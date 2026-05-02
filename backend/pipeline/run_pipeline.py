@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import csv
 import os
+import time
 
 from backend.signals.ingest import ingest_all_sync
 from backend.pipeline.rank import rank_signals
@@ -18,6 +19,8 @@ VALID_SOURCES = {"tiktok", "youtube", "meta", "google", "amazon", "google_trends
 
 
 def run() -> dict:
+    _start_time = time.time()
+
     # 1. Ingest
     all_signals = ingest_all_sync()
     print(f"[ingest]  {len(all_signals)} signals from {len(VALID_SOURCES)} sources")
@@ -69,6 +72,25 @@ def run() -> dict:
             writer.writeheader()
             writer.writerows(ads)
         print(f"[output]  {OUTPUT_CSV} written ({len(ads)} rows)")
+
+    try:
+        from backend.connectors.notion_logger import NotionLogger
+        import datetime as _dt
+        _end_time = time.time()
+        _started_at = _dt.datetime.fromtimestamp(_start_time, tz=_dt.timezone.utc).isoformat()
+        _finished_at = _dt.datetime.fromtimestamp(_end_time, tz=_dt.timezone.utc).isoformat()
+        NotionLogger().log_run({
+            "pipeline_entrypoint": "backend/pipeline/run_pipeline.py",
+            "started_at": _started_at,
+            "finished_at": _finished_at,
+            "duration_seconds": round(_end_time - _start_time, 3),
+            "ads_count": len(ads) if ads is not None else None,
+            "sources_count": len(all_signals) if all_signals is not None else None,
+            "deterministic": None,
+            "output_files": [OUTPUT_JSON, OUTPUT_CSV],
+        })
+    except Exception:
+        pass
 
     return output
 
