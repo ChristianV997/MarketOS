@@ -1269,6 +1269,78 @@ def runtime_state():
         return {"error": str(exc)}
 
 
+# ── Phase 5: observability + topology endpoints ───────────────────────────────
+
+@app.get("/observability/snapshot")
+def observability_snapshot(workspace: str = "default"):
+    """Full CognitionSnapshot for the given workspace."""
+    try:
+        from backend.observability.exporters import cognition_json
+        return cognition_json(workspace=workspace)
+    except Exception as exc:
+        return {"error": str(exc), "workspace": workspace}
+
+
+@app.get("/observability/entropy")
+def observability_entropy(workspace: str = "default"):
+    """Current entropy report for the workspace."""
+    try:
+        from backend.observability.exporters import entropy_json
+        return entropy_json(workspace=workspace)
+    except Exception as exc:
+        return {"error": str(exc), "workspace": workspace}
+
+
+@app.get("/observability/traces")
+def observability_traces(n: int = 20):
+    """Last n completed traces."""
+    try:
+        from backend.observability.exporters import recent_traces_json
+        return recent_traces_json(n=n)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.get("/topology")
+def topology(workspace: str = "default"):
+    """Full topology snapshot for the workspace."""
+    try:
+        from backend.runtime.topology.topology_snapshot import capture_topology_snapshot
+        return capture_topology_snapshot(workspace=workspace).to_dict()
+    except Exception as exc:
+        return {"error": str(exc), "workspace": workspace}
+
+
+@app.get("/topology/cognition")
+def topology_cognition(workspace: str = "default"):
+    """High-level cognitive state map: topology + entropy + heatmap."""
+    try:
+        from backend.runtime.topology.cognition_map import cognition_map
+        return cognition_map(workspace=workspace)
+    except Exception as exc:
+        return {"error": str(exc), "workspace": workspace}
+
+
+@app.get("/topology/entropy")
+def topology_entropy(workspace: str = "default"):
+    """Per-node-type entropy overlay for the workspace."""
+    try:
+        from backend.runtime.topology.entropy_map import entropy_overlay
+        return entropy_overlay(workspace=workspace)
+    except Exception as exc:
+        return {"error": str(exc), "workspace": workspace}
+
+
+@app.get("/governance/schemas")
+def governance_schemas():
+    """Return all registered schema versions."""
+    try:
+        from backend.contracts.governance.registry import get_governance_registry
+        return get_governance_registry().to_dict()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 # ── WebSocket live event stream ────────────────────────────────────────────────
 
 try:
