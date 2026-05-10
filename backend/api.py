@@ -729,8 +729,9 @@ def runtime_inference_providers():
             "providers": get_router().provider_status(),
             "fallback_chain": FallbackPolicy().with_guaranteed_mock(),
         }
-    except Exception as exc:
-        return {"error": str(exc)}
+    except Exception:
+        _api_log.exception("runtime_inference_providers_failed")
+        return {"error": "provider status unavailable"}
 
 
 @app.get("/runtime/sleep/status")
@@ -740,8 +741,9 @@ def runtime_sleep_status():
         from backend.runtime.sleep.replay_scheduler import get_scheduler
 
         return get_scheduler().status()
-    except Exception as exc:
-        return {"error": str(exc)}
+    except Exception:
+        _api_log.exception("runtime_sleep_status_failed")
+        return {"error": "sleep status unavailable"}
 
 
 @app.post("/runtime/sleep/run")
@@ -756,9 +758,12 @@ def runtime_sleep_run(workspace: str | None = None, window_hours: float | None =
         if window_hours is not None:
             scheduler.window_hours = window_hours
         result = scheduler.run_now()
+        if result is None:
+            return {"error": "sleep cycle failed", "workspace": workspace or scheduler.workspace}
         return result.to_dict() if hasattr(result, "to_dict") else {"result": result}
-    except Exception as exc:
-        return {"error": str(exc), "workspace": workspace}
+    except Exception:
+        _api_log.exception("runtime_sleep_run_failed")
+        return {"error": "sleep cycle failed", "workspace": workspace}
 
 
 @app.get("/runtime/skills")
@@ -768,8 +773,9 @@ def runtime_skills():
         from backend.runtime.skills import get_skill_registry
 
         return {"skills": get_skill_registry().list_skills()}
-    except Exception as exc:
-        return {"error": str(exc)}
+    except Exception:
+        _api_log.exception("runtime_skills_failed")
+        return {"error": "skill registry unavailable"}
 
 
 @app.get("/runtime/skills/traces")
@@ -779,8 +785,9 @@ def runtime_skill_traces():
         from backend.runtime.skills import get_skill_registry
 
         return {"traces": get_skill_registry().traces()}
-    except Exception as exc:
-        return {"error": str(exc)}
+    except Exception:
+        _api_log.exception("runtime_skill_traces_failed")
+        return {"error": "skill traces unavailable"}
 
 
 @app.post("/runtime/skills/{skill_name}/execute")
@@ -792,8 +799,9 @@ def runtime_skill_execute(skill_name: str, payload: dict[str, Any] | None = Body
         return get_skill_registry().execute(skill_name, payload or {})
     except KeyError:
         return {"error": f"unknown skill: {skill_name}", "skill": skill_name}
-    except Exception as exc:
-        return {"error": str(exc), "skill": skill_name}
+    except Exception:
+        _api_log.exception("runtime_skill_execute_failed skill=%s", skill_name)
+        return {"error": "skill execution failed", "skill": skill_name}
 
 
 @app.get("/playbook")

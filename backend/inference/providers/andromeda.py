@@ -147,6 +147,8 @@ class AndromedaProvider(BaseProvider):
                     yield delta
 
         content = "".join(chunks)
+        # Streaming responses often omit usage metadata until the stream closes,
+        # so these token counts are an explicit fallback approximation.
         return InferenceResponse(
             content=content,
             provider="andromeda",

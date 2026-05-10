@@ -109,8 +109,8 @@ class ReplayScheduler:
         return self._cycle_count
 
     @property
-    def last_cycle_at(self) -> float:
-        return self._last_cycle_ts
+    def last_cycle_at(self) -> float | None:
+        return self._last_cycle_ts or None
 
     # ── internals ─────────────────────────────────────────────────────────────
 
