@@ -1,7 +1,7 @@
 """FallbackPolicy — ordered provider chain with environment override.
 
 Priority (default, left = highest):
-  ollama  →  openai  →  airllm  →  vllm  →  litellm  →  mock
+  ollama  →  openai  →  airllm  →  vllm  →  andromeda  →  litellm  →  mock
 
 Rationale:
   * Ollama first — free, local, zero latency if running.
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 
-_DEFAULT = ["ollama", "openai", "airllm", "vllm", "litellm", "mock"]
+_DEFAULT = ["ollama", "openai", "airllm", "vllm", "andromeda", "litellm", "mock"]
 
 
 class FallbackPolicy:

@@ -10,6 +10,11 @@ class CommandSandbox:
 
     def execute(self, command: str):
         parts = command.split()
+        if not parts:
+            return {
+                "success": False,
+                "error": "empty command",
+            }
 
         if parts[0] not in self.SAFE_COMMANDS:
             return {
@@ -24,6 +29,8 @@ class CommandSandbox:
         )
 
         return {
-            "success": True,
+            "success": result.returncode == 0,
             "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode,
         }

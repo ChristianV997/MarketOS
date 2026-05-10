@@ -14,9 +14,10 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
+from typing import Any
 
 import numpy as np
-from fastapi import FastAPI, Query
+from fastapi import Body, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
@@ -177,6 +178,34 @@ def _research_runner():
         time.sleep(300)  # check every 5 minutes
 
 
+def _start_runtime_services() -> None:
+    try:
+        from backend.runtime.task_inventory import start_heartbeat_broadcaster
+        start_heartbeat_broadcaster(interval_s=30.0)
+    except Exception:
+        pass
+
+    try:
+        from backend.runtime.sleep.replay_scheduler import get_scheduler
+        get_scheduler().start()
+    except Exception:
+        pass
+
+
+def _stop_runtime_services() -> None:
+    try:
+        from backend.runtime.task_inventory import stop_heartbeat_broadcaster
+        stop_heartbeat_broadcaster()
+    except Exception:
+        pass
+
+    try:
+        from backend.runtime.sleep.replay_scheduler import get_scheduler
+        get_scheduler().stop()
+    except Exception:
+        pass
+
+
 @app.on_event("startup")
 async def _startup():
     global _state, _bg_running
@@ -188,22 +217,14 @@ async def _startup():
     _bg_running = True
     threading.Thread(target=_background_runner, daemon=True).start()
     threading.Thread(target=_research_runner, daemon=True).start()
-    try:
-        from backend.runtime.task_inventory import start_heartbeat_broadcaster
-        start_heartbeat_broadcaster(interval_s=30.0)
-    except Exception:
-        pass
+    _start_runtime_services()
 
 
 @app.on_event("shutdown")
 async def _shutdown():
     global _bg_running
     _bg_running = False
-    try:
-        from backend.runtime.task_inventory import stop_heartbeat_broadcaster
-        stop_heartbeat_broadcaster()
-    except Exception:
-        pass
+    _stop_runtime_services()
     from backend.core.serializer import save
     try:
         save(_state, STATE_PATH)
@@ -695,6 +716,84 @@ def runtime_tasks():
         }
     except Exception as exc:
         return {"error": str(exc)}
+
+
+@app.get("/runtime/inference/providers")
+def runtime_inference_providers():
+    """Expose current inference provider availability and configured order."""
+    try:
+        from backend.inference import get_router
+        from backend.inference.policies.fallback_policy import FallbackPolicy
+
+        return {
+            "providers": get_router().provider_status(),
+            "fallback_chain": FallbackPolicy().with_guaranteed_mock(),
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.get("/runtime/sleep/status")
+def runtime_sleep_status():
+    """Expose cognitive sleep scheduler status."""
+    try:
+        from backend.runtime.sleep.replay_scheduler import get_scheduler
+
+        return get_scheduler().status()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.post("/runtime/sleep/run")
+def runtime_sleep_run(workspace: str | None = None, window_hours: float | None = None):
+    """Trigger one cognitive sleep cycle immediately."""
+    try:
+        from backend.runtime.sleep.replay_scheduler import get_scheduler
+
+        scheduler = get_scheduler()
+        if workspace is not None:
+            scheduler.workspace = workspace
+        if window_hours is not None:
+            scheduler.window_hours = window_hours
+        result = scheduler.run_now()
+        return result.to_dict() if hasattr(result, "to_dict") else {"result": result}
+    except Exception as exc:
+        return {"error": str(exc), "workspace": workspace}
+
+
+@app.get("/runtime/skills")
+def runtime_skills():
+    """Expose registered runtime skills."""
+    try:
+        from backend.runtime.skills import get_skill_registry
+
+        return {"skills": get_skill_registry().list_skills()}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.get("/runtime/skills/traces")
+def runtime_skill_traces():
+    """Expose recent runtime skill execution traces."""
+    try:
+        from backend.runtime.skills import get_skill_registry
+
+        return {"traces": get_skill_registry().traces()}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.post("/runtime/skills/{skill_name}/execute")
+def runtime_skill_execute(skill_name: str, payload: dict[str, Any] | None = Body(None)):
+    """Execute a registered runtime skill."""
+    try:
+        from backend.runtime.skills import get_skill_registry
+
+        return get_skill_registry().execute(skill_name, payload or {})
+    except KeyError:
+        return {"error": f"unknown skill: {skill_name}", "skill": skill_name}
+    except Exception as exc:
+        return {"error": str(exc), "skill": skill_name}
 
 
 @app.get("/playbook")
