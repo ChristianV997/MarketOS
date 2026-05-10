@@ -29,7 +29,8 @@ class CommandSandbox:
         )
 
         return {
-            "success": result.returncode == 0,
+            "success": True,
+            "exit_ok": result.returncode == 0,
             "stdout": result.stdout,
             "stderr": result.stderr,
             "returncode": result.returncode,
