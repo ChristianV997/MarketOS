@@ -207,12 +207,27 @@ def _stop_runtime_services() -> None:
 
 
 def _public_sleep_result(result: Any) -> dict[str, Any]:
-    if hasattr(result, "to_dict"):
-        payload = result.to_dict()
-        errors = payload.pop("errors", [])
-        payload["error_count"] = len(errors)
-        payload["ok"] = not errors
-        return payload
+    if hasattr(result, "cycle_id"):
+        errors = list(getattr(result, "errors", []) or [])
+        return {
+            "cycle_id": getattr(result, "cycle_id", ""),
+            "workspace": getattr(result, "workspace", "default"),
+            "started_at": getattr(result, "started_at", 0.0),
+            "finished_at": getattr(result, "finished_at", 0.0),
+            "duration_s": getattr(result, "duration_s", 0.0),
+            "episodes_read": getattr(result, "episodes_read", 0),
+            "episodes_compacted": getattr(result, "episodes_compacted", 0),
+            "semantic_units_created": getattr(result, "semantic_units_created", 0),
+            "semantic_units_pruned": getattr(result, "semantic_units_pruned", 0),
+            "procedures_reinforced": getattr(result, "procedures_reinforced", 0),
+            "procedures_deprecated": getattr(result, "procedures_deprecated", 0),
+            "lineage_nodes_summarized": getattr(result, "lineage_nodes_summarized", 0),
+            "vectors_indexed": getattr(result, "vectors_indexed", 0),
+            "compression_ratio": getattr(result, "compression_ratio", 0.0),
+            "decay_applied": getattr(result, "decay_applied", False),
+            "error_count": len(errors),
+            "ok": not errors,
+        }
     return {"result": result}
 
 

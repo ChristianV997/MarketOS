@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 from backend.events.schemas import SKILL_EXECUTED, SKILL_FAILED, TASK_INVENTORY
 
+_TRACE_HISTORY_LIMIT = 100
+
 
 def _serialize(value: Any) -> Any:
     if hasattr(value, "to_dict"):
@@ -54,7 +56,7 @@ class SkillRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._skills: dict[str, tuple[SkillRecord, Callable[[dict[str, Any]], Any]]] = {}
-        self._traces: deque[dict[str, Any]] = deque(maxlen=100)
+        self._traces: deque[dict[str, Any]] = deque(maxlen=_TRACE_HISTORY_LIMIT)
         self._register_builtin_skills()
 
     def register(
@@ -101,6 +103,7 @@ class SkillRegistry:
         except Exception as exc:
             trace["status"] = "error"
             trace["error"] = str(exc)
+            trace["error_type"] = type(exc).__name__
             raise
         finally:
             trace["finished_at"] = time.time()
