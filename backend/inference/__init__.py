@@ -12,7 +12,7 @@ Quick-start:
     # → [[0.12, -0.34, ...], [...]]  — one 384-dim vector per text
 
 Provider priority (override via INFERENCE_PROVIDERS env var):
-    ollama → openai → airllm → vllm → litellm → mock
+    ollama → openai → airllm → vllm → andromeda → litellm → mock
 
 Replay safety:
     Every response is cached by sequence_id and emitted as an

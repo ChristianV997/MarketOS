@@ -28,7 +28,11 @@ def _safe_publish(event_type: str, payload: dict[str, Any]) -> None:
     if b is None:
         return
     try:
-        b.publish({"type": event_type, "ts": time.time(), **payload})
+        b.publish(
+            event_type,
+            {"type": event_type, "ts": time.time(), **payload},
+            source="sleep_runtime",
+        )
     except Exception as exc:
         log.debug("sleep.telemetry publish failed (%s): %s", event_type, exc)
 

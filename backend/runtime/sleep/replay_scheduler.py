@@ -94,12 +94,23 @@ class ReplayScheduler:
     def status(self) -> dict[str, Any]:
         return {
             "enabled":       self.enabled,
-            "running":       self._thread is not None and self._thread.is_alive(),
+            "running":       self.is_running(),
             "cycle_count":   self._cycle_count,
             "last_cycle_ts": self._last_cycle_ts,
             "interval_s":    self.interval_s,
             "workspace":     self.workspace,
         }
+
+    def is_running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def cycles_completed(self) -> int:
+        return self._cycle_count
+
+    @property
+    def last_cycle_at(self) -> float | None:
+        return self._last_cycle_ts or None
 
     # ── internals ─────────────────────────────────────────────────────────────
 
@@ -120,10 +131,22 @@ class ReplayScheduler:
             self._cycle_count  += 1
             self._last_cycle_ts = time.time()
             self._last_result   = result
+            try:
+                from backend.runtime.task_inventory import task_registry
+
+                task_registry.heartbeat("sleep_scheduler", status="ok")
+            except Exception:
+                pass
             _emit_scheduler_tick(self._cycle_count, result)
             return result
         except Exception as exc:
             log.error("ReplayScheduler: cycle failed: %s", exc)
+            try:
+                from backend.runtime.task_inventory import task_registry
+
+                task_registry.heartbeat("sleep_scheduler", status="error")
+            except Exception:
+                pass
             return None
 
 

@@ -36,6 +36,8 @@ METRICS_INGESTED     = "metrics.ingested"    # engagement/retention/campaign met
 HEARTBEAT            = "heartbeat"           # periodic runtime liveness signal
 RUNTIME_CONSISTENCY  = "runtime.consistency" # validation failures / drift warnings
 CAMPAIGN_LAUNCHED    = "campaign.launched"   # campaign created; carries full attribution lineage
+SKILL_EXECUTED       = "skill.executed"
+SKILL_FAILED         = "skill.failed"
 
 # ── inference kernel events ───────────────────────────────────────────────────
 
