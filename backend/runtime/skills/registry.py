@@ -85,7 +85,6 @@ class SkillRegistry:
         trace = {
             "trace_id": uuid.uuid4().hex[:12],
             "skill": name,
-            "status": "started",
             "started_at": time.time(),
             "input": _serialize(data),
         }

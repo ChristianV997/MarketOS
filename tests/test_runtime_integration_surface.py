@@ -82,6 +82,8 @@ def test_runtime_service_helpers_start_and_stop(monkeypatch):
         def stop(self):
             calls["stopped"] = True
 
+    scheduler = FakeScheduler()
+
     monkeypatch.setattr(
         "backend.runtime.task_inventory.start_heartbeat_broadcaster",
         lambda interval_s=30.0: calls.__setitem__("heartbeat", interval_s),
@@ -92,7 +94,7 @@ def test_runtime_service_helpers_start_and_stop(monkeypatch):
     )
     monkeypatch.setattr(
         "backend.runtime.sleep.replay_scheduler.get_scheduler",
-        lambda: FakeScheduler(),
+        lambda: scheduler,
     )
 
     api._start_runtime_services()

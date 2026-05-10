@@ -206,6 +206,16 @@ def _stop_runtime_services() -> None:
         pass
 
 
+def _public_sleep_result(result: Any) -> dict[str, Any]:
+    if hasattr(result, "to_dict"):
+        payload = result.to_dict()
+        errors = payload.pop("errors", [])
+        payload["error_count"] = len(errors)
+        payload["ok"] = not errors
+        return payload
+    return {"result": result}
+
+
 @app.on_event("startup")
 async def _startup():
     global _state, _bg_running
@@ -760,7 +770,7 @@ def runtime_sleep_run(workspace: str | None = None, window_hours: float | None =
         result = scheduler.run_now()
         if result is None:
             return {"error": "sleep cycle failed", "workspace": workspace or scheduler.workspace}
-        return result.to_dict() if hasattr(result, "to_dict") else {"result": result}
+        return _public_sleep_result(result)
     except Exception:
         _api_log.exception("runtime_sleep_run_failed")
         return {"error": "sleep cycle failed", "workspace": workspace}
