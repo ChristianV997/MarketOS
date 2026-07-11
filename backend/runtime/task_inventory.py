@@ -212,11 +212,11 @@ def _register_all() -> None:
         env_required="ADOBE_AJO_TOKEN",
     )
     task_registry.register(
-        "legacy_run_forever",
+        "run_py_shim",
         kind="loop",
-        description="run.py::run_forever(): legacy 300s polling loop (superseded by orchestrator)",
+        description="run.py: thin shim delegating to orchestrator.main.run() (single entrypoint)",
         module="run",
-        interval_s=300,
+        interval_s=10,
     )
 
     # ── schedulers ────────────────────────────────────────────────────────
