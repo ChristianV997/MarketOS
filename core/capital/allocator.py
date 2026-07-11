@@ -41,9 +41,16 @@ def _compute_score(strategy: dict[str, Any]) -> float:
 
 
 def _softmax(scores: list[float], temperature: float) -> list[float]:
-    """Return softmax probabilities for *scores*."""
+    """Return softmax probabilities for *scores* (numerically stable)."""
     temp = max(temperature, 1e-8)
-    exps = [math.exp(s / temp) for s in scores]
+    if not scores:
+        return []
+    # Subtract the max before exponentiating — mathematically identical
+    # output, but prevents math.exp overflow when a score/temp is large
+    # (e.g. a pod with large cumulative profit).
+    scaled = [s / temp for s in scores]
+    hi = max(scaled)
+    exps = [math.exp(s - hi) for s in scaled]
     total = sum(exps) or 1.0
     return [e / total for e in exps]
 

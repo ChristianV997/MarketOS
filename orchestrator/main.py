@@ -61,9 +61,11 @@ def _run_signal_ingestion() -> dict[str, Any]:
             keywords = [s.get("product", "") for s in signals if s.get("product")][:20]
             if keywords:
                 run_intelligence(keywords)
-        except Exception:
-            pass
-        # Index signals in the vector store for semantic recall (fail-silent)
+        except Exception as exc:
+            _log.debug("intelligence_loop_failed error=%s", exc)
+        # Index signals in the vector store for semantic recall (fail-silent,
+        # but logged — a silent bare pass here would hide a real indexing
+        # defect and leave semantic recall permanently empty)
         try:
             from backend.vector.embeddings import embed_text
             from backend.vector.indexing import signal_record, index_batch
@@ -78,8 +80,8 @@ def _run_signal_ingestion() -> dict[str, Any]:
             ]
             if records:
                 index_batch(records)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("signal_vector_index_failed error=%s", exc)
         return {"status": "ok", "signals": len(signals)}
     except Exception as exc:
         _log.exception("signal_ingestion_failed error=%s", exc)
@@ -102,6 +104,14 @@ def _run_sleep_consolidation() -> dict[str, Any]:
         from backend.runtime.sleep.consolidation_engine import ConsolidationEngine
         result = ConsolidationEngine(workspace="default").run_cycle()
         _last_sleep_ts = now
+        # Snapshot the high-volume cognitive stores to disk so they survive a
+        # restart (episodic + lineage are persisted here rather than on every
+        # write; playbook/calibration/patternstore persist on their own writes).
+        for _persist in (_persist_episodic, _persist_lineage, _persist_calibration):
+            try:
+                _persist()
+            except Exception as exc:  # noqa: BLE001 — best-effort
+                _log.debug("cognitive_persist_failed fn=%s error=%s", _persist, exc)
         return {
             "status":   "ok",
             "cycle_id": result.cycle_id,
@@ -110,6 +120,21 @@ def _run_sleep_consolidation() -> dict[str, Any]:
     except Exception as exc:
         _log.exception("sleep_consolidation_failed error=%s", exc)
         return {"status": "error", "error": str(exc)}
+
+
+def _persist_episodic() -> None:
+    from backend.memory.episodic import persist_episodic
+    persist_episodic()
+
+
+def _persist_lineage() -> None:
+    from backend.lineage.tracker import persist_lineage
+    persist_lineage()
+
+
+def _persist_calibration() -> None:
+    from simulation.calibration import calibration_store
+    calibration_store.persist()
 
 
 def _run_execution_cycle() -> dict[str, Any]:

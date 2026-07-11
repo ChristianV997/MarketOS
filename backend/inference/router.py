@@ -20,7 +20,9 @@ Replay safety guarantee:
 from __future__ import annotations
 
 import logging
+import os
 import time
+from collections import OrderedDict
 from threading import Lock
 from typing import Generator
 
@@ -76,7 +78,11 @@ class InferenceRouter:
     ) -> None:
         self._providers = providers if providers is not None else _build_default_providers()
         self._policy    = policy or RoutingPolicy()
-        self._cache: dict[str, InferenceResponse] = {}
+        # Bounded replay cache. Callers that pass a stable sequence_id get
+        # replay-dedup; callers that don't (fresh uuid per call) would
+        # otherwise grow this dict without bound — the cap makes it a FIFO.
+        self._cache: "OrderedDict[str, InferenceResponse]" = OrderedDict()
+        self._cache_max  = int(os.getenv("INFERENCE_CACHE_MAX", "1000"))
         self._cache_lock = Lock()
 
     # ── completion ────────────────────────────────────────────────────────────
@@ -197,6 +203,9 @@ class InferenceRouter:
     def _store(self, sequence_id: str, response: InferenceResponse) -> None:
         with self._cache_lock:
             self._cache[sequence_id] = response
+            self._cache.move_to_end(sequence_id)
+            while len(self._cache) > self._cache_max:
+                self._cache.popitem(last=False)  # evict oldest (FIFO)
 
     def cache_size(self) -> int:
         return len(self._cache)

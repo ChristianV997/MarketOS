@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from threading import Lock
 
 from core.content.patterns import extract_patterns
+from backend.core.persistence import save_json_atomic, load_json, state_path
+
+_PLAYBOOK_PATH = state_path("playbook.json")
 
 
 @dataclass
@@ -51,6 +54,24 @@ class PlaybookMemory:
                 )
             else:
                 self._store[key] = playbook
+        self._persist()
+
+    def snapshot(self) -> list[dict]:
+        with self._lock:
+            return [asdict(pb) for pb in self._store.values()]
+
+    def restore(self, rows: list[dict]) -> None:
+        with self._lock:
+            self._store.clear()
+            for d in rows or []:
+                try:
+                    pb = Playbook(**d)
+                except Exception:
+                    continue
+                self._store[(pb.product, pb.phase)] = pb
+
+    def _persist(self) -> None:
+        save_json_atomic(_PLAYBOOK_PATH, self.snapshot())
 
     def get(self, product: str, phase: str | None = None) -> Playbook | None:
         with self._lock:
@@ -93,3 +114,8 @@ def generate_playbook(
 
 
 playbook_memory = PlaybookMemory()
+
+# Restore persisted playbooks on import (fail-silent)
+_saved = load_json(_PLAYBOOK_PATH)
+if _saved:
+    playbook_memory.restore(_saved)

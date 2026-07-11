@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 from collections import defaultdict
 from threading import Lock
+
+from backend.core.persistence import save_json_atomic, load_json
 
 _log = logging.getLogger(__name__)
 
@@ -99,17 +100,7 @@ class PatternStore:
 
     def _persist(self) -> None:
         """Write current snapshot to PATTERNSTORE_PATH (fail-silent)."""
-        path = _PATTERNSTORE_PATH
-        if not path:
-            return
-        try:
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            tmp = path + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(self.snapshot(), f)
-            os.replace(tmp, path)
-        except Exception as exc:
-            _log.debug("patternstore_persist_failed path=%s error=%s", path, exc)
+        save_json_atomic(_PATTERNSTORE_PATH, self.snapshot())
 
     def get_top_hooks(self, n: int = 3) -> list[str]:
         with self._lock:
@@ -140,19 +131,14 @@ pattern_store = PatternStore()
 
 def _load_patternstore() -> None:
     """Load persisted pattern scores on startup (fail-silent)."""
-    path = _PATTERNSTORE_PATH
-    if not path or not os.path.exists(path):
+    data = load_json(_PATTERNSTORE_PATH)
+    if not data:
         return
-    try:
-        with open(path) as f:
-            data = json.load(f)
-        pattern_store.restore(data)
-        _log.info("patternstore_loaded path=%s hooks=%d angles=%d",
-                  path,
-                  len(data.get("hook_scores", {})),
-                  len(data.get("angle_scores", {})))
-    except Exception as exc:
-        _log.debug("patternstore_load_failed path=%s error=%s", path, exc)
+    pattern_store.restore(data)
+    _log.info("patternstore_loaded path=%s hooks=%d angles=%d",
+              _PATTERNSTORE_PATH,
+              len(data.get("hook_scores", {})),
+              len(data.get("angle_scores", {})))
 
 
 _load_patternstore()

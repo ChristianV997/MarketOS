@@ -148,9 +148,24 @@ class LineageTracker:
         with self._lock:
             return len(self._worldlines)
 
+    # ── persistence ─────────────────────────────────────────────────────────
+
+    def snapshot(self) -> dict:
+        """Return a JSON-safe snapshot of the lineage graph."""
+        return {"nodes": self._graph.snapshot()}
+
+    def restore(self, data: dict) -> None:
+        """Rebuild the lineage graph from a snapshot."""
+        if isinstance(data, dict):
+            self._graph.restore(data.get("nodes", []))
+
 
 _tracker: LineageTracker | None = None
 _tracker_lock = threading.Lock()
+
+from backend.core.persistence import save_json_atomic, load_json, state_path
+
+_LINEAGE_PATH = state_path("lineage.json")
 
 
 def get_tracker() -> LineageTracker:
@@ -158,5 +173,14 @@ def get_tracker() -> LineageTracker:
     if _tracker is None:
         with _tracker_lock:
             if _tracker is None:
-                _tracker = LineageTracker()
+                tracker = LineageTracker()
+                data = load_json(_LINEAGE_PATH)
+                if data:
+                    tracker.restore(data)
+                _tracker = tracker
     return _tracker
+
+
+def persist_lineage() -> bool:
+    """Write the current lineage graph to disk (best-effort)."""
+    return save_json_atomic(_LINEAGE_PATH, get_tracker().snapshot())

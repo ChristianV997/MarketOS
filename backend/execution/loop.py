@@ -294,6 +294,11 @@ def execute(decisions, state):
             "env_regime":    ENV["regime"],
             "env_trend":     round(ENV["trend"], 4),
         }
+        # Preserve the nested action so downstream consumers (portfolio
+        # bucketing, kill/amplify sets, replay buffer) can recover the
+        # variant. Also flatten action keys onto the outcome for readers
+        # that expect the legacy flat shape.
+        outcome["action"] = action
         outcome.update(action)
 
         # structural evolution scoring
@@ -339,6 +344,10 @@ def run_cycle(state):
             _macro_cache = get_macro_signals()
         except Exception:
             pass
+
+    # expose the current market trend on state so the bandit's trend
+    # feature is live (ENV is module-level; the bandit reads state.trend)
+    state.trend = ENV["trend"]
 
     # select high-level arm from LinUCB contextual bandit
     bandit_arm = select_arm(state)

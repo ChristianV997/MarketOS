@@ -30,6 +30,18 @@ _KILL_ROAS_FLOOR  = float(os.getenv("TIKTOK_KILL_ROAS_FLOOR", "0.8"))
 # In-process ROAS streak tracker: {campaign_id → [float, ...]}
 _roas_streaks: dict[str, list[float]] = {}
 
+# Monotonic counter for dry-run IDs. A bare int(time.time()) collides for any
+# two campaigns launched in the same second, which makes distinct launches
+# share a campaign_id and silently overwrite each other in the orchestrator's
+# _campaign_artifacts attribution map. The counter guarantees uniqueness.
+_dry_seq = 0
+
+
+def _next_dry_id(prefix: str = "dry") -> str:
+    global _dry_seq
+    _dry_seq += 1
+    return f"{prefix}_{int(time.time())}_{_dry_seq}"
+
 
 def is_configured() -> bool:
     return bool(os.getenv("TIKTOK_ACCESS_TOKEN") and os.getenv("TIKTOK_ADVERTISER_ID"))
@@ -45,7 +57,7 @@ def _headers() -> dict[str, str]:
 def _post(path: str, payload: dict) -> dict:
     if _DRY_RUN:
         _log.info("tiktok_dry_run path=%s payload=%s", path, payload)
-        return {"code": 0, "message": "OK", "data": {"campaign_id": f"dry_{int(time.time())}"}}
+        return {"code": 0, "message": "OK", "data": {"campaign_id": _next_dry_id()}}
     import requests
     r = requests.post(f"{_BASE}{path}", headers=_headers(), json=payload, timeout=15)
     r.raise_for_status()
