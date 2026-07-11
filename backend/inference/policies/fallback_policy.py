@@ -1,14 +1,15 @@
 """FallbackPolicy — ordered provider chain with environment override.
 
 Priority (default, left = highest):
-  ollama  →  openai  →  airllm  →  vllm  →  litellm  →  mock
+  ollama  →  anthropic  →  openai  →  airllm  →  vllm  →  litellm  →  mock
 
 Rationale:
   * Ollama first — free, local, zero latency if running.
-  * OpenAI second — reliable cloud fallback when available.
-  * AirLLM third — large local models without Ollama daemon.
-  * vLLM fourth — self-hosted GPU server.
-  * LiteLLM fifth — any provider via unified API.
+  * Anthropic second — primary cloud provider (creative generation).
+  * OpenAI third — reliable cloud fallback when available.
+  * AirLLM fourth — large local models without Ollama daemon.
+  * vLLM fifth — self-hosted GPU server.
+  * LiteLLM sixth — any provider via unified API.
   * Mock always last — guaranteed fallback for CI / cold-start.
 
 Override via INFERENCE_PROVIDERS env var (comma-separated names).
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 import os
 
-_DEFAULT = ["ollama", "openai", "airllm", "vllm", "litellm", "mock"]
+_DEFAULT = ["ollama", "anthropic", "openai", "airllm", "vllm", "litellm", "mock"]
 
 
 class FallbackPolicy:

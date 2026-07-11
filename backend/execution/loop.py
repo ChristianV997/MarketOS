@@ -65,6 +65,93 @@ _POOL_TTL:      float = 60.0
 _DEFAULT_ANGLES = ["problem-solution", "social-proof", "urgency", "curiosity", "authority"]
 
 
+# Lineage: previous cycle's node id, so cycles chain into a worldline
+_last_cycle_node: str = ""
+
+
+def _cognitive_writethrough(state, results: list[dict], avg_roas: float) -> None:
+    """Feed the cycle's outcomes into the cognitive subsystem.
+
+    Three fail-silent writes per cycle:
+      episodic memory  — one episode per execution outcome (raw history)
+      vector store     — winning creatives indexed for semantic recall
+      lineage tracker  — decision→outcome edges chained across cycles
+    Failures never disturb the execution loop.
+    """
+    global _last_cycle_node
+
+    # 1. Episodic memory write-through
+    try:
+        from backend.memory.episodic import get_episodic_store
+        epi = get_episodic_store()
+        for r in results:
+            epi.record_event(
+                "execution.outcome",
+                payload={
+                    "product": r.get("product", ""),
+                    "hook":    r.get("hook", ""),
+                    "angle":   r.get("angle", ""),
+                    "roas":    r.get("roas", 0.0),
+                    "cost":    r.get("cost", 0.0),
+                    "revenue": r.get("revenue", 0.0),
+                    "ctr":     r.get("ctr", 0.0),
+                    "cvr":     r.get("cvr", 0.0),
+                    "regime":  state.detected_regime,
+                },
+                source="execution_loop",
+            )
+    except Exception:
+        _log.debug("episodic_writethrough_failed", exc_info=True)
+
+    # 2. Vector indexing of winning creatives (ROAS > 1.5)
+    try:
+        from backend.vector.embeddings import embed_text
+        from backend.vector.indexing import creative_record, index_batch
+        records = []
+        for r in results:
+            if r.get("roas", 0.0) <= 1.5 or not r.get("hook"):
+                continue
+            text = f"{r.get('hook', '')} | {r.get('angle', '')} | {r.get('product', '')}"
+            records.append(creative_record(
+                creative_id=f"cyc{state.total_cycles}_{r.get('product', '')[:24]}",
+                vector=embed_text(text),
+                hook=r.get("hook", ""),
+                product=r.get("product", ""),
+                roas=float(r.get("roas", 0.0)),
+                angle=r.get("angle", ""),
+            ))
+        if records:
+            index_batch(records)
+    except Exception:
+        _log.debug("vector_writethrough_failed", exc_info=True)
+
+    # 3. Lineage: decision node → outcome node, chained to the previous cycle
+    try:
+        from backend.lineage import get_tracker
+        tracker = get_tracker()
+        decision_node = tracker.track(
+            "execution.decision",
+            label=f"cycle_{state.total_cycles}_decision",
+            parent_ids=[_last_cycle_node] if _last_cycle_node else [],
+            source="execution_loop",
+            payload={"regime": state.detected_regime, "n_decisions": len(results)},
+        )
+        outcome_node = tracker.track(
+            "execution.outcome",
+            label=f"cycle_{state.total_cycles}_outcome",
+            parent_ids=[decision_node],
+            source="execution_loop",
+            payload={
+                "avg_roas": round(avg_roas, 4),
+                "capital":  round(getattr(state, "capital", 0.0), 2),
+                "winners":  sum(1 for r in results if r.get("roas", 0) > 1.5),
+            },
+        )
+        _last_cycle_node = outcome_node
+    except Exception:
+        _log.debug("lineage_writethrough_failed", exc_info=True)
+
+
 def _refresh_pools() -> tuple[list[str], list[str]]:
     global _hook_pool, _angle_pool, _pool_ts
     import time as _time
@@ -312,6 +399,9 @@ def run_cycle(state):
     # update LinUCB bandit reward using mean ROAS this cycle
     avg_roas_cycle = sum(r.get("roas", 0) for r in results) / max(len(results), 1)
     record_reward(bandit_arm, state, avg_roas_cycle)
+
+    # feed outcomes into the cognitive subsystem (episodic/vector/lineage)
+    _cognitive_writethrough(state, results, avg_roas_cycle)
 
     # push experiences into the replay buffer
     for r in results:

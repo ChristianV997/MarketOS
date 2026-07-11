@@ -1,43 +1,33 @@
-try:
-    import anthropic as _anthropic
-except ImportError:
-    _anthropic = None
+def _placeholder(product: str, angle: str) -> str:
+    return (
+        f"[Script] Product: {product} | Angle: {angle} | "
+        "Hook: Discover the difference. | CTA: Shop now."
+    )
 
 
 def generate_creative(product: str, angle: str) -> str:
     """Generate an ad script for *product* using the given *angle*.
 
-    Uses the Anthropic Claude API when available; otherwise returns a
-    deterministic placeholder so the system works offline / in tests.
+    Routed through the central inference kernel (backend.inference.router),
+    which provides provider fallback (Ollama → Anthropic → OpenAI → …),
+    replay-safe caching, and cost telemetry.  When no real provider is
+    configured the router lands on MockProvider; in that case we return the
+    deterministic domain placeholder so the system works offline / in tests
+    exactly as before.
     """
-    if _anthropic is None or not hasattr(_anthropic, "Anthropic"):
-        return (
-            f"[Script] Product: {product} | Angle: {angle} | "
-            "Hook: Discover the difference. | CTA: Shop now."
-        )
-
+    prompt = (
+        f"Write a short TikTok ad script for '{product}'. "
+        f"Angle: {angle}. "
+        "Include a hook, problem, solution, and CTA. "
+        "Keep it under 60 words."
+    )
     try:
-        client = _anthropic.Anthropic()
-        msg = client.messages.create(
-            model="claude-3-haiku-20240307",
-            max_tokens=256,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Write a short TikTok ad script for '{product}'. "
-                        f"Angle: {angle}. "
-                        "Include a hook, problem, solution, and CTA. "
-                        "Keep it under 60 words."
-                    ),
-                }
-            ],
-        )
-        return msg.content[0].text.strip()
+        from backend.inference.router import complete
+        response = complete(prompt, max_tokens=256)
+        if response.provider != "mock" and response.content.strip():
+            return response.content.strip()
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception:
-        return (
-            f"[Script] Product: {product} | Angle: {angle} | "
-            "Hook: Discover the difference. | CTA: Shop now."
-        )
+        pass
+    return _placeholder(product, angle)

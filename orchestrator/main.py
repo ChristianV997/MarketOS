@@ -63,9 +63,52 @@ def _run_signal_ingestion() -> dict[str, Any]:
                 run_intelligence(keywords)
         except Exception:
             pass
+        # Index signals in the vector store for semantic recall (fail-silent)
+        try:
+            from backend.vector.embeddings import embed_text
+            from backend.vector.indexing import signal_record, index_batch
+            records = [
+                signal_record(
+                    signal_key=s["product"],
+                    vector=embed_text(s["product"]),
+                    signal_type=s.get("source", ""),
+                    score=float(s.get("score", 0.0)),
+                )
+                for s in signals if s.get("product")
+            ]
+            if records:
+                index_batch(records)
+        except Exception:
+            pass
         return {"status": "ok", "signals": len(signals)}
     except Exception as exc:
         _log.exception("signal_ingestion_failed error=%s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
+_SLEEP_MIN_INTERVAL_S = float(os.getenv("SLEEP_MIN_INTERVAL_S", "300"))
+_last_sleep_ts: float = 0.0
+
+
+def _run_sleep_consolidation() -> dict[str, Any]:
+    """Run one cognitive sleep cycle (episodic compaction, semantic compression,
+    procedural reinforcement, memory decay).  Rate-limited so back-to-back
+    ticks don't re-consolidate; a no-op between windows."""
+    global _last_sleep_ts
+    now = time.time()
+    if now - _last_sleep_ts < _SLEEP_MIN_INTERVAL_S:
+        return {"status": "skipped", "reason": "rate_limited"}
+    try:
+        from backend.runtime.sleep.consolidation_engine import ConsolidationEngine
+        result = ConsolidationEngine(workspace="default").run_cycle()
+        _last_sleep_ts = now
+        return {
+            "status":   "ok",
+            "cycle_id": result.cycle_id,
+            "episodes_compacted": getattr(result, "episodes_compacted", 0),
+        }
+    except Exception as exc:
+        _log.exception("sleep_consolidation_failed error=%s", exc)
         return {"status": "error", "error": str(exc)}
 
 
@@ -429,14 +472,15 @@ _PHASE_WORKERS: dict[Phase, list[Any]] = {
     Phase.EXPLORE:   [_run_simulation, _run_signal_ingestion, _run_execution_cycle,
                       _run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_metrics_ingestion],
-    # VALIDATE: execution + feedback × 2 + metrics ingestion to close loop
+    # VALIDATE: execution + feedback × 2 + metrics ingestion + sleep to close loop
     Phase.VALIDATE:  [_run_signal_ingestion, _run_execution_cycle,
                       _run_feedback_collection, _run_feedback_collection,
-                      _run_content_generation, _run_metrics_ingestion],
+                      _run_content_generation, _run_metrics_ingestion,
+                      _run_sleep_consolidation],
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
     Phase.SCALE:     [_run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_scaling, _run_scaling,
-                      _run_metrics_ingestion],
+                      _run_metrics_ingestion, _run_sleep_consolidation],
 }
 
 
