@@ -1,7 +1,6 @@
 from backend.integrations import shopify_client
 from backend.integrations import meta_ads_client
 from backend.core.state import ensure_state_shape
-from backend.core.system_v5 import SystemV5
 from backend.decision.engine import decide
 
 
@@ -51,17 +50,3 @@ def test_decide_handles_legacy_state_shape():
     decisions = decide(LegacyState())
     assert isinstance(decisions, list)
     assert len(decisions) > 0
-
-
-def test_system_v5_smoke_cycle():
-    class DummyEnv:
-        def execute(self, action):
-            return {"roas": 1.0, "revenue": 100.0, "orders": 1, "cost": 50.0}
-
-    system = SystemV5()
-    for _ in range(3):
-        results = system.run_cycle(DummyEnv(), decide)
-
-    assert len(results) > 0
-    assert all("prediction" in row for row in results)
-    assert len(system.state.event_log.rows) > 0

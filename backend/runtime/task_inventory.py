@@ -212,13 +212,6 @@ def _register_all() -> None:
         env_required="ADOBE_AJO_TOKEN",
     )
     task_registry.register(
-        "core_master_loop",
-        kind="loop",
-        description="core.engine.master_loop: execution_step + RL train_loop (standalone mode)",
-        module="core.engine.master_loop",
-        interval_s=60.0,
-    )
-    task_registry.register(
         "legacy_run_forever",
         kind="loop",
         description="run.py::run_forever(): legacy 300s polling loop (superseded by orchestrator)",
