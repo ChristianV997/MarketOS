@@ -18,14 +18,15 @@ import logging
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Generator
 
+from backend.core.persistence import state_path
+
 _log = logging.getLogger(__name__)
 
-# Cost state persisted to disk
-_COST_DB_PATH = Path("state/costs.jsonl")
+# Cost state persisted to disk (respects MARKETOS_STATE_DIR for test isolation)
+_COST_DB_PATH = Path(state_path("costs.jsonl"))
 
 
 @dataclass

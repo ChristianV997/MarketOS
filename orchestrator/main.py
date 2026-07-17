@@ -46,6 +46,15 @@ TOTAL_WORKERS   = int(os.getenv("ORCHESTRATOR_WORKERS", "4"))
 from core.content.schemas import CampaignArtifact as _CampaignArtifact
 _campaign_artifacts: dict[str, _CampaignArtifact] = {}
 
+# campaign_id → ad platform ("tiktok"/"meta"), captured at launch registration
+# (CampaignArtifact has no platform field; this sidecar keeps attribution
+# without touching the shared schema)
+_campaign_platforms: dict[str, str] = {}
+
+# campaign_id → last metric-observation timestamp, for prorating daily budget
+# into per-observation spend estimates
+_campaign_last_metric_ts: dict[str, float] = {}
+
 
 # ── worker dispatchers ────────────────────────────────────────────────────────
 
@@ -162,6 +171,7 @@ def _run_dropship_pipeline() -> dict[str, Any]:
                     dry_run        = str(cid).startswith("dry"),
                 )
                 _campaign_artifacts[cid] = artifact
+                _campaign_platforms[cid] = c.get("platform", "")
                 try:
                     from backend.events.emitter import emit_campaign_launched
                     emit_campaign_launched(
@@ -184,6 +194,64 @@ def _run_dropship_pipeline() -> dict[str, Any]:
         }
     except Exception as exc:
         _log.exception("dropship_pipeline_failed error=%s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
+_BUDGET_SCALING_MIN_INTERVAL_S = float(os.getenv("BUDGET_SCALING_MIN_INTERVAL_S", "3600"))
+_last_budget_scaling_ts: float = 0.0
+
+
+def _run_budget_scaling() -> dict[str, Any]:
+    """Turn observed campaign ROAS into budget decisions (rate-limited).
+
+    Decisions are persisted to the scaling log and mirrored onto in-memory
+    campaign artifacts, so spend proration and the next scaling round
+    compound from the updated budgets rather than the launch-time ones.
+    """
+    global _last_budget_scaling_ts
+    now = time.time()
+    if now - _last_budget_scaling_ts < _BUDGET_SCALING_MIN_INTERVAL_S:
+        return {"status": "skipped", "reason": "rate_limited"}
+    try:
+        from backend.optimization.budget_scaling import (
+            apply_scaling_decisions, compute_scaling_decisions)
+        decisions = compute_scaling_decisions()
+        result = apply_scaling_decisions(decisions)
+        _last_budget_scaling_ts = now
+        for d in decisions:
+            artifact = _campaign_artifacts.get(d["campaign_id"])
+            if artifact is not None:
+                artifact.budget = d["new_budget"]
+        kills = sum(1 for d in decisions if d["action"] == "kill")
+        ups   = sum(1 for d in decisions if d["action"] == "scale_up")
+        if decisions:
+            _log.info("budget_scaling decisions=%d scale_up=%d kills=%d change=%.2f",
+                      len(decisions), ups, kills, result.get("budget_change", 0.0))
+        return {"status": "ok", "decisions": len(decisions),
+                "scale_up": ups, "kills": kills,
+                "budget_change": result.get("budget_change", 0.0)}
+    except Exception as exc:
+        _log.exception("budget_scaling_failed error=%s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
+_ALERTING_MIN_INTERVAL_S = float(os.getenv("ALERTING_MIN_INTERVAL_S", "600"))
+_last_alerting_ts: float = 0.0
+
+
+def _run_alerting() -> dict[str, Any]:
+    """Evaluate alert conditions over local state (rate-limited, cheap)."""
+    global _last_alerting_ts
+    now = time.time()
+    if now - _last_alerting_ts < _ALERTING_MIN_INTERVAL_S:
+        return {"status": "skipped", "reason": "rate_limited"}
+    try:
+        from backend.monitoring.alerts import evaluate_alerts
+        fired = evaluate_alerts()
+        _last_alerting_ts = now
+        return {"status": "ok", "alerts_fired": len(fired)}
+    except Exception as exc:
+        _log.exception("alerting_failed error=%s", exc)
         return {"status": "error", "error": str(exc)}
 
 
@@ -477,6 +545,28 @@ def _run_metrics_ingestion() -> dict[str, Any]:
                     product  = artifact.product if artifact else cid
                     # ── CalibrationStore: record per-product outcome ───────────
                     calibration_store.record_outcome(product, actual_roas=roas)
+                    # ── CampaignMetrics: persist observation for profitability ─
+                    # Spend is prorated from the campaign's daily budget over
+                    # the interval since the last observation (first sight
+                    # assumes a 1h window), so per-day totals stay honest no
+                    # matter how often this worker fires.
+                    try:
+                        from backend.metrics.campaign_metrics import record_metric
+                        now_obs = time.time()
+                        budget  = artifact.budget if artifact else 0.0
+                        last    = _campaign_last_metric_ts.get(cid, now_obs - 3600)
+                        elapsed = min(max(now_obs - last, 0.0), 86400.0)
+                        est_spend = budget * (elapsed / 86400.0)
+                        record_metric(
+                            cid,
+                            platform=_campaign_platforms.get(cid, "tiktok"),
+                            product=product,
+                            spend_usd=est_spend,
+                            revenue_usd=est_spend * roas,
+                        )
+                        _campaign_last_metric_ts[cid] = now_obs
+                    except Exception as exc:
+                        _log.debug("campaign_metric_record_failed error=%s", exc)
                     # ── PatternStore: backfill from real TikTok ROAS ──────────
                     # Build a synthetic classified event so pattern learning sees
                     # real campaign performance, not just simulated outcomes.
@@ -557,22 +647,23 @@ def _with_retry(fn: Any, attempts: int = 2) -> dict[str, Any]:
 _PHASE_WORKERS: dict[Phase, list[Any]] = {
     # RESEARCH: discover signals + warm simulation; ingest first metrics
     Phase.RESEARCH:  [_run_simulation, _run_signal_ingestion, _run_signal_ingestion,
-                      _run_execution_cycle, _run_metrics_ingestion],
+                      _run_execution_cycle, _run_metrics_ingestion, _run_alerting],
     # EXPLORE: signal → simulate → execute × 2 → feedback → generate content
     # → dropship cycle (rate-limited internally; usually a no-op between windows)
     Phase.EXPLORE:   [_run_simulation, _run_signal_ingestion, _run_execution_cycle,
                       _run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_dropship_pipeline,
-                      _run_metrics_ingestion],
+                      _run_metrics_ingestion, _run_alerting],
     # VALIDATE: execution + feedback × 2 + metrics ingestion + sleep to close loop
     Phase.VALIDATE:  [_run_signal_ingestion, _run_execution_cycle,
                       _run_feedback_collection, _run_feedback_collection,
                       _run_content_generation, _run_metrics_ingestion,
-                      _run_sleep_consolidation],
+                      _run_alerting, _run_sleep_consolidation],
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
     Phase.SCALE:     [_run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_scaling, _run_scaling,
                       _run_dropship_pipeline, _run_metrics_ingestion,
+                      _run_budget_scaling, _run_alerting,
                       _run_sleep_consolidation],
 }
 
@@ -699,6 +790,8 @@ def run() -> None:
                     "_run_content_generation":  "content_generation_worker",
                     "_run_dropship_pipeline":   "dropship_pipeline_worker",
                     "_run_metrics_ingestion":   "metrics_ingestion_worker",
+                    "_run_budget_scaling":      "budget_scaling_worker",
+                    "_run_alerting":            "alerting_worker",
                 }.get(worker_fn.__name__, worker_fn.__name__)
                 try:
                     from backend.runtime.task_inventory import task_registry as _tr

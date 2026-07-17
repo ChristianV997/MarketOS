@@ -18,20 +18,20 @@ Usage:
 """
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Query
 
+from backend.core.persistence import state_path
+
 _log = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Paths to persistent state
-_DROPSHIP_SNAPSHOT_PATH = Path("state/dropship.json")
-_COSTS_DB_PATH = Path("state/costs.jsonl")
-_ERRORS_DB_PATH = Path("state/errors.jsonl")
+# Paths to persistent state (respect MARKETOS_STATE_DIR)
+_DROPSHIP_SNAPSHOT_PATH = Path(state_path("dropship.json"))
 
 
 # ── health and status ─────────────────────────────────────────────────────────
@@ -123,42 +123,71 @@ async def get_campaigns(
 async def get_profitability(
     lookback_days: int = Query(7, ge=1, le=90),
 ) -> dict:
-    """Profitability summary for the last N days."""
-    snapshot = {}
-    if _DROPSHIP_SNAPSHOT_PATH.exists():
-        try:
-            with open(_DROPSHIP_SNAPSHOT_PATH) as f:
-                snapshot = json.load(f)
-        except Exception:
-            pass
+    """Actual profitability (real metrics + predictions)."""
+    try:
+        from backend.metrics.profitability import calculate_profitability
+        return calculate_profitability(lookback_days=lookback_days)
+    except Exception as exc:
+        _log.error("Failed to calculate profitability: %s", exc)
+        return {
+            "status": "error",
+            "error": str(exc),
+            "total_profit": 0.0,
+        }
 
-    total_budget = 0.0
-    total_predicted_spend = 0.0
-    total_predicted_revenue = 0.0
-    num_products = 0
 
-    for launch in snapshot.get("launches", []):
-        num_products += 1
-        budget = launch.get("budget", 0.0)
-        predicted_roas = launch.get("predicted_roas", 1.0)
-        total_budget += budget
-        total_predicted_spend += budget
-        total_predicted_revenue += budget * predicted_roas
+@router.get("/profitability/products")
+async def get_profitability_by_product(
+    lookback_days: int = Query(7, ge=1, le=90),
+) -> dict:
+    """Profitability breakdown by product."""
+    try:
+        from backend.metrics.profitability import calculate_profitability
+        report = calculate_profitability(lookback_days=lookback_days)
+        return {
+            "status": "ok",
+            "period_days": lookback_days,
+            "products": report.get("products", []),
+            "summary": {
+                "total_profit": report.get("total_profit", 0.0),
+                "roi_pct": report.get("roi_pct", 0.0),
+                "profitable_count": report.get("profitable_count", 0),
+            },
+        }
+    except Exception as exc:
+        _log.error("Failed to get product profitability: %s", exc)
+        return {"status": "error", "error": str(exc), "products": []}
 
-    predicted_profit = total_predicted_revenue - total_predicted_spend
-    predicted_roi = (predicted_profit / total_predicted_spend * 100) if total_predicted_spend > 0 else 0
 
-    return {
-        "period_days": lookback_days,
-        "num_products_launched": num_products,
-        "total_spend": round(total_predicted_spend, 2),
-        "total_predicted_revenue": round(total_predicted_revenue, 2),
-        "total_predicted_profit": round(predicted_profit, 2),
-        "avg_roas": round(total_predicted_revenue / total_predicted_spend, 2) if total_predicted_spend > 0 else 0,
-        "predicted_roi_pct": round(predicted_roi, 1),
-        "breakeven_threshold": 1.0,
-        "note": "These are predictions; real ROAS comes from campaign metrics",
-    }
+@router.get("/profitability/product/{product_name}")
+async def get_product_timeline(product_name: str) -> dict:
+    """Profitability timeline for a single product."""
+    try:
+        from backend.metrics.profitability import product_timeline
+        timeline = product_timeline(product_name, lookback_days=30)
+        return {
+            "status": "ok",
+            "product": product_name,
+            "data_points": len(timeline),
+            "timeline": timeline,
+        }
+    except Exception as exc:
+        _log.error("Failed to get product timeline: %s", exc)
+        return {"status": "error", "error": str(exc), "timeline": []}
+
+
+@router.get("/forecast")
+async def get_revenue_forecast(
+    horizon_days: int = Query(7, ge=1, le=90),
+) -> dict:
+    """Projected revenue bands (pessimistic/realistic/optimistic) from live
+    campaigns, with the realistic band corrected by observed prediction error."""
+    try:
+        from backend.metrics.profitability import revenue_forecast
+        return revenue_forecast(horizon_days=horizon_days)
+    except Exception as exc:
+        _log.error("Failed to compute forecast: %s", exc)
+        return {"status": "error", "error": str(exc)}
 
 
 # ── cost tracking ─────────────────────────────────────────────────────────────
@@ -271,6 +300,146 @@ async def get_recent_errors(
         }
     except Exception as exc:
         return {"status": "error", "error": str(exc), "errors": []}
+
+
+# ── campaign metrics ─────────────────────────────────────────────────────────
+
+
+@router.get("/metrics/ingest")
+async def ingest_metrics() -> dict:
+    """Fetch and ingest campaign metrics from real platforms."""
+    try:
+        from backend.metrics.campaign_metrics import ingest_campaign_metrics
+        return ingest_campaign_metrics()
+    except Exception as exc:
+        _log.error("Failed to ingest metrics: %s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
+@router.get("/metrics/performance")
+async def get_campaign_performance(
+    lookback_days: int = Query(7, ge=1, le=90),
+    platform: Optional[str] = Query(None),
+) -> dict:
+    """Campaign performance summary."""
+    try:
+        from backend.metrics.campaign_metrics import campaign_performance
+        campaigns = campaign_performance(lookback_days=lookback_days, platform=platform)
+        return {
+            "status": "ok",
+            "count": len(campaigns),
+            "campaigns": campaigns,
+            "period_days": lookback_days,
+            "platform_filter": platform,
+        }
+    except Exception as exc:
+        _log.error("Failed to get performance: %s", exc)
+        return {"status": "error", "error": str(exc), "campaigns": []}
+
+
+@router.get("/metrics/campaign/{campaign_id}")
+async def get_campaign_metrics(campaign_id: str) -> dict:
+    """Detailed metrics for one campaign."""
+    try:
+        from backend.metrics.campaign_metrics import campaign_by_id
+        metrics = campaign_by_id(campaign_id)
+        if not metrics:
+            return {"status": "not_found", "campaign_id": campaign_id}
+        return {"status": "ok", **metrics}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+# ── budget optimization ───────────────────────────────────────────────────────
+
+
+@router.get("/optimization/scaling-decisions")
+async def get_scaling_decisions() -> dict:
+    """Compute budget scaling decisions based on recent performance."""
+    try:
+        from backend.optimization.budget_scaling import compute_scaling_decisions, apply_scaling_decisions
+        decisions = compute_scaling_decisions(lookback_days=3)
+        result = apply_scaling_decisions(decisions)
+        result["decisions"] = decisions
+        return result
+    except Exception as exc:
+        _log.error("Failed to compute scaling: %s", exc)
+        return {"status": "error", "error": str(exc), "decisions": []}
+
+
+@router.get("/optimization/scaling-summary")
+async def get_scaling_summary(
+    lookback_days: int = Query(7, ge=1, le=90),
+) -> dict:
+    """Summary of scaling decisions made."""
+    try:
+        from backend.optimization.budget_scaling import scaling_summary
+        return scaling_summary(lookback_days=lookback_days)
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+# ── alerts and reporting ──────────────────────────────────────────────────────
+
+
+@router.get("/alerts")
+async def get_alerts(
+    lookback_hours: int = Query(24, ge=1, le=720),
+) -> dict:
+    """Recent alerts (error bursts, spend bursts, ROAS floors, stalls)."""
+    try:
+        from backend.monitoring.alerts import alert_summary
+        return {"status": "ok", **alert_summary(lookback_hours=lookback_hours)}
+    except Exception as exc:
+        _log.error("Failed to get alerts: %s", exc)
+        return {"status": "error", "error": str(exc), "alerts": []}
+
+
+@router.post("/alerts/evaluate")
+async def trigger_alert_evaluation() -> dict:
+    """Run alert checks now (also runs automatically in the orchestrator)."""
+    try:
+        from backend.monitoring.alerts import evaluate_alerts
+        fired = evaluate_alerts()
+        return {"status": "ok", "alerts_fired": len(fired), "alerts": fired}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@router.get("/report")
+async def get_report(regenerate: bool = Query(False)) -> dict:
+    """Latest full status report (profitability, forecast, costs, errors,
+    scaling, calibration, alerts). Pass regenerate=true to build fresh."""
+    try:
+        from backend.reporting.weekly_report import generate_report, latest_report
+        if not regenerate:
+            existing = latest_report()
+            if existing:
+                return existing
+        return generate_report()
+    except Exception as exc:
+        _log.error("Failed to build report: %s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
+@router.get("/calibration")
+async def get_calibration_report() -> dict:
+    """Does validation confidence actually predict real ROAS?"""
+    try:
+        from backend.metrics.calibration_tuning import confidence_report
+        return confidence_report()
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@router.get("/signal-cache")
+async def get_signal_cache_status() -> dict:
+    """Discovery signal cache freshness."""
+    try:
+        from backend.discovery.signal_cache import cache_status
+        return {"status": "ok", **cache_status()}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
 
 
 # ── credentials and config ────────────────────────────────────────────────────

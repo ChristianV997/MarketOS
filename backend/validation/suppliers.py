@@ -248,16 +248,25 @@ _CLIENTS: list[SupplierClient] = [
 
 
 def quote_all(product_name: str) -> list[SupplierQuote]:
-    """Collect quotes from every supplier (None results dropped)."""
-    quotes = []
-    for client in _CLIENTS:
+    """Collect quotes from every supplier concurrently (None results dropped).
+
+    Live supplier calls are network-bound (~1-3s each); querying all four in
+    a thread pool turns worst-case ~12s sequential into ~3s.  Result order
+    stays deterministic (client registration order), so downstream scoring
+    and tests are unaffected.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _safe_quote(client: SupplierClient) -> SupplierQuote | None:
         try:
-            q = client.quote(product_name)
-            if q is not None:
-                quotes.append(q)
+            return client.quote(product_name)
         except Exception as exc:
             _log.debug("supplier_quote_error supplier=%s error=%s", client.name, exc)
-    return quotes
+            return None
+
+    with ThreadPoolExecutor(max_workers=len(_CLIENTS)) as pool:
+        results = list(pool.map(_safe_quote, _CLIENTS))
+    return [q for q in results if q is not None]
 
 
 def find_best_supplier(product_name: str) -> SupplierQuote | None:

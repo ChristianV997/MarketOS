@@ -103,8 +103,15 @@ def run_dropship_cycle(
 
             # Stage a calibration prediction per product so the metrics loop
             # can close the loop against real ROAS when outcomes arrive.
+            # The raw prior is de-biased by the observed prediction error from
+            # previous cycles (×1.0 until enough outcomes accumulate).
             predicted = _ROAS_PRIOR.get(
                 (verdict.get("margin") or {}).get("margin_status", ""), 1.0)
+            try:
+                from backend.metrics.calibration_tuning import prior_correction
+                predicted = round(predicted * prior_correction(), 4)
+            except Exception as exc:
+                _log.debug("prior_correction_unavailable error=%s", exc)
             try:
                 from simulation.calibration import calibration_store
                 calibration_store.record_prediction(product, predicted_roas=predicted)

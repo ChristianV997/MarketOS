@@ -10,19 +10,27 @@ except ImportError:  # pragma: no cover
 
 _log = logging.getLogger(__name__)
 
-# Use config system for credentials (falls back to env vars)
-try:
-    from backend.config import get_credential, is_dry_run
-    _ACCESS_TOKEN_FN = lambda: get_credential("META_ACCESS_TOKEN")
-    _AD_ACCOUNT_ID_FN = lambda: get_credential("META_AD_ACCOUNT_ID")
-    _IS_DRY_RUN_FN = lambda: is_dry_run("meta")
-except ImportError:
-    # Fallback if config module not available (e.g., in tests)
-    _ACCESS_TOKEN_FN = lambda: os.getenv("META_ACCESS_TOKEN")
-    _AD_ACCOUNT_ID_FN = lambda: os.getenv("META_AD_ACCOUNT_ID")
-    _IS_DRY_RUN_FN = lambda: os.getenv("META_DRY_RUN", "true").lower() != "false"
+def _cfg(key: str) -> str | None:
+    """Credential lookup: env var first, then the local config store."""
+    try:
+        from backend.config import get_credential
+        return get_credential(key)
+    except Exception:
+        return os.getenv(key)
 
+
+# Resolved once at import (tests monkeypatch these module attributes
+# directly; credential changes via the setup API need a process restart).
+ACCESS_TOKEN = _cfg("META_ACCESS_TOKEN")
+AD_ACCOUNT_ID = _cfg("META_AD_ACCOUNT_ID")
 GRAPH_API_VERSION = os.getenv("META_GRAPH_API_VERSION", "v20.0")
+
+
+def _is_dry_run() -> bool:
+    """Dry-run unless META_DRY_RUN=false AND credentials are present."""
+    if os.getenv("META_DRY_RUN", "true").lower() != "false":
+        return True
+    return not (ACCESS_TOKEN and AD_ACCOUNT_ID)
 
 # Monotonic counter keeps dry-run IDs unique within one second
 _dry_seq = 0
@@ -36,42 +44,47 @@ def _next_dry_id(prefix: str) -> str:
 
 
 def _graph_post(path: str, payload: dict) -> dict:
-    access_token = _ACCESS_TOKEN_FN()
-    ad_account_id = _AD_ACCOUNT_ID_FN()
-    is_dry = _IS_DRY_RUN_FN()
-
-    if is_dry or not (access_token and ad_account_id and requests is not None):
+    if _is_dry_run() or requests is None:
         _log.info("meta_dry_run path=%s", path)
         return {"id": _next_dry_id("dry_meta")}
 
-    # Track cost: Meta Graph API calls typically cost ~$0.001 each for most operations
-    try:
-        from backend.cost_tracking import track_api_call
-        with track_api_call("meta_ads", path.split("/")[-1], cost_usd=0.001):
-            r = requests.post(
-                f"https://graph.facebook.com/{GRAPH_API_VERSION}/{path}",
-                data={**payload, "access_token": access_token},
-                timeout=15,
-            )
-            r.raise_for_status()
-            return r.json()
-    except ImportError:
-        # Fallback if cost_tracking not available
+    def _post() -> dict:
         r = requests.post(
             f"https://graph.facebook.com/{GRAPH_API_VERSION}/{path}",
-            data={**payload, "access_token": access_token},
+            data={**payload, "access_token": ACCESS_TOKEN},
             timeout=15,
         )
         r.raise_for_status()
         return r.json()
+
+    # Live path: stay inside quota, retry transient failures, track cost.
+    # Each guard degrades independently so a missing helper never blocks a call.
+    try:
+        from backend.integrations.rate_limiter import rate_limiter
+        rate_limiter.acquire("meta")
+    except Exception:
+        pass
+
+    def _post_with_retry() -> dict:
+        try:
+            from backend.integrations.retry_middleware import retry_call
+            return retry_call(_post, attempts=3, label=f"meta:{path}")
+        except ImportError:
+            return _post()
+
+    try:
+        from backend.cost_tracking import track_api_call
+        with track_api_call("meta_ads", path.split("/")[-1], cost_usd=0.001):
+            return _post_with_retry()
+    except ImportError:
+        return _post_with_retry()
 
 
 def create_campaign(name: str, objective: str = "OUTCOME_SALES",
                     daily_budget: float = 50.0) -> str:
     """Create a Meta campaign. Returns campaign_id ('' on failure)."""
     try:
-        ad_account_id = _AD_ACCOUNT_ID_FN()
-        resp = _graph_post(f"act_{ad_account_id or 'dry'}/campaigns", {
+        resp = _graph_post(f"act_{AD_ACCOUNT_ID or 'dry'}/campaigns", {
             "name": name,
             "objective": objective,
             "status": "PAUSED",   # launched paused; budget flips it live
@@ -88,8 +101,7 @@ def create_campaign(name: str, objective: str = "OUTCOME_SALES",
 def create_ad_set(campaign_id: str, name: str, daily_budget: float = 50.0) -> str:
     """Create an ad set under a campaign. Returns ad_set_id ('' on failure)."""
     try:
-        ad_account_id = _AD_ACCOUNT_ID_FN()
-        resp = _graph_post(f"act_{ad_account_id or 'dry'}/adsets", {
+        resp = _graph_post(f"act_{AD_ACCOUNT_ID or 'dry'}/adsets", {
             "name": name,
             "campaign_id": campaign_id,
             "daily_budget": int(daily_budget * 100),  # Meta wants cents
@@ -110,8 +122,7 @@ def create_ad(ad_set_id: str, name: str, headline: str = "",
               body: str = "", link_url: str = "") -> str:
     """Create an ad within an ad set. Returns ad_id ('' on failure)."""
     try:
-        ad_account_id = _AD_ACCOUNT_ID_FN()
-        resp = _graph_post(f"act_{ad_account_id or 'dry'}/ads", {
+        resp = _graph_post(f"act_{AD_ACCOUNT_ID or 'dry'}/ads", {
             "name": name,
             "adset_id": ad_set_id,
             "creative": json.dumps({
@@ -141,14 +152,11 @@ def get_ad_spend(last_n_minutes=60):
     ]
     campaigns = fallback_campaigns
 
-    access_token = _ACCESS_TOKEN_FN()
-    ad_account_id = _AD_ACCOUNT_ID_FN()
-
-    if access_token and ad_account_id and requests is not None:
+    if ACCESS_TOKEN and AD_ACCOUNT_ID and requests is not None:
         try:
-            url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/act_{ad_account_id}/insights"
+            url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/act_{AD_ACCOUNT_ID}/insights"
             params = {
-                "access_token": access_token,
+                "access_token": ACCESS_TOKEN,
                 "level": "campaign",
                 "fields": "campaign_id,spend",
                 "time_range": json.dumps(

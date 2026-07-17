@@ -26,10 +26,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from backend.core.persistence import state_path
+
 _log = logging.getLogger(__name__)
 
-# Error state persisted to disk
-_ERROR_DB_PATH = Path("state/errors.jsonl")
+# Error state persisted to disk (respects MARKETOS_STATE_DIR for test isolation)
+_ERROR_DB_PATH = Path(state_path("errors.jsonl"))
 
 
 @dataclass

@@ -116,6 +116,10 @@ class CalibrationStore:
 
         Returns True if a pair was created.
         """
+        # Honor the actual_roas keyword — callers use it exclusively; the
+        # positional ``actual`` previously shadowed it and every pair was
+        # recorded with actual=0.0, poisoning the whole audit trail.
+        value = actual_roas if actual_roas is not None else actual
         now = time.time()
         with self._lock:
             pending = self._pending.get(product, [])
@@ -127,7 +131,7 @@ class CalibrationStore:
             # take the most recent
             p = pending.pop()
             self._pending[product] = pending
-            rec = CalibrationRecord(product, p["predicted"], float(actual), now)
+            rec = CalibrationRecord(product, p["predicted"], float(value), now)
             self._records.append(rec)
             self.total_paired += 1
         return True

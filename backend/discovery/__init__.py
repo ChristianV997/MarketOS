@@ -30,11 +30,13 @@ def discover_products(limit: int = 10, min_signal_score: float = 0.5) -> list[di
     Fail-silent: any source error degrades to the remaining sources; an
     empty signal engine yields its built-in mock signals so the pipeline
     always produces candidates in dev/dry-run.
-    """
-    from core.signals import signal_engine
 
+    Signals come through the signal cache (SIGNAL_CACHE_TTL_H, default 6h)
+    so back-to-back cycles don't re-query trend APIs that barely move.
+    """
     try:
-        signals = signal_engine.get()
+        from backend.discovery.signal_cache import get_signals_cached
+        signals = get_signals_cached()
     except Exception as exc:
         _log.debug("discovery_signals_failed error=%s", exc)
         signals = []
