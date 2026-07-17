@@ -225,14 +225,29 @@ def _refresh_real_roas():
 
 
 def execute(decisions, state):
-    budgets = budget_allocate(decisions, total_budget=TOTAL_CYCLE_BUDGET)
-    _log.debug(allocation_summary(decisions, budgets))
-
     # Track peak capital for drawdown monitoring (stored on state object)
     peak_capital = getattr(state, "_peak_capital", state.capital)
     if state.capital > peak_capital:
         peak_capital = state.capital
     state._peak_capital = peak_capital
+
+    # Unified capital policy (shadow-mode: legacy LP result is returned and
+    # both allocations are journaled until CAPITAL_POLICY_LIVE=true).
+    from backend.decision.capital_policy import allocate_with_shadow
+    arms = [
+        {"id": str(d.get("action", {}).get("variant", i)),
+         "pred": d.get("pred", 1.0),
+         "pred_width": d.get("pred_width", 0.5),
+         "group": str(d.get("action", {}).get("variant", ""))}
+        for i, d in enumerate(decisions)
+    ]
+    budgets = allocate_with_shadow(
+        arms, TOTAL_CYCLE_BUDGET,
+        legacy_fn=lambda: budget_allocate(decisions, total_budget=TOTAL_CYCLE_BUDGET),
+        risk_context={"capital": state.capital, "peak_capital": peak_capital},
+        context_label="cycle_variant_budgets",
+    )
+    _log.debug(allocation_summary(decisions, budgets))
 
     hook_pool, angle_pool = _refresh_pools()
     results = []

@@ -1,3 +1,8 @@
+"""DEPRECATED — no production call sites. Capital/action allocation is
+unified in backend.decision.capital_policy; this naive mean-reward share
+is retained only for import/test compatibility and will be removed.
+"""
+
 class StrategyAllocator:
 
     def __init__(self):
