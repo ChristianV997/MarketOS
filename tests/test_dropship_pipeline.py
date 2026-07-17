@@ -98,7 +98,7 @@ def test_orchestrator_worker_registers_artifacts(monkeypatch):
         }],
     }
     monkeypatch.setattr("backend.dropship.run_dropship_cycle", lambda: fake_summary)
-    monkeypatch.setattr(om, "_last_dropship_ts", 0.0)
+    monkeypatch.setattr(om._dropship_limiter, "last_run", 0.0)
     om._campaign_artifacts.pop("dry_test_cid_1", None)
 
     result = om._run_dropship_pipeline()
@@ -114,6 +114,6 @@ def test_orchestrator_worker_registers_artifacts(monkeypatch):
 def test_orchestrator_worker_rate_limited(monkeypatch):
     import time
     import orchestrator.main as om
-    monkeypatch.setattr(om, "_last_dropship_ts", time.time())
+    monkeypatch.setattr(om._dropship_limiter, "last_run", time.time())
     result = om._run_dropship_pipeline()
     assert result == {"status": "skipped", "reason": "rate_limited"}

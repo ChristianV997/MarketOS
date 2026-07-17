@@ -14,6 +14,8 @@ import os
 import time
 from typing import Any
 
+from backend.patterns.safe_call import safe_call
+
 _log = logging.getLogger(__name__)
 
 _BASE   = "https://business-api.tiktok.com/open_api/v1.3"
@@ -76,28 +78,26 @@ def _get(path: str, params: dict | None = None) -> dict:
 
 # ── campaign lifecycle ─────────────────────────────────────────────────────────
 
+@safe_call(default="")
 def create_campaign(
     name: str,
     objective: str = "CONVERSIONS",
     budget: float | None = None,
 ) -> str:
     """Create a campaign. Returns campaign_id."""
-    try:
-        resp = _post("/campaign/create/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "campaign_name": name,
-            "objective_type": objective,
-            "budget_mode": "BUDGET_MODE_TOTAL",
-            "budget": budget or _BUDGET_DAILY,
-        })
-        cid = resp.get("data", {}).get("campaign_id", f"dry_{name}")
-        _log.info("tiktok_campaign_created id=%s", cid)
-        return str(cid)
-    except Exception:
-        _log.exception("tiktok create_campaign failed")
-        return ""
+    resp = _post("/campaign/create/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "campaign_name": name,
+        "objective_type": objective,
+        "budget_mode": "BUDGET_MODE_TOTAL",
+        "budget": budget or _BUDGET_DAILY,
+    })
+    cid = resp.get("data", {}).get("campaign_id", f"dry_{name}")
+    _log.info("tiktok_campaign_created id=%s", cid)
+    return str(cid)
 
 
+@safe_call(default="")
 def create_ad_group(
     campaign_id: str,
     name: str,
@@ -105,27 +105,24 @@ def create_ad_group(
     placements: list[str] | None = None,
 ) -> str:
     """Create an ad group under a campaign. Returns adgroup_id."""
-    try:
-        resp = _post("/adgroup/create/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "campaign_id": campaign_id,
-            "adgroup_name": name,
-            "placement_type": "PLACEMENT_TYPE_NORMAL",
-            "placements": placements or ["PLACEMENT_TIKTOK"],
-            "budget_mode": "BUDGET_MODE_DAY",
-            "budget": daily_budget or _BUDGET_DAILY,
-            "schedule_type": "SCHEDULE_FROM_NOW",
-            "optimization_goal": "CONVERT",
-            "bid_type": "BID_TYPE_NO_BID",
-        })
-        agid = resp.get("data", {}).get("adgroup_id", f"dry_ag_{name}")
-        _log.info("tiktok_adgroup_created id=%s", agid)
-        return str(agid)
-    except Exception:
-        _log.exception("tiktok create_ad_group failed")
-        return ""
+    resp = _post("/adgroup/create/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "campaign_id": campaign_id,
+        "adgroup_name": name,
+        "placement_type": "PLACEMENT_TYPE_NORMAL",
+        "placements": placements or ["PLACEMENT_TIKTOK"],
+        "budget_mode": "BUDGET_MODE_DAY",
+        "budget": daily_budget or _BUDGET_DAILY,
+        "schedule_type": "SCHEDULE_FROM_NOW",
+        "optimization_goal": "CONVERT",
+        "bid_type": "BID_TYPE_NO_BID",
+    })
+    agid = resp.get("data", {}).get("adgroup_id", f"dry_ag_{name}")
+    _log.info("tiktok_adgroup_created id=%s", agid)
+    return str(agid)
 
 
+@safe_call(default="")
 def create_ad(
     adgroup_id: str,
     creative_id: str,
@@ -134,56 +131,47 @@ def create_ad(
     angle: str = "",
 ) -> str:
     """Create an ad within an ad group. Returns ad_id."""
-    try:
-        resp = _post("/ad/create/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "adgroup_id": adgroup_id,
-            "ad_name": name,
-            "creatives": [{
-                "creative_id": creative_id,
-                "ad_text": f"{hook} {angle}".strip()[:100],
-            }],
-        })
-        ad_id = resp.get("data", {}).get("ad_id", f"dry_ad_{name}")
-        _log.info("tiktok_ad_created id=%s", ad_id)
-        return str(ad_id)
-    except Exception:
-        _log.exception("tiktok create_ad failed")
-        return ""
+    resp = _post("/ad/create/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "adgroup_id": adgroup_id,
+        "ad_name": name,
+        "creatives": [{
+            "creative_id": creative_id,
+            "ad_text": f"{hook} {angle}".strip()[:100],
+        }],
+    })
+    ad_id = resp.get("data", {}).get("ad_id", f"dry_ad_{name}")
+    _log.info("tiktok_ad_created id=%s", ad_id)
+    return str(ad_id)
 
 
+@safe_call(default=False)
 def pause_campaign(campaign_id: str) -> bool:
     """Pause a campaign (kill-switch)."""
-    try:
-        _post("/campaign/status/update/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "campaign_ids": [campaign_id],
-            "opt_status": "DISABLE",
-        })
-        _log.info("tiktok_campaign_paused id=%s", campaign_id)
-        return True
-    except Exception:
-        _log.exception("tiktok pause_campaign failed id=%s", campaign_id)
-        return False
+    _post("/campaign/status/update/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "campaign_ids": [campaign_id],
+        "opt_status": "DISABLE",
+    })
+    _log.info("tiktok_campaign_paused id=%s", campaign_id)
+    return True
 
 
+@safe_call(default=False)
 def scale_budget(campaign_id: str, new_budget: float) -> bool:
     """Update campaign daily budget for scaling winners."""
-    try:
-        _post("/campaign/update/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "campaign_id": campaign_id,
-            "budget": round(new_budget, 2),
-        })
-        _log.info("tiktok_budget_scaled id=%s budget=%s", campaign_id, new_budget)
-        return True
-    except Exception:
-        _log.exception("tiktok scale_budget failed id=%s", campaign_id)
-        return False
+    _post("/campaign/update/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "campaign_id": campaign_id,
+        "budget": round(new_budget, 2),
+    })
+    _log.info("tiktok_budget_scaled id=%s budget=%s", campaign_id, new_budget)
+    return True
 
 
 # ── ROAS reporting ─────────────────────────────────────────────────────────────
 
+@safe_call(default=dict)
 def fetch_roas(campaign_ids: list[str], date: str | None = None) -> dict[str, float]:
     """Return {campaign_id → roas} for the given date (defaults to today)."""
     if not campaign_ids:
@@ -192,31 +180,27 @@ def fetch_roas(campaign_ids: list[str], date: str | None = None) -> dict[str, fl
         # Simulate realistic ROAS for dry-run testing
         import random
         return {cid: round(random.uniform(0.8, 2.5), 4) for cid in campaign_ids}
-    try:
-        import datetime
-        today = date or datetime.date.today().strftime("%Y-%m-%d")
-        resp = _get("/reports/integrated/get/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "report_type": "BASIC",
-            "dimensions": ["campaign_id"],
-            "metrics": ["spend", "revenue"],
-            "start_date": today,
-            "end_date": today,
-            "filtering": [{"field_name": "campaign_id", "filter_type": "IN",
-                           "filter_value": campaign_ids}],
-        })
-        result = {}
-        for row in resp.get("data", {}).get("list", []):
-            dims = row.get("dimensions", {})
-            metrics = row.get("metrics", {})
-            cid = str(dims.get("campaign_id", ""))
-            spend   = float(metrics.get("spend", 0) or 0)
-            revenue = float(metrics.get("revenue", 0) or 0)
-            result[cid] = round(revenue / spend, 4) if spend > 0 else 0.0
-        return result
-    except Exception:
-        _log.exception("tiktok fetch_roas failed")
-        return {}
+    import datetime
+    today = date or datetime.date.today().strftime("%Y-%m-%d")
+    resp = _get("/reports/integrated/get/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "report_type": "BASIC",
+        "dimensions": ["campaign_id"],
+        "metrics": ["spend", "revenue"],
+        "start_date": today,
+        "end_date": today,
+        "filtering": [{"field_name": "campaign_id", "filter_type": "IN",
+                       "filter_value": campaign_ids}],
+    })
+    result = {}
+    for row in resp.get("data", {}).get("list", []):
+        dims = row.get("dimensions", {})
+        metrics = row.get("metrics", {})
+        cid = str(dims.get("campaign_id", ""))
+        spend   = float(metrics.get("spend", 0) or 0)
+        revenue = float(metrics.get("revenue", 0) or 0)
+        result[cid] = round(revenue / spend, 4) if spend > 0 else 0.0
+    return result
 
 
 # ── anomaly detection + auto-actions ─────────────────────────────────────────

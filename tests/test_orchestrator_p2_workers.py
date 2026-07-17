@@ -17,7 +17,7 @@ def isolated(monkeypatch, tmp_path):
 
 
 def test_budget_scaling_rate_limited(monkeypatch):
-    monkeypatch.setattr(om, "_last_budget_scaling_ts", time.time())
+    monkeypatch.setattr(om._budget_scaling_limiter, "last_run", time.time())
     assert om._run_budget_scaling() == {"status": "skipped", "reason": "rate_limited"}
 
 
@@ -25,7 +25,7 @@ def test_budget_scaling_updates_artifacts(isolated, monkeypatch):
     cid = f"c_{uuid.uuid4().hex[:8]}"
     cm.record_metric(cid, "tiktok", "Scaler Widget", spend_usd=50.0, revenue_usd=150.0)
     monkeypatch.setattr(bs, "_current_budgets", lambda: {cid: 40.0})
-    monkeypatch.setattr(om, "_last_budget_scaling_ts", 0.0)
+    monkeypatch.setattr(om._budget_scaling_limiter, "last_run", 0.0)
 
     artifact = om._CampaignArtifact(
         campaign_id=cid, adgroup_id="ag", ad_ids=["a"], product="Scaler Widget",
@@ -42,7 +42,7 @@ def test_budget_scaling_updates_artifacts(isolated, monkeypatch):
 
 
 def test_alerting_rate_limited(monkeypatch):
-    monkeypatch.setattr(om, "_last_alerting_ts", time.time())
+    monkeypatch.setattr(om._alerting_limiter, "last_run", time.time())
     assert om._run_alerting() == {"status": "skipped", "reason": "rate_limited"}
 
 
@@ -50,7 +50,7 @@ def test_alerting_runs(monkeypatch, tmp_path):
     import backend.monitoring.alerts as alerts_mod
     monkeypatch.setattr(alerts_mod, "_ALERTS_PATH", tmp_path / "alerts.jsonl")
     monkeypatch.setattr(alerts_mod, "_COOLDOWN_STATE", str(tmp_path / "cd.json"))
-    monkeypatch.setattr(om, "_last_alerting_ts", 0.0)
+    monkeypatch.setattr(om._alerting_limiter, "last_run", 0.0)
     result = om._run_alerting()
     assert result["status"] == "ok"
     assert "alerts_fired" in result
