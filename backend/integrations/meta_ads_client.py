@@ -133,6 +133,88 @@ def create_ad(ad_set_id: str, name: str, headline: str = "",
     return ad_id
 
 
+@safe_call(default=list)
+def create_ads_batch(ad_set_id: str, ads: list[dict]) -> list[str]:
+    """Create multiple ads in one Graph API batch request.
+
+    Each item in ``ads`` is {"name", "headline", "body", "link_url"}.
+    Returns ad_ids in the same order as ``ads``; a failed sub-request
+    yields "" at that position rather than dropping it (callers zip this
+    against ``ads`` by index).
+
+    Uses the Graph API's documented batch endpoint (POST / with a `batch`
+    array of {method, relative_url, body}) instead of N separate requests
+    — one round trip for the whole ad set. Falls back to sequential
+    create_ad() calls in dry-run mode, where there's no network cost to
+    save.
+    """
+    if not ads:
+        return []
+    if _is_dry_run() or requests is None:
+        return [create_ad(ad_set_id, name=a.get("name", ""),
+                          headline=a.get("headline", ""), body=a.get("body", ""),
+                          link_url=a.get("link_url", "")) for a in ads]
+
+    import urllib.parse
+
+    sub_requests = []
+    for ad in ads:
+        body = {
+            "name": ad.get("name", ""),
+            "adset_id": ad_set_id,
+            "creative": json.dumps({
+                "title": ad.get("headline", "")[:40],
+                "body": ad.get("body", "")[:280],
+                "object_url": ad.get("link_url", ""),
+            }),
+            "status": "PAUSED",
+        }
+        sub_requests.append({
+            "method": "POST",
+            "relative_url": f"act_{AD_ACCOUNT_ID}/ads",
+            "body": urllib.parse.urlencode(body),
+        })
+
+    try:
+        from backend.integrations.rate_limiter import rate_limiter
+        rate_limiter.acquire("meta")
+    except Exception:
+        pass
+
+    def _post_batch() -> list[dict]:
+        r = requests.post(
+            f"https://graph.facebook.com/{GRAPH_API_VERSION}/",
+            data={"access_token": ACCESS_TOKEN, "batch": json.dumps(sub_requests)},
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def _post_batch_with_retry() -> list[dict]:
+        try:
+            from backend.integrations.retry_middleware import retry_call
+            return retry_call(_post_batch, attempts=3, label="meta:batch_ads")
+        except ImportError:
+            return _post_batch()
+
+    try:
+        from backend.cost_tracking import track_api_call
+        with track_api_call("meta_ads", "batch_ads", cost_usd=0.001 * len(ads)):
+            responses = _post_batch_with_retry()
+    except ImportError:
+        responses = _post_batch_with_retry()
+
+    ad_ids = []
+    for resp in responses:
+        try:
+            sub_body = json.loads(resp.get("body", "{}"))
+            ad_ids.append(str(sub_body.get("id", "")))
+        except Exception:
+            ad_ids.append("")
+    _log.info("meta_ads_batch_created count=%d", sum(1 for a in ad_ids if a))
+    return ad_ids
+
+
 def get_ad_spend(last_n_minutes=60):
     now = datetime.datetime.now(datetime.UTC)
     since = now - datetime.timedelta(minutes=last_n_minutes)

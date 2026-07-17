@@ -145,6 +145,39 @@ def create_ad(
     return str(ad_id)
 
 
+@safe_call(default=list)
+def create_ads_batch(adgroup_id: str, ads: list[dict]) -> list[str]:
+    """Create multiple ads concurrently for one ad group.
+
+    Each item in ``ads`` is {"creative_id", "name", "hook", "angle"}.
+    Returns ad_ids in the same order as ``ads``.
+
+    TikTok's Marketing API doesn't expose a documented bulk ad-create
+    endpoint the way Meta's Graph API batch protocol does, so this
+    parallelizes the existing single-ad create_ad() calls with a thread
+    pool instead of guessing at an unverified bulk endpoint shape — the
+    same approach already used for supplier quoting
+    (backend/validation/suppliers.py:quote_all). Each create_ad() call is
+    independently safe_call-wrapped, so one failing ad returns "" at its
+    position without affecting the others.
+    """
+    if not ads:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _create(ad: dict) -> str:
+        return create_ad(
+            adgroup_id=adgroup_id,
+            creative_id=ad.get("creative_id", ""),
+            name=ad.get("name", ""),
+            hook=ad.get("hook", ""),
+            angle=ad.get("angle", ""),
+        )
+
+    with ThreadPoolExecutor(max_workers=min(len(ads), 5)) as pool:
+        return list(pool.map(_create, ads))
+
+
 @safe_call(default=False)
 def pause_campaign(campaign_id: str) -> bool:
     """Pause a campaign (kill-switch)."""

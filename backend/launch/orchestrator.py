@@ -76,17 +76,16 @@ def _launch_tiktok(product: str, page_url: str, budget: float,
 
     hooks = copy.get("hooks") or [f"Meet the {product}"]
     angles = copy.get("angles") or ["problem-solution"]
-    ad_ids = []
-    for i, hook in enumerate(hooks[:3]):
-        ad_id = tiktok_ads.create_ad(
-            adgroup_id=adgroup_id,
-            creative_id=f"ds_{product[:30]}_{i}",
-            name=f"ad_{product[:30]}_{i}",
-            hook=hook,
-            angle=angles[i % len(angles)],
-        )
-        if ad_id:
-            ad_ids.append(ad_id)
+    ad_specs = [
+        {
+            "creative_id": f"ds_{product[:30]}_{i}",
+            "name": f"ad_{product[:30]}_{i}",
+            "hook": hook,
+            "angle": angles[i % len(angles)],
+        }
+        for i, hook in enumerate(hooks[:3])
+    ]
+    ad_ids = [aid for aid in tiktok_ads.create_ads_batch(adgroup_id, ad_specs) if aid]
 
     return {
         "platform": "tiktok",
@@ -115,17 +114,16 @@ def _launch_meta(product: str, page_url: str, budget: float,
     headlines = copy.get("headlines") or [f"{product} — Shop Now"]
     hooks = copy.get("hooks") or [f"Meet the {product}"]
     angles = copy.get("angles") or ["problem-solution"]
-    ad_ids = []
-    for i, headline in enumerate(headlines[:3]):
-        ad_id = meta.create_ad(
-            ad_set_id=ad_set_id,
-            name=f"ad_{product[:30]}_{i}",
-            headline=headline,
-            body=hooks[i % len(hooks)],
-            link_url=page_url,
-        )
-        if ad_id:
-            ad_ids.append(ad_id)
+    ad_specs = [
+        {
+            "name": f"ad_{product[:30]}_{i}",
+            "headline": headline,
+            "body": hooks[i % len(hooks)],
+            "link_url": page_url,
+        }
+        for i, headline in enumerate(headlines[:3])
+    ]
+    ad_ids = [aid for aid in meta.create_ads_batch(ad_set_id, ad_specs) if aid]
 
     return {
         "platform": "meta",
