@@ -224,6 +224,7 @@ async def test_credentials(service: str) -> dict:
     elif service == "tiktok":
         try:
             from backend.config import is_dry_run
+            from backend.integrations import tiktok_ads
 
             if is_dry_run("tiktok"):
                 return {
@@ -231,11 +232,20 @@ async def test_credentials(service: str) -> dict:
                     "message": "TikTok is in dry-run mode (no credentials detected)",
                 }
 
-            return {
-                "status": "ok",
-                "message": "TikTok support coming soon",
-            }
+            campaign_id = tiktok_ads.create_campaign("__TEST__Campaign__", daily_budget=1.0)
+            if campaign_id and not str(campaign_id).startswith("dry"):
+                return {
+                    "status": "ok",
+                    "message": "TikTok credentials are valid",
+                    "campaign_id": str(campaign_id),
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Failed to create test campaign",
+                }
         except Exception as exc:
+            _log.exception("tiktok_test_failed")
             return {
                 "status": "error",
                 "message": str(exc),
@@ -244,6 +254,7 @@ async def test_credentials(service: str) -> dict:
     elif service == "shopify":
         try:
             from backend.config import is_dry_run
+            from backend.creation.store_builder import create_product_page
 
             if is_dry_run("shopify"):
                 return {
@@ -251,11 +262,24 @@ async def test_credentials(service: str) -> dict:
                     "message": "Shopify is in dry-run mode (no credentials detected)",
                 }
 
-            return {
-                "status": "ok",
-                "message": "Shopify support coming soon",
-            }
+            page = create_product_page(
+                "__TEST__Product__",
+                "<p>Test product for credential verification</p>",
+                1.0
+            )
+            if page.get("status") == "ok" and page.get("dry_run") is not True:
+                return {
+                    "status": "ok",
+                    "message": "Shopify credentials are valid",
+                    "product_id": page.get("product_id"),
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Failed to create test product",
+                }
         except Exception as exc:
+            _log.exception("shopify_test_failed")
             return {
                 "status": "error",
                 "message": str(exc),
