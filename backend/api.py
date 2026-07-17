@@ -416,6 +416,7 @@ from api.routes import (
     agents_risk as _r_agents_risk,
     tiktok as _r_tiktok,
     simulation as _r_simulation,
+    orchestration as _r_orchestration,
 )
 
 app.include_router(_r_health.router)
@@ -428,6 +429,7 @@ app.include_router(_r_dashboard_panels.router)
 app.include_router(_r_agents_risk.router)
 app.include_router(_r_tiktok.router)
 app.include_router(_r_simulation.router)
+app.include_router(_r_orchestration.router)
 
 
 # ── UPOS compatibility routes (optional — imported only when present) ──────────

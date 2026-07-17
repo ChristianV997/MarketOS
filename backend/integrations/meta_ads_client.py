@@ -97,6 +97,15 @@ def create_campaign(name: str, objective: str = "OUTCOME_SALES",
     return cid
 
 
+@safe_call(default=False)
+def pause_campaign(campaign_id: str) -> bool:
+    """Pause a campaign (used as launch-transaction compensation)."""
+    resp = _graph_post(campaign_id, {"status": "PAUSED"})
+    ok = bool(resp)
+    _log.info("meta_campaign_paused id=%s ok=%s", campaign_id, ok)
+    return ok
+
+
 @safe_call(default="")
 def create_ad_set(campaign_id: str, name: str, daily_budget: float = 50.0) -> str:
     """Create an ad set under a campaign. Returns ad_set_id ('' on failure)."""

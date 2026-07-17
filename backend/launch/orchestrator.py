@@ -62,6 +62,37 @@ def launch_product(
     }
 
 
+def launch_product_tx(
+    build: dict[str, Any],
+    budget_daily: float = 50.0,
+    platforms: tuple[str, ...] = ("tiktok", "meta"),
+    atomic: bool = False,
+) -> dict[str, Any]:
+    """Coordinated launch through the orchestration framework.
+
+    Unlike launch_product(): health-gates platforms before spending,
+    re-allocates an unhealthy platform's budget to healthy ones, launches
+    in parallel, journals every phase to the event store, and (atomic=True)
+    pauses live campaigns when a sibling platform fails.
+    """
+    from backend.orchestration.transaction import LaunchTransaction
+
+    tx = LaunchTransaction(atomic=atomic).execute(
+        build, budget_daily=budget_daily, platforms=platforms)
+    live = [c for c in tx.campaigns if c.get("status") == "live"]
+    return {
+        "status": "ok" if tx.status in ("ok", "partial") else "error",
+        "tx_status": tx.status,
+        "workflow_id": tx.workflow_id,
+        "product": build.get("product", "unknown"),
+        "campaigns": tx.campaigns,
+        "live_count": len(live),
+        "total_budget": tx.total_budget,
+        "skipped_platforms": tx.skipped_platforms,
+        "compensated": tx.compensated,
+    }
+
+
 def _launch_tiktok(product: str, page_url: str, budget: float,
                    copy: dict[str, Any]) -> dict[str, Any]:
     from backend.integrations import tiktok_ads
