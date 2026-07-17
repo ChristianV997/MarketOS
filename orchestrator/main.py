@@ -122,6 +122,71 @@ def _run_sleep_consolidation() -> dict[str, Any]:
         return {"status": "error", "error": str(exc)}
 
 
+_DROPSHIP_MIN_INTERVAL_S = float(os.getenv("DROPSHIP_MIN_INTERVAL_S", "900"))
+_last_dropship_ts: float = 0.0
+
+
+def _run_dropship_pipeline() -> dict[str, Any]:
+    """Run one discover→validate→create→launch dropship cycle (rate-limited).
+
+    Launched campaigns are registered in _campaign_artifacts so the existing
+    metrics-ingestion worker picks up their ROAS, closes the calibration
+    loop, and the scaling worker can kill/amplify them — Pipeline 5 is the
+    live loop itself, no separate optimizer needed.
+    """
+    global _last_dropship_ts
+    now = time.time()
+    if now - _last_dropship_ts < _DROPSHIP_MIN_INTERVAL_S:
+        return {"status": "skipped", "reason": "rate_limited"}
+    try:
+        from backend.dropship import run_dropship_cycle
+        summary = run_dropship_cycle()
+        _last_dropship_ts = now
+
+        # Register launched campaigns for attribution + ROAS tracking
+        for launch in summary.get("launches", []):
+            for c in launch.get("campaigns", []):
+                cid = c.get("campaign_id", "")
+                if not cid or c.get("status") != "live":
+                    continue
+                artifact = _CampaignArtifact(
+                    campaign_id    = cid,
+                    adgroup_id     = c.get("adgroup_id", ""),
+                    ad_ids         = c.get("ad_ids", []),
+                    product        = launch.get("product", ""),
+                    hook           = c.get("hook", ""),
+                    angle          = c.get("angle", ""),
+                    phase          = "DROPSHIP",
+                    estimated_roas = launch.get("predicted_roas", 1.0),
+                    budget         = c.get("budget", 0.0),
+                    dry_run        = str(cid).startswith("dry"),
+                )
+                _campaign_artifacts[cid] = artifact
+                try:
+                    from backend.events.emitter import emit_campaign_launched
+                    emit_campaign_launched(
+                        campaign_id=cid,
+                        product=artifact.product,
+                        hook=artifact.hook,
+                        angle=artifact.angle,
+                        phase="DROPSHIP",
+                        budget=artifact.budget,
+                        dry_run=artifact.dry_run,
+                    )
+                except Exception as exc:
+                    _log.debug("dropship_emit_failed error=%s", exc)
+
+        return {
+            "status":     summary.get("status", "ok"),
+            "discovered": summary.get("discovered", 0),
+            "green":      summary.get("green", 0),
+            "launched":   summary.get("launched", 0),
+        }
+    except Exception as exc:
+        _log.exception("dropship_pipeline_failed error=%s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
 def _persist_episodic() -> None:
     from backend.memory.episodic import persist_episodic
     persist_episodic()
@@ -494,9 +559,11 @@ _PHASE_WORKERS: dict[Phase, list[Any]] = {
     Phase.RESEARCH:  [_run_simulation, _run_signal_ingestion, _run_signal_ingestion,
                       _run_execution_cycle, _run_metrics_ingestion],
     # EXPLORE: signal → simulate → execute × 2 → feedback → generate content
+    # → dropship cycle (rate-limited internally; usually a no-op between windows)
     Phase.EXPLORE:   [_run_simulation, _run_signal_ingestion, _run_execution_cycle,
                       _run_execution_cycle, _run_feedback_collection,
-                      _run_content_generation, _run_metrics_ingestion],
+                      _run_content_generation, _run_dropship_pipeline,
+                      _run_metrics_ingestion],
     # VALIDATE: execution + feedback × 2 + metrics ingestion + sleep to close loop
     Phase.VALIDATE:  [_run_signal_ingestion, _run_execution_cycle,
                       _run_feedback_collection, _run_feedback_collection,
@@ -505,7 +572,8 @@ _PHASE_WORKERS: dict[Phase, list[Any]] = {
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
     Phase.SCALE:     [_run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_scaling, _run_scaling,
-                      _run_metrics_ingestion, _run_sleep_consolidation],
+                      _run_dropship_pipeline, _run_metrics_ingestion,
+                      _run_sleep_consolidation],
 }
 
 
@@ -629,6 +697,7 @@ def run() -> None:
                     "_run_scaling":             "scaling_worker",
                     "_run_simulation":          "simulation_worker",
                     "_run_content_generation":  "content_generation_worker",
+                    "_run_dropship_pipeline":   "dropship_pipeline_worker",
                     "_run_metrics_ingestion":   "metrics_ingestion_worker",
                 }.get(worker_fn.__name__, worker_fn.__name__)
                 try:
