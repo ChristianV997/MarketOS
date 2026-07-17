@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from agents.arbitration import arbitrate
 from backend import api as _core
 from backend.execution.loop import TOTAL_CYCLE_BUDGET
 
@@ -11,12 +12,14 @@ router = APIRouter()
 
 @router.get("/agents")
 def agent_performance():
-    """Agent performance panel: decisions, PnL, and drift detection per agent."""
+    """Agent performance panel: decisions, PnL, drift detection, and the
+    arbitrated outcome (see agents.arbitration) of the four agents' input
+    for the latest window."""
     state = _core._state
     rows = state.event_log.rows
     recent = rows[-_core._RECENT_ROWS_WINDOW:] if rows else []
 
-    # Run agents against the latest window to record live decisions
+    arbitrated = None
     if recent:
         avg_roas = sum(r.get("roas", 0) for r in recent) / len(recent)
         avg_ctr = sum(r.get("ctr", 0) for r in recent) / len(recent)
@@ -34,12 +37,16 @@ def agent_performance():
         }
         risk_dec = _core._risk_agent.decide(risk_input)
 
-        for dec in [scaling_dec, geo_dec, audience_dec, risk_dec]:
+        decisions = [scaling_dec, geo_dec, audience_dec, risk_dec]
+        for dec in decisions:
             _core._agent_metrics.record_decision(dec.agent, dec.action)
+
+        arbitrated = arbitrate(decisions).to_dict()
 
     return {
         "agents": _core._agent_metrics.snapshot(),
         "risk_status": _core._global_risk_engine.status(),
+        "arbitrated_decision": arbitrated,
     }
 
 
