@@ -612,6 +612,18 @@ try:
 except ImportError:
     pass
 
+try:
+    from api.dropship_dashboard import router as _dropship_router
+    app.include_router(_dropship_router, prefix="/api/dropship")
+except ImportError:
+    pass
+
+try:
+    from api.credentials_setup import router as _credentials_router
+    app.include_router(_credentials_router, prefix="/api/setup")
+except ImportError:
+    pass
+
 
 # ── observability endpoints ───────────────────────────────────────────────────
 
