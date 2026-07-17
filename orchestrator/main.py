@@ -91,7 +91,13 @@ def _run_signal_ingestion() -> dict[str, Any]:
         if records:
             index_batch(records)
     except Exception as exc:
-        _log.debug("signal_vector_index_failed error=%s", exc)
+        # warning, not debug: this comment previously noted debug-level
+        # logging here would hide a real indexing defect behind a level
+        # most deployments don't surface — semantic recall silently going
+        # empty is worth a visible log line, even though the worker itself
+        # still completes successfully (indexing is a nice-to-have, not a
+        # blocker for signal ingestion).
+        _log.warning("signal_vector_index_failed error=%s", exc)
     return {"status": "ok", "signals": len(signals)}
 
 

@@ -19,6 +19,8 @@ import logging
 import os
 from dataclasses import dataclass, asdict
 
+from backend.patterns.errors import SupplierQuoteError
+
 _log = logging.getLogger(__name__)
 
 _DRY_RUN = os.getenv("SUPPLIERS_DRY_RUN", "true").lower() != "false"
@@ -73,14 +75,25 @@ class SupplierClient:
         return bool(self.api_key_env and os.getenv(self.api_key_env))
 
     def quote(self, product_name: str) -> SupplierQuote | None:
-        """Return a quote for the product, or None when unavailable."""
+        """Return a quote for the product, or None when unavailable.
+
+        Live failures are wrapped as SupplierQuoteError (retryable=True) so
+        callers that care can distinguish "supplier had a bad moment" from a
+        real bug, even though this method itself falls back to a mock quote
+        either way — validation must never block on one flaky supplier.
+        """
         if _DRY_RUN or not self.is_configured():
             return self._mock_quote(product_name)
         try:
             return self._live_quote(product_name)
         except Exception as exc:
-            _log.debug("supplier_quote_failed supplier=%s product=%s error=%s",
-                       self.name, product_name, exc)
+            wrapped = SupplierQuoteError(
+                f"{self.name} live quote failed for {product_name!r}: {exc}",
+                service=self.name,
+            )
+            _log.warning("supplier_quote_failed supplier=%s product=%s "
+                        "retryable=%s error=%s",
+                        self.name, product_name, wrapped.retryable, exc)
             return self._mock_quote(product_name)
 
     # -- mock path -----------------------------------------------------------

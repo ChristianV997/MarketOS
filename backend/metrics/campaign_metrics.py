@@ -22,10 +22,18 @@ from pathlib import Path
 from typing import Any, Optional
 
 from backend.core.persistence import state_path
+from backend.patterns.cache import AggregationCache
 
 _log = logging.getLogger(__name__)
 
 _METRICS_PATH = Path(state_path("campaign_metrics.jsonl"))
+
+# campaign_performance() re-aggregates the whole log on every call; cache it
+# for a short window since the orchestrator's metrics/scaling workers and
+# dashboard endpoints often call it multiple times per tick. Invalidated on
+# every write so a fresh record_metric() is visible on the very next read —
+# the TTL is a ceiling on staleness between writes, not a source of it.
+_perf_cache = AggregationCache(ttl_s=60.0)
 
 
 @dataclass
@@ -52,6 +60,7 @@ def _append(metric: CampaignMetric) -> bool:
         _METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(_METRICS_PATH, "a") as f:
             f.write(json.dumps(metric.to_dict()) + "\n")
+        _perf_cache.invalidate()
         return True
     except Exception as exc:
         _log.error("campaign_metric_write_failed error=%s", exc)
@@ -147,7 +156,21 @@ def campaign_performance(
 
     Returns [{campaign_id, platform, product, spend, revenue, roas,
               conversions, profit, roi_pct}], best ROAS first.
+
+    Cached for _perf_cache.ttl_s seconds (invalidated immediately on any
+    new record_metric() write) since this re-reads and re-aggregates the
+    entire log on every call.
     """
+    cache_key = f"perf_{lookback_days}_{platform or 'all'}"
+    return _perf_cache.get_or_compute(
+        cache_key, lambda: _campaign_performance_uncached(lookback_days, platform)
+    )
+
+
+def _campaign_performance_uncached(
+    lookback_days: int,
+    platform: Optional[str],
+) -> list[dict]:
     since = time.time() - lookback_days * 86400
     agg: dict[str, dict] = {}
 
