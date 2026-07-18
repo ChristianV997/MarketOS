@@ -46,13 +46,15 @@ from typing import Any, Callable
 
 import numpy as np
 
+from backend.risk.config import BASE_MAX_DRAWDOWN
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_RISK_LAMBDA = 0.3     # λ0 — matches the legacy LP's constant
 DEFAULT_COV_LAMBDA = 0.15     # weight of the covariance (concentration) penalty
 DEFAULT_GROUP_RHO = 0.5       # correlation between arms sharing a group
 DEFAULT_WIDTH = 0.5           # uncertainty for arms with no width estimate
-DEFAULT_MAX_DRAWDOWN = 0.30   # matches RiskAgent / GlobalRiskEngine
+DEFAULT_MAX_DRAWDOWN = BASE_MAX_DRAWDOWN   # single-sourced (Phase 5): backend/risk/config.py
 
 
 def _policy_live() -> bool:
