@@ -11,6 +11,7 @@ The RiskAgent has *priority override*: its decision supersedes all others.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -119,34 +120,64 @@ class GeoAgent:
         input_data:
             Must contain ``country`` (str) and ``roas`` (float).
             Optional: ``spend``.
+            Phase 6 adaptive geo-economics (optional; absent means legacy
+            raw-ROAS behavior regardless of GEO_ECONOMICS_LIVE):
+                ``geo_margin_pct`` (float) — net margin % from
+                ``calculate_margin_geo`` for this country/payment mix.
         """
         country = str(input_data.get("country", "unknown"))
         roas = float(input_data.get("roas", 0.0))
+        geo_margin_pct = input_data.get("geo_margin_pct")
 
-        if roas >= self.expand_roas:
+        geo_economics_live = os.getenv("GEO_ECONOMICS_LIVE", "false").lower() == "true"
+        effective_roas = roas
+        margin_adjusted_roas = roas
+        if geo_margin_pct is not None:
+            from backend.validation.margin_calculator import geo_margin_adjusted_roas
+            margin_adjusted_roas = geo_margin_adjusted_roas(roas, float(geo_margin_pct))
+            if geo_economics_live:
+                effective_roas = margin_adjusted_roas
+
+        try:
+            from backend.orchestration.event_store import event_store, new_workflow_id
+            event_store.append(
+                new_workflow_id("geoagent"), "shadow_geo_economics",
+                workflow="geo_agent", step="decide",
+                data={
+                    "country": country,
+                    "raw_roas": roas,
+                    "geo_margin_pct": geo_margin_pct,
+                    "margin_adjusted_roas": round(margin_adjusted_roas, 4),
+                    "live": geo_economics_live,
+                },
+            )
+        except Exception:
+            pass  # journaling must never block a geo decision
+
+        if effective_roas >= self.expand_roas:
             return AgentDecision(
                 agent="geo",
                 action="expand",
-                confidence=min(1.0, roas / (self.expand_roas * 1.5)),
-                reason=f"{country}: roas={roas} >= expand_threshold={self.expand_roas}",
-                metadata={"country": country, "roas": roas},
+                confidence=min(1.0, effective_roas / (self.expand_roas * 1.5)),
+                reason=f"{country}: roas={effective_roas} >= expand_threshold={self.expand_roas}",
+                metadata={"country": country, "roas": effective_roas},
             )
 
-        if roas < self.pause_roas:
+        if effective_roas < self.pause_roas:
             return AgentDecision(
                 agent="geo",
                 action="pause",
                 confidence=0.9,
-                reason=f"{country}: roas={roas} < pause_threshold={self.pause_roas}",
-                metadata={"country": country, "roas": roas},
+                reason=f"{country}: roas={effective_roas} < pause_threshold={self.pause_roas}",
+                metadata={"country": country, "roas": effective_roas},
             )
 
         return AgentDecision(
             agent="geo",
             action="test",
             confidence=0.6,
-            reason=f"{country}: roas={roas} in test band",
-            metadata={"country": country, "roas": roas},
+            reason=f"{country}: roas={effective_roas} in test band",
+            metadata={"country": country, "roas": effective_roas},
         )
 
 

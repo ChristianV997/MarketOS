@@ -35,6 +35,7 @@ def validate_product(
     product_name: str,
     retail_price: float | None = None,
     supplier_quote: SupplierQuote | None = None,
+    category: str = "general",
 ) -> dict[str, Any]:
     """Validate one product candidate end to end.
 
@@ -42,10 +43,15 @@ def validate_product(
     margin (bisection over the margin model) — the returned suggested_price
     is what the store should charge.
 
+    ``category`` (Phase 6, default "general") threads through to
+    ``find_best_supplier`` (category-aware return-risk supplier ranking)
+    and ``calculate_margin`` (category-aware return rate); omitting it
+    preserves exact pre-Phase-6 behavior.
+
     Never raises; a product with no supplier at all comes back "red" with a
     no_supplier flag rather than an exception.
     """
-    quote = supplier_quote or find_best_supplier(product_name)
+    quote = supplier_quote or find_best_supplier(product_name, category=category)
     if quote is None:
         return {
             "product": product_name,
@@ -66,6 +72,7 @@ def validate_product(
         supplier_cost=quote.cost,
         retail_price=price,
         shipping_cost=quote.shipping,
+        category=category,
     )
     competition = competition_summary(product_name)
 

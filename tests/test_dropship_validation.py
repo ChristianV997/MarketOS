@@ -99,7 +99,7 @@ def test_validate_product_structure():
 
 def test_validate_no_supplier_is_red(monkeypatch):
     monkeypatch.setattr("backend.validation.validator.find_best_supplier",
-                        lambda name: None)
+                        lambda name, category="general": None)
     v = validate_product("Ghost Product")
     assert v["recommendation"] == "red"
     assert v["ready_for_creation"] is False

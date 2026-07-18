@@ -20,6 +20,10 @@ import os
 from dataclasses import dataclass, asdict
 
 from backend.patterns.errors import SupplierQuoteError
+from backend.validation.margin_calculator import (
+    category_return_rate, RETURN_RELIABILITY_SENSITIVITY,
+)
+from backend.economics.supplier_feedback import supplier_feedback, supplier_feedback_live
 
 _log = logging.getLogger(__name__)
 
@@ -282,15 +286,75 @@ def quote_all(product_name: str) -> list[SupplierQuote]:
     return [q for q in results if q is not None]
 
 
-def find_best_supplier(product_name: str) -> SupplierQuote | None:
+def _effective_reliability(quote: SupplierQuote, category: str) -> float:
+    """Observed feedback reliability when available (Phase 6c, gated by
+    SUPPLIER_FEEDBACK_LIVE), else the quote's own static class reliability."""
+    if not supplier_feedback_live():
+        return quote.reliability
+    return supplier_feedback.reliability_for(
+        quote.supplier, category, static_default=quote.reliability)
+
+
+def _risk_adjusted_cost(quote: SupplierQuote, category: str) -> float:
+    """Landed cost inflated by a reliability-sensitive return/complaint-risk
+    markup (Phase 6a): a category baseline return rate, plus an additional
+    markup for suppliers with weaker reliability — worse quality control
+    plausibly correlates with more returns/complaints, independent of
+    category. Differentiates suppliers within the same call (unlike simply
+    scaling every candidate's cost by the same category rate, which would
+    be a no-op for ranking)."""
+    reliability = _effective_reliability(quote, category)
+    base_rate = category_return_rate(category)
+    reliability_markup = max(0.0, 1.0 - reliability) * RETURN_RELIABILITY_SENSITIVITY
+    effective_rate = min(0.9, base_rate + reliability_markup)
+    return quote.landed_cost * (1.0 + effective_rate)
+
+
+def _supplier_risk_ranking_live() -> bool:
+    return os.getenv("SUPPLIER_RISK_RANKING_LIVE", "false").lower() == "true"
+
+
+def find_best_supplier(product_name: str, category: str = "general") -> SupplierQuote | None:
     """Cheapest landed cost among suppliers above the reliability floor.
 
-    Falls back to the most reliable quote when nothing clears the floor,
-    and returns None only when no supplier produced any quote at all.
+    Phase 6a/6c add a risk-adjusted ranking (category-aware return-rate risk
+    plus a reliability-sensitive markup — and, when SUPPLIER_FEEDBACK_LIVE
+    is also on, observed EMA reliability instead of the static per-class
+    constant) as a shadow-mode alternative: both the legacy plain-landed-
+    cost pick and the risk-adjusted pick are always computed and journaled,
+    but the legacy pick is what's returned until SUPPLIER_RISK_RANKING_LIVE
+    is flipped on — existing callers/tests keep today's exact selection.
+
+    Falls back to the most reliable quote when nothing clears the floor
+    (the reliability floor itself already accounts for observed feedback
+    when SUPPLIER_FEEDBACK_LIVE is on), and returns None only when no
+    supplier produced any quote at all.
     """
     quotes = quote_all(product_name)
     if not quotes:
         return None
-    reliable = [q for q in quotes if q.reliability >= _MIN_RELIABILITY]
+
+    reliable = [q for q in quotes if _effective_reliability(q, category) >= _MIN_RELIABILITY]
     pool = reliable if reliable else quotes
-    return min(pool, key=lambda q: q.landed_cost)
+
+    legacy_pick = min(pool, key=lambda q: q.landed_cost)
+    risk_adjusted_pick = min(pool, key=lambda q: _risk_adjusted_cost(q, category))
+    live = _supplier_risk_ranking_live()
+
+    try:
+        from backend.orchestration.event_store import event_store, new_workflow_id
+        event_store.append(
+            new_workflow_id("supplierrank"), "shadow_supplier_ranking",
+            workflow="suppliers", step="find_best_supplier",
+            data={
+                "product_name": product_name,
+                "category": category,
+                "legacy_supplier": legacy_pick.supplier,
+                "risk_adjusted_supplier": risk_adjusted_pick.supplier,
+                "live": live,
+            },
+        )
+    except Exception:
+        pass  # journaling must never break supplier selection
+
+    return risk_adjusted_pick if live else legacy_pick
