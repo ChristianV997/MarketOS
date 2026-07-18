@@ -6,9 +6,14 @@ from backend.decision.confidence import confidence_engine, apply_confidence
 from backend.learning.signals import roas_velocity, roas_acceleration
 from backend.learning.bandit_update import bandit_weight
 from backend.learning.calibration import calibration_model
+from backend.learning.score_normalization import (
+    normalize_and_combine, record_decision_terms, get_scoring_stats
+)
+from backend.learning.contextual_bandit import product_bandit
 from backend.regime.meta_strategy import strategy_memory
 from backend.simulation.reality_gap import reality_gap_engine
 from backend.core.state import ensure_state_shape
+from backend.orchestration.event_store import event_store
 from agents.world_model import world_model
 from connectors.meta_ads_intel import MetaAdsIntel
 from connectors.shopify_scraper import ShopifyScraper
@@ -95,6 +100,9 @@ def decide(state):
 
     decisions = []
 
+    # Phase 3 shadow mode: SCORING_NORMALIZE_LIVE (default false)
+    normalize_live = os.getenv("SCORING_NORMALIZE_LIVE", "false").lower() == "true"
+
     for i in range(5):
         variant = product_variants[i % len(product_variants)]
         action = {"variant": variant}
@@ -102,8 +110,12 @@ def decide(state):
         # use product title as competition keyword when available for meaningful scoring
         if products and i < len(products):
             keyword = str(products[i].get("title", variant))
+            product_id = str(products[i].get("id", variant))
+            category = str(products[i].get("category", "unknown"))
         else:
             keyword = str(variant)
+            product_id = str(variant)
+            category = "unknown"
 
         # competition penalty: high density → lower score for this variant
         competition_density = _refresh_competition(keyword)
@@ -129,10 +141,50 @@ def decide(state):
         interval_conf = _interval_confidence(preds)
         confidence = calib_conf * interval_conf * system_conf
 
+        # ─ Unnormalized score (legacy)
+        legacy_score = corrected_pred + c_score + velocity_bonus + bandit_w + regime_bonus - competition_penalty
+
+        # ─ Normalized score (Phase 3)
+        raw_terms = {
+            "corrected_pred": corrected_pred,
+            "c_score": c_score,
+            "velocity_bonus": velocity_bonus,
+            "bandit_w": bandit_w,
+            "regime_bonus": regime_bonus,
+            "competition_penalty": competition_penalty,
+        }
+        record_decision_terms(raw_terms)
+
+        # Compute precision weight: 1/width² normalized to [0, 1]
+        pred_width = preds.get("width_6h", 0.5)
+        precision_weight = 1.0 / (1.0 + pred_width)
+
+        normalized_score = normalize_and_combine(raw_terms, confidence=precision_weight)
+
+        # Choose score based on flag
+        final_score = normalized_score if normalize_live else legacy_score
+
+        # Shadow-mode journaling
+        try:
+            if not normalize_live:
+                event_store.append({
+                    "event": "shadow_decision_scoring",
+                    "data": {
+                        "product_id": product_id,
+                        "legacy_score": round(legacy_score, 4),
+                        "normalized_score": round(normalized_score, 4),
+                        "terms": {k: round(v, 4) for k, v in raw_terms.items()},
+                        "confidence": round(confidence, 4),
+                        "live": False,
+                    }
+                })
+        except Exception:
+            pass  # don't break decision if journaling fails
+
         decision_row = {
             "action":              action,
             "product_name":        keyword,
-            "score":               corrected_pred + c_score + velocity_bonus + bandit_w + regime_bonus - competition_penalty,
+            "score":               final_score,
             "pred":                corrected_pred,
             "pred_lo":             round(0.5 * preds["lo_6h"] + 0.3 * preds["lo_12h"] + 0.2 * preds["lo_24h"], 4),
             "pred_hi":             round(0.5 * preds["hi_6h"] + 0.3 * preds["hi_12h"] + 0.2 * preds["hi_24h"], 4),
