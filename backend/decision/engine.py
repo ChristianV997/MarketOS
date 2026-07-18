@@ -11,9 +11,10 @@ from backend.learning.score_normalization import (
 )
 from backend.learning.contextual_bandit import product_bandit
 from backend.regime.meta_strategy import strategy_memory
+from backend.regime.confidence import regime_confidence
 from backend.simulation.reality_gap import reality_gap_engine
 from backend.core.state import ensure_state_shape
-from backend.orchestration.event_store import event_store
+from backend.orchestration.event_store import event_store, new_workflow_id
 from agents.world_model import world_model
 from connectors.meta_ads_intel import MetaAdsIntel
 from connectors.shopify_scraper import ShopifyScraper
@@ -27,6 +28,15 @@ _discovery_cache: list[dict] = []           # recently discovered Shopify produc
 
 _META_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
 _SHOPIFY_STORE_URL = os.getenv("SHOPIFY_STORE_URL", "")
+
+# Phase 4: chance-corrected floor for regime-confidence down-weighting.
+# regime_confidence.confidence() is a hit-rate over a 4-way label space
+# (growth/decay/volatile/stable), so a detector that's merely guessing
+# scores well above 0 — anchoring the floor at the chance rate and
+# linearly rescaling [floor, 1.0] -> [0, 1] means a detector no better
+# than chance contributes nothing to the score, while a perfect one gets
+# full trust (same logic as chance-corrected agreement statistics).
+REGIME_CONF_FLOOR = 0.25
 
 
 def _refresh_competition(keyword: str) -> float:
@@ -136,13 +146,23 @@ def decide(state):
         bandit_w = bandit_weight(action, state.graph)
         regime_bonus = strategy_memory.score(state.detected_regime)
 
+        # Phase 4: down-weight regime_bonus by the detector's own historical
+        # hit-rate, so a chronically-wrong regime detector no longer gets
+        # full trust in the score. Chance-corrected linear rescaling: f=0 at
+        # or below chance accuracy, f=1 at perfect accuracy.
+        regime_conf = regime_confidence.confidence()
+        regime_conf_f = max(0.0, min(1.0, (regime_conf - REGIME_CONF_FLOOR) / (1.0 - REGIME_CONF_FLOOR)))
+        regime_bonus_adjusted = regime_bonus * regime_conf_f
+        regime_conf_live = os.getenv("REGIME_CONFIDENCE_WEIGHTING_LIVE", "false").lower() == "true"
+        regime_bonus_used = regime_bonus_adjusted if regime_conf_live else regime_bonus
+
         # three-factor confidence: calibration × interval narrowness × system health
         calib_conf = calibration_model.confidence_weight()
         interval_conf = _interval_confidence(preds)
         confidence = calib_conf * interval_conf * system_conf
 
         # ─ Unnormalized score (legacy)
-        legacy_score = corrected_pred + c_score + velocity_bonus + bandit_w + regime_bonus - competition_penalty
+        legacy_score = corrected_pred + c_score + velocity_bonus + bandit_w + regime_bonus_used - competition_penalty
 
         # ─ Normalized score (Phase 3)
         raw_terms = {
@@ -150,7 +170,7 @@ def decide(state):
             "c_score": c_score,
             "velocity_bonus": velocity_bonus,
             "bandit_w": bandit_w,
-            "regime_bonus": regime_bonus,
+            "regime_bonus": regime_bonus_used,
             "competition_penalty": competition_penalty,
         }
         record_decision_terms(raw_terms)
@@ -164,22 +184,42 @@ def decide(state):
         # Choose score based on flag
         final_score = normalized_score if normalize_live else legacy_score
 
-        # Shadow-mode journaling
+        # Shadow-mode journaling (fixed Phase 4: event_store.append() requires
+        # (workflow_id, event, ...) positional args — the Phase 3 call below
+        # silently threw inside its own try/except and never journaled).
         try:
             if not normalize_live:
-                event_store.append({
-                    "event": "shadow_decision_scoring",
-                    "data": {
+                event_store.append(
+                    new_workflow_id("decision"), "shadow_decision_scoring",
+                    workflow="decision_engine", step="decide",
+                    data={
                         "product_id": product_id,
                         "legacy_score": round(legacy_score, 4),
                         "normalized_score": round(normalized_score, 4),
                         "terms": {k: round(v, 4) for k, v in raw_terms.items()},
                         "confidence": round(confidence, 4),
                         "live": False,
-                    }
-                })
+                    },
+                )
         except Exception:
             pass  # don't break decision if journaling fails
+
+        try:
+            event_store.append(
+                new_workflow_id("regimeconf"), "shadow_regime_confidence_weighting",
+                workflow="decision_engine", step="decide",
+                data={
+                    "product_id": product_id,
+                    "detected_regime": state.detected_regime,
+                    "regime_bonus_raw": round(regime_bonus, 4),
+                    "regime_confidence": round(regime_conf, 4),
+                    "f": round(regime_conf_f, 4),
+                    "regime_bonus_adjusted": round(regime_bonus_adjusted, 4),
+                    "live": regime_conf_live,
+                },
+            )
+        except Exception:
+            pass  # don't break decisions if journaling fails
 
         decision_row = {
             "action":              action,

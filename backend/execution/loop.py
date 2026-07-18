@@ -442,6 +442,20 @@ def run_cycle(state):
     previous_regime = state.detected_regime
     state.detected_regime = detector.detect(state.event_log, _macro_cache or None)
     transition_detected = detect_transition(previous_regime, state.detected_regime)
+
+    # Phase 4: shadow-mode CUSUM changepoint signal — computed and journaled
+    # every cycle, does not gate any decision yet (deliberate deferral until
+    # shadow data validates false-positive rate / detection delay in practice).
+    try:
+        cp_result = detector.detect_changepoint(state.event_log)
+        from backend.orchestration.event_store import event_store, new_workflow_id
+        event_store.append(
+            new_workflow_id("regimecp"), "shadow_regime_changepoint",
+            workflow="regime_detector", step="detect_changepoint",
+            data=cp_result,
+        )
+    except Exception:
+        _log.debug("changepoint_detection_failed", exc_info=True)
     state.previous_regime = previous_regime
     state.transition = {
         "occurred": transition_detected,
