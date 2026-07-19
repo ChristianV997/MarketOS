@@ -107,7 +107,8 @@ class TestNormalizeAndCombine:
 
     def test_empty_terms(self):
         result = normalize_and_combine({})
-        assert result == 0.0
+        # Empty terms combine to 0, which sigmoid maps to 0.5 (sigmoid(0) = 0.5)
+        assert result == 0.5
 
     def test_single_term(self):
         raw_terms = {"corrected_pred": 2.0}
