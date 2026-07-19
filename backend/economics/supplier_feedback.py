@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import os
 
-# EMA weight on each new observation. Small enough that one bad outcome
-# doesn't wildly swing an otherwise-solid track record, large enough that a
-# real quality shift is visible within a reasonable number of orders.
-DECAY_ALPHA = 0.1
+# EMA weight on each new observation. Increased from 0.1 to 0.2 for faster
+# convergence to observed reliability (quality shifts visible within 5-10 orders
+# instead of 10-20). Still conservative enough that one bad outcome doesn't
+# wildly swing an otherwise-solid track record.
+DECAY_ALPHA = 0.2
 
 # Prior reliability for a (supplier, category) pair with no observations
 # yet — matches SupplierClient's rough base_reliability center (0.85-0.95

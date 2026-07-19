@@ -60,8 +60,10 @@ CATEGORY_RETURN_RATES = {
 # Supplier-selection risk adjustment (see suppliers.py::find_best_supplier):
 # lower-reliability suppliers get a return-rate markup on top of the
 # category baseline — worse quality control plausibly correlates with more
-# returns/complaints, independent of category.
-RETURN_RELIABILITY_SENSITIVITY = 0.3
+# returns/complaints, independent of category. Increased from 0.3 to 0.5 to
+# make risk-adjusted ranking more aggressive (0.15 unreliability gap = 7.5%
+# cost markup vs 4.5% before).
+RETURN_RELIABILITY_SENSITIVITY = 0.5
 
 
 def category_return_rate(category: str = "general") -> float:

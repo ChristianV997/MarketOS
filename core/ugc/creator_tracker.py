@@ -144,7 +144,7 @@ class CreatorTracker:
         avg_cost_per = total_cost / total_orders if total_orders > 0 else 0.0
         avg_rev_per = total_revenue / total_orders if total_orders > 0 else 0.0
 
-        return {
+        stats = {
             "total_seeds": len(seeds),
             "total_seeding_cost": round(total_cost, 2),
             "total_organic_orders": total_orders,
@@ -152,6 +152,23 @@ class CreatorTracker:
             "avg_cost_per_order": round(avg_cost_per, 2),
             "avg_revenue_per_order": round(avg_rev_per, 2),
         }
+
+        # Shadow-mode logging for validation (Phase 8)
+        try:
+            from backend.orchestration.event_store import event_store, new_workflow_id
+            organic_cac = avg_cost_per if avg_cost_per > 0 else None
+            event_store.append(
+                new_workflow_id("ugc"), "shadow_organic_channel",
+                workflow="organic_channel", step="creator_stats",
+                data={
+                    "creator_id": creator_id,
+                    "organic_cac_ratio": round(avg_cost_per / 50.0, 4) if avg_cost_per > 0 else None,  # normalized to typical paid CAC
+                    **stats
+                })
+        except Exception:
+            pass  # journaling must never break stats computation
+
+        return stats
 
     def product_stats(self, product_id: str) -> dict:
         """Aggregate stats for a product across all seeded creators.

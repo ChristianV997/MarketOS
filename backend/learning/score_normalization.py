@@ -121,7 +121,7 @@ def record_decision_terms(terms: dict) -> None:
 
 def normalize_and_combine(raw_terms: dict, confidence: float = 1.0,
                          use_precision_weighting: bool = True) -> float:
-    """Normalize terms and combine them into a final decision score.
+    """Normalize terms and combine them into a final decision score [0, 1].
 
     Args:
         raw_terms: dict with raw (unnormalized) term values
@@ -129,7 +129,7 @@ def normalize_and_combine(raw_terms: dict, confidence: float = 1.0,
         use_precision_weighting: if True, use 1/variance as precision weight
 
     Returns:
-        normalized combined score
+        normalized combined score bounded to [0, 1] via sigmoid
     """
     normalized = {}
     precisions = {}
@@ -148,7 +148,12 @@ def normalize_and_combine(raw_terms: dict, confidence: float = 1.0,
         else:
             precisions[term_name] = 1.0 / variance
 
-    return _scorer_tracker.combine_normalized_terms(normalized, precisions)
+    combined = _scorer_tracker.combine_normalized_terms(normalized, precisions)
+
+    # Transform unbounded z-score to [0, 1] via sigmoid: 1 / (1 + exp(-z))
+    # Scaled by 2 to make the midpoint (z=0) → 0.5, z=±1 → [0.27, 0.73]
+    sigmoid = 1.0 / (1.0 + np.exp(-combined))
+    return float(sigmoid)
 
 
 def get_scoring_stats() -> dict:

@@ -76,13 +76,30 @@ class FatigueDetector:
 
         is_fatigued = decay_pct >= self.decay_threshold
 
-        return is_fatigued, {
+        details = {
             "trend_roas": round(trend_roas, 4),
             "historical_roas": round(historical_roas, 4),
             "decay_pct": round(decay_pct, 4),
             "days_of_data": len(history),
             "threshold_exceeded": is_fatigued,
         }
+
+        # Shadow-mode logging for validation (Phase 7a)
+        try:
+            from backend.orchestration.event_store import event_store, new_workflow_id
+            event_store.append(
+                new_workflow_id("fatigue"), "shadow_creative_fatigue",
+                workflow="creative_fatigue", step="is_fatigued",
+                data={
+                    "hook_id": hook_id,
+                    "angle_id": angle_id,
+                    "is_fatigued": is_fatigued,
+                    **details
+                })
+        except Exception:
+            pass  # journaling must never break fatigue detection
+
+        return is_fatigued, details
 
     def refresh_recommendation(self, hook_id: str = "", angle_id: str = "") -> tuple[bool, str]:
         """High-level recommendation: refresh this creative or not.
