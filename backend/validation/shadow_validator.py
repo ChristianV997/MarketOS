@@ -170,10 +170,11 @@ class ValidationResult:
     def to_dict(self) -> dict:
         return {
             "phase": self.phase,
-            "passed": self.passed,
-            "num_events": self.num_events,
-            "metrics": self.metrics,
-            "regression_detected": self.regression_detected,
+            "passed": bool(self.passed),
+            "num_events": int(self.num_events),
+            "metrics": {k: (float(v) if isinstance(v, (float, np.floating)) else int(v) if isinstance(v, (int, np.integer)) else v)
+                        for k, v in self.metrics.items()},
+            "regression_detected": bool(self.regression_detected),
             "recommendation": self.recommendation,
         }
 

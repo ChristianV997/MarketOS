@@ -90,19 +90,25 @@ def main():
     report = validate_all_phases(args.event_store)
 
     # ── output format ───────────────────────────────────────────────────────
+    report_json = report.to_dict()
+
     if args.summary:
         print("\n" + report.summary_text())
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "w") as fh:
+                json.dump(report_json, fh, indent=2)
+            _log.info(f"Report written to {output_path}")
     else:
-        report_json = report.to_dict()
-
-    if args.output:
-        output_path = Path(args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w") as fh:
-            json.dump(report_json, fh, indent=2)
-        _log.info(f"Report written to {output_path}")
-    else:
-        print(json.dumps(report_json, indent=2))
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "w") as fh:
+                json.dump(report_json, fh, indent=2)
+            _log.info(f"Report written to {output_path}")
+        else:
+            print(json.dumps(report_json, indent=2))
 
     # ── exit code ────────────────────────────────────────────────────────────
     sys.exit(0 if report.phases_passed == report.total_phases else 1)
