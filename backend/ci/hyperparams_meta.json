@@ -1,78 +1,6 @@
 {
   "history": [
     {
-      "regime": "volatile",
-      "params": {
-        "mutation_rate": 0.1,
-        "exploration_rate": 0.2
-      },
-      "improvement": -0.4757199999999999
-    },
-    {
-      "regime": "volatile",
-      "params": {
-        "mutation_rate": 0.1,
-        "exploration_rate": 0.2
-      },
-      "improvement": -0.3923
-    },
-    {
-      "regime": "volatile",
-      "params": {
-        "mutation_rate": 0.1,
-        "exploration_rate": 0.2
-      },
-      "improvement": 0.3598
-    },
-    {
-      "regime": "volatile",
-      "params": {
-        "mutation_rate": 0.1,
-        "exploration_rate": 0.2
-      },
-      "improvement": 0.0
-    },
-    {
-      "regime": "growth",
-      "params": {
-        "mutation_rate": 0.1,
-        "exploration_rate": 0.2
-      },
-      "improvement": 0.4408000000000003
-    },
-    {
-      "regime": "decay",
-      "params": {
-        "mutation_rate": 0.1,
-        "exploration_rate": 0.2
-      },
-      "improvement": -1.56458
-    },
-    {
-      "regime": "volatile",
-      "params": {
-        "mutation_rate": 0.1,
-        "exploration_rate": 0.2
-      },
-      "improvement": 0.34210000000000007
-    },
-    {
-      "regime": "volatile",
-      "params": {
-        "mutation_rate": 0.1,
-        "exploration_rate": 0.2
-      },
-      "improvement": 0.0
-    },
-    {
-      "regime": "decay",
-      "params": {
-        "mutation_rate": 0.1,
-        "exploration_rate": 0.2
-      },
-      "improvement": -0.86556
-    },
-    {
       "regime": "growth",
       "params": {
         "mutation_rate": 0.1,
@@ -1599,29 +1527,94 @@
         "exploration_rate": 0.2
       },
       "improvement": 0.34210000000000007
+    },
+    {
+      "regime": "decay",
+      "params": {
+        "mutation_rate": 0.1,
+        "exploration_rate": 0.2
+      },
+      "improvement": 0.0
+    },
+    {
+      "regime": "growth",
+      "params": {
+        "mutation_rate": 0.1,
+        "exploration_rate": 0.2
+      },
+      "improvement": 0.4188400000000001
+    },
+    {
+      "regime": "volatile",
+      "params": {
+        "mutation_rate": 0.1,
+        "exploration_rate": 0.2
+      },
+      "improvement": 0.35173999999999994
+    },
+    {
+      "regime": "volatile",
+      "params": {
+        "mutation_rate": 0.1,
+        "exploration_rate": 0.2
+      },
+      "improvement": -0.21916000000000002
+    },
+    {
+      "regime": "volatile",
+      "params": {
+        "mutation_rate": 0.1,
+        "exploration_rate": 0.2
+      },
+      "improvement": -0.07665999999999995
+    },
+    {
+      "regime": "volatile",
+      "params": {
+        "mutation_rate": 0.1,
+        "exploration_rate": 0.2
+      },
+      "improvement": 0.04679999999999973
+    },
+    {
+      "regime": "growth",
+      "params": {
+        "mutation_rate": 0.1,
+        "exploration_rate": 0.2
+      },
+      "improvement": 0.78234
+    },
+    {
+      "regime": "volatile",
+      "params": {
+        "mutation_rate": 0.1,
+        "exploration_rate": 0.2
+      },
+      "improvement": -0.044540000000000024
+    },
+    {
+      "regime": "volatile",
+      "params": {
+        "mutation_rate": 0.1,
+        "exploration_rate": 0.2
+      },
+      "improvement": -0.20866000000000007
     }
   ],
   "best": {
-    "volatile": {
-      "params": {
-        "exploration_rate": 0.2,
-        "mutation_rate": 0.1
-      },
-      "score": 0.07704198581560287
-    },
     "growth": {
       "params": {
         "exploration_rate": 0.2,
         "mutation_rate": 0.1
       },
-      "score": 0.4479391304347827
+      "score": 0.4609575000000001
     },
-    "decay": {
+    "volatile": {
       "params": {
         "exploration_rate": 0.2,
         "mutation_rate": 0.1
       },
-      "score": -0.7343982608695654
+      "score": 0.07715290780141848
     },
     "stable": {
       "params": {
@@ -1629,6 +1622,13 @@
         "mutation_rate": 0.1
       },
       "score": -0.4835861538461538
+    },
+    "decay": {
+      "params": {
+        "exploration_rate": 0.2,
+        "mutation_rate": 0.1
+      },
+      "score": -0.6573190909090909
     }
   }
 }
