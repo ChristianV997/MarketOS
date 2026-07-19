@@ -48,9 +48,24 @@ class SignalEngine:
         """Return only signals that meet the minimum score threshold."""
         return [s for s in signals if s.get("score", 0) >= min_score]
 
-    def top_opportunities(self, signals: list, n: int = 5) -> list:
-        """Return the top N signals by score."""
-        return sorted(signals, key=lambda s: s.get("score", 0), reverse=True)[:n]
+    def top_opportunities(self, signals: list, n: int = 5, use_urgency: bool = False) -> list:
+        """Return top N signals by score, optionally weighted by urgency (Phase 7).
+
+        If use_urgency=True, rank by urgency = score * velocity * (1 - saturation).
+        This prioritizes products that are trending fast with low market saturation.
+        """
+        if not use_urgency:
+            return sorted(signals, key=lambda s: s.get("score", 0), reverse=True)[:n]
+
+        ranked = []
+        for s in signals:
+            base_score = s.get("score", 0)
+            velocity = s.get("velocity", 0.5)  # default 0.5 if not provided
+            saturation = s.get("saturation", 0.5)  # default 0.5 if not provided
+            urgency = base_score * velocity * (1 - saturation)
+            ranked.append((s, urgency))
+
+        return [s for s, _ in sorted(ranked, key=lambda x: -x[1])[:n]]
 
 
 signal_engine = SignalEngine()
