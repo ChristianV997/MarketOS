@@ -11,6 +11,7 @@ Runs pre-recorded decision scenarios through both old and new paths, measures:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -147,8 +148,16 @@ class StagingValidator:
         self.historical_data_path = Path(historical_data_path or "data/staging_scenarios.jsonl")
         self.metrics: list[DecisionMetrics] = []
 
-    async def validate_decision_quality(self, num_samples: int = 100) -> ValidationReport:
+    async def validate_decision_quality(
+        self,
+        num_samples: int = 100,
+        use_historical: bool = True,
+    ) -> ValidationReport:
         """Run decision quality validation across historical scenarios.
+
+        Args:
+            num_samples: Number of scenarios to validate
+            use_historical: If True, load real data from event store; if False, use synthetic
 
         Returns ValidationReport with detailed comparison metrics.
         """
@@ -159,8 +168,15 @@ class StagingValidator:
             )
         )
 
-        # For MVP: load synthetic scenarios (production data integration in follow-up)
-        scenarios = self._generate_synthetic_scenarios(num_samples)
+        # Load real scenarios from file or event store
+        if use_historical:
+            scenarios = self._load_historical_scenarios(num_samples)
+            if not scenarios:
+                _log.warning("No historical scenarios found; falling back to synthetic")
+                scenarios = self._generate_synthetic_scenarios(num_samples)
+        else:
+            scenarios = self._generate_synthetic_scenarios(num_samples)
+
         report.scenarios_tested = len(scenarios)
 
         old_scores = []
@@ -222,6 +238,42 @@ class StagingValidator:
             report.recommendation = "REJECT"
 
         return report
+
+    def _load_historical_scenarios(self, num_samples: int = 100) -> list[dict]:
+        """Load real historical scenarios from JSONL file.
+
+        Tries to load from data/staging_scenarios.jsonl. Falls back to extracting
+        from event store if file doesn't exist.
+        """
+        scenarios_file = self.historical_data_path
+
+        # Try to load from file first
+        if scenarios_file.exists():
+            try:
+                scenarios = []
+                with open(scenarios_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            scenarios.append(json.loads(line))
+
+                # Limit to num_samples
+                scenarios = scenarios[:num_samples]
+                _log.info(f"Loaded {len(scenarios)} historical scenarios from {scenarios_file}")
+                return scenarios
+            except Exception as exc:
+                _log.warning(f"Failed to load scenarios file: {exc}")
+
+        # Fall back to extracting from event store
+        try:
+            from backend.staging.historical_extraction import get_or_create_scenarios
+            scenarios = get_or_create_scenarios(lookback_days=90, force_refresh=True)
+            scenarios = scenarios[:num_samples]
+            _log.info(f"Extracted {len(scenarios)} scenarios from event store")
+            return scenarios
+        except Exception as exc:
+            _log.warning(f"Failed to extract from event store: {exc}")
+            return []
 
     def _generate_synthetic_scenarios(self, num_samples: int = 100) -> list[dict]:
         """Generate synthetic decision scenarios for MVP validation."""
