@@ -85,3 +85,7 @@ class HookFatigueDetector:
     def get_fatigued_hooks(self) -> list[str]:
         """Return hooks currently flagged as fatigued."""
         return [h for h in self.hook_history.keys() if self.is_fatigued(h)]
+
+
+# Module-level singleton consumed by the live execution loop (Phase 7)
+hook_fatigue_detector = HookFatigueDetector()

@@ -4,6 +4,19 @@
 **Status**: ✅ **APPROVE** — Ready for Shadow-Mode Rollout  
 **Recommendation**: Proceed immediately to 30-day shadow-mode validation on production
 
+> **Caveat added after this report was generated**: at the time this run
+> executed, none of the Phase 7-8 modules were wired into the live execution
+> path — `StagingValidator._evaluate_new_logic()` scored a simplified
+> stand-in formula (`score * velocity * (1-saturation)` plus synthetic
+> organic-CAC noise), not `HookFatigueDetector`, `PatternStore`'s validity
+> gate, `SignalEngine.top_opportunities(use_urgency=True)`, or
+> `ScoringModel.predict_with_intervals()`. Those modules are now live-wired
+> (see "Live Wiring" in `DEPLOYMENT_GUIDE.md`) and journaling real
+> `shadow_*` comparisons on every execution cycle. Treat the numbers below
+> as illustrative of the validation *methodology*, not as a substitute for
+> re-running validation against accumulated real shadow-mode data before
+> flipping any flag.
+
 ---
 
 ## Executive Summary

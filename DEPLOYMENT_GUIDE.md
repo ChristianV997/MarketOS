@@ -1,7 +1,7 @@
 # Phase 7-8 Production Deployment Guide
 
 **Date**: July 19, 2026  
-**Status**: Ready for Staging Validation  
+**Status**: Live-wired, shadow mode active — ready for shadow-mode data collection  
 **Branch**: `claude/analyze-repository-fsGUx`
 
 ---
@@ -15,6 +15,38 @@ Complete deployment pipeline for Phase 7-8 (Creative optimization + Organic chan
 - **Production Deployment**: Feature flag gates with validation
 
 All infrastructure tested (26 comprehensive tests), code committed and pushed.
+
+### Live Wiring (July 19, 2026 update)
+
+The Phase 7-8 business logic and this deployment pipeline were originally built
+as standalone, unit-tested modules with **no call sites in the actual
+execution loop** — flipping any `PHASE7_*`/`PHASE8_*` flag would have changed
+nothing, and the staging validator's "+52.5% rank accuracy" result was scoring
+a simplified stand-in formula written inside `validator.py`, not the real
+modules. This has been fixed: every Phase 7-8 module is now wired into its
+live consumer, following the same env-flag + `event_store` shadow-journal
+pattern used by Phases 2-5 (see `backend/decision/capital_policy.py::allocate_with_shadow`
+for the template this follows).
+
+| Module | Live consumer | Flag |
+|---|---|---|
+| `HookFatigueDetector` / `SequenceOptimizer` | `core/creative/selection.py` → `backend/execution/loop.py::_refresh_pools()`, `orchestrator/main.py::_run_content_generation()` | `PHASE7_FATIGUE_DETECTION_LIVE` |
+| `PatternStore.get_top_hooks_validated/get_top_angles_validated` | same `core/creative/selection.py` gate | `PHASE7_AB_TEST_VALIDITY_LIVE` |
+| `SignalEngine.top_opportunities(use_urgency=True)` + `TrendHistory` | `backend/runtime/state.py::build_runtime_state()`, `orchestrator/main.py::_run_signal_ingestion()` | `PHASE7_URGENCY_SCORING_LIVE` |
+| `ScoringModel.predict_with_intervals()` | `simulation/engine.py::SimulationEngine._apply_monte_carlo_intervals()` | `PHASE7_MONTE_CARLO_LIVE` |
+| `core/ugc/creator_tracker.py` organic ROAS | `core/portfolio.py::_pred_and_width()` (blended into capital allocation) | `PHASE8_ORGANIC_CHANNEL_LIVE` |
+| `OrganicChannelExpander` (affiliate networks) | new `orchestrator/main.py::_run_organic_channel_evaluation()` worker (SCALE phase) | `PHASE8_AFFILIATE_SCALING_LIVE` |
+
+All six integration points always compute **both** the legacy and Phase 7-8
+result and journal a `shadow_*` event comparing them — real shadow-mode data
+now accumulates from every execution cycle. Every flag still defaults to
+shadow mode (no behavior change) until explicitly flipped.
+
+**Consequence for the staging validation report below**: it reflects a
+synthetic stand-in, not this now-wired code. Re-run
+`scripts/run_staging_validation.py` against real `shadow_*` event-store data
+(via `backend/staging/historical_extraction.py`) once enough shadow-mode
+cycles have accumulated, before treating its recommendation as authoritative.
 
 ---
 

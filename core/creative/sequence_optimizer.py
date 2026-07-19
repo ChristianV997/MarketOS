@@ -63,3 +63,10 @@ class SequenceOptimizer:
     def get_fatigued_sequences(self, threshold: float = 0.20) -> list[str]:
         """Return sequence IDs currently flagged as fatigued."""
         return [s for s in self.sequence_history.keys() if self.is_fatigued(s, threshold=threshold)]
+
+
+# Module-level singleton consumed by the live execution loop (Phase 7).
+# Ad "angles" are treated as sequences: the only other content axis tracked
+# alongside hooks in the live loop, and SequenceOptimizer's API is generic
+# enough (arbitrary sequence_id -> ROAS) to apply to them directly.
+sequence_fatigue_optimizer = SequenceOptimizer()

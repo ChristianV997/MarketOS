@@ -65,6 +65,23 @@ def _run_signal_ingestion() -> dict[str, Any]:
     signals = signal_engine.get()
     for _ in signals:
         phase_controller.record_signal()
+    # Phase 7: accumulate velocity/saturation trend history per product so
+    # urgency scoring (core/signals.py) can detect lifecycle stage over time.
+    try:
+        from backend.discovery.ad_intelligence import competition_summary
+        from backend.discovery.trend_history import trend_history
+        for s in signals:
+            product = s.get("product", "")
+            if not product:
+                continue
+            velocity = float(s.get("velocity", 0.5))
+            try:
+                saturation = competition_summary(product).get("market_saturation", 0.5)
+            except Exception:
+                saturation = 0.5
+            trend_history.record(product, velocity=velocity, saturation=saturation)
+    except Exception as exc:
+        _log.debug("trend_history_record_failed error=%s", exc)
     # Feed top keywords to core/intelligence_loop if available
     try:
         from core.intelligence_loop import run_intelligence
@@ -388,19 +405,15 @@ def _run_content_generation() -> dict[str, Any]:
     generates a script per product, and upserts into playbook_memory so
     _run_scaling() can launch campaigns from the result.
     """
-    from core.content.patterns import pattern_store
     from core.content.playbook import playbook_memory, generate_playbook, Playbook
     from core.creative.generator import generate_creative
+    from core.creative.selection import select_hooks, select_angles
     from core.signals import signal_engine
 
-    # ── hooks / angles ────────────────────────────────────────────────────
-    top_hooks  = pattern_store.get_top_hooks(n=3)
-    top_angles = pattern_store.get_top_angles(n=3)
-    if not top_hooks:
-        from core.creative.hooks import HOOKS
-        top_hooks = list(HOOKS)[:3]
-    if not top_angles:
-        top_angles = ["problem-solution", "social-proof", "urgency"]
+    # ── hooks / angles (Phase 7: fatigue + A/B-validity gated) ────────────
+    from core.creative.hooks import HOOKS
+    top_hooks  = select_hooks(n=3, fallback=list(HOOKS)[:3])
+    top_angles = select_angles(n=3, fallback=["problem-solution", "social-proof", "urgency"])
 
     # ── real trending products ────────────────────────────────────────────
     try:
@@ -437,6 +450,58 @@ def _run_content_generation() -> dict[str, Any]:
             _log.warning("content_generate_failed product=%s error=%s", product, gen_exc)
 
     return {"status": "ok", "generated": generated, "top_hooks": top_hooks}
+
+
+@worker_safe()
+def _run_organic_channel_evaluation() -> dict[str, Any]:
+    """Phase 8: evaluate top products for affiliate-network organic scaling.
+
+    Always evaluates and journals recommendations (network CAC vs current
+    organic/paid CAC) via OrganicChannelExpander. Recruitment submissions
+    to affiliate networks only fire once PHASE8_AFFILIATE_SCALING_LIVE=true
+    — until then this worker is purely observational.
+    """
+    import asyncio
+    import os
+
+    from backend.decision.portfolio_engine import top_products
+    from backend.integrations.affiliate_networks import OrganicChannelExpander
+    from core.ugc.creator_tracker import creator_tracker
+
+    affiliate_live = os.getenv("PHASE8_AFFILIATE_SCALING_LIVE", "false").lower() == "true"
+
+    products = [p["product_id"] for p in top_products(n=5)]
+    if not products:
+        return {"status": "skipped", "reason": "no_products"}
+
+    expander = OrganicChannelExpander(dry_run=True)
+    evaluated = 0
+    recruited = 0
+
+    for product_id in products:
+        stats = creator_tracker.product_stats(product_id)
+        current_organic_cac = stats.get("avg_cost_per_order", 0.0) or 20.0
+        try:
+            result = asyncio.run(expander.evaluate_product_for_affiliate_scaling(
+                product_id, current_organic_cac=current_organic_cac,
+            ))
+        except Exception as exc:
+            _log.debug("organic_channel_eval_failed product=%s error=%s", product_id, exc)
+            continue
+        evaluated += 1
+
+        if affiliate_live and result["recommendation"] == "SCALE":
+            try:
+                asyncio.run(expander.recruit_on_qualified_networks(
+                    product_id, result["qualified_networks"],
+                ))
+                recruited += 1
+            except Exception as exc:
+                _log.debug("affiliate_recruit_failed product=%s error=%s", product_id, exc)
+
+    if evaluated == 0:
+        return {"status": "skipped", "reason": "no_evaluations"}
+    return {"status": "ok", "evaluated": evaluated, "recruited": recruited, "live": affiliate_live}
 
 
 @worker_safe()
@@ -615,7 +680,8 @@ _PHASE_WORKERS: dict[Phase, list[Any]] = {
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
     Phase.SCALE:     [_run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_scaling, _run_scaling,
-                      _run_dropship_pipeline, _run_metrics_ingestion,
+                      _run_dropship_pipeline, _run_organic_channel_evaluation,
+                      _run_metrics_ingestion,
                       _run_budget_scaling, _run_alerting,
                       _run_sleep_consolidation],
 }
@@ -742,6 +808,7 @@ def run() -> None:
                     "_run_simulation":          "simulation_worker",
                     "_run_content_generation":  "content_generation_worker",
                     "_run_dropship_pipeline":   "dropship_pipeline_worker",
+                    "_run_organic_channel_evaluation": "organic_channel_worker",
                     "_run_metrics_ingestion":   "metrics_ingestion_worker",
                     "_run_budget_scaling":      "budget_scaling_worker",
                     "_run_alerting":            "alerting_worker",

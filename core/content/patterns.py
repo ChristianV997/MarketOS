@@ -180,6 +180,24 @@ class PatternStore:
         with self._lock:
             return sorted(self._angle_scores, key=lambda k: -self._angle_scores[k])[:n]
 
+    def get_top_hooks_validated(self, n: int = 3, min_samples: int = 20) -> list[str]:
+        """Phase 7: top hooks restricted to those with n >= min_samples observations.
+
+        Prevents a single lucky observation from being treated as a winner.
+        Returns fewer than n (or empty) if not enough hooks have cleared the gate.
+        """
+        with self._lock:
+            valid = {k: v for k, v in self._hook_scores.items()
+                     if self._hook_counts.get(k, 0) >= min_samples}
+        return sorted(valid, key=lambda k: -valid[k])[:n]
+
+    def get_top_angles_validated(self, n: int = 3, min_samples: int = 20) -> list[str]:
+        """Phase 7: top angles restricted to those with n >= min_samples observations."""
+        with self._lock:
+            valid = {k: v for k, v in self._angle_scores.items()
+                     if self._angle_counts.get(k, 0) >= min_samples}
+        return sorted(valid, key=lambda k: -valid[k])[:n]
+
     def get_patterns(self) -> dict:
         with self._lock:
             hook_scores   = dict(self._hook_scores)

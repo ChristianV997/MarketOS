@@ -158,9 +158,10 @@ def _refresh_pools() -> tuple[list[str], list[str]]:
     if _hook_pool and (_time.time() - _pool_ts) < _POOL_TTL:
         return _hook_pool, _angle_pool
     try:
-        from core.content.patterns import pattern_store
-        hooks  = pattern_store.get_top_hooks(n=5)
-        angles = pattern_store.get_top_angles(n=5)
+        from core.creative.hooks import HOOKS
+        from core.creative.selection import select_hooks, select_angles
+        hooks  = select_hooks(n=5, fallback=list(HOOKS))
+        angles = select_angles(n=5, fallback=list(_DEFAULT_ANGLES))
     except Exception:
         hooks, angles = [], []
     if not hooks:
@@ -285,6 +286,15 @@ def execute(decisions, state):
 
         # Record agent-level metrics
         agent_metrics_registry.record_pnl("execution", revenue, cost)
+
+        # Phase 7: feed realized ROAS into creative fatigue tracking
+        # (always recorded; only the gated selection in _refresh_pools()
+        # acts on it, per PHASE7_FATIGUE_DETECTION_LIVE)
+        try:
+            from core.creative.selection import record_creative_outcome
+            record_creative_outcome(hook, angle, roas)
+        except Exception:
+            _log.debug("creative_fatigue_record_failed", exc_info=True)
 
         outcome = {
             "product":       product,

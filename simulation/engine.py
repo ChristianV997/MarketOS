@@ -16,11 +16,17 @@ simulation_calibrator) — no external dependencies required at import time.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from typing import Any
 
 _log = logging.getLogger(__name__)
+
+# Phase 7: cap Monte Carlo interval computation per cycle — each call
+# bootstraps 1000 samples, so scoring is limited to the top-K candidates
+# by engagement rather than the full signal batch.
+_MONTE_CARLO_TOP_K = 20
 
 
 class SimulationEngine:
@@ -117,12 +123,75 @@ class SimulationEngine:
             )
             results.append(r)
 
+        self._apply_monte_carlo_intervals(signals, results, patterns, playbooks, history_map)
+
         ranked = rank_results(results)
 
         with self._lock:
             self._score_count += len(ranked)
 
         return ranked
+
+    def _apply_monte_carlo_intervals(
+        self,
+        signals: list[dict],
+        results: list[Any],
+        patterns: dict | None,
+        playbooks: dict | None,
+        history_map: dict[str, list[dict]] | None,
+    ) -> None:
+        """Phase 7: attach bootstrap prediction intervals to top-K results.
+
+        Gated by PHASE7_MONTE_CARLO_LIVE: always computed and journaled for
+        shadow-mode validation; only widens risk_score (changing the final
+        rank_score) once the flag is live.
+        """
+        from simulation.model import scoring_model
+
+        monte_carlo_live = os.getenv("PHASE7_MONTE_CARLO_LIVE", "false").lower() == "true"
+
+        # Bound cost: only the top-K by pre-MC engagement get bootstrapped.
+        by_engagement = sorted(
+            zip(signals, results), key=lambda p: p[1].predicted_engagement, reverse=True
+        )[:_MONTE_CARLO_TOP_K]
+
+        journal_rows = []
+        for sig, r in by_engagement:
+            product = r.product
+            playbook = (playbooks or {}).get(product)
+            history = (history_map or {}).get(product)
+            try:
+                interval = scoring_model.predict_with_intervals(
+                    sig, patterns=patterns, playbook=playbook, history=history,
+                )
+            except Exception:
+                continue
+
+            r.mc_interval_width = interval["mean_interval_width"]
+            r.mc_ci_lower = interval["confidence_interval_lower"]
+            r.mc_ci_upper = interval["confidence_interval_upper"]
+
+            legacy_risk = r.risk_score
+            mc_risk = max(r.risk_score, r.mc_interval_width)
+            journal_rows.append({
+                "product": product,
+                "legacy_risk_score": round(legacy_risk, 4),
+                "mc_risk_score": round(mc_risk, 4),
+                "mc_interval_width": round(r.mc_interval_width, 4),
+            })
+
+            if monte_carlo_live:
+                r.risk_score = mc_risk
+
+        try:
+            from backend.orchestration.event_store import event_store, new_workflow_id
+            event_store.append(
+                new_workflow_id("montecarlo"), "shadow_monte_carlo_risk",
+                workflow="simulation_engine", step="score_signals",
+                data={"rows": journal_rows, "live": monte_carlo_live},
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Outcome recording

@@ -19,6 +19,7 @@ layer, not here — this function computes fractions, it doesn't spend.
 """
 from __future__ import annotations
 
+import os
 import threading
 from collections import deque
 
@@ -46,6 +47,27 @@ def update_portfolio(product_id, metrics):
         hist.append(float(roas))
 
 
+_ORGANIC_WEIGHT = 0.20  # Phase 8: 20% organic / 80% paid blend, per deployment plan
+
+
+def _organic_roas(pid: str) -> float | None:
+    """Phase 8: organic-channel ROAS for a product from seeded-creator data.
+
+    Returns None until at least one organic order has been attributed
+    (creator_tracker starts empty in production until real seeding begins).
+    """
+    try:
+        from core.ugc.creator_tracker import creator_tracker
+        stats = creator_tracker.product_stats(pid)
+        cost = stats.get("total_seeding_cost", 0.0)
+        orders = stats.get("total_organic_orders", 0)
+        if orders > 0 and cost > 0:
+            return stats["total_organic_revenue"] / cost
+    except Exception:
+        pass
+    return None
+
+
 def _pred_and_width(pid: str, m: dict) -> tuple[float, float]:
     """Mean ROAS + std/√n from history; wide width when evidence is thin."""
     with _lock:
@@ -53,12 +75,38 @@ def _pred_and_width(pid: str, m: dict) -> tuple[float, float]:
     if not hist:
         revenue = m.get("revenue", 0)
         spend = m.get("spend", 0)
-        return max(revenue / max(spend, 1), 0.1), _WIDE_DEFAULT_WIDTH
-    pred = max(float(np.mean(hist)), 0.1)
-    if len(hist) < _MIN_SAMPLES_FOR_WIDTH:
-        return pred, _WIDE_DEFAULT_WIDTH
-    width = float(np.std(hist)) / np.sqrt(len(hist))
-    return pred, max(width, 0.01)
+        pred, width = max(revenue / max(spend, 1), 0.1), _WIDE_DEFAULT_WIDTH
+    elif len(hist) < _MIN_SAMPLES_FOR_WIDTH:
+        pred, width = max(float(np.mean(hist)), 0.1), _WIDE_DEFAULT_WIDTH
+    else:
+        pred = max(float(np.mean(hist)), 0.1)
+        width = max(float(np.std(hist)) / np.sqrt(len(hist)), 0.01)
+
+    # Phase 8: blend in organic-channel ROAS when seeded-creator data exists.
+    # Always computed and journaled for shadow-mode validation; only changes
+    # the allocation once PHASE8_ORGANIC_CHANNEL_LIVE is true.
+    organic_roas = _organic_roas(pid)
+    if organic_roas is not None:
+        organic_live = os.getenv("PHASE8_ORGANIC_CHANNEL_LIVE", "false").lower() == "true"
+        blended_pred = (1 - _ORGANIC_WEIGHT) * pred + _ORGANIC_WEIGHT * organic_roas
+        try:
+            from backend.orchestration.event_store import event_store, new_workflow_id
+            event_store.append(
+                new_workflow_id("organicalloc"), "shadow_organic_allocation",
+                workflow="portfolio", step=pid,
+                data={
+                    "paid_pred": round(pred, 4),
+                    "organic_roas": round(organic_roas, 4),
+                    "blended_pred": round(blended_pred, 4),
+                    "live": organic_live,
+                },
+            )
+        except Exception:
+            pass
+        if organic_live:
+            pred = blended_pred
+
+    return pred, width
 
 
 def allocate_budget(portfolio_data):
