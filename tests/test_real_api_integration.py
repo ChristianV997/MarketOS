@@ -16,7 +16,7 @@ _HAS_META = bool(os.getenv("META_ACCESS_TOKEN") and os.getenv("META_AD_ACCOUNT_I
                  and os.getenv("META_DRY_RUN", "true").lower() == "false")
 _HAS_TIKTOK = bool(os.getenv("TIKTOK_ACCESS_TOKEN") and os.getenv("TIKTOK_ADVERTISER_ID")
                    and os.getenv("TIKTOK_DRY_RUN", "true").lower() == "false")
-_HAS_SHOPIFY = bool(os.getenv("SHOPIFY_STORE_URL") and os.getenv("SHOPIFY_API_KEY")
+_HAS_SHOPIFY = bool(os.getenv("SHOPIFY_STORE_URL") and os.getenv("SHOPIFY_ACCESS_TOKEN")
                     and os.getenv("SHOPIFY_DRY_RUN", "true").lower() == "false")
 
 

@@ -55,13 +55,13 @@ TIKTOK_DRY_RUN=false TIKTOK_ACCESS_TOKEN=... TIKTOK_ADVERTISER_ID=... \
 **Environment variables for testing:**
 ```bash
 export SHOPIFY_STORE_URL="mystore.myshopify.com"
-export SHOPIFY_API_KEY="your_access_token"
+export SHOPIFY_ACCESS_TOKEN="your_admin_api_access_token"
 export SHOPIFY_DRY_RUN="false"
 ```
 
 **Test command:**
 ```bash
-SHOPIFY_DRY_RUN=false SHOPIFY_STORE_URL=... SHOPIFY_API_KEY=... \
+SHOPIFY_DRY_RUN=false SHOPIFY_STORE_URL=... SHOPIFY_ACCESS_TOKEN=... \
   python -m pytest tests/test_real_api_integration.py::test_shopify_live_product_created -v
 ```
 
@@ -91,10 +91,22 @@ All tokens should:
 ## Customer Onboarding
 
 When a customer connects their accounts, we:
-1. Request each credential (token, ID, keys)
-2. Verify with a test API call (create paused campaign → verify ID format → delete)
-3. Store encrypted (AES-256) with audit timestamp
-4. Periodically test connectivity (detect expired/revoked tokens)
-5. Alert if multiple consecutive failures
+1. Request each credential (token, ID, keys) via `api/onboarding.py`'s step-2 wizard
+2. Verify with a test API call (`api/credentials_setup.py::test_credentials`) — create paused campaign / test product → verify ID format → confirm success
+3. Store credentials env-first, falling back to `~/.marketos/credentials.json` (mode 0600, plaintext — see `backend/config.py::get_credential/set_credential`; there is no separate encrypted-storage module today)
+4. Periodically test connectivity (detect expired/revoked tokens) — not yet automated; run `test_credentials` manually per service
+5. Alert if multiple consecutive failures — not yet implemented
 
-See `backend/credentials/manager.py` for implementation.
+## Discovery/research sources (no setup needed)
+
+These already return real, live data with zero credentials configured:
+- **Reddit** (`backend/adapters/reddit_trends.py`) — public JSON API, no auth
+- **Google Trends** (`backend/adapters/research/trend_source_v1.py`) — public dailytrends endpoint, no auth
+- **YouTube trend proxy** (`backend/adapters/youtube_trends.py`) — via pytrends, no auth
+- **MercadoLibre** (`backend/adapters/mercadolibre_trends.py`) — public catalog search API, no auth
+
+Amazon bestsellers and TikTok organic attempt real (unauthenticated) fetches
+first and fall back to mock data when blocked; TikTok's official Creative
+Center API additionally activates with `TIKTOK_ACCESS_TOKEN`/`TIKTOK_ADVERTISER_ID`.
+Alibaba is intentionally mock-only (see `backend/adapters/alibaba_trends.py`).
+Check `GET /api/dropship/discovery/sources` for live status of every source.

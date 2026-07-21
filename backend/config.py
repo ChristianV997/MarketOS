@@ -106,7 +106,8 @@ def is_dry_run(service: str) -> bool:
 _SERVICE_CREDENTIALS = {
     "meta": ["META_ACCESS_TOKEN", "META_AD_ACCOUNT_ID"],
     "tiktok": ["TIKTOK_ACCESS_TOKEN", "TIKTOK_ADVERTISER_ID"],
-    "shopify": ["SHOPIFY_STORE_URL", "SHOPIFY_API_KEY", "SHOPIFY_API_PASSWORD"],
+    "shopify": ["SHOPIFY_STORE_URL", "SHOPIFY_ACCESS_TOKEN"],
+    "stripe": ["STRIPE_SECRET_KEY"],
     "supabase": ["SUPABASE_URL", "SUPABASE_ANON_KEY"],
     "ga4": ["GA4_PROPERTY_ID", "GA4_API_KEY"],
 }

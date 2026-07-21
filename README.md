@@ -128,7 +128,7 @@ python run.py                # == python -m orchestrator.main
 docker compose up            # api, orchestrator, redis, qdrant, prometheus, grafana
 ```
 
-**Everything is dry-run by default.** Real spend requires explicitly setting the per-integration gates (`TIKTOK_DRY_RUN=false`, `META_DRY_RUN=false`, `STORE_DRY_RUN=false`, `SUPPLIERS_DRY_RUN=false`, `ADLIB_DRY_RUN=false`) *and* providing credentials — via environment (`TIKTOK_ACCESS_TOKEN`/`TIKTOK_ADVERTISER_ID`, `META_ACCESS_TOKEN`/`META_AD_ACCOUNT_ID`, `SHOPIFY_SHOP_URL`/`SHOPIFY_ACCESS_TOKEN`, `CJ_API_KEY`, `ZENDROP_API_KEY`, `SPOCKET_API_KEY`, `PRINTFUL_API_KEY`, `FRED_API_KEY`) or the setup wizard (`~/.marketos/credentials.json`, written 0600).
+**Everything is dry-run by default.** Real spend requires explicitly setting the per-integration gates (`TIKTOK_DRY_RUN=false`, `META_DRY_RUN=false`, `STORE_DRY_RUN=false`, `SUPPLIERS_DRY_RUN=false`, `ADLIB_DRY_RUN=false`) *and* providing credentials — via environment (`TIKTOK_ACCESS_TOKEN`/`TIKTOK_ADVERTISER_ID`, `META_ACCESS_TOKEN`/`META_AD_ACCOUNT_ID`, `SHOPIFY_STORE_URL`/`SHOPIFY_ACCESS_TOKEN`, `CJ_API_KEY`, `ZENDROP_API_KEY`, `SPOCKET_API_KEY`, `PRINTFUL_API_KEY`, `FRED_API_KEY`) or the setup wizard (`~/.marketos/credentials.json`, written 0600).
 
 State persists under `state/` (`STATE_DIR`/`MARKETOS_STATE_DIR`): DuckDB system state, append-only JSONL event/metric/cost/error logs, atomic-JSON stores for patterns, playbooks, and calibration.
 

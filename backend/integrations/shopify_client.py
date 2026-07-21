@@ -7,7 +7,7 @@ except ImportError:  # pragma: no cover
     shopify = None
 
 API_VERSION = "2023-10"
-SHOP_URL = os.getenv("SHOPIFY_SHOP_URL")
+SHOP_URL = os.getenv("SHOPIFY_STORE_URL")
 ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
 
 

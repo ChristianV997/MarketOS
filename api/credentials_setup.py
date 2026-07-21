@@ -127,14 +127,13 @@ async def setup_instructions(service: str) -> dict:
                 "Go to Settings > Apps and channels",
                 "Create a custom app (e.g., 'MarketOS')",
                 "Set permissions: 'Products' (read, write), 'Orders' (read)",
-                "Install and copy your API Key and Password",
+                "Install and copy the Admin API access token",
                 "Your store URL is in Settings > Domains",
             ],
             "sandbox": "Use a development store (free, no real products)",
             "credentials": [
                 "SHOPIFY_STORE_URL",
-                "SHOPIFY_API_KEY",
-                "SHOPIFY_API_PASSWORD",
+                "SHOPIFY_ACCESS_TOKEN",
             ],
         },
     }
@@ -166,7 +165,7 @@ async def all_instructions() -> dict:
         "shopify": {
             "name": "Shopify",
             "url": "https://www.shopify.com/",
-            "required_credentials": ["SHOPIFY_STORE_URL", "SHOPIFY_API_KEY", "SHOPIFY_API_PASSWORD"],
+            "required_credentials": ["SHOPIFY_STORE_URL", "SHOPIFY_ACCESS_TOKEN"],
         },
     }
 

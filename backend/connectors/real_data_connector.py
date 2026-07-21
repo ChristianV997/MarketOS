@@ -31,7 +31,7 @@ class ShopifyConnector(BaseConnector):
         dry_run: bool = True,
     ):
         super().__init__(dry_run=dry_run)
-        self.shop_url = shop_url or os.getenv("SHOPIFY_SHOP_URL")
+        self.shop_url = shop_url or os.getenv("SHOPIFY_STORE_URL")
         self.access_token = access_token or os.getenv("SHOPIFY_ACCESS_TOKEN")
         self.api_version = "2024-01"
         self.base_url = f"https://{self.shop_url}/admin/api/{self.api_version}"

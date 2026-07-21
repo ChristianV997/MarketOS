@@ -123,7 +123,7 @@ To set up Shopify API access:
 2. Create a development store or use your existing store
 3. Go to Settings > Apps and channels
 4. Create a custom app for product/order management
-5. Copy your API key and password
+5. Copy the app's Admin API access token
 6. Your store URL is in the format: your-store-name.myshopify.com
     """)
 
@@ -132,19 +132,13 @@ To set up Shopify API access:
         print("✗ Skipped Shopify setup")
         return False
 
-    api_key = input_credential("SHOPIFY_API_KEY", "Shopify API Key:")
-    if not api_key:
-        print("✗ Skipped Shopify setup")
-        return False
-
-    api_password = input_credential("SHOPIFY_API_PASSWORD", "Shopify API Password:")
-    if not api_password:
+    access_token = input_credential("SHOPIFY_ACCESS_TOKEN", "Shopify Admin API Access Token:")
+    if not access_token:
         print("✗ Skipped Shopify setup")
         return False
 
     set_credential("SHOPIFY_STORE_URL", store_url)
-    set_credential("SHOPIFY_API_KEY", api_key)
-    set_credential("SHOPIFY_API_PASSWORD", api_password)
+    set_credential("SHOPIFY_ACCESS_TOKEN", access_token)
 
     # Verify
     is_valid, msg = validate_credentials("shopify")

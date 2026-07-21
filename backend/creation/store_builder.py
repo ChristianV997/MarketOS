@@ -3,7 +3,7 @@
 Creates the store side of a validated product: product page with listing
 copy, price, and supplier SKU.  Dry-run by default (STORE_DRY_RUN=true) so
 the pipeline runs end-to-end without a live shop; production activation
-needs STORE_DRY_RUN=false plus the same SHOPIFY_SHOP_URL /
+needs STORE_DRY_RUN=false plus the same SHOPIFY_STORE_URL /
 SHOPIFY_ACCESS_TOKEN credentials backend.integrations.shopify_client uses.
 """
 from __future__ import annotations
@@ -63,7 +63,7 @@ def create_product_page(
         product.save()
         if product.errors.errors:
             return {"status": "error", "error": str(product.errors.errors), "dry_run": False}
-        shop_url = os.getenv("SHOPIFY_SHOP_URL", "")
+        shop_url = os.getenv("SHOPIFY_STORE_URL", "")
         return {
             "status": "ok",
             "product_id": str(product.id),
