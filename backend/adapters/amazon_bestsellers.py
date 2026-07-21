@@ -101,4 +101,9 @@ def fetch() -> list[dict]:
 def register(signal_engine: Any) -> None:
     """Register this adapter with the provided SignalEngine instance."""
     signal_engine.register_source("amazon_bestsellers", fetch)
+    try:
+        from backend.discovery.registry import discovery_registry
+        discovery_registry.register("amazon_bestsellers", credential_env_vars=[], requires_auth=False)
+    except Exception:
+        pass
     _log.info("amazon_bestsellers adapter registered")

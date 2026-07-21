@@ -30,6 +30,8 @@ class SignalEngine:
         if not self._sources:
             return self._mock_signals()
 
+        from backend.discovery.registry import discovery_registry
+
         all_signals: list = []
         for source in self._sources:
             try:
@@ -37,10 +39,11 @@ class SignalEngine:
                 for s in signals:
                     s.setdefault("source", source["name"])
                 all_signals.extend(signals)
+                discovery_registry.record_fetch(source["name"], len(signals))
             except (KeyboardInterrupt, SystemExit):
                 raise
-            except Exception:
-                pass
+            except Exception as exc:
+                discovery_registry.record_fetch(source["name"], 0, error=str(exc))
 
         return all_signals if all_signals else self._mock_signals()
 
@@ -83,24 +86,9 @@ def _register_adapters() -> None:
         _r2(signal_engine)
     except Exception:
         pass
-    # Google Trends adapter via existing research adapter registry
     try:
-        from backend.adapters.research import GoogleTrendsAdapterV1
-        from datetime import datetime, timezone
-        def _google_trends_fetch():
-            adapter = GoogleTrendsAdapterV1()
-            raw = adapter.fetch()
-            return [
-                {
-                    "product":  adapter.to_canonical(r, fetched_at=datetime.now(timezone.utc)).keyword,
-                    "score":    getattr(adapter.to_canonical(r, fetched_at=datetime.now(timezone.utc)), "confidence", 0.6),
-                    "velocity": getattr(adapter.to_canonical(r, fetched_at=datetime.now(timezone.utc)), "velocity", 1.0),
-                    "source":   "google_trends",
-                    "platform": "google",
-                }
-                for r in raw
-            ]
-        signal_engine.register_source("google_trends", _google_trends_fetch)
+        from backend.adapters.research.trend_source_v1 import register as _r_google
+        _r_google(signal_engine)
     except Exception:
         pass
     try:
@@ -111,6 +99,16 @@ def _register_adapters() -> None:
     try:
         from backend.adapters.youtube_trends import register as _r4
         _r4(signal_engine)
+    except Exception:
+        pass
+    try:
+        from backend.adapters.mercadolibre_trends import register as _r5
+        _r5(signal_engine)
+    except Exception:
+        pass
+    try:
+        from backend.adapters.alibaba_trends import register as _r6
+        _r6(signal_engine)
     except Exception:
         pass
 

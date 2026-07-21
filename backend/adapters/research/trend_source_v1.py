@@ -1,10 +1,14 @@
+import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
 
 from backend.adapters.research.base import ResearchSourceAdapter
+
+_log = logging.getLogger(__name__)
 
 
 ERROR_AUTH = "auth"
@@ -151,3 +155,72 @@ class GoogleTrendsAdapterV1(ResearchSourceAdapter):
             "confidence": self.confidence_baseline,
             "raw": raw_record,
         }
+
+
+# ── SignalEngine adapter surface ────────────────────────────────────────────
+#
+# Self-contained fetch()+register() pair, matching the convention used by
+# every other adapter in backend/adapters/ (reddit_trends.py,
+# amazon_bestsellers.py, tiktok_organic.py): module-level cache, never raises
+# out of fetch(), returns [] on total failure.
+#
+# Note: to_canonical() returns a plain dict with a "topic" key (there is no
+# "keyword" attribute) — SignalEngine's signals key on "product" instead, so
+# fields are mapped explicitly below rather than passed through as-is.
+
+_CACHE_TTL_S = 1800  # 30 minutes — daily-trends data doesn't move faster than this
+_CACHE: list[dict] = []
+_CACHE_TS = 0.0
+
+
+def fetch_google_trends_signals() -> list[dict]:
+    """Fetch and cache Google Trends daily-trending signals for SignalEngine.
+
+    Falls back to an empty list on any network/parsing failure (never
+    crashes the engine); one malformed record is skipped rather than
+    dropping the whole batch.
+    """
+    global _CACHE, _CACHE_TS
+    now = time.time()
+    if _CACHE and (now - _CACHE_TS) < _CACHE_TTL_S:
+        return list(_CACHE)
+
+    adapter = GoogleTrendsAdapterV1()
+    fetched_at = datetime.now(timezone.utc)
+    signals: list[dict] = []
+    try:
+        raw_records = adapter.fetch()
+    except Exception as exc:
+        _log.warning("google_trends_adapter_fetch_failed error=%s", exc)
+        return []
+
+    for raw in raw_records:
+        try:
+            canonical = adapter.to_canonical(raw, fetched_at=fetched_at)
+        except AdapterFetchError as exc:
+            _log.debug("google_trends_record_skipped error=%s", exc)
+            continue
+        signals.append({
+            "product": canonical["topic"],
+            "score": canonical.get("confidence", 0.6),
+            "velocity": max(0.0, min(1.0, canonical.get("velocity", 0.5))),
+            "source": "google_trends",
+            "platform": "google",
+        })
+
+    if signals:
+        _CACHE = signals
+        _CACHE_TS = now
+        _log.info("google_trends_signals_fetched count=%d", len(signals))
+    return signals
+
+
+def register(engine: Any) -> None:
+    """Register this adapter with a SignalEngine instance."""
+    engine.register_source("google_trends", fetch_google_trends_signals)
+    try:
+        from backend.discovery.registry import discovery_registry
+        discovery_registry.register("google_trends", credential_env_vars=[], requires_auth=False)
+    except Exception:
+        pass
+    _log.info("google_trends_adapter_registered")

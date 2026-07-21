@@ -114,4 +114,17 @@ def fetch() -> list[dict]:
 def register(signal_engine: Any) -> None:
     """Register this adapter with the provided SignalEngine instance."""
     signal_engine.register_source("tiktok_organic", fetch)
+    try:
+        from backend.discovery.registry import discovery_registry
+        # requires_auth=False: the official Creative Center path needs
+        # credentials, but this adapter still attempts real data via a
+        # pytrends proxy without them (mirrors amazon_bestsellers' pattern
+        # of "no auth required to attempt real data, mock only as last resort").
+        discovery_registry.register(
+            "tiktok_organic",
+            credential_env_vars=["TIKTOK_ACCESS_TOKEN", "TIKTOK_ADVERTISER_ID"],
+            requires_auth=False,
+        )
+    except Exception:
+        pass
     _log.info("tiktok_organic adapter registered")

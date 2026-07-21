@@ -442,6 +442,20 @@ async def get_signal_cache_status() -> dict:
         return {"status": "error", "error": str(exc)}
 
 
+@router.get("/discovery/sources")
+async def get_discovery_sources_status() -> dict:
+    """Health of every registered discovery/market-research data source.
+
+    Reports, per source: live/mock_fallback/mock_only/error/not_registered
+    status, required credentials, and the last fetch's signal count/error.
+    """
+    try:
+        from backend.discovery.registry import discovery_registry
+        return {"status": "ok", "sources": discovery_registry.status_report()}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
 # ── credentials and config ────────────────────────────────────────────────────
 
 
