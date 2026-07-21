@@ -64,6 +64,32 @@ def _shopify_ground_truth(lookback_days: int) -> float | None:
         return None
 
 
+def _stripe_ground_truth(lookback_days: int) -> float | None:
+    """Independent (non-ad-platform) revenue ground truth for the window.
+
+    A second, additive revenue channel alongside Shopify (e.g. products sold
+    via a direct checkout rather than the Shopify storefront). None means
+    unavailable (Stripe not configured / no charges).
+
+    Checked explicitly rather than trusting get_revenue()'s return value:
+    that connector always falls back to nonzero mock charges even when
+    STRIPE_SECRET_KEY is unset (by design, for callers that just want "some
+    usable figure"), which would otherwise silently inject a phantom mock
+    revenue into every reconciliation regardless of whether Stripe is
+    actually configured.
+    """
+    if not os.getenv("STRIPE_SECRET_KEY"):
+        return None
+    try:
+        from connectors.stripe_connector import get_revenue
+        result = get_revenue(last_n_minutes=lookback_days * 24 * 60)
+        revenue = float(result.get("total_revenue", 0.0))
+        return revenue if revenue > 0 else None
+    except Exception as exc:
+        _log.debug("stripe_ground_truth_unavailable error=%s", exc)
+        return None
+
+
 def _launched_products() -> dict[str, dict]:
     """product → {predicted_roas, confidence, retail_price, budget, campaign_ids}"""
     snapshot = load_json(_DROPSHIP_SNAPSHOT, default={}) or {}
@@ -106,7 +132,15 @@ def calculate_profitability(lookback_days: int = 7) -> dict[str, Any]:
     # at the portfolio level — reconcile total platform-claimed revenue
     # against it, then use each campaign's *reconciled* share below.
     raw_campaign_revenue = {c["campaign_id"]: c["revenue"] for c in perf}
-    ground_truth = _shopify_ground_truth(lookback_days)
+    shopify_gt = _shopify_ground_truth(lookback_days)
+    stripe_gt = _stripe_ground_truth(lookback_days)
+    # Shopify orders and Stripe charges are additive, non-overlapping revenue
+    # channels — sum whichever are available; None only when *neither* has data,
+    # preserving the existing "skip reconciliation" contract for that case.
+    ground_truth = (
+        (shopify_gt or 0.0) + (stripe_gt or 0.0)
+        if (shopify_gt is not None or stripe_gt is not None) else None
+    )
     reconciliation = reconcile_revenue(raw_campaign_revenue, ground_truth)
     reconciled_by_campaign = reconciliation.per_campaign_revenue
     use_reconciled = _reconcile_live()

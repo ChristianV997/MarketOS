@@ -129,6 +129,100 @@ def test_profitability_empty(isolated_metrics):
     assert report["num_products"] == 0
 
 
+# ── ground truth reconciliation (Shopify + Stripe) ────────────────────────────
+
+def test_ground_truth_neither_source_available_skips_reconciliation(monkeypatch, isolated_metrics):
+    """Neither Shopify nor Stripe configured -> reconciled revenue == raw
+    (reconcile_revenue's "no_ground_truth_available" early-return path)."""
+    monkeypatch.setattr(prof, "_shopify_ground_truth", lambda days: None)
+    monkeypatch.setattr(prof, "_stripe_ground_truth", lambda days: None)
+    cid = f"c_{uuid.uuid4().hex[:8]}"
+    _write_snapshot(isolated_metrics["snapshot"], [_launch("Widget", [cid])])
+    cm.record_metric(cid, "tiktok", "Widget", spend_usd=50.0, revenue_usd=150.0)
+
+    report = prof.calculate_profitability(lookback_days=7)
+    assert report["total_revenue_reconciled"] == report["total_revenue_raw"] == 150.0
+
+
+def test_ground_truth_sums_shopify_and_stripe_not_just_one(monkeypatch, isolated_metrics):
+    """Regression test: ground truth must be the SUM of both sources, not
+    just Shopify. Raw revenue is 150; Shopify alone (80) would trigger
+    scaling (raw > 80), but Shopify+Stripe (80+90=170) should not, since
+    raw(150) <= 170. If the combination logic silently dropped Stripe,
+    this would incorrectly scale revenue_reconciled down to ~80."""
+    monkeypatch.setattr(prof, "_shopify_ground_truth", lambda days: 80.0)
+    monkeypatch.setattr(prof, "_stripe_ground_truth", lambda days: 90.0)
+    cid = f"c_{uuid.uuid4().hex[:8]}"
+    _write_snapshot(isolated_metrics["snapshot"], [_launch("Widget", [cid])])
+    cm.record_metric(cid, "tiktok", "Widget", spend_usd=50.0, revenue_usd=150.0)
+
+    report = prof.calculate_profitability(lookback_days=7)
+    # raw (150) <= combined ground truth (170) -> "within_ground_truth" ->
+    # reconciled revenue stays at raw, unscaled.
+    assert report["total_revenue_reconciled"] == 150.0
+
+
+def test_ground_truth_scales_down_when_raw_exceeds_combined_total(monkeypatch, isolated_metrics):
+    """Combined ground truth (80+40=120) is below raw revenue (150) ->
+    reconciliation scales down proportionally."""
+    monkeypatch.setattr(prof, "_shopify_ground_truth", lambda days: 80.0)
+    monkeypatch.setattr(prof, "_stripe_ground_truth", lambda days: 40.0)
+    cid = f"c_{uuid.uuid4().hex[:8]}"
+    _write_snapshot(isolated_metrics["snapshot"], [_launch("Widget", [cid])])
+    cm.record_metric(cid, "tiktok", "Widget", spend_usd=50.0, revenue_usd=150.0)
+
+    report = prof.calculate_profitability(lookback_days=7)
+    assert report["total_revenue_reconciled"] == 120.0
+
+
+def test_ground_truth_falls_back_to_single_source(monkeypatch, isolated_metrics):
+    """Only Stripe available (Shopify None) -> combined ground truth == Stripe alone."""
+    monkeypatch.setattr(prof, "_shopify_ground_truth", lambda days: None)
+    monkeypatch.setattr(prof, "_stripe_ground_truth", lambda days: 60.0)
+    cid = f"c_{uuid.uuid4().hex[:8]}"
+    _write_snapshot(isolated_metrics["snapshot"], [_launch("Widget", [cid])])
+    cm.record_metric(cid, "tiktok", "Widget", spend_usd=50.0, revenue_usd=150.0)
+
+    report = prof.calculate_profitability(lookback_days=7)
+    # raw (150) > ground truth (60) -> scaled down to 60
+    assert report["total_revenue_reconciled"] == 60.0
+
+
+def test_stripe_ground_truth_none_when_unconfigured(monkeypatch):
+    """Regression test: connectors.stripe_connector.get_revenue() always
+    returns nonzero mock charges even with no STRIPE_SECRET_KEY (by design,
+    for callers that just want a usable figure). _stripe_ground_truth()
+    must NOT treat that mock fallback as real ground truth — it should
+    short-circuit to None whenever Stripe isn't actually configured, so
+    reconciliation isn't silently contaminated by a phantom mock revenue."""
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+
+    result = prof._stripe_ground_truth(lookback_days=1)
+    assert result is None
+
+
+def test_stripe_ground_truth_returns_value_when_configured(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake")
+    import connectors.stripe_connector as stripe_mod
+
+    fixture_payload = {
+        "data": [{"id": "ch_1", "amount": 5000, "currency": "usd", "status": "succeeded"}]
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return fixture_payload
+
+    monkeypatch.setattr(stripe_mod, "STRIPE_SECRET_KEY", "sk_test_fake")
+    monkeypatch.setattr(stripe_mod._requests, "get", lambda *a, **kw: FakeResponse())
+
+    result = prof._stripe_ground_truth(lookback_days=1)
+    assert result == 50.0
+
+
 # ── forecast ──────────────────────────────────────────────────────────────────
 
 def test_forecast_no_campaigns(isolated_metrics):
