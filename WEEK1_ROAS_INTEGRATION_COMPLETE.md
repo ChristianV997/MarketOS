@@ -260,7 +260,7 @@ Result: 1411 passed, 4 skipped, 20 warnings in 188.50s
 
 **Transition to Real Data**:
 1. User provides Shopify, Meta, TikTok API credentials
-2. Set environment variables (SHOPIFY_SHOP_URL, SHOPIFY_ACCESS_TOKEN, etc.)
+2. Set environment variables (SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN, etc.)
 3. Dry-run flag automatically disabled when credentials present
 4. Schedule worker as daily cron job (00:00 UTC recommended)
 5. Monitor first 7 days for deduplication accuracy and error rates
