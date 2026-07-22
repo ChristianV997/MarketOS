@@ -75,13 +75,19 @@ def create_product_page(
         return {"status": "error", "error": str(exc), "dry_run": False}
 
 
-def build_product(verdict: dict[str, Any]) -> dict[str, Any]:
+def build_product(verdict: dict[str, Any], brand: Any = None) -> dict[str, Any]:
     """Create listing + ad copy + store page from a validation verdict.
 
     Takes the output of backend.validation.validate_product (must be
     ready_for_creation) and returns everything Pipeline 4 needs to launch:
 
-        {status, product, page: {...}, listing: {...}, ad_copy: {platform: {...}}}
+        {status, product, brand_id, page: {...}, listing: {...}, ad_copy: {...}}
+
+    Brand routing (Phase A): the product is assigned to a brand (resolved
+    by category via the brand registry when *brand* is None) and created
+    through that brand's storefront adapter — a MarketOS landing page by
+    default, or the brand's Shopify store when so bound. Falls back to the
+    legacy direct-Shopify path only if the commerce layer is unavailable.
     """
     product = verdict.get("product", "")
     if not verdict.get("ready_for_creation"):
@@ -95,14 +101,41 @@ def build_product(verdict: dict[str, Any]) -> dict[str, Any]:
     listing = generate_listing(
         product, price, supplier_days=int(supplier.get("fulfillment_days", 9))
     )
-    page = create_product_page(
-        title=listing["title"],
-        description_html=listing["description"],
-        price=price,
-        sku=str(supplier.get("product_id", "")),
-        vendor=str(supplier.get("supplier", "")),
-        tags=["dropship", "auto-generated"],
-    )
+
+    brand_id = ""
+    try:
+        from backend.commerce.brands import brand_registry
+        from backend.commerce.storefront import get_storefront
+
+        if brand is None:
+            brand = brand_registry.resolve_for_category(
+                str(verdict.get("category", "general"))
+            )
+        brand_id = brand.brand_id
+        page = get_storefront(brand).create_product(
+            brand, listing, price, supplier=supplier,
+        )
+        try:
+            from backend.orchestration.event_store import event_store, new_workflow_id
+            event_store.append(
+                new_workflow_id("commerce"), "brand_product_registered",
+                workflow="commerce", step="catalog_register",
+                data={"brand_id": brand_id, "product": product,
+                      "price": price, "page_url": page.get("url", "")},
+            )
+        except Exception:
+            pass
+    except Exception:
+        _log.debug("brand_routing_unavailable; using legacy store path", exc_info=True)
+        page = create_product_page(
+            title=listing["title"],
+            description_html=listing["description"],
+            price=price,
+            sku=str(supplier.get("product_id", "")),
+            vendor=str(supplier.get("supplier", "")),
+            tags=["dropship", "auto-generated"],
+        )
+
     if page.get("status") != "ok":
         return {"status": "error", "reason": "store_page_failed", "product": product,
                 "error": page.get("error", "")}
@@ -114,6 +147,7 @@ def build_product(verdict: dict[str, Any]) -> dict[str, Any]:
     return {
         "status": "ok",
         "product": product,
+        "brand_id": brand_id,
         "price": price,
         "page": page,
         "listing": listing,

@@ -120,6 +120,7 @@ def run_dropship_cycle(
 
             launches.append({
                 "product": product,
+                "brand_id": build.get("brand_id", ""),
                 "confidence": verdict["confidence"],
                 "retail_price": verdict.get("retail_price"),
                 "predicted_roas": predicted,

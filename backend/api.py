@@ -460,6 +460,12 @@ try:
 except ImportError:
     pass
 
+try:
+    from api.routes.storefront import router as _storefront_router
+    app.include_router(_storefront_router)
+except ImportError:
+    pass
+
 
 # ── WebSocket live event stream ────────────────────────────────────────────────
 
