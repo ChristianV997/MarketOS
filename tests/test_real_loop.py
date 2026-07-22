@@ -151,6 +151,7 @@ def test_active_campaigns_populated_after_run_scaling():
         evidence_count=20,
     )
     orch._campaign_artifacts.clear()
+    orch._scaling_limiter.last_run = 0.0
 
     # Isolate from other tests' playbook state
     with patch("core.content.playbook.playbook_memory.all", return_value=[pb]):
@@ -179,6 +180,7 @@ def test_active_campaigns_maps_campaign_to_product():
     )
     playbook_memory.upsert(pb)
     orch._campaign_artifacts.clear()
+    orch._scaling_limiter.last_run = 0.0
 
     orch._run_scaling()
 

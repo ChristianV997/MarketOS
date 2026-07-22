@@ -373,14 +373,24 @@ def _run_feedback_collection() -> dict[str, Any]:
     return {"status": "ok", "classified": len(classified), "winners": len(winners)}
 
 
-@worker_safe()
+_SCALING_MIN_INTERVAL_S = float(os.getenv("SCALING_MIN_INTERVAL_S", "900"))
+_scaling_limiter = RateLimiter(interval_s=_SCALING_MIN_INTERVAL_S)
+
+_PLAYBOOK_RELAUNCH_COOLDOWN_S = float(os.getenv("PLAYBOOK_RELAUNCH_COOLDOWN_S", "21600"))
+
+
+@worker_safe(rate_limiter=_scaling_limiter)
 def _run_scaling() -> dict[str, Any]:
     """Scale/kill campaigns and launch new ones from high-confidence playbooks.
 
     Two execution paths (both run independently):
     1. AJO scale — if Adobe AJO is configured, scale existing winners.
     2. Playbook launch — for products with confidence >= 0.6, launch a fresh
-       TikTok campaign via launch_from_playbook() (dry-run safe).
+       TikTok campaign via launch_from_playbook() (dry-run safe), gated by
+       PLAYBOOK_RELAUNCH_COOLDOWN_S so a playbook that stays above the
+       confidence bar doesn't mint a brand-new campaign every time this
+       worker runs — confidence rises with evidence and never resets on its
+       own, so without a cooldown this path would relaunch indefinitely.
     """
     scaled   = 0
     launched = 0
@@ -412,8 +422,12 @@ def _run_scaling() -> dict[str, Any]:
             confidence = getattr(pb, "confidence", 0.0)
             if confidence < 0.6:
                 continue
+            now = time.time()
+            if now - getattr(pb, "last_launched_at", 0.0) < _PLAYBOOK_RELAUNCH_COOLDOWN_S:
+                continue
             result = launch_from_playbook(vars(pb), phase=phase)
             if result.get("status") != "error":
+                playbook_memory.mark_launched(pb.product, pb.phase, now)
                 cid = result.get("campaign_id", "")
                 if cid:
                     hook  = (pb.top_hooks[0]  if pb.top_hooks  else "")
@@ -747,7 +761,7 @@ _PHASE_WORKERS: dict[Phase, list[Any]] = {
                       _run_alerting, _run_sleep_consolidation],
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
     Phase.SCALE:     [_run_execution_cycle, _run_feedback_collection,
-                      _run_content_generation, _run_scaling, _run_scaling,
+                      _run_content_generation, _run_scaling,
                       _run_dropship_pipeline, _run_organic_channel_evaluation,
                       _run_engagement_ingestion, _run_inventory_sync,
                       _run_fulfillment, _run_metrics_ingestion,

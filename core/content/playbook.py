@@ -20,6 +20,7 @@ class Playbook:
     confidence: float
     evidence_count: int
     created_at: float = field(default_factory=time.time)
+    last_launched_at: float = 0.0
 
 
 class PlaybookMemory:
@@ -51,6 +52,7 @@ class PlaybookMemory:
                     confidence=round(total / (total + 10), 4),
                     evidence_count=total,
                     created_at=existing.created_at,
+                    last_launched_at=existing.last_launched_at,
                 )
             else:
                 self._store[key] = playbook
@@ -84,6 +86,18 @@ class PlaybookMemory:
     def all(self) -> list[Playbook]:
         with self._lock:
             return list(self._store.values())
+
+    def mark_launched(self, product: str, phase: str, ts: float) -> None:
+        """Stamp last_launched_at after a real campaign launch, so a
+        relaunch-cooldown check (backend/orchestration's _run_scaling) can
+        avoid minting a fresh campaign for the same playbook every tick."""
+        with self._lock:
+            key = (product, phase)
+            existing = self._store.get(key)
+            if existing is None:
+                return
+            existing.last_launched_at = ts
+        self._persist()
 
 
 def generate_playbook(
