@@ -32,6 +32,11 @@ _DRY_RUN = os.getenv("SUPPLIERS_DRY_RUN", "true").lower() != "false"
 # Reliability floor: quotes below this are excluded from find_best_supplier
 _MIN_RELIABILITY = float(os.getenv("SUPPLIER_MIN_RELIABILITY", "0.7"))
 
+# Separate flag from SUPPLIERS_DRY_RUN: live QUOTING never implies live
+# ORDERING — a supplier's catalog API being configured doesn't mean we're
+# ready to actually spend real money placing orders against it.
+_ORDERS_DRY_RUN = os.getenv("SUPPLIER_ORDERS_DRY_RUN", "true").lower() != "false"
+
 
 @dataclass
 class SupplierQuote:
@@ -123,6 +128,73 @@ class SupplierClient:
     def _live_quote(self, product_name: str) -> SupplierQuote | None:
         raise NotImplementedError
 
+    # -- order placement (Phase D) ---------------------------------------
+
+    def place_order(self, order: dict) -> dict:
+        """Place a fulfillment order with this supplier.
+
+        *order* = {order_id, supplier_product_id, qty, shipping: {...}}.
+        Returns {status, supplier_order_id, dry_run}. Dry-run under
+        SUPPLIER_ORDERS_DRY_RUN (default true, independent of the quoting
+        dry-run flag) — deterministic id derived from our own order_id so
+        placement is idempotent (a retry after a crash mid-place resolves
+        to the same supplier_order_id rather than double-ordering).
+        """
+        if _ORDERS_DRY_RUN or not self.is_configured():
+            return self._dry_place_order(order)
+        try:
+            return self._live_place_order(order)
+        except Exception as exc:
+            _log.warning("supplier_place_order_failed supplier=%s order=%s error=%s",
+                        self.name, order.get("order_id", ""), exc)
+            return {"status": "error", "supplier_order_id": "",
+                   "error": str(exc), "dry_run": False}
+
+    def order_status(self, supplier_order_id: str) -> dict:
+        """Poll fulfillment status for a previously-placed order.
+
+        Returns {status: placed|shipped|delivered|failed, tracking?}. Dry
+        ids always resolve to a stable, deterministic status so shadow-mode
+        rehearsals can exercise the full state machine without a real
+        supplier ever being called.
+        """
+        if _ORDERS_DRY_RUN or supplier_order_id.startswith("dry_so_"):
+            return self._dry_order_status(supplier_order_id)
+        try:
+            return self._live_order_status(supplier_order_id)
+        except Exception as exc:
+            _log.warning("supplier_order_status_failed supplier=%s id=%s error=%s",
+                        self.name, supplier_order_id, exc)
+            return {"status": "failed", "error": str(exc)}
+
+    def _dry_place_order(self, order: dict) -> dict:
+        order_id = str(order.get("order_id", ""))
+        stem = hashlib.md5(f"{self.name}:{order_id}".encode()).hexdigest()[:12]
+        supplier_order_id = f"dry_so_{self.name}_{stem}"
+        _log.info("supplier_dry_order_placed supplier=%s order=%s supplier_order=%s",
+                  self.name, order_id, supplier_order_id)
+        return {"status": "ok", "supplier_order_id": supplier_order_id, "dry_run": True}
+
+    def _dry_order_status(self, supplier_order_id: str) -> dict:
+        # Deterministic per-id progression so tests/rehearsals are stable:
+        # the fraction of ids that "ship" vs stay "placed" is fixed, not
+        # time-based, so repeated polls in a test don't flap.
+        f = _stable_fraction(f"{supplier_order_id}:status")
+        if f < 0.85:
+            return {"status": "shipped", "tracking": f"DRYTRACK{supplier_order_id[-8:].upper()}"}
+        return {"status": "placed"}
+
+    def _live_place_order(self, order: dict) -> dict:
+        raise NotImplementedError(
+            f"{self.name} live order placement not yet implemented — "
+            "fill in from the supplier's developer portal when credentials arrive"
+        )
+
+    def _live_order_status(self, supplier_order_id: str) -> dict:
+        raise NotImplementedError(
+            f"{self.name} live order status not yet implemented"
+        )
+
 
 class CJDropshippingClient(SupplierClient):
     """CJ Dropshipping — https://developers.cjdropshipping.com"""
@@ -155,6 +227,52 @@ class CJDropshippingClient(SupplierClient):
             fulfillment_days=int(row.get("deliveryTime", self.base_fulfillment_days) or self.base_fulfillment_days),
             reliability=self.base_reliability,
         )
+
+    def _live_place_order(self, order: dict) -> dict:
+        import requests
+        shipping = order.get("shipping", {}) or {}
+        resp = requests.post(
+            "https://developers.cjdropshipping.com/api2.0/v1/shopping/order/createOrder",
+            headers={"CJ-Access-Token": os.environ[self.api_key_env]},
+            json={
+                "orderNumber": order.get("order_id", ""),
+                "shippingCountryCode": shipping.get("country", ""),
+                "shippingProvince": shipping.get("state", ""),
+                "shippingCity": shipping.get("city", ""),
+                "shippingAddress": shipping.get("line1", ""),
+                "shippingAddress2": shipping.get("line2", ""),
+                "shippingZip": shipping.get("postal_code", ""),
+                "products": [{"vid": order.get("supplier_product_id", ""),
+                             "quantity": int(order.get("qty", 1))}],
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data", {})
+        supplier_order_id = str(data.get("orderId", ""))
+        if not supplier_order_id:
+            return {"status": "error", "supplier_order_id": "",
+                   "error": "no_order_id_returned", "dry_run": False}
+        return {"status": "ok", "supplier_order_id": supplier_order_id, "dry_run": False}
+
+    def _live_order_status(self, supplier_order_id: str) -> dict:
+        import requests
+        resp = requests.get(
+            "https://developers.cjdropshipping.com/api2.0/v1/shopping/order/getOrderDetail",
+            headers={"CJ-Access-Token": os.environ[self.api_key_env]},
+            params={"orderId": supplier_order_id},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data", {})
+        cj_status = str(data.get("orderStatus", "")).upper()
+        mapped = {"CREATED": "placed", "IN_PRODUCTION": "placed",
+                 "SHIPPED": "shipped", "DELIVERED": "delivered"}.get(cj_status, "placed")
+        result = {"status": mapped}
+        tracking = data.get("trackNumber")
+        if tracking:
+            result["tracking"] = str(tracking)
+        return result
 
 
 class ZendropClient(SupplierClient):
@@ -262,6 +380,13 @@ _CLIENTS: list[SupplierClient] = [
     SpocketClient(),
     PrintfulClient(),
 ]
+
+_CLIENTS_BY_NAME: dict[str, SupplierClient] = {c.name: c for c in _CLIENTS}
+
+
+def get_client(supplier_name: str) -> SupplierClient | None:
+    """Look up a registered supplier client by its .name (e.g. "cj_dropshipping")."""
+    return _CLIENTS_BY_NAME.get(supplier_name)
 
 
 def quote_all(product_name: str) -> list[SupplierQuote]:

@@ -169,6 +169,27 @@ def _run_inventory_sync() -> dict[str, Any]:
     return reconcile_all_brands()
 
 
+_FULFILLMENT_MIN_INTERVAL_S = float(os.getenv("FULFILLMENT_MIN_INTERVAL_S", "300"))
+_fulfillment_limiter = RateLimiter(interval_s=_FULFILLMENT_MIN_INTERVAL_S)
+
+
+@worker_safe(rate_limiter=_fulfillment_limiter)
+def _run_fulfillment() -> dict[str, Any]:
+    """Phase D: route RECEIVED orders to their bound supplier and place
+    them, then poll PLACED orders for shipped/delivered status.
+
+    Runs every tick regardless of phase (orders can't wait for SCALE) —
+    registered in every phase table below. Dry-run under
+    SUPPLIER_ORDERS_DRY_RUN (default true, independent of quoting's own
+    dry-run flag) and FULFILLMENT_LIVE (default false) gates whether the
+    order's fulfillment_status actually advances outside of rehearsal.
+    """
+    from backend.commerce.fulfillment import poll_placed_orders, process_new_orders
+    placed = process_new_orders()
+    polled = poll_placed_orders()
+    return {"status": "ok", "placed": placed, "polled": polled}
+
+
 @worker_safe(rate_limiter=_organic_post_limiter)
 def _run_organic_posting() -> dict[str, Any]:
     """Phase E: publish organic posts for catalog/playbook products (Postiz).
@@ -708,27 +729,28 @@ def _with_retry(fn: Any, attempts: int = 2) -> dict[str, Any]:
 _PHASE_WORKERS: dict[Phase, list[Any]] = {
     # RESEARCH: discover signals + warm simulation; ingest first metrics
     Phase.RESEARCH:  [_run_simulation, _run_signal_ingestion, _run_signal_ingestion,
-                      _run_execution_cycle, _run_metrics_ingestion, _run_alerting],
+                      _run_execution_cycle, _run_fulfillment,
+                      _run_metrics_ingestion, _run_alerting],
     # EXPLORE: signal → simulate → execute × 2 → feedback → generate content
     # → organic posting → dropship cycle (rate-limited internally)
     Phase.EXPLORE:   [_run_simulation, _run_signal_ingestion, _run_execution_cycle,
                       _run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_organic_posting,
                       _run_engagement_ingestion, _run_dropship_pipeline,
-                      _run_metrics_ingestion, _run_alerting],
+                      _run_fulfillment, _run_metrics_ingestion, _run_alerting],
     # VALIDATE: execution + feedback × 2 + organic validation + inventory + sleep
     Phase.VALIDATE:  [_run_signal_ingestion, _run_execution_cycle,
                       _run_feedback_collection, _run_feedback_collection,
                       _run_content_generation, _run_organic_posting,
                       _run_engagement_ingestion, _run_inventory_sync,
-                      _run_metrics_ingestion,
+                      _run_fulfillment, _run_metrics_ingestion,
                       _run_alerting, _run_sleep_consolidation],
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
     Phase.SCALE:     [_run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_scaling, _run_scaling,
                       _run_dropship_pipeline, _run_organic_channel_evaluation,
                       _run_engagement_ingestion, _run_inventory_sync,
-                      _run_metrics_ingestion,
+                      _run_fulfillment, _run_metrics_ingestion,
                       _run_budget_scaling, _run_alerting,
                       _run_sleep_consolidation],
 }
@@ -859,6 +881,7 @@ def run() -> None:
                     "_run_organic_posting":     "organic_posting_worker",
                     "_run_engagement_ingestion": "engagement_ingestion_worker",
                     "_run_inventory_sync":      "inventory_sync_worker",
+                    "_run_fulfillment":         "fulfillment_worker",
                     "_run_metrics_ingestion":   "metrics_ingestion_worker",
                     "_run_budget_scaling":      "budget_scaling_worker",
                     "_run_alerting":            "alerting_worker",
