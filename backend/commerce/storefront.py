@@ -123,7 +123,10 @@ class ShopifyStorefront:
                 tags=["dropship", "auto-generated", brand.brand_id],
             )
         if page.get("status") == "ok":
-            # Mirror into the catalog so inventory/orders see Shopify products too.
+            # Mirror into the catalog so inventory/orders see Shopify products
+            # too. external_id carries Shopify's OWN product id (numeric, or
+            # a dry_* id) — required to look the product back up for updates,
+            # since it's distinct from our slug-based product_id.
             product_id = product_slug(listing.get("title", "product"))
             product_catalog.register(CatalogEntry(
                 product_id=product_id,
@@ -137,6 +140,7 @@ class ShopifyStorefront:
                 page_url=page.get("url", ""),
                 description_html=listing.get("description", ""),
                 bullets=list(listing.get("bullets", [])),
+                external_id=str(page.get("product_id", "")),
             ))
             page["product_id_catalog"] = product_id
         return page
@@ -145,8 +149,22 @@ class ShopifyStorefront:
                        price: float | None = None,
                        status: str | None = None,
                        stock_ok: bool | None = None) -> dict[str, Any]:
-        # Shopify-side mutation lands in Phase B (store_builder.update_product_page);
-        # until then, keep the catalog authoritative.
+        from backend.creation.store_builder import update_product_page
+
+        entry = product_catalog.get(product_id)
+        if entry is None:
+            return {"status": "error", "error": "unknown_product", "product_id": product_id}
+
+        result: dict[str, Any] = {"status": "ok", "product_id": product_id, "dry_run": True}
+        if entry.external_id and (price is not None or status is not None):
+            with self._with_brand_creds(brand):
+                result = update_product_page(
+                    entry.external_id, price=price,
+                    status=status if status in ("live", "draft") else None,
+                )
+            if result.get("status") != "ok":
+                return result
+
         fields: dict[str, Any] = {}
         if price is not None:
             fields["retail_price"] = float(price)
@@ -154,10 +172,10 @@ class ShopifyStorefront:
             fields["status"] = status
         if stock_ok is not None:
             fields["stock_ok"] = bool(stock_ok)
-        entry = product_catalog.update(product_id, **fields)
-        if entry is None:
-            return {"status": "error", "error": "unknown_product", "product_id": product_id}
-        return {"status": "ok", "product_id": product_id, "dry_run": True}
+        if fields:
+            product_catalog.update(product_id, **fields)
+        return {"status": "ok", "product_id": product_id,
+                "dry_run": result.get("dry_run", True)}
 
 
 _ADAPTERS: dict[str, Any] = {}

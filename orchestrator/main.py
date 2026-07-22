@@ -153,6 +153,21 @@ _organic_post_limiter = RateLimiter(interval_s=_ORGANIC_POST_MIN_INTERVAL_S)
 _ENGAGEMENT_MIN_INTERVAL_S = float(os.getenv("ENGAGEMENT_MIN_INTERVAL_S", "3600"))
 _engagement_limiter = RateLimiter(interval_s=_ENGAGEMENT_MIN_INTERVAL_S)
 
+_INVENTORY_SYNC_MIN_INTERVAL_S = float(os.getenv("INVENTORY_SYNC_MIN_INTERVAL_S", "3600"))
+_inventory_sync_limiter = RateLimiter(interval_s=_INVENTORY_SYNC_MIN_INTERVAL_S)
+
+
+@worker_safe(rate_limiter=_inventory_sync_limiter)
+def _run_inventory_sync() -> dict[str, Any]:
+    """Phase B: re-quote every brand's live catalog and reprice/pause as
+    supplier costs drift or stock runs out.
+
+    Always journals shadow_inventory_sync; only mutates storefronts when
+    INVENTORY_SYNC_LIVE=true.
+    """
+    from backend.commerce.inventory_sync import reconcile_all_brands
+    return reconcile_all_brands()
+
 
 @worker_safe(rate_limiter=_organic_post_limiter)
 def _run_organic_posting() -> dict[str, Any]:
@@ -701,17 +716,19 @@ _PHASE_WORKERS: dict[Phase, list[Any]] = {
                       _run_content_generation, _run_organic_posting,
                       _run_engagement_ingestion, _run_dropship_pipeline,
                       _run_metrics_ingestion, _run_alerting],
-    # VALIDATE: execution + feedback × 2 + organic validation + metrics + sleep
+    # VALIDATE: execution + feedback × 2 + organic validation + inventory + sleep
     Phase.VALIDATE:  [_run_signal_ingestion, _run_execution_cycle,
                       _run_feedback_collection, _run_feedback_collection,
                       _run_content_generation, _run_organic_posting,
-                      _run_engagement_ingestion, _run_metrics_ingestion,
+                      _run_engagement_ingestion, _run_inventory_sync,
+                      _run_metrics_ingestion,
                       _run_alerting, _run_sleep_consolidation],
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
     Phase.SCALE:     [_run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_scaling, _run_scaling,
                       _run_dropship_pipeline, _run_organic_channel_evaluation,
-                      _run_engagement_ingestion, _run_metrics_ingestion,
+                      _run_engagement_ingestion, _run_inventory_sync,
+                      _run_metrics_ingestion,
                       _run_budget_scaling, _run_alerting,
                       _run_sleep_consolidation],
 }
@@ -841,6 +858,7 @@ def run() -> None:
                     "_run_organic_channel_evaluation": "organic_channel_worker",
                     "_run_organic_posting":     "organic_posting_worker",
                     "_run_engagement_ingestion": "engagement_ingestion_worker",
+                    "_run_inventory_sync":      "inventory_sync_worker",
                     "_run_metrics_ingestion":   "metrics_ingestion_worker",
                     "_run_budget_scaling":      "budget_scaling_worker",
                     "_run_alerting":            "alerting_worker",

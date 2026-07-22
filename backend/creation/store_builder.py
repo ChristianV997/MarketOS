@@ -75,6 +75,43 @@ def create_product_page(
         return {"status": "error", "error": str(exc), "dry_run": False}
 
 
+def update_product_page(
+    product_id: str,
+    *,
+    price: float | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """Update an existing Shopify product's price and/or published status.
+
+    Dry-run under STORE_DRY_RUN (the default) — logs the would-be mutation
+    and returns immediately. Live path fetches the product by id, mutates
+    only the fields provided, and saves.
+    """
+    if _DRY_RUN:
+        _log.info("store_dry_run product_updated id=%s price=%s status=%s",
+                  product_id, price, status)
+        return {"status": "ok", "product_id": product_id, "dry_run": True}
+    try:
+        from backend.integrations.shopify_client import init_shopify
+        import shopify
+        if not init_shopify():
+            return {"status": "error", "error": "shopify_not_configured", "dry_run": False}
+        product = shopify.Product.find(product_id)
+        if price is not None and product.variants:
+            product.variants[0].price = price
+        if status is not None:
+            # Shopify's own status values: active | draft | archived.
+            product.status = "active" if status == "live" else (
+                "draft" if status == "draft" else "archived")
+        product.save()
+        if product.errors.errors:
+            return {"status": "error", "error": str(product.errors.errors), "dry_run": False}
+        return {"status": "ok", "product_id": product_id, "dry_run": False}
+    except Exception as exc:
+        _log.exception("store_product_update_failed id=%s", product_id)
+        return {"status": "error", "error": str(exc), "dry_run": False}
+
+
 def build_product(verdict: dict[str, Any], brand: Any = None) -> dict[str, Any]:
     """Create listing + ad copy + store page from a validation verdict.
 

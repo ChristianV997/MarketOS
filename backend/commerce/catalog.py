@@ -46,6 +46,9 @@ class CatalogEntry:
     page_url: str = ""
     description_html: str = ""
     bullets: list = field(default_factory=list)
+    external_id: str = ""      # storefront backend's own product id (e.g. the
+                               # numeric Shopify product id) when it differs
+                               # from our slug — empty for the landing binding.
     created_at: str = ""
     updated_at: str = ""
 

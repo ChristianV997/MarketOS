@@ -1,6 +1,6 @@
 """Tests for backend.creation and backend.launch — listings, store pages, campaigns."""
 from backend.creation.creative_generator import generate_listing, generate_ad_copy
-from backend.creation.store_builder import create_product_page, build_product
+from backend.creation.store_builder import create_product_page, build_product, update_product_page
 from backend.launch.orchestrator import launch_product
 from backend.integrations import meta_ads_client
 
@@ -37,6 +37,14 @@ def test_dry_run_page_ids_unique():
     a = create_product_page("Same Title", "<p>d</p>", 10.0)
     b = create_product_page("Same Title", "<p>d</p>", 10.0)
     assert a["product_id"] != b["product_id"]
+
+
+def test_update_product_page_dry_run():
+    page = create_product_page("Test Widget", "<p>d</p>", 49.99)
+    result = update_product_page(page["product_id"], price=39.99, status="paused")
+    assert result["status"] == "ok"
+    assert result["dry_run"] is True
+    assert result["product_id"] == page["product_id"]
 
 
 def _green_verdict(product="Test Widget"):
