@@ -69,6 +69,21 @@ def _verify_shopify_signature(payload: bytes, hmac_header: str, secret: str) -> 
     return hmac.compare_digest(expected, hmac_header)
 
 
+def _journal_signature_failure(source: str) -> None:
+    """Feeds the webhook_signature_failures alert (backend.monitoring.alerts)
+    — a burst of these is either a misconfigured webhook secret or an
+    attacker probing the endpoint, and previously there was no signal
+    anywhere that it was happening at all."""
+    try:
+        from backend.orchestration.event_store import event_store, new_workflow_id
+        event_store.append(new_workflow_id("webhooksig"), "webhook_signature_failed",
+                           workflow="webhook_security", step="verify",
+                           data={"source": source})
+    except Exception:
+        _log.warning("webhook_signature_failure_journal_failed source=%s", source,
+                    exc_info=True)
+
+
 # Event types this route understands. Anything else falls through to the
 # generic {"ignored": event_type} branch — that's fine (Stripe sends many
 # event types we don't act on), but these are the ones with money-safety
@@ -91,6 +106,7 @@ async def stripe_webhook(
 
     body = await request.body()
     if not stripe_signature or not _verify_stripe_signature(body, stripe_signature, secret):
+        _journal_signature_failure("stripe")
         raise HTTPException(status_code=400, detail="invalid_signature")
 
     try:
@@ -220,6 +236,7 @@ async def shopify_webhook(
     if not x_shopify_hmac_sha256 or not _verify_shopify_signature(
         body, x_shopify_hmac_sha256, secret
     ):
+        _journal_signature_failure("shopify")
         raise HTTPException(status_code=400, detail="invalid_signature")
 
     if x_shopify_topic and x_shopify_topic != "orders/create":
