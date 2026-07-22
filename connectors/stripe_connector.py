@@ -2,11 +2,17 @@
 
 Second, additive revenue ground-truth source alongside Shopify (see
 backend/integrations/shopify_client.py). Falls back to mock charges when
-STRIPE_SECRET_KEY is unset or the API call fails, so callers always get a
-usable (if approximate) revenue figure.
+STRIPE_SECRET_KEY is unset or the API call fails, so callers that just want
+"some usable figure" always get one — but the returned dict's "source"
+field ("live" | "fallback") lets callers that need to know whether the
+figure is real (e.g. financial reconciliation) tell the difference instead
+of silently treating mock revenue as real.
 """
+import logging
 import os
 import datetime
+
+_log = logging.getLogger(__name__)
 
 try:
     import requests as _requests
@@ -32,6 +38,7 @@ def get_revenue(last_n_minutes: int = 60) -> dict:
     since = now - datetime.timedelta(minutes=last_n_minutes)
 
     charges = _FALLBACK_CHARGES
+    source = "unconfigured" if not STRIPE_SECRET_KEY else "fallback"
 
     if STRIPE_SECRET_KEY and _requests is not None:
         try:
@@ -53,12 +60,17 @@ def get_revenue(last_n_minutes: int = 60) -> dict:
                 for ch in data
                 if ch.get("id")
             ]
-            if parsed:
-                charges = parsed
+            # A real API call that legitimately found zero charges is still
+            # "live" data (an empty window), not a reason to substitute mock
+            # revenue — only an actual failure below falls back to the mock.
+            charges = parsed
+            source = "live"
         except (KeyboardInterrupt, SystemExit):
             raise
-        except Exception:
+        except Exception as exc:
             charges = _FALLBACK_CHARGES
+            source = "fallback"
+            _log.error("stripe_get_revenue_failed error=%s — falling back to mock charges", exc)
 
     succeeded = [c for c in charges if c.get("status") == "succeeded"]
     total_revenue = sum(_cents_to_dollars(c["amount"]) for c in succeeded)
@@ -67,4 +79,5 @@ def get_revenue(last_n_minutes: int = 60) -> dict:
         "total_revenue": total_revenue,
         "since": since.isoformat(),
         "until": now.isoformat(),
+        "source": source,
     }

@@ -266,8 +266,13 @@ class CJDropshippingClient(SupplierClient):
         resp.raise_for_status()
         data = resp.json().get("data", {})
         cj_status = str(data.get("orderStatus", "")).upper()
+        # Default to "unknown" (not "placed") for anything unrecognized —
+        # a real CJ cancellation/return-to-sender must never be silently
+        # treated as a healthy in-progress order (poll_placed_orders logs
+        # "unknown" loudly instead of quietly doing nothing).
         mapped = {"CREATED": "placed", "IN_PRODUCTION": "placed",
-                 "SHIPPED": "shipped", "DELIVERED": "delivered"}.get(cj_status, "placed")
+                 "SHIPPED": "shipped", "DELIVERED": "delivered",
+                 "CANCELLED": "failed", "EXCEPTION": "failed"}.get(cj_status, "unknown")
         result = {"status": mapped}
         tracking = data.get("trackNumber")
         if tracking:
@@ -480,6 +485,10 @@ def find_best_supplier(product_name: str, category: str = "general") -> Supplier
             },
         )
     except Exception:
-        pass  # journaling must never break supplier selection
+        # journaling must never break supplier selection, but a silent
+        # failure here means the crash-recovery journal event_store's
+        # incomplete_workflows() relies on has quietly stopped being written
+        _log.warning("supplier_ranking_journal_failed product=%s", product_name,
+                    exc_info=True)
 
     return risk_adjusted_pick if live else legacy_pick

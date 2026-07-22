@@ -157,6 +157,96 @@ class TestStripeWebhook:
         assert resp.json().get("ignored") == "payment_intent.created"
         assert commerce.get_order("cs_test_1") is None
 
+    def test_unpaid_session_not_ingested_pending_async_payment(self, commerce, client):
+        """A delayed payment method (ACH, SEPA) completes the *session*
+        before the *payment* — ingesting here would place a supplier order
+        against money that hasn't actually moved yet."""
+        event = _stripe_event()
+        event["data"]["object"]["payment_status"] = "unpaid"
+        body = json.dumps(event).encode()
+        sig = _stripe_signature(body, "whsec_test_secret")
+        resp = client.post("/webhooks/stripe", content=body, headers={"Stripe-Signature": sig})
+        assert resp.status_code == 200
+        assert resp.json().get("ignored") == "payment_pending"
+        assert commerce.get_order("cs_test_1") is None
+
+    def test_async_payment_succeeded_ingests_order(self, commerce, client):
+        event = _stripe_event(event_type="checkout.session.async_payment_succeeded")
+        body = json.dumps(event).encode()
+        sig = _stripe_signature(body, "whsec_test_secret")
+        resp = client.post("/webhooks/stripe", content=body, headers={"Stripe-Signature": sig})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+        assert commerce.get_order("cs_test_1") is not None
+
+    def test_async_payment_failed_is_a_noop(self, commerce, client):
+        event = _stripe_event(event_type="checkout.session.async_payment_failed")
+        body = json.dumps(event).encode()
+        sig = _stripe_signature(body, "whsec_test_secret")
+        resp = client.post("/webhooks/stripe", content=body, headers={"Stripe-Signature": sig})
+        assert resp.status_code == 200
+        assert commerce.get_order("cs_test_1") is None
+
+    def test_session_expired_is_a_noop(self, commerce, client):
+        event = _stripe_event(event_type="checkout.session.expired")
+        body = json.dumps(event).encode()
+        sig = _stripe_signature(body, "whsec_test_secret")
+        resp = client.post("/webhooks/stripe", content=body, headers={"Stripe-Signature": sig})
+        assert resp.status_code == 200
+        assert commerce.get_order("cs_test_1") is None
+
+    def test_refund_reverses_the_order(self, commerce, client):
+        event = _stripe_event()
+        event["data"]["object"]["payment_intent"] = "pi_123"
+        body = json.dumps(event).encode()
+        sig = _stripe_signature(body, "whsec_test_secret")
+        client.post("/webhooks/stripe", content=body, headers={"Stripe-Signature": sig})
+        assert commerce.get_order("cs_test_1").fulfillment_status == "RECEIVED"
+
+        refund_event = {
+            "id": "evt_refund_1", "type": "charge.refunded",
+            "data": {"object": {"id": "ch_1", "payment_intent": "pi_123"}},
+        }
+        refund_body = json.dumps(refund_event).encode()
+        refund_sig = _stripe_signature(refund_body, "whsec_test_secret")
+        resp = client.post("/webhooks/stripe", content=refund_body,
+                           headers={"Stripe-Signature": refund_sig})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+        assert commerce.get_order("cs_test_1").fulfillment_status == "REFUNDED"
+
+    def test_refund_with_no_matching_order_is_a_noop(self, commerce, client):
+        refund_event = {
+            "id": "evt_refund_2", "type": "charge.refunded",
+            "data": {"object": {"id": "ch_2", "payment_intent": "pi_unknown"}},
+        }
+        body = json.dumps(refund_event).encode()
+        sig = _stripe_signature(body, "whsec_test_secret")
+        resp = client.post("/webhooks/stripe", content=body, headers={"Stripe-Signature": sig})
+        assert resp.status_code == 200
+        assert resp.json().get("ignored") == "charge.refunded_no_matching_order"
+
+    def test_processing_failure_returns_500_and_event_not_marked_seen(
+        self, commerce, client, monkeypatch
+    ):
+        """The Tier 1 fix: a transient failure during processing must
+        surface as a 500 (so Stripe retries) and must NOT mark the event
+        seen — the pre-fix behavior marked it seen first, so a retry after
+        a transient failure short-circuited on 'duplicate' and the order
+        was silently lost forever despite the customer having paid."""
+        import backend.commerce.orders as orders_mod
+
+        monkeypatch.setattr(
+            orders_mod, "ingest_order",
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db locked")),
+        )
+        event = _stripe_event(event_id="evt_crash_1")
+        body = json.dumps(event).encode()
+        sig = _stripe_signature(body, "whsec_test_secret")
+        resp = client.post("/webhooks/stripe", content=body, headers={"Stripe-Signature": sig})
+        assert resp.status_code == 500
+        assert not commerce.event_already_seen("evt_crash_1")
+
 
 class TestShopifyWebhook:
     def _order_payload(self):

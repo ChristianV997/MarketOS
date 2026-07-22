@@ -23,6 +23,14 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
+# After this many consecutive poll_placed_orders() errors for the same
+# order, stop polling silently and escalate to FAILED (which retry_failed_orders
+# then picks up) instead of stalling in PLACED forever with no signal.
+_MAX_POLL_FAILURES = int(os.getenv("FULFILLMENT_POLL_FAILURE_LIMIT", "5"))
+# Cap on FAILED->PLACED retry attempts before an order is left FAILED for
+# good (surfaced via the Tier 3 supplier_placement_failures alert).
+_MAX_FULFILLMENT_ATTEMPTS = int(os.getenv("FULFILLMENT_MAX_ATTEMPTS", "3"))
+
 
 def _live() -> bool:
     return os.getenv("FULFILLMENT_LIVE", "false").lower() == "true"
@@ -59,7 +67,15 @@ def route_order(order: Any) -> Any | None:
     except Exception:
         pass
 
-    quote = find_best_supplier(entry.title if entry else order.product_id)
+    try:
+        quote = find_best_supplier(entry.title if entry else order.product_id)
+    except Exception:
+        # _place_one_order's docstring promises "never raises" — a bad
+        # quote lookup here must not propagate out of process_new_orders()'s
+        # list comprehension and abort the rest of the batch silently.
+        _log.warning("route_order_fallback_quote_failed order=%s", order.order_id,
+                    exc_info=True)
+        quote = None
     if quote:
         return get_client(quote.supplier)
     return None
@@ -71,7 +87,8 @@ def _journal_workflow(workflow_id: str, event: str, **data) -> None:
         event_store.append(workflow_id, event, workflow="fulfillment",
                            step="place_order", data=data)
     except Exception:
-        pass
+        _log.warning("fulfillment_journal_failed workflow_id=%s event=%s",
+                    workflow_id, event, exc_info=True)
 
 
 def _place_one_order(order: Any) -> dict[str, Any]:
@@ -91,6 +108,8 @@ def _place_one_order(order: Any) -> dict[str, Any]:
         if _live():
             order_repository.update_fulfillment(order.order_id, "FAILED")
         return {"order_id": order.order_id, "status": "no_supplier"}
+
+    order_repository.increment_fulfillment_attempts(order.order_id)
 
     from backend.commerce.catalog import product_catalog
     entry = product_catalog.get(order.product_id)
@@ -151,6 +170,35 @@ def process_new_orders(limit: int = 50) -> dict[str, Any]:
            "placed": placed, "failed": failed, "results": results}
 
 
+def retry_failed_orders(limit: int = 50, max_attempts: int = _MAX_FULFILLMENT_ATTEMPTS) -> dict[str, Any]:
+    """Re-attempt placement for FAILED orders — the state machine has always
+    allowed FAILED->PLACED, but nothing called it, so an order that failed
+    routing/placement (transient supplier error, brief no-supplier-bound
+    window) was stranded forever. Capped by fulfillment_attempts so a
+    permanently broken order doesn't retry indefinitely; orders at the cap
+    are left FAILED and surface via the supplier_placement_failures alert."""
+    from backend.data.repositories.order_repository import order_repository
+
+    orders = order_repository.orders_by_status("FAILED", limit=limit)
+    if not orders:
+        return {"status": "skipped", "reason": "no_failed_orders"}
+
+    retried = 0
+    exhausted = 0
+    results = []
+    for order in orders:
+        if order.fulfillment_attempts >= max_attempts:
+            exhausted += 1
+            continue
+        result = _place_one_order(order)
+        results.append(result)
+        if result["status"] == "placed":
+            retried += 1
+
+    return {"status": "ok", "checked": len(orders), "retried": retried,
+           "exhausted": exhausted, "results": results}
+
+
 def poll_placed_orders(limit: int = 50) -> dict[str, Any]:
     """Poll supplier status for every PLACED order, advancing SHIPPED/DELIVERED.
 
@@ -165,14 +213,30 @@ def poll_placed_orders(limit: int = 50) -> dict[str, Any]:
         return {"status": "skipped", "reason": "no_placed_orders"}
 
     advanced = 0
+    escalated = 0
     for order in orders:
         client = get_client(order.supplier_name)
         if client is None or not order.supplier_order_id:
             continue
         try:
             status = client.order_status(order.supplier_order_id)
-        except Exception:
+        except Exception as exc:
+            failures = order_repository.increment_poll_failures(order.order_id)
+            _log.warning("supplier_status_poll_failed order=%s supplier=%s "
+                        "consecutive_failures=%d error=%s",
+                        order.order_id, order.supplier_name, failures, exc)
+            if failures >= _MAX_POLL_FAILURES:
+                # Repeated polling errors are indistinguishable from a
+                # genuinely stuck order — stop stalling silently in PLACED
+                # and let retry_failed_orders() (and the Tier 3 alert) take
+                # over rather than nothing ever noticing.
+                order_repository.update_fulfillment(order.order_id, "FAILED")
+                _feed_supplier_reliability(order, delivered=False)
+                escalated += 1
             continue
+
+        if order.poll_failures:
+            order_repository.reset_poll_failures(order.order_id)
 
         mapped = status.get("status", "")
         if mapped == "shipped":
@@ -186,9 +250,13 @@ def poll_placed_orders(limit: int = 50) -> dict[str, Any]:
             order_repository.update_fulfillment(order.order_id, "FAILED")
             advanced += 1
             _feed_supplier_reliability(order, delivered=False)
+        elif mapped == "unknown":
+            _log.warning("supplier_status_unrecognized order=%s supplier=%s "
+                        "supplier_order_id=%s", order.order_id,
+                        order.supplier_name, order.supplier_order_id)
 
-    return {"status": "ok" if advanced else "skipped",
-           "checked": len(orders), "advanced": advanced}
+    return {"status": "ok" if (advanced or escalated) else "skipped",
+           "checked": len(orders), "advanced": advanced, "escalated": escalated}
 
 
 def _feed_supplier_reliability(order: Any, delivered: bool) -> None:

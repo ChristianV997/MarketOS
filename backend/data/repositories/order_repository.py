@@ -9,7 +9,9 @@ Mirrors roas_repository.py's sqlite3-at-data/marketos.db idiom.
 Fulfillment lifecycle:
     RECEIVED -> PLACED -> SHIPPED -> DELIVERED
                     \\-> FAILED        (supplier rejection / error)
-    RECEIVED -> REFUNDED               (cancellation before placement)
+    RECEIVED/PLACED/SHIPPED/DELIVERED -> REFUNDED   (cancellation, or a
+                                          post-fulfillment refund/chargeback
+                                          arriving after the order shipped)
 """
 from __future__ import annotations
 
@@ -26,9 +28,9 @@ FULFILLMENT_STATES = ["RECEIVED", "PLACED", "SHIPPED", "DELIVERED", "FAILED", "R
 
 _VALID_TRANSITIONS = {
     "RECEIVED": {"PLACED", "FAILED", "REFUNDED"},
-    "PLACED": {"SHIPPED", "DELIVERED", "FAILED"},
-    "SHIPPED": {"DELIVERED", "FAILED"},
-    "DELIVERED": set(),
+    "PLACED": {"SHIPPED", "DELIVERED", "FAILED", "REFUNDED"},
+    "SHIPPED": {"DELIVERED", "FAILED", "REFUNDED"},
+    "DELIVERED": {"REFUNDED"},
     "FAILED": {"PLACED"},          # retry after failure is allowed
     "REFUNDED": set(),
 }
@@ -61,6 +63,22 @@ class CommerceOrder:
     fulfillment_status: str = "RECEIVED"
     supplier_name: str = ""
     supplier_order_id: str = ""
+    # Stripe PaymentIntent id (present once a Checkout Session's payment
+    # completes) — the only reliable key to map a later charge.refunded /
+    # payment_intent.payment_failed / charge.dispute.created event back to
+    # this order, since those events reference the charge/PI, not the
+    # Checkout Session id we use as order_id.
+    payment_intent_id: str = ""
+    # side_effects_done: whether the ROAS mirror / LTV feed / order_received
+    # journal (backend.commerce.orders.ingest_order) have all completed at
+    # least once. Tracked separately from fulfillment_status/record_order's
+    # own dedupe so a crash between the INSERT and those three side effects
+    # can be detected and self-healed by _run_order_reconciliation instead
+    # of silently skipping them forever (a webhook retry finds the order
+    # already recorded and, without this flag, would never re-attempt them).
+    side_effects_done: bool = False
+    fulfillment_attempts: int = 0   # PLACED attempts consumed (caps FAILED->PLACED retries)
+    poll_failures: int = 0          # consecutive poll_placed_orders() errors for this order
     created_at: str = ""
     updated_at: str = ""
 
@@ -109,6 +127,10 @@ class OrderRepository:
                     fulfillment_status TEXT,
                     supplier_name TEXT,
                     supplier_order_id TEXT,
+                    payment_intent_id TEXT,
+                    side_effects_done INTEGER DEFAULT 0,
+                    fulfillment_attempts INTEGER DEFAULT 0,
+                    poll_failures INTEGER DEFAULT 0,
                     created_at TEXT,
                     updated_at TEXT
                 )
@@ -120,11 +142,44 @@ class OrderRepository:
                     ts TEXT
                 )
             """)
+            self._migrate_commerce_orders_columns(conn)
             conn.commit()
         finally:
             conn.close()
 
+    @staticmethod
+    def _migrate_commerce_orders_columns(conn: sqlite3.Connection) -> None:
+        """Add columns introduced after the table's original CREATE TABLE to
+        any pre-existing on-disk db (sqlite has no ADD COLUMN IF NOT EXISTS
+        prior to 3.35, so check PRAGMA table_info explicitly)."""
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(commerce_orders)")}
+        for column, ddl in (
+            ("payment_intent_id", "TEXT"),
+            ("side_effects_done", "INTEGER DEFAULT 0"),
+            ("fulfillment_attempts", "INTEGER DEFAULT 0"),
+            ("poll_failures", "INTEGER DEFAULT 0"),
+        ):
+            if column not in existing:
+                conn.execute(f"ALTER TABLE commerce_orders ADD COLUMN {column} {ddl}")
+
     # ── webhook dedupe ───────────────────────────────────────────────────
+
+    def event_already_seen(self, event_id: str) -> bool:
+        """Read-only check — does NOT mark the event seen. Used to fast-path
+        a genuine webhook retry before processing, while the actual
+        mark-seen commit happens only after processing succeeds (see
+        api/routes/webhooks.py) so a transient processing failure doesn't
+        permanently blackhole the event."""
+        if not event_id:
+            return False
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM webhook_events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return row is not None
 
     def mark_event_seen(self, event_id: str, source: str = "") -> bool:
         """Record a webhook event id. Returns False if already seen (duplicate)."""
@@ -190,13 +245,15 @@ class OrderRepository:
                 """INSERT INTO commerce_orders
                    (order_id, source, brand_id, product_id, qty, amount, currency,
                     customer_id, utm_json, fulfillment_status, supplier_name,
-                    supplier_order_id, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    supplier_order_id, payment_intent_id, side_effects_done,
+                    fulfillment_attempts, poll_failures, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (order.order_id, order.source, order.brand_id, order.product_id,
                  order.qty, order.amount, order.currency, order.customer_id,
                  json.dumps(order.utm), order.fulfillment_status,
-                 order.supplier_name, order.supplier_order_id,
-                 order.created_at, order.updated_at),
+                 order.supplier_name, order.supplier_order_id, order.payment_intent_id,
+                 int(order.side_effects_done), order.fulfillment_attempts,
+                 order.poll_failures, order.created_at, order.updated_at),
             )
             conn.commit()
             return True
@@ -205,13 +262,18 @@ class OrderRepository:
         finally:
             conn.close()
 
+    _SELECT_COLUMNS = (
+        "order_id, source, brand_id, product_id, qty, amount, currency, "
+        "customer_id, utm_json, fulfillment_status, supplier_name, "
+        "supplier_order_id, payment_intent_id, side_effects_done, "
+        "fulfillment_attempts, poll_failures, created_at, updated_at"
+    )
+
     def get_order(self, order_id: str) -> CommerceOrder | None:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT order_id, source, brand_id, product_id, qty, amount, currency, "
-                "customer_id, utm_json, fulfillment_status, supplier_name, "
-                "supplier_order_id, created_at, updated_at "
+                f"SELECT {self._SELECT_COLUMNS} "
                 "FROM commerce_orders WHERE order_id = ?", (order_id,)
             ).fetchone()
         finally:
@@ -222,11 +284,41 @@ class OrderRepository:
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT order_id, source, brand_id, product_id, qty, amount, currency, "
-                "customer_id, utm_json, fulfillment_status, supplier_name, "
-                "supplier_order_id, created_at, updated_at "
+                f"SELECT {self._SELECT_COLUMNS} "
                 "FROM commerce_orders WHERE fulfillment_status = ? "
                 "ORDER BY created_at LIMIT ?", (status, limit)
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._row_to_order(r) for r in rows]
+
+    def get_order_by_payment_intent(self, payment_intent_id: str) -> CommerceOrder | None:
+        """Look up an order by its Stripe PaymentIntent id — the only key a
+        charge.refunded / payment_intent.payment_failed / charge.dispute.created
+        event carries back to us (those reference the charge/PI, not our
+        Checkout-Session-derived order_id)."""
+        if not payment_intent_id:
+            return None
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                f"SELECT {self._SELECT_COLUMNS} "
+                "FROM commerce_orders WHERE payment_intent_id = ?", (payment_intent_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return self._row_to_order(row) if row else None
+
+    def orders_missing_side_effects(self, limit: int = 100) -> list[CommerceOrder]:
+        """Orders recorded but whose ROAS/LTV/journal side effects never
+        completed (e.g. a crash between record_order() succeeding and those
+        three feeds finishing) — consumed by the order-reconciliation worker."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"SELECT {self._SELECT_COLUMNS} "
+                "FROM commerce_orders WHERE side_effects_done = 0 "
+                "ORDER BY created_at LIMIT ?", (limit,)
             ).fetchall()
         finally:
             conn.close()
@@ -264,6 +356,64 @@ class OrderRepository:
         finally:
             conn.close()
 
+    def mark_side_effects_done(self, order_id: str) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE commerce_orders SET side_effects_done = 1 WHERE order_id = ?",
+                (order_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def increment_fulfillment_attempts(self, order_id: str) -> int:
+        """Bump and return the new fulfillment_attempts count (caps FAILED->PLACED retries)."""
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE commerce_orders SET fulfillment_attempts = fulfillment_attempts + 1 "
+                "WHERE order_id = ?", (order_id,),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT fulfillment_attempts FROM commerce_orders WHERE order_id = ?",
+                (order_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return int(row[0]) if row else 0
+
+    def increment_poll_failures(self, order_id: str) -> int:
+        """Bump and return the new poll_failures count for a supplier-status
+        poll error, so repeated failures can escalate to FAILED instead of
+        stalling in PLACED forever."""
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE commerce_orders SET poll_failures = poll_failures + 1 "
+                "WHERE order_id = ?", (order_id,),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT poll_failures FROM commerce_orders WHERE order_id = ?",
+                (order_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return int(row[0]) if row else 0
+
+    def reset_poll_failures(self, order_id: str) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE commerce_orders SET poll_failures = 0 WHERE order_id = ?",
+                (order_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     @staticmethod
     def _row_to_order(row) -> CommerceOrder:
         return CommerceOrder(
@@ -273,7 +423,10 @@ class OrderRepository:
             customer_id=row[7] or "", utm=json.loads(row[8] or "{}"),
             fulfillment_status=row[9] or "RECEIVED",
             supplier_name=row[10] or "", supplier_order_id=row[11] or "",
-            created_at=row[12] or "", updated_at=row[13] or "",
+            payment_intent_id=row[12] or "",
+            side_effects_done=bool(row[13]), fulfillment_attempts=int(row[14] or 0),
+            poll_failures=int(row[15] or 0),
+            created_at=row[16] or "", updated_at=row[17] or "",
         )
 
 

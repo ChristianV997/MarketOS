@@ -100,12 +100,23 @@ def reconcile_brand(brand: Any) -> dict[str, Any]:
     if live:
         storefront = get_storefront(brand)
         for action in actions:
-            if action["action"] == "pause_stockout":
-                storefront.update_product(brand, action["product_id"],
-                                          status=STATUS_PAUSED, stock_ok=False)
-            elif action["action"] == "reprice":
-                storefront.update_product(brand, action["product_id"],
-                                          price=action["new_price"])
+            # Each action applies independently so one storefront failure
+            # doesn't abort the rest of the batch and lose track of which
+            # actions actually landed — action["applied"] is the audit trail.
+            try:
+                if action["action"] == "pause_stockout":
+                    storefront.update_product(brand, action["product_id"],
+                                              status=STATUS_PAUSED, stock_ok=False)
+                elif action["action"] == "reprice":
+                    storefront.update_product(brand, action["product_id"],
+                                              price=action["new_price"])
+                action["applied"] = True
+            except Exception as exc:
+                action["applied"] = False
+                action["apply_error"] = str(exc)
+                _log.warning("inventory_sync_apply_failed brand=%s product=%s action=%s error=%s",
+                            brand.brand_id, action["product_id"], action["action"], exc,
+                            exc_info=True)
 
     _journal(brand.brand_id, actions, live)
 
@@ -123,7 +134,7 @@ def _journal(brand_id: str, actions: list[dict], live: bool) -> None:
             data={"brand_id": brand_id, "actions": actions, "live": live},
         )
     except Exception:
-        pass
+        _log.warning("inventory_sync_journal_failed brand=%s", brand_id, exc_info=True)
 
 
 def reconcile_all_brands() -> dict[str, Any]:

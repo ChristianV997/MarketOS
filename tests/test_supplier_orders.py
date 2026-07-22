@@ -96,3 +96,37 @@ class TestLiveOrderPlacementNotImplementedForUnfinishedSuppliers:
         client = ZendropClient()
         with pytest.raises(NotImplementedError):
             client._live_place_order(_order())
+
+
+class TestCJLiveOrderStatusMapping:
+    """Tier 1 fix: an unrecognized/cancelled CJ status must never be
+    silently reported as a healthy in-progress order."""
+
+    def _status_response(self, order_status: str, monkeypatch):
+        monkeypatch.setenv("CJ_API_KEY", "fake")
+
+        class _FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"data": {"orderStatus": order_status}}
+
+        monkeypatch.setattr("requests.get", lambda *a, **kw: _FakeResponse())
+        return CJDropshippingClient()._live_order_status("cj_so_1")
+
+    def test_cancelled_maps_to_failed(self, monkeypatch):
+        result = self._status_response("CANCELLED", monkeypatch)
+        assert result["status"] == "failed"
+
+    def test_exception_status_maps_to_failed(self, monkeypatch):
+        result = self._status_response("EXCEPTION", monkeypatch)
+        assert result["status"] == "failed"
+
+    def test_unrecognized_status_maps_to_unknown_not_placed(self, monkeypatch):
+        result = self._status_response("SOME_NEW_CJ_STATUS", monkeypatch)
+        assert result["status"] == "unknown"
+
+    def test_known_in_progress_statuses_still_map_to_placed(self, monkeypatch):
+        assert self._status_response("CREATED", monkeypatch)["status"] == "placed"
+        assert self._status_response("IN_PRODUCTION", monkeypatch)["status"] == "placed"

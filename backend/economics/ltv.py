@@ -79,8 +79,13 @@ class CohortTracker:
         # category -> observed repeat count / total orders eligible to repeat
         self._repeat_counts: dict[str, int] = {}
         self._total_counts: dict[str, int] = {}
+        # order ids already recorded — lets callers safely retry
+        # record_order() for the same order (e.g. a crash-recovery retry in
+        # backend.commerce.orders._run_side_effects) without double-counting.
+        self._recorded_order_ids: set[str] = set()
 
-    def record_order(self, customer_id: str, category: str, ts: float | None = None) -> bool:
+    def record_order(self, customer_id: str, category: str, ts: float | None = None,
+                     order_id: str = "") -> bool:
         """Record one order; returns True if it was detected as a repeat.
 
         A missing/empty ``customer_id`` cannot be linked across orders (no
@@ -88,7 +93,16 @@ class CohortTracker:
         a first-order-only observation and never counts toward
         ``_repeat_counts``, matching the honest "no signal" default used
         throughout this codebase's other adaptive modules.
+
+        Pass ``order_id`` when the same logical order could plausibly be
+        recorded more than once (webhook retry after a partial crash) — a
+        repeat order_id is a no-op instead of double-counting.
         """
+        if order_id:
+            if order_id in self._recorded_order_ids:
+                return False
+            self._recorded_order_ids.add(order_id)
+
         ts = time.time() if ts is None else ts
         self._total_counts[category] = self._total_counts.get(category, 0) + 1
 

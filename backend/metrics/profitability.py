@@ -83,6 +83,14 @@ def _stripe_ground_truth(lookback_days: int) -> float | None:
     try:
         from connectors.stripe_connector import get_revenue
         result = get_revenue(last_n_minutes=lookback_days * 24 * 60)
+        if result.get("source") != "live":
+            # Configured but the API call itself failed (network error,
+            # rotated/invalid key, Stripe outage) — get_revenue() falls back
+            # to nonzero mock charges in that case, which would otherwise
+            # silently inject phantom revenue into reconciliation with no
+            # indication anything went wrong.
+            _log.warning("stripe_ground_truth_degraded source=%s", result.get("source"))
+            return None
         revenue = float(result.get("total_revenue", 0.0))
         return revenue if revenue > 0 else None
     except Exception as exc:

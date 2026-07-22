@@ -118,6 +118,7 @@ def create_checkout_session(
                   "utm": utm, "dry_run": result["dry_run"]},
         )
     except Exception:
-        pass
+        _log.warning("checkout_session_journal_failed session_id=%s product=%s",
+                     result.get("session_id", ""), product_id, exc_info=True)
 
     return result
