@@ -466,6 +466,12 @@ try:
 except ImportError:
     pass
 
+try:
+    from api.routes.webhooks import router as _webhooks_router
+    app.include_router(_webhooks_router)
+except ImportError:
+    pass
+
 
 # ── WebSocket live event stream ────────────────────────────────────────────────
 

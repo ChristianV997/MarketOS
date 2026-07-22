@@ -16,7 +16,7 @@ import logging
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 _log = logging.getLogger(__name__)
 
@@ -103,3 +103,23 @@ def product_page(brand_id: str, product_id: str, request: Request) -> HTMLRespon
         f"<footer>{html.escape(brand.name)} — ships direct from our fulfillment partners</footer>"
     )
     return HTMLResponse(f"<style>{_PAGE_STYLE}</style>{body}")
+
+
+@router.get("/s/{brand_id}/{product_id}/checkout")
+def start_checkout(brand_id: str, product_id: str, request: Request):
+    """Create a Stripe Checkout Session and redirect the buyer to it.
+
+    The redirect target is informational only — actual order fulfillment
+    fires exclusively from the signed checkout.session.completed webhook
+    (api/routes/webhooks.py), never from this request completing.
+    """
+    from backend.commerce.checkout import create_checkout_session
+
+    utm = {k: v for k, v in request.query_params.items() if k.startswith("utm_")}
+    result = create_checkout_session(brand_id, product_id, qty=1, utm=utm)
+    if result.get("status") != "ok":
+        return HTMLResponse(
+            f"<h1>Checkout unavailable</h1><p>{html.escape(result.get('error', ''))}</p>",
+            status_code=409,
+        )
+    return RedirectResponse(url=result["url"], status_code=303)
