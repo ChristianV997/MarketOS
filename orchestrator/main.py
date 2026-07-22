@@ -147,6 +147,34 @@ def _run_sleep_consolidation() -> dict[str, Any]:
 _DROPSHIP_MIN_INTERVAL_S = float(os.getenv("DROPSHIP_MIN_INTERVAL_S", "900"))
 _dropship_limiter = RateLimiter(interval_s=_DROPSHIP_MIN_INTERVAL_S)
 
+_ORGANIC_POST_MIN_INTERVAL_S = float(os.getenv("ORGANIC_POST_MIN_INTERVAL_S", "21600"))
+_organic_post_limiter = RateLimiter(interval_s=_ORGANIC_POST_MIN_INTERVAL_S)
+
+_ENGAGEMENT_MIN_INTERVAL_S = float(os.getenv("ENGAGEMENT_MIN_INTERVAL_S", "3600"))
+_engagement_limiter = RateLimiter(interval_s=_ENGAGEMENT_MIN_INTERVAL_S)
+
+
+@worker_safe(rate_limiter=_organic_post_limiter)
+def _run_organic_posting() -> dict[str, Any]:
+    """Phase E: publish organic posts for catalog/playbook products (Postiz).
+
+    Dry-run by default (ORGANIC_DRY_RUN=true) — posts get deterministic dry
+    ids and the loop is fully rehearsable without credentials. This is the
+    owner's funnel step 1: organic validation BEFORE paid spend.
+    """
+    from backend.organic import run_organic_posting
+    return run_organic_posting()
+
+
+@worker_safe(rate_limiter=_engagement_limiter)
+def _run_engagement_ingestion() -> dict[str, Any]:
+    """Phase E: fetch organic post metrics and feed engagement_rate into the
+    content feedback loop (finally populating the field the classifier has
+    always read). The per-product rollup drives the Phase F organic->paid gate.
+    """
+    from backend.organic import ingest_engagement
+    return ingest_engagement()
+
 
 @worker_safe(rate_limiter=_dropship_limiter)
 def _run_dropship_pipeline() -> dict[str, Any]:
@@ -667,21 +695,23 @@ _PHASE_WORKERS: dict[Phase, list[Any]] = {
     Phase.RESEARCH:  [_run_simulation, _run_signal_ingestion, _run_signal_ingestion,
                       _run_execution_cycle, _run_metrics_ingestion, _run_alerting],
     # EXPLORE: signal → simulate → execute × 2 → feedback → generate content
-    # → dropship cycle (rate-limited internally; usually a no-op between windows)
+    # → organic posting → dropship cycle (rate-limited internally)
     Phase.EXPLORE:   [_run_simulation, _run_signal_ingestion, _run_execution_cycle,
                       _run_execution_cycle, _run_feedback_collection,
-                      _run_content_generation, _run_dropship_pipeline,
+                      _run_content_generation, _run_organic_posting,
+                      _run_engagement_ingestion, _run_dropship_pipeline,
                       _run_metrics_ingestion, _run_alerting],
-    # VALIDATE: execution + feedback × 2 + metrics ingestion + sleep to close loop
+    # VALIDATE: execution + feedback × 2 + organic validation + metrics + sleep
     Phase.VALIDATE:  [_run_signal_ingestion, _run_execution_cycle,
                       _run_feedback_collection, _run_feedback_collection,
-                      _run_content_generation, _run_metrics_ingestion,
+                      _run_content_generation, _run_organic_posting,
+                      _run_engagement_ingestion, _run_metrics_ingestion,
                       _run_alerting, _run_sleep_consolidation],
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
     Phase.SCALE:     [_run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_scaling, _run_scaling,
                       _run_dropship_pipeline, _run_organic_channel_evaluation,
-                      _run_metrics_ingestion,
+                      _run_engagement_ingestion, _run_metrics_ingestion,
                       _run_budget_scaling, _run_alerting,
                       _run_sleep_consolidation],
 }
@@ -809,6 +839,8 @@ def run() -> None:
                     "_run_content_generation":  "content_generation_worker",
                     "_run_dropship_pipeline":   "dropship_pipeline_worker",
                     "_run_organic_channel_evaluation": "organic_channel_worker",
+                    "_run_organic_posting":     "organic_posting_worker",
+                    "_run_engagement_ingestion": "engagement_ingestion_worker",
                     "_run_metrics_ingestion":   "metrics_ingestion_worker",
                     "_run_budget_scaling":      "budget_scaling_worker",
                     "_run_alerting":            "alerting_worker",

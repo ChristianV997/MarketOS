@@ -179,3 +179,46 @@ class ContentCalendar:
 
 # Module singleton
 content_calendar = ContentCalendar(gap_threshold_days=7)
+
+
+# ── persistence (Phase E) ─────────────────────────────────────────────────────
+# The calendar previously lived only in memory; organic posting made it a
+# real bookkeeping surface, so it now snapshots to state/content_calendar.json
+# on every write (PlaybookMemory-style) and restores on import.
+
+def _persist_calendar() -> None:
+    try:
+        from backend.core.persistence import save_json_atomic, state_path
+        save_json_atomic(state_path("content_calendar.json"),
+                         {"posts": content_calendar.all_posts_as_dicts()})
+    except Exception:
+        pass  # persistence is best-effort, never disturbs callers
+
+
+def _wrap_persisting(method_name: str) -> None:
+    original = getattr(ContentCalendar, method_name)
+
+    def wrapper(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        if self is content_calendar:
+            _persist_calendar()
+        return result
+
+    setattr(ContentCalendar, method_name, wrapper)
+
+
+for _m in ("schedule_post", "mark_posted"):
+    _wrap_persisting(_m)
+
+
+def _restore_calendar() -> None:
+    try:
+        from backend.core.persistence import load_json, state_path
+        data = load_json(state_path("content_calendar.json"))
+        if data and data.get("posts"):
+            content_calendar.restore_from_dicts(data["posts"])
+    except Exception:
+        pass
+
+
+_restore_calendar()
