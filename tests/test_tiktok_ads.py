@@ -93,3 +93,60 @@ def test_launch_from_playbook_dry_run():
     assert result["dry_run"] is True
     assert result["campaign_id"]
     assert len(result["ad_ids"]) > 0
+
+
+class TestLiveRiskGateWiring:
+    """Tier 2 fix: real (non-dry-run) spend passes through backend.risk.gate
+    before ever reaching TikTok's API."""
+
+    def test_launch_from_playbook_live_blocked_by_kill_switch(self, monkeypatch):
+        import backend.integrations.tiktok_ads as tiktok_ads
+        monkeypatch.setattr(tiktok_ads, "_DRY_RUN", False)
+        calls = []
+        monkeypatch.setattr(tiktok_ads, "create_campaign",
+                            lambda **kw: calls.append(kw) or "should_not_be_called")
+
+        from backend.risk.gate import _engine
+        _engine().activate_kill_switch(reason="test")
+        try:
+            result = tiktok_ads.launch_from_playbook(
+                {"product": "widget", "top_hooks": ["H"], "top_angles": ["A"],
+                 "estimated_roas": 1.8},
+                phase="VALIDATE",
+            )
+        finally:
+            _engine().deactivate_kill_switch()
+
+        assert calls == []
+        assert result["status"] == "error"
+        assert "risk_gate_blocked" in result["reason"]
+
+    def test_scale_budget_live_gates_and_records_only_the_delta(self, monkeypatch):
+        import backend.integrations.tiktok_ads as tiktok_ads
+        monkeypatch.setattr(tiktok_ads, "_DRY_RUN", False)
+        monkeypatch.setattr(tiktok_ads, "_post", lambda path, payload: {"data": {}})
+
+        recorded = []
+        monkeypatch.setattr("backend.risk.gate.check_spend",
+                           lambda amount: recorded.append(("check", amount)) or
+                           {"allowed": True, "adjusted_amount": amount})
+        monkeypatch.setattr("backend.risk.gate.record_spend",
+                           lambda amount: recorded.append(("record", amount)))
+
+        ok = tiktok_ads.scale_budget("cid_1", new_budget=60.0, current_budget=40.0)
+        assert ok is True
+        # Only the $20 incremental increase is gated/recorded, not the full $60.
+        assert recorded == [("check", 20.0), ("record", 20.0)]
+
+    def test_scale_down_never_gated(self, monkeypatch):
+        import backend.integrations.tiktok_ads as tiktok_ads
+        monkeypatch.setattr(tiktok_ads, "_DRY_RUN", False)
+        monkeypatch.setattr(tiktok_ads, "_post", lambda path, payload: {"data": {}})
+
+        calls = []
+        monkeypatch.setattr("backend.risk.gate.check_spend",
+                           lambda amount: calls.append(amount) or {"allowed": True, "adjusted_amount": amount})
+
+        ok = tiktok_ads.scale_budget("cid_1", new_budget=20.0, current_budget=40.0)
+        assert ok is True
+        assert calls == []  # a reduction never needs to pass through the gate

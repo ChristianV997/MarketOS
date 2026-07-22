@@ -19,6 +19,16 @@ _log = logging.getLogger(__name__)
 _SPLIT = {"tiktok": 0.55, "meta": 0.45}
 
 
+def _platform_is_live(platform: str) -> bool:
+    if platform == "tiktok":
+        from backend.integrations import tiktok_ads
+        return not tiktok_ads._DRY_RUN
+    if platform == "meta":
+        from backend.integrations import meta_ads_client as meta
+        return not meta._is_dry_run()
+    return False
+
+
 def launch_product(
     build: dict[str, Any],
     budget_daily: float = 50.0,
@@ -29,6 +39,8 @@ def launch_product(
     Returns {status, product, campaigns: [{platform, campaign_id, ...}], total_budget}.
     status is "ok" if at least one platform launched, else "error".
     """
+    from backend.risk.gate import check_spend, record_spend
+
     product = build.get("product", "unknown")
     page_url = (build.get("page") or {}).get("url", "")
     ad_copy = build.get("ad_copy") or {}
@@ -39,26 +51,41 @@ def launch_product(
     campaigns: list[dict[str, Any]] = []
     for platform in platforms:
         budget = round(budget_daily * weights[platform] / total_w, 2)
+        live = _platform_is_live(platform)
+
+        # Only real (non-dry-run) spend passes through the risk gate — a
+        # dry-run launch never actually spends, so gating it would just be
+        # noise, and recording it would corrupt today_spend() with fake data.
+        if live:
+            gate = check_spend(budget)
+            if not gate["allowed"]:
+                campaigns.append({"platform": platform, "status": "error",
+                                  "error": f"risk_gate_blocked: {gate['reason']}"})
+                continue
+            budget = gate["adjusted_amount"]
+
         try:
             if platform == "tiktok":
-                campaigns.append(_launch_tiktok(product, page_url, budget,
-                                                ad_copy.get("tiktok") or {}))
+                result = _launch_tiktok(product, page_url, budget, ad_copy.get("tiktok") or {})
             elif platform == "meta":
-                campaigns.append(_launch_meta(product, page_url, budget,
-                                              ad_copy.get("meta") or {}))
+                result = _launch_meta(product, page_url, budget, ad_copy.get("meta") or {})
             else:
                 _log.debug("launch_unknown_platform platform=%s", platform)
+                continue
+            campaigns.append(result)
+            if live and result.get("status") == "live":
+                record_spend(budget)
         except Exception as exc:
             _log.exception("launch_platform_failed platform=%s product=%s", platform, product)
             campaigns.append({"platform": platform, "status": "error", "error": str(exc)})
 
-    live = [c for c in campaigns if c.get("status") == "live"]
+    live_campaigns = [c for c in campaigns if c.get("status") == "live"]
     return {
-        "status": "ok" if live else "error",
+        "status": "ok" if live_campaigns else "error",
         "product": product,
         "campaigns": campaigns,
-        "live_count": len(live),
-        "total_budget": round(sum(c.get("budget", 0.0) for c in live), 2),
+        "live_count": len(live_campaigns),
+        "total_budget": round(sum(c.get("budget", 0.0) for c in live_campaigns), 2),
     }
 
 

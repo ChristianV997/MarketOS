@@ -136,3 +136,41 @@ def test_launch_platform_failure_isolated(monkeypatch):
     assert by_platform["tiktok"]["status"] == "error"
     assert by_platform["meta"]["status"] == "live"
     assert result["status"] == "ok"   # one live platform is still a success
+
+
+class TestLaunchProductRiskGate:
+    """Tier 2 fix: a real (non-dry-run) launch consults backend.risk.gate
+    before ever calling the platform — a kill switch or exhausted daily cap
+    must block it with zero platform API calls, not just fail silently
+    after the fact."""
+
+    def test_dry_run_never_touches_the_risk_gate(self, monkeypatch):
+        # The default (dry-run) path is the overwhelming common case in
+        # tests/dev — it must be completely unaffected by the risk gate.
+        calls = []
+        monkeypatch.setattr("backend.risk.gate.check_spend",
+                           lambda amount: calls.append(amount) or {"allowed": True, "adjusted_amount": amount})
+        build = build_product(_green_verdict())
+        result = launch_product(build, budget_daily=50.0, platforms=("tiktok",))
+        assert result["status"] == "ok"
+        assert calls == []  # never consulted — dry-run isn't real spend
+
+    def test_kill_switch_blocks_live_launch_before_any_platform_call(self, monkeypatch):
+        import backend.launch.orchestrator as orch_mod
+        monkeypatch.setattr(orch_mod, "_platform_is_live", lambda platform: True)
+
+        platform_calls = []
+        monkeypatch.setattr("backend.integrations.tiktok_ads.create_campaign",
+                           lambda **kw: platform_calls.append(kw) or "should_not_be_called")
+
+        from backend.risk.gate import _engine
+        _engine().activate_kill_switch(reason="test")
+        try:
+            build = build_product(_green_verdict())
+            result = launch_product(build, budget_daily=50.0, platforms=("tiktok",))
+        finally:
+            _engine().deactivate_kill_switch()
+
+        assert platform_calls == []  # blocked before the platform was ever touched
+        assert result["campaigns"][0]["status"] == "error"
+        assert "risk_gate_blocked" in result["campaigns"][0]["error"]

@@ -106,6 +106,33 @@ def pause_campaign(campaign_id: str) -> bool:
     return ok
 
 
+@safe_call(default=False)
+def update_ad_set_budget(ad_set_id: str, new_budget: float, current_budget: float = 0.0) -> bool:
+    """Update an ad set's daily budget for scaling winners — Meta's mirror
+    of tiktok_ads.scale_budget(), same shape and same risk-gate treatment:
+    only the incremental increase over *current_budget* is gated/recorded
+    as new spend commitment; a scale-down/kill is never blocked."""
+    delta = max(0.0, new_budget - current_budget)
+    committed_delta = delta
+    if not _is_dry_run() and delta > 0:
+        from backend.risk.gate import check_spend
+        gate = check_spend(delta)
+        if not gate["allowed"]:
+            _log.warning("meta_budget_scale_blocked_by_risk_gate id=%s reason=%s",
+                        ad_set_id, gate["reason"])
+            return False
+        committed_delta = gate["adjusted_amount"]
+        new_budget = current_budget + committed_delta
+
+    resp = _graph_post(ad_set_id, {"daily_budget": int(round(new_budget * 100))})
+    ok = bool(resp)
+    _log.info("meta_adset_budget_scaled id=%s budget=%s ok=%s", ad_set_id, new_budget, ok)
+    if ok and not _is_dry_run() and committed_delta > 0:
+        from backend.risk.gate import record_spend
+        record_spend(committed_delta)
+    return ok
+
+
 @safe_call(default="")
 def create_ad_set(campaign_id: str, name: str, daily_budget: float = 50.0) -> str:
     """Create an ad set under a campaign. Returns ad_set_id ('' on failure)."""

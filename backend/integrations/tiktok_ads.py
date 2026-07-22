@@ -191,14 +191,40 @@ def pause_campaign(campaign_id: str) -> bool:
 
 
 @safe_call(default=False)
-def scale_budget(campaign_id: str, new_budget: float) -> bool:
-    """Update campaign daily budget for scaling winners."""
+def scale_budget(campaign_id: str, new_budget: float, current_budget: float = 0.0) -> bool:
+    """Update campaign daily budget for scaling winners.
+
+    Real (non-dry-run) budget increases pass through the risk gate first —
+    a scale-down/kill (new_budget <= current_budget) never gets blocked
+    since it reduces spend, not increases it. Only the incremental
+    increase over *current_budget* is gated/recorded as new spend commitment
+    (not the full new_budget every call, which would overcount cumulative
+    spend across repeated scale-ups of the same campaign); when the caller
+    doesn't know the prior budget, current_budget defaults to 0 — the
+    conservative choice, since it treats the full new_budget as newly
+    committed rather than under-counting.
+    """
+    delta = max(0.0, new_budget - current_budget)
+    committed_delta = delta
+    if not _DRY_RUN and delta > 0:
+        from backend.risk.gate import check_spend
+        gate = check_spend(delta)
+        if not gate["allowed"]:
+            _log.warning("budget_scale_blocked_by_risk_gate id=%s reason=%s",
+                        campaign_id, gate["reason"])
+            return False
+        committed_delta = gate["adjusted_amount"]
+        new_budget = current_budget + committed_delta
+
     _post("/campaign/update/", {
         "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
         "campaign_id": campaign_id,
         "budget": round(new_budget, 2),
     })
     _log.info("tiktok_budget_scaled id=%s budget=%s", campaign_id, new_budget)
+    if not _DRY_RUN and committed_delta > 0:
+        from backend.risk.gate import record_spend
+        record_spend(committed_delta)
     return True
 
 
@@ -260,7 +286,7 @@ def check_and_act(
         streak.pop(0)
     if len(streak) >= _SCALE_WIN_STREAK and all(r >= 1.5 for r in streak):
         new_budget = round(budget * _SCALE_MULTIPLIER, 2)
-        scale_budget(campaign_id, new_budget)
+        scale_budget(campaign_id, new_budget, current_budget=budget)
         _roas_streaks[campaign_id] = []  # reset streak after scaling
         return f"scaled_to_{new_budget}"
 
@@ -278,6 +304,15 @@ def launch_from_playbook(playbook: dict, phase: str = "EXPLORE") -> dict:
     hooks   = playbook.get("top_hooks", ["This changed everything…"])
     angles  = playbook.get("top_angles", ["Problem-solution"])
     budget  = playbook.get("estimated_roas", 1.0) * _BUDGET_DAILY
+
+    if not _DRY_RUN:
+        from backend.risk.gate import check_spend
+        gate = check_spend(budget)
+        if not gate["allowed"]:
+            _log.warning("playbook_launch_blocked_by_risk_gate product=%s reason=%s",
+                        product, gate["reason"])
+            return {"status": "error", "reason": f"risk_gate_blocked: {gate['reason']}"}
+        budget = gate["adjusted_amount"]
 
     campaign_id = create_campaign(
         name=f"marketos_{product}_{phase}_{int(time.time())}",
@@ -299,6 +334,10 @@ def launch_from_playbook(playbook: dict, phase: str = "EXPLORE") -> dict:
         )
         if ad_id:
             ad_ids.append(ad_id)
+
+    if not _DRY_RUN:
+        from backend.risk.gate import record_spend
+        record_spend(budget)
 
     return {
         "status": "ok",

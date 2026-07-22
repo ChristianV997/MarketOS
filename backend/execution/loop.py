@@ -391,6 +391,16 @@ def run_cycle(state):
     portfolio_ingest(results)
 
     # auto_kill: pause underperforming campaigns via AJO (ROAS < 0.5)
+    # This is a second, independent kill/scale decision system alongside
+    # backend.optimization.budget_scaling — AJO campaigns never appear in
+    # campaign_metrics.jsonl (no record_metric() call site emits platform
+    # "ajo"), and AJO's scale_campaign() takes a budget_multiplier with no
+    # absolute dollar figure exposed, so there's nothing to gate against
+    # backend.risk.gate the way TikTok/Meta spend is. Rather than force a
+    # fake dollar amount through the shared gate, this stays a separate,
+    # narrower decision path — but its actuation failures must be visible,
+    # not silently swallowed (a failed pause here means a flagged-for-kill
+    # campaign keeps spending with zero signal anywhere).
     _cycle_kill = {
         str(r.get("action", {}).get("variant", ""))
         for r in results
@@ -401,9 +411,12 @@ def run_cycle(state):
             from backend.integrations.adobe_ajo import pause_campaign, is_configured as _ajo_ok
             if _ajo_ok():
                 for cid in _cycle_kill:
-                    pause_campaign(cid)
-        except Exception:
-            pass
+                    result = pause_campaign(cid)
+                    if result.get("error"):
+                        _log.error("ajo_pause_failed campaign=%s error=%s",
+                                  cid, result["error"])
+        except Exception as exc:
+            _log.error("ajo_auto_kill_failed error=%s", exc, exc_info=True)
 
     # amplifier: scale high-ROAS campaigns via AJO (ROAS > 2.0)
     _amplified_ids = [
@@ -416,9 +429,12 @@ def run_cycle(state):
             from backend.integrations.adobe_ajo import scale_campaign, is_configured as _ajo_ok
             if _ajo_ok():
                 for cid in _amplified_ids[-5:]:
-                    scale_campaign(cid)
-        except Exception:
-            pass
+                    result = scale_campaign(cid)
+                    if result.get("error"):
+                        _log.error("ajo_scale_failed campaign=%s error=%s",
+                                  cid, result["error"])
+        except Exception as exc:
+            _log.error("ajo_amplifier_failed error=%s", exc, exc_info=True)
 
     try:
         state = learn(state, results)
