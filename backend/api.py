@@ -180,6 +180,11 @@ def _research_runner():
 @app.on_event("startup")
 async def _startup():
     global _state, _bg_running
+    try:
+        from backend.observability.sentry_init import init_sentry
+        init_sentry(component="api")
+    except Exception:
+        pass
     from backend.core.serializer import load
     loaded = load(STATE_PATH)
     if loaded:
@@ -430,6 +435,22 @@ app.include_router(_r_agents_risk.router)
 app.include_router(_r_tiktok.router)
 app.include_router(_r_simulation.router)
 app.include_router(_r_orchestration.router)
+
+
+# ── Prometheus scrape endpoint ────────────────────────────────────────────────
+# Mounted at /metrics/prometheus, not /metrics — that path is already the JSON
+# dashboard-metrics route above (api/routes/metrics.py). The Counter/Gauge/
+# Histogram objects declared near the top of this file were being updated on
+# every cycle (see _prom_cycles.inc() etc. below) but nothing ever actually
+# exposed them over HTTP for a real Prometheus server to scrape — this ASGI
+# mount is that missing piece. monitoring/prometheus.yml's scrape config
+# points at this exact path.
+if _PROMETHEUS_OK:
+    try:
+        from prometheus_client import make_asgi_app
+        app.mount("/metrics/prometheus", make_asgi_app())
+    except ImportError:
+        pass
 
 
 # ── UPOS compatibility routes (optional — imported only when present) ──────────

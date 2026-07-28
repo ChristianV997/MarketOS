@@ -830,6 +830,11 @@ except ImportError:
 def run() -> None:
     """Run the orchestrator loop indefinitely."""
     _log.info("orchestrator_starting tick_interval=%s", TICK_INTERVAL)
+    try:
+        from backend.observability.sentry_init import init_sentry
+        init_sentry(component="orchestrator")
+    except Exception:
+        pass
     _init_prometheus()
 
     while True:

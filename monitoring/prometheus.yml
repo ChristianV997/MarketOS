@@ -1,0 +1,27 @@
+# Prometheus scrape config for the local docker-compose stack.
+#
+# docker-compose.yml's `prometheus` service already bind-mounts this file
+# (as ./monitoring/prometheus.yml) but the file itself didn't exist yet —
+# Tier 3 of the consolidation plan wires up observability that was declared
+# but never actually connected. Target hostnames are docker-compose service
+# names, resolvable only inside that network.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # backend/api.py's business metrics (marketos_cycles_total,
+  # marketos_capital_usd, marketos_avg_roas, marketos_regime,
+  # marketos_cycle_duration_s) — mounted at /metrics/prometheus, not
+  # /metrics (that path is the existing JSON dashboard-metrics route).
+  - job_name: marketos_api
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets: ["api:3000"]
+
+  # orchestrator/main.py's own start_http_server(9200) — phase gauge,
+  # cycle counter, worker-dispatch counter.
+  - job_name: marketos_orchestrator
+    static_configs:
+      - targets: ["orchestrator:9200"]

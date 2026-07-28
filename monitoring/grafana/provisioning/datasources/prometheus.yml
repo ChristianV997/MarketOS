@@ -1,0 +1,14 @@
+# Auto-provisions the Prometheus datasource on Grafana startup so
+# "point a Grafana instance at the already-wired Prometheus /metrics
+# endpoint" (Tier 3) doesn't require manual UI setup every time the stack
+# is recreated. Mounted into Grafana's provisioning directory by
+# docker-compose.yml.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
