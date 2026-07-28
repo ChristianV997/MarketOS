@@ -34,6 +34,77 @@ def test_trend_mapping_transforms_payload_to_canonical_entity():
     assert record["raw"] == raw
 
 
+class TestTrendspygFetch:
+    """trendspyg's RSS downloader (no Selenium/browser needed) replaced the
+    hand-scrape of Google's undocumented dailytrends endpoint as the
+    primary fetch path — to_canonical()'s intent/velocity/competition
+    derivation is unchanged, only the data source."""
+
+    def test_fetch_uses_trendspyg_when_available(self, monkeypatch):
+        import backend.adapters.research.trend_source_v1 as mod
+
+        fake_trends = [
+            {
+                "trend": "best buy laptop deals",
+                "traffic": "200K+",
+                "news_articles": [{"headline": "a"}, {"headline": "b"}],
+            },
+        ]
+        monkeypatch.setattr(
+            mod._trendspyg, "download_google_trends_rss",
+            lambda **kw: fake_trends,
+        )
+
+        adapter = mod.GoogleTrendsAdapterV1(max_pages=1)
+        records = adapter.fetch()
+
+        assert records == [{
+            "title": {"query": "best buy laptop deals"},
+            "formattedTraffic": "200K+",
+            "articles": [{"headline": "a"}, {"headline": "b"}],
+        }]
+        # to_canonical() is unchanged and still parses this reshaped record
+        canonical = adapter.to_canonical(records[0])
+        assert canonical["topic"] == "best buy laptop deals"
+        assert canonical["intent"] == "buy"
+
+    def test_fetch_falls_back_to_legacy_on_trendspyg_failure(self, monkeypatch):
+        import backend.adapters.research.trend_source_v1 as mod
+
+        def _boom(**kw):
+            raise RuntimeError("trendspyg network error")
+
+        monkeypatch.setattr(mod._trendspyg, "download_google_trends_rss", _boom)
+
+        legacy_calls = []
+        monkeypatch.setattr(
+            mod.GoogleTrendsAdapterV1, "_fetch_legacy",
+            lambda self: legacy_calls.append(1) or [],
+        )
+
+        adapter = mod.GoogleTrendsAdapterV1(max_pages=1)
+        records = adapter.fetch()
+
+        assert records == []
+        assert legacy_calls == [1]
+
+    def test_fetch_uses_legacy_path_when_trendspyg_unavailable(self, monkeypatch):
+        import backend.adapters.research.trend_source_v1 as mod
+        monkeypatch.setattr(mod, "_trendspyg", None)
+
+        legacy_calls = []
+        monkeypatch.setattr(
+            mod.GoogleTrendsAdapterV1, "_fetch_legacy",
+            lambda self: legacy_calls.append(1) or [],
+        )
+
+        adapter = mod.GoogleTrendsAdapterV1(max_pages=1)
+        records = adapter.fetch()
+
+        assert records == []
+        assert legacy_calls == [1]
+
+
 def test_error_classification_for_http_status_codes():
     assert classify_http_error(429) == "rate_limit"
     assert classify_http_error(503) == "server"

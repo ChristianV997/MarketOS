@@ -26,8 +26,13 @@ _STATUS_NOT_REGISTERED = "not_registered"
 
 # Sources known to have an honest mock-only or mock-fallback tier even when
 # fetch succeeds (i.e. a nonzero count doesn't necessarily mean real data).
-_MOCK_ONLY_SOURCES = {"alibaba"}
-_MOCK_FALLBACK_SOURCES = {"amazon_bestsellers", "tiktok_organic"}
+# alibaba moved from mock_only to mock_fallback once its optional
+# Firecrawl-backed real path (gated by FIRECRAWL_API_KEY) was added — it's
+# no longer *permanently* mock, just conservatively treated the same as
+# every other scraper here whose real-data success isn't guaranteed
+# run-to-run.
+_MOCK_ONLY_SOURCES = set()
+_MOCK_FALLBACK_SOURCES = {"amazon_bestsellers", "tiktok_organic", "alibaba"}
 
 
 @dataclass

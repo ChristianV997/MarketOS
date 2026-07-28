@@ -1,7 +1,8 @@
 """Tests for scripts/ingest_category_priors.py's pure transform functions —
-amazon_category_stats, olist_category_stats, merge_priors never touch the
-filesystem or network, so they're exercised entirely on inline fixtures
-here; the real datasets are never touched in tests."""
+amazon_category_stats, olist_category_stats, wish_category_stats,
+merge_priors never touch the filesystem or network, so they're exercised
+entirely on inline fixtures here; the real datasets are never touched in
+tests."""
 import importlib.util
 import sys
 from pathlib import Path
@@ -81,6 +82,38 @@ class TestOlistCategoryStats:
         assert stats["order_volume"] == 0
 
 
+class TestWishCategoryStats:
+    def test_price_band_and_units_sold_median(self):
+        rows = [{"price": p, "units_sold": u, "rating": 4.0, "rating_count": 100}
+                for p, u in zip([10, 20, 30, 40, 50], [100, 200, 300, 400, 500])]
+        stats = ingest.wish_category_stats(rows)
+        assert stats["price_band"]["p50"] == 30
+        assert stats["units_sold_median"] == 300
+
+    def test_rating_mean(self):
+        rows = [{"price": 10, "units_sold": 50, "rating": r, "rating_count": 10}
+                for r in [3.0, 4.0, 5.0]]
+        stats = ingest.wish_category_stats(rows)
+        assert stats["rating_mean"] == 4.0
+
+    def test_review_volume_counts_all_rows(self):
+        rows = [{"price": 10, "units_sold": 50, "rating": 4.0, "rating_count": 10}] * 6
+        stats = ingest.wish_category_stats(rows)
+        assert stats["review_volume"] == 6
+
+    def test_missing_fields_degrade_to_none(self):
+        rows = [{"price": None, "units_sold": None, "rating": None, "rating_count": None}]
+        stats = ingest.wish_category_stats(rows)
+        assert stats["price_band"]["p50"] is None
+        assert stats["units_sold_median"] is None
+        assert stats["rating_mean"] is None
+
+    def test_empty_input(self):
+        stats = ingest.wish_category_stats([])
+        assert stats["review_volume"] == 0
+        assert stats["units_sold_median"] is None
+
+
 class TestMergePriors:
     def test_merges_fields_from_both_sources(self):
         amazon = {"pets": {"return_proxy": 0.08, "rating_mean": 4.3}}
@@ -99,3 +132,16 @@ class TestMergePriors:
 
     def test_no_sources_yields_empty(self):
         assert ingest.merge_priors({}, {}) == {}
+
+    def test_three_way_merge_including_wish(self):
+        amazon = {"pets": {"return_proxy": 0.08}}
+        olist = {"pets": {"repeat_rate": 0.15}}
+        wish = {"wish_summer_products": {"units_sold_median": 500.0}}
+        merged = ingest.merge_priors(amazon, olist, wish)
+        assert merged["pets"] == {"return_proxy": 0.08, "repeat_rate": 0.15}
+        assert merged["wish_summer_products"] == {"units_sold_median": 500.0}
+
+    def test_single_source_still_works(self):
+        assert ingest.merge_priors({"pets": {"return_proxy": 0.08}}) == {
+            "pets": {"return_proxy": 0.08}
+        }

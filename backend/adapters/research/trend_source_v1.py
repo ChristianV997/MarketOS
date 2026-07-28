@@ -8,6 +8,11 @@ import requests
 
 from backend.adapters.research.base import ResearchSourceAdapter
 
+try:
+    import trendspyg as _trendspyg
+except ImportError:  # pragma: no cover
+    _trendspyg = None
+
 _log = logging.getLogger(__name__)
 
 
@@ -77,6 +82,36 @@ class GoogleTrendsAdapterV1(ResearchSourceAdapter):
         self.velocity_baseline = max(1.0, float(velocity_baseline))
         self.confidence_baseline = min(1.0, max(0.0, float(confidence_baseline)))
 
+    def _fetch_via_trendspyg(self) -> list[dict[str, Any]]:
+        """Fetch current trending topics via trendspyg's RSS downloader —
+        an actively maintained library using Google's public RSS feed —
+        instead of hand-scraping the undocumented dailytrends JSON
+        endpoint. No Selenium/browser dependency (unlike trendspyg's
+        interest-over-time function): the RSS path is plain HTTP+XML.
+
+        Reshapes trendspyg's {'trend', 'traffic', 'news_articles', ...}
+        records into the legacy dailytrends record shape
+        ({"title": {"query": ...}, "formattedTraffic": ..., "articles": ...})
+        so to_canonical() below — its intent classification and velocity/
+        competition derivation — needs no changes at all.
+        """
+        trends = _trendspyg.download_google_trends_rss(
+            geo=self.geo,
+            output_format="dict",
+            include_images=False,
+            include_articles=True,
+            max_articles_per_trend=10,
+            cache=True,
+        )
+        return [
+            {
+                "title": {"query": t.get("trend", "")},
+                "formattedTraffic": t.get("traffic", ""),
+                "articles": t.get("news_articles", []) or [],
+            }
+            for t in trends
+        ]
+
     def _request(self, date_cursor: datetime) -> dict[str, Any]:
         params = {
             "hl": self.language,
@@ -103,6 +138,20 @@ class GoogleTrendsAdapterV1(ResearchSourceAdapter):
             raise AdapterFetchError(ERROR_SCHEMA, f"invalid trend payload: {err}") from err
 
     def fetch(self) -> list[dict[str, Any]]:
+        if _trendspyg is not None:
+            try:
+                return self._fetch_via_trendspyg()
+            except Exception as exc:
+                _log.warning("trendspyg_fetch_failed_falling_back_to_legacy error=%s", exc)
+        return self._fetch_legacy()
+
+    def _fetch_legacy(self) -> list[dict[str, Any]]:
+        """Hand-rolled scrape of Google's undocumented dailytrends JSON
+        endpoint — the pre-trendspyg fetch path, kept as a fallback for
+        when trendspyg isn't installed or its RSS call fails. Also the
+        only path with day-by-day pagination (max_pages > 1); trendspyg's
+        RSS feed only ever returns "current" trends, no historical paging.
+        """
         records: list[dict[str, Any]] = []
         cursor = datetime.now(timezone.utc)
         for _ in range(self.max_pages):

@@ -48,6 +48,39 @@ def test_tiktok_fetch_returns_mock_when_no_credentials():
     assert all("score" in r for r in results)
 
 
+def test_tiktok_fetch_uses_trendspyg_proxy_when_creative_center_fails(monkeypatch):
+    import backend.adapters.tiktok_organic as mod
+    mod._CACHE = []
+    mod._CACHE_TS = 0.0
+    monkeypatch.setattr(mod, "_fetch_creative_center", lambda: [])
+
+    fake_trends = [{"trend": f"term{i}"} for i in range(3)]
+    monkeypatch.setattr(
+        "trendspyg.download_google_trends_rss", lambda **kw: fake_trends,
+    )
+
+    results = mod.fetch()
+    assert len(results) == 3
+    assert all(r["source"] == "trendspyg_proxy" for r in results)
+    assert all(r["platform"] == "tiktok" for r in results)
+    assert {r["product"] for r in results} == {"term0", "term1", "term2"}
+
+
+def test_tiktok_fetch_falls_back_to_mock_on_trendspyg_failure(monkeypatch):
+    import backend.adapters.tiktok_organic as mod
+    mod._CACHE = []
+    mod._CACHE_TS = 0.0
+    monkeypatch.setattr(mod, "_fetch_creative_center", lambda: [])
+
+    def _boom(**kw):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr("trendspyg.download_google_trends_rss", _boom)
+
+    results = mod.fetch()
+    assert all(r["source"] == "tiktok_mock" for r in results)
+
+
 def test_tiktok_register():
     from backend.adapters.tiktok_organic import register
     from core.signals import SignalEngine
@@ -196,10 +229,13 @@ def test_mercadolibre_register():
     assert any(s["name"] == "mercadolibre" for s in engine._sources)
 
 
-def test_alibaba_fetch_returns_mock_tagged_data():
-    from backend.adapters.alibaba_trends import fetch
+def test_alibaba_fetch_returns_mock_tagged_data(monkeypatch):
+    import backend.adapters.alibaba_trends as mod
+    mod._CACHE = []
+    mod._CACHE_TS = 0.0
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
 
-    results = fetch()
+    results = mod.fetch()
     assert isinstance(results, list)
     assert len(results) > 0
     assert all(r["source"] == "alibaba_mock" for r in results)
@@ -214,6 +250,59 @@ def test_alibaba_register():
     engine = SignalEngine()
     register(engine)
     assert any(s["name"] == "alibaba" for s in engine._sources)
+
+
+def test_alibaba_fetch_uses_firecrawl_when_configured(monkeypatch):
+    import backend.adapters.alibaba_trends as mod
+    mod._CACHE = []
+    mod._CACHE_TS = 0.0
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test-key")
+    # _QUERIES is resolved from the env var once at import time, not
+    # re-read per call — monkeypatch the module attribute directly so this
+    # test only exercises one query (deterministic result count).
+    monkeypatch.setattr(mod, "_QUERIES", ["wireless earbuds"])
+
+    class FakeDoc:
+        json = {"products": [
+            {"name": "Bulk Earbuds Wholesale", "price_usd": 3.5, "min_order_quantity": 500},
+            {"name": "", "price_usd": 1.0, "min_order_quantity": 100},  # blank name skipped
+        ]}
+
+    class FakeFirecrawl:
+        def __init__(self, api_key=None):
+            self.api_key = api_key
+
+        def scrape(self, url, formats=None):
+            return FakeDoc()
+
+    import firecrawl
+    monkeypatch.setattr(firecrawl, "Firecrawl", FakeFirecrawl)
+
+    results = mod.fetch()
+    assert len(results) == 1
+    assert results[0]["product"] == "Bulk Earbuds Wholesale"
+    assert results[0]["source"] == "alibaba_firecrawl"
+    assert results[0]["confidence_tier"] == "live"
+
+
+def test_alibaba_fetch_falls_back_to_mock_on_firecrawl_failure(monkeypatch):
+    import backend.adapters.alibaba_trends as mod
+    mod._CACHE = []
+    mod._CACHE_TS = 0.0
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test-key")
+
+    class FakeFirecrawl:
+        def __init__(self, api_key=None):
+            pass
+
+        def scrape(self, url, formats=None):
+            raise RuntimeError("scrape failed")
+
+    import firecrawl
+    monkeypatch.setattr(firecrawl, "Firecrawl", FakeFirecrawl)
+
+    results = mod.fetch()
+    assert all(r["source"] == "alibaba_mock" for r in results)
 
 
 def test_top_opportunities_ranked():

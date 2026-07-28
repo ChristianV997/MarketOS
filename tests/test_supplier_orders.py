@@ -2,6 +2,7 @@
 import pytest
 
 from backend.validation.suppliers import (
+    AutoDSClient,
     CJDropshippingClient,
     PrintfulClient,
     SpocketClient,
@@ -54,9 +55,9 @@ class TestDryRunOrdering:
         assert s1 == s2
         assert s1["status"] in ("shipped", "placed")
 
-    def test_all_four_suppliers_support_dry_ordering(self):
+    def test_all_five_suppliers_support_dry_ordering(self):
         for client in (CJDropshippingClient(), ZendropClient(),
-                      SpocketClient(), PrintfulClient()):
+                      SpocketClient(), PrintfulClient(), AutoDSClient()):
             result = client.place_order(_order(f"o_{client.name}"))
             assert result["status"] == "ok"
             assert result["dry_run"] is True
@@ -68,6 +69,7 @@ class TestGetClient:
         assert get_client("zendrop").__class__ is ZendropClient
         assert get_client("spocket").__class__ is SpocketClient
         assert get_client("printful").__class__ is PrintfulClient
+        assert get_client("autods").__class__ is AutoDSClient
 
     def test_unknown_name_returns_none(self):
         assert get_client("nonexistent") is None

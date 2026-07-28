@@ -61,7 +61,7 @@ def test_suggest_retail_price_zero_cost():
 def test_quote_all_returns_all_suppliers():
     quotes = quote_all("Test Widget")
     names = {q.supplier for q in quotes}
-    assert names == {"cj_dropshipping", "zendrop", "spocket", "printful"}
+    assert names == {"cj_dropshipping", "zendrop", "spocket", "printful", "autods"}
 
 
 def test_quotes_are_deterministic():
@@ -83,6 +83,59 @@ def test_landed_cost_property():
                       fulfillment_days=7, reliability=0.9)
     assert q.landed_cost == 12.5
     assert q.to_dict()["landed_cost"] == 12.5
+
+
+def test_autods_dry_run_quote_is_deterministic():
+    from backend.validation.suppliers import AutoDSClient
+    client = AutoDSClient()
+    a = client.quote("Test Widget")
+    b = client.quote("Test Widget")
+    assert a.supplier == "autods"
+    assert a.landed_cost == b.landed_cost
+
+
+def test_autods_live_quote_parses_response(monkeypatch):
+    from backend.validation.suppliers import AutoDSClient
+    monkeypatch.setenv("AUTODS_API_KEY", "fake-key")
+    client = AutoDSClient()
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"products": [{
+                "id": "ad_123", "cost": 7.5, "shipping_cost": 2.25, "processing_days": 8,
+            }]}
+
+    monkeypatch.setattr(
+        "requests.get", lambda url, headers=None, params=None, timeout=None: FakeResponse(),
+    )
+
+    quote = client._live_quote("Test Widget")
+    assert quote.product_id == "ad_123"
+    assert quote.cost == 7.5
+    assert quote.shipping == 2.25
+    assert quote.fulfillment_days == 8
+
+
+def test_autods_live_quote_returns_none_when_no_products(monkeypatch):
+    from backend.validation.suppliers import AutoDSClient
+    monkeypatch.setenv("AUTODS_API_KEY", "fake-key")
+    client = AutoDSClient()
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"products": []}
+
+    monkeypatch.setattr(
+        "requests.get", lambda url, headers=None, params=None, timeout=None: FakeResponse(),
+    )
+
+    assert client._live_quote("Test Widget") is None
 
 
 # ── validator ─────────────────────────────────────────────────────────────────

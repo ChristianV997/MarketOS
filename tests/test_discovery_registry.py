@@ -40,12 +40,27 @@ def test_record_fetch_zero_count_no_error_is_mock_fallback():
     assert report[0]["status"] == "mock_fallback"
 
 
-def test_known_mock_only_source_never_reports_live():
+def test_known_mock_only_source_never_reports_live(monkeypatch):
+    import backend.discovery.registry as registry_mod
+    monkeypatch.setattr(registry_mod, "_MOCK_ONLY_SOURCES", {"permanently_mocked_source"})
+
+    registry = DiscoveryRegistry()
+    registry.register("permanently_mocked_source")
+    registry.record_fetch("permanently_mocked_source", count=5)  # nonzero, but it's all mock data
+    report = registry.status_report()
+    assert report[0]["status"] == "mock_only"
+
+
+def test_known_mock_fallback_source_never_reports_live():
+    """alibaba moved from mock_only to mock_fallback once its optional
+    Firecrawl-backed real path was added (backend/adapters/alibaba_trends.py)
+    — it's conservatively treated the same as every other scraper here
+    whose real-data success isn't guaranteed run-to-run, same as before."""
     registry = DiscoveryRegistry()
     registry.register("alibaba")
     registry.record_fetch("alibaba", count=5)  # nonzero count, but it's all mock data
     report = registry.status_report()
-    assert report[0]["status"] == "mock_only"
+    assert report[0]["status"] == "mock_fallback"
 
 
 def test_record_fetch_without_prior_register_still_tracked():

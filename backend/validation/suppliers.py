@@ -1,9 +1,10 @@
 """backend.validation.suppliers — multi-supplier sourcing layer.
 
-Four supplier clients (CJ Dropshipping, Zendrop, Spocket, Printful) behind a
-common interface.  All calls are dry-run by default (SUPPLIERS_DRY_RUN=true)
-and return deterministic mock quotes derived from the product name, so the
-whole validation pipeline works offline and in tests without credentials.
+Five supplier clients (CJ Dropshipping, Zendrop, Spocket, Printful, AutoDS)
+behind a common interface.  All calls are dry-run by default
+(SUPPLIERS_DRY_RUN=true) and return deterministic mock quotes derived from
+the product name, so the whole validation pipeline works offline and in
+tests without credentials.
 
 Production activation per supplier: set SUPPLIERS_DRY_RUN=false and supply
 the supplier's API key env var (see each client class).
@@ -509,11 +510,60 @@ class PrintfulClient(SupplierClient):
         )
 
 
+class AutoDSClient(SupplierClient):
+    """AutoDS — https://www.autods.com (aggregates AliExpress/Walmart/Amazon
+    sourcing behind one API). Genuinely differentiated from the other four
+    clients here: it's a cross-supplier aggregator with automated price/
+    stock monitoring, not another single-catalog reseller wrapper.
+
+    AutoDS API access requires account approval + a one-time activation fee
+    (per autods.com/api/) — there is no free/instant sandbox to verify
+    against, the same situation CJ/Zendrop/Spocket/Printful started from.
+    The endpoint path/response shape below is a best-effort placeholder
+    matching AutoDS's documented REST conventions; SupplierClient.quote()'s
+    existing try/except already degrades any live-call failure (wrong
+    field name included) to the deterministic mock quote, so an
+    unverified shape here is exactly as safe as a network outage would be
+    — refine against the real developer portal once an approved account
+    exists.
+    """
+    name = "autods"
+    api_key_env = "AUTODS_API_KEY"
+    cost_band = (5.0, 30.0)
+    shipping_band = (2.0, 7.0)
+    base_reliability = 0.85
+    base_fulfillment_days = 9
+
+    def _live_quote(self, product_name: str) -> SupplierQuote | None:
+        import requests
+        resp = requests.get(
+            "https://api.autods.com/v1/products/search",
+            headers={"Authorization": f"Bearer {os.environ[self.api_key_env]}"},
+            params={"query": product_name, "limit": 1},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        rows = resp.json().get("products", [])
+        if not rows:
+            return None
+        row = rows[0]
+        return SupplierQuote(
+            supplier=self.name,
+            product_id=str(row.get("id", "")),
+            product_name=product_name,
+            cost=float(row.get("cost", 0) or 0),
+            shipping=float(row.get("shipping_cost", 0) or 0),
+            fulfillment_days=int(row.get("processing_days", self.base_fulfillment_days) or self.base_fulfillment_days),
+            reliability=self.base_reliability,
+        )
+
+
 _CLIENTS: list[SupplierClient] = [
     CJDropshippingClient(),
     ZendropClient(),
     SpocketClient(),
     PrintfulClient(),
+    AutoDSClient(),
 ]
 
 _CLIENTS_BY_NAME: dict[str, SupplierClient] = {c.name: c for c in _CLIENTS}

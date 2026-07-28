@@ -26,7 +26,20 @@ dowhy
 redis
 
 # ── signal ingestion ──────────────────────────────────────────────────────────
+# pytrends: archived upstream (no replacement, per the maintainer) — still
+# used by backend/adapters/youtube_trends.py's multi-keyword interest-over-
+# time batching, which trendspyg has no lightweight (non-Selenium)
+# equivalent for. Kept for that one caller.
 pytrends
+# trendspyg: actively maintained pytrends alternative. Its RSS-based
+# trending-topics function (no Selenium/browser needed) replaced the
+# hand-rolled scrape of Google's undocumented dailytrends endpoint in
+# backend/adapters/research/trend_source_v1.py and the pytrends proxy in
+# backend/adapters/tiktok_organic.py.
+trendspyg
+# firecrawl-py: optional, hosted browser/anti-bot handling for
+# backend/adapters/alibaba_trends.py's real (non-mock) path.
+firecrawl-py
 beautifulsoup4
 lxml
 

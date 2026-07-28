@@ -21,18 +21,33 @@ load_dataset('McAuley-Lab/Amazon-Reviews-2023', 'raw_meta_Pet_Supplies',
     kaggle datasets download -d olistbr/brazilian-ecommerce \
       -p data/olist --unzip
 
+  Wish Summer Products (Kaggle, jmmvutu/summer-products-and-sales-in-
+  ecommerce-wish) — real sales-velocity + rating + merchant data:
+    kaggle datasets download \
+      -d jmmvutu/summer-products-and-sales-in-ecommerce-wish \
+      -p data/wish --unzip
+
+    Unlike Amazon/Olist, this dataset has no product-category column —
+    it's inherently a single-niche ("summer products") export, so every
+    row is bucketed under one category key: "wish_summer_products". A
+    user wanting a finer split could bucket by the dataset's own free-text
+    `tags` column before calling wish_category_stats(), but that's out of
+    scope here — see wish_category_stats()'s docstring.
+
 Usage:
     python scripts/ingest_category_priors.py \
         --amazon-dir data/amazon_reviews_2023 \
         --amazon-categories raw_meta_Pet_Supplies,raw_meta_Baby_Products \
         --olist-dir data/olist \
+        --wish-csv data/wish/summer-products-with-rating-and-performance_2020-08.csv \
         --out backend/data/seed/category_priors.json
 
-The three transform functions below (amazon_category_stats,
-olist_category_stats, merge_priors) are pure — no filesystem or network
-access — and are exercised in tests/test_category_priors.py on inline
-fixtures; only the loader helpers and main() touch real files, and only
-when this script is actually run with real downloaded data.
+The four transform functions below (amazon_category_stats,
+olist_category_stats, wish_category_stats, merge_priors) are pure — no
+filesystem or network access — and are exercised in
+tests/test_ingest_category_priors.py on inline fixtures; only the loader
+helpers and main() touch real files, and only when this script is
+actually run with real downloaded data.
 """
 from __future__ import annotations
 
@@ -122,20 +137,58 @@ def olist_category_stats(orders: list[dict]) -> dict[str, Any]:
     }
 
 
-def merge_priors(amazon_by_category: dict[str, dict],
-                 olist_by_category: dict[str, dict]) -> dict[str, dict]:
-    """Combine both sources per category — Amazon contributes price/rating/
-    return_proxy, Olist contributes repeat_rate/delivery days. A category
-    present in only one source still gets a partial entry: consumers
-    (category_prior()) already treat a missing field as "no prior" and
-    fall back to their own default, so a partial entry degrades gracefully
-    field-by-field rather than needing both sources to have data."""
-    categories = set(amazon_by_category) | set(olist_by_category)
+def wish_category_stats(rows: list[dict]) -> dict[str, Any]:
+    """Pure transform: Wish summer-products rows (each at least
+    {"price": float|None, "units_sold": int|None, "rating": float|None,
+    "rating_count": int|None}) -> {price_band, units_sold_median,
+    rating_mean, review_volume}.
+
+    This dataset has no per-product-category column (it's a single-niche
+    "summer products" export) — the loader below buckets every row under
+    one category key, "wish_summer_products", rather than pretending a
+    finer taxonomy exists. units_sold_median is this source's genuinely
+    new signal vs. Amazon/Olist: Wish's `units_sold` column is a real,
+    directly-observed sales-velocity figure (Amazon Reviews 2023 and Olist
+    both only offer proxies — review volume, repeat-purchase rate).
+    """
+    prices = sorted(r["price"] for r in rows if r.get("price") is not None and r["price"] > 0)
+    units = sorted(r["units_sold"] for r in rows if r.get("units_sold") is not None)
+    ratings = [r["rating"] for r in rows if r.get("rating") is not None]
+
+    def _percentile(sorted_vals: list[float], p: float) -> float | None:
+        if not sorted_vals:
+            return None
+        idx = min(len(sorted_vals) - 1, max(0, round(p * (len(sorted_vals) - 1))))
+        return round(sorted_vals[idx], 2)
+
+    return {
+        "price_band": {
+            "p25": _percentile(prices, 0.25),
+            "p50": _percentile(prices, 0.50),
+            "p75": _percentile(prices, 0.75),
+        },
+        "units_sold_median": _percentile(units, 0.50),
+        "rating_mean": round(sum(ratings) / len(ratings), 3) if ratings else None,
+        "review_volume": len(rows),
+    }
+
+
+def merge_priors(*sources: dict[str, dict]) -> dict[str, dict]:
+    """Combine any number of per-category stats dicts (Amazon, Olist, Wish,
+    ...) — later sources' fields win on key collision, earlier sources
+    fill in fields a later one doesn't have. A category present in only
+    one source still gets a partial entry: consumers (category_prior())
+    already treat a missing field as "no prior" and fall back to their own
+    default, so a partial entry degrades gracefully field-by-field rather
+    than needing every source to have data for that category."""
+    categories: set[str] = set()
+    for source in sources:
+        categories.update(source)
     merged: dict[str, dict] = {}
     for cat in categories:
         entry: dict[str, Any] = {}
-        entry.update(amazon_by_category.get(cat, {}))
-        entry.update(olist_by_category.get(cat, {}))
+        for source in sources:
+            entry.update(source.get(cat, {}))
         merged[cat] = entry
     return merged
 
@@ -186,6 +239,24 @@ def _load_olist_orders_by_category(olist_dir: str) -> dict[str, list[dict]]:
     return by_category
 
 
+def _load_wish_products(wish_csv_path: str) -> list[dict]:
+    """Load the Wish summer-products CSV. Every row is returned under one
+    bucket — see wish_category_stats()'s docstring for why this dataset
+    has no real per-product category to split on."""
+    import pandas as pd
+
+    df = pd.read_csv(wish_csv_path)
+    rows = []
+    for _, row in df.iterrows():
+        rows.append({
+            "price": row.get("price"),
+            "units_sold": row.get("units_sold"),
+            "rating": row.get("rating"),
+            "rating_count": row.get("rating_count"),
+        })
+    return rows
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description=__doc__,
@@ -197,6 +268,9 @@ def main() -> int:
     parser.add_argument("--olist-dir", default="data/olist")
     parser.add_argument("--skip-olist", action="store_true",
                         help="ingest Amazon categories only")
+    parser.add_argument("--wish-csv", default="",
+                        help="path to the downloaded Wish summer-products CSV "
+                             "(omit to skip this source)")
     parser.add_argument("--out", default="backend/data/seed/category_priors.json")
     args = parser.parse_args()
 
@@ -220,7 +294,16 @@ def main() -> int:
         except Exception as exc:
             _log.error("olist_ingest_failed error=%s", exc)
 
-    merged = merge_priors(amazon_stats, olist_stats)
+    wish_stats: dict[str, dict] = {}
+    if args.wish_csv:
+        try:
+            rows = _load_wish_products(args.wish_csv)
+            wish_stats["wish_summer_products"] = wish_category_stats(rows)
+            _log.info("wish_ingested rows=%d", len(rows))
+        except Exception as exc:
+            _log.error("wish_ingest_failed error=%s", exc)
+
+    merged = merge_priors(amazon_stats, olist_stats, wish_stats)
     if not merged:
         print("No priors ingested — nothing written. Check the errors logged above; "
              "the datasets must be downloaded locally first (see this script's docstring).")
