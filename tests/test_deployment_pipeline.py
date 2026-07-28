@@ -4,8 +4,16 @@ Tests cover:
 1. Staging validation (old vs new logic comparison)
 2. Shadow-mode tracking and journaling
 3. Organic channel expansion (affiliate networks)
-4. Feature flag management
-5. End-to-end deployment workflow
+4. End-to-end deployment workflow
+
+(Feature flag management tests were removed when
+backend/deployment/feature_flags.py was retired as Tier 2 — it was a
+second, independent flag-bookkeeping system whose 6 PHASE7_*/PHASE8_*_LIVE
+flags were never actually consulted by any real code path; each flag it
+tracked already has its own ad-hoc os.getenv(...) gate directly in the
+module that uses it — see core/creative/selection.py, core/portfolio.py,
+simulation/engine.py, orchestrator/main.py — which is the one real
+deployment mechanism this codebase actually uses.)
 """
 from __future__ import annotations
 
@@ -14,7 +22,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backend.deployment.feature_flags import FeatureFlag, FeatureFlagManager
 from backend.deployment.shadow_mode import ShadowModeController, shadow_record_decision, shadow_record_outcome
 from backend.integrations.affiliate_networks import AffiliateNetwork, OrganicChannelExpander
 from backend.staging.validator import StagingValidator, ValidationReport
@@ -260,78 +267,6 @@ class TestAffiliateNetworks:
         assert len(result["evaluated"]) == 2
 
 
-class TestFeatureFlagManagement:
-    """Test feature flag management for staged deployment."""
-
-    def test_flag_manager_initialization(self):
-        """Test FeatureFlagManager initialization."""
-        manager = FeatureFlagManager()
-
-        # All flags should be loaded
-        assert len(manager.flags) == 6  # 6 Phase 7-8 flags
-
-    def test_is_enabled_default_false(self):
-        """Test flags default to disabled."""
-        manager = FeatureFlagManager()
-
-        for flag in FeatureFlag:
-            assert manager.is_enabled(flag) is False
-
-    def test_is_shadow_mode_default_true(self):
-        """Test flags default to shadow mode."""
-        manager = FeatureFlagManager()
-
-        for flag in FeatureFlag:
-            assert manager.is_shadow_mode(flag) is True
-
-    def test_flip_flag(self):
-        """Test flipping a flag from shadow to live."""
-        manager = FeatureFlagManager()
-        flag = FeatureFlag.PHASE7_URGENCY_SCORING_LIVE
-
-        # Initially disabled and in shadow mode
-        assert manager.is_enabled(flag) is False
-        assert manager.is_shadow_mode(flag) is True
-
-        # Flip to enabled
-        success, msg = manager.flip_flag(flag, enabled=True)
-        assert success is True
-        assert manager.is_enabled(flag) is True
-
-    def test_flip_flag_already_enabled(self):
-        """Test flipping flag when already in target state."""
-        manager = FeatureFlagManager()
-        flag = FeatureFlag.PHASE7_URGENCY_SCORING_LIVE
-
-        manager.flip_flag(flag, enabled=True)
-
-        # Try to enable again
-        success, msg = manager.flip_flag(flag, enabled=True)
-        assert success is False
-        assert "already" in msg.lower()
-
-    def test_get_deployment_checklist(self):
-        """Test deployment checklist generation."""
-        manager = FeatureFlagManager()
-        checklist = manager.get_deployment_checklist()
-
-        assert len(checklist) == 6
-        for flag, info in checklist.items():
-            assert "name" in info
-            assert "description" in info
-            assert "enabled" in info
-            assert "validation_gate" in info
-
-    def test_deployment_report_generation(self):
-        """Test deployment report generation."""
-        manager = FeatureFlagManager()
-        report = manager.generate_deployment_report()
-
-        assert "Phase 7-8 Feature Flag Deployment Report" in report
-        assert "SHADOW" in report
-        assert "Deployment Strategy" in report
-
-
 class TestEndToEndDeploymentWorkflow:
     """Integration tests for complete deployment pipeline."""
 
@@ -360,26 +295,6 @@ class TestEndToEndDeploymentWorkflow:
         first_shadow_id = list(controller.shadow_decisions.keys())[0]
         controller.record_outcome(first_shadow_id, realized_roas=0.76)
 
-        # Step 3: Feature flag management
-        manager = FeatureFlagManager()
-        flag = FeatureFlag.PHASE7_URGENCY_SCORING_LIVE
-
-        # Verify flag is in shadow mode (both paths run)
-        assert manager.is_shadow_mode(flag)
-
-        # Can flip flag to enable/disable as needed
-        current_state = manager.is_enabled(flag)
-        if current_state:
-            # If already enabled, test disabling
-            success, msg = manager.flip_flag(flag, enabled=False)
-            assert success is True
-            assert not manager.is_enabled(flag)
-        else:
-            # If disabled, test enabling
-            success, msg = manager.flip_flag(flag, enabled=True)
-            assert success is True
-            assert manager.is_enabled(flag)
-
     @pytest.mark.asyncio
     async def test_organic_channel_production_integration(self):
         """Test organic channel integrated into production workflow."""
@@ -400,18 +315,6 @@ class TestEndToEndDeploymentWorkflow:
 
             assert recruit_result["product_id"] == "product_prod_test"
             assert "networks_recruited" in recruit_result
-
-    @pytest.mark.asyncio
-    async def test_full_deployment_checklist(self):
-        """Test complete deployment checklist and status."""
-        manager = FeatureFlagManager()
-        report = manager.generate_deployment_report()
-
-        # Report should include all flags and strategy
-        assert "SHADOW" in report
-        assert "Deployment Strategy" in report
-        assert "Gate:" in report  # Validation gates are shown as "Gate:"
-        assert "Rollback:" in report  # Rollback plans are shown as "Rollback:"
 
 
 if __name__ == "__main__":
