@@ -418,9 +418,9 @@ def _run_scaling() -> dict[str, Any]:
             phase = phase_controller.current.value
         except Exception:
             pass
+        from backend.decision.organic_gate import gate_launch
         for pb in playbook_memory.all():
-            confidence = getattr(pb, "confidence", 0.0)
-            if confidence < 0.6:
+            if not gate_launch(pb):
                 continue
             now = time.time()
             if now - getattr(pb, "last_launched_at", 0.0) < _PLAYBOOK_RELAUNCH_COOLDOWN_S:
