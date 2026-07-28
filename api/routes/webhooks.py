@@ -16,13 +16,14 @@ Local testing (Stripe):
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
 import logging
 import os
-import time
 
+import stripe
 from fastapi import APIRouter, Header, HTTPException, Request
 
 _log = logging.getLogger(__name__)
@@ -33,37 +34,23 @@ _STRIPE_TOLERANCE_S = 300
 
 
 def _verify_stripe_signature(payload: bytes, sig_header: str, secret: str) -> bool:
-    """Verify a Stripe webhook signature (stdlib hmac — no stripe SDK needed).
+    """Verify a Stripe webhook signature via the official stripe SDK.
 
-    Header shape: "t=<timestamp>,v1=<signature>[,v1=<signature>...]"
-    Signed payload is "{timestamp}.{body}", HMAC-SHA256 with the secret.
+    Delegates to ``stripe.Webhook.construct_event`` (constant-time
+    comparison, timestamp-tolerance check, "t=<ts>,v1=<sig>[,v1=<sig>...]"
+    header parsing) rather than hand-rolling the HMAC-SHA256 check — same
+    tolerance window (300s) as before. Only the boolean result is used
+    here; the parsed Event object is discarded since the caller already
+    re-parses the raw body as a plain dict downstream.
     """
-    parts: dict[str, list[str]] = {}
-    for item in sig_header.split(","):
-        if "=" not in item:
-            continue
-        k, v = item.split("=", 1)
-        parts.setdefault(k.strip(), []).append(v.strip())
-
-    timestamps = parts.get("t", [])
-    signatures = parts.get("v1", [])
-    if not timestamps or not signatures:
-        return False
-
     try:
-        ts = int(timestamps[0])
-    except ValueError:
+        stripe.Webhook.construct_event(payload, sig_header, secret, tolerance=_STRIPE_TOLERANCE_S)
+        return True
+    except (ValueError, stripe.error.SignatureVerificationError):
         return False
-    if abs(time.time() - ts) > _STRIPE_TOLERANCE_S:
-        return False
-
-    signed_payload = f"{ts}.".encode() + payload
-    expected = hmac.new(secret.encode(), signed_payload, hashlib.sha256).hexdigest()
-    return any(hmac.compare_digest(expected, sig) for sig in signatures)
 
 
 def _verify_shopify_signature(payload: bytes, hmac_header: str, secret: str) -> bool:
-    import base64
     digest = hmac.new(secret.encode(), payload, hashlib.sha256).digest()
     expected = base64.b64encode(digest).decode()
     return hmac.compare_digest(expected, hmac_header)

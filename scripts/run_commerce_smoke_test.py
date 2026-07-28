@@ -79,6 +79,7 @@ def main() -> int:
     # 4. Simulate a signed Stripe checkout.session.completed webhook
     event = {
         "id": "evt_smoke_1",
+        "object": "event",
         "type": "checkout.session.completed",
         "data": {"object": {
             "id": "cs_smoke_1",

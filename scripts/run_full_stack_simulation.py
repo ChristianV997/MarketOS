@@ -74,6 +74,7 @@ def _fire_checkout_webhook(client, order_id: str, brand_id: str, product_id: str
                            amount_usd: float, email: str, name: str, city: str) -> bool:
     event = {
         "id": f"evt_{order_id}",
+        "object": "event",
         "type": "checkout.session.completed",
         "data": {"object": {
             "id": order_id,

@@ -77,32 +77,30 @@ def create_checkout_session(
                   "url": success_url, "dry_run": True}
     else:
         try:
-            import requests
-            payload = {
-                "mode": "payment",
-                "success_url": success_url,
-                "cancel_url": cancel_url,
-                "shipping_address_collection[allowed_countries][0]": "US",
-                "line_items[0][quantity]": str(qty),
-                "line_items[0][price_data][currency]": "usd",
-                "line_items[0][price_data][unit_amount]": str(int(round(entry.retail_price * 100))),
-                "line_items[0][price_data][product_data][name]": entry.title,
-                "metadata[brand_id]": brand_id,
-                "metadata[product_id]": product_id,
-                "metadata[qty]": str(qty),
-            }
-            for i, (k, v) in enumerate(utm.items()):
-                payload[f"metadata[{k}]"] = v[:100]
-            resp = requests.post(
-                "https://api.stripe.com/v1/checkout/sessions",
-                data=payload,
-                auth=(os.environ["STRIPE_SECRET_KEY"], ""),
-                timeout=15,
+            import stripe
+            metadata = {"brand_id": brand_id, "product_id": product_id, "qty": str(qty)}
+            metadata.update({k: v[:100] for k, v in utm.items()})
+            session = stripe.checkout.Session.create(
+                mode="payment",
+                success_url=success_url,
+                cancel_url=cancel_url,
+                shipping_address_collection={"allowed_countries": ["US"]},
+                line_items=[{
+                    "quantity": qty,
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": int(round(entry.retail_price * 100)),
+                        "product_data": {"name": entry.title},
+                    },
+                }],
+                metadata=metadata,
+                api_key=os.environ["STRIPE_SECRET_KEY"],
             )
-            resp.raise_for_status()
-            data = resp.json()
-            result = {"status": "ok", "session_id": str(data.get("id", "")),
-                      "url": str(data.get("url", "")), "dry_run": False}
+            # Bracket access, not `.get()` — a real stripe.checkout.Session
+            # object (unlike a plain dict) routes `.get` through __getattr__
+            # to a key lookup and raises AttributeError.
+            result = {"status": "ok", "session_id": str(session["id"] if "id" in session else ""),
+                      "url": str(session["url"] if "url" in session else ""), "dry_run": False}
         except Exception as exc:
             _log.exception("checkout_session_failed product=%s", product_id)
             return {"status": "error", "error": str(exc), "dry_run": False}

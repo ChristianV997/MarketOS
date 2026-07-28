@@ -104,6 +104,32 @@ class TestDryRunCheckout:
         assert a["session_id"] != b["session_id"]
 
 
+class TestLiveCheckoutSessionCreation:
+    """Regression guard: stripe SDK objects (unlike plain dicts) raise
+    AttributeError on `.get(...)` — a real stripe.checkout.Session (or any
+    StripeObject) routes `.get` through __getattr__ to a key lookup. Uses a
+    real Session instance (not a plain dict) so this actually exercises that
+    behavior rather than a mock that happens to support .get()."""
+
+    def test_live_session_create_reads_id_and_url_via_bracket_access(self, commerce, monkeypatch):
+        import stripe
+        monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake")
+        monkeypatch.setenv("CHECKOUT_DRY_RUN", "false")
+
+        fake_session = stripe.checkout.Session()
+        fake_session["id"] = "cs_live_123"
+        fake_session["url"] = "https://checkout.stripe.com/pay/cs_live_123"
+        monkeypatch.setattr(stripe.checkout.Session, "create", lambda **kw: fake_session)
+
+        from backend.commerce.checkout import create_checkout_session
+        result = create_checkout_session("beauty", "jade-roller", qty=1)
+
+        assert result["status"] == "ok"
+        assert result["session_id"] == "cs_live_123"
+        assert result["url"] == "https://checkout.stripe.com/pay/cs_live_123"
+        assert result["dry_run"] is False
+
+
 class TestLiveCheckoutGating:
     def test_stays_dry_without_secret_even_if_flag_false(self, commerce, monkeypatch):
         monkeypatch.setenv("CHECKOUT_DRY_RUN", "false")

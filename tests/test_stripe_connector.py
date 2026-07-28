@@ -37,14 +37,7 @@ def test_get_revenue_uses_real_api_when_key_set(monkeypatch):
         ]
     }
 
-    class FakeResponse:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return fixture_payload
-
-    monkeypatch.setattr(mod._requests, "get", lambda *a, **kw: FakeResponse())
+    monkeypatch.setattr(mod._stripe.Charge, "list", lambda *a, **kw: fixture_payload)
 
     result = mod.get_revenue(last_n_minutes=60)
     assert result["total_revenue"] == 75.0  # (5000+2500) cents -> $75
@@ -59,10 +52,39 @@ def test_get_revenue_falls_back_to_mock_on_api_failure(monkeypatch):
     def _raise(*a, **kw):
         raise Exception("network error")
 
-    monkeypatch.setattr(mod._requests, "get", _raise)
+    monkeypatch.setattr(mod._stripe.Charge, "list", _raise)
 
     result = mod.get_revenue(last_n_minutes=60)
     assert result["total_revenue"] == 180.0  # falls back to mock charges
+
+
+def test_get_revenue_uses_real_stripe_objects_not_just_dicts(monkeypatch):
+    """Regression guard: a real stripe.ListObject/stripe.Charge (unlike a
+    plain dict) raises AttributeError on `.get(...)` — .get is routed
+    through __getattr__ to a key lookup. Build the fixture from real SDK
+    objects (bracket assignment only) so this actually exercises that
+    behavior rather than a dict mock that happens to support .get()."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake")
+    import connectors.stripe_connector as mod
+    importlib.reload(mod)
+
+    charge = mod._stripe.Charge()
+    charge["id"] = "ch_real_1"
+    charge["amount"] = 5000
+    charge["currency"] = "usd"
+    charge["status"] = "succeeded"
+
+    listing = mod._stripe.ListObject()
+    listing["data"] = [charge]
+
+    monkeypatch.setattr(mod._stripe.Charge, "list", lambda *a, **kw: listing)
+
+    result = mod.get_revenue(last_n_minutes=60)
+    assert result["source"] == "live"
+    assert result["total_revenue"] == 50.0
+    assert result["charges"] == [
+        {"id": "ch_real_1", "amount": 5000, "currency": "usd", "status": "succeeded"}
+    ]
 
 
 def test_get_revenue_ignores_non_succeeded_charges(monkeypatch):
@@ -77,14 +99,7 @@ def test_get_revenue_ignores_non_succeeded_charges(monkeypatch):
         ]
     }
 
-    class FakeResponse:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return fixture_payload
-
-    monkeypatch.setattr(mod._requests, "get", lambda *a, **kw: FakeResponse())
+    monkeypatch.setattr(mod._stripe.Charge, "list", lambda *a, **kw: fixture_payload)
 
     result = mod.get_revenue(last_n_minutes=60)
     assert result["total_revenue"] == 50.0  # only the succeeded charge counts

@@ -78,6 +78,7 @@ def _stripe_event(event_id="evt_1", session_id="cs_test_1", brand_id="beauty",
                    product_id="jade-roller", amount_cents=1999, event_type="checkout.session.completed"):
     return {
         "id": event_id,
+        "object": "event",
         "type": event_type,
         "data": {"object": {
             "id": session_id,
@@ -204,7 +205,7 @@ class TestStripeWebhook:
         assert commerce.get_order("cs_test_1").fulfillment_status == "RECEIVED"
 
         refund_event = {
-            "id": "evt_refund_1", "type": "charge.refunded",
+            "id": "evt_refund_1", "object": "event", "type": "charge.refunded",
             "data": {"object": {"id": "ch_1", "payment_intent": "pi_123"}},
         }
         refund_body = json.dumps(refund_event).encode()
@@ -217,7 +218,7 @@ class TestStripeWebhook:
 
     def test_refund_with_no_matching_order_is_a_noop(self, commerce, client):
         refund_event = {
-            "id": "evt_refund_2", "type": "charge.refunded",
+            "id": "evt_refund_2", "object": "event", "type": "charge.refunded",
             "data": {"object": {"id": "ch_2", "payment_intent": "pi_unknown"}},
         }
         body = json.dumps(refund_event).encode()

@@ -209,15 +209,8 @@ def test_stripe_ground_truth_returns_value_when_configured(monkeypatch):
         "data": [{"id": "ch_1", "amount": 5000, "currency": "usd", "status": "succeeded"}]
     }
 
-    class FakeResponse:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return fixture_payload
-
     monkeypatch.setattr(stripe_mod, "STRIPE_SECRET_KEY", "sk_test_fake")
-    monkeypatch.setattr(stripe_mod._requests, "get", lambda *a, **kw: FakeResponse())
+    monkeypatch.setattr(stripe_mod._stripe.Charge, "list", lambda *a, **kw: fixture_payload)
 
     result = prof._stripe_ground_truth(lookback_days=1)
     assert result == 50.0

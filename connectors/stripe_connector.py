@@ -15,12 +15,11 @@ import datetime
 _log = logging.getLogger(__name__)
 
 try:
-    import requests as _requests
+    import stripe as _stripe
 except ImportError:  # pragma: no cover
-    _requests = None
+    _stripe = None
 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-API_BASE = "https://api.stripe.com/v1"
 
 _FALLBACK_CHARGES = [
     {"id": "ch_mock_1", "amount": 10000, "currency": "usd", "status": "succeeded"},
@@ -40,16 +39,17 @@ def get_revenue(last_n_minutes: int = 60) -> dict:
     charges = _FALLBACK_CHARGES
     source = "unconfigured" if not STRIPE_SECRET_KEY else "fallback"
 
-    if STRIPE_SECRET_KEY and _requests is not None:
+    if STRIPE_SECRET_KEY and _stripe is not None:
         try:
-            url = f"{API_BASE}/charges"
-            params = {"created[gte]": int(since.timestamp()), "limit": 100}
-            resp = _requests.get(
-                url, params=params, auth=(STRIPE_SECRET_KEY, ""), timeout=10
+            data = _stripe.Charge.list(
+                created={"gte": int(since.timestamp())},
+                limit=100,
+                api_key=STRIPE_SECRET_KEY,
             )
-            resp.raise_for_status()
-            payload = resp.json()
-            data = payload.get("data", [])
+            # Bracket/`in` access, not `.get()` — a real stripe.ListObject /
+            # stripe.Charge (unlike a plain dict) routes `.get` through
+            # __getattr__ to a key lookup and raises AttributeError, which
+            # would silently degrade every live call to the mock fallback.
             parsed = [
                 {
                     "id": ch["id"],
@@ -57,8 +57,8 @@ def get_revenue(last_n_minutes: int = 60) -> dict:
                     "currency": ch["currency"],
                     "status": ch["status"],
                 }
-                for ch in data
-                if ch.get("id")
+                for ch in data["data"]
+                if "id" in ch and ch["id"]
             ]
             # A real API call that legitimately found zero charges is still
             # "live" data (an empty window), not a reason to substitute mock
