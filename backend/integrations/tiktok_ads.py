@@ -11,6 +11,20 @@ production caller (only their own tests exercised them). Merged here as
 upload_creative()/create_ads_from_files() so creative upload shares this
 module's dry-run/risk-gate conventions.
 
+Live calls go through the official ``tiktok-business-api-sdk-official``
+package (importable as ``business_api_client``) instead of hand-rolled REST
+— ``_post``/``_get`` keep their original (path, payload/params) -> dict
+signature so every calling function above them is unchanged; only their
+internals dispatch to the right typed SDK request model per path. Two
+real field-name mismatches between the old hand-rolled payloads and
+TikTok's actual schema were found and fixed in that dispatch:
+``creative_id`` -> ``video_id`` (ad creation references a previously
+uploaded video, not an opaque "creative" id) and ``opt_status`` ->
+``operation_status`` (campaign pause/enable) — the old field names would
+have been silently accepted by requests.post's raw dict payload but
+rejected or ignored by TikTok's real API, so this is a live-path
+correctness fix, not just a mechanical swap.
+
 Production activation: set TIKTOK_DRY_RUN=false and supply:
   TIKTOK_ACCESS_TOKEN, TIKTOK_ADVERTISER_ID, TIKTOK_APP_ID
 """
@@ -25,7 +39,6 @@ from backend.patterns.safe_call import safe_call
 
 _log = logging.getLogger(__name__)
 
-_BASE   = "https://business-api.tiktok.com/open_api/v1.3"
 _DRY_RUN = os.getenv("TIKTOK_DRY_RUN", "true").lower() != "false"
 _BUDGET_DAILY = float(os.getenv("TIKTOK_BUDGET_DAILY", "50"))
 
@@ -56,31 +69,78 @@ def is_configured() -> bool:
     return bool(os.getenv("TIKTOK_ACCESS_TOKEN") and os.getenv("TIKTOK_ADVERTISER_ID"))
 
 
-def _headers() -> dict[str, str]:
-    return {
-        "Access-Token": os.environ["TIKTOK_ACCESS_TOKEN"],
-        "Content-Type": "application/json",
-    }
+def _unwrap(resp) -> dict:
+    """Normalize an SDK InlineResponse200 back into the plain
+    {"code", "message", "data"} shape the raw-REST response used to have,
+    so every caller's `.get("data", {}).get(...)` parsing is unchanged.
+    `resp.data` is already a plain dict (typed 'object' in the SDK's
+    swagger schema, never further model-parsed) — no bracket-only gotcha
+    here the way there was for Meta's/Stripe's SDK objects.
+    """
+    return {"code": resp.code, "message": resp.message, "data": resp.data or {}}
 
 
 def _post(path: str, payload: dict) -> dict:
     if _DRY_RUN:
         _log.info("tiktok_dry_run path=%s payload=%s", path, payload)
         return {"code": 0, "message": "OK", "data": {"campaign_id": _next_dry_id()}}
-    import requests
-    r = requests.post(f"{_BASE}{path}", headers=_headers(), json=payload, timeout=15)
-    r.raise_for_status()
-    return r.json()
+
+    from business_api_client.api.campaign_creation_api import CampaignCreationApi
+    from business_api_client.api.adgroup_api import AdgroupApi
+    from business_api_client.api.ad_api import AdApi
+    from business_api_client.models.campaign_create_body import CampaignCreateBody
+    from business_api_client.models.campaign_status_update_body import CampaignStatusUpdateBody
+    from business_api_client.models.campaign_update_body import CampaignUpdateBody
+    from business_api_client.models.adgroup_create_body import AdgroupCreateBody
+    from business_api_client.models.ad_create_body import AdCreateBody
+    from business_api_client.models.adcreate_creatives import AdcreateCreatives
+
+    token = os.environ["TIKTOK_ACCESS_TOKEN"]
+
+    if path == "/campaign/create/":
+        resp = CampaignCreationApi().campaign_create(token, body=CampaignCreateBody(**payload))
+    elif path == "/adgroup/create/":
+        resp = AdgroupApi().adgroup_create(token, body=AdgroupCreateBody(**payload))
+    elif path == "/ad/create/":
+        creatives = [
+            AdcreateCreatives(video_id=c.get("creative_id", ""), ad_text=c.get("ad_text", ""))
+            for c in payload.get("creatives", [])
+        ]
+        body = AdCreateBody(advertiser_id=payload.get("advertiser_id", ""),
+                            adgroup_id=payload.get("adgroup_id", ""), creatives=creatives)
+        resp = AdApi().ad_create(token, body=body)
+    elif path == "/campaign/status/update/":
+        body = CampaignStatusUpdateBody(
+            advertiser_id=payload.get("advertiser_id", ""),
+            campaign_ids=payload.get("campaign_ids", []),
+            operation_status=payload.get("opt_status", ""),
+        )
+        resp = CampaignCreationApi().campaign_status_update(token, body=body)
+    elif path == "/campaign/update/":
+        resp = CampaignCreationApi().campaign_update(token, body=CampaignUpdateBody(**payload))
+    else:
+        raise ValueError(f"unmapped tiktok_ads POST path: {path}")
+
+    return _unwrap(resp)
 
 
 def _get(path: str, params: dict | None = None) -> dict:
     if _DRY_RUN:
         _log.info("tiktok_dry_run GET path=%s params=%s", path, params)
         return {"code": 0, "message": "OK", "data": {"list": []}}
-    import requests
-    r = requests.get(f"{_BASE}{path}", headers=_headers(), params=params or {}, timeout=15)
-    r.raise_for_status()
-    return r.json()
+
+    from business_api_client.api.reporting_api import ReportingApi
+
+    token = os.environ["TIKTOK_ACCESS_TOKEN"]
+
+    if path == "/reports/integrated/get/":
+        p = dict(params or {})
+        report_type = p.pop("report_type", "BASIC")
+        resp = ReportingApi().report_integrated_get(report_type, token, **p)
+    else:
+        raise ValueError(f"unmapped tiktok_ads GET path: {path}")
+
+    return _unwrap(resp)
 
 
 # ── campaign lifecycle ─────────────────────────────────────────────────────────
@@ -257,15 +317,13 @@ def upload_creative(file_path: str) -> dict:
     if not is_configured() or not os.path.exists(file_path):
         return {"data": {"video_id": _next_dry_id("vid")}}
 
-    import requests
-    url = f"{_BASE}/file/video/ad/upload/"
-    with open(file_path, "rb") as fh:
-        files = {"video_file": fh}
-        data = {"advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", "")}
-        r = requests.post(url, headers={"Access-Token": os.environ["TIKTOK_ACCESS_TOKEN"]},
-                          files=files, data=data, timeout=60)
-        r.raise_for_status()
-        return r.json()
+    from business_api_client.api.file_api import FileApi
+    resp = FileApi().ad_video_upload(
+        os.environ["TIKTOK_ACCESS_TOKEN"],
+        advertiser_id=os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        video_file=file_path,  # SDK reads the file itself from this path
+    )
+    return _unwrap(resp)
 
 
 @safe_call(default=list)

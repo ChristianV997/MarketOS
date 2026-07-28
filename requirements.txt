@@ -39,6 +39,7 @@ sentry-sdk[fastapi]
 ShopifyAPI
 stripe
 facebook-business
+tiktok-business-api-sdk-official
 evidently
 
 # ── inference kernel ──────────────────────────────────────────────────────────

@@ -231,7 +231,7 @@ async def test_credentials(service: str) -> dict:
                     "message": "TikTok is in dry-run mode (no credentials detected)",
                 }
 
-            campaign_id = tiktok_ads.create_campaign("__TEST__Campaign__", daily_budget=1.0)
+            campaign_id = tiktok_ads.create_campaign("__TEST__Campaign__", budget=1.0)
             if campaign_id and not str(campaign_id).startswith("dry"):
                 return {
                     "status": "ok",
