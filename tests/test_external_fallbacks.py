@@ -21,10 +21,10 @@ def test_meta_ads_fallback_without_credentials(monkeypatch):
     assert [c["campaign_id"] for c in ads["campaigns"]] == ["camp_1", "camp_2", "camp_3"]
 
 
-def test_meta_ads_fallback_without_requests(monkeypatch):
+def test_meta_ads_fallback_without_sdk(monkeypatch):
     monkeypatch.setattr(meta_ads_client, "ACCESS_TOKEN", "token")
     monkeypatch.setattr(meta_ads_client, "AD_ACCOUNT_ID", "account")
-    monkeypatch.setattr(meta_ads_client, "requests", None)
+    monkeypatch.setattr(meta_ads_client, "FacebookAdsApi", None)
     ads = meta_ads_client.get_ad_spend(last_n_minutes=10)
     assert ads["total_spend"] > 0
     assert len(ads["campaigns"]) > 0

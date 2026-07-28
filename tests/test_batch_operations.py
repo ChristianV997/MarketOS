@@ -1,6 +1,4 @@
 """Tests for Meta/TikTok batch ad-creation operations."""
-import json
-
 import pytest
 
 import backend.integrations.meta_ads_client as meta
@@ -22,29 +20,42 @@ class TestMetaBatchAds:
         assert len(set(ad_ids)) == 2  # unique dry-run ids
 
     def test_live_batch_request_shape(self, monkeypatch):
-        """Live path posts one batch request and parses per-ad responses."""
-        monkeypatch.setattr(meta, "ACCESS_TOKEN", "tok")
+        """Live path queues one SDK batch call and parses per-ad responses
+        via the success callback (order-preserving), instead of a raw
+        Graph API batch POST."""
         monkeypatch.setattr(meta, "AD_ACCOUNT_ID", "123")  # code adds the act_ prefix
         monkeypatch.setenv("META_DRY_RUN", "false")
+        monkeypatch.setattr(meta, "_live", lambda: True)
+        monkeypatch.setattr(meta, "_ensure_api", lambda: None)
 
-        captured = {}
+        queued = []
 
         class FakeResponse:
-            def raise_for_status(self):
-                pass
+            def __init__(self, body):
+                self._body = body
 
             def json(self):
-                return [
-                    {"code": 200, "body": json.dumps({"id": "ad_1"})},
-                    {"code": 200, "body": json.dumps({"id": "ad_2"})},
-                ]
+                return self._body
 
-        def fake_post(url, data=None, timeout=None):
-            captured["url"] = url
-            captured["data"] = data
-            return FakeResponse()
+        class FakeAd:
+            def __init__(self, parent_id=None, fbid=None):
+                self.parent_id = parent_id
 
-        monkeypatch.setattr(meta.requests, "post", fake_post)
+            def api_create(self, params=None, batch=None, success=None, failure=None):
+                queued.append({"parent_id": self.parent_id, "params": params,
+                              "success": success, "failure": failure})
+
+        class FakeBatch:
+            def execute(self):
+                for i, call in enumerate(queued):
+                    call["success"](FakeResponse({"id": f"ad_{i + 1}"}))
+
+        class FakeApi:
+            def new_batch(self):
+                return FakeBatch()
+
+        monkeypatch.setattr(meta, "Ad", FakeAd)
+        monkeypatch.setattr(meta.FacebookAdsApi, "get_default_api", staticmethod(lambda: FakeApi()))
 
         ads = [
             {"name": "ad1", "headline": "H1", "body": "B1", "link_url": "http://x/1"},
@@ -53,21 +64,33 @@ class TestMetaBatchAds:
         ad_ids = meta.create_ads_batch("as_1", ads)
 
         assert ad_ids == ["ad_1", "ad_2"]
-        assert captured["url"] == "https://graph.facebook.com/v20.0/"
-        batch_payload = json.loads(captured["data"]["batch"])
-        assert len(batch_payload) == 2
-        assert all(sr["method"] == "POST" for sr in batch_payload)
-        assert all(sr["relative_url"] == "act_123/ads" for sr in batch_payload)
+        assert len(queued) == 2
+        assert all(q["parent_id"] == "act_123" for q in queued)
+        assert all(q["params"]["adset_id"] == "as_1" for q in queued)
 
     def test_live_batch_failure_returns_empty_list(self, monkeypatch):
-        monkeypatch.setattr(meta, "ACCESS_TOKEN", "tok")
         monkeypatch.setattr(meta, "AD_ACCOUNT_ID", "123")
         monkeypatch.setenv("META_DRY_RUN", "false")
+        monkeypatch.setattr(meta, "_live", lambda: True)
+        monkeypatch.setattr(meta, "_ensure_api", lambda: None)
 
-        def raise_post(*a, **k):
-            raise ConnectionError("network down")
+        class FakeAd:
+            def __init__(self, parent_id=None, fbid=None):
+                pass
 
-        monkeypatch.setattr(meta.requests, "post", raise_post)
+            def api_create(self, params=None, batch=None, success=None, failure=None):
+                pass
+
+        class FakeBatch:
+            def execute(self):
+                raise ConnectionError("network down")
+
+        class FakeApi:
+            def new_batch(self):
+                return FakeBatch()
+
+        monkeypatch.setattr(meta, "Ad", FakeAd)
+        monkeypatch.setattr(meta.FacebookAdsApi, "get_default_api", staticmethod(lambda: FakeApi()))
 
         result = meta.create_ads_batch("as_1", [{"name": "a", "headline": "h"}])
         assert result == []  # safe_call default=list -> fresh []

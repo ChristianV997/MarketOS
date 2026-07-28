@@ -38,6 +38,7 @@ sentry-sdk[fastapi]
 # ── integrations ──────────────────────────────────────────────────────────────
 ShopifyAPI
 stripe
+facebook-business
 evidently
 
 # ── inference kernel ──────────────────────────────────────────────────────────

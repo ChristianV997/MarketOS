@@ -15,28 +15,56 @@ class TestCreateAdSetTargeting:
     def test_default_targeting_unchanged(self, monkeypatch):
         import backend.integrations.meta_ads_client as meta
         captured = {}
-        monkeypatch.setattr(meta, "_graph_post",
-                            lambda path, payload: captured.update(payload) or {"id": "as_1"})
+
+        class FakeAdSet:
+            def __init__(self, parent_id=None, fbid=None):
+                pass
+
+            def api_create(self, params=None, **kw):
+                captured.update(params)
+                return {"id": "as_1"}
+
+        monkeypatch.setattr(meta, "_live", lambda: True)
+        monkeypatch.setattr(meta, "_ensure_api", lambda: None)
+        monkeypatch.setattr(meta, "AdSet", FakeAdSet)
         meta.create_ad_set("camp_1", name="as1")
-        import json
-        assert json.loads(captured["targeting"]) == {"geo_locations": {"countries": ["US"]}}
+        assert captured["targeting"] == {"geo_locations": {"countries": ["US"]}}
 
     def test_custom_targeting_passed_through(self, monkeypatch):
         import backend.integrations.meta_ads_client as meta
         captured = {}
-        monkeypatch.setattr(meta, "_graph_post",
-                            lambda path, payload: captured.update(payload) or {"id": "as_1"})
+
+        class FakeAdSet:
+            def __init__(self, parent_id=None, fbid=None):
+                pass
+
+            def api_create(self, params=None, **kw):
+                captured.update(params)
+                return {"id": "as_1"}
+
+        monkeypatch.setattr(meta, "_live", lambda: True)
+        monkeypatch.setattr(meta, "_ensure_api", lambda: None)
+        monkeypatch.setattr(meta, "AdSet", FakeAdSet)
         custom = {"geo_locations": {"countries": ["MX"]}, "age_min": 25, "age_max": 44}
         meta.create_ad_set("camp_1", name="as1", targeting=custom)
-        import json
-        assert json.loads(captured["targeting"]) == custom
+        assert captured["targeting"] == custom
 
 
 class TestLiveRiskGateWiring:
     def test_live_gates_and_records_only_the_delta(self, monkeypatch):
         import backend.integrations.meta_ads_client as meta
+
+        class FakeAdSet:
+            def __init__(self, fbid=None, parent_id=None):
+                self.fbid = fbid
+
+            def api_update(self, params=None, **kw):
+                return {"id": self.fbid}
+
         monkeypatch.setattr(meta, "_is_dry_run", lambda: False)
-        monkeypatch.setattr(meta, "_graph_post", lambda path, payload: {"id": path})
+        monkeypatch.setattr(meta, "_live", lambda: True)
+        monkeypatch.setattr(meta, "_ensure_api", lambda: None)
+        monkeypatch.setattr(meta, "AdSet", FakeAdSet)
 
         recorded = []
         monkeypatch.setattr("backend.risk.gate.check_spend",
@@ -51,10 +79,21 @@ class TestLiveRiskGateWiring:
 
     def test_kill_switch_blocks_live_scale_up(self, monkeypatch):
         import backend.integrations.meta_ads_client as meta
-        monkeypatch.setattr(meta, "_is_dry_run", lambda: False)
+
         calls = []
-        monkeypatch.setattr(meta, "_graph_post",
-                           lambda path, payload: calls.append(payload) or {"id": path})
+
+        class FakeAdSet:
+            def __init__(self, fbid=None, parent_id=None):
+                self.fbid = fbid
+
+            def api_update(self, params=None, **kw):
+                calls.append(params)
+                return {"id": self.fbid}
+
+        monkeypatch.setattr(meta, "_is_dry_run", lambda: False)
+        monkeypatch.setattr(meta, "_live", lambda: True)
+        monkeypatch.setattr(meta, "_ensure_api", lambda: None)
+        monkeypatch.setattr(meta, "AdSet", FakeAdSet)
 
         from backend.risk.gate import _engine
         _engine().activate_kill_switch(reason="test")
@@ -68,8 +107,18 @@ class TestLiveRiskGateWiring:
 
     def test_scale_down_never_gated(self, monkeypatch):
         import backend.integrations.meta_ads_client as meta
+
+        class FakeAdSet:
+            def __init__(self, fbid=None, parent_id=None):
+                self.fbid = fbid
+
+            def api_update(self, params=None, **kw):
+                return {"id": self.fbid}
+
         monkeypatch.setattr(meta, "_is_dry_run", lambda: False)
-        monkeypatch.setattr(meta, "_graph_post", lambda path, payload: {"id": path})
+        monkeypatch.setattr(meta, "_live", lambda: True)
+        monkeypatch.setattr(meta, "_ensure_api", lambda: None)
+        monkeypatch.setattr(meta, "AdSet", FakeAdSet)
 
         gate_calls = []
         monkeypatch.setattr("backend.risk.gate.check_spend",
