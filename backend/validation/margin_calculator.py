@@ -70,8 +70,19 @@ RETURN_RELIABILITY_SENSITIVITY = 0.5
 
 def category_return_rate(category: str = "general") -> float:
     """Category-specific return/chargeback rate; unknown categories fall
-    back to the "general" (12%) rate, matching the pre-Phase-6 default."""
-    return CATEGORY_RETURN_RATES.get(category, CATEGORY_RETURN_RATES["general"])
+    back to the "general" (12%) rate, matching the pre-Phase-6 default.
+
+    Consults backend.data.category_priors (Phase I) for a dataset-derived
+    return_proxy first — a no-op today (returns *legacy* unchanged) until
+    both CATEGORY_PRIORS_LIVE is set and scripts/ingest_category_priors.py
+    has actually populated real data for *category*.
+    """
+    legacy = CATEGORY_RETURN_RATES.get(category, CATEGORY_RETURN_RATES["general"])
+    try:
+        from backend.data.category_priors import category_prior
+        return category_prior(category, "return_proxy", legacy)
+    except Exception:
+        return legacy
 
 
 def calculate_margin(

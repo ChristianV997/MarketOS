@@ -1,0 +1,13 @@
+# Optional extras — not required for MarketOS to run; each is import-guarded
+# at its call site and the codebase degrades gracefully to its existing
+# default behavior when the package isn't installed.
+
+# pymc-marketing: BG/NBD + Gamma-Gamma customer-lifetime-value modeling.
+# backend/economics/ltv.py's CohortTracker.repeat_rate() checks
+# pymc_marketing_available() and PYMC_CLV_MIN_ORDERS before ever
+# considering this path — until order volume for a category crosses that
+# threshold (and a full frequency/recency/monetary transaction history is
+# wired in, a larger follow-up beyond the current last-order-timestamp
+# tracking), the existing Beta-Binomial estimate remains the one actually
+# used. Installing this package alone does not change behavior.
+pymc-marketing>=0.8

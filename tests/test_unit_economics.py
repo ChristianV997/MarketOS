@@ -425,6 +425,42 @@ class TestRepeatRatePosterior:
         assert abs(posterior - prior) < 0.05
 
 
+class TestPymcMarketingOptionalExtra:
+    """The pymc-marketing extra is import-guarded — installing it (or not)
+    must never change repeat_rate()'s actual behavior, since the
+    transaction-history plumbing a real BG/NBD fit needs doesn't exist yet."""
+
+    def test_unavailable_when_not_installed(self, monkeypatch):
+        import builtins
+        from backend.economics import ltv as ltv_mod
+
+        real_import = builtins.__import__
+
+        def _blocked_import(name, *a, **kw):
+            if name == "pymc_marketing":
+                raise ImportError("no module named pymc_marketing")
+            return real_import(name, *a, **kw)
+
+        monkeypatch.setattr(builtins, "__import__", _blocked_import)
+        assert ltv_mod.pymc_marketing_available() is False
+
+    def test_min_orders_default(self, monkeypatch):
+        monkeypatch.delenv("PYMC_CLV_MIN_ORDERS", raising=False)
+        import importlib
+        from backend.economics import ltv as ltv_mod
+        importlib.reload(ltv_mod)
+        assert ltv_mod.PYMC_CLV_MIN_ORDERS == 1000
+
+    def test_repeat_rate_unaffected_regardless_of_availability(self, monkeypatch):
+        """The actual estimate used is Beta-Binomial either way — this is
+        the load-bearing safety property of an import-guarded extra that
+        isn't wired into repeat_rate()'s computation yet."""
+        from backend.economics.ltv import CohortTracker, category_repeat_rate_prior
+        tracker = CohortTracker()
+        assert tracker.repeat_rate("beauty") == pytest.approx(
+            category_repeat_rate_prior("beauty"))
+
+
 class TestEffectiveCac:
     def test_zero_repeat_rate_leaves_cac_unchanged(self):
         tracker = CohortTracker()

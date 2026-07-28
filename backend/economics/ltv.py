@@ -22,9 +22,22 @@ acquisition cost — so its *effective* CAC per lifetime dollar of margin is
 lower than its first-order CAC, exactly the correction
 ``backend/validation/margin_calculator.py::calculate_ltv_adjusted_margin``
 needs to stop under-valuing consumables relative to one-off novelty items.
+
+Optional PyMC-Marketing extra (see requirements-optional.txt):
+pymc_marketing_available() gates a future BG/NBD + Gamma-Gamma CLV path —
+a fuller model than this module's Beta-Binomial repeat-rate estimate, but
+one that needs real per-customer frequency/recency/monetary transaction
+history (this module currently only tracks last-order-timestamp per
+customer per category) and enough order volume per category
+(PYMC_CLV_MIN_ORDERS, default 1000) to fit meaningfully. Installing the
+package is necessary but not sufficient to activate it — until that
+transaction-history plumbing exists, the Beta-Binomial estimate below
+remains what's actually used regardless of order volume or whether
+pymc-marketing is installed.
 """
 from __future__ import annotations
 
+import os
 import time
 
 # Beta-Binomial prior: category benchmark repeat rate (order again within
@@ -51,6 +64,20 @@ PRIOR_STRENGTH = 20
 REPEAT_WINDOW_DAYS = 60
 REPEAT_WINDOW_SECONDS = REPEAT_WINDOW_DAYS * 86_400
 
+# PyMC-Marketing optional extra — see requirements-optional.txt and the
+# module docstring for exactly what's gated here and why it's not active
+# yet regardless of order volume.
+PYMC_CLV_MIN_ORDERS = int(os.getenv("PYMC_CLV_MIN_ORDERS", "1000"))
+
+
+def pymc_marketing_available() -> bool:
+    try:
+        import pymc_marketing  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 # Repeat orders carry ~zero incremental CAC but aren't free to fulfill
 # (shipping, payment fees, some return risk) — this fraction discounts a
 # repeat order's margin contribution relative to a full first-order margin
@@ -59,7 +86,19 @@ AVG_REPEAT_MARGIN_FRAC = 0.6
 
 
 def category_repeat_rate_prior(category: str = "general") -> float:
-    return CATEGORY_REPEAT_RATE_PRIOR.get(category, CATEGORY_REPEAT_RATE_PRIOR["general"])
+    """Beta-Binomial prior repeat rate for *category*.
+
+    Consults backend.data.category_priors (Phase I) for an Olist-derived
+    repeat_rate first — a no-op today (returns *legacy* unchanged) until
+    both CATEGORY_PRIORS_LIVE is set and scripts/ingest_category_priors.py
+    has actually populated real data for *category*.
+    """
+    legacy = CATEGORY_REPEAT_RATE_PRIOR.get(category, CATEGORY_REPEAT_RATE_PRIOR["general"])
+    try:
+        from backend.data.category_priors import category_prior
+        return category_prior(category, "repeat_rate", legacy)
+    except Exception:
+        return legacy
 
 
 class CohortTracker:
@@ -122,6 +161,12 @@ class CohortTracker:
 
         posterior_mean = (prior_strength * prior + observed_repeats)
                         / (prior_strength + observed_total)
+
+        This is the estimate actually used today regardless of order
+        volume or whether pymc-marketing is installed — see
+        pymc_marketing_available()/PYMC_CLV_MIN_ORDERS and the module
+        docstring for what a future BG/NBD+Gamma-Gamma path still needs
+        (real per-customer transaction history this tracker doesn't keep).
         """
         prior = category_repeat_rate_prior(category)
         repeats = self._repeat_counts.get(category, 0)

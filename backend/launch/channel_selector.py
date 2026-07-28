@@ -15,9 +15,10 @@ splits as shadow_channel_selection; returns the selected split only when
 CHANNEL_SELECT_LIVE=true, so nothing changes for existing brands until the
 flag flips.
 
-A category-prior fallback (channel affinity learned from category-level
-data) is a natural extension point once backend.data.category_priors
-exists — not built yet, so this module only consults brand preferences.
+A category-prior fallback (channel_affinity, backend.data.category_priors,
+Phase I) sits between brand preference and the legacy default — a no-op
+today (empty seed data) until an operator ingests real category priors and
+sets CATEGORY_PRIORS_LIVE.
 """
 from __future__ import annotations
 
@@ -34,11 +35,15 @@ def _live() -> bool:
     return os.getenv("CHANNEL_SELECT_LIVE", "false").lower() == "true"
 
 
-def select_weights(platforms: tuple[str, ...], brand: Any = None) -> dict[str, float]:
+def select_weights(platforms: tuple[str, ...], brand: Any = None,
+                   category: str = "") -> dict[str, float]:
     """Return {platform: weight} for *platforms*, always summing to 1.0.
 
     Priority: brand.channel_preferences (when it covers at least one of
-    the requested platforms) -> the legacy 55/45 default.
+    the requested platforms) -> a category channel_affinity prior
+    (backend.data.category_priors, Phase I) -> the legacy 55/45 default.
+    *category* defaults to brand.category when brand is given and category
+    is omitted.
     """
     legacy = {p: _LEGACY_SPLIT.get(p, 1.0 / len(platforms)) for p in platforms}
     legacy_total = sum(legacy.values()) or 1.0
@@ -50,6 +55,19 @@ def select_weights(platforms: tuple[str, ...], brand: Any = None) -> dict[str, f
     if prefs and any(p in prefs for p in platforms):
         selected = {p: float(prefs.get(p, 0.0)) for p in platforms}
         source = "brand_preference"
+
+    if selected is None:
+        resolved_category = category or getattr(brand, "category", "")
+        if resolved_category:
+            try:
+                from backend.data.category_priors import category_prior
+                affinity = category_prior(resolved_category, "channel_affinity", None)
+                if affinity and any(p in affinity for p in platforms):
+                    selected = {p: float(affinity.get(p, 0.0)) for p in platforms}
+                    source = "category_prior"
+            except Exception:
+                _log.debug("category_affinity_lookup_failed category=%s",
+                          resolved_category, exc_info=True)
 
     if selected is None:
         selected = dict(legacy)
