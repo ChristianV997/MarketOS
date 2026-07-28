@@ -5,7 +5,6 @@ from api.control import STATE, approve, override_budget, pause, resume
 from agents.human_gate import can_launch
 from backend.core.state import SystemState
 from backend.execution.loop import run_cycle
-from core.bridge import Bridge
 
 
 def test_run_cycle_emits_real_feedback_metrics_and_profit():
@@ -20,25 +19,6 @@ def test_run_cycle_emits_real_feedback_metrics_and_profit():
     assert "profit" in row
     assert "cost" in row
     assert row["profit"] == round(row["revenue"] - row["cost"], 2)
-
-
-def test_bridge_execute_dispatches_real_cycles(monkeypatch):
-    class Runner:
-        def __init__(self):
-            self.products = []
-
-        def delay(self, product):
-            self.products.append(product)
-
-    runner = Runner()
-    monkeypatch.setattr("core.bridge.run_intelligence", lambda _keywords: ["idea one", "idea two"])
-    monkeypatch.setattr("core.bridge.run_real_cycle", runner)
-
-    launched = Bridge().execute(["ignored"])
-
-    assert launched == 2
-    assert len(runner.products) == 2
-    assert all("budget" in product for product in runner.products)
 
 
 def test_control_gate_rules():

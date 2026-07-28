@@ -539,7 +539,7 @@ def run_cycle(state):
 
     # persist cycle summary to Supabase (no-op when credentials absent)
     try:
-        from connectors.supabase_connector import save_cycle_summary
+        from backend.integrations.supabase_client import save_cycle_summary
         save_cycle_summary({
             "total_cycles": state.total_cycles,
             "capital": round(state.capital, 2),

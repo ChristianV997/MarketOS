@@ -27,7 +27,7 @@ from typing import Any
 @dataclass
 class TaskRecord:
     name: str
-    kind: str           # thread | celery | scheduler | ws | state_writer | queue | loop
+    kind: str           # thread | scheduler | ws | state_writer | queue | loop
     description: str
     module: str = ""
     interval_s: float | None = None   # None = event-driven / on-demand
@@ -209,7 +209,7 @@ def _register_all() -> None:
         description="_run_scaling(): portfolio.top_products → AJO scale_campaign (SCALE phase only)",
         module="orchestrator.main",
         interval_s=_TICK,
-        env_required="ADOBE_AJO_TOKEN",
+        env_required="ADOBE_CLIENT_ID",
     )
     task_registry.register(
         "run_py_shim",
@@ -231,21 +231,6 @@ def _register_all() -> None:
     )
 
     # ── Celery tasks ──────────────────────────────────────────────────────
-    task_registry.register(
-        "celery_run_real_cycle",
-        kind="celery",
-        description="Celery task: execute one paid campaign cycle from a product signal dict",
-        module="tasks.pipeline",
-        broker=os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0"),
-    )
-    task_registry.register(
-        "celery_run_discovery",
-        kind="celery",
-        description="Celery task: keyword discovery via core.bridge.Bridge (Bridge pattern)",
-        module="tasks.discovery",
-        broker=os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0"),
-    )
-
     # ── queues ────────────────────────────────────────────────────────────
     task_registry.register(
         "redis_stream_upos_events",
@@ -284,8 +269,8 @@ def _register_all() -> None:
     task_registry.register(
         "sw_supabase",
         kind="state_writer",
-        description="supabase_connector.save_cycle_summary(): upserts cycle KPIs to Supabase (optional)",
-        module="connectors.supabase_connector",
+        description="supabase_client.save_cycle_summary(): inserts cycle KPIs to Supabase (optional)",
+        module="backend.integrations.supabase_client",
         env_required="SUPABASE_URL",
     )
     task_registry.register(

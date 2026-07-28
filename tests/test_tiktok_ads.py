@@ -118,6 +118,29 @@ def test_launch_from_playbook_dry_run():
     assert len(result["ad_ids"]) > 0
 
 
+def test_upload_creative_dry_run():
+    from backend.integrations.tiktok_ads import upload_creative
+    result = upload_creative("/nonexistent.mp4")
+    assert result["data"]["video_id"]
+
+
+def test_upload_creative_no_creds_no_file(monkeypatch):
+    import backend.integrations.tiktok_ads as tiktok_ads
+    monkeypatch.setattr(tiktok_ads, "_DRY_RUN", False)
+    result = tiktok_ads.upload_creative("/nonexistent.mp4")
+    assert result["data"]["video_id"]
+
+
+def test_create_ads_from_files_dry_run():
+    from backend.integrations.tiktok_ads import create_ads_from_files
+    assets = [{"name": "c0", "file_path": "/tmp/x.mp4"}]
+    result = create_ads_from_files("dry_ag_1", assets)
+    assert len(result) == 1
+    assert result[0]["adgroup_id"] == "dry_ag_1"
+    assert result[0]["video_id"]
+    assert result[0]["ad_id"]
+
+
 class TestLiveRiskGateWiring:
     """Tier 2 fix: real (non-dry-run) spend passes through backend.risk.gate
     before ever reaching TikTok's API."""

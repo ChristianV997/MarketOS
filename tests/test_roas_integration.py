@@ -4,28 +4,29 @@ Tests cover:
 1. RoasRepository schema and basic CRUD
 2. Multi-touch order deduplication
 3. Cross-platform ROAS reconciliation
-4. Connector dry-run modes
+
+(Connector dry-run and daily-ingestion-worker tests were removed when
+backend/connectors/real_data_connector.py and
+backend/workers/roas_ingestion_worker.py were retired — that batch
+pipeline duplicated backend/integrations/{shopify_client,meta_ads_client,
+tiktok_ads}.py's real spend/order fetching and was never actually
+scheduled anywhere in production; Commerce Phase C's real-time webhook
+path (api/routes/webhooks.py -> backend.commerce.orders.ingest_order)
+supersedes it for order/UTM-attribution ingestion.)
 """
 from __future__ import annotations
 
-import asyncio
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-from backend.connectors.real_data_connector import (
-    MetaAdsConnector,
-    ShopifyConnector,
-    TikTokAdsConnector,
-)
 from backend.data.repositories.roas_repository import (
     Order,
     PlatformInsight,
     RoasRepository,
 )
-from backend.workers.roas_ingestion_worker import RoasIngestionWorker
 
 
 @pytest.fixture
@@ -302,85 +303,6 @@ class TestOrderDeduplication:
         assert result["duplicate_count"] == 0  # Nothing marked duplicate
 
 
-class TestConnectorDryRun:
-    """Test connector dry-run (mock) modes."""
-
-    @pytest.mark.asyncio
-    async def test_shopify_dry_run(self):
-        """Verify Shopify connector works in dry-run mode."""
-        connector = ShopifyConnector(dry_run=True)
-        now = datetime.now(timezone.utc)
-
-        result = await connector.fetch_orders(
-            since=now - timedelta(days=7),
-            until=now,
-        )
-
-        assert result["success"]
-        assert len(result["orders"]) > 0
-        assert "id" in result["orders"][0]
-        assert "customer_id" in result["orders"][0]
-
-    @pytest.mark.asyncio
-    async def test_meta_dry_run(self):
-        """Verify Meta connector works in dry-run mode."""
-        connector = MetaAdsConnector(dry_run=True)
-
-        result = await connector.fetch_daily_insights(date="2024-01-15")
-
-        assert result["success"]
-        assert len(result["insights"]) > 0
-        assert "campaign_id" in result["insights"][0]
-        assert "spend" in result["insights"][0]
-
-    @pytest.mark.asyncio
-    async def test_tiktok_dry_run(self):
-        """Verify TikTok connector works in dry-run mode."""
-        connector = TikTokAdsConnector(dry_run=True)
-
-        result = await connector.fetch_daily_insights(date="2024-01-15")
-
-        assert result["success"]
-        assert len(result["insights"]) > 0
-        assert "campaign_id" in result["insights"][0]
-        assert "spend" in result["insights"][0]
-
-
-class TestRoasIngestionWorker:
-    """Test the daily ingestion worker integration."""
-
-    @pytest.mark.asyncio
-    async def test_worker_dry_run(self, temp_db):
-        """Test worker with dry-run mode."""
-        worker = RoasIngestionWorker(roas_repo_path=temp_db, dry_run=True)
-        target_date = datetime.now(timezone.utc) - timedelta(days=1)
-
-        result = await worker.run_daily_ingestion(target_date=target_date)
-
-        assert result["success"]
-        assert result["shopify_orders"] > 0
-        assert result["meta_insights"] > 0
-        assert result["tiktok_insights"] > 0
-
-    @pytest.mark.asyncio
-    async def test_worker_ingestion_pipeline(self, temp_db):
-        """Test full ingestion pipeline: fetch → ingest → deduplicate."""
-        worker = RoasIngestionWorker(roas_repo_path=temp_db, dry_run=True)
-
-        # Run ingestion
-        result = await worker.run_daily_ingestion()
-
-        assert result["success"]
-
-        # Verify data was actually ingested by checking repository
-        repo = RoasRepository(db_path=temp_db)
-        comparison = repo.get_platform_comparison(days=1)
-
-        # In dry-run mode, we should have generated some mock data
-        # (exact counts depend on mock data generator, but should be > 0)
-        assert isinstance(comparison, dict)
-
-
 class TestCrossPlatformReconciliation:
     """Test ROAS reconciliation across Meta and TikTok."""
 
@@ -389,7 +311,15 @@ class TestCrossPlatformReconciliation:
         Verify that deduplicated ROAS is different from platform-reported ROAS
         when orders are attributed to multiple platforms (multi-touch).
         """
-        now = datetime.now(timezone.utc)
+        # Anchored to the start of today (not "now") so the second order's
+        # +12h offset below can never cross midnight UTC and land on a
+        # different calendar day than date_str — that was the actual root
+        # cause of this test's previously-reported flakiness (it failed
+        # whenever run in the afternoon UTC, since compute_deduped_roas
+        # filters strictly by calendar date).
+        today_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        now = today_start + timedelta(hours=2)
         date_str = now.strftime("%Y-%m-%d")
 
         # Scenario: Same customer buys via Meta and TikTok

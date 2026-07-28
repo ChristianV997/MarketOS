@@ -8,18 +8,6 @@ services:
     depends_on:
       - redis
       - db
-  worker:
-    build: .
-    command: celery -A core.celery_app worker --loglevel=info
-    depends_on:
-      - redis
-      - db
-  beat:
-    build: .
-    command: celery -A core.celery_app beat --loglevel=info
-    depends_on:
-      - redis
-      - db
   redis:
     image: redis:7
   db:

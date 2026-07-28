@@ -4,6 +4,13 @@ All calls are no-ops when TIKTOK_DRY_RUN=true (default) or when credentials
 are absent. This ensures the module is always safe to import and test without
 live credentials.
 
+The single TikTok integration surface — creative upload used to live in a
+separate, disjoint pair of modules (core/connectors/tiktok_creatives.py +
+tiktok_ads_variants.py) with no shared client, no dry-run gating, and no
+production caller (only their own tests exercised them). Merged here as
+upload_creative()/create_ads_from_files() so creative upload shares this
+module's dry-run/risk-gate conventions.
+
 Production activation: set TIKTOK_DRY_RUN=false and supply:
   TIKTOK_ACCESS_TOKEN, TIKTOK_ADVERTISER_ID, TIKTOK_APP_ID
 """
@@ -236,6 +243,57 @@ def scale_budget(campaign_id: str, new_budget: float, current_budget: float = 0.
         from backend.risk.gate import record_spend
         record_spend(committed_delta)
     return True
+
+
+@safe_call(default=dict)
+def upload_creative(file_path: str) -> dict:
+    """Upload a video file as a TikTok creative. Returns the raw API response
+    (or a dry-run/fallback stub with a synthetic ``video_id``).
+    """
+    if _DRY_RUN:
+        _log.info("tiktok_dry_run upload_creative file_path=%s", file_path)
+        return {"data": {"video_id": _next_dry_id("vid")}}
+
+    if not is_configured() or not os.path.exists(file_path):
+        return {"data": {"video_id": _next_dry_id("vid")}}
+
+    import requests
+    url = f"{_BASE}/file/video/ad/upload/"
+    with open(file_path, "rb") as fh:
+        files = {"video_file": fh}
+        data = {"advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", "")}
+        r = requests.post(url, headers={"Access-Token": os.environ["TIKTOK_ACCESS_TOKEN"]},
+                          files=files, data=data, timeout=60)
+        r.raise_for_status()
+        return r.json()
+
+
+@safe_call(default=list)
+def create_ads_from_files(adgroup_id: str, assets: list[dict]) -> list[dict]:
+    """Upload each asset's video file and create an ad from it.
+
+    Each item in ``assets`` is {"file_path", "name"} (optionally "hook",
+    "angle"). Returns a list of {"campaign_id"/"adgroup_id", "creative_name",
+    "video_id", "ad_id"} dicts, one per asset, in order.
+    """
+    results = []
+    for asset in assets:
+        video = upload_creative(asset["file_path"])
+        video_id = video.get("data", {}).get("video_id", "")
+        ad_id = create_ad(
+            adgroup_id=adgroup_id,
+            creative_id=video_id,
+            name=asset.get("name", ""),
+            hook=asset.get("hook", ""),
+            angle=asset.get("angle", ""),
+        )
+        results.append({
+            "adgroup_id": adgroup_id,
+            "creative_name": asset.get("name", ""),
+            "video_id": video_id,
+            "ad_id": ad_id,
+        })
+    return results
 
 
 # ── ROAS reporting ─────────────────────────────────────────────────────────────

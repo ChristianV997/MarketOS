@@ -126,3 +126,54 @@ def test_validate_slow_fulfillment_flagged():
 def test_validate_uses_suggested_price_when_none_given():
     v = validate_product("Test Widget")
     assert v["retail_price"] == v["suggested_price"]
+
+
+def test_validate_product_includes_similar_past_products_field():
+    v = validate_product("Test Widget")
+    assert "similar_past_products" in v
+    assert isinstance(v["similar_past_products"], list)
+
+
+def test_validate_flags_repeated_similar_failures(monkeypatch):
+    monkeypatch.setattr(
+        "backend.validation.validator._find_similar_past_products",
+        lambda name, top_k=3: [
+            {"product": "Ghost Widget A", "similarity": 0.91, "confidence": 0.1, "recommendation": "red"},
+            {"product": "Ghost Widget B", "similarity": 0.83, "confidence": 0.2, "recommendation": "red"},
+        ],
+    )
+    v = validate_product("Test Widget")
+    assert "similar_to_repeated_past_failures" in v["risk_flags"]
+    assert v["ready_for_creation"] is False
+
+
+def test_validate_no_flag_when_similar_products_not_mostly_red(monkeypatch):
+    monkeypatch.setattr(
+        "backend.validation.validator._find_similar_past_products",
+        lambda name, top_k=3: [
+            {"product": "Winner Widget", "similarity": 0.9, "confidence": 0.8, "recommendation": "green"},
+        ],
+    )
+    v = validate_product("Test Widget")
+    assert "similar_to_repeated_past_failures" not in v["risk_flags"]
+
+
+def test_similar_past_products_lookup_never_raises(monkeypatch):
+    from backend.validation.validator import _find_similar_past_products
+
+    def _boom(*a, **kw):
+        raise RuntimeError("vector store unreachable")
+
+    monkeypatch.setattr("backend.vector.semantic_search.find_similar_products", _boom)
+    assert _find_similar_past_products("Anything") == []
+
+
+def test_index_validated_product_never_raises(monkeypatch):
+    from backend.validation.validator import _index_validated_product
+
+    def _boom(*a, **kw):
+        raise RuntimeError("vector store unreachable")
+
+    monkeypatch.setattr("backend.vector.embeddings.embed_text", _boom)
+    # Should not raise even though embed_text is broken.
+    _index_validated_product("Anything", {"confidence": 0.5, "recommendation": "yellow"}, "general")

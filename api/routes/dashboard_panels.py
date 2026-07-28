@@ -17,7 +17,7 @@ router = APIRouter()
 @router.post("/ajo/apply")
 def ajo_apply(campaign_id: str, action: str, budget_multiplier: float = 1.5):
     """Apply a MarketOS action (pause/scale/hold) to an Adobe AJO campaign."""
-    from connectors.adobe_ajo_connector import apply_decision
+    from backend.integrations.adobe_ajo import apply_decision
     try:
         return apply_decision(campaign_id, action, budget_multiplier)
     except Exception:

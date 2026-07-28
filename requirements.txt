@@ -15,8 +15,14 @@ cvxpy
 mabwiser
 dowhy
 
-# ── async task queue + message bus ────────────────────────────────────────────
-celery[redis]
+# ── message bus ───────────────────────────────────────────────────────────────
+# redis: backs core/stream.py's event stream (with an in-memory fallback when
+# unavailable). The celery[redis] task-queue dependency was removed here — its
+# only dispatcher (core/full_loop.py's FullLoop, never actually instantiated
+# anywhere) and the two tasks it queued (tasks/discovery.py, tasks/pipeline.py)
+# were a fully deployed (docker-compose worker+beat services) but never
+# actually triggered pipeline, duplicating what orchestrator/main.py's
+# synchronous tick loop already does in production.
 redis
 
 # ── signal ingestion ──────────────────────────────────────────────────────────

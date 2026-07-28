@@ -173,24 +173,6 @@ class TestPrepareAssets:
         assert all("file_path" in a and "name" in a for a in assets)
 
 
-class TestTikTokCreatives:
-    def test_fallback_no_creds(self, monkeypatch):
-        import core.connectors.tiktok_creatives as mod
-        monkeypatch.setattr(mod, "TIKTOK_ACCESS_TOKEN", None)
-        monkeypatch.setattr(mod, "TIKTOK_ADVERTISER_ID", None)
-        result = mod.upload_creative("/nonexistent.mp4")
-        assert "data" in result
-
-    def test_launch_variants_no_creds(self, monkeypatch):
-        from core.connectors.tiktok_ads_variants import launch_variants
-        import core.connectors.tiktok_creatives as mod
-        monkeypatch.setattr(mod, "TIKTOK_ACCESS_TOKEN", None)
-        monkeypatch.setattr(mod, "TIKTOK_ADVERTISER_ID", None)
-        assets = [{"name": "c0", "file_path": "/tmp/x.mp4"}]
-        result = launch_variants("camp1", assets)
-        assert len(result) == 1
-        assert result[0]["campaign_id"] == "camp1"
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 35 — video generation, prompt builder, hooks, hook performance
