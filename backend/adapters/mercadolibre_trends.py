@@ -31,7 +31,7 @@ _CACHE_TTL = 3600  # 1 hour — catalog popularity doesn't churn as fast as soci
 _SITES = os.getenv("MERCADOLIBRE_SITES", "MLA,MLM,MLB").split(",")
 _QUERIES = os.getenv(
     "MERCADOLIBRE_QUERIES",
-    "electronica,hogar,belleza,deportes",
+    "electronica,hogar,belleza,deportes,mascotas,bebes",
 ).split(",")
 
 _ENDPOINT = "https://api.mercadolibre.com/sites/{site_id}/search"

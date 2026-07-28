@@ -55,6 +55,8 @@ CATEGORY_RETURN_RATES = {
     "consumables": 0.08,
     "jewelry":     0.18,
     "home":        0.10,
+    "pets":        0.08,   # low returns — impulse/gift-driven, rarely fit-dependent
+    "baby":        0.14,   # moderate — safety/fit concerns push slightly above general
 }
 
 # Supplier-selection risk adjustment (see suppliers.py::find_best_supplier):

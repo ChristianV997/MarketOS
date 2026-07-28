@@ -34,6 +34,8 @@ _MOCK_PRODUCTS = [
     {"product": "LED Strip Light Kit Wholesale",     "category": "electronics", "score": 0.73},
     {"product": "Yoga Mat Custom Print Bulk",        "category": "sports",      "score": 0.70},
     {"product": "Silicone Phone Case Wholesale",     "category": "electronics", "score": 0.68},
+    {"product": "Interactive Cat Toy Bulk OEM",      "category": "pets",        "score": 0.77},
+    {"product": "Silicone Baby Teether Wholesale",   "category": "baby",        "score": 0.74},
 ]
 
 

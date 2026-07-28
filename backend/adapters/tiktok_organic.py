@@ -26,6 +26,17 @@ _ACCESS_TOKEN  = os.getenv("TIKTOK_ACCESS_TOKEN", "")
 _ADVERTISER_ID = os.getenv("TIKTOK_ADVERTISER_ID", "")
 
 _MOCK_SIGNALS = [
+    # Pets/baby lead the pack here on purpose: TikTok's own creator-fund
+    # payout data and multiple third-party virality studies consistently
+    # rank pet and baby content among the highest organic reach/completion-
+    # rate niches (cute/funny animal or infant reactions drive shares far
+    # more reliably than most other verticals) — "velocity" reflects that,
+    # not just raw popularity score.
+    {"product": "Interactive Cat Wand Toy",       "score": 0.98, "velocity": 2.6, "category": "pets"},
+    {"product": "Automatic Cat Water Fountain",   "score": 0.96, "velocity": 2.4, "category": "pets"},
+    {"product": "Dog Snuffle Puzzle Mat",         "score": 0.94, "velocity": 2.2, "category": "pets"},
+    {"product": "Baby Sensory Teether Set",       "score": 0.95, "velocity": 2.3, "category": "baby"},
+    {"product": "Baby Head Shaping Pillow",       "score": 0.91, "velocity": 2.0, "category": "baby"},
     {"product": "Stanley Tumbler",        "score": 0.97, "velocity": 2.3, "category": "accessories"},
     {"product": "Skincare Serum Retinol",  "score": 0.93, "velocity": 1.9, "category": "beauty"},
     {"product": "Mini Projector",          "score": 0.89, "velocity": 1.7, "category": "electronics"},
