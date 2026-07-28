@@ -32,6 +32,29 @@ def test_create_ad_group_dry_run():
     assert agid  # non-empty
 
 
+def test_create_ad_group_targeting_merged_into_payload(monkeypatch):
+    import backend.integrations.tiktok_ads as tiktok_ads
+    captured = {}
+    monkeypatch.setattr(tiktok_ads, "_post",
+                        lambda path, payload: captured.update(payload) or
+                        {"data": {"adgroup_id": "ag_1"}})
+    tiktok_ads.create_ad_group("cid_1", name="g1",
+                              targeting={"age_groups": ["AGE_25_34"], "gender": "GENDER_FEMALE"})
+    assert captured["age_groups"] == ["AGE_25_34"]
+    assert captured["gender"] == "GENDER_FEMALE"
+
+
+def test_create_ad_group_no_targeting_unchanged(monkeypatch):
+    import backend.integrations.tiktok_ads as tiktok_ads
+    captured = {}
+    monkeypatch.setattr(tiktok_ads, "_post",
+                        lambda path, payload: captured.update(payload) or
+                        {"data": {"adgroup_id": "ag_1"}})
+    tiktok_ads.create_ad_group("cid_1", name="g1")
+    assert "age_groups" not in captured
+    assert "gender" not in captured
+
+
 def test_create_ad_dry_run():
     from backend.integrations.tiktok_ads import create_ad
     ad_id = create_ad("ag_1", creative_id="c1", name="ad_1", hook="Hook A")

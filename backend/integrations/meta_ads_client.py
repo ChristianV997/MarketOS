@@ -134,15 +134,24 @@ def update_ad_set_budget(ad_set_id: str, new_budget: float, current_budget: floa
 
 
 @safe_call(default="")
-def create_ad_set(campaign_id: str, name: str, daily_budget: float = 50.0) -> str:
-    """Create an ad set under a campaign. Returns ad_set_id ('' on failure)."""
+def create_ad_set(campaign_id: str, name: str, daily_budget: float = 50.0,
+                  targeting: dict | None = None) -> str:
+    """Create an ad set under a campaign. Returns ad_set_id ('' on failure).
+
+    *targeting* is Meta's raw targeting spec (geo_locations, age_min/max,
+    interests, etc.) — omit it (the default) for the exact previous
+    behavior (US-only, no age/interest targeting). Passing a category- or
+    brand-specific spec (e.g. narrower geo + interest targeting for a pets
+    or baby brand) is what backend.launch.channel_selector's category
+    hook is meant to eventually feed.
+    """
     resp = _graph_post(f"act_{AD_ACCOUNT_ID or 'dry'}/adsets", {
         "name": name,
         "campaign_id": campaign_id,
         "daily_budget": int(daily_budget * 100),  # Meta wants cents
         "billing_event": "IMPRESSIONS",
         "optimization_goal": "OFFSITE_CONVERSIONS",
-        "targeting": json.dumps({"geo_locations": {"countries": ["US"]}}),
+        "targeting": json.dumps(targeting or {"geo_locations": {"countries": ["US"]}}),
         "status": "PAUSED",
     })
     asid = str(resp.get("id", ""))

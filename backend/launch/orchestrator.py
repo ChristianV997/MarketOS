@@ -14,10 +14,6 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
-# Budget split when launching on both platforms; TikTok gets the edge because
-# dropship CPMs and organic spillover historically run cheaper there.
-_SPLIT = {"tiktok": 0.55, "meta": 0.45}
-
 
 def _platform_is_live(platform: str) -> bool:
     if platform == "tiktok":
@@ -40,17 +36,23 @@ def launch_product(
     status is "ok" if at least one platform launched, else "error".
     """
     from backend.risk.gate import check_spend, record_spend
+    from backend.launch.channel_selector import select_weights
 
     product = build.get("product", "unknown")
     page_url = (build.get("page") or {}).get("url", "")
     ad_copy = build.get("ad_copy") or {}
 
-    weights = {p: _SPLIT.get(p, 1.0 / len(platforms)) for p in platforms}
-    total_w = sum(weights.values()) or 1.0
+    brand = None
+    try:
+        from backend.commerce.brands import brand_registry
+        brand = brand_registry.get(build.get("brand_id", ""))
+    except Exception:
+        pass
+    weights = select_weights(platforms, brand=brand)
 
     campaigns: list[dict[str, Any]] = []
     for platform in platforms:
-        budget = round(budget_daily * weights[platform] / total_w, 2)
+        budget = round(budget_daily * weights[platform], 2)
         live = _platform_is_live(platform)
 
         # Only real (non-dry-run) spend passes through the risk gate — a

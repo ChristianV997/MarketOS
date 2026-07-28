@@ -11,6 +11,27 @@ def test_update_ad_set_budget_dry_run():
     assert result is True
 
 
+class TestCreateAdSetTargeting:
+    def test_default_targeting_unchanged(self, monkeypatch):
+        import backend.integrations.meta_ads_client as meta
+        captured = {}
+        monkeypatch.setattr(meta, "_graph_post",
+                            lambda path, payload: captured.update(payload) or {"id": "as_1"})
+        meta.create_ad_set("camp_1", name="as1")
+        import json
+        assert json.loads(captured["targeting"]) == {"geo_locations": {"countries": ["US"]}}
+
+    def test_custom_targeting_passed_through(self, monkeypatch):
+        import backend.integrations.meta_ads_client as meta
+        captured = {}
+        monkeypatch.setattr(meta, "_graph_post",
+                            lambda path, payload: captured.update(payload) or {"id": "as_1"})
+        custom = {"geo_locations": {"countries": ["MX"]}, "age_min": 25, "age_max": 44}
+        meta.create_ad_set("camp_1", name="as1", targeting=custom)
+        import json
+        assert json.loads(captured["targeting"]) == custom
+
+
 class TestLiveRiskGateWiring:
     def test_live_gates_and_records_only_the_delta(self, monkeypatch):
         import backend.integrations.meta_ads_client as meta

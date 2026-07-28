@@ -103,9 +103,16 @@ def create_ad_group(
     name: str,
     daily_budget: float | None = None,
     placements: list[str] | None = None,
+    targeting: dict | None = None,
 ) -> str:
-    """Create an ad group under a campaign. Returns adgroup_id."""
-    resp = _post("/adgroup/create/", {
+    """Create an ad group under a campaign. Returns adgroup_id.
+
+    *targeting* merges TikTok's real targeting fields (e.g.
+    age_groups, gender, interest_category_ids, location_ids) into the
+    payload — omit it (the default) for the exact previous behavior
+    (TikTok's own defaults, no explicit targeting).
+    """
+    payload = {
         "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
         "campaign_id": campaign_id,
         "adgroup_name": name,
@@ -116,7 +123,10 @@ def create_ad_group(
         "schedule_type": "SCHEDULE_FROM_NOW",
         "optimization_goal": "CONVERT",
         "bid_type": "BID_TYPE_NO_BID",
-    })
+    }
+    if targeting:
+        payload.update(targeting)
+    resp = _post("/adgroup/create/", payload)
     agid = resp.get("data", {}).get("adgroup_id", f"dry_ag_{name}")
     _log.info("tiktok_adgroup_created id=%s", agid)
     return str(agid)

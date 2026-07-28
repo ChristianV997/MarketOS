@@ -37,9 +37,6 @@ from backend.orchestration.state_machine import health_registry
 
 _log = logging.getLogger(__name__)
 
-# Budget split preference mirrors backend.launch.orchestrator._SPLIT.
-_SPLIT = {"tiktok": 0.55, "meta": 0.45}
-
 # Serialize transactions so two concurrent launches can't both consume the
 # same remaining daily budget headroom.
 _tx_lock = threading.Lock()
@@ -120,7 +117,13 @@ class LaunchTransaction:
                 return TransactionResult(wid, "failed",
                                          skipped_platforms=skipped)
 
-            budgets = self._allocate(budget_daily, healthy)
+            brand = None
+            try:
+                from backend.commerce.brands import brand_registry
+                brand = brand_registry.get(build.get("brand_id", ""))
+            except Exception:
+                pass
+            budgets = self._allocate(budget_daily, healthy, brand=brand)
             event_store.append(wid, "step_completed", workflow="launch_tx",
                                step="prepare", data={"output": budgets})
 
@@ -185,11 +188,12 @@ class LaunchTransaction:
     # ── helpers ──────────────────────────────────────────────────────────
 
     @staticmethod
-    def _allocate(budget_daily: float, platforms: list[str]) -> dict[str, float]:
-        """Split budget by preference weights, renormalized over the healthy
-        set — an unhealthy platform's share flows to the healthy ones
-        instead of silently evaporating."""
-        weights = {p: _SPLIT.get(p, 1.0 / len(platforms)) for p in platforms}
+    def _allocate(budget_daily: float, platforms: list[str], brand: Any = None) -> dict[str, float]:
+        """Split budget by channel_selector's preference weights,
+        renormalized over the healthy set — an unhealthy platform's share
+        flows to the healthy ones instead of silently evaporating."""
+        from backend.launch.channel_selector import select_weights
+        weights = select_weights(tuple(platforms), brand=brand)
         total = sum(weights.values()) or 1.0
         return {p: round(budget_daily * w / total, 2)
                 for p, w in weights.items()}
