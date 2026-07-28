@@ -17,7 +17,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import time
 from dataclasses import dataclass, asdict
+from typing import Any
 
 from backend.patterns.errors import SupplierQuoteError
 from backend.validation.margin_calculator import (
@@ -196,6 +198,96 @@ class SupplierClient:
         )
 
 
+def _parse_cj_expiry(value: Any) -> float:
+    """CJ returns expiry timestamps as "YYYY-MM-DD HH:MM:SS" strings.
+    Falls back to a conservative 15-days-from-now on any parse failure —
+    never raises, since a slightly-wrong cached expiry just causes one
+    extra re-auth, not a broken client."""
+    if value:
+        try:
+            import datetime
+            return datetime.datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S").timestamp()
+        except Exception:
+            pass
+    return time.time() + 15 * 86400
+
+
+class _CJTokenManager:
+    """Fetches and caches CJ Dropshipping's access/refresh token pair.
+
+    CJ's real API (unlike the placeholder this replaced) never accepts the
+    raw CJ_API_KEY as a request header directly — it must first be
+    exchanged, together with the account email, for a short-lived
+    accessToken (~15 days) and a refreshToken via a dedicated
+    authentication endpoint. This manager caches both, transparently
+    refreshing the access token ~1 day before it expires (falling back to
+    a full re-authentication if the refresh token itself has lapsed), so
+    every live CJ call site just asks for access_token() and never touches
+    the raw API key.
+    """
+    _AUTH_URL = "https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken"
+    _REFRESH_URL = "https://developers.cjdropshipping.com/api2.0/v1/authentication/refreshAccessToken"
+    _REFRESH_MARGIN_S = 86400  # refresh a day before expiry, not at the wire
+
+    def __init__(self) -> None:
+        self._access_token = ""
+        self._access_expiry = 0.0
+        self._refresh_token = ""
+        self._refresh_expiry = 0.0
+
+    def _authenticate(self) -> None:
+        import requests
+        resp = requests.post(
+            self._AUTH_URL,
+            json={"email": os.environ["CJ_EMAIL"], "password": os.environ["CJ_API_KEY"]},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data", {}) or {}
+        self._access_token = str(data.get("accessToken", ""))
+        self._refresh_token = str(data.get("refreshToken", ""))
+        self._access_expiry = _parse_cj_expiry(data.get("accessTokenExpiryDate"))
+        self._refresh_expiry = _parse_cj_expiry(data.get("refreshTokenExpiryDate"))
+        if not self._access_token:
+            raise SupplierQuoteError("cj_dropshipping authentication returned no accessToken",
+                                     service="cj_dropshipping")
+
+    def _refresh(self) -> None:
+        import requests
+        resp = requests.post(
+            self._REFRESH_URL, json={"refreshToken": self._refresh_token}, timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data", {}) or {}
+        access_token = str(data.get("accessToken", ""))
+        if not access_token:
+            raise SupplierQuoteError("cj_dropshipping refresh returned no accessToken",
+                                     service="cj_dropshipping")
+        self._access_token = access_token
+        self._access_expiry = _parse_cj_expiry(data.get("accessTokenExpiryDate"))
+        if data.get("refreshToken"):  # CJ may rotate the refresh token too
+            self._refresh_token = str(data["refreshToken"])
+            self._refresh_expiry = _parse_cj_expiry(data.get("refreshTokenExpiryDate"))
+
+    def access_token(self) -> str:
+        """Return a valid access token, refreshing or re-authenticating as
+        needed. Never caches a stale token past its margin."""
+        now = time.time()
+        if self._access_token and now < self._access_expiry - self._REFRESH_MARGIN_S:
+            return self._access_token
+        if self._refresh_token and now < self._refresh_expiry:
+            try:
+                self._refresh()
+                return self._access_token
+            except Exception as exc:
+                _log.warning("cj_token_refresh_failed error=%s — falling back to re-auth", exc)
+        self._authenticate()
+        return self._access_token
+
+
+_cj_token_manager = _CJTokenManager()
+
+
 class CJDropshippingClient(SupplierClient):
     """CJ Dropshipping — https://developers.cjdropshipping.com"""
     name = "cj_dropshipping"
@@ -205,11 +297,17 @@ class CJDropshippingClient(SupplierClient):
     base_reliability = 0.88
     base_fulfillment_days = 8
 
+    def is_configured(self) -> bool:
+        # CJ's real auth flow needs both the account email and the API key
+        # (exchanged together for an access token — see _CJTokenManager);
+        # the base class only checks api_key_env, which isn't sufficient here.
+        return bool(os.getenv("CJ_EMAIL") and os.getenv(self.api_key_env))
+
     def _live_quote(self, product_name: str) -> SupplierQuote | None:
         import requests
         resp = requests.get(
             "https://developers.cjdropshipping.com/api2.0/v1/product/list",
-            headers={"CJ-Access-Token": os.environ[self.api_key_env]},
+            headers={"CJ-Access-Token": _cj_token_manager.access_token()},
             params={"productNameEn": product_name, "pageSize": 1},
             timeout=15,
         )
@@ -228,14 +326,46 @@ class CJDropshippingClient(SupplierClient):
             reliability=self.base_reliability,
         )
 
+    def _find_existing_order(self, order_number: str) -> str:
+        """Best-effort idempotency check: look up whether *order_number*
+        (our own order_id, sent as CJ's orderNumber) already has a CJ
+        order before creating a new one — a retry after a timed-out
+        create call must not risk placing a second physical order for the
+        same customer. Returns the existing CJ orderId, or "" if none is
+        found (including on any lookup failure — a failed check falls
+        through to a normal create call, same as before this existed)."""
+        import requests
+        try:
+            resp = requests.get(
+                "https://developers.cjdropshipping.com/api2.0/v1/shopping/order/list",
+                headers={"CJ-Access-Token": _cj_token_manager.access_token()},
+                params={"orderNumber": order_number, "pageSize": 1},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            rows = resp.json().get("data", {}).get("list", [])
+            if rows:
+                return str(rows[0].get("orderId", ""))
+        except Exception as exc:
+            _log.debug("cj_existing_order_lookup_failed order_number=%s error=%s",
+                      order_number, exc)
+        return ""
+
     def _live_place_order(self, order: dict) -> dict:
         import requests
+        order_number = order.get("order_id", "")
+        existing_id = self._find_existing_order(order_number)
+        if existing_id:
+            _log.info("cj_order_already_exists order_number=%s cj_order_id=%s — skipping create",
+                      order_number, existing_id)
+            return {"status": "ok", "supplier_order_id": existing_id, "dry_run": False}
+
         shipping = order.get("shipping", {}) or {}
         resp = requests.post(
             "https://developers.cjdropshipping.com/api2.0/v1/shopping/order/createOrder",
-            headers={"CJ-Access-Token": os.environ[self.api_key_env]},
+            headers={"CJ-Access-Token": _cj_token_manager.access_token()},
             json={
-                "orderNumber": order.get("order_id", ""),
+                "orderNumber": order_number,
                 "shippingCountryCode": shipping.get("country", ""),
                 "shippingProvince": shipping.get("state", ""),
                 "shippingCity": shipping.get("city", ""),
@@ -259,7 +389,7 @@ class CJDropshippingClient(SupplierClient):
         import requests
         resp = requests.get(
             "https://developers.cjdropshipping.com/api2.0/v1/shopping/order/getOrderDetail",
-            headers={"CJ-Access-Token": os.environ[self.api_key_env]},
+            headers={"CJ-Access-Token": _cj_token_manager.access_token()},
             params={"orderId": supplier_order_id},
             timeout=15,
         )
