@@ -1,3 +1,5 @@
+import asyncio
+
 from backend.commerce.oss_bridge import clear_oss_cache, collect_oss_inputs
 from backend.commerce.loop import run_provider_cycle
 from backend.contracts.adapters import AdapterHealth, SidecarContext
@@ -88,6 +90,31 @@ def test_oss_bridge_caches_successful_research_results():
     collect_oss_inputs(["https://supplier.example/cached"], research=research, commerce=Commerce())
     collect_oss_inputs(["https://supplier.example/cached"], research=research, commerce=Commerce())
     assert research.calls == 1
+
+
+def test_oss_bridge_bounds_concurrent_research_refreshes(monkeypatch):
+    clear_oss_cache()
+    monkeypatch.setenv("MARKETOS_OSS_MAX_CONCURRENCY", "2")
+
+    class ConcurrentResearch:
+        active = 0
+        peak = 0
+
+        async def discover(self, url, *, context):
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            await asyncio.sleep(0.01)
+            self.active -= 1
+            return [{"name": url.rsplit("/", 1)[-1], "url": url}]
+
+    research = ConcurrentResearch()
+    signals, _, metadata = collect_oss_inputs(
+        ["https://supplier.example/a", "https://supplier.example/b", "https://supplier.example/c"],
+        research=research, commerce=Commerce(),
+    )
+    assert [item["product"] for item in signals] == ["a", "b", "c"]
+    assert research.peak == 2
+    assert metadata["failures"] == {}
 
 
 def test_oss_bridge_retries_transient_research_failure():

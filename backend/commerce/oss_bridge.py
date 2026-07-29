@@ -52,6 +52,55 @@ async def _discover_with_retry(research: Any, url: str, *, context: SidecarConte
             await asyncio.sleep(backoff_s * (2 ** attempt))
 
 
+async def _collect_research_records(
+    urls: Sequence[str],
+    *,
+    research: Any,
+    context: SidecarContext,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, str]]:
+    """Fetch uncached research URLs concurrently with a strict upper bound."""
+    provider_name = getattr(research, "name", "research")
+    ttl_s = max(0.0, float(os.getenv("MARKETOS_OSS_CACHE_TTL_S", "300")))
+    max_concurrency = max(1, min(int(os.getenv("MARKETOS_OSS_MAX_CONCURRENCY", "4")), 20))
+    records_by_url: dict[str, list[dict[str, Any]]] = {}
+    failures: dict[str, str] = {}
+    pending: list[str] = []
+    now = time.monotonic()
+    for url in dict.fromkeys(urls):
+        cache_key = (url, bool(context.dry_run))
+        cached = _research_cache.get(cache_key)
+        if cached and now - cached[0] < ttl_s:
+            records_by_url[url] = list(cached[1])
+            if _oss_cache_hits is not None:
+                _oss_cache_hits.labels(provider=provider_name).inc()
+        else:
+            pending.append(url)
+
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def fetch(url: str) -> tuple[str, list[dict[str, Any]] | None, str | None, float]:
+        started = time.monotonic()
+        try:
+            async with semaphore:
+                records = await _discover_with_retry(research, url, context=context)
+            return url, records, None, time.monotonic() - started
+        except Exception as exc:
+            return url, None, str(exc), time.monotonic() - started
+
+    for url, records, error, duration in await asyncio.gather(*(fetch(url) for url in pending)):
+        if records is not None:
+            _research_cache[(url, bool(context.dry_run))] = (time.monotonic(), list(records))
+            records_by_url[url] = records
+            if _oss_refreshes is not None:
+                _oss_refreshes.labels(provider=provider_name).inc()
+                _oss_refresh_duration.labels(provider=provider_name).observe(duration)
+        else:
+            if _oss_failures is not None:
+                _oss_failures.labels(provider=provider_name).inc()
+            failures[f"research:{url}"] = error or "unknown research failure"
+    return records_by_url, failures
+
+
 def _research_signal(record: Mapping[str, Any]) -> dict[str, Any] | None:
     name = str(record.get("name") or record.get("product_name") or "").strip()
     if not name:
@@ -99,46 +148,18 @@ def collect_oss_inputs(
     signals: list[dict[str, Any]] = []
     research_products: dict[str, Any] = {}
     research_offers: dict[str, Any] = {}
-    failures: dict[str, Any] = {}
-    for url in urls:
-        provider_name = getattr(research, "name", "research")
-        ttl_s = max(0.0, float(os.getenv("MARKETOS_OSS_CACHE_TTL_S", "300")))
-        cache_key = (url, bool(context.dry_run))
-        cached = _research_cache.get(cache_key)
-        if cached and time.monotonic() - cached[0] < ttl_s:
-            records = cached[1]
-            if _oss_cache_hits is not None:
-                _oss_cache_hits.labels(provider=provider_name).inc()
-            signals.extend(filter(None, (_research_signal(record) for record in records)))
-            normalizer = getattr(research, "normalize_candidates", None)
-            if callable(normalizer):
-                for candidate in normalizer(records):
-                    research_products[candidate.product_id] = candidate
-            offer_normalizer = getattr(research, "normalize_supplier_offers", None)
-            if callable(offer_normalizer):
-                for offer in offer_normalizer(records):
-                    research_offers.setdefault(offer.product_id, offer)
-            continue
-        started = time.monotonic()
-        try:
-            records = asyncio.run(_discover_with_retry(research, url, context=context))
-            _research_cache[cache_key] = (time.monotonic(), list(records))
-            if _oss_refreshes is not None:
-                _oss_refreshes.labels(provider=provider_name).inc()
-                _oss_refresh_duration.labels(provider=provider_name).observe(time.monotonic() - started)
-            signals.extend(filter(None, (_research_signal(record) for record in records)))
-            normalizer = getattr(research, "normalize_candidates", None)
-            if callable(normalizer):
-                for candidate in normalizer(records):
-                    research_products[candidate.product_id] = candidate
-            offer_normalizer = getattr(research, "normalize_supplier_offers", None)
-            if callable(offer_normalizer):
-                for offer in offer_normalizer(records):
-                    research_offers.setdefault(offer.product_id, offer)
-        except Exception as exc:
-            if _oss_failures is not None:
-                _oss_failures.labels(provider=provider_name).inc()
-            failures[f"research:{url}"] = str(exc)
+    records_by_url, failures = asyncio.run(_collect_research_records(tuple(urls), research=research, context=context))
+    for url in dict.fromkeys(urls):
+        records = records_by_url.get(url, [])
+        signals.extend(filter(None, (_research_signal(record) for record in records)))
+        normalizer = getattr(research, "normalize_candidates", None)
+        if callable(normalizer):
+            for candidate in normalizer(records):
+                research_products[candidate.product_id] = candidate
+        offer_normalizer = getattr(research, "normalize_supplier_offers", None)
+        if callable(offer_normalizer):
+            for offer in offer_normalizer(records):
+                research_offers.setdefault(offer.product_id, offer)
 
     # Research facts make the candidate usable even without Medusa. When the
     # commerce sidecar is live, its catalog remains the source of truth for
