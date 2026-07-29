@@ -1,0 +1,52 @@
+{
+  "uid": "marketos-signal-health",
+  "title": "MarketOS Signal Health",
+  "tags": ["marketos", "signals", "cache"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "type": "gauge",
+      "title": "Signal Cache Hit Rate",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "marketos-prometheus"},
+      "targets": [{"refId": "A", "expr": "100 * sum(rate(marketos_signal_cache_hits_total[10m])) / clamp_min(sum(rate(marketos_signal_cache_lookups_total[10m])), 0.001)", "legendFormat": "hit rate"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 50}, {"color": "green", "value": 80}]}}}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Signal Refresh Latency (p95)",
+      "gridPos": {"h": 8, "w": 16, "x": 8, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "marketos-prometheus"},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(marketos_signal_cache_refresh_duration_seconds_bucket[10m])))", "legendFormat": "p95 seconds"}],
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 2}, {"color": "red", "value": 5}]}}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Source Failures by Source",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "marketos-prometheus"},
+      "targets": [{"refId": "A", "expr": "sum by (source) (increase(marketos_signal_source_failures_total[15m]))", "legendFormat": "{{source}}"}],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Cache Operations",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "marketos-prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "sum(rate(marketos_signal_cache_hits_total[10m]))", "legendFormat": "hits/s"},
+        {"refId": "B", "expr": "sum(rate(marketos_signal_cache_lookups_total[10m]))", "legendFormat": "lookups/s"},
+        {"refId": "C", "expr": "sum(rate(marketos_signal_cache_refreshes_total[10m]))", "legendFormat": "refreshes/s"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    }
+  ]
+}

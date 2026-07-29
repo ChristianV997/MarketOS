@@ -10,6 +10,10 @@ try:
         "marketos_signal_cache_hits",
         "Signal cache lookups served without external refresh",
     )
+    _prom_signal_cache_lookups = Counter(
+        "marketos_signal_cache_lookups",
+        "Signal cache lookup operations",
+    )
     _prom_signal_cache_refreshes = Counter(
         "marketos_signal_cache_refreshes",
         "Signal cache refresh operations",
@@ -29,6 +33,7 @@ try:
     )
 except ImportError:
     _prom_signal_cache_hits = None
+    _prom_signal_cache_lookups = None
     _prom_signal_cache_refreshes = None
     _prom_signal_cache_refresh_duration = None
     _prom_signal_cache_last_refresh_duration = None
@@ -106,6 +111,8 @@ class SignalEngine:
         """
         now = time.monotonic()
         self._cache_lookups += 1
+        if _prom_signal_cache_lookups is not None:
+            _prom_signal_cache_lookups.inc()
         if (
             not force_refresh
             and self._cached_signals

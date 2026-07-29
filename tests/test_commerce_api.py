@@ -107,6 +107,7 @@ def test_prometheus_exposes_signal_cache_metric_families():
     engine.get()
     payload = prometheus_metrics().body.decode("utf-8")
     assert "marketos_signal_cache_hits_total" in payload
+    assert "marketos_signal_cache_lookups_total" in payload
     assert "marketos_signal_cache_refreshes_total" in payload
     assert "marketos_signal_cache_refresh_duration_seconds" in payload
     assert "marketos_signal_cache_last_refresh_duration_seconds" in payload
