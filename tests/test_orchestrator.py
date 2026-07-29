@@ -145,6 +145,13 @@ def test_live_commerce_loop_suppresses_legacy_playbook_launch(monkeypatch):
         top_angles=["Angle"], estimated_roas=2.0, confidence=0.9, evidence_count=1,
     ))
     monkeypatch.setattr(orch, "_COMMERCE_LOOP_LIVE", True)
+    # _run_scaling is rate-limited via a module-level singleton
+    # (orch._scaling_limiter) shared across the whole test session — reset
+    # it so an earlier test's call within the same 900s window doesn't make
+    # worker_safe short-circuit this call to {"status": "skipped", ...}
+    # (no "launched" key), which is exactly the order-dependent flake this
+    # test previously hit.
+    monkeypatch.setattr(orch._scaling_limiter, "last_run", 0.0)
     with patch("backend.integrations.tiktok_ads.launch_from_playbook") as launch:
         result = orch._run_scaling()
     assert launch.call_count == 0

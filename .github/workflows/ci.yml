@@ -148,6 +148,8 @@ jobs:
         env:
           MEDUSA_IMAGE: medusajs/medusa:v2.14.2
           MEDUSA_DATABASE_URL: postgres://validation.invalid/marketos
+          BROWSER_USE_WORKER_TOKEN: validation-only-browser-use-worker-token
+          BROWSER_USE_ALLOWED_DOMAINS: validation.invalid
           N8N_ENCRYPTION_KEY: validation-only-encryption-key
           N8N_USER_MANAGEMENT_JWT_SECRET: validation-only-jwt-secret
           N8N_WEBHOOK_TOKEN: validation-only-webhook-token

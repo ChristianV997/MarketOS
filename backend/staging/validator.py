@@ -152,15 +152,25 @@ class StagingValidator:
         self,
         num_samples: int = 100,
         use_historical: bool = True,
+        seed: int = 42,
     ) -> ValidationReport:
         """Run decision quality validation across historical scenarios.
 
         Args:
             num_samples: Number of scenarios to validate
             use_historical: If True, load real data from event store; if False, use synthetic
+            seed: RNG seed for synthetic scenario generation. Staging
+                validation exists to answer "did this change help or hurt"
+                reproducibly — using the shared, unseeded global np.random
+                state made every run (and every CI run) draw different
+                synthetic data, so the APPROVE/NEEDS_ITERATION/REJECT
+                recommendation could flip between otherwise-identical runs.
+                A local Generator (not global np.random.seed()) keeps this
+                isolated from any other code running in the same process.
 
         Returns ValidationReport with detailed comparison metrics.
         """
+        rng = np.random.default_rng(seed)
         report = ValidationReport(
             validation_period=(
                 datetime.now(timezone.utc),
@@ -173,9 +183,9 @@ class StagingValidator:
             scenarios = self._load_historical_scenarios(num_samples)
             if not scenarios:
                 _log.warning("No historical scenarios found; falling back to synthetic")
-                scenarios = self._generate_synthetic_scenarios(num_samples)
+                scenarios = self._generate_synthetic_scenarios(num_samples, rng)
         else:
-            scenarios = self._generate_synthetic_scenarios(num_samples)
+            scenarios = self._generate_synthetic_scenarios(num_samples, rng)
 
         report.scenarios_tested = len(scenarios)
 
@@ -192,7 +202,7 @@ class StagingValidator:
 
             old_scores.append(old_result["score"])
             new_scores.append(new_result["score"])
-            realized_roas.append(scenario.get("realized_roas", np.random.rand() * 2.0))
+            realized_roas.append(scenario.get("realized_roas", rng.random() * 2.0))
 
             if old_result["decision"] == new_result["decision"]:
                 report.scenarios_agreement += 1
@@ -275,21 +285,24 @@ class StagingValidator:
             _log.warning(f"Failed to extract from event store: {exc}")
             return []
 
-    def _generate_synthetic_scenarios(self, num_samples: int = 100) -> list[dict]:
+    def _generate_synthetic_scenarios(
+        self, num_samples: int = 100, rng: np.random.Generator | None = None,
+    ) -> list[dict]:
         """Generate synthetic decision scenarios for MVP validation."""
+        rng = rng or np.random.default_rng()
         scenarios = []
         for i in range(num_samples):
             # Synthetic: products with varying characteristics
-            velocity = np.random.uniform(0.1, 0.9)
-            saturation = np.random.uniform(0.1, 0.9)
-            score = np.random.uniform(0.5, 0.95)
+            velocity = rng.uniform(0.1, 0.9)
+            saturation = rng.uniform(0.1, 0.9)
+            score = rng.uniform(0.5, 0.95)
 
             # Realized ROAS: influenced by score + saturation
             realized_roas = (
                 0.5 * score
                 + 0.3 * velocity
                 + 0.2 * (1 - saturation)
-                + np.random.normal(0, 0.2)
+                + rng.normal(0, 0.2)
             )
             realized_roas = max(0.1, min(3.0, realized_roas))
 
