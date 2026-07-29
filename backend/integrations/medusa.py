@@ -211,7 +211,7 @@ class MedusaCommerceAdapter:
         }
         for key, value in lineage.items():
             if value != "" and value != []:
-                metadata.setdefault(key, value)
+                metadata[key] = value
         body["metadata"] = metadata
         return body
 

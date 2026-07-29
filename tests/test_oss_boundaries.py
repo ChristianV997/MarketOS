@@ -32,7 +32,7 @@ def test_medusa_dry_order_never_requires_network():
 
 def test_medusa_cart_persists_sidecar_lineage_and_preserves_campaign_metadata():
     result = MedusaCommerceAdapter(base_url="").create_cart(
-        {"items": [], "metadata": {"marketos_campaign_id": "campaign-1", "marketos_creative_id": "creative-1"}},
+        {"items": [], "metadata": {"marketos_campaign_id": "campaign-1", "marketos_creative_id": "creative-1", "marketos_workspace": "spoofed"}},
         context=SidecarContext(workspace_id="commerce", run_id="run-1", artifact_id="artifact-1", parent_ids=("signal-1",), idempotency_key="cart-1"),
     )
     metadata = result["cart"]["metadata"]
