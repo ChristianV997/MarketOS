@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import json
 from typing import Any
 from urllib.parse import urlparse
 from urllib import robotparser
@@ -61,6 +62,24 @@ class Crawl4AIResearchAdapter:
 
         async with AsyncWebCrawler() as crawler:
             result = await crawler.arun(url=url)
+        extracted = getattr(result, "extracted_content", None)
+        if extracted:
+            try:
+                structured = json.loads(extracted) if isinstance(extracted, str) else extracted
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Crawl4AI returned malformed structured extraction") from exc
+            rows = structured if isinstance(structured, list) else [structured]
+            normalized: list[dict[str, Any]] = []
+            for row in rows:
+                if isinstance(row, dict):
+                    normalized.append({
+                        **row,
+                        "url": row.get("url") or url,
+                        "source": self.name,
+                        "quality": {"provenance": "live", "source_ref": url},
+                    })
+            if normalized:
+                return normalized
         markdown = (getattr(result, "markdown", "") or "")[: self.max_content_chars]
         return [{
             "url": url,
