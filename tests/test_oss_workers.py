@@ -124,3 +124,14 @@ def test_crawl4ai_rejects_unnamed_structured_records():
     )
     assert len(records) == 1
     assert records[0]["name"] == "Travel Mug"
+
+
+def test_crawl4ai_supplier_offers_require_an_explicit_cost_not_selling_price():
+    offers = Crawl4AIResearchAdapter.normalize_supplier_offers([
+        {"product_id": "mug-blue", "price": 19.95, "url": "https://supplier.example/mug"},
+        {"product_id": "mug-blue", "unit_cost": 6.5, "shipping_cost": 2, "inventory_units": 25, "url": "https://supplier.example/mug"},
+    ])
+    assert len(offers) == 1
+    assert offers[0].unit_cost == 6.5
+    assert offers[0].shipping_cost == 2.0
+    assert offers[0].supplier_id == "supplier.example"

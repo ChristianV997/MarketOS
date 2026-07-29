@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from urllib import robotparser
 
 from backend.contracts.adapters import AdapterHealth, SidecarContext
-from evaluation.contracts import DataQuality, ProductCandidate
+from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
 
 
 class Crawl4AIResearchAdapter:
@@ -213,3 +213,49 @@ class Crawl4AIResearchAdapter:
                 quality=quality,
             ))
         return candidates
+
+    @staticmethod
+    def normalize_supplier_offers(records: list[dict[str, Any]]) -> list[SupplierOffer]:
+        """Turn explicitly extracted supplier costs into economics evidence.
+
+        A public product price is a selling price, not a supplier cost. This
+        method intentionally requires an explicit ``unit_cost``/``wholesale``
+        field and refuses to infer it from any product-page price.
+        """
+        offers: list[SupplierOffer] = []
+        for record in records:
+            product_id = str(record.get("product_id") or "").strip()
+            if not product_id:
+                continue
+            raw_cost = record.get("unit_cost", record.get("wholesale_price", record.get("supplier_price")))
+            try:
+                unit_cost = float(raw_cost)
+            except (TypeError, ValueError):
+                continue
+            if unit_cost <= 0:
+                continue
+            try:
+                shipping_cost = max(0.0, float(record.get("shipping_cost", 0.0) or 0.0))
+            except (TypeError, ValueError):
+                shipping_cost = 0.0
+            try:
+                fulfillment_days = int(record["fulfillment_days"]) if record.get("fulfillment_days") is not None else None
+            except (TypeError, ValueError):
+                fulfillment_days = None
+            try:
+                inventory_units = int(record["inventory_units"]) if record.get("inventory_units") is not None else None
+            except (TypeError, ValueError):
+                inventory_units = None
+            source_ref = str(record.get("url") or record.get("source_ref") or "")
+            supplier_id = str(record.get("supplier_id") or record.get("supplier_name") or urlparse(source_ref).hostname or "crawl4ai-supplier").strip()
+            offers.append(SupplierOffer(
+                supplier_id=supplier_id,
+                product_id=product_id,
+                unit_cost=unit_cost,
+                shipping_cost=shipping_cost,
+                fulfillment_days=fulfillment_days,
+                inventory_units=inventory_units,
+                currency=str(record.get("currency") or "USD").upper(),
+                quality=DataQuality(provenance="live", attribution="attributed" if source_ref else "unknown", source_ref=source_ref),
+            ))
+        return offers

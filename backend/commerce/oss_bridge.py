@@ -98,6 +98,7 @@ def collect_oss_inputs(
     commerce = commerce or MedusaCommerceAdapter()
     signals: list[dict[str, Any]] = []
     research_products: dict[str, Any] = {}
+    research_offers: dict[str, Any] = {}
     failures: dict[str, Any] = {}
     for url in urls:
         provider_name = getattr(research, "name", "research")
@@ -113,6 +114,10 @@ def collect_oss_inputs(
             if callable(normalizer):
                 for candidate in normalizer(records):
                     research_products[candidate.product_id] = candidate
+            offer_normalizer = getattr(research, "normalize_supplier_offers", None)
+            if callable(offer_normalizer):
+                for offer in offer_normalizer(records):
+                    research_offers.setdefault(offer.product_id, offer)
             continue
         started = time.monotonic()
         try:
@@ -126,6 +131,10 @@ def collect_oss_inputs(
             if callable(normalizer):
                 for candidate in normalizer(records):
                     research_products[candidate.product_id] = candidate
+            offer_normalizer = getattr(research, "normalize_supplier_offers", None)
+            if callable(offer_normalizer):
+                for offer in offer_normalizer(records):
+                    research_offers.setdefault(offer.product_id, offer)
         except Exception as exc:
             if _oss_failures is not None:
                 _oss_failures.labels(provider=provider_name).inc()
@@ -135,7 +144,7 @@ def collect_oss_inputs(
     # commerce sidecar is live, its catalog remains the source of truth for
     # matching IDs/prices and replaces any same-ID external observation.
     products: dict[str, Any] = dict(research_products)
-    offers: dict[str, Any] = {}
+    offers: dict[str, Any] = dict(research_offers)
     if commerce.configured:
         try:
             rows = commerce.list_products()
@@ -147,7 +156,12 @@ def collect_oss_inputs(
                 else:
                     inventory = commerce.get_inventory(tuple(medusa_products))
                     normalized_offers = commerce.normalize_inventory(inventory)
-                offers = {offer.product_id: offer for offer in normalized_offers}
+                for offer in normalized_offers:
+                    existing = offers.get(offer.product_id)
+                    # A zero cost in Medusa means "not configured", so do not
+                    # erase a source-attributed supplier cost with an unknown.
+                    if existing is None or offer.unit_cost > 0 or existing.unit_cost <= 0:
+                        offers[offer.product_id] = offer
         except Exception as exc:
             if _oss_failures is not None:
                 _oss_failures.labels(provider=getattr(commerce, "name", "commerce")).inc()
@@ -156,4 +170,5 @@ def collect_oss_inputs(
         "offers": offers,
         "failures": failures,
         "research_products": len(research_products),
+        "research_offers": len(research_offers),
     }

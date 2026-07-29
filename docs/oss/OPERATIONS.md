@@ -42,6 +42,10 @@ the creative `not_launchable` and fails closed.
 
 Live Crawl4AI research requires `CRAWL4AI_ALLOWED_DOMAINS` and verifies the
 target site's `robots.txt`; dry-run planning does not make network requests.
+The adapter emits product evidence only from a validated structured extractor
+or schema.org JSON-LD `Product` object. Supplier economics require an explicit
+`unit_cost`, `wholesale_price`, or `supplier_price`; a public `price` is kept
+as a selling price and is never inferred to be supplier cost.
 
 Medusa and Postiz adapters expose bounded in-process webhook deduplication.
 Production webhook receivers should persist accepted event IDs in the durable

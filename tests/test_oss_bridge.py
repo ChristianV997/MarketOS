@@ -47,7 +47,7 @@ def test_oss_bridge_preserves_typed_crawl4ai_candidate_for_ranking():
         async def discover(self, url, *, context):
             return [{
                 "name": "Travel Mug", "product_id": "mug-blue", "url": url,
-                "selling_price": 19.95, "currency": "USD",
+                "selling_price": 19.95, "unit_cost": 6.5, "shipping_cost": 2, "currency": "USD",
                 "quality": {"provenance": "live", "attribution": "attributed", "source_ref": url},
             }]
 
@@ -57,6 +57,8 @@ def test_oss_bridge_preserves_typed_crawl4ai_candidate_for_ranking():
     assert signals[0]["product_id"] == "mug-blue"
     assert products["mug-blue"].selling_price == 19.95
     assert metadata["research_products"] == 1
+    assert metadata["offers"]["mug-blue"].unit_cost == 6.5
+    assert metadata["research_offers"] == 1
 
 
 class FailingResearch:
