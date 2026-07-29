@@ -9,6 +9,7 @@ import os
 import hashlib
 from typing import Any
 from urllib.parse import urlparse
+from urllib import robotparser
 
 from backend.contracts.adapters import AdapterHealth, SidecarContext
 from evaluation.contracts import DataQuality, ProductCandidate
@@ -17,9 +18,11 @@ from evaluation.contracts import DataQuality, ProductCandidate
 class Crawl4AIResearchAdapter:
     name = "crawl4ai"
 
-    def __init__(self, *, allowed_domains: set[str] | None = None, max_content_chars: int = 200_000):
+    def __init__(self, *, allowed_domains: set[str] | None = None, max_content_chars: int = 200_000, respect_robots: bool = True, user_agent: str = "MarketOSResearch/1.0"):
         self.allowed_domains = allowed_domains or set(filter(None, os.getenv("CRAWL4AI_ALLOWED_DOMAINS", "").split(",")))
         self.max_content_chars = max_content_chars
+        self.respect_robots = respect_robots
+        self.user_agent = user_agent
 
     def health(self) -> AdapterHealth:
         try:
@@ -33,12 +36,22 @@ class Crawl4AIResearchAdapter:
         hostname = (parsed.hostname or "").lower()
         if parsed.scheme not in {"http", "https"} or not hostname:
             raise ValueError("research URL must be an absolute HTTP(S) URL")
-        if not context.dry_run and self.allowed_domains and not any(
+        if not context.dry_run and not self.allowed_domains:
+            raise PermissionError("live research requires CRAWL4AI_ALLOWED_DOMAINS")
+        if not context.dry_run and not any(
             hostname == domain.strip().lower().lstrip(".")
             or hostname.endswith("." + domain.strip().lower().lstrip("."))
             for domain in self.allowed_domains
         ):
             raise PermissionError(f"research domain is not allowlisted: {hostname}")
+        if not context.dry_run and self.respect_robots:
+            robots = robotparser.RobotFileParser(f"{parsed.scheme}://{hostname}/robots.txt")
+            try:
+                robots.read()
+            except Exception as exc:
+                raise PermissionError(f"robots.txt could not be verified for {hostname}") from exc
+            if not robots.can_fetch(self.user_agent, url):
+                raise PermissionError(f"robots.txt disallows research URL: {url}")
         if context.dry_run:
             return [{"url": url, "source": self.name, "dry_run": True, "quality": {"provenance": "simulated"}}]
         try:

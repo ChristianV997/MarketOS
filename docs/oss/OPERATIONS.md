@@ -28,6 +28,9 @@ approval gates, timeouts, and dry-run defaults.
 disabled by default; when enabled, provider unavailability or rejection marks
 the creative `not_launchable` and fails closed.
 
+Live Crawl4AI research requires `CRAWL4AI_ALLOWED_DOMAINS` and verifies the
+target site's `robots.txt`; dry-run planning does not make network requests.
+
 Research retries are limited by `MARKETOS_OSS_MAX_RETRIES` (default `2`) and
 `MARKETOS_OSS_RETRY_BACKOFF_S` (default `0.25`). Only transport-like failures
 are retried; permission, validation, and malformed-input failures fail fast.

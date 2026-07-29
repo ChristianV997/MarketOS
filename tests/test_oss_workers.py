@@ -57,6 +57,14 @@ def test_crawl4ai_rejects_non_allowlisted_live_domain():
         )
 
 
+def test_crawl4ai_requires_allowlist_for_live_research():
+    adapter = Crawl4AIResearchAdapter(allowed_domains=set())
+    with pytest.raises(PermissionError, match="requires CRAWL4AI_ALLOWED_DOMAINS"):
+        pytest.importorskip("asyncio").run(
+            adapter.discover("https://supplier.example/item", context=SidecarContext(dry_run=False))
+        )
+
+
 def test_crawl4ai_normalizes_only_named_records_to_marketos_contract():
     candidates = Crawl4AIResearchAdapter.normalize_candidates([
         {"name": "Travel Mug", "url": "https://supplier.example/mug", "price": "19.95", "quality": {"provenance": "live"}},
