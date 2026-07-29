@@ -113,7 +113,10 @@ def test_readiness_distinguishes_health_from_runtime_startup(monkeypatch):
 
 
 def test_readiness_can_require_medusa_when_explicitly_configured(monkeypatch):
+    # /ready lives in api.routes.health (see
+    # test_readiness_distinguishes_health_from_runtime_startup above).
     import backend.api as api
+    from api.routes import health as health_routes
     from backend.contracts.adapters import AdapterHealth
 
     monkeypatch.setenv("MEDUSA_REQUIRED_FOR_READY", "true")
@@ -125,7 +128,7 @@ def test_readiness_can_require_medusa_when_explicitly_configured(monkeypatch):
             return AdapterHealth("medusa", configured=True, reachable=False, detail="sidecar starting")
 
     monkeypatch.setattr("backend.integrations.medusa.commerce_provider", Provider())
-    response = api.ready()
+    response = health_routes.ready()
     assert response.status_code == 503
     assert response.body and b"required_medusa_unavailable" in response.body
 
@@ -215,7 +218,9 @@ def test_integration_webhook_verifies_configured_hmac_secret(monkeypatch):
 
 def test_webhook_outcome_metrics_are_exported():
     pytest.importorskip("prometheus_client")
-    from backend.api import prometheus_metrics
+    # /metrics/prometheus lives in api.routes.observability for the same
+    # reason as the other prometheus_metrics tests in this file.
+    from api.routes.observability import prometheus_metrics
     payload = prometheus_metrics().body.decode()
     assert "marketos_integration_webhook_events_total" in payload
 
@@ -231,10 +236,11 @@ def test_optional_integration_health_is_safe_when_unconfigured():
 def test_integration_health_is_exported_to_prometheus():
     pytest.importorskip("prometheus_client")
     import backend.api as api
+    from api.routes.observability import prometheus_metrics
     api._integration_health_cache.clear()
     result = api.integrations_health()
     assert "crawl4ai" in result["integrations"]
-    payload = api.prometheus_metrics().body.decode("utf-8")
+    payload = prometheus_metrics().body.decode("utf-8")
     assert "marketos_integration_configured" in payload
     assert "marketos_integration_reachable" in payload
     assert "marketos_integration_health_probe_duration_seconds" in payload
