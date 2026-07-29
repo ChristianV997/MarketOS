@@ -69,7 +69,13 @@ class MedusaCommerceAdapter:
         self.webhook_events.release(self.name, event_id)
 
     def list_products(self, *, limit: int = 50) -> Sequence[Mapping[str, Any]]:
-        payload = self._request("GET", "/store/products", params={"limit": max(1, min(limit, 100))})
+        # Medusa prices and inventory are variant-scoped. Request calculated
+        # prices explicitly instead of treating a product shell as sellable.
+        payload = self._request(
+            "GET",
+            "/store/products",
+            params={"limit": max(1, min(limit, 100)), "fields": "*variants.calculated_price"},
+        )
         return payload.get("products", payload.get("data", []))
 
     @staticmethod
@@ -80,19 +86,61 @@ class MedusaCommerceAdapter:
             name = str(row.get("title") or row.get("name") or "").strip()
             if not product_id or not name:
                 continue
-            result.append(ProductCandidate(
-                product_id=product_id, name=name,
-                currency=str(row.get("currency_code") or row.get("currency") or "USD").upper(),
-                selling_price=float(row.get("selling_price") or row.get("price") or 0.0),
-                quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"medusa:{product_id}"),
-            ))
+            variants = row.get("variants")
+            if not isinstance(variants, Sequence) or isinstance(variants, (str, bytes)) or not variants:
+                variants = (row,)
+            for variant in variants:
+                if not isinstance(variant, Mapping):
+                    continue
+                variant_id = str(variant.get("id") or product_id).strip()
+                if not variant_id:
+                    continue
+                calculated = variant.get("calculated_price")
+                calculated = calculated if isinstance(calculated, Mapping) else {}
+                variant_title = str(variant.get("title") or "").strip()
+                candidate_name = name if not variant_title or variant_title.lower() == "default variant" else f"{name} — {variant_title}"
+                try:
+                    # Medusa V2 uses major currency units for price amounts.
+                    price = float(variant.get("selling_price") or calculated.get("calculated_amount") or variant.get("price") or row.get("selling_price") or row.get("price") or 0.0)
+                except (TypeError, ValueError):
+                    price = 0.0
+                result.append(ProductCandidate(
+                    product_id=variant_id,
+                    name=candidate_name,
+                    currency=str(calculated.get("currency_code") or variant.get("currency_code") or row.get("currency_code") or row.get("currency") or "USD").upper(),
+                    selling_price=max(0.0, price),
+                    source_signal_ids=(f"medusa:{product_id}",),
+                    quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"medusa:{product_id}:{variant_id}"),
+                ))
         return result
 
     def get_inventory(self, product_ids: Sequence[str]) -> Sequence[Mapping[str, Any]]:
         if not product_ids:
             return []
-        payload = self._request("GET", "/admin/inventory-items", params={"product_id": list(product_ids)})
-        return payload.get("inventory_items", payload.get("data", []))
+        # Inventory items link to product *variants* and location levels. The
+        # Admin API does not make a product_id filter the canonical join; fetch
+        # those links and filter locally by the candidate's variant ID.
+        payload = self._request(
+            "GET",
+            "/admin/inventory-items",
+            params={"limit": 100, "fields": "*variants,*location_levels"},
+        )
+        rows = payload.get("inventory_items", payload.get("data", []))
+        requested = {str(product_id) for product_id in product_ids}
+        matching: list[Mapping[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            variants = row.get("variants")
+            variant_ids = {
+                str(variant.get("id") or "")
+                for variant in variants
+                if isinstance(variant, Mapping)
+            } if isinstance(variants, Sequence) and not isinstance(variants, (str, bytes)) else set()
+            fallback = str(row.get("variant_id") or row.get("product_id") or "")
+            if requested.intersection(variant_ids) or fallback in requested:
+                matching.append(row)
+        return matching
 
     def get_offers(self, product_ids: Sequence[str]) -> Sequence[SupplierOffer]:
         """Expose inventory as canonical supplier offers for ranking."""
@@ -102,16 +150,38 @@ class MedusaCommerceAdapter:
     def normalize_inventory(rows: Sequence[Mapping[str, Any]]) -> list[SupplierOffer]:
         offers: list[SupplierOffer] = []
         for row in rows:
-            product_id = str(row.get("product_id") or row.get("variant_id") or "").strip()
-            if not product_id:
-                continue
-            offers.append(SupplierOffer(
-                supplier_id=f"medusa:{row.get('inventory_item_id') or product_id}", product_id=product_id,
-                unit_cost=float(row.get("unit_cost") or row.get("cost") or 0.0),
-                inventory_units=int(row["stocked_quantity"]) if row.get("stocked_quantity") is not None else None,
-                currency=str(row.get("currency_code") or "USD").upper(),
-                quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"medusa:{product_id}"),
-            ))
+            variants = row.get("variants")
+            variant_ids = [
+                str(variant.get("id") or "").strip()
+                for variant in variants
+                if isinstance(variant, Mapping) and str(variant.get("id") or "").strip()
+            ] if isinstance(variants, Sequence) and not isinstance(variants, (str, bytes)) else []
+            if not variant_ids:
+                fallback = str(row.get("variant_id") or row.get("product_id") or "").strip()
+                variant_ids = [fallback] if fallback else []
+            levels = row.get("location_levels")
+            if isinstance(levels, Sequence) and not isinstance(levels, (str, bytes)):
+                available = 0
+                valid_level = False
+                for level in levels:
+                    if not isinstance(level, Mapping):
+                        continue
+                    try:
+                        available += max(0, int(level.get("stocked_quantity", 0) or 0) - int(level.get("reserved_quantity", 0) or 0))
+                        valid_level = True
+                    except (TypeError, ValueError):
+                        continue
+                inventory_units = available if valid_level else None
+            else:
+                inventory_units = int(row["stocked_quantity"]) if row.get("stocked_quantity") is not None else None
+            for product_id in variant_ids:
+                offers.append(SupplierOffer(
+                    supplier_id=f"medusa:{row.get('id') or row.get('inventory_item_id') or product_id}:{product_id}", product_id=product_id,
+                    unit_cost=float(row.get("unit_cost") or row.get("cost") or 0.0),
+                    inventory_units=inventory_units,
+                    currency=str(row.get("currency_code") or "USD").upper(),
+                    quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"medusa:{row.get('id') or product_id}"),
+                ))
         return offers
 
     def create_order(self, order: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:

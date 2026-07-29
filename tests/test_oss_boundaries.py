@@ -45,6 +45,41 @@ def test_medusa_normalizes_sidecar_records_to_canonical_contracts():
     assert offers[0].inventory_units == 9
 
 
+def test_medusa_maps_variant_prices_and_available_inventory_to_same_candidate_id():
+    products = MedusaCommerceAdapter.normalize_products([{
+        "id": "prod-1", "title": "Travel Mug", "variants": [{
+            "id": "variant-blue", "title": "Blue", "calculated_price": {"calculated_amount": 19.95, "currency_code": "usd"},
+        }],
+    }])
+    offers = MedusaCommerceAdapter.normalize_inventory([{
+        "id": "iitem-1", "variants": [{"id": "variant-blue"}],
+        "location_levels": [{"stocked_quantity": 10, "reserved_quantity": 3}, {"stocked_quantity": 2, "reserved_quantity": 0}],
+    }])
+    assert products[0].product_id == offers[0].product_id == "variant-blue"
+    assert products[0].name == "Travel Mug — Blue"
+    assert products[0].selling_price == 19.95
+    assert offers[0].inventory_units == 9
+
+
+def test_medusa_inventory_fetches_variant_and_level_links_then_filters_locally():
+    class Response:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"inventory_items": [{"id": "i1", "variants": [{"id": "v1"}]}, {"id": "i2", "variants": [{"id": "v2"}]}]}
+    class Client:
+        def __init__(self):
+            self.calls = []
+        def request(self, method, path, **kwargs):
+            self.calls.append((method, path, kwargs))
+            return Response()
+
+    client = Client()
+    rows = MedusaCommerceAdapter(base_url="http://medusa", client=client).get_inventory(("v2",))
+    assert rows == [{"id": "i2", "variants": [{"id": "v2"}]}]
+    assert client.calls[0][2]["params"] == {"limit": 100, "fields": "*variants,*location_levels"}
+
+
 def test_medusa_exposes_typed_supplier_offer_boundary():
     class Response:
         def raise_for_status(self):
