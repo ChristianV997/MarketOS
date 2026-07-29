@@ -160,79 +160,13 @@ class TestMetaInsights:
         assert detect_patterns([]) == []
 
 
-# ---------------------------------------------------------------------------
-# Step 72 Master Drop — PhaseController
-# ---------------------------------------------------------------------------
-
-class TestPhaseController:
-    def test_default_phase_is_research(self):
-        from core.system.phase_controller import PhaseController
-        pc = PhaseController()
-        assert pc.get_phase() == "RESEARCH"
-
-    def test_set_phase(self):
-        from core.system.phase_controller import PhaseController
-        pc = PhaseController()
-        pc.set_phase("EXPAND")
-        assert pc.get_phase() == "EXPAND"
-
-    def test_set_invalid_phase_raises(self):
-        from core.system.phase_controller import PhaseController
-        pc = PhaseController()
-        with pytest.raises(ValueError):
-            pc.set_phase("INVALID")
-
-    def test_advance_moves_forward(self):
-        from core.system.phase_controller import PhaseController
-        pc = PhaseController()
-        phase = pc.advance()
-        assert phase == "EXPLORE"
-        assert pc.get_phase() == "EXPLORE"
-
-    def test_advance_stays_at_last_phase(self):
-        from core.system.phase_controller import PhaseController
-        pc = PhaseController(initial="SCALE")
-        phase = pc.advance()
-        assert phase == "SCALE"
-
-    def test_invalid_initial_phase_raises(self):
-        from core.system.phase_controller import PhaseController
-        with pytest.raises(ValueError):
-            PhaseController(initial="BOGUS")
-
-
-# ---------------------------------------------------------------------------
-# Step 72 Master Drop — ResourceAllocator
-# ---------------------------------------------------------------------------
-
-class TestResourceAllocator:
-    def test_research_phase_allocation(self):
-        from core.system.resource_allocator import allocate
-        result = allocate("RESEARCH")
-        assert result == {"research": 1.0}
-
-    def test_explore_phase_allocation(self):
-        from core.system.resource_allocator import allocate
-        result = allocate("EXPLORE")
-        assert "content" in result and "ads" in result
-
-    def test_expand_phase_allocation(self):
-        from core.system.resource_allocator import allocate
-        result = allocate("EXPAND")
-        assert result["ads"] == pytest.approx(0.7)
-        assert result["trading"] == pytest.approx(0.3)
-
-    def test_invalid_phase_raises(self):
-        from core.system.resource_allocator import allocate
-        with pytest.raises(ValueError):
-            allocate("UNKNOWN")
-
-    def test_fractions_sum_to_one(self):
-        from core.system.resource_allocator import allocate
-        for phase in ("RESEARCH", "EXPLORE", "EXPAND", "SCALE"):
-            alloc = allocate(phase)
-            assert sum(alloc.values()) == pytest.approx(1.0)
-
+# NOTE: This branch's own core/system/phase_controller.py and
+# core/system/resource_allocator.py (tested by the two classes formerly
+# here — TestPhaseController, TestResourceAllocator) were superseded by
+# main's more mature, thread-safe, env-configurable implementations during
+# the branch merge (see docs/plan for this merge) — main's phase_controller
+# is a singleton with drawdown-awareness, not the simple class these tests
+# expected. Removed rather than adapted since the two APIs are unrelated.
 
 # ---------------------------------------------------------------------------
 # Step 72 Master Drop — POD_001
@@ -369,51 +303,9 @@ class TestDiscoveryProducts:
         assert "satisfaction" in products[0]["angles"]
 
 
-# ---------------------------------------------------------------------------
-# Step 74 — content feedback
-# ---------------------------------------------------------------------------
-
-class TestContentFeedback:
-    def test_winner_classification(self):
-        from core.content.feedback import evaluate
-        video = {"views": 15000, "likes": 800, "comments": 200}
-        assert evaluate(video) == "WINNER"
-
-    def test_loser_classification(self):
-        from core.content.feedback import evaluate
-        video = {"views": 3000, "likes": 50, "comments": 10}
-        assert evaluate(video) == "LOSER"
-
-    def test_neutral_classification(self):
-        from core.content.feedback import evaluate
-        # Enough views but low engagement
-        video = {"views": 8000, "likes": 50, "comments": 10}
-        assert evaluate(video) == "NEUTRAL"
-
-    def test_zero_views_is_loser(self):
-        from core.content.feedback import evaluate
-        assert evaluate({"views": 0, "likes": 0, "comments": 0}) == "LOSER"
-
-    def test_log_to_memory_appends_entry(self):
-        from core.content import memory as mem
-        from core.content.feedback import log_to_memory
-        mem.clear()
-        video = {"views": 20000, "likes": 1500, "comments": 500}
-        log_to_memory(video, hook="satisfying clean", angle="satisfaction", fmt="before/after", result="WINNER")
-        entries = mem.get_all()
-        assert len(entries) == 1
-        assert entries[0]["hook"] == "satisfying clean"
-        assert entries[0]["result"] == "WINNER"
-        mem.clear()
-
-    def test_log_to_memory_records_all_fields(self):
-        from core.content import memory as mem
-        from core.content.feedback import log_to_memory
-        mem.clear()
-        video = {"views": 3000, "likes": 30, "comments": 5}
-        log_to_memory(video, hook="fast fix", angle="problem-solution", fmt="demo", result="LOSER")
-        entry = mem.get_all()[0]
-        assert entry["angle"] == "problem-solution"
-        assert entry["format"] == "demo"
-        assert entry["views"] == 3000
-        mem.clear()
+# NOTE: This branch's own core/content/feedback.py (tested by the
+# TestContentFeedback class formerly here) was superseded by main's
+# existing content-feedback module (a different API — see
+# orchestrator/main.py's `from core.content.feedback import batch_classify`)
+# during the branch merge. Removed rather than adapted since the two APIs
+# are unrelated.
