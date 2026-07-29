@@ -19,7 +19,7 @@ from .base import BaseProvider
 _log = logging.getLogger(__name__)
 
 _BASE    = os.getenv("OLLAMA_URL",        "http://localhost:11434")
-_MODEL   = os.getenv("OLLAMA_MODEL",      "llama3.2")
+_MODEL   = os.getenv("OLLAMA_MODEL",      "mistral:7b")
 _TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT_S", "30"))
 _HEALTH_TIMEOUT = float(os.getenv("OLLAMA_HEALTH_TIMEOUT_S", "0.25"))
 
