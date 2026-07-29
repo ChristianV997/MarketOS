@@ -139,6 +139,14 @@ class EventStore:
         events = list(self._iter_events())
         return events[-n:]
 
+    def events_of_type(self, event: str, *, limit: int | None = None) -> list[dict]:
+        """All journaled events matching *event* (e.g. a ``shadow_*`` type),
+        oldest-first. Used by shadow-flag validation reporting to read back
+        the legacy-vs-new-path canary diffs every ``_LIVE`` flag journals.
+        """
+        matches = [e for e in self._iter_events() if e.get("event") == event]
+        return matches[-limit:] if limit is not None else matches
+
 
 event_store = EventStore()
 
