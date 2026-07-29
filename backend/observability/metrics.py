@@ -95,6 +95,15 @@ inference_latency_ms     = _histogram("inference_latency_ms",   "Inference laten
                                        buckets=[50, 100, 200, 500, 1000, 3000, 10000])
 inference_fallbacks_total= _counter("inference_fallbacks_total","Provider fallbacks triggered")
 
+# ── ollama (local inference) ─────────────────────────────────────────────────
+ollama_health_check_failures_total = _counter(
+    "ollama_health_check_failures_total", "Ollama daemon health-check failures")
+ollama_model_pull_duration_ms = _histogram(
+    "ollama_model_pull_duration_ms", "Ollama model pull duration (ms)", ["model"],
+    buckets=[100, 500, 1000, 5000, 15000, 60000, 300000])
+ollama_model_pulls_total = _counter(
+    "ollama_model_pulls_total", "Ollama model pull attempts", ["model", "status"])
+
 # ── tracing ───────────────────────────────────────────────────────────────────
 trace_spans_total        = _counter("trace_spans_total",        "Trace spans completed",                  ["name", "status"])
 trace_duration_ms        = _histogram("trace_duration_ms",      "Trace span duration (ms)",               ["name"],

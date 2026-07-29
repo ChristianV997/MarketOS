@@ -90,6 +90,22 @@ class InferenceRouter:
         self._cache_lock = Lock()
         self._provider_failure_backoff_s = max(0.0, provider_failure_backoff_s)
         self._provider_failed_until: dict[str, float] = {}
+        self._ensure_ollama_model()
+
+    def _ensure_ollama_model(self) -> None:
+        """Best-effort: if OllamaProvider is active, make sure its configured
+        model is pulled. Never blocks or raises — router construction must
+        succeed even when Ollama is unreachable."""
+        if not any(p.name == "ollama" for p in self._providers):
+            return
+        try:
+            from ..ollama_manager import OllamaManager
+            model = os.getenv("OLLAMA_MODEL", "llama3.2")
+            manager = OllamaManager()
+            if manager.is_healthy():
+                manager.ensure_model(model)
+        except Exception as exc:
+            _log.debug("ollama_ensure_model_startup_skipped error=%s", exc)
 
     # ── completion ────────────────────────────────────────────────────────────
 
