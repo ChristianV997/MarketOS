@@ -1,0 +1,5 @@
+# ── development / CI tooling ──────────────────────────────────────────────────
+# Not required to run MarketOS — only for the advisory lint/coverage CI job
+# (.github/workflows/ci.yml) and local development.
+ruff==0.15.8
+pytest-cov>=5.0

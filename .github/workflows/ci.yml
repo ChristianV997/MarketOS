@@ -55,6 +55,41 @@ jobs:
           print(f"OK: {s.total_cycles} cycles, capital=${s.capital:.2f}, regime={s.detected_regime}")
           PY
 
+  quality-advisory:
+    # Advisory lint + coverage gate — reports only, never fails the build.
+    # First pass on a codebase with no prior lint/coverage history; make
+    # this blocking once ruff and coverage baselines are clean (see
+    # pyproject.toml's [tool.ruff] comment and requirements-dev.txt).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: ruff check (advisory)
+        run: ruff check . || true
+
+      - name: pytest --cov (advisory)
+        # Floor set slightly below the measured baseline (67.6% on 2026-07-29)
+        # so normal variance doesn't trip it while still catching real drops.
+        run: pytest tests/ --cov=. --cov-report=term-missing --cov-fail-under=65 || true
+
   container-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
