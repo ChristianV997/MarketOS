@@ -56,3 +56,18 @@ def test_domain_agent_runners_validate_mocked_provider_results():
     assert research.product_name == "Mug"
     assert research.confidence == 0.8
     assert qa.approved is True
+
+
+def test_domain_agent_runners_emit_marketos_trace():
+    class Result:
+        data = {"product_name": "Mug", "confidence": 0.8}
+    class Agent:
+        async def run(self, _prompt):
+            return Result()
+    class Provider:
+        def create(self, **_kwargs):
+            return Agent()
+    from backend.agents.domain_agents import run_product_research
+    from backend.observability.tracing import tracer
+    asyncio.run(run_product_research(ProductResearchRequest(query="mugs"), provider=Provider()))
+    assert any(trace.name == "agent.product_research" for trace in tracer.recent_traces())

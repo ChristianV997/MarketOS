@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from backend.contracts.adapters import AgentProvider
 from backend.agents.pydantic_boundary import agent_provider
+from backend.observability.tracing import tracer
 
 
 class ProductResearchRequest(BaseModel):
@@ -66,13 +67,35 @@ def create_campaign_qa_agent(*, provider: AgentProvider = agent_provider) -> Any
 
 async def run_product_research(request: ProductResearchRequest, *, provider: AgentProvider = agent_provider) -> ProductResearchResult:
     agent = create_product_research_agent(provider=provider)
-    result = await agent.run(request.model_dump_json())
-    output = getattr(result, "output", getattr(result, "data", result))
-    return output if isinstance(output, ProductResearchResult) else ProductResearchResult.model_validate(output)
+    with tracer.span("agent.product_research", workspace="commerce", source="pydantic-ai", dry_run=request.dry_run) as span:
+        result = await agent.run(request.model_dump_json())
+        output = getattr(result, "output", getattr(result, "data", result))
+        usage = getattr(result, "usage", None)
+        if callable(usage):
+            try:
+                usage = usage()
+            except Exception:
+                usage = None
+        if isinstance(usage, dict):
+            for key in ("total_tokens", "prompt_tokens", "completion_tokens", "cost", "cost_usd"):
+                if key in usage:
+                    span.attributes[f"usage.{key}"] = usage[key]
+        return output if isinstance(output, ProductResearchResult) else ProductResearchResult.model_validate(output)
 
 
 async def run_campaign_qa(request: CampaignQARequest, *, provider: AgentProvider = agent_provider) -> CampaignQAResult:
     agent = create_campaign_qa_agent(provider=provider)
-    result = await agent.run(request.model_dump_json())
-    output = getattr(result, "output", getattr(result, "data", result))
-    return output if isinstance(output, CampaignQAResult) else CampaignQAResult.model_validate(output)
+    with tracer.span("agent.campaign_qa", workspace="commerce", source="pydantic-ai", dry_run=request.dry_run, platform=request.platform) as span:
+        result = await agent.run(request.model_dump_json())
+        output = getattr(result, "output", getattr(result, "data", result))
+        usage = getattr(result, "usage", None)
+        if callable(usage):
+            try:
+                usage = usage()
+            except Exception:
+                usage = None
+        if isinstance(usage, dict):
+            for key in ("total_tokens", "prompt_tokens", "completion_tokens", "cost", "cost_usd"):
+                if key in usage:
+                    span.attributes[f"usage.{key}"] = usage[key]
+        return output if isinstance(output, CampaignQAResult) else CampaignQAResult.model_validate(output)
