@@ -46,7 +46,14 @@ n8n is an internal-only automation sidecar for alerts, CRM synchronization,
 approval reminders, and exports. Do not embed it, white-label it, or expose
 its workflow editor as a MarketOS customer capability; keep it behind the
 allowlisted adapter and use `N8N_BASE_URL` only for an approved internal
-deployment.
+deployment. Use `docker-compose.n8n.internal.example.yml` for the private
+deployment topology: it publishes no n8n host port, pins the image, requires
+durable encryption/JWT secrets, and waits for n8n health before the API starts.
+Set `N8N_ALLOWED_HOSTS=n8n` (or a reviewed private DNS suffix) and a separate
+`N8N_WEBHOOK_TOKEN`; configure every approved n8n Webhook workflow with Header
+Auth for `X-MarketOS-Automation-Token`. An `N8N_API_KEY` is optional instance
+API authentication and is not a substitute for webhook authentication. Run
+`python scripts/validate_n8n_internal_compose.py` before enabling the overlay.
 
 `MARKETOS_AGENT_QA_ENABLED=true` enables the typed campaign-QA gate. It is
 disabled by default; when enabled, provider unavailability or rejection marks

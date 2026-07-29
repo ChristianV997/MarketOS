@@ -48,6 +48,9 @@ jobs:
       - name: Validate OSS Compose overlay
         run: python scripts/validate_oss_compose.py
 
+      - name: Validate internal n8n Compose overlay
+        run: python scripts/validate_n8n_internal_compose.py
+
       - name: Enforce pinned container images
         run: python scripts/validate_container_pins.py
 
@@ -81,11 +84,15 @@ jobs:
         env:
           MEDUSA_IMAGE: medusajs/medusa:v2.14.2
           MEDUSA_DATABASE_URL: postgres://validation.invalid/marketos
+          N8N_ENCRYPTION_KEY: validation-only-encryption-key
+          N8N_USER_MANAGEMENT_JWT_SECRET: validation-only-jwt-secret
+          N8N_WEBHOOK_TOKEN: validation-only-webhook-token
         run: |
           # The base compose file deliberately uses the local .env contract.
           # Supply safe example values for config validation; no services start.
           cp .env.example .env
           docker compose -f docker-compose.yml -f docker-compose.oss.example.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.n8n.internal.example.yml config --quiet
 
       - name: Build production image
         run: docker build --tag marketos:ci .

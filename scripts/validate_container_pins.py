@@ -13,6 +13,7 @@ DEFAULT_MANIFESTS = (
     ROOT / "docker-compose.yml",
     ROOT / "docker-compose.prod.yml",
     ROOT / "docker-compose.oss.example.yml",
+    ROOT / "docker-compose.n8n.internal.example.yml",
 )
 _VERSION_TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
