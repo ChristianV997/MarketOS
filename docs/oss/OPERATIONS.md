@@ -4,6 +4,8 @@ OSS integrations are optional boundaries. They are not installed into the API
 image by default and no third-party source is vendored into MarketOS.
 
 Run `python scripts/validate_oss_inventory.py` before changing the inventory.
+Run `python scripts/check_oss_policy.py` to reject restricted licenses in the
+commercial core and unreviewed source-copying modes.
 Pin and test each upstream release before enabling it. Record licenses,
 transitive dependencies, smoke tests, and rollback notes in the inventory.
 Run `python scripts/validate_oss_runtime.py --json` for a read-only local
