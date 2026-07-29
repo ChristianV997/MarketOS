@@ -57,7 +57,7 @@ candidates:
     status: internal_only
     owner: automation
     capabilities: [workflow_automation, connectors, approvals]
-    reviewed_ref: pending-internal-validation
+    reviewed_ref: n8n@2.30.5
   - name: erpnext
     repository: https://github.com/frappe/erpnext
     license: GPL-3.0
