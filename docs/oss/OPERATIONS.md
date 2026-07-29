@@ -52,6 +52,13 @@ deployment.
 disabled by default; when enabled, provider unavailability or rejection marks
 the creative `not_launchable` and fails closed.
 
+Typed PydanticAI domain agents are optional and use only bounded, read-only
+MarketOS semantic evidence from the existing skill registry. Install the
+reviewed profile with `pip install -r requirements-oss-agents.txt`, set the
+model provider configuration, and leave money-affecting execution with the
+existing MarketOS approval gates. These agents never receive advertising,
+payment, browser, publishing, or fulfillment credentials.
+
 Live Crawl4AI research requires `CRAWL4AI_ALLOWED_DOMAINS` and verifies the
 target site's `robots.txt`; dry-run planning does not make network requests.
 The adapter emits product evidence only from a validated structured extractor

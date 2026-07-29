@@ -1,0 +1,3 @@
+# Reviewed optional profile for typed, read-only MarketOS domain agents.
+# Keep this out of the base API image until the agent capability is enabled.
+pydantic-ai==1.104.0

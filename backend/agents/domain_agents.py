@@ -6,12 +6,14 @@ owned by the existing MarketOS gates and loop.
 """
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, Callable, Sequence
 
 from pydantic import BaseModel, Field
 
 from backend.contracts.adapters import AgentProvider
 from backend.agents.pydantic_boundary import agent_provider
+from backend.agents.marketos_read_tools import MarketOSReadTools, default_read_tools
 from backend.observability.tracing import tracer
 
 
@@ -97,18 +99,24 @@ class MetricsReconciliationResult(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
-def create_product_research_agent(*, provider: AgentProvider = agent_provider) -> Any:
+def _read_tools(tools: Sequence[Callable[..., Any]] | None) -> Sequence[Callable[..., Any]]:
+    return default_read_tools() if tools is None else tools
+
+
+def create_product_research_agent(*, provider: AgentProvider = agent_provider, tools: Sequence[Callable[..., Any]] | None = None) -> Any:
     return provider.create(
         name="product-research",
         instructions=(
             "Analyze provided MarketOS research evidence and return only a "
-            "ProductResearchResult. Do not invent evidence or perform actions."
+            "ProductResearchResult. Use only the supplied read-only MarketOS "
+            "evidence tool when needed; do not invent evidence or perform actions."
         ),
         output_type=ProductResearchResult,
+        tools=_read_tools(tools),
     )
 
 
-def create_campaign_qa_agent(*, provider: AgentProvider = agent_provider) -> Any:
+def create_campaign_qa_agent(*, provider: AgentProvider = agent_provider, tools: Sequence[Callable[..., Any]] | None = None) -> Any:
     return provider.create(
         name="campaign-qa",
         instructions=(
@@ -116,10 +124,11 @@ def create_campaign_qa_agent(*, provider: AgentProvider = agent_provider) -> Any
             "Return only CampaignQAResult. Never launch or publish anything."
         ),
         output_type=CampaignQAResult,
+        tools=_read_tools(tools),
     )
 
 
-def create_supplier_comparison_agent(*, provider: AgentProvider = agent_provider) -> Any:
+def create_supplier_comparison_agent(*, provider: AgentProvider = agent_provider, tools: Sequence[Callable[..., Any]] | None = None) -> Any:
     return provider.create(
         name="supplier-comparison",
         instructions=(
@@ -128,10 +137,11 @@ def create_supplier_comparison_agent(*, provider: AgentProvider = agent_provider
             "or invent logistics facts."
         ),
         output_type=SupplierComparisonResult,
+        tools=_read_tools(tools),
     )
 
 
-def create_creative_brief_agent(*, provider: AgentProvider = agent_provider) -> Any:
+def create_creative_brief_agent(*, provider: AgentProvider = agent_provider, tools: Sequence[Callable[..., Any]] | None = None) -> Any:
     return provider.create(
         name="creative-brief",
         instructions=(
@@ -140,10 +150,11 @@ def create_creative_brief_agent(*, provider: AgentProvider = agent_provider) -> 
             "unverified product capabilities."
         ),
         output_type=CreativeBriefResult,
+        tools=_read_tools(tools),
     )
 
 
-def create_metrics_reconciliation_agent(*, provider: AgentProvider = agent_provider) -> Any:
+def create_metrics_reconciliation_agent(*, provider: AgentProvider = agent_provider, tools: Sequence[Callable[..., Any]] | None = None) -> Any:
     return provider.create(
         name="metrics-reconciliation",
         instructions=(
@@ -152,6 +163,7 @@ def create_metrics_reconciliation_agent(*, provider: AgentProvider = agent_provi
             "or fabricate missing measurements."
         ),
         output_type=MetricsReconciliationResult,
+        tools=_read_tools(tools),
     )
 
 
@@ -161,10 +173,28 @@ async def _run_typed_agent(
     output_type: type[BaseModel],
     *,
     trace_name: str,
+    evidence_query: str = "",
     **attributes: Any,
 ) -> BaseModel:
     with tracer.span(trace_name, workspace="commerce", source="pydantic-ai", dry_run=bool(getattr(request, "dry_run", True)), **attributes) as span:
-        result = await agent.run(request.model_dump_json())
+        prompt = request.model_dump_json()
+        # A live agent always receives a bounded read-only retrieval preflight
+        # from the existing MarketOS skill registry. This gives the model
+        # provenance-backed context even if it elects not to request the
+        # supplied semantic_evidence tool again. Dry-runs stay retrieval-free.
+        if not bool(getattr(request, "dry_run", True)) and evidence_query:
+            try:
+                evidence = MarketOSReadTools().semantic_evidence(evidence_query, top_k=3)
+                if evidence:
+                    prompt += "\nRegistered MarketOS evidence (read-only): " + json.dumps(evidence, sort_keys=True)
+                    span.attributes["marketos_evidence_collections"] = len(evidence)
+                    span.attributes["marketos_evidence_records"] = sum(len(hits) for hits in evidence.values())
+            except Exception as exc:
+                # Retrieval is useful evidence, not an execution authority.
+                # Preserve the agent's bounded analysis path while recording
+                # why contextual evidence was unavailable.
+                span.attributes["marketos_evidence_error"] = type(exc).__name__
+        result = await agent.run(prompt)
         output = getattr(result, "output", getattr(result, "data", result))
         usage = getattr(result, "usage", None)
         if callable(usage):
@@ -180,20 +210,20 @@ async def _run_typed_agent(
 
 
 async def run_product_research(request: ProductResearchRequest, *, provider: AgentProvider = agent_provider) -> ProductResearchResult:
-    return await _run_typed_agent(create_product_research_agent(provider=provider), request, ProductResearchResult, trace_name="agent.product_research")  # type: ignore[return-value]
+    return await _run_typed_agent(create_product_research_agent(provider=provider), request, ProductResearchResult, trace_name="agent.product_research", evidence_query=request.query)  # type: ignore[return-value]
 
 
 async def run_campaign_qa(request: CampaignQARequest, *, provider: AgentProvider = agent_provider) -> CampaignQAResult:
-    return await _run_typed_agent(create_campaign_qa_agent(provider=provider), request, CampaignQAResult, trace_name="agent.campaign_qa", platform=request.platform)  # type: ignore[return-value]
+    return await _run_typed_agent(create_campaign_qa_agent(provider=provider), request, CampaignQAResult, trace_name="agent.campaign_qa", evidence_query=f"{request.product_id} {request.creative_id} {request.platform}", platform=request.platform)  # type: ignore[return-value]
 
 
 async def run_supplier_comparison(request: SupplierComparisonRequest, *, provider: AgentProvider = agent_provider) -> SupplierComparisonResult:
-    return await _run_typed_agent(create_supplier_comparison_agent(provider=provider), request, SupplierComparisonResult, trace_name="agent.supplier_comparison")  # type: ignore[return-value]
+    return await _run_typed_agent(create_supplier_comparison_agent(provider=provider), request, SupplierComparisonResult, trace_name="agent.supplier_comparison", evidence_query=request.product_id)  # type: ignore[return-value]
 
 
 async def run_creative_brief(request: CreativeBriefRequest, *, provider: AgentProvider = agent_provider) -> CreativeBriefResult:
-    return await _run_typed_agent(create_creative_brief_agent(provider=provider), request, CreativeBriefResult, trace_name="agent.creative_brief", platform=request.platform)  # type: ignore[return-value]
+    return await _run_typed_agent(create_creative_brief_agent(provider=provider), request, CreativeBriefResult, trace_name="agent.creative_brief", evidence_query=f"{request.product_name} {request.platform}", platform=request.platform)  # type: ignore[return-value]
 
 
 async def run_metrics_reconciliation(request: MetricsReconciliationRequest, *, provider: AgentProvider = agent_provider) -> MetricsReconciliationResult:
-    return await _run_typed_agent(create_metrics_reconciliation_agent(provider=provider), request, MetricsReconciliationResult, trace_name="agent.metrics_reconciliation")  # type: ignore[return-value]
+    return await _run_typed_agent(create_metrics_reconciliation_agent(provider=provider), request, MetricsReconciliationResult, trace_name="agent.metrics_reconciliation", evidence_query=request.campaign_id)  # type: ignore[return-value]

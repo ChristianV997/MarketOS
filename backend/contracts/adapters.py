@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 
 def _now() -> datetime:
@@ -116,4 +116,11 @@ class WorkflowAutomationProvider(Protocol):
 class AgentProvider(Protocol):
     def health(self) -> AdapterHealth: ...
 
-    def create(self, *, name: str, instructions: str, output_type: Any = None) -> Any: ...
+    def create(
+        self,
+        *,
+        name: str,
+        instructions: str,
+        output_type: Any = None,
+        tools: Sequence[Callable[..., Any]] = (),
+    ) -> Any: ...
