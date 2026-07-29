@@ -9,6 +9,7 @@ import os
 from typing import Any, Mapping, Sequence
 
 from backend.contracts.adapters import AdapterHealth, CommerceProvider, SidecarContext
+from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
 
 try:
     import httpx
@@ -61,11 +62,43 @@ class MedusaCommerceAdapter:
         payload = self._request("GET", "/store/products", params={"limit": max(1, min(limit, 100))})
         return payload.get("products", payload.get("data", []))
 
+    @staticmethod
+    def normalize_products(rows: Sequence[Mapping[str, Any]]) -> list[ProductCandidate]:
+        result: list[ProductCandidate] = []
+        for row in rows:
+            product_id = str(row.get("id") or row.get("product_id") or "").strip()
+            name = str(row.get("title") or row.get("name") or "").strip()
+            if not product_id or not name:
+                continue
+            result.append(ProductCandidate(
+                product_id=product_id, name=name,
+                currency=str(row.get("currency_code") or row.get("currency") or "USD").upper(),
+                selling_price=float(row.get("selling_price") or row.get("price") or 0.0),
+                quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"medusa:{product_id}"),
+            ))
+        return result
+
     def get_inventory(self, product_ids: Sequence[str]) -> Sequence[Mapping[str, Any]]:
         if not product_ids:
             return []
         payload = self._request("GET", "/admin/inventory-items", params={"product_id": list(product_ids)})
         return payload.get("inventory_items", payload.get("data", []))
+
+    @staticmethod
+    def normalize_inventory(rows: Sequence[Mapping[str, Any]]) -> list[SupplierOffer]:
+        offers: list[SupplierOffer] = []
+        for row in rows:
+            product_id = str(row.get("product_id") or row.get("variant_id") or "").strip()
+            if not product_id:
+                continue
+            offers.append(SupplierOffer(
+                supplier_id=f"medusa:{row.get('inventory_item_id') or product_id}", product_id=product_id,
+                unit_cost=float(row.get("unit_cost") or row.get("cost") or 0.0),
+                inventory_units=int(row["stocked_quantity"]) if row.get("stocked_quantity") is not None else None,
+                currency=str(row.get("currency_code") or "USD").upper(),
+                quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"medusa:{product_id}"),
+            ))
+        return offers
 
     def create_order(self, order: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:
         if context.dry_run:

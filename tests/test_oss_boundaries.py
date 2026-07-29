@@ -29,6 +29,14 @@ def test_medusa_dry_order_never_requires_network():
     assert result["id"] == "dry-medusa-order-order-1"
 
 
+def test_medusa_normalizes_sidecar_records_to_canonical_contracts():
+    products = MedusaCommerceAdapter.normalize_products([{"id": "p1", "title": "Widget", "price": 12}])
+    offers = MedusaCommerceAdapter.normalize_inventory([{"product_id": "p1", "cost": 4, "stocked_quantity": 9}])
+    assert products[0].product_id == "p1"
+    assert offers[0].product_id == "p1"
+    assert offers[0].inventory_units == 9
+
+
 def test_sidecar_context_carries_lineage_and_approval():
     context = SidecarContext(
         workspace_id="commerce",

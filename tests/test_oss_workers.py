@@ -37,3 +37,14 @@ def test_crawl4ai_rejects_non_allowlisted_live_domain():
         pytest.importorskip("asyncio").run(
             adapter.discover("https://evil.example/test", context=SidecarContext(dry_run=False))
         )
+
+
+def test_crawl4ai_normalizes_only_named_records_to_marketos_contract():
+    candidates = Crawl4AIResearchAdapter.normalize_candidates([
+        {"name": "Travel Mug", "url": "https://supplier.example/mug", "price": "19.95", "quality": {"provenance": "live"}},
+        {"content": "not a product"},
+    ])
+    assert len(candidates) == 1
+    assert candidates[0].name == "Travel Mug"
+    assert candidates[0].selling_price == 19.95
+    assert candidates[0].quality.source_ref == "https://supplier.example/mug"

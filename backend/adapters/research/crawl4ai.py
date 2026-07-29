@@ -6,10 +6,12 @@ and usable when the optional browser worker is not installed.
 from __future__ import annotations
 
 import os
+import hashlib
 from typing import Any
 from urllib.parse import urlparse
 
 from backend.contracts.adapters import AdapterHealth, SidecarContext
+from evaluation.contracts import DataQuality, ProductCandidate
 
 
 class Crawl4AIResearchAdapter:
@@ -53,3 +55,38 @@ class Crawl4AIResearchAdapter:
             "source": self.name,
             "quality": {"provenance": "live", "source_ref": url},
         }]
+
+    @staticmethod
+    def normalize_candidates(records: list[dict[str, Any]]) -> list[ProductCandidate]:
+        """Convert crawler records into the single MarketOS product contract.
+
+        Extraction is intentionally conservative: a crawler record without a
+        usable name is rejected rather than becoming false product evidence.
+        Prices are accepted only when already normalized by the extractor.
+        """
+        candidates: list[ProductCandidate] = []
+        for record in records:
+            name = str(record.get("name") or record.get("product_name") or "").strip()
+            if not name:
+                continue
+            source_ref = str(record.get("url") or record.get("source_ref") or "")
+            product_id = str(record.get("product_id") or hashlib.sha256(f"{source_ref}:{name}".encode()).hexdigest()[:24])
+            raw_quality = record.get("quality") or {}
+            quality = raw_quality if isinstance(raw_quality, DataQuality) else DataQuality(
+                provenance=str(raw_quality.get("provenance", "unknown")),
+                attribution="attributed" if source_ref else "unknown",
+                source_ref=source_ref,
+            )
+            try:
+                price = float(record.get("selling_price", record.get("price", 0.0)) or 0.0)
+            except (TypeError, ValueError):
+                price = 0.0
+            candidates.append(ProductCandidate(
+                product_id=product_id,
+                name=name,
+                currency=str(record.get("currency", "USD")),
+                selling_price=max(0.0, price),
+                source_signal_ids=(source_ref,) if source_ref else (),
+                quality=quality,
+            ))
+        return candidates
