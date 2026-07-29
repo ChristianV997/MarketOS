@@ -41,6 +41,64 @@ class PostizPublisherAdapter:
     def release_webhook(self, event_id: str) -> None:
         self.webhook_events.release(self.name, event_id)
 
+    def _headers(self, context: SidecarContext | None = None) -> dict[str, str]:
+        authorization = f"{self.auth_scheme} {self.token}".strip() if self.auth_scheme else self.token
+        headers = {"Authorization": authorization}
+        if context is not None:
+            headers.update(context.to_headers())
+        return headers
+
+    @staticmethod
+    def normalize_analytics(post_id: str, rows: Any) -> Mapping[str, Any]:
+        """Normalize Postiz's provider-specific analytics labels conservatively."""
+        totals: dict[str, int] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, Mapping):
+                continue
+            label = str(row.get("label") or "").strip().lower()
+            points = row.get("data") if isinstance(row.get("data"), list) else []
+            if not label or not points:
+                continue
+            latest = points[-1] if isinstance(points[-1], Mapping) else {}
+            try:
+                totals[label] = int(float(latest.get("total", 0) or 0))
+            except (TypeError, ValueError):
+                continue
+        impressions = sum(value for label, value in totals.items() if label in {"impressions", "views", "reach"})
+        clicks = sum(value for label, value in totals.items() if label in {"clicks", "link clicks"})
+        engagements = sum(value for label, value in totals.items() if label in {"likes", "reactions", "comments", "shares", "reposts", "saves"})
+        return {
+            "post_id": post_id,
+            "metrics": {
+                "impressions": impressions,
+                "clicks": clicks,
+                "engagements": engagements,
+                "engagement_rate": round(engagements / impressions, 6) if impressions else 0.0,
+            },
+            "labels": totals,
+        }
+
+    def fetch_post_analytics(self, post_id: str, *, days: int | None = None) -> Mapping[str, Any]:
+        """Read one published Postiz post's engagement metrics."""
+        post_id = str(post_id).strip()
+        if not post_id:
+            raise ValueError("post_id is required")
+        if not self.base_url or not self.token:
+            raise RuntimeError("Postiz is not configured")
+        if httpx is None and self._client is None:
+            raise RuntimeError("httpx is required for the Postiz adapter")
+        lookback_days = days if days is not None else int(os.getenv("POSTIZ_ANALYTICS_DAYS", "30"))
+        if not 1 <= int(lookback_days) <= 365:
+            raise ValueError("Postiz analytics days must be between 1 and 365")
+        client = self._client or httpx.Client(timeout=15.0)
+        response = client.get(
+            f"{self.base_url}/analytics/post/{post_id}",
+            params={"date": int(lookback_days)},
+            headers=self._headers(),
+        )
+        response.raise_for_status()
+        return self.normalize_analytics(post_id, response.json())
+
     def publish_bundle(self, bundle: CreativeBundle, *, context: SidecarContext) -> Mapping[str, Any]:
         """Publish one canonical MarketOS creative artifact."""
         return self.publish({
@@ -92,8 +150,7 @@ class PostizPublisherAdapter:
             raise RuntimeError("Postiz is not configured")
         if httpx is None and self._client is None:
             raise RuntimeError("httpx is required for the Postiz adapter")
-        authorization = f"{self.auth_scheme} {self.token}".strip() if self.auth_scheme else self.token
-        headers = {"Authorization": authorization, **context.to_headers()}
+        headers = self._headers(context)
         client = self._client or httpx.Client(timeout=15.0)
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):

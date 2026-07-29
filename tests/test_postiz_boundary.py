@@ -118,3 +118,27 @@ def test_postiz_retries_transient_transport_failure(monkeypatch):
     )
     assert result["id"] == "post-retried"
     assert client.calls == 2
+
+
+def test_postiz_fetches_and_normalizes_read_only_analytics():
+    class Response:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return [
+                {"label": "Impressions", "data": [{"total": "100"}, {"total": "250"}]},
+                {"label": "Likes", "data": [{"total": "4"}, {"total": "10"}]},
+                {"label": "Comments", "data": [{"total": "1"}, {"total": "3"}]},
+                {"label": "Clicks", "data": [{"total": "2"}, {"total": "8"}]},
+            ]
+    class Client:
+        def __init__(self):
+            self.call = None
+        def get(self, url, **kwargs):
+            self.call = (url, kwargs)
+            return Response()
+    client = Client()
+    result = PostizPublisherAdapter(base_url="https://postiz/public/v1", token="secret", client=client).fetch_post_analytics("post-1", days=7)
+    assert client.call[0] == "https://postiz/public/v1/analytics/post/post-1"
+    assert client.call[1]["params"] == {"date": 7}
+    assert result["metrics"] == {"impressions": 250, "clicks": 8, "engagements": 13, "engagement_rate": 0.052}
