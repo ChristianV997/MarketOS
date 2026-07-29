@@ -31,7 +31,8 @@ def test_postiz_live_publish_requires_idempotency_key():
         raise AssertionError("live publishing must require idempotency")
 
 
-def test_postiz_live_publish_requires_explicit_integration_id():
+def test_postiz_live_publish_requires_explicit_integration_id(monkeypatch):
+    monkeypatch.setenv("POSTIZ_COMMERCIAL_APPROVED", "true")
     class Client:
         def post(self, *_args, **_kwargs):
             raise AssertionError("request should not be sent")
@@ -44,7 +45,18 @@ def test_postiz_live_publish_requires_explicit_integration_id():
         raise AssertionError("live publishing must target an explicit Postiz integration")
 
 
-def test_postiz_live_publish_sends_lineage_and_idempotency_headers():
+def test_postiz_live_publish_is_disabled_until_agpl_review_is_explicitly_approved():
+    adapter = PostizPublisherAdapter(base_url="https://postiz.invalid/public/v1", token="token", integration_id="integration-1")
+    try:
+        adapter.publish({"text": "hello"}, context=SidecarContext(idempotency_key="post-1", dry_run=False, approval_state="approved"))
+    except PermissionError as exc:
+        assert "AGPL" in str(exc)
+    else:
+        raise AssertionError("Postiz must fail closed pending commercial approval")
+
+
+def test_postiz_live_publish_sends_lineage_and_idempotency_headers(monkeypatch):
+    monkeypatch.setenv("POSTIZ_COMMERCIAL_APPROVED", "true")
     class Response:
         def raise_for_status(self):
             return None
@@ -94,6 +106,7 @@ def test_postiz_publish_bundle_maps_canonical_creative_artifact():
 
 
 def test_postiz_retries_transient_transport_failure(monkeypatch):
+    monkeypatch.setenv("POSTIZ_COMMERCIAL_APPROVED", "true")
     class Response:
         status_code = 200
         def raise_for_status(self):

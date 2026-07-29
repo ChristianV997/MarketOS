@@ -24,6 +24,8 @@ an approved context and idempotency key; rollback is to stop the overlay and
 unset `MEDUSA_BASE_URL`.
 
 Postiz requires a separate AGPL compliance review before commercial delivery.
+Read-only analytics may be configured independently, but live publishing is
+fail-closed until `POSTIZ_COMMERCIAL_APPROVED=true` is set by the review owner.
 Browser Use and Crawl4AI remain isolated optional workers with allowlists,
 approval gates, timeouts, and dry-run defaults.
 n8n is an internal-only automation sidecar for alerts, CRM synchronization,

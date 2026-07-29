@@ -31,9 +31,21 @@ class PostizPublisherAdapter:
         self._client = client
         self.webhook_events = WebhookEventLedger(db_path=os.getenv("MARKETOS_WEBHOOK_DEDUP_DB", ":memory:"))
 
+    @staticmethod
+    def _commercial_approval_granted() -> bool:
+        """Keep AGPL-reviewed publishing disabled until an owner opts in."""
+        return os.getenv("POSTIZ_COMMERCIAL_APPROVED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
     def health(self) -> AdapterHealth:
         if not self.base_url or not self.token:
             return AdapterHealth(self.name, configured=False, reachable=False, detail="POSTIZ_BASE_URL or POSTIZ_API_TOKEN is unset")
+        if not self._commercial_approval_granted():
+            return AdapterHealth(
+                self.name,
+                configured=False,
+                reachable=False,
+                detail="Postiz live publishing is disabled pending explicit AGPL commercial approval",
+            )
         return AdapterHealth(self.name, configured=True, reachable=True, capabilities=("publish",))
 
     def accept_webhook(self, event_id: str) -> bool:
@@ -171,9 +183,11 @@ class PostizPublisherAdapter:
     def publish(self, content: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:
         if context.dry_run:
             return {"id": f"dry-postiz-{context.idempotency_key or 'pending'}", "status": "planned", "dry_run": True, "content": dict(content)}
-        if context.approval_state not in {"approved", "not_required"}:
+        if context.approval_state != "approved":
             raise PermissionError("publishing requires approved MarketOS context")
         context.require_live_idempotency()
+        if not self._commercial_approval_granted():
+            raise PermissionError("Postiz live publishing is disabled pending explicit AGPL commercial approval")
         if not self.base_url or not self.token:
             raise RuntimeError("Postiz is not configured")
         if httpx is None and self._client is None:
