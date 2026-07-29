@@ -1,5 +1,6 @@
 # ── core runtime ──────────────────────────────────────────────────────────────
 numpy
+scipy
 scikit-learn
 statsmodels
 fastapi
