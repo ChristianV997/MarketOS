@@ -82,3 +82,22 @@ def test_medusa_live_order_sends_lineage_and_idempotency_headers():
     assert headers["X-MarketOS-Artifact"] == "launch-1"
     assert headers["X-MarketOS-Parents"] == "candidate-1"
     assert headers["X-MarketOS-Approval"] == "approved"
+
+
+def test_medusa_live_order_uses_optional_bearer_token():
+    class Response:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"id": "order-2"}
+    class Client:
+        def __init__(self):
+            self.headers = None
+        def request(self, _method, _path, **kwargs):
+            self.headers = kwargs["headers"]
+            return Response()
+    client = Client()
+    MedusaCommerceAdapter(base_url="http://medusa", token="secret", client=client).create_order(
+        {}, context=SidecarContext(dry_run=False, approval_state="approved")
+    )
+    assert client.headers["Authorization"] == "Bearer secret"

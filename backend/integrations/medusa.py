@@ -20,8 +20,9 @@ except ImportError:  # pragma: no cover
 class MedusaCommerceAdapter:
     name = "medusa"
 
-    def __init__(self, base_url: str | None = None, *, timeout_s: float = 10.0, client: Any = None):
+    def __init__(self, base_url: str | None = None, *, token: str | None = None, timeout_s: float = 10.0, client: Any = None):
         self.base_url = (base_url or os.getenv("MEDUSA_BASE_URL", "")).rstrip("/")
+        self.token = token or os.getenv("MEDUSA_API_TOKEN", "")
         self.timeout_s = timeout_s
         self._client = client
 
@@ -35,6 +36,8 @@ class MedusaCommerceAdapter:
         if httpx is None and self._client is None:
             raise RuntimeError("httpx is required for the Medusa adapter")
         headers = dict(kwargs.pop("headers", {}) or {})
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         if context and context.idempotency_key:
             headers["Idempotency-Key"] = context.idempotency_key
         if context:
