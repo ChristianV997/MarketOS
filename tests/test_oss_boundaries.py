@@ -193,9 +193,9 @@ def test_medusa_fulfillment_and_refund_are_dry_run_safe():
     fulfillment = adapter.fulfill_order(
         "order-1", {"location_id": "sloc-1", "items": [{"id": "item-1", "quantity": 1}]}, context=context,
     )
-    refund = adapter.refund_order_payment("order-1", "paycol-1", 1299, context=context, reason="return")
+    refund = adapter.refund_order_payment("order-1", "paycol-1", 19.95, context=context, reason="return")
     assert fulfillment["id"] == "dry-medusa-fulfillment-commerce-action"
-    assert refund["refund"] == {"amount": 1299, "reason": "return"}
+    assert refund["refund"] == {"amount": 19.95, "reason": "return"}
 
 
 def test_medusa_live_fulfillment_and_refund_require_approval_and_idempotency():
@@ -212,7 +212,7 @@ def test_medusa_live_fulfillment_and_refund_require_approval_and_idempotency():
 
     try:
         adapter.refund_order_payment(
-            "order-1", "paycol-1", 1299,
+            "order-1", "paycol-1", 19.95,
             context=SidecarContext(dry_run=False, approval_state="approved"),
         )
     except ValueError as exc:
@@ -249,10 +249,10 @@ def test_medusa_live_fulfillment_and_refund_use_documented_routes_and_headers():
     adapter = MedusaCommerceAdapter(base_url="http://medusa", client=client)
     context = SidecarContext(idempotency_key="action-1", dry_run=False, approval_state="approved")
     adapter.fulfill_order("order-1", {"location_id": "sloc-1", "items": [{"id": "item-1", "quantity": 1}]}, context=context)
-    adapter.refund_order_payment("order-1", "paycol-1", 1299, context=context, reason="return")
+    adapter.refund_order_payment("order-1", "paycol-1", 19.95, context=context, reason="return")
     assert [call[:2] for call in client.calls] == [
         ("POST", "/admin/orders/order-1/fulfillments"),
         ("POST", "/admin/orders/order-1/payment-collections/paycol-1/refund"),
     ]
-    assert client.calls[1][2]["json"] == {"amount": 1299, "reason": "return"}
+    assert client.calls[1][2]["json"] == {"amount": 19.95, "reason": "return"}
     assert client.calls[0][2]["headers"]["Idempotency-Key"] == "action-1"

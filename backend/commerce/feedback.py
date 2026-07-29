@@ -110,6 +110,8 @@ def _observation_from_outcome(outcome: CampaignOutcome) -> CampaignObservation:
 
 def observation_from_webhook(payload: dict[str, Any], *, source: str) -> CampaignObservation | None:
     """Normalize a provider metrics event without inventing missing values."""
+    if source == "medusa":
+        return _medusa_observation_from_webhook(payload)
     metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else payload
     campaign_id = str(payload.get("campaign_id") or metrics.get("campaign_id") or "").strip()
     observation_id = str(payload.get("id") or payload.get("event_id") or "").strip()
@@ -133,6 +135,45 @@ def observation_from_webhook(payload: dict[str, Any], *, source: str) -> Campaig
         )
     except (TypeError, ValueError):
         return None
+
+
+def _medusa_observation_from_webhook(payload: dict[str, Any]) -> CampaignObservation | None:
+    """Map Medusa revenue only when order metadata proves MarketOS lineage."""
+    event_id = str(payload.get("id") or payload.get("event_id") or payload.get("webhook_id") or "").strip()
+    event_type = str(payload.get("type") or payload.get("event_type") or "").strip().lower()
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    order = payload.get("order") if isinstance(payload.get("order"), dict) else data.get("order")
+    order = order if isinstance(order, dict) else data
+    metadata = order.get("metadata") if isinstance(order.get("metadata"), dict) else {}
+    campaign_id = str(metadata.get("marketos_campaign_id") or "").strip()
+    if not event_id or not campaign_id:
+        return None
+    product_id = str(metadata.get("marketos_product_id") or "").strip()
+    creative_id = str(metadata.get("marketos_creative_id") or "").strip()
+    if not product_id:
+        items = order.get("items") if isinstance(order.get("items"), list) else []
+        first = items[0] if items and isinstance(items[0], dict) else {}
+        product_id = str(first.get("variant_id") or first.get("product_id") or "").strip()
+    refund = order.get("refund") if isinstance(order.get("refund"), dict) else data.get("refund")
+    refund = refund if isinstance(refund, dict) else {}
+    is_refund = "refund" in event_type
+    raw_amount = refund.get("amount") if is_refund else order.get("total", order.get("subtotal", 0.0))
+    try:
+        amount = max(0.0, float(raw_amount or 0.0))
+    except (TypeError, ValueError):
+        return None
+    return CampaignObservation(
+        observation_id=event_id,
+        campaign_id=campaign_id,
+        product_id=product_id,
+        creative_id=creative_id,
+        revenue=0.0 if is_refund else amount,
+        conversions=0 if is_refund else 1,
+        refunds=amount if is_refund else 0.0,
+        currency=str(order.get("currency_code") or order.get("currency") or "USD").upper(),
+        quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"medusa:{event_id}"),
+        metadata={"source": "medusa", "event_type": event_type, "order_id": str(order.get("id") or data.get("id") or ""), "lineage": "order_metadata"},
+    )
 
 
 @dataclass

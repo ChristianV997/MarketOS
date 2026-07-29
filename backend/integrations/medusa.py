@@ -263,22 +263,28 @@ class MedusaCommerceAdapter:
         self,
         order_id: str,
         payment_collection_id: str,
-        amount: int,
+        amount: float,
         *,
         context: SidecarContext,
         reason: str = "",
         note: str = "",
     ) -> Mapping[str, Any]:
-        """Refund a captured payment in minor currency units after approval.
+        """Refund a captured payment in Medusa major currency units after approval.
 
         Medusa ties a refund to a payment collection, rather than treating an
         order ID as sufficient authorization to move money.
         """
         order_id = self._resource_id(order_id, "order_id")
         payment_collection_id = self._resource_id(payment_collection_id, "payment_collection_id")
-        if isinstance(amount, bool) or not isinstance(amount, int) or amount <= 0:
-            raise ValueError("refund amount must be a positive integer in minor currency units")
-        body = {"amount": int(amount)}
+        if isinstance(amount, bool):
+            raise ValueError("refund amount must be a positive major-currency value")
+        try:
+            amount_value = float(amount)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("refund amount must be a positive major-currency value") from exc
+        if amount_value <= 0:
+            raise ValueError("refund amount must be a positive major-currency value")
+        body = {"amount": amount_value}
         if reason:
             body["reason"] = str(reason)
         if note:
