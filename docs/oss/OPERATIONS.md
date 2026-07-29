@@ -13,6 +13,13 @@ Pin and test each upstream release before enabling it. Record licenses,
 transitive dependencies, smoke tests, and rollback notes in the inventory.
 Run `python scripts/validate_oss_runtime.py --json` for a read-only local
 health and dry-run boundary report.
+Run `python scripts/audit_oss_readiness.py --json` before release to collect
+the static acceptance evidence and list any live checks still requiring Docker,
+credentials, approved domains, or legal approval. A static pass never claims a
+live sidecar was launched.
+Run `python scripts/benchmark_commerce_cycle.py` to verify the canonical
+signal-to-feedback dry-run path stays below its configured p95 latency budget;
+CI enforces a conservative 2-second p95 threshold without external sidecars.
 Run `python scripts/evaluate_medusa_sidecar.py` to emit the pinned Medusa
 runtime-evaluation plan. A real local evaluation is intentionally opt-in and
 requires `MEDUSA_IMAGE`, `MEDUSA_DATABASE_URL`, and both `--execute` and

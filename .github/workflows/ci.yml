@@ -42,6 +42,9 @@ jobs:
       - name: Validate OSS inventory and runtime boundaries
         run: python scripts/validate_oss_runtime.py --json
 
+      - name: Audit OSS static readiness
+        run: python scripts/audit_oss_readiness.py --json
+
       - name: Enforce OSS commercial policy
         run: python scripts/check_oss_policy.py
 
@@ -73,11 +76,18 @@ jobs:
       - name: Audit declared Python dependencies
         run: |
           python -m pip install -r requirements-security.txt
-          pip-audit -r requirements.txt --strict
-          pip-audit -r requirements-oss-agents.txt --strict
+          # Base requirements are already installed above. Audit the actual
+          # resolved CI environment instead of resolving the large unpinned
+          # graph a second time through `pip-audit -r`.
+          pip-audit --local --strict
+          python -m pip install -r requirements-oss-agents.txt
+          pip-audit --local --strict
 
       - name: Run tests
         run: pytest tests/ -v
+
+      - name: Enforce dry-run commerce-cycle p95 budget
+        run: python scripts/benchmark_commerce_cycle.py --runs 10 --p95-limit-ms 2000
 
       - name: Smoke run (10 cycles)
         run: |
