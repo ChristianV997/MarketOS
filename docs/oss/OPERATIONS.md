@@ -22,3 +22,12 @@ Research retries are limited by `MARKETOS_OSS_MAX_RETRIES` (default `2`) and
 are retried; permission, validation, and malformed-input failures fail fast.
 Dry-run and live research caches are isolated so synthetic results cannot be
 reused as live evidence.
+
+## Enabling discovery
+
+Copy the OSS variables from `.env.example`, set
+`MARKETOS_OSS_DISCOVERY=true`, and provide comma-separated
+`MARKETOS_RESEARCH_URLS` plus `CRAWL4AI_ALLOWED_DOMAINS`. The orchestrator only
+uses OSS discovery when its normal signal batch is empty, so it cannot silently
+replace established signal sources. Keep `COMMERCE_LOOP_LIVE=false` while
+validating the integration path.

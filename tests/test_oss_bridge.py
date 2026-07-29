@@ -132,3 +132,14 @@ def test_provider_cycle_uses_one_canonical_commerce_execution_path():
     assert report.summary["provider_signals"] == 1
     assert report.summary["ranked"] == 1
     assert report.summary["creatives"] == 1
+
+
+def test_oss_provider_metrics_are_exported_when_prometheus_is_available():
+    import pytest
+    pytest.importorskip("prometheus_client")
+    clear_oss_cache()
+    collect_oss_inputs(["https://supplier.example/metrics"], research=Research(), commerce=Commerce())
+    from backend.api import prometheus_metrics
+    payload = prometheus_metrics().body.decode()
+    assert "marketos_oss_provider_refreshes_total" in payload
+    assert "marketos_oss_provider_refresh_duration_seconds" in payload
