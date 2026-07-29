@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
 from backend.commerce import CommerceLoop, CreativeBundle, LaunchExecutor, OpportunityScorer
-from backend.commerce.contracts import RankedOpportunity
+from backend.commerce.contracts import CampaignOutcome, RankedOpportunity
 from backend.commerce.feedback import FeedbackRecorder
 from backend.commerce.launch import LaunchPlan
 from backend.vector.schemas.similarity_result import SimilarityResult
@@ -98,6 +98,49 @@ def test_launch_executor_uses_injected_backend():
     assert outcome.roas == 2.5
     assert calls[0][0] == "campaign"
     assert calls[-1][0] == "metrics"
+
+
+def test_launch_executor_resumes_checkpoint_without_duplicate_platform_resources():
+    calls: list[str] = []
+    fail_once = {"adgroup": True}
+
+    def create_campaign(**kwargs):
+        calls.append("campaign")
+        return {"campaign_id": "resume-campaign"}
+
+    def create_ad_group(**kwargs):
+        calls.append("adgroup")
+        if fail_once.pop("adgroup", False):
+            raise RuntimeError("temporary adgroup failure")
+        return {"adgroup_id": "resume-adgroup"}
+
+    def create_ad(**kwargs):
+        calls.append("ad")
+        return {"ad_id": "resume-ad"}
+
+    opportunity = RankedOpportunity(
+        artifact_id="opp-resume-unique", product_id="resume-product", product_name="Resume Product",
+        signal_id="resume-signal", score=90.0, quality=LIVE_ATTRIBUTED,
+    )
+    bundle = CreativeBundle.from_opportunity(
+        opportunity, script="script", hook="Hook", angle="Angle", headline="Headline",
+        primary_text="Primary", cta="Shop Now", quality=LIVE_ATTRIBUTED,
+    )
+    executor = LaunchExecutor(
+        create_campaign=create_campaign,
+        create_ad_group=create_ad_group,
+        create_ad=create_ad,
+        metrics_provider=lambda ids: ({"spend": 10.0, "revenue": 25.0}, LIVE_ATTRIBUTED),
+    )
+
+    import pytest
+    with pytest.raises(RuntimeError, match="temporary adgroup"):
+        executor.execute(bundle, budget=17.0, dry_run=False)
+    plan, outcome = executor.execute(bundle, budget=17.0, dry_run=False)
+
+    assert plan.campaign_id == "resume-campaign"
+    assert outcome.campaign_id == "resume-campaign"
+    assert calls == ["campaign", "adgroup", "adgroup", "ad"]
 
 
 def test_feedback_recorder_reconciles_outcome_into_readiness():
@@ -206,6 +249,43 @@ def test_live_launch_and_feedback_update_one_durable_campaign_artifact():
     updated = registry.get("commerce-campaign:campaign-lineage")
     assert updated.outcome_recorded is True
     assert updated.actual_roas == 2.0
+
+
+def test_feedback_recorder_deduplicates_repeated_observation():
+    class Memory:
+        def __init__(self):
+            self.calls = 0
+
+        def index_campaign(self, **kwargs):
+            self.calls += 1
+
+        def record_outcome(self, **kwargs):
+            self.calls += 1
+
+        def index_keyword(self, *args, **kwargs):
+            self.calls += 1
+
+    memory = Memory()
+    recorder = FeedbackRecorder(campaign_memory=memory, reinforcement_memory=memory, signal_memory=memory)
+    opportunity = RankedOpportunity(
+        artifact_id="opp-feedback-dedupe", product_id="feedback-product", product_name="Feedback Product",
+        signal_id="feedback-signal", score=90.0, quality=LIVE_ATTRIBUTED,
+    )
+    bundle = CreativeBundle.from_opportunity(
+        opportunity, script="script", hook="Hook", angle="Angle", headline="Headline",
+        primary_text="Primary", cta="Shop Now", quality=LIVE_ATTRIBUTED,
+    )
+    plan = LaunchPlan.from_bundle(bundle, budget=20.0, dry_run=False)
+    plan.campaign_id = "feedback-campaign"
+    outcome = CampaignOutcome.from_metrics(
+        plan, {"spend": 10.0, "revenue": 25.0, "campaign_id": "feedback-campaign"}, quality=LIVE_ATTRIBUTED,
+    )
+
+    first = recorder.record(bundle, plan, outcome)
+    second = FeedbackRecorder(campaign_memory=memory, reinforcement_memory=memory, signal_memory=memory).record(bundle, plan, outcome)
+    assert first["deduplicated"] is False
+    assert second["deduplicated"] is True
+    assert memory.calls == 3
 
 
 def test_unattributed_initial_metrics_do_not_close_campaign_lineage():

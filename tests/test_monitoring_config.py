@@ -11,6 +11,8 @@ def test_prometheus_rules_cover_signal_health_alerts():
     assert "MarketOSSignalRefreshLatencyHigh" in rules
     assert "MarketOSSignalCacheHitRateLow" in rules
     assert "MarketOSSignalSourceFailuresRepeated" in rules
+    assert "MarketOSSignalSourceRefreshLatencyHigh" in rules
+    assert "MarketOSSignalSourceFailureRateHigh" in rules
     assert "marketos_signal_cache_lookups_total" in rules
 
 
@@ -20,6 +22,8 @@ def test_grafana_dashboard_has_signal_health_panels():
     assert "Signal Cache Hit Rate" in titles
     assert "Signal Refresh Latency (p95)" in titles
     assert "Source Failures by Source" in titles
+    assert "Source Refresh Latency (p95)" in titles
+    assert "Source Success and Failure Rate" in titles
 
 
 def test_compose_mounts_monitoring_provisioning():

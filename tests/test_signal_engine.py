@@ -1,4 +1,6 @@
 from core.signals import SignalEngine
+import threading
+import time
 
 
 def test_get_returns_mock_when_no_sources():
@@ -127,3 +129,49 @@ def test_mock_signals_contain_platform_and_market():
     for s in signals:
         assert "market" in s
         assert "platform" in s
+
+
+def test_refresh_fetches_sources_concurrently():
+    engine = SignalEngine()
+    engine._max_source_workers = 2
+    barrier = threading.Barrier(2)
+
+    def source(name):
+        def fetch():
+            barrier.wait(timeout=1)
+            return [{"product": name, "score": 0.8}]
+        return fetch
+
+    engine.register_source("one", source("one"))
+    engine.register_source("two", source("two"))
+    signals = engine.get(force_refresh=True)
+    assert {item["product"] for item in signals} == {"one", "two"}
+    assert engine.cache_stats()["source_successes"] == {"one": 1, "two": 1}
+
+
+def test_concurrent_refreshes_share_one_provider_call():
+    engine = SignalEngine()
+    calls = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def source():
+        calls.append(True)
+        started.set()
+        release.wait(timeout=1)
+        return [{"product": "shared", "score": 0.9}]
+
+    engine.register_source("shared", source)
+    results = []
+    first = threading.Thread(target=lambda: results.append(engine.get(force_refresh=True)))
+    second = threading.Thread(target=lambda: results.append(engine.get(force_refresh=True)))
+    first.start()
+    assert started.wait(timeout=1)
+    second.start()
+    time.sleep(0.02)
+    release.set()
+    first.join(timeout=1)
+    second.join(timeout=1)
+    assert len(calls) == 1
+    assert len(results) == 2
+    assert all(result[0]["product"] == "shared" for result in results)

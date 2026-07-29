@@ -71,6 +71,62 @@ def _register_campaign_lineage(bundle: CreativeBundle, plan: LaunchPlan) -> None
         return
 
 
+def _launch_state_id(plan: LaunchPlan) -> str:
+    return f"commerce-launch:{plan.artifact_id}"
+
+
+def _get_launch_state(plan: LaunchPlan):
+    try:
+        from backend.contracts.registry import get_registry
+        return get_registry().get(_launch_state_id(plan))
+    except Exception:
+        return None
+
+
+def _save_launch_state(
+    bundle: CreativeBundle,
+    plan: LaunchPlan,
+    *,
+    status: str,
+    campaign_id: str = "",
+    adgroup_id: str = "",
+    ad_ids: list[str] | None = None,
+    error: str | None = None,
+) -> None:
+    """Checkpoint launch progress in the existing artifact registry."""
+    try:
+        from backend.contracts.campaign import CampaignAsset
+        from backend.contracts.registry import get_registry
+
+        current = _get_launch_state(plan)
+        if current is not None and hasattr(current, "with_launch_state"):
+            get_registry().register(current.with_launch_state(
+                status=status,
+                campaign_id=campaign_id or current.campaign_id,
+                adgroup_id=adgroup_id or current.adgroup_id,
+                ad_ids=ad_ids if ad_ids is not None else list(current.ad_ids),
+                error=error,
+            ))
+            return
+        get_registry().register(CampaignAsset(
+            artifact_id=_launch_state_id(plan),
+            workspace=plan.workspace,
+            parent_ids=[bundle.artifact_id, plan.artifact_id],
+            campaign_id=campaign_id,
+            adgroup_id=adgroup_id,
+            ad_ids=list(ad_ids or ()),
+            product=plan.product_name,
+            phase="commerce",
+            budget=plan.budget,
+            launched_at=plan.created_at,
+            dry_run=False,
+            launch_status=status,
+            metadata={"launch_key": plan.artifact_id, "product_id": plan.product_id, "creative_id": plan.creative_id},
+        ))
+    except Exception:
+        # The platform operation remains authoritative if optional persistence
+        # is unavailable; the next retry will still be protected in-process.
+        return
 @dataclass
 class LaunchExecutor:
     """Create campaigns, ad groups, ads, and outcome snapshots."""
@@ -99,27 +155,44 @@ class LaunchExecutor:
             )
             return plan, outcome
 
-        campaign_response = self.create_campaign(
-            name=plan.campaign_name,
-            budget=plan.budget,
-        )
-        campaign_id = str(campaign_response.get("campaign_id", "") or "")
-        adgroup_response = self.create_ad_group(
-            campaign_id=campaign_id,
-            name=f"{bundle.product_name[:32]}::{bundle.creative_id[:8]}",
-            budget=plan.budget,
-        )
-        adgroup_id = str(adgroup_response.get("adgroup_id", "") or "")
+        state = _get_launch_state(plan)
+        campaign_id = str(getattr(state, "campaign_id", "") or "")
+        adgroup_id = str(getattr(state, "adgroup_id", "") or "")
+        ad_ids = list(getattr(state, "ad_ids", ()) or ())
+        _save_launch_state(bundle, plan, status=getattr(state, "launch_status", "planned"))
 
-        ad_response = self.create_ad(
-            adgroup_id=adgroup_id,
-            creative={
-                "headline": bundle.headline,
-                "body": bundle.primary_text,
-                "cta": bundle.cta,
-            },
-        )
-        ad_id = str(ad_response.get("ad_id", "") or "")
+        if not campaign_id:
+            campaign_response = self.create_campaign(name=plan.campaign_name, budget=plan.budget)
+            campaign_id = str(campaign_response.get("campaign_id", "") or "")
+            if not campaign_id:
+                _save_launch_state(bundle, plan, status="campaign_failed", error="campaign provider returned no campaign_id")
+                raise RuntimeError("campaign provider returned no campaign_id")
+            _save_launch_state(bundle, plan, status="campaign_created", campaign_id=campaign_id)
+
+        if not adgroup_id:
+            adgroup_response = self.create_ad_group(
+                campaign_id=campaign_id,
+                name=f"{bundle.product_name[:32]}::{bundle.creative_id[:8]}",
+                budget=plan.budget,
+            )
+            adgroup_id = str(adgroup_response.get("adgroup_id", "") or "")
+            if not adgroup_id:
+                _save_launch_state(bundle, plan, status="adgroup_failed", campaign_id=campaign_id, error="ad group provider returned no adgroup_id")
+                raise RuntimeError("ad group provider returned no adgroup_id")
+            _save_launch_state(bundle, plan, status="adgroup_created", campaign_id=campaign_id, adgroup_id=adgroup_id)
+
+        if not ad_ids:
+            ad_response = self.create_ad(
+                adgroup_id=adgroup_id,
+                creative={"headline": bundle.headline, "body": bundle.primary_text, "cta": bundle.cta},
+            )
+            ad_id = str(ad_response.get("ad_id", "") or "")
+            if not ad_id:
+                _save_launch_state(bundle, plan, status="ad_failed", campaign_id=campaign_id, adgroup_id=adgroup_id, error="ad provider returned no ad_id")
+                raise RuntimeError("ad provider returned no ad_id")
+            ad_ids = [ad_id]
+            _save_launch_state(bundle, plan, status="ad_created", campaign_id=campaign_id, adgroup_id=adgroup_id, ad_ids=ad_ids)
+        ad_id = ad_ids[0] if ad_ids else ""
 
         plan = LaunchPlan(
             artifact_id=plan.artifact_id,
@@ -136,7 +209,7 @@ class LaunchExecutor:
             status="launched",
             campaign_id=campaign_id,
             adgroup_id=adgroup_id,
-            ad_ids=(ad_id,) if ad_id else (),
+            ad_ids=tuple(ad_ids),
             quality=DataQuality(provenance="unknown", attribution="unknown"),
             reasons=plan.reasons,
         )
@@ -149,4 +222,5 @@ class LaunchExecutor:
         metrics["metadata"] = {**metrics["metadata"], "campaign_id": campaign_id, "adgroup_id": adgroup_id, "ad_id": ad_id}
 
         outcome = CampaignOutcome.from_metrics(plan, metrics, quality=quality)
+        _save_launch_state(bundle, plan, status="completed", campaign_id=campaign_id, adgroup_id=adgroup_id, ad_ids=ad_ids)
         return plan, outcome

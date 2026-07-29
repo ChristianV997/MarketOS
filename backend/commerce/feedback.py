@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import threading
 from typing import Any, Iterable
 
 from evaluation import CampaignCandidate, CampaignObservation, DataQuality, evaluate_campaign
@@ -11,6 +12,25 @@ from backend.vector.memory.reinforcement_memory import ReinforcementMemory
 from backend.vector.memory.signal_memory import SignalMemory
 
 from .contracts import CampaignOutcome, CreativeBundle, LaunchPlan
+
+try:
+    from prometheus_client import Counter
+
+    _prom_feedback_records = Counter(
+        "marketos_feedback_records",
+        "Commerce feedback observations processed",
+    )
+    _prom_feedback_duplicates = Counter(
+        "marketos_feedback_duplicates",
+        "Commerce feedback observations ignored as duplicates",
+    )
+except ImportError:
+    _prom_feedback_records = None
+    _prom_feedback_duplicates = None
+
+
+_PROCESSED_OBSERVATIONS: set[str] = set()
+_OBSERVATION_LOCK = threading.Lock()
 
 
 def _record_campaign_lineage_outcome(plan: LaunchPlan, outcome: CampaignOutcome) -> None:
@@ -88,6 +108,16 @@ class FeedbackRecorder:
 
     def record(self, bundle: CreativeBundle, plan: LaunchPlan, outcome: CampaignOutcome) -> dict[str, Any]:
         observation = _observation_from_outcome(outcome)
+        with _OBSERVATION_LOCK:
+            if observation.observation_id in _PROCESSED_OBSERVATIONS:
+                if _prom_feedback_duplicates is not None:
+                    _prom_feedback_duplicates.inc()
+                return {
+                    "observation": _observation_dict(observation),
+                    "readiness": {},
+                    "deduplicated": True,
+                }
+            _PROCESSED_OBSERVATIONS.add(observation.observation_id)
         readiness = evaluate_campaign(
             CampaignCandidate(
                 campaign_id=plan.campaign_id or plan.artifact_id,
@@ -132,7 +162,11 @@ class FeedbackRecorder:
         )
         _record_campaign_lineage_outcome(plan, outcome)
 
+        if _prom_feedback_records is not None:
+            _prom_feedback_records.inc()
+
         return {
             "observation": _observation_dict(observation),
             "readiness": readiness.to_dict(),
+            "deduplicated": False,
         }
