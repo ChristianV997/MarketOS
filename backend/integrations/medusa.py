@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from backend.contracts.adapters import AdapterHealth, CommerceProvider, SidecarContext
 from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
+from backend.integrations.webhook_dedup import WebhookEventLedger
 
 try:
     import httpx
@@ -25,6 +26,7 @@ class MedusaCommerceAdapter:
         self.token = token or os.getenv("MEDUSA_API_TOKEN", "")
         self.timeout_s = timeout_s
         self._client = client
+        self.webhook_events = WebhookEventLedger()
 
     @property
     def configured(self) -> bool:
@@ -62,6 +64,9 @@ class MedusaCommerceAdapter:
             return AdapterHealth(self.name, configured=True, reachable=True, capabilities=("catalog", "inventory", "orders"))
         except Exception as exc:
             return AdapterHealth(self.name, configured=True, reachable=False, detail=str(exc))
+
+    def accept_webhook(self, event_id: str) -> bool:
+        return self.webhook_events.accept(self.name, event_id)
 
     def list_products(self, *, limit: int = 50) -> Sequence[Mapping[str, Any]]:
         payload = self._request("GET", "/store/products", params={"limit": max(1, min(limit, 100))})

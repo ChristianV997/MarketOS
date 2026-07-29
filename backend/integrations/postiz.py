@@ -5,6 +5,7 @@ import os
 from typing import Any, Mapping
 
 from backend.contracts.adapters import AdapterHealth, ContentPublisher, SidecarContext
+from backend.integrations.webhook_dedup import WebhookEventLedger
 
 try:
     import httpx
@@ -20,11 +21,15 @@ class PostizPublisherAdapter:
         self.token = token or os.getenv("POSTIZ_API_TOKEN", "")
         self.path = os.getenv("POSTIZ_PUBLISH_PATH", "/api/posts")
         self._client = client
+        self.webhook_events = WebhookEventLedger()
 
     def health(self) -> AdapterHealth:
         if not self.base_url or not self.token:
             return AdapterHealth(self.name, configured=False, reachable=False, detail="POSTIZ_BASE_URL or POSTIZ_API_TOKEN is unset")
         return AdapterHealth(self.name, configured=True, reachable=True, capabilities=("publish",))
+
+    def accept_webhook(self, event_id: str) -> bool:
+        return self.webhook_events.accept(self.name, event_id)
 
     def publish(self, content: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:
         if context.dry_run:

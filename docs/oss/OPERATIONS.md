@@ -31,6 +31,11 @@ the creative `not_launchable` and fails closed.
 Live Crawl4AI research requires `CRAWL4AI_ALLOWED_DOMAINS` and verifies the
 target site's `robots.txt`; dry-run planning does not make network requests.
 
+Medusa and Postiz adapters expose bounded in-process webhook deduplication.
+Production webhook receivers should persist accepted event IDs in the durable
+event store before acknowledging events; the adapter ledger is a first-line
+replay guard, not a cross-process replacement for durable persistence.
+
 Research retries are limited by `MARKETOS_OSS_MAX_RETRIES` (default `2`) and
 `MARKETOS_OSS_RETRY_BACKOFF_S` (default `0.25`). Only transport-like failures
 are retried; permission, validation, and malformed-input failures fail fast.
