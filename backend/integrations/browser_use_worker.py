@@ -14,6 +14,60 @@ from backend.contracts.adapters import AdapterHealth, BrowserWorkflowProvider, S
 WorkflowRunner = Callable[[str, Mapping[str, Any], SidecarContext], Awaitable[Mapping[str, Any]]]
 
 
+_TRACE_SECRET_KEYS = {"authorization", "cookie", "cookies", "password", "secret", "token", "api_key", "access_token"}
+
+
+def _trace_value(value: Any, *, depth: int = 0) -> Any:
+    """Return a small, JSON-safe audit representation of Browser Use history.
+
+    Browser history can contain rendered page data, cookies, and screenshots.
+    It is useful for an operator to see which actions ran, but none of those
+    heavyweight or sensitive artifacts belong in an API response by default.
+    """
+    if depth > 4:
+        return "<truncated>"
+    if hasattr(value, "model_dump"):
+        try:
+            value = value.model_dump()
+        except Exception:  # pragma: no cover - optional dependency shapes
+            value = str(value)
+    elif hasattr(value, "to_dict"):
+        try:
+            value = value.to_dict()
+        except Exception:  # pragma: no cover - optional dependency shapes
+            value = str(value)
+    if isinstance(value, Mapping):
+        return {
+            str(key): ("<redacted>" if str(key).lower() in _TRACE_SECRET_KEYS else _trace_value(item, depth=depth + 1))
+            for key, item in list(value.items())[:20]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_trace_value(item, depth=depth + 1) for item in value[:10]]
+    if isinstance(value, str):
+        # Screenshots commonly arrive as data URLs; retain only an indication
+        # that one existed rather than returning a potentially huge image.
+        if value.startswith("data:image/"):
+            return "<screenshot captured>"
+        return value[:1000]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:1000]
+
+
+def _history_trace(history: Any) -> Mapping[str, Any]:
+    """Extract a version-tolerant, bounded action trace from Browser Use."""
+    steps = getattr(history, "history", None)
+    if steps is None and isinstance(history, Mapping):
+        steps = history.get("history") or history.get("actions")
+    if not isinstance(steps, (list, tuple)):
+        steps = []
+    return {
+        "action_count": len(steps),
+        "steps": [_trace_value(step) for step in steps[:50]],
+        "truncated": len(steps) > 50,
+    }
+
+
 class BrowserUseWorker:
     """Run approved browser workflows through one injected runner.
 
@@ -57,7 +111,10 @@ class BrowserUseWorker:
             raise RuntimeError("Browser Use runner is not configured")
         result = await asyncio.wait_for(self.runner(workflow, payload, context), timeout=self.timeout_s)
         actions = result.get("actions") if isinstance(result, Mapping) else None
+        action_count = result.get("action_count") if isinstance(result, Mapping) else None
         if isinstance(actions, list) and len(actions) > self.max_actions:
+            raise RuntimeError("browser workflow exceeded the configured action limit")
+        if isinstance(action_count, int) and action_count > self.max_actions:
             raise RuntimeError("browser workflow exceeded the configured action limit")
         if self.require_trace and isinstance(result, Mapping) and not (result.get("trace_id") or result.get("trace") or result.get("actions")):
             raise RuntimeError("browser workflow result must include an execution trace")
@@ -92,7 +149,15 @@ def build_browser_use_runner() -> WorkflowRunner:
         history = await agent.run()
         final = history.final_result() if hasattr(history, "final_result") else str(history)
         trace_id = hashlib.sha256(f"{context.run_id}:{context.artifact_id}:{workflow}".encode()).hexdigest()[:24]
-        return {"workflow": workflow, "status": "completed", "result": final, "trace_id": trace_id}
+        trace = _history_trace(history)
+        return {
+            "workflow": workflow,
+            "status": "completed",
+            "result": final,
+            "trace_id": trace_id,
+            "trace": trace,
+            "action_count": trace["action_count"],
+        }
 
     return _run
 

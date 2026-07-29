@@ -2,7 +2,7 @@ import pytest
 
 from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
 from backend.contracts.adapters import SidecarContext
-from backend.integrations.browser_use_worker import BrowserUseWorker
+from backend.integrations.browser_use_worker import BrowserUseWorker, _history_trace
 
 
 def test_crawl4ai_is_optional_and_dry_run_is_network_free():
@@ -71,6 +71,33 @@ def test_browser_worker_live_execution_requires_allowlist_url_approval_and_idemp
         pytest.importorskip("asyncio").run(
             worker.execute("supplier_research", {"url": "https://supplier.example/product"}, context=SidecarContext(dry_run=False, approval_state="approved"))
         )
+
+
+def test_browser_worker_enforces_runner_action_count():
+    async def runner(_workflow, _payload, _context):
+        return {"trace_id": "trace-1", "trace": {"steps": []}, "action_count": 3}
+
+    worker = BrowserUseWorker(runner=runner, allowed_domains={"supplier.example"}, max_actions=2)
+    with pytest.raises(RuntimeError, match="action limit"):
+        pytest.importorskip("asyncio").run(
+            worker.execute(
+                "supplier_research", {"url": "https://supplier.example/product"},
+                context=SidecarContext(dry_run=False, approval_state="approved", idempotency_key="research-1"),
+            )
+        )
+
+
+def test_browser_history_trace_is_bounded_and_redacts_sensitive_page_state():
+    class History:
+        history = [
+            {"action": "click", "cookie": "private", "screenshot": "data:image/png;base64,large"},
+            {"action": "extract", "result": "useful"},
+        ]
+
+    trace = _history_trace(History())
+    assert trace["action_count"] == 2
+    assert trace["steps"][0]["cookie"] == "<redacted>"
+    assert trace["steps"][0]["screenshot"] == "<screenshot captured>"
 
 
 
