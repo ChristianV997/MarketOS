@@ -3,6 +3,37 @@ import os
 import time
 from typing import Callable
 
+try:
+    from prometheus_client import Counter, Gauge, Histogram
+
+    _prom_signal_cache_hits = Counter(
+        "marketos_signal_cache_hits",
+        "Signal cache lookups served without external refresh",
+    )
+    _prom_signal_cache_refreshes = Counter(
+        "marketos_signal_cache_refreshes",
+        "Signal cache refresh operations",
+    )
+    _prom_signal_cache_refresh_duration = Histogram(
+        "marketos_signal_cache_refresh_duration_seconds",
+        "Duration of aggregated signal refreshes",
+    )
+    _prom_signal_cache_last_refresh_duration = Gauge(
+        "marketos_signal_cache_last_refresh_duration_seconds",
+        "Duration of the most recent aggregated signal refresh",
+    )
+    _prom_signal_source_failures = Counter(
+        "marketos_signal_source_failures",
+        "Signal source refresh failures",
+        ["source"],
+    )
+except ImportError:
+    _prom_signal_cache_hits = None
+    _prom_signal_cache_refreshes = None
+    _prom_signal_cache_refresh_duration = None
+    _prom_signal_cache_last_refresh_duration = None
+    _prom_signal_source_failures = None
+
 
 class SignalEngine:
     """Aggregates external demand signals and scores product opportunities."""
@@ -81,6 +112,8 @@ class SignalEngine:
             and now - self._cache_updated_at < self._cache_ttl_s
         ):
             self._cache_hits += 1
+            if _prom_signal_cache_hits is not None:
+                _prom_signal_cache_hits.inc()
             return self._copy_signals(self._cached_signals)
 
         refresh_started = time.monotonic()
@@ -89,7 +122,7 @@ class SignalEngine:
             self._cached_signals = self._copy_signals(signals)
             self._cache_updated_at = now
             self._refresh_count += 1
-            self._last_refresh_duration_s = time.monotonic() - refresh_started
+            self._record_refresh_metrics(time.monotonic() - refresh_started)
             self._last_refresh_at = time.time()
             return signals
 
@@ -105,14 +138,23 @@ class SignalEngine:
             except Exception:
                 source_name = str(source.get("name") or "unknown")
                 self._source_failures[source_name] = self._source_failures.get(source_name, 0) + 1
+                if _prom_signal_source_failures is not None:
+                    _prom_signal_source_failures.labels(source=source_name).inc()
 
         signals = all_signals if all_signals else self._mock_signals()
         self._cached_signals = self._copy_signals(signals)
         self._cache_updated_at = now
         self._refresh_count += 1
-        self._last_refresh_duration_s = time.monotonic() - refresh_started
+        self._record_refresh_metrics(time.monotonic() - refresh_started)
         self._last_refresh_at = time.time()
         return self._copy_signals(signals)
+
+    def _record_refresh_metrics(self, duration_s: float) -> None:
+        self._last_refresh_duration_s = duration_s
+        if _prom_signal_cache_refreshes is not None:
+            _prom_signal_cache_refreshes.inc()
+            _prom_signal_cache_refresh_duration.observe(duration_s)
+            _prom_signal_cache_last_refresh_duration.set(duration_s)
 
     def filter_opportunities(self, signals: list, min_score: float = 0.5) -> list:
         """Return only signals that meet the minimum score threshold."""

@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import asyncio
 import json
 from pathlib import Path
+import pytest
 
 
 def test_live_commerce_api_requires_explicit_confirmation():
@@ -93,6 +94,23 @@ def test_signal_metrics_endpoint_exposes_cache_telemetry():
     assert "cache_hit_rate" in result
     assert "last_refresh_duration_s" in result
     assert "source_failures" in result
+
+
+def test_prometheus_exposes_signal_cache_metric_families():
+    pytest.importorskip("prometheus_client")
+    from backend.api import prometheus_metrics
+    from core.signals import SignalEngine
+
+    engine = SignalEngine()
+    engine.register_source("prometheus-test", lambda: (_ for _ in ()).throw(RuntimeError("offline")))
+    engine.get(force_refresh=True)
+    engine.get()
+    payload = prometheus_metrics().body.decode("utf-8")
+    assert "marketos_signal_cache_hits_total" in payload
+    assert "marketos_signal_cache_refreshes_total" in payload
+    assert "marketos_signal_cache_refresh_duration_seconds" in payload
+    assert "marketos_signal_cache_last_refresh_duration_seconds" in payload
+    assert "marketos_signal_source_failures_total" in payload
 
 
 def test_api_deployment_smoke_runs_dry_commerce_cycle(monkeypatch):
