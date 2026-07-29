@@ -75,9 +75,9 @@ jobs:
 
       - name: Verify health and dry commerce execution
         run: |
-          curl --fail --silent --show-error http://127.0.0.1:3000/health
           for attempt in {1..30}; do
-            if curl --fail --silent --show-error http://127.0.0.1:3000/ready; then
+            if curl --fail --silent --show-error http://127.0.0.1:3000/health \
+              && curl --fail --silent --show-error http://127.0.0.1:3000/ready; then
               break
             fi
             if [ "$attempt" -eq 30 ]; then
