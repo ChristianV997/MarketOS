@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Mapping
 
 from backend.contracts.adapters import AdapterHealth, ContentPublisher, SidecarContext
@@ -21,6 +22,8 @@ class PostizPublisherAdapter:
         self.base_url = (base_url or os.getenv("POSTIZ_BASE_URL", "")).rstrip("/")
         self.token = token or os.getenv("POSTIZ_API_TOKEN", "")
         self.path = os.getenv("POSTIZ_PUBLISH_PATH", "/api/posts")
+        self.max_retries = max(0, int(os.getenv("POSTIZ_MAX_RETRIES", "2")))
+        self.retry_backoff_s = max(0.0, float(os.getenv("POSTIZ_RETRY_BACKOFF_S", "0.25")))
         self._client = client
         self.webhook_events = WebhookEventLedger(db_path=os.getenv("MARKETOS_WEBHOOK_DEDUP_DB", ":memory:"))
 
@@ -68,9 +71,24 @@ class PostizPublisherAdapter:
         if context.idempotency_key:
             headers["Idempotency-Key"] = context.idempotency_key
         client = self._client or httpx.Client(timeout=15.0)
-        response = client.post(f"{self.base_url}{self.path}", json=dict(content), headers=headers)
-        response.raise_for_status()
-        return response.json()
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = client.post(f"{self.base_url}{self.path}", json=dict(content), headers=headers)
+                status_code = int(getattr(response, "status_code", 200) or 200)
+                if status_code >= 500 and attempt < self.max_retries:
+                    time.sleep(self.retry_backoff_s * (2 ** attempt))
+                    continue
+                response.raise_for_status()
+                return response.json()
+            except Exception as exc:
+                last_error = exc
+                status_code = int(getattr(locals().get("response"), "status_code", 0) or 0)
+                retryable = status_code == 0 or status_code >= 500
+                if not retryable or attempt >= self.max_retries:
+                    raise
+                time.sleep(self.retry_backoff_s * (2 ** attempt))
+        raise RuntimeError("Postiz publish exhausted retries") from last_error
 
 
 publisher: ContentPublisher = PostizPublisherAdapter()

@@ -66,3 +66,30 @@ def test_postiz_publish_bundle_maps_canonical_creative_artifact():
     assert result["dry_run"] is True
     assert result["content"]["artifact_id"] == "bundle-1"
     assert result["content"]["source_refs"] == ["https://source.example/product"]
+
+
+def test_postiz_retries_transient_transport_failure(monkeypatch):
+    class Response:
+        status_code = 200
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"id": "post-retried"}
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+        def post(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise TimeoutError("temporary failure")
+            return Response()
+
+    monkeypatch.setenv("POSTIZ_MAX_RETRIES", "1")
+    monkeypatch.setenv("POSTIZ_RETRY_BACKOFF_S", "0")
+    client = Client()
+    result = PostizPublisherAdapter(base_url="https://postiz", token="secret", client=client).publish(
+        {"text": "retry me"}, context=SidecarContext(dry_run=False, approval_state="approved")
+    )
+    assert result["id"] == "post-retried"
+    assert client.calls == 2
