@@ -61,7 +61,12 @@ class MedusaCommerceAdapter:
             return AdapterHealth(self.name, configured=False, reachable=False, detail="MEDUSA_BASE_URL is unset")
         try:
             self._request("GET", "/health")
-            return AdapterHealth(self.name, configured=True, reachable=True, capabilities=("catalog", "inventory", "orders"))
+            return AdapterHealth(
+                self.name,
+                configured=True,
+                reachable=True,
+                capabilities=("catalog", "inventory", "cart", "orders", "fulfillment"),
+            )
         except Exception as exc:
             return AdapterHealth(self.name, configured=True, reachable=False, detail=str(exc))
 
@@ -114,11 +119,32 @@ class MedusaCommerceAdapter:
         return offers
 
     def create_order(self, order: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:
+        """Compatibility entry point for creating a Medusa cart.
+
+        Medusa's Store API creates an order by completing a cart; callers that
+        need actual checkout should use ``complete_cart`` after ``create_cart``.
+        Keeping this method preserves the existing CommerceProvider surface
+        while removing the false implication that ``POST /store/carts`` is an
+        order-creation endpoint.
+        """
+        return self.create_cart(order, context=context)
+
+    def create_cart(self, cart: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:
         if context.dry_run:
-            return {"id": f"dry-medusa-order-{context.idempotency_key or 'pending'}", "dry_run": True, "order": dict(order)}
+            return {"id": f"dry-medusa-cart-{context.idempotency_key or 'pending'}", "dry_run": True, "cart": dict(cart)}
         if context.approval_state not in {"approved", "not_required"}:
-            raise PermissionError("Medusa order requires approved MarketOS context")
-        return self._request("POST", "/store/carts", context=context, json=dict(order))
+            raise PermissionError("Medusa cart creation requires approved MarketOS context")
+        return self._request("POST", "/store/carts", context=context, json=dict(cart))
+
+    def complete_cart(self, cart_id: str, *, context: SidecarContext) -> Mapping[str, Any]:
+        cart_id = str(cart_id).strip()
+        if not cart_id:
+            raise ValueError("cart_id is required")
+        if context.dry_run:
+            return {"id": f"dry-medusa-order-{context.idempotency_key or cart_id}", "dry_run": True, "cart_id": cart_id}
+        if context.approval_state not in {"approved", "not_required"}:
+            raise PermissionError("Medusa checkout requires approved MarketOS context")
+        return self._request("POST", f"/store/carts/{cart_id}/complete", context=context, json={})
 
 
 commerce_provider: CommerceProvider = MedusaCommerceAdapter()

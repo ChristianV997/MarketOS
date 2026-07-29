@@ -26,7 +26,15 @@ def test_medusa_dry_order_never_requires_network():
         context=SidecarContext(idempotency_key="order-1", dry_run=True),
     )
     assert result["dry_run"] is True
-    assert result["id"] == "dry-medusa-order-order-1"
+    assert result["id"] == "dry-medusa-cart-order-1"
+    assert result["cart"]["items"][0]["product_id"] == "p1"
+
+
+def test_medusa_dry_checkout_is_explicit_and_network_free():
+    result = MedusaCommerceAdapter(base_url="").complete_cart(
+        "cart-1", context=SidecarContext(idempotency_key="checkout-1", dry_run=True)
+    )
+    assert result == {"id": "dry-medusa-order-checkout-1", "dry_run": True, "cart_id": "cart-1"}
 
 
 def test_medusa_normalizes_sidecar_records_to_canonical_contracts():
