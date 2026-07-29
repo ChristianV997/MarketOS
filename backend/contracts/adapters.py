@@ -61,6 +61,14 @@ class ProductResearchProvider(Protocol):
     async def discover(self, query: str, *, context: SidecarContext) -> Sequence[Mapping[str, Any]]: ...
 
 
+class SupplierProvider(Protocol):
+    """Canonical supplier-offer boundary independent of commerce storage."""
+
+    def health(self) -> AdapterHealth: ...
+
+    def get_offers(self, product_ids: Sequence[str]) -> Sequence[Any]: ...
+
+
 class BrowserWorkflowProvider(Protocol):
     def health(self) -> AdapterHealth: ...
 

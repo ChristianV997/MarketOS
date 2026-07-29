@@ -126,8 +126,12 @@ def collect_oss_inputs(
             rows = commerce.list_products()
             products = {candidate.product_id: candidate for candidate in commerce.normalize_products(rows)}
             if products:
-                inventory = commerce.get_inventory(tuple(products))
-                offers = {offer.product_id: offer for offer in commerce.normalize_inventory(inventory)}
+                if hasattr(commerce, "get_offers"):
+                    normalized_offers = commerce.get_offers(tuple(products))
+                else:
+                    inventory = commerce.get_inventory(tuple(products))
+                    normalized_offers = commerce.normalize_inventory(inventory)
+                offers = {offer.product_id: offer for offer in normalized_offers}
         except Exception as exc:
             if _oss_failures is not None:
                 _oss_failures.labels(provider=getattr(commerce, "name", "commerce")).inc()

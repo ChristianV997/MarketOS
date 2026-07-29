@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from typing import Any, Mapping, Sequence
 
-from backend.contracts.adapters import AdapterHealth, CommerceProvider, SidecarContext
+from backend.contracts.adapters import AdapterHealth, CommerceProvider, SidecarContext, SupplierProvider
 from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
 from backend.integrations.webhook_dedup import WebhookEventLedger
 
@@ -102,6 +102,10 @@ class MedusaCommerceAdapter:
         payload = self._request("GET", "/admin/inventory-items", params={"product_id": list(product_ids)})
         return payload.get("inventory_items", payload.get("data", []))
 
+    def get_offers(self, product_ids: Sequence[str]) -> Sequence[SupplierOffer]:
+        """Expose inventory as canonical supplier offers for ranking."""
+        return self.normalize_inventory(self.get_inventory(product_ids))
+
     @staticmethod
     def normalize_inventory(rows: Sequence[Mapping[str, Any]]) -> list[SupplierOffer]:
         offers: list[SupplierOffer] = []
@@ -148,3 +152,4 @@ class MedusaCommerceAdapter:
 
 
 commerce_provider: CommerceProvider = MedusaCommerceAdapter()
+supplier_provider: SupplierProvider = commerce_provider

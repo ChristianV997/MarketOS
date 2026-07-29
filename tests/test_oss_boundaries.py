@@ -45,6 +45,20 @@ def test_medusa_normalizes_sidecar_records_to_canonical_contracts():
     assert offers[0].inventory_units == 9
 
 
+def test_medusa_exposes_typed_supplier_offer_boundary():
+    class Response:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"inventory_items": [{"product_id": "p1", "cost": 4, "stocked_quantity": 9}]}
+    class Client:
+        def request(self, *_args, **_kwargs):
+            return Response()
+    offers = MedusaCommerceAdapter(base_url="http://medusa", client=Client()).get_offers(("p1",))
+    assert offers[0].product_id == "p1"
+    assert offers[0].unit_cost == 4
+
+
 def test_sidecar_context_carries_lineage_and_approval():
     context = SidecarContext(
         workspace_id="commerce",
