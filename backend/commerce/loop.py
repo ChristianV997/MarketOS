@@ -187,6 +187,35 @@ class CommerceLoop:
             summary=summary,
         )
 
+    def run_provider_cycle(
+        self,
+        urls: Iterable[str],
+        *,
+        research_provider: Any | None = None,
+        commerce_provider: Any | None = None,
+        context: Any | None = None,
+        top_k: int = 5,
+        budget: float = 20.0,
+        dry_run: bool = True,
+    ) -> CommerceCycleReport:
+        """Run the canonical loop using optional OSS provider inputs."""
+        from .oss_bridge import collect_oss_inputs
+        signals, products, metadata = collect_oss_inputs(
+            tuple(urls), research=research_provider, commerce=commerce_provider, context=context,
+        )
+        report = self.run_cycle(
+            signals=signals,
+            products=products,
+            offers=metadata.get("offers", {}),
+            top_k=top_k,
+            budget=budget,
+            dry_run=dry_run,
+        )
+        if metadata.get("failures"):
+            report.summary["provider_failures"] = metadata["failures"]
+        report.summary["provider_signals"] = len(signals)
+        return report
+
 
 def run_commerce_cycle(
     signals: Iterable[dict[str, Any]] | None = None,
@@ -204,4 +233,20 @@ def run_commerce_cycle(
         top_k=top_k,
         budget=budget,
         dry_run=dry_run,
+    )
+
+
+def run_provider_cycle(
+    urls: Iterable[str],
+    *,
+    research_provider: Any | None = None,
+    commerce_provider: Any | None = None,
+    context: Any | None = None,
+    top_k: int = 5,
+    budget: float = 20.0,
+    dry_run: bool = True,
+) -> CommerceCycleReport:
+    return CommerceLoop().run_provider_cycle(
+        urls, research_provider=research_provider, commerce_provider=commerce_provider,
+        context=context, top_k=top_k, budget=budget, dry_run=dry_run,
     )

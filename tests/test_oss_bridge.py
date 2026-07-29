@@ -1,4 +1,5 @@
 from backend.commerce.oss_bridge import clear_oss_cache, collect_oss_inputs
+from backend.commerce.loop import run_provider_cycle
 from backend.contracts.adapters import AdapterHealth, SidecarContext
 
 
@@ -106,3 +107,16 @@ def test_oss_bridge_separates_dry_run_and_live_cache_entries():
     signals, _, _ = collect_oss_inputs(["https://supplier.example/mode"], research=research, commerce=Commerce(), context=SidecarContext(dry_run=False))
     assert signals[0]["product"] == "Live"
     assert research.calls == [True, False]
+
+
+def test_provider_cycle_uses_one_canonical_commerce_execution_path():
+    clear_oss_cache()
+    report = run_provider_cycle(
+        ["https://supplier.example/cycle"],
+        research_provider=Research(), commerce_provider=Commerce(),
+        context=SidecarContext(dry_run=True), top_k=1, budget=10.0, dry_run=True,
+    )
+    assert report.dry_run is True
+    assert report.summary["provider_signals"] == 1
+    assert report.summary["ranked"] == 1
+    assert report.summary["creatives"] == 1

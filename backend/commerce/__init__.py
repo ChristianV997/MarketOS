@@ -15,7 +15,7 @@ from .contracts import (
 from .creative import CreativeComposer
 from .feedback import FeedbackRecorder
 from .launch import LaunchExecutor
-from .loop import CommerceLoop, run_commerce_cycle
+from .loop import CommerceLoop, run_commerce_cycle, run_provider_cycle
 from .scoring import OpportunityScorer
 from .oss_bridge import clear_oss_cache, collect_oss_inputs
 
@@ -31,6 +31,7 @@ __all__ = [
     "LaunchExecutor",
     "CommerceLoop",
     "run_commerce_cycle",
+    "run_provider_cycle",
     "OpportunityScorer",
     "collect_oss_inputs",
     "clear_oss_cache",
