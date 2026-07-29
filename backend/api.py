@@ -1689,6 +1689,29 @@ def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webh
         return JSONResponse({"accepted": False, "reason": "webhook_processing_failed", "detail": str(exc)}, status_code=503)
 
 
+@app.post("/commerce/publish")
+def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
+    """Publish one canonical CreativeBundle through the publishing adapter."""
+    try:
+        data = payload or {}
+        raw_dry_run = data.get("dry_run", True)
+        dry_run = raw_dry_run if isinstance(raw_dry_run, bool) else str(raw_dry_run).lower() not in {"false", "0", "no", "off"}
+        if not dry_run and data.get("confirm_live") is not True:
+            return {"published": False, "reasons": ["live_publishing_requires_confirm_live"]}
+        bundle_data = data.get("bundle") if isinstance(data.get("bundle"), dict) else data
+        from backend.commerce.contracts import CreativeBundle
+        from backend.commerce.loop import CommerceLoop
+        from backend.contracts.adapters import SidecarContext
+        bundle = CreativeBundle(**{key: value for key, value in bundle_data.items() if key in CreativeBundle.__dataclass_fields__})
+        records = CommerceLoop().publish_creatives(
+            [bundle], dry_run=dry_run,
+            approval_state="approved" if not dry_run else "not_required",
+        )
+        return {"published": bool(records), "dry_run": dry_run, "records": records, "artifact_id": bundle.artifact_id}
+    except Exception as exc:
+        return {"published": False, "reasons": ["invalid_publish_request", str(exc)]}
+
+
 @app.post("/evaluation/campaign")
 def evaluation_campaign(payload: dict[str, Any] = Body(...)):
     """Evaluate campaign observations without changing campaign state."""

@@ -137,6 +137,13 @@ def test_integration_webhook_rejects_unsupported_or_unidentified_events():
     assert integration_webhook("medusa", {"type": "order.created"}).status_code == 400
 
 
+def test_commerce_publish_requires_explicit_live_confirmation():
+    from backend.api import commerce_publish
+    bundle = {"artifact_id": "bundle-api", "product_id": "p", "creative_id": "c", "primary_text": "Try it"}
+    assert commerce_publish({"bundle": bundle, "dry_run": True})["published"] is True
+    assert commerce_publish({"bundle": bundle, "dry_run": False})["reasons"] == ["live_publishing_requires_confirm_live"]
+
+
 def test_integration_webhook_verifies_configured_hmac_secret(monkeypatch):
     import hashlib
     import hmac
