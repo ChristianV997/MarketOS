@@ -37,3 +37,23 @@ def test_feedback_recorder_accepts_observation_without_launch_bundle():
     result = FeedbackRecorder(campaign_memory=memory, reinforcement_memory=memory, signal_memory=memory).record_observation(observation)
     assert result["recorded"] is True
     assert len(memory.calls) == 3
+
+
+def test_feedback_observation_can_retry_after_memory_failure():
+    class Memory:
+        def __init__(self):
+            self.fail = True
+        def index_campaign(self, **_kwargs):
+            if self.fail:
+                raise RuntimeError("temporary vector failure")
+        def record_outcome(self, **_kwargs):
+            return None
+        def index_keyword(self, *_args, **_kwargs):
+            return None
+    from backend.commerce.feedback import CampaignObservation, DataQuality
+    observation = CampaignObservation(observation_id="retry-feedback", campaign_id="c1", product_id="p1", spend=1, revenue=2, quality=DataQuality(provenance="live", attribution="attributed"))
+    memory = Memory()
+    recorder = FeedbackRecorder(campaign_memory=memory, reinforcement_memory=memory, signal_memory=memory)
+    assert recorder.record_observation(observation)["recorded"] is False
+    memory.fail = False
+    assert recorder.record_observation(observation)["recorded"] is True

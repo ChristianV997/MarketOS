@@ -24,13 +24,23 @@ try:
         "marketos_feedback_duplicates",
         "Commerce feedback observations ignored as duplicates",
     )
+    _prom_feedback_failures = Counter(
+        "marketos_feedback_failures",
+        "Commerce feedback observations that failed to persist",
+    )
 except ImportError:
     _prom_feedback_records = None
     _prom_feedback_duplicates = None
+    _prom_feedback_failures = None
 
 
 _PROCESSED_OBSERVATIONS: set[str] = set()
 _OBSERVATION_LOCK = threading.Lock()
+
+
+def _release_observation(observation_id: str) -> None:
+    with _OBSERVATION_LOCK:
+        _PROCESSED_OBSERVATIONS.discard(observation_id)
 
 
 def _record_campaign_lineage_outcome(plan: LaunchPlan, outcome: CampaignOutcome) -> None:
@@ -175,6 +185,9 @@ class FeedbackRecorder:
             )
             self.signal_memory.index_keyword(product, source="commerce_webhook_feedback", campaign_id=observation.campaign_id, roas=roas)
         except Exception as exc:
+            _release_observation(observation.observation_id)
+            if _prom_feedback_failures is not None:
+                _prom_feedback_failures.inc()
             return {"observation_id": observation.observation_id, "deduplicated": False, "recorded": False, "error": str(exc)}
         if _prom_feedback_records is not None:
             _prom_feedback_records.inc()
@@ -193,49 +206,55 @@ class FeedbackRecorder:
                     "deduplicated": True,
                 }
             _PROCESSED_OBSERVATIONS.add(observation.observation_id)
-        readiness = evaluate_campaign(
-            CampaignCandidate(
-                campaign_id=plan.campaign_id or plan.artifact_id,
-                product_id=plan.product_id,
-                creative_id=plan.creative_id,
-                platform=plan.platform,
-                budget=plan.budget,
-                currency=plan.currency,
-                quality=outcome.quality,
-            ),
-            [observation],
-        )
+        try:
+            readiness = evaluate_campaign(
+                CampaignCandidate(
+                    campaign_id=plan.campaign_id or plan.artifact_id,
+                    product_id=plan.product_id,
+                    creative_id=plan.creative_id,
+                    platform=plan.platform,
+                    budget=plan.budget,
+                    currency=plan.currency,
+                    quality=outcome.quality,
+                ),
+                [observation],
+            )
 
-        if outcome.campaign_id:
-            self.campaign_memory.index_campaign(
-                campaign_id=outcome.campaign_id,
-                product=outcome.product_name or plan.product_name,
+            if outcome.campaign_id:
+                self.campaign_memory.index_campaign(
+                    campaign_id=outcome.campaign_id,
+                    product=outcome.product_name or plan.product_name,
+                    hook=bundle.hook,
+                    angle=bundle.angle,
+                    roas=outcome.roas,
+                    phase="commerce",
+                    spend=outcome.spend,
+                    revenue=outcome.revenue,
+                    creative_id=outcome.creative_id,
+                )
+
+            self.reinforcement_memory.record_outcome(
                 hook=bundle.hook,
                 angle=bundle.angle,
+                product=outcome.product_name or plan.product_name,
                 roas=outcome.roas,
                 phase="commerce",
-                spend=outcome.spend,
-                revenue=outcome.revenue,
+                campaign_id=outcome.campaign_id,
                 creative_id=outcome.creative_id,
             )
 
-        self.reinforcement_memory.record_outcome(
-            hook=bundle.hook,
-            angle=bundle.angle,
-            product=outcome.product_name or plan.product_name,
-            roas=outcome.roas,
-            phase="commerce",
-            campaign_id=outcome.campaign_id,
-            creative_id=outcome.creative_id,
-        )
-
-        self.signal_memory.index_keyword(
-            outcome.product_name or plan.product_name,
-            source="commerce_feedback",
-            campaign_id=outcome.campaign_id,
-            roas=outcome.roas,
-        )
-        _record_campaign_lineage_outcome(plan, outcome)
+            self.signal_memory.index_keyword(
+                outcome.product_name or plan.product_name,
+                source="commerce_feedback",
+                campaign_id=outcome.campaign_id,
+                roas=outcome.roas,
+            )
+            _record_campaign_lineage_outcome(plan, outcome)
+        except Exception:
+            _release_observation(observation.observation_id)
+            if _prom_feedback_failures is not None:
+                _prom_feedback_failures.inc()
+            raise
 
         if _prom_feedback_records is not None:
             _prom_feedback_records.inc()
