@@ -9,6 +9,8 @@ Environment variables (set in Replit Secrets):
   CYCLES_PER_MINUTE  Background runner speed (default 10 → one cycle / 6 s)
 """
 import json
+import hashlib
+import hmac
 import logging
 import os
 import threading
@@ -18,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
-from fastapi import Body, FastAPI, Query
+from fastapi import Body, FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
@@ -1649,11 +1651,25 @@ def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None))
         return {"launchable": False, "reasons": ["invalid_provider_cycle_request", str(exc)]}
 
 
+def _verify_integration_webhook(source: str, payload: dict[str, Any], signature: str | None) -> bool:
+    secret = os.getenv(f"{source.upper()}_WEBHOOK_SECRET", "")
+    if not secret:
+        return True
+    if not signature:
+        return False
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    provided = signature.removeprefix("sha256=")
+    return hmac.compare_digest(expected, provided)
+
+
 @app.post("/integrations/webhooks/{source}")
-def integration_webhook(source: str, payload: dict[str, Any] = Body(...)):
+def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webhook_signature: str | None = Header(default=None)):
     """Receive deduplicated Medusa/Postiz events into the canonical broker."""
     if source not in {"medusa", "postiz"}:
         return JSONResponse({"accepted": False, "reason": "unsupported_webhook_source"}, status_code=404)
+    if not _verify_integration_webhook(source, payload, x_webhook_signature):
+        return JSONResponse({"accepted": False, "reason": "invalid_webhook_signature"}, status_code=401)
     event_id = str(payload.get("id") or payload.get("event_id") or payload.get("webhook_id") or "")
     if not event_id:
         return JSONResponse({"accepted": False, "reason": "webhook_event_id_required"}, status_code=400)

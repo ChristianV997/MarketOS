@@ -137,6 +137,23 @@ def test_integration_webhook_rejects_unsupported_or_unidentified_events():
     assert integration_webhook("medusa", {"type": "order.created"}).status_code == 400
 
 
+def test_integration_webhook_verifies_configured_hmac_secret(monkeypatch):
+    import hashlib
+    import hmac
+    import json
+    from backend.api import integration_webhook
+    from backend.integrations.medusa import commerce_provider
+    payload = {"id": "evt-signature", "type": "order.created"}
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    signature = hmac.new(b"secret", body, hashlib.sha256).hexdigest()
+    monkeypatch.setenv("MEDUSA_WEBHOOK_SECRET", "secret")
+    commerce_provider.webhook_events.clear()
+    accepted = integration_webhook("medusa", payload, x_webhook_signature=signature)
+    assert accepted["accepted"] is True
+    invalid = integration_webhook("medusa", {"id": "evt-signature-2"}, x_webhook_signature="bad")
+    assert invalid.status_code == 401
+
+
 def test_optional_integration_health_is_safe_when_unconfigured():
     from backend.api import integrations_health
     result = integrations_health()

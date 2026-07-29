@@ -37,6 +37,9 @@ event store before acknowledging events; the adapter ledger is a first-line
 replay guard, not a cross-process replacement for durable persistence.
 Set `MARKETOS_WEBHOOK_DEDUP_DB` to a shared SQLite path for cross-process
 deduplication; the default `:memory:` mode is intended for local/testing use.
+Set `MEDUSA_WEBHOOK_SECRET` and/or `POSTIZ_WEBHOOK_SECRET` to require
+constant-time HMAC verification on inbound events. Sign the canonical sorted
+JSON payload with SHA-256; an optional `sha256=` prefix is accepted.
 
 Research retries are limited by `MARKETOS_OSS_MAX_RETRIES` (default `2`) and
 `MARKETOS_OSS_RETRY_BACKOFF_S` (default `0.25`). Only transport-like failures
