@@ -42,6 +42,8 @@ class MedusaCommerceAdapter:
                 "X-MarketOS-Workspace": context.workspace_id,
                 "X-MarketOS-Run": context.run_id,
                 "X-MarketOS-Artifact": context.artifact_id,
+                "X-MarketOS-Parents": ",".join(context.parent_ids),
+                "X-MarketOS-Approval": context.approval_state,
             })
         client = self._client or httpx.Client(base_url=self.base_url, timeout=self.timeout_s)
         response = client.request(method, path, headers=headers, **kwargs)

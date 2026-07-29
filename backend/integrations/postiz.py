@@ -35,7 +35,14 @@ class PostizPublisherAdapter:
             raise RuntimeError("Postiz is not configured")
         if httpx is None and self._client is None:
             raise RuntimeError("httpx is required for the Postiz adapter")
-        headers = {"Authorization": f"Bearer {self.token}", "X-MarketOS-Workspace": context.workspace_id, "X-MarketOS-Run": context.run_id}
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "X-MarketOS-Workspace": context.workspace_id,
+            "X-MarketOS-Run": context.run_id,
+            "X-MarketOS-Artifact": context.artifact_id,
+            "X-MarketOS-Parents": ",".join(context.parent_ids),
+            "X-MarketOS-Approval": context.approval_state,
+        }
         if context.idempotency_key:
             headers["Idempotency-Key"] = context.idempotency_key
         client = self._client or httpx.Client(timeout=15.0)

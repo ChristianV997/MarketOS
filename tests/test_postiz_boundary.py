@@ -18,3 +18,38 @@ def test_postiz_requires_approval_for_live_publish():
         pass
     else:
         raise AssertionError("live publishing must require approval")
+
+
+def test_postiz_live_publish_sends_lineage_and_idempotency_headers():
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "post-1", "status": "published"}
+
+    class Client:
+        def __init__(self):
+            self.call = None
+
+        def post(self, url, **kwargs):
+            self.call = (url, kwargs)
+            return Response()
+
+    client = Client()
+    adapter = PostizPublisherAdapter(base_url="https://postiz", token="secret", client=client)
+    result = adapter.publish(
+        {"text": "approved content"},
+        context=SidecarContext(
+            workspace_id="commerce", run_id="run-2", artifact_id="creative-2",
+            idempotency_key="post-key", parent_ids=("bundle-2",), dry_run=False, approval_state="approved",
+        ),
+    )
+    assert result["id"] == "post-1"
+    assert client.call[0] == "https://postiz/api/posts"
+    headers = client.call[1]["headers"]
+    assert headers["Authorization"] == "Bearer secret"
+    assert headers["Idempotency-Key"] == "post-key"
+    assert headers["X-MarketOS-Artifact"] == "creative-2"
+    assert headers["X-MarketOS-Parents"] == "bundle-2"
+    assert headers["X-MarketOS-Approval"] == "approved"

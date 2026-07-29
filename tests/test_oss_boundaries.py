@@ -49,3 +49,36 @@ def test_sidecar_context_carries_lineage_and_approval():
     )
     assert context.parent_ids == ("signal-1",)
     assert context.approval_state == "approved"
+
+
+def test_medusa_live_order_sends_lineage_and_idempotency_headers():
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"order": {"id": "order-1"}}
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, path, **kwargs):
+            self.calls.append((method, path, kwargs))
+            return Response()
+
+    client = Client()
+    adapter = MedusaCommerceAdapter(base_url="http://medusa", client=client)
+    context = SidecarContext(
+        workspace_id="commerce", run_id="run-1", artifact_id="launch-1",
+        idempotency_key="order-key", parent_ids=("candidate-1",), dry_run=False, approval_state="approved",
+    )
+    result = adapter.create_order({"items": [{"variant_id": "v1", "quantity": 1}]}, context=context)
+    assert result["order"]["id"] == "order-1"
+    headers = client.calls[0][2]["headers"]
+    assert headers["Idempotency-Key"] == "order-key"
+    assert headers["X-MarketOS-Workspace"] == "commerce"
+    assert headers["X-MarketOS-Run"] == "run-1"
+    assert headers["X-MarketOS-Artifact"] == "launch-1"
+    assert headers["X-MarketOS-Parents"] == "candidate-1"
+    assert headers["X-MarketOS-Approval"] == "approved"
