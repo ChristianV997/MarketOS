@@ -100,7 +100,7 @@ jobs:
           assert result["dry_run"] is True, result
           assert result["summary"]["launchable"] == 1, result
           assert result["summary"]["feedback_records"] == 1, result
-          print("Container commerce smoke passed:", result["cycle_id"])
+          print("Container commerce smoke passed:", result.get("artifact_id", "unknown"))
           PY
 
       - name: Print container logs on failure
