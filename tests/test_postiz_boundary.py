@@ -1,5 +1,6 @@
 from backend.contracts.adapters import SidecarContext
 from backend.integrations.postiz import PostizPublisherAdapter
+from backend.commerce.contracts import CreativeBundle
 
 
 def test_postiz_dry_run_is_network_free():
@@ -53,3 +54,15 @@ def test_postiz_live_publish_sends_lineage_and_idempotency_headers():
     assert headers["X-MarketOS-Artifact"] == "creative-2"
     assert headers["X-MarketOS-Parents"] == "bundle-2"
     assert headers["X-MarketOS-Approval"] == "approved"
+
+
+def test_postiz_publish_bundle_maps_canonical_creative_artifact():
+    bundle = CreativeBundle(
+        artifact_id="bundle-1", product_id="product-1", creative_id="creative-1",
+        headline="A useful product", primary_text="Try it today", cta="Shop Now",
+        source_refs=("https://source.example/product",),
+    )
+    result = PostizPublisherAdapter().publish_bundle(bundle, context=SidecarContext(idempotency_key="bundle-1"))
+    assert result["dry_run"] is True
+    assert result["content"]["artifact_id"] == "bundle-1"
+    assert result["content"]["source_refs"] == ["https://source.example/product"]

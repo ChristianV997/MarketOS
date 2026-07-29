@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from backend.contracts.adapters import AdapterHealth, ContentPublisher, SidecarContext
 from backend.integrations.webhook_dedup import WebhookEventLedger
+from backend.commerce.contracts import CreativeBundle
 
 try:
     import httpx
@@ -30,6 +31,19 @@ class PostizPublisherAdapter:
 
     def accept_webhook(self, event_id: str) -> bool:
         return self.webhook_events.accept(self.name, event_id)
+
+    def publish_bundle(self, bundle: CreativeBundle, *, context: SidecarContext) -> Mapping[str, Any]:
+        """Publish one canonical MarketOS creative artifact."""
+        return self.publish({
+            "content": bundle.primary_text or bundle.script,
+            "headline": bundle.headline,
+            "cta": bundle.cta,
+            "platform": os.getenv("MARKETOS_DEFAULT_SOCIAL_PLATFORM", "instagram"),
+            "artifact_id": bundle.artifact_id,
+            "creative_id": bundle.creative_id,
+            "product_id": bundle.product_id,
+            "source_refs": list(bundle.source_refs),
+        }, context=context)
 
     def publish(self, content: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:
         if context.dry_run:
