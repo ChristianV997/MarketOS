@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import time
+import asyncio
+import os
+from dataclasses import replace
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
@@ -108,6 +111,33 @@ class CommerceLoop:
     def compose(self, opportunities: Iterable[RankedOpportunity]) -> list[CreativeBundle]:
         return self.composer.compose_batch(opportunities)
 
+    def quality_gate(self, creatives: Iterable[CreativeBundle]) -> tuple[list[CreativeBundle], list[str]]:
+        """Optionally run typed campaign QA before launch, failing closed."""
+        bundles = list(creatives)
+        if os.getenv("MARKETOS_AGENT_QA_ENABLED", "false").lower() != "true":
+            return bundles, []
+        from backend.agents.domain_agents import CampaignQARequest, run_campaign_qa
+        failures: list[str] = []
+        checked: list[CreativeBundle] = []
+        for bundle in bundles:
+            try:
+                result = asyncio.run(run_campaign_qa(CampaignQARequest(
+                    product_id=bundle.product_id,
+                    creative_id=bundle.creative_id,
+                    platform=os.getenv("MARKETOS_DEFAULT_AD_PLATFORM", "tiktok"),
+                    copy_text=bundle.primary_text or bundle.script,
+                    dry_run=True,
+                )))
+                if not result.approved:
+                    checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_rejected", "not_launchable"))))))
+                    failures.append(f"{bundle.creative_id}:rejected")
+                else:
+                    checked.append(bundle)
+            except Exception as exc:
+                checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_unavailable", "not_launchable"))))))
+                failures.append(f"{bundle.creative_id}:unavailable:{exc}")
+        return checked, failures
+
     def launch(
         self,
         creatives: Iterable[CreativeBundle],
@@ -159,6 +189,7 @@ class CommerceLoop:
         normalized_signals = [CommerceSignal.from_signal(signal) for signal in raw_signals]
         ranked = self.rank(normalized_signals, products=products, offers=offers, top_k=top_k)
         creatives = self.compose(ranked[:top_k])
+        creatives, qa_failures = self.quality_gate(creatives)
         plans, outcomes = self.launch(creatives, budget=budget, dry_run=dry_run)
         feedback = self.reconcile(creatives, plans, outcomes)
         finished_at = time.time()
@@ -172,6 +203,8 @@ class CommerceLoop:
             "feedback_records": len(feedback),
             "launchable": sum(1 for item in ranked if item.readiness and item.readiness.launchable),
         }
+        if qa_failures:
+            summary["qa_failures"] = len(qa_failures)
 
         return CommerceCycleReport(
             artifact_id=f"commerce-cycle-{int(started_at * 1000)}",
