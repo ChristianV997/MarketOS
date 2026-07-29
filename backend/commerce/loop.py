@@ -155,6 +155,35 @@ class CommerceLoop:
             outcomes.append(outcome)
         return plans, outcomes
 
+    def publish_creatives(
+        self,
+        creatives: Iterable[CreativeBundle],
+        *,
+        publisher: Any | None = None,
+        dry_run: bool = True,
+        approval_state: str = "not_required",
+    ) -> list[dict[str, Any]]:
+        """Publish approved creative bundles through the configured adapter."""
+        from backend.integrations.postiz import publisher as default_publisher
+        from backend.contracts.adapters import SidecarContext
+        target = publisher or default_publisher
+        records: list[dict[str, Any]] = []
+        for bundle in creatives:
+            if "not_launchable" in bundle.reasons:
+                continue
+            context = SidecarContext(
+                workspace_id=bundle.workspace,
+                run_id=bundle.artifact_id,
+                artifact_id=bundle.artifact_id,
+                parent_ids=tuple(bundle.parent_ids),
+                idempotency_key=f"publish:{bundle.creative_id}",
+                dry_run=dry_run,
+                approval_state=approval_state,
+            )
+            result = target.publish_bundle(bundle, context=context)
+            records.append(dict(result))
+        return records
+
     def reconcile(
         self,
         creatives: Iterable[CreativeBundle],
