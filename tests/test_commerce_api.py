@@ -88,6 +88,24 @@ def test_readiness_distinguishes_health_from_runtime_startup(monkeypatch):
         assert response.json() == {"ready": True}
 
 
+def test_readiness_can_require_medusa_when_explicitly_configured(monkeypatch):
+    import backend.api as api
+    from backend.contracts.adapters import AdapterHealth
+
+    monkeypatch.setenv("MEDUSA_REQUIRED_FOR_READY", "true")
+    monkeypatch.setattr(api, "_bg_running", True)
+    monkeypatch.setattr(api, "_runtime_services_ready", True)
+
+    class Provider:
+        def health(self):
+            return AdapterHealth("medusa", configured=True, reachable=False, detail="sidecar starting")
+
+    monkeypatch.setattr("backend.integrations.medusa.commerce_provider", Provider())
+    response = api.ready()
+    assert response.status_code == 503
+    assert response.body and b"required_medusa_unavailable" in response.body
+
+
 def test_signal_metrics_endpoint_exposes_cache_telemetry():
     from backend.api import signal_metrics
     result = signal_metrics()
