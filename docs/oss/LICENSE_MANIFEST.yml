@@ -1,0 +1,49 @@
+schema_version: 1
+# Canonical license/attribution record for externally adopted OSS systems.
+# This records integrations and sidecars, not copied upstream source.
+components:
+  - name: medusa
+    license: MIT
+    reviewed_ref: v2.14.2
+    distribution: sidecar
+    notice: Preserve upstream MIT notice in the reviewed deployment image.
+  - name: crawl4ai
+    license: Apache-2.0-with-attribution
+    reviewed_ref: v0.8.6
+    distribution: optional_worker
+    notice: Preserve Apache notice and required project attribution.
+  - name: browser-use
+    license: MIT
+    reviewed_ref: v0.13.6
+    distribution: optional_worker
+    notice: Preserve upstream MIT notice in the pinned worker image.
+  - name: pydantic-ai
+    license: MIT
+    reviewed_ref: v1.104.0
+    distribution: optional_library
+    notice: Preserve upstream MIT notice with the optional agent profile.
+  - name: postiz
+    license: AGPL-3.0
+    reviewed_ref: pending-legal-review
+    distribution: sidecar
+    notice: Commercial deployment requires legal approval; do not vendor source.
+  - name: n8n
+    license: Sustainable-Use
+    reviewed_ref: n8n@2.30.5
+    distribution: internal_sidecar
+    notice: Internal operations only; do not embed or white-label without review.
+  - name: erpnext
+    license: GPL-3.0
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Deferred; no source may enter the commercial core.
+  - name: airbyte
+    license: review_required
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Deferred pending license and integration review.
+  - name: saleor
+    license: review_required
+    reviewed_ref: pending-benchmark-review
+    distribution: benchmark
+    notice: Benchmark only; do not deploy alongside Medusa.

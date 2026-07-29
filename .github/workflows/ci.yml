@@ -57,8 +57,24 @@ jobs:
       - name: Enforce pinned container images
         run: python scripts/validate_container_pins.py
 
+      - name: Validate OCI image provenance contract
+        run: python scripts/validate_image_provenance.py
+
       - name: Generate OSS SBOM manifest
-        run: python scripts/generate_oss_sbom.py --output /tmp/marketos-oss-sbom.json
+        run: python scripts/generate_oss_sbom.py --output artifacts/oss-sbom.json
+
+      - name: Retain OSS SBOM manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketos-oss-sbom
+          path: artifacts/oss-sbom.json
+          if-no-files-found: error
+
+      - name: Audit declared Python dependencies
+        run: |
+          python -m pip install -r requirements-security.txt
+          pip-audit -r requirements.txt --strict
+          pip-audit -r requirements-oss-agents.txt --strict
 
       - name: Run tests
         run: pytest tests/ -v
@@ -105,7 +121,12 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.postiz.example.yml config --quiet
 
       - name: Build production image
-        run: docker build --tag marketos:ci .
+        run: docker build --build-arg VCS_REF=${{ github.sha }} --tag marketos:ci .
+
+      - name: Verify built-image provenance
+        run: |
+          test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.source" }}' marketos:ci)" = "https://github.com/ChristianV997/MarketOS"
+          test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' marketos:ci)" = "${{ github.sha }}"
 
       - name: Start API container
         run: |

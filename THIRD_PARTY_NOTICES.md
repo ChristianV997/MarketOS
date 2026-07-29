@@ -1,23 +1,25 @@
-# Third-party software policy
+# Third-party notices
 
-MarketOS is intended for commercial distribution. Third-party source is not
-copied into the commercial core unless its exact release, license, notices,
-and transitive dependencies are reviewed and recorded in `docs/oss/INVENTORY.yml`.
+MarketOS is intended for commercial distribution. Upstream source is not
+copied into the MarketOS commercial core: reviewed systems are connected only
+through adapters, optional Python profiles, or independently deployed
+sidecars. This notice file is aligned with
+[`docs/oss/LICENSE_MANIFEST.yml`](docs/oss/LICENSE_MANIFEST.yml) and is not
+legal advice.
 
-Selected systems are integrated as adapters or independently deployed
-sidecars. Their source repositories, trademarks, licenses, and security
-updates remain separate from MarketOS.
+| Component | Reviewed reference | License | Distribution and notice |
+|---|---:|---|---|
+| medusa | v2.14.2 | MIT | Commerce sidecar; retain its upstream MIT notice. |
+| crawl4ai | v0.8.6 | Apache-2.0-with-attribution | Optional research worker; retain Apache notice and required attribution. |
+| browser-use | v0.13.6 | MIT | Optional browser worker; retain upstream MIT notice. |
+| pydantic-ai | v1.104.0 | MIT | Optional typed-agent profile; retain upstream MIT notice. |
+| postiz | pending-legal-review | AGPL-3.0 | Independently deployed sidecar only; commercial use requires explicit legal approval. |
+| n8n | n8n@2.30.5 | Sustainable-Use | Internal operational sidecar only; do not embed or white-label without review. |
+| erpnext | pending-deferred-review | GPL-3.0 | Deferred; do not vendor into the commercial core. |
+| airbyte | pending-deferred-review | review_required | Deferred pending license and integration review. |
+| saleor | pending-benchmark-review | review_required | Benchmark only; do not deploy alongside Medusa. |
 
-Current review requirements:
-
-- Medusa: MIT; pin the sidecar release and preserve notices.
-- Crawl4AI: Apache 2.0 with the project attribution requirement.
-- Browser Use: review the exact package release before installation.
-- PydanticAI: MIT; pin the reviewed package release.
-- Postiz: AGPL-3.0; production use requires an explicit compliance review.
-- n8n: Sustainable Use License; internal automation only unless separately
-  approved for the intended commercial product model.
-- ERPNext: GPL-3.0; do not vendor into the MarketOS core.
-
-This file is a project policy, not legal advice. Distribution decisions must
-be reviewed against the exact versions actually shipped.
+The generated release SBOM captures resolved Python packages actually present
+in the build environment. Before enabling or updating any listed component,
+review its exact release, transitive licenses, security posture, attribution,
+and rollback plan according to `docs/oss/DEPENDENCY_POLICY.md`.

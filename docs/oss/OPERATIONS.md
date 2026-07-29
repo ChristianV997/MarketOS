@@ -6,6 +6,9 @@ image by default and no third-party source is vendored into MarketOS.
 Run `python scripts/validate_oss_inventory.py` before changing the inventory.
 Run `python scripts/check_oss_policy.py` to reject restricted licenses in the
 commercial core and unreviewed source-copying modes.
+Run `python scripts/validate_license_manifest.py` to ensure the notices and
+license manifest still match the reviewed inventory. Read
+`docs/oss/DEPENDENCY_POLICY.md` before changing an upstream dependency.
 Pin and test each upstream release before enabling it. Record licenses,
 transitive dependencies, smoke tests, and rollback notes in the inventory.
 Run `python scripts/validate_oss_runtime.py --json` for a read-only local
@@ -18,6 +21,9 @@ whether an unauthenticated negative probe is rejected.
 Run `python scripts/generate_oss_sbom.py --output artifacts/oss-sbom.json`
 during release preparation to capture the reviewed OSS inventory and installed
 Python package versions without network access.
+CI retains that SBOM, audits base and optional-agent Python requirements with
+the pinned `pip-audit` scanner, and verifies OCI source/revision labels on the
+production image.
 When Docker is unavailable, run `python scripts/validate_oss_compose.py` for
 static overlay validation; in Docker-enabled CI, also run `docker compose
 config` with a reviewed pinned `MEDUSA_IMAGE`.
