@@ -11,6 +11,24 @@ ever fed.
 Organic events are tagged source="organic": the classifier's organic
 branch scores them on engagement alone (a post with zero ROAS is not a
 LOSER — absence of purchase signal is not negative evidence).
+
+Tier 5 evaluation (Mixpost as a complementary analytics source): the
+consolidation roadmap asked whether Mixpost's (inovector/mixpost) more
+polished built-in analytics dashboard is worth wiring in here alongside
+Postiz, purely as a read-only complement — not a publishing-surface
+replacement, Postiz remains correct for that. Conclusion: not adopted, for
+a reason more fundamental than "unverified endpoint shape" (the bar that
+was fine for e.g. Tier 4's AutoDS supplier client). Mixpost's own docs
+site describes the freely self-hostable "Lite" edition as MIT-licensed,
+but "Advanced Analytics" is called out as a feature of the separate paid
+Pro/Enterprise tier — and a third-party community project
+(github.com/btafoya/mixpost-api) exists specifically to bolt a REST API
+onto self-hosted Mixpost for n8n/external integrations, which is itself
+evidence the free, self-hostable edition doesn't ship a first-party
+analytics API the way Postiz does. Revisit if a confirmed, documented
+analytics endpoint turns out to be reachable on the free Lite tier (not
+just Pro) — until then, get_post_metrics() via backend.integrations.
+postiz_client stays the only engagement-metrics source feeding this gate.
 """
 from __future__ import annotations
 
