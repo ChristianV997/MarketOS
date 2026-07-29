@@ -57,7 +57,7 @@ class MedusaCommerceAdapter:
                 self.name,
                 configured=True,
                 reachable=True,
-                capabilities=("catalog", "inventory", "cart", "orders", "fulfillment"),
+                capabilities=("catalog", "inventory", "cart", "orders", "fulfillment", "refunds"),
             )
         except Exception as exc:
             return AdapterHealth(self.name, configured=True, reachable=False, detail=str(exc))
@@ -128,9 +128,7 @@ class MedusaCommerceAdapter:
     def create_cart(self, cart: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:
         if context.dry_run:
             return {"id": f"dry-medusa-cart-{context.idempotency_key or 'pending'}", "dry_run": True, "cart": dict(cart)}
-        if context.approval_state not in {"approved", "not_required"}:
-            raise PermissionError("Medusa cart creation requires approved MarketOS context")
-        context.require_live_idempotency()
+        self._require_approved_mutation(context, "cart creation")
         return self._request("POST", "/store/carts", context=context, json=dict(cart))
 
     def complete_cart(self, cart_id: str, *, context: SidecarContext) -> Mapping[str, Any]:
@@ -139,10 +137,97 @@ class MedusaCommerceAdapter:
             raise ValueError("cart_id is required")
         if context.dry_run:
             return {"id": f"dry-medusa-order-{context.idempotency_key or cart_id}", "dry_run": True, "cart_id": cart_id}
-        if context.approval_state not in {"approved", "not_required"}:
-            raise PermissionError("Medusa checkout requires approved MarketOS context")
-        context.require_live_idempotency()
+        self._require_approved_mutation(context, "checkout")
         return self._request("POST", f"/store/carts/{cart_id}/complete", context=context, json={})
+
+    @staticmethod
+    def _resource_id(value: str, label: str) -> str:
+        """Validate IDs before interpolating them into a Medusa route."""
+        normalized = str(value or "").strip()
+        if not normalized or "/" in normalized or "?" in normalized or "#" in normalized:
+            raise ValueError(f"{label} is required and must be a single Medusa resource ID")
+        return normalized
+
+    @staticmethod
+    def _require_approved_mutation(context: SidecarContext, operation: str) -> None:
+        if context.approval_state != "approved":
+            raise PermissionError(f"Medusa {operation} requires approved MarketOS context")
+        context.require_live_idempotency()
+
+    def get_order(self, order_id: str) -> Mapping[str, Any]:
+        """Retrieve a canonical order without enabling any financial action."""
+        order_id = self._resource_id(order_id, "order_id")
+        return self._request("GET", f"/admin/orders/{order_id}")
+
+    def fulfill_order(
+        self,
+        order_id: str,
+        fulfillment: Mapping[str, Any],
+        *,
+        context: SidecarContext,
+    ) -> Mapping[str, Any]:
+        """Create an approved, retry-safe Medusa V2 order fulfillment.
+
+        MarketOS intentionally does not infer quantities or stock locations. A
+        caller must supply the reviewed Medusa item IDs and location ID.
+        """
+        order_id = self._resource_id(order_id, "order_id")
+        body = dict(fulfillment)
+        items = body.get("items")
+        location_id = body.get("location_id")
+        if not isinstance(items, Sequence) or isinstance(items, (str, bytes)) or not items:
+            raise ValueError("fulfillment.items must be a non-empty sequence")
+        if not str(location_id or "").strip():
+            raise ValueError("fulfillment.location_id is required")
+        if context.dry_run:
+            return {
+                "id": f"dry-medusa-fulfillment-{context.idempotency_key or order_id}",
+                "dry_run": True,
+                "order_id": order_id,
+                "fulfillment": body,
+            }
+        self._require_approved_mutation(context, "fulfillment")
+        return self._request("POST", f"/admin/orders/{order_id}/fulfillments", context=context, json=body)
+
+    def refund_order_payment(
+        self,
+        order_id: str,
+        payment_collection_id: str,
+        amount: int,
+        *,
+        context: SidecarContext,
+        reason: str = "",
+        note: str = "",
+    ) -> Mapping[str, Any]:
+        """Refund a captured payment in minor currency units after approval.
+
+        Medusa ties a refund to a payment collection, rather than treating an
+        order ID as sufficient authorization to move money.
+        """
+        order_id = self._resource_id(order_id, "order_id")
+        payment_collection_id = self._resource_id(payment_collection_id, "payment_collection_id")
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount <= 0:
+            raise ValueError("refund amount must be a positive integer in minor currency units")
+        body = {"amount": int(amount)}
+        if reason:
+            body["reason"] = str(reason)
+        if note:
+            body["note"] = str(note)
+        if context.dry_run:
+            return {
+                "id": f"dry-medusa-refund-{context.idempotency_key or order_id}",
+                "dry_run": True,
+                "order_id": order_id,
+                "payment_collection_id": payment_collection_id,
+                "refund": body,
+            }
+        self._require_approved_mutation(context, "refund")
+        return self._request(
+            "POST",
+            f"/admin/orders/{order_id}/payment-collections/{payment_collection_id}/refund",
+            context=context,
+            json=body,
+        )
 
 
 commerce_provider: CommerceProvider = MedusaCommerceAdapter()

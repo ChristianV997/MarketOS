@@ -131,3 +131,93 @@ def test_medusa_live_order_uses_optional_bearer_token():
         {}, context=SidecarContext(idempotency_key="order-2", dry_run=False, approval_state="approved")
     )
     assert client.headers["Authorization"] == "Bearer secret"
+
+
+def test_medusa_order_read_uses_admin_route_without_side_effect_context():
+    class Response:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"order": {"id": "order-1"}}
+    class Client:
+        def __init__(self):
+            self.calls = []
+        def request(self, method, path, **kwargs):
+            self.calls.append((method, path, kwargs))
+            return Response()
+
+    client = Client()
+    result = MedusaCommerceAdapter(base_url="http://medusa", client=client).get_order("order-1")
+    assert result["order"]["id"] == "order-1"
+    assert client.calls == [("GET", "/admin/orders/order-1", {"headers": {}})]
+
+
+def test_medusa_fulfillment_and_refund_are_dry_run_safe():
+    adapter = MedusaCommerceAdapter(base_url="")
+    context = SidecarContext(idempotency_key="commerce-action", dry_run=True)
+    fulfillment = adapter.fulfill_order(
+        "order-1", {"location_id": "sloc-1", "items": [{"id": "item-1", "quantity": 1}]}, context=context,
+    )
+    refund = adapter.refund_order_payment("order-1", "paycol-1", 1299, context=context, reason="return")
+    assert fulfillment["id"] == "dry-medusa-fulfillment-commerce-action"
+    assert refund["refund"] == {"amount": 1299, "reason": "return"}
+
+
+def test_medusa_live_fulfillment_and_refund_require_approval_and_idempotency():
+    adapter = MedusaCommerceAdapter(base_url="http://medusa")
+    try:
+        adapter.fulfill_order(
+            "order-1", {"location_id": "sloc-1", "items": [{"id": "item-1", "quantity": 1}]},
+            context=SidecarContext(dry_run=False, idempotency_key="action-1"),
+        )
+    except PermissionError as exc:
+        assert "approved" in str(exc)
+    else:
+        raise AssertionError("live fulfillment must require approval")
+
+    try:
+        adapter.refund_order_payment(
+            "order-1", "paycol-1", 1299,
+            context=SidecarContext(dry_run=False, approval_state="approved"),
+        )
+    except ValueError as exc:
+        assert "idempotency_key" in str(exc)
+    else:
+        raise AssertionError("live refund must require idempotency")
+
+
+def test_medusa_live_checkout_requires_explicit_approval_not_implicit_default():
+    try:
+        MedusaCommerceAdapter(base_url="http://medusa").create_cart(
+            {"items": []}, context=SidecarContext(dry_run=False, idempotency_key="cart-1"),
+        )
+    except PermissionError as exc:
+        assert "approved" in str(exc)
+    else:
+        raise AssertionError("live cart creation must require explicit approval")
+
+
+def test_medusa_live_fulfillment_and_refund_use_documented_routes_and_headers():
+    class Response:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"ok": True}
+    class Client:
+        def __init__(self):
+            self.calls = []
+        def request(self, method, path, **kwargs):
+            self.calls.append((method, path, kwargs))
+            return Response()
+
+    client = Client()
+    adapter = MedusaCommerceAdapter(base_url="http://medusa", client=client)
+    context = SidecarContext(idempotency_key="action-1", dry_run=False, approval_state="approved")
+    adapter.fulfill_order("order-1", {"location_id": "sloc-1", "items": [{"id": "item-1", "quantity": 1}]}, context=context)
+    adapter.refund_order_payment("order-1", "paycol-1", 1299, context=context, reason="return")
+    assert [call[:2] for call in client.calls] == [
+        ("POST", "/admin/orders/order-1/fulfillments"),
+        ("POST", "/admin/orders/order-1/payment-collections/paycol-1/refund"),
+    ]
+    assert client.calls[1][2]["json"] == {"amount": 1299, "reason": "return"}
+    assert client.calls[0][2]["headers"]["Idempotency-Key"] == "action-1"
