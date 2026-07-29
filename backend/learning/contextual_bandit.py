@@ -4,9 +4,25 @@ Provides a single module-level bandit instance pre-configured with the
 feature vector used by the execution loop, and a convenience function
 ``select_arm`` / ``record_reward`` for easy wiring.
 """
+import hashlib
+
 import numpy as np
 
 from core.contextual_bandit import LinUCB
+
+
+def _stable_hash(value: str) -> int:
+    """Deterministic, process-restart-stable replacement for Python's
+    built-in hash().
+
+    Built-in hash() is salted by PYTHONHASHSEED, randomized per process by
+    default — the same product_id/category/hook_id would map to a
+    different feature dimension after every restart, silently
+    invalidating ProductContextualBandit's learned _A_global/_b_global
+    weights (they'd now correspond to the wrong products) with no error
+    or log signal. SHA-256 has no such per-process salt.
+    """
+    return int(hashlib.sha256(value.encode("utf-8")).hexdigest(), 16)
 
 # Feature vector: [velocity, acceleration, trend, capital_norm, regime_int]
 _N_FEATURES = 5
@@ -92,18 +108,19 @@ class ProductContextualBandit:
         """Construct normalized feature vector from product context."""
         features = np.zeros(self.n_features)
 
-        # Hash categorical features into feature dimensions
+        # Hash categorical features into feature dimensions (stable across
+        # process restarts — see _stable_hash's docstring).
         if product_id:
-            prod_hash = hash(product_id) % (self.n_features - 3)
+            prod_hash = _stable_hash(product_id) % (self.n_features - 3)
             features[prod_hash] += 0.5
 
-        cat_hash = hash(category or "unknown") % (self.n_features - 3)
+        cat_hash = _stable_hash(category or "unknown") % (self.n_features - 3)
         features[(cat_hash + 1) % self.n_features] += 0.7
 
-        hook_hash = hash(hook_id or "default") % (self.n_features - 3)
+        hook_hash = _stable_hash(hook_id or "default") % (self.n_features - 3)
         features[(hook_hash + 2) % self.n_features] += 0.6
 
-        aud_hash = hash(audience_id or "broad") % (self.n_features - 3)
+        aud_hash = _stable_hash(audience_id or "broad") % (self.n_features - 3)
         features[(aud_hash + 3) % self.n_features] += 0.5
 
         # Extra numeric features

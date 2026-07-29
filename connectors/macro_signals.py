@@ -46,15 +46,11 @@ _SERIES: dict[str, str] = {
 }
 
 
-def _fetch_latest(series_id: str) -> float | None:
-    """Return the most-recent observation for *series_id* or None on error."""
+def _fetch_observations(series_id: str, start: str, *, limit: int = 5) -> list[dict]:
+    """Return raw FRED observations for *series_id* from *start* onward
+    (most-recent first), or [] on any error."""
     if not FRED_API_KEY or _requests is None:
-        return None
-
-    now = datetime.datetime.now(datetime.UTC).date()
-    # Request last 90 days to ensure we get the most-recent release
-    start = (now - datetime.timedelta(days=90)).isoformat()
-
+        return []
     try:
         resp = _requests.get(
             _BASE,
@@ -64,22 +60,72 @@ def _fetch_latest(series_id: str) -> float | None:
                 "file_type": "json",
                 "observation_start": start,
                 "sort_order": "desc",
-                "limit": 5,
+                "limit": limit,
             },
             timeout=10,
         )
         resp.raise_for_status()
-        obs = resp.json().get("observations", [])
-        # Skip "." (missing data) entries
-        for o in obs:
-            val = o.get("value", ".")
-            if val != ".":
-                return float(val)
-        return None
+        return resp.json().get("observations", [])
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception:
+        return []
+
+
+def _fetch_latest(series_id: str) -> float | None:
+    """Return the most-recent observation for *series_id* or None on error."""
+    now = datetime.datetime.now(datetime.UTC).date()
+    # Request last 90 days to ensure we get the most-recent release
+    start = (now - datetime.timedelta(days=90)).isoformat()
+    for o in _fetch_observations(series_id, start):
+        val = o.get("value", ".")
+        if val != ".":
+            return float(val)
+    return None
+
+
+def _fetch_yoy_pct_change(series_id: str) -> float | None:
+    """Return the year-over-year percent change for *series_id*, or None.
+
+    CPIAUCSL (and similarly-shaped FRED series) are raw index levels
+    (~310 for CPI, not a percentage) — treating the level itself as a
+    already-a-percentage YoY figure silently pinned `_macro_risk`'s
+    `cpi_norm` term to its 1.0 ceiling on every real (non-fallback) fetch,
+    since (310 - 2.0) / 8.0 clips far above 1.0. This fetches both the
+    latest observation and one from ~12 months prior and computes the
+    actual percent change.
+    """
+    now = datetime.datetime.now(datetime.UTC).date()
+    latest_obs = _fetch_observations(series_id, (now - datetime.timedelta(days=90)).isoformat())
+    latest_val: float | None = None
+    for o in latest_obs:
+        val = o.get("value", ".")
+        if val != ".":
+            latest_val = float(val)
+            break
+    if latest_val is None:
         return None
+
+    # Monthly series can release with a lag, so widen the prior-year
+    # window (335-395 days back) rather than requesting a single date.
+    prior_start = (now - datetime.timedelta(days=395)).isoformat()
+    prior_end_cutoff = now - datetime.timedelta(days=335)
+    prior_val: float | None = None
+    for o in _fetch_observations(series_id, prior_start, limit=10):
+        try:
+            obs_date = datetime.date.fromisoformat(o.get("date", ""))
+        except ValueError:
+            continue
+        if obs_date > prior_end_cutoff:
+            continue
+        val = o.get("value", ".")
+        if val != ".":
+            prior_val = float(val)
+            break
+    if prior_val is None or prior_val == 0:
+        return None
+
+    return round((latest_val - prior_val) / prior_val * 100.0, 4)
 
 
 def _macro_risk(signals: dict) -> float:
@@ -107,13 +153,13 @@ def get_macro_signals() -> dict:
     signals: dict[str, float] = {}
 
     for key, series_id in _SERIES.items():
-        val = _fetch_latest(series_id)
+        if key == "cpi_yoy":
+            # CPIAUCSL is a raw index level, not YoY % — compute the real
+            # year-over-year delta instead of passing the level through.
+            val = _fetch_yoy_pct_change(series_id)
+        else:
+            val = _fetch_latest(series_id)
         signals[key] = val if val is not None else _FALLBACK[key]
-
-    # CPI YoY requires computing the delta ourselves (FRED returns levels)
-    # Simple approximation: (current - 12-months-ago) / 12-months-ago * 100
-    # We leave the raw value as-is when fetched from FRED to keep the connector
-    # simple; callers should treat it as approximate.
 
     signals["macro_risk_score"] = _macro_risk(signals)
     return signals

@@ -9,17 +9,26 @@ This module is consumed by the unified urgency score in core/signals.py.
 """
 from __future__ import annotations
 
-from collections import defaultdict, deque
+import os
+from collections import OrderedDict, deque
 from datetime import datetime, timezone
+
+# Every distinct/renamed product discovered over the process lifetime
+# previously added a permanent, never-pruned dict entry (only clear(),
+# never called automatically, could remove one) — an unbounded-cache leak
+# in a long-running discovery process. Cap total tracked products with
+# LRU-style eviction of the least-recently-updated one.
+_MAX_PRODUCTS = int(os.getenv("TREND_HISTORY_MAX_PRODUCTS", "2000"))
 
 
 class TrendHistory:
     """Per-product rolling time-series of (timestamp, velocity, saturation)."""
 
-    def __init__(self, max_history: int = 100):
+    def __init__(self, max_history: int = 100, max_products: int = _MAX_PRODUCTS):
         self.max_history = max_history
+        self.max_products = max_products
         # product_id -> deque of (ts_sec: float, velocity: float, saturation: float)
-        self._history: dict[str, deque] = defaultdict(lambda: deque(maxlen=max_history))
+        self._history: "OrderedDict[str, deque]" = OrderedDict()
 
     def record(self, product_id: str, velocity: float = 0.0, saturation: float = 0.0,
                ts: float | None = None) -> None:
@@ -27,6 +36,12 @@ class TrendHistory:
         ts = ts or datetime.now(timezone.utc).timestamp()
         velocity = max(0.0, min(1.0, float(velocity)))  # clamp to [0, 1]
         saturation = max(0.0, min(1.0, float(saturation)))  # clamp to [0, 1]
+        if product_id not in self._history:
+            if len(self._history) >= self.max_products:
+                self._history.popitem(last=False)  # evict least-recently-updated product
+            self._history[product_id] = deque(maxlen=self.max_history)
+        else:
+            self._history.move_to_end(product_id)
         self._history[product_id].append((ts, velocity, saturation))
 
     def get_trend_stats(self, product_id: str) -> dict:

@@ -47,7 +47,7 @@ def save(state, path=STATE_PATH):
         "event_log": state.event_log.rows[-2000:],
         "memory": state.memory[-500:],
         "graph_edges": {f"{p}|{c}": w for (p, c), w in state.graph.edges.items()},
-        "bandit_history": bu.bandit_memory.history,
+        "bandit_history": {k: list(v) for k, v in bu.bandit_memory.history.items()},
         "calibration_errors": cal.calibration_model.errors,
         "calibration_log": cal_log.calibration_log.history[-200:],
         "regime_confidence": rc.regime_confidence.history,
@@ -83,7 +83,15 @@ def load(path=STATE_PATH):
         if len(parts) == 2:
             state.graph.add_edge(parts[0], parts[1], weight)
 
-    bu.bandit_memory.history = d.get("bandit_history", {})
+    # Rebuild as the same bounded OrderedDict-of-deques shape
+    # bandit_memory.update() maintains (see backend/core/db_serializer.py's
+    # equivalent load path) — a plain dict of lists would silently drop
+    # the memory cap on every restore.
+    from collections import OrderedDict, deque
+    bu.bandit_memory.history = OrderedDict(
+        (k, deque(v, maxlen=bu._MAX_REWARDS_PER_KEY))
+        for k, v in d.get("bandit_history", {}).items()
+    )
     cal.calibration_model.errors = d.get("calibration_errors", [])
     cal_log.calibration_log.history = d.get("calibration_log", [])
     rc.regime_confidence.history = d.get("regime_confidence", [])

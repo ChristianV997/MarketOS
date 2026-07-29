@@ -1,9 +1,23 @@
+import os
+from collections import OrderedDict, deque
+
 import numpy as np
+
+# Bounds mirroring sibling learning stores (CalibrationLog caps at 500,
+# RegimeStrategyMemory caps at 100) — previously both the number of
+# distinct action keys and each key's reward list grew forever, since
+# action keys are near-unique str(dict) reprs. A long-running process
+# would accumulate an ever-growing dict of ever-growing lists.
+_MAX_ACTION_KEYS = int(os.getenv("BANDIT_MEMORY_MAX_KEYS", "1000"))
+_MAX_REWARDS_PER_KEY = int(os.getenv("BANDIT_MEMORY_MAX_REWARDS_PER_KEY", "200"))
+
 
 class BanditMemory:
 
     def __init__(self):
-        self.history = {}  # action_key -> list of rewards
+        # OrderedDict for LRU-style eviction of the oldest action key once
+        # _MAX_ACTION_KEYS is exceeded.
+        self.history: "OrderedDict[str, deque]" = OrderedDict()
 
     def _key(self, action):
         return str(action)
@@ -11,7 +25,11 @@ class BanditMemory:
     def update(self, action, reward):
         k = self._key(action)
         if k not in self.history:
-            self.history[k] = []
+            if len(self.history) >= _MAX_ACTION_KEYS:
+                self.history.popitem(last=False)  # evict oldest key
+            self.history[k] = deque(maxlen=_MAX_REWARDS_PER_KEY)
+        else:
+            self.history.move_to_end(k)
         self.history[k].append(reward)
 
     def stats(self, action):

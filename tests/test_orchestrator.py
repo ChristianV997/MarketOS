@@ -31,6 +31,57 @@ def test_commerce_cycle_consumes_ingested_signals():
     assert run.call_args.kwargs["signals"] == [{"product": "test", "score": 0.8}]
 
 
+def test_run_execution_cycle_writes_updated_state_back_to_api(monkeypatch):
+    """Previously _run_execution_cycle read backend.api._state, ran
+    run_cycle(), and returned the computed capital/regime — but never
+    published the updated SystemState back to backend.api._state. Capital
+    and decisions silently never advanced: the dashboard, /metrics, and
+    the checkpoint writer (which persists backend.api._state) all saw a
+    permanently frozen snapshot forever."""
+    import backend.api as api
+    from backend.core.state import SystemState
+    from orchestrator.main import _run_execution_cycle
+
+    original_state = SystemState()
+    updated_state = SystemState()
+    updated_state.total_cycles = 42
+    updated_state.capital = 1234.56
+    updated_state.detected_regime = "growth"
+
+    monkeypatch.setattr(api, "_state", original_state)
+    with patch("backend.execution.loop.run_cycle", return_value=updated_state) as run_cycle_mock:
+        result = _run_execution_cycle()
+
+    run_cycle_mock.assert_called_once_with(original_state)
+    assert api._state is updated_state
+    assert result["cycles"] == 42
+    assert result["capital"] == 1234.56
+    assert result["regime"] == "growth"
+
+
+def test_run_execution_cycle_falls_back_to_fresh_state_when_api_unavailable(monkeypatch):
+    """If backend.api._state (or its lock) is unreachable — e.g. a
+    standalone orchestrator process without the API's lifespan ever
+    running — _run_execution_cycle must fall back to a fresh SystemState
+    rather than raising. Scoped narrowly (only backend.api._lock raises)
+    rather than blocking imports globally, which would corrupt unrelated
+    module-level singletons that happen to import backend.api as a side
+    effect elsewhere in the same process."""
+    import backend.api as api
+    from orchestrator.main import _run_execution_cycle
+
+    class _RaisingLock:
+        def __enter__(self):
+            raise RuntimeError("simulated: backend.api._state unreachable")
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(api, "_lock", _RaisingLock())
+    result = _run_execution_cycle()
+    assert result["status"] == "ok"
+
+
 def test_delayed_commerce_metrics_reconcile_only_live_campaigns(monkeypatch):
     from backend.contracts.campaign import CampaignAsset
     from backend.contracts.registry import get_registry
