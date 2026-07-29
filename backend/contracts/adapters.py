@@ -33,6 +33,11 @@ class SidecarContext:
             headers["Idempotency-Key"] = self.idempotency_key
         return headers
 
+    def require_live_idempotency(self) -> None:
+        """Reject live sidecar mutations that cannot be safely retried."""
+        if not self.idempotency_key:
+            raise ValueError("live sidecar operations require an idempotency_key")
+
 
 @dataclass(frozen=True)
 class AdapterHealth:

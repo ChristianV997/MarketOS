@@ -130,6 +130,7 @@ class MedusaCommerceAdapter:
             return {"id": f"dry-medusa-cart-{context.idempotency_key or 'pending'}", "dry_run": True, "cart": dict(cart)}
         if context.approval_state not in {"approved", "not_required"}:
             raise PermissionError("Medusa cart creation requires approved MarketOS context")
+        context.require_live_idempotency()
         return self._request("POST", "/store/carts", context=context, json=dict(cart))
 
     def complete_cart(self, cart_id: str, *, context: SidecarContext) -> Mapping[str, Any]:
@@ -140,6 +141,7 @@ class MedusaCommerceAdapter:
             return {"id": f"dry-medusa-order-{context.idempotency_key or cart_id}", "dry_run": True, "cart_id": cart_id}
         if context.approval_state not in {"approved", "not_required"}:
             raise PermissionError("Medusa checkout requires approved MarketOS context")
+        context.require_live_idempotency()
         return self._request("POST", f"/store/carts/{cart_id}/complete", context=context, json={})
 
 

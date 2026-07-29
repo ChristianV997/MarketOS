@@ -56,6 +56,7 @@ class PostizPublisherAdapter:
             return {"id": f"dry-postiz-{context.idempotency_key or 'pending'}", "status": "planned", "dry_run": True, "content": dict(content)}
         if context.approval_state not in {"approved", "not_required"}:
             raise PermissionError("publishing requires approved MarketOS context")
+        context.require_live_idempotency()
         if not self.base_url or not self.token:
             raise RuntimeError("Postiz is not configured")
         if httpx is None and self._client is None:

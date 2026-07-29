@@ -17,6 +17,17 @@ def test_n8n_rejects_unallowlisted_workflow():
         raise AssertionError("n8n product workflows must not bypass the internal allowlist")
 
 
+def test_n8n_live_trigger_requires_idempotency_key():
+    try:
+        N8nAutomationAdapter(base_url="https://n8n.internal").trigger(
+            "alerts", {}, context=SidecarContext(dry_run=False, approval_state="approved")
+        )
+    except ValueError as exc:
+        assert "idempotency_key" in str(exc)
+    else:
+        raise AssertionError("live n8n triggers must require idempotency")
+
+
 def test_n8n_live_trigger_preserves_context_and_retries(monkeypatch):
     class Response:
         status_code = 200

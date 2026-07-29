@@ -21,6 +21,16 @@ def test_postiz_requires_approval_for_live_publish():
         raise AssertionError("live publishing must require approval")
 
 
+def test_postiz_live_publish_requires_idempotency_key():
+    adapter = PostizPublisherAdapter(base_url="https://postiz.invalid", token="token")
+    try:
+        adapter.publish({"text": "hello"}, context=SidecarContext(dry_run=False, approval_state="approved"))
+    except ValueError as exc:
+        assert "idempotency_key" in str(exc)
+    else:
+        raise AssertionError("live publishing must require idempotency")
+
+
 def test_postiz_live_publish_sends_lineage_and_idempotency_headers():
     class Response:
         def raise_for_status(self):
@@ -89,7 +99,7 @@ def test_postiz_retries_transient_transport_failure(monkeypatch):
     monkeypatch.setenv("POSTIZ_RETRY_BACKOFF_S", "0")
     client = Client()
     result = PostizPublisherAdapter(base_url="https://postiz", token="secret", client=client).publish(
-        {"text": "retry me"}, context=SidecarContext(dry_run=False, approval_state="approved")
+        {"text": "retry me"}, context=SidecarContext(idempotency_key="retry-1", dry_run=False, approval_state="approved")
     )
     assert result["id"] == "post-retried"
     assert client.calls == 2

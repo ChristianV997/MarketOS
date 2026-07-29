@@ -43,6 +43,7 @@ class N8nAutomationAdapter:
             return {"id": f"dry-n8n-{context.idempotency_key or workflow}", "workflow": workflow, "status": "planned", "dry_run": True}
         if context.approval_state not in {"approved", "not_required"}:
             raise PermissionError("n8n automation requires approved MarketOS context")
+        context.require_live_idempotency()
         if not self.base_url:
             raise RuntimeError("n8n is not configured")
         if httpx is None and self._client is None:

@@ -128,6 +128,6 @@ def test_medusa_live_order_uses_optional_bearer_token():
             return Response()
     client = Client()
     MedusaCommerceAdapter(base_url="http://medusa", token="secret", client=client).create_order(
-        {}, context=SidecarContext(dry_run=False, approval_state="approved")
+        {}, context=SidecarContext(idempotency_key="order-2", dry_run=False, approval_state="approved")
     )
     assert client.headers["Authorization"] == "Bearer secret"
