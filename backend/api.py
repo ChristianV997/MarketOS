@@ -47,9 +47,11 @@ try:
     _prom_avg_roas   = Gauge("marketos_avg_roas",             "Average ROAS last 100 cycles")
     _prom_regime     = Gauge("marketos_regime",               "Detected regime label", ["regime"])
     _prom_cycle_time = Histogram("marketos_cycle_duration_s", "run_cycle() latency")
+    _prom_webhook_events = Counter("marketos_integration_webhook_events_total", "Sidecar webhook events by outcome", ["source", "outcome"])
     _PROMETHEUS_OK   = True
 except ImportError:
     _PROMETHEUS_OK = False
+    _prom_webhook_events = None
 
 from backend.core.state import SystemState
 from backend.execution.loop import run_cycle
@@ -1667,11 +1669,17 @@ def _verify_integration_webhook(source: str, payload: dict[str, Any], signature:
 def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webhook_signature: str | None = Header(default=None)):
     """Receive deduplicated Medusa/Postiz events into the canonical broker."""
     if source not in {"medusa", "postiz"}:
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source="unknown", outcome="unsupported").inc()
         return JSONResponse({"accepted": False, "reason": "unsupported_webhook_source"}, status_code=404)
     if not _verify_integration_webhook(source, payload, x_webhook_signature):
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source=source, outcome="invalid_signature").inc()
         return JSONResponse({"accepted": False, "reason": "invalid_webhook_signature"}, status_code=401)
     event_id = str(payload.get("id") or payload.get("event_id") or payload.get("webhook_id") or "")
     if not event_id:
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source=source, outcome="missing_id").inc()
         return JSONResponse({"accepted": False, "reason": "webhook_event_id_required"}, status_code=400)
     try:
         if source == "medusa":
@@ -1681,17 +1689,23 @@ def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webh
             from backend.integrations.postiz import publisher
             accepted = publisher.accept_webhook(event_id)
         if not accepted:
+            if _prom_webhook_events is not None:
+                _prom_webhook_events.labels(source=source, outcome="duplicate").inc()
             return {"accepted": False, "duplicate": True, "event_id": event_id}
         from backend.pubsub.broker import broker
         broker_event_id = broker.publish(f"{source}.webhook", payload, source=source, correlation_id=event_id)
         from backend.commerce.feedback import observation_from_webhook
         observation = observation_from_webhook(payload, source=source)
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source=source, outcome="accepted").inc()
         return {
             "accepted": True, "duplicate": False, "event_id": event_id,
             "broker_event_id": broker_event_id,
             "observation": observation.__dict__ if observation else None,
         }
     except Exception as exc:
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source=source, outcome="failed").inc()
         return JSONResponse({"accepted": False, "reason": "webhook_processing_failed", "detail": str(exc)}, status_code=503)
 
 

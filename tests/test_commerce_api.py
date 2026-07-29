@@ -161,6 +161,13 @@ def test_integration_webhook_verifies_configured_hmac_secret(monkeypatch):
     assert invalid.status_code == 401
 
 
+def test_webhook_outcome_metrics_are_exported():
+    pytest.importorskip("prometheus_client")
+    from backend.api import prometheus_metrics
+    payload = prometheus_metrics().body.decode()
+    assert "marketos_integration_webhook_events_total" in payload
+
+
 def test_optional_integration_health_is_safe_when_unconfigured():
     from backend.api import integrations_health
     result = integrations_health()
