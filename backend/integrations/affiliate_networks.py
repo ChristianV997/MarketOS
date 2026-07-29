@@ -92,8 +92,16 @@ class AffiliateNetworkConnector:
         """Fetch affiliate performance for product over N days."""
         if self.dry_run:
             return self._mock_performance(product_id, days)
-        # Real implementation would call network API
-        raise NotImplementedError(f"Real API for {self.network} not yet implemented")
+        # Real implementation would call network API. No real network client
+        # exists yet for any AffiliateNetwork — degrade to an empty result
+        # (same "no live client configured" pattern as every other
+        # integration in this codebase) rather than raising into the live
+        # orchestrator tick.
+        _log.warning(
+            "affiliate_network_real_api_unavailable network=%s product=%s",
+            self.network, product_id,
+        )
+        return []
 
     async def recruit_affiliates(
         self,
@@ -112,8 +120,14 @@ class AffiliateNetworkConnector:
             )
             return True, "Dry-run recruitment submitted"
 
-        # Real implementation would submit to API
-        raise NotImplementedError(f"Real API for {self.network} not yet implemented")
+        # Real implementation would submit to API. No real network client
+        # exists yet — degrade gracefully instead of raising into the live
+        # orchestrator tick.
+        _log.warning(
+            "affiliate_network_real_api_unavailable network=%s product=%s",
+            self.network, recruitment.product_id,
+        )
+        return False, f"Real API for {self.network} not yet implemented"
 
     def _mock_performance(self, product_id: str, days: int = 30) -> list[AffiliatePerformance]:
         """Generate synthetic performance data for MVP."""

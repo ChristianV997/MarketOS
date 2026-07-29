@@ -144,6 +144,19 @@ def decide(state):
         c_score = causal_score(action, state.graph)
         velocity_bonus = vel + acc
         bandit_w = bandit_weight(action, state.graph)
+
+        # Phase 3 follow-up: blend in the per-product LinUCB contextual
+        # bandit's UCB score (real exploration/exploitation over historical
+        # per-product ROAS, not just the graph-based bandit_weight stub).
+        # Shadow-gated: journaled every cycle, only affects the score when
+        # PRODUCT_BANDIT_LIVE=true.
+        try:
+            pb_score = product_bandit.score(product_id, category=category)
+        except Exception:
+            pb_score = 0.0
+        product_bandit_live = os.getenv("PRODUCT_BANDIT_LIVE", "false").lower() == "true"
+        bandit_w_used = (bandit_w + pb_score) if product_bandit_live else bandit_w
+
         regime_bonus = strategy_memory.score(state.detected_regime)
 
         # Phase 4: down-weight regime_bonus by the detector's own historical
@@ -162,14 +175,14 @@ def decide(state):
         confidence = calib_conf * interval_conf * system_conf
 
         # ─ Unnormalized score (legacy)
-        legacy_score = corrected_pred + c_score + velocity_bonus + bandit_w + regime_bonus_used - competition_penalty
+        legacy_score = corrected_pred + c_score + velocity_bonus + bandit_w_used + regime_bonus_used - competition_penalty
 
         # ─ Normalized score (Phase 3)
         raw_terms = {
             "corrected_pred": corrected_pred,
             "c_score": c_score,
             "velocity_bonus": velocity_bonus,
-            "bandit_w": bandit_w,
+            "bandit_w": bandit_w_used,
             "regime_bonus": regime_bonus_used,
             "competition_penalty": competition_penalty,
         }
@@ -221,9 +234,26 @@ def decide(state):
         except Exception:
             pass  # don't break decisions if journaling fails
 
+        try:
+            event_store.append(
+                new_workflow_id("productbandit"), "shadow_product_bandit_weighting",
+                workflow="decision_engine", step="decide",
+                data={
+                    "product_id": product_id,
+                    "category": category,
+                    "bandit_w_stub": round(bandit_w, 4),
+                    "pb_score": round(pb_score, 4),
+                    "bandit_w_used": round(bandit_w_used, 4),
+                    "live": product_bandit_live,
+                },
+            )
+        except Exception:
+            pass  # don't break decisions if journaling fails
+
         decision_row = {
             "action":              action,
             "product_name":        keyword,
+            "category":            category,
             "score":               final_score,
             "pred":                corrected_pred,
             "pred_lo":             round(0.5 * preds["lo_6h"] + 0.3 * preds["lo_12h"] + 0.2 * preds["lo_24h"], 4),

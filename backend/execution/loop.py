@@ -9,7 +9,7 @@ from backend.learning.bandit_update import update_from_delayed
 from backend.learning.update import learn
 from backend.learning.calibration import calibration_model
 from backend.learning.calibration_log import calibration_log
-from backend.learning.contextual_bandit import select_arm, record_reward
+from backend.learning.contextual_bandit import select_arm, record_reward, product_bandit
 from backend.learning.replay_buffer import replay_buffer
 from backend.learning.world_model_calibration import world_model_calibrator
 from backend.causal.update import update_causal
@@ -332,6 +332,13 @@ def execute(decisions, state):
 
         # regime performance feedback
         strategy_memory.update(ENV["regime"], roas)
+
+        # per-product LinUCB contextual bandit feedback (feeds decide()'s
+        # product_bandit.score() shadow term)
+        try:
+            product_bandit.update(product, roas, category=d.get("category", ""))
+        except Exception:
+            _log.debug("product_bandit_update_failed", exc_info=True)
 
         # reality gap — feed real ROAS when Shopify/Meta credentials present
         reality_gap_engine.update(roas, _refresh_real_roas())
