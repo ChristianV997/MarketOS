@@ -29,7 +29,9 @@ services:
   # ── API ────────────────────────────────────────────────────────────────────
   api:
     <<: *common
-    command: uvicorn backend.api:app --host 0.0.0.0 --port 3000 --reload
+    # The orchestrator service owns execution in this multi-service stack.
+    # Without this guard both it and the API background runner mutate cycles.
+    command: sh -c "ORCHESTRATOR_HANDLES_CYCLES=true exec uvicorn backend.api:app --host 0.0.0.0 --port 3000 --reload"
     ports:
       - "3000:3000"
 
@@ -67,6 +69,7 @@ services:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus_rules.yml:/etc/prometheus/marketos-rules.yml:ro
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -83,6 +86,7 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
 

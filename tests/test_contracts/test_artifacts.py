@@ -148,9 +148,43 @@ def test_registry_count():
     assert reg.count("campaign") == 0
 
 
+def test_registry_replaces_updated_artifact_without_duplicate_indexes():
+    reg = ArtifactRegistry()
+    original = CampaignAsset(
+        artifact_id="campaign-update", campaign_id="campaign-update", parent_ids=["parent-a"]
+    )
+    reg.register(original)
+    reg.register(original.with_outcome(2.1))
+
+    assert reg.count("campaign") == 1
+    assert len(reg.by_type("campaign")) == 1
+    assert len(reg.children_of("parent-a")) == 1
+    assert reg.get("campaign-update").outcome_recorded is True
+
+
 def test_registry_deserialize():
     reg = ArtifactRegistry()
     a   = CampaignAsset(campaign_id="deser-001")
     d   = a.to_dict()
     b   = reg.deserialize(d)
     assert isinstance(b, CampaignAsset)
+    assert b.campaign_id == "deser-001"
+
+
+def test_registry_hydrates_latest_campaign_revision_without_reemitting():
+    source = CampaignAsset(
+        artifact_id="restore-campaign", campaign_id="restore-campaign", product="Restored"
+    )
+    updated = source.with_outcome(2.7)
+    reg = ArtifactRegistry()
+    restored = reg.hydrate([
+        {"type": "artifact.campaign.registered", "payload": source.to_dict()},
+        {"type": "artifact.campaign.registered", "payload": updated.to_dict()},
+    ])
+
+    assert restored == 2
+    assert reg.count("campaign") == 1
+    campaign = reg.get("restore-campaign")
+    assert campaign.product == "Restored"
+    assert campaign.outcome_recorded is True
+    assert campaign.actual_roas == 2.7

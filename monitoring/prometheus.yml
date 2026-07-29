@@ -10,6 +10,9 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+rule_files:
+  - /etc/prometheus/marketos-rules.yml
+
 scrape_configs:
   # backend/api.py's business metrics (marketos_cycles_total,
   # marketos_capital_usd, marketos_avg_roas, marketos_regime,

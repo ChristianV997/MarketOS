@@ -38,15 +38,35 @@ class ArtifactRegistry:
         self._by_type:   dict[str, list[str]]  = {}  # type → [artifact_id]
         self._by_parent: dict[str, list[str]]  = {}  # parent_id → [child_id]
 
+    def _register_in_memory(self, artifact: BaseArtifact) -> None:
+        """Store one artifact and update indexes. Caller holds ``_lock``."""
+        previous = self._store.get(artifact.artifact_id)
+        if previous is not None:
+            # Updates replace index entries rather than multiplying them.
+            previous_type_ids = self._by_type.get(previous.artifact_type, [])
+            self._by_type[previous.artifact_type] = [
+                item_id for item_id in previous_type_ids
+                if item_id != artifact.artifact_id
+            ]
+            for parent_id in previous.parent_ids:
+                parent_children = self._by_parent.get(parent_id, [])
+                retained = [
+                    child_id for child_id in parent_children
+                    if child_id != artifact.artifact_id
+                ]
+                if retained:
+                    self._by_parent[parent_id] = retained
+                else:
+                    self._by_parent.pop(parent_id, None)
+        self._store[artifact.artifact_id] = artifact
+        self._by_type.setdefault(artifact.artifact_type, []).append(artifact.artifact_id)
+        for pid in artifact.parent_ids:
+            self._by_parent.setdefault(pid, []).append(artifact.artifact_id)
+
     def register(self, artifact: BaseArtifact) -> None:
-        """Store artifact and update indexes.  Emits an event to the log."""
+        """Store artifact and update indexes. Emits an event to the log."""
         with self._lock:
-            self._store[artifact.artifact_id] = artifact
-            self._by_type.setdefault(artifact.artifact_type, []).append(
-                artifact.artifact_id
-            )
-            for pid in artifact.parent_ids:
-                self._by_parent.setdefault(pid, []).append(artifact.artifact_id)
+            self._register_in_memory(artifact)
 
         # Append to durable log (fail-silent)
         try:
@@ -58,6 +78,37 @@ class ArtifactRegistry:
             )
         except Exception:
             pass
+
+    def hydrate(self, events: list[dict[str, Any]]) -> int:
+        """Rebuild the registry from ordered artifact-registration events.
+
+        Hydration is deliberately side-effect free: restored entries must not
+        emit another copy of historical events. Later events with the same id
+        replace earlier versions, preserving the latest campaign outcome.
+        """
+        restored = 0
+        with self._lock:
+            for event in events:
+                payload = event.get("payload", event)
+                if not isinstance(payload, dict) or not payload.get("artifact_id"):
+                    continue
+                event_type = str(event.get("type", ""))
+                if event_type and not (event_type.startswith("artifact.") and event_type.endswith(".registered")):
+                    continue
+                try:
+                    self._register_in_memory(self.deserialize(payload))
+                    restored += 1
+                except Exception:
+                    continue
+        return restored
+
+    def hydrate_from_replay(self, limit: int = 5000) -> int:
+        """Restore retained artifacts from the configured durable replay store."""
+        try:
+            from backend.events.log import tail
+            return self.hydrate(tail(limit))
+        except Exception:
+            return 0
 
     def get(self, artifact_id: str) -> BaseArtifact | None:
         with self._lock:

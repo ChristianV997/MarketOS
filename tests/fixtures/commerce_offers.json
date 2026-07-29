@@ -1,0 +1,16 @@
+{
+  "fixture-product-1": {
+    "supplier_id": "fixture-supplier-1",
+    "product_id": "fixture-product-1",
+    "unit_cost": 14.5,
+    "shipping_cost": 5.25,
+    "fulfillment_days": 5,
+    "inventory_units": 200,
+    "currency": "USD",
+    "quality": {
+      "provenance": "live",
+      "attribution": "attributed",
+      "source_ref": "fixture://supplier"
+    }
+  }
+}

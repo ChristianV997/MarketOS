@@ -9,6 +9,10 @@ def simulate_series(length=50, drift=0.0):
 
 
 def test_reality_gap_convergence():
+    # Keep the convergence assertion reproducible across Python/NumPy builds.
+    # The engine receives pre-generated series, so tuning cannot influence the
+    # random draw itself.
+    np.random.seed(0)
     engine = RealityGapEngine(window=50)
 
     sim_series = simulate_series(60, drift=0.2)

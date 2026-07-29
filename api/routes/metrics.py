@@ -13,6 +13,13 @@ from backend.agents.structural_evolution import structural_engine
 router = APIRouter()
 
 
+@router.get("/metrics/signals")
+def signal_metrics():
+    """Signal cache freshness and per-source failure telemetry."""
+    from core.signals import signal_engine
+    return signal_engine.cache_stats()
+
+
 @router.get("/metrics")
 def metrics():
     """Rich dashboard payload — all key metrics in one call."""

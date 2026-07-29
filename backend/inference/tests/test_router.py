@@ -81,6 +81,35 @@ def test_router_fallback_reason_set():
     assert resp.fallback_reason is not None
 
 
+def test_router_cools_down_failed_provider_between_requests():
+    from backend.inference.policies import RoutingPolicy, FallbackPolicy
+
+    class CountingFailureProvider(AlwaysFailProvider):
+        name = "counting_failure"
+
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, request):
+            self.calls += 1
+            raise RuntimeError("offline")
+
+    failing = CountingFailureProvider()
+    policy = RoutingPolicy(fallback=FallbackPolicy(["counting_failure", "mock"]))
+    router = InferenceRouter(
+        providers=[failing, MockProvider()],
+        policy=policy,
+        provider_failure_backoff_s=60.0,
+    )
+
+    router.complete(InferenceRequest(prompt="first", sequence_id="cooldown-1"))
+    router.complete(InferenceRequest(prompt="second", sequence_id="cooldown-2"))
+
+    assert failing.calls == 1
+    status = next(item for item in router.provider_status() if item["name"] == "counting_failure")
+    assert status["cooling_down"] is True
+
+
 # ── embedding ─────────────────────────────────────────────────────────────────
 
 def test_router_embed_returns_vectors():

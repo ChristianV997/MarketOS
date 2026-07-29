@@ -1,5 +1,6 @@
 """Tests for DuckDB state persistence."""
 import os
+import random
 import tempfile
 import pytest
 
@@ -14,10 +15,17 @@ def db_path(tmp_path):
 
 
 def _run_n(n=15):
-    state = SystemState()
-    for _ in range(n):
-        state = run_cycle(state)
-    return state
+    # The simulated environment is intentionally stochastic, but serializer
+    # assertions should not depend on a random run producing a high-ROAS row.
+    random_state = random.getstate()
+    random.seed(0)
+    try:
+        state = SystemState()
+        for _ in range(n):
+            state = run_cycle(state)
+        return state
+    finally:
+        random.setstate(random_state)
 
 
 def test_save_creates_file(db_path):

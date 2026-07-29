@@ -38,7 +38,8 @@ class TestWorldModelPreTraining:
 
 class TestWorldModelPostTraining:
     @pytest.fixture(scope="class")
-    def model(self):
+    @classmethod
+    def model(cls):
         return _make_trained_model(n_cycles=10)
 
     def test_all_horizons_fitted(self, model):

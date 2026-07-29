@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from backend import api as _core
 
@@ -15,6 +16,17 @@ router = APIRouter()
 def health():
     """Replit uptime monitor / health check."""
     return {"ok": True}
+
+
+@router.get("/ready")
+def ready():
+    """Readiness probe that waits for the application lifespan to initialize."""
+    if not _core._bg_running or not _core._runtime_services_ready:
+        return JSONResponse(
+            {"ready": False, "reason": "runtime_services_initializing"},
+            status_code=503,
+        )
+    return {"ready": True}
 
 
 @router.get("/status")

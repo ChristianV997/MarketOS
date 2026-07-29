@@ -1,0 +1,20 @@
+[
+  {
+    "id": "fixture-signal-1",
+    "product_id": "fixture-product-1",
+    "product": "Portable Blender",
+    "source": "fixture",
+    "platform": "tiktok",
+    "score": 0.88,
+    "engagement": 0.72,
+    "velocity": 0.64,
+    "quality": {
+      "provenance": "live",
+      "attribution": "attributed",
+      "source_ref": "fixture://portable-blender"
+    },
+    "metadata": {
+      "competition": 0.2
+    }
+  }
+]
