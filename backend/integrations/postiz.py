@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from backend.contracts.adapters import AdapterHealth, ContentPublisher, SidecarContext
@@ -18,10 +19,12 @@ except ImportError:  # pragma: no cover
 class PostizPublisherAdapter:
     name = "postiz"
 
-    def __init__(self, base_url: str | None = None, *, token: str | None = None, client: Any = None):
+    def __init__(self, base_url: str | None = None, *, token: str | None = None, integration_id: str | None = None, client: Any = None):
         self.base_url = (base_url or os.getenv("POSTIZ_BASE_URL", "")).rstrip("/")
         self.token = token or os.getenv("POSTIZ_API_TOKEN", "")
-        self.path = os.getenv("POSTIZ_PUBLISH_PATH", "/api/posts")
+        self.integration_id = integration_id or os.getenv("POSTIZ_INTEGRATION_ID", "")
+        self.path = os.getenv("POSTIZ_PUBLISH_PATH", "/posts")
+        self.auth_scheme = os.getenv("POSTIZ_AUTH_SCHEME", "").strip()
         self.max_retries = max(0, int(os.getenv("POSTIZ_MAX_RETRIES", "2")))
         self.retry_backoff_s = max(0.0, float(os.getenv("POSTIZ_RETRY_BACKOFF_S", "0.25")))
         self._client = client
@@ -51,6 +54,34 @@ class PostizPublisherAdapter:
             "source_refs": list(bundle.source_refs),
         }, context=context)
 
+    def _payload(self, content: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Map canonical creative data to the Postiz public API payload."""
+        if "posts" in content:
+            return dict(content)
+        integration_id = str(content.get("integration_id") or self.integration_id).strip()
+        if not integration_id:
+            raise ValueError("Postiz publishing requires POSTIZ_INTEGRATION_ID or content.integration_id")
+        platform = str(content.get("platform") or "instagram")
+        settings = dict(content.get("settings") or {})
+        settings.setdefault("__type", platform)
+        if platform in {"instagram", "instagram-standalone"}:
+            settings.setdefault("post_type", "post")
+        post_type = str(content.get("type") or os.getenv("POSTIZ_POST_TYPE", "draft"))
+        if post_type not in {"draft", "schedule", "now"}:
+            raise ValueError("Postiz post type must be draft, schedule, or now")
+        date = str(content.get("date") or os.getenv("POSTIZ_PUBLISH_DATE", "") or datetime.now(timezone.utc).isoformat())
+        return {
+            "type": post_type,
+            "date": date,
+            "shortLink": bool(content.get("short_link", False)),
+            "tags": list(content.get("tags") or []),
+            "posts": [{
+                "integration": {"id": integration_id},
+                "value": [{"content": str(content.get("content") or content.get("text") or ""), "image": list(content.get("images") or [])}],
+                "settings": settings,
+            }],
+        }
+
     def publish(self, content: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:
         if context.dry_run:
             return {"id": f"dry-postiz-{context.idempotency_key or 'pending'}", "status": "planned", "dry_run": True, "content": dict(content)}
@@ -61,12 +92,13 @@ class PostizPublisherAdapter:
             raise RuntimeError("Postiz is not configured")
         if httpx is None and self._client is None:
             raise RuntimeError("httpx is required for the Postiz adapter")
-        headers = {"Authorization": f"Bearer {self.token}", **context.to_headers()}
+        authorization = f"{self.auth_scheme} {self.token}".strip() if self.auth_scheme else self.token
+        headers = {"Authorization": authorization, **context.to_headers()}
         client = self._client or httpx.Client(timeout=15.0)
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                response = client.post(f"{self.base_url}{self.path}", json=dict(content), headers=headers)
+                response = client.post(f"{self.base_url}{self.path}", json=self._payload(content), headers=headers)
                 status_code = int(getattr(response, "status_code", 200) or 200)
                 if status_code >= 500 and attempt < self.max_retries:
                     time.sleep(self.retry_backoff_s * (2 ** attempt))

@@ -12,7 +12,7 @@ def test_postiz_dry_run_is_network_free():
 
 
 def test_postiz_requires_approval_for_live_publish():
-    adapter = PostizPublisherAdapter(base_url="https://postiz.invalid", token="token")
+    adapter = PostizPublisherAdapter(base_url="https://postiz.invalid/public/v1", token="token", integration_id="integration-1")
     try:
         adapter.publish({"text": "hello"}, context=SidecarContext(dry_run=False, approval_state="pending"))
     except PermissionError:
@@ -22,13 +22,26 @@ def test_postiz_requires_approval_for_live_publish():
 
 
 def test_postiz_live_publish_requires_idempotency_key():
-    adapter = PostizPublisherAdapter(base_url="https://postiz.invalid", token="token")
+    adapter = PostizPublisherAdapter(base_url="https://postiz.invalid/public/v1", token="token", integration_id="integration-1")
     try:
         adapter.publish({"text": "hello"}, context=SidecarContext(dry_run=False, approval_state="approved"))
     except ValueError as exc:
         assert "idempotency_key" in str(exc)
     else:
         raise AssertionError("live publishing must require idempotency")
+
+
+def test_postiz_live_publish_requires_explicit_integration_id():
+    class Client:
+        def post(self, *_args, **_kwargs):
+            raise AssertionError("request should not be sent")
+    adapter = PostizPublisherAdapter(base_url="https://postiz.invalid/public/v1", token="token", client=Client())
+    try:
+        adapter.publish({"text": "hello"}, context=SidecarContext(idempotency_key="post-1", dry_run=False, approval_state="approved"))
+    except ValueError as exc:
+        assert "INTEGRATION_ID" in str(exc)
+    else:
+        raise AssertionError("live publishing must target an explicit Postiz integration")
 
 
 def test_postiz_live_publish_sends_lineage_and_idempotency_headers():
@@ -48,7 +61,7 @@ def test_postiz_live_publish_sends_lineage_and_idempotency_headers():
             return Response()
 
     client = Client()
-    adapter = PostizPublisherAdapter(base_url="https://postiz", token="secret", client=client)
+    adapter = PostizPublisherAdapter(base_url="https://postiz/public/v1", token="secret", integration_id="integration-1", client=client)
     result = adapter.publish(
         {"text": "approved content"},
         context=SidecarContext(
@@ -57,13 +70,15 @@ def test_postiz_live_publish_sends_lineage_and_idempotency_headers():
         ),
     )
     assert result["id"] == "post-1"
-    assert client.call[0] == "https://postiz/api/posts"
+    assert client.call[0] == "https://postiz/public/v1/posts"
     headers = client.call[1]["headers"]
-    assert headers["Authorization"] == "Bearer secret"
+    assert headers["Authorization"] == "secret"
     assert headers["Idempotency-Key"] == "post-key"
     assert headers["X-MarketOS-Artifact"] == "creative-2"
     assert headers["X-MarketOS-Parents"] == "bundle-2"
     assert headers["X-MarketOS-Approval"] == "approved"
+    assert client.call[1]["json"]["posts"][0]["integration"]["id"] == "integration-1"
+    assert client.call[1]["json"]["posts"][0]["settings"]["__type"] == "instagram"
 
 
 def test_postiz_publish_bundle_maps_canonical_creative_artifact():
@@ -98,7 +113,7 @@ def test_postiz_retries_transient_transport_failure(monkeypatch):
     monkeypatch.setenv("POSTIZ_MAX_RETRIES", "1")
     monkeypatch.setenv("POSTIZ_RETRY_BACKOFF_S", "0")
     client = Client()
-    result = PostizPublisherAdapter(base_url="https://postiz", token="secret", client=client).publish(
+    result = PostizPublisherAdapter(base_url="https://postiz/public/v1", token="secret", integration_id="integration-1", client=client).publish(
         {"text": "retry me"}, context=SidecarContext(idempotency_key="retry-1", dry_run=False, approval_state="approved")
     )
     assert result["id"] == "post-retried"
