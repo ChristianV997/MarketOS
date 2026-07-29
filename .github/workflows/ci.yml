@@ -78,7 +78,11 @@ jobs:
         env:
           MEDUSA_IMAGE: medusajs/medusa:v2.14.2
           MEDUSA_DATABASE_URL: postgres://validation.invalid/marketos
-        run: docker compose -f docker-compose.yml -f docker-compose.oss.example.yml config --quiet
+        run: |
+          # The base compose file deliberately uses the local .env contract.
+          # Supply safe example values for config validation; no services start.
+          cp .env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.oss.example.yml config --quiet
 
       - name: Build production image
         run: docker build --tag marketos:ci .
