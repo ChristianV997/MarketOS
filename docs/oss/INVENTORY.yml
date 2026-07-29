@@ -12,12 +12,12 @@ candidates:
     reviewed_ref: v2.14.2
   - name: saleor
     repository: https://github.com/saleor/saleor
-    license: review_required
+    license: BSD-3-Clause
     mode: benchmark
     status: deferred
     owner: commerce
     capabilities: [headless_commerce, graphql, multichannel_inventory]
-    reviewed_ref: pending-benchmark-review
+    reviewed_ref: 3.23.7
   - name: crawl4ai
     repository: https://github.com/unclecode/crawl4ai
     license: Apache-2.0-with-attribution
