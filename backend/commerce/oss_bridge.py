@@ -7,11 +7,28 @@ an empty batch when an optional service is unavailable.
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 from typing import Any, Mapping, Sequence
 
 from backend.contracts.adapters import SidecarContext
 from backend.integrations.medusa import MedusaCommerceAdapter
 from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
+
+try:
+    from prometheus_client import Counter, Histogram
+    _oss_cache_hits = Counter("marketos_oss_provider_cache_hits_total", "OSS provider cache hits", ["provider"])
+    _oss_refreshes = Counter("marketos_oss_provider_refreshes_total", "OSS provider refreshes", ["provider"])
+    _oss_failures = Counter("marketos_oss_provider_failures_total", "OSS provider failures", ["provider"])
+    _oss_refresh_duration = Histogram("marketos_oss_provider_refresh_duration_seconds", "OSS provider refresh duration", ["provider"])
+except ImportError:  # pragma: no cover
+    _oss_cache_hits = _oss_refreshes = _oss_failures = _oss_refresh_duration = None
+
+_research_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
+def clear_oss_cache() -> None:
+    _research_cache.clear()
 
 
 def _research_signal(record: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -50,10 +67,26 @@ def collect_oss_inputs(
     signals: list[dict[str, Any]] = []
     failures: dict[str, Any] = {}
     for url in urls:
+        provider_name = getattr(research, "name", "research")
+        ttl_s = max(0.0, float(os.getenv("MARKETOS_OSS_CACHE_TTL_S", "300")))
+        cached = _research_cache.get(url)
+        if cached and time.monotonic() - cached[0] < ttl_s:
+            records = cached[1]
+            if _oss_cache_hits is not None:
+                _oss_cache_hits.labels(provider=provider_name).inc()
+            signals.extend(filter(None, (_research_signal(record) for record in records)))
+            continue
+        started = time.monotonic()
         try:
             records = asyncio.run(research.discover(url, context=context))
+            _research_cache[url] = (time.monotonic(), list(records))
+            if _oss_refreshes is not None:
+                _oss_refreshes.labels(provider=provider_name).inc()
+                _oss_refresh_duration.labels(provider=provider_name).observe(time.monotonic() - started)
             signals.extend(filter(None, (_research_signal(record) for record in records)))
         except Exception as exc:
+            if _oss_failures is not None:
+                _oss_failures.labels(provider=provider_name).inc()
             failures[f"research:{url}"] = str(exc)
 
     products: dict[str, Any] = {}
@@ -66,5 +99,7 @@ def collect_oss_inputs(
                 inventory = commerce.get_inventory(tuple(products))
                 offers = {offer.product_id: offer for offer in commerce.normalize_inventory(inventory)}
         except Exception as exc:
+            if _oss_failures is not None:
+                _oss_failures.labels(provider=getattr(commerce, "name", "commerce")).inc()
             failures["commerce"] = str(exc)
     return signals, products, {"offers": offers, "failures": failures}

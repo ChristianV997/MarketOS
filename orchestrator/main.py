@@ -107,10 +107,12 @@ def _run_commerce_cycle() -> dict[str, Any]:
                 _log.warning("oss_provider_degradation failures=%s", oss_meta["failures"])
         else:
             oss_products = {}
+            oss_meta = {"offers": {}}
 
         report = run_commerce_cycle(
             signals=signal_batch or None,
             products=oss_products,
+            offers=oss_meta.get("offers", {}),
             top_k=_COMMERCE_LOOP_TOP_K,
             budget=_COMMERCE_LOOP_BUDGET,
             dry_run=not _COMMERCE_LOOP_LIVE,

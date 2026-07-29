@@ -17,7 +17,7 @@ from .feedback import FeedbackRecorder
 from .launch import LaunchExecutor
 from .loop import CommerceLoop, run_commerce_cycle
 from .scoring import OpportunityScorer
-from .oss_bridge import collect_oss_inputs
+from .oss_bridge import clear_oss_cache, collect_oss_inputs
 
 __all__ = [
     "CampaignOutcome",
@@ -33,4 +33,5 @@ __all__ = [
     "run_commerce_cycle",
     "OpportunityScorer",
     "collect_oss_inputs",
+    "clear_oss_cache",
 ]
