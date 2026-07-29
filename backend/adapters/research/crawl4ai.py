@@ -9,6 +9,7 @@ import os
 import hashlib
 import json
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -26,6 +27,7 @@ class Crawl4AIResearchAdapter:
         self.max_content_chars = max_content_chars
         self.respect_robots = respect_robots
         self.user_agent = user_agent
+        self._raw_cache: dict[tuple[str, bool], tuple[float, dict[str, Any]]] = {}
 
     def health(self) -> AdapterHealth:
         try:
@@ -132,6 +134,35 @@ class Crawl4AIResearchAdapter:
             })
         return normalized
 
+    def _raw_cache_get(self, url: str, *, dry_run: bool) -> dict[str, Any] | None:
+        cached = self._raw_cache.get((url, dry_run))
+        ttl_s = max(0.0, float(os.getenv("CRAWL4AI_RAW_CACHE_TTL_S", "900")))
+        if cached and time.monotonic() - cached[0] < ttl_s:
+            return dict(cached[1])
+        if cached:
+            self._raw_cache.pop((url, dry_run), None)
+        return None
+
+    def _raw_cache_put(self, url: str, raw: Mapping[str, Any], *, dry_run: bool) -> None:
+        max_entries = max(1, min(int(os.getenv("CRAWL4AI_RAW_CACHE_MAX_ENTRIES", "100")), 1000))
+        key = (url, dry_run)
+        self._raw_cache[key] = (time.monotonic(), dict(raw))
+        if len(self._raw_cache) > max_entries:
+            oldest = min(self._raw_cache, key=lambda item: self._raw_cache[item][0])
+            self._raw_cache.pop(oldest, None)
+
+    def _records_from_raw(self, raw: Mapping[str, Any], url: str) -> list[dict[str, Any]]:
+        extracted = raw.get("extracted_content")
+        if extracted:
+            try:
+                structured = json.loads(extracted) if isinstance(extracted, str) else extracted
+            except (TypeError, ValueError):
+                structured = None
+            normalized = self._normalized_structured_records(structured, url) if structured is not None else []
+            if normalized:
+                return normalized
+        return self._product_records_from_jsonld(raw.get("html", ""), url)
+
     async def discover(self, url: str, *, context: SidecarContext) -> list[dict[str, Any]]:
         parsed = urlparse(url)
         hostname = (parsed.hostname or "").lower()
@@ -160,20 +191,20 @@ class Crawl4AIResearchAdapter:
         except ImportError as exc:
             raise RuntimeError("Crawl4AI is not installed; install the reviewed optional OSS profile") from exc
 
+        cached_raw = self._raw_cache_get(url, dry_run=False)
+        if cached_raw is not None:
+            return self._records_from_raw(cached_raw, url)
+
         async with AsyncWebCrawler() as crawler:
             result = await crawler.arun(url=url)
-        extracted = getattr(result, "extracted_content", None)
-        if extracted:
-            try:
-                structured = json.loads(extracted) if isinstance(extracted, str) else extracted
-            except (TypeError, ValueError) as exc:
-                raise ValueError("Crawl4AI returned malformed structured extraction") from exc
-            normalized = self._normalized_structured_records(structured, url)
-            if normalized:
-                return normalized
-        jsonld_records = self._product_records_from_jsonld(getattr(result, "html", ""), url)
-        if jsonld_records:
-            return jsonld_records
+        raw = {
+            "extracted_content": getattr(result, "extracted_content", None),
+            "html": getattr(result, "html", "") or "",
+        }
+        self._raw_cache_put(url, raw, dry_run=False)
+        records = self._records_from_raw(raw, url)
+        if records:
+            return records
         # Do not turn arbitrary markdown into product evidence. The raw page
         # remains under Crawl4AI's own cache; this boundary emits only records
         # that satisfy the canonical product contract.

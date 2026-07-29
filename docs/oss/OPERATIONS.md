@@ -51,6 +51,9 @@ The adapter emits product evidence only from a validated structured extractor
 or schema.org JSON-LD `Product` object. Supplier economics require an explicit
 `unit_cost`, `wholesale_price`, or `supplier_price`; a public `price` is kept
 as a selling price and is never inferred to be supplier cost.
+Raw live pages use a bounded Crawl4AI cache (`CRAWL4AI_RAW_CACHE_*`), while
+the bridge separately caches normalized records; `MARKETOS_OSS_MAX_CONCURRENCY`
+limits concurrent external research refreshes (default `4`).
 
 Medusa and Postiz adapters expose bounded in-process webhook deduplication.
 Production webhook receivers should persist accepted event IDs in the durable

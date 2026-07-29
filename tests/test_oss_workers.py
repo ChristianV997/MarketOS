@@ -126,6 +126,19 @@ def test_crawl4ai_rejects_unnamed_structured_records():
     assert records[0]["name"] == "Travel Mug"
 
 
+def test_crawl4ai_raw_page_cache_is_separate_from_dry_run_and_reextracts_products():
+    adapter = Crawl4AIResearchAdapter()
+    url = "https://supplier.example/mug"
+    adapter._raw_cache_put(url, {
+        "html": '<script type="application/ld+json">{"@type":"Product","name":"Travel Mug","sku":"mug-1"}</script>',
+    }, dry_run=False)
+    assert adapter._raw_cache_get(url, dry_run=True) is None
+    raw = adapter._raw_cache_get(url, dry_run=False)
+    assert raw is not None
+    records = adapter._records_from_raw(raw, url)
+    assert records[0]["product_id"] == "mug-1"
+
+
 def test_crawl4ai_supplier_offers_require_an_explicit_cost_not_selling_price():
     offers = Crawl4AIResearchAdapter.normalize_supplier_offers([
         {"product_id": "mug-blue", "price": 19.95, "url": "https://supplier.example/mug"},
