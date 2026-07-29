@@ -27,7 +27,9 @@ Postiz requires a separate AGPL compliance review before commercial delivery.
 Read-only analytics may be configured independently, but live publishing is
 fail-closed until `POSTIZ_COMMERCIAL_APPROVED=true` is set by the review owner.
 Browser Use and Crawl4AI remain isolated optional workers with allowlists,
-approval gates, timeouts, and dry-run defaults.
+approval gates, timeouts, and dry-run defaults. Live Browser Use executions
+also require an explicit allowlisted URL and idempotency key; dry-run planning
+remains network-free.
 n8n is an internal-only automation sidecar for alerts, CRM synchronization,
 approval reminders, and exports. Do not embed it, white-label it, or expose
 its workflow editor as a MarketOS customer capability; keep it behind the

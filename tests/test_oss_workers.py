@@ -42,10 +42,34 @@ def test_browser_worker_rejects_non_allowlisted_domain():
 def test_browser_worker_requires_trace_for_live_runner():
     async def runner(_workflow, _payload, _context):
         return {"status": "done"}
-    worker = BrowserUseWorker(runner=runner)
+    worker = BrowserUseWorker(runner=runner, allowed_domains={"supplier.example"})
     with pytest.raises(RuntimeError, match="execution trace"):
         pytest.importorskip("asyncio").run(
-            worker.execute("supplier_research", {}, context=SidecarContext(dry_run=False, approval_state="approved"))
+            worker.execute(
+                "supplier_research", {"url": "https://supplier.example/product"},
+                context=SidecarContext(dry_run=False, approval_state="approved", idempotency_key="research-1"),
+            )
+        )
+
+
+def test_browser_worker_live_execution_requires_allowlist_url_approval_and_idempotency():
+    async def runner(_workflow, _payload, _context):
+        return {"trace_id": "trace-1"}
+
+    worker = BrowserUseWorker(runner=runner)
+    with pytest.raises(PermissionError, match="ALLOWED_DOMAINS"):
+        pytest.importorskip("asyncio").run(
+            worker.execute("supplier_research", {"url": "https://supplier.example/product"}, context=SidecarContext(dry_run=False, approval_state="approved", idempotency_key="research-1"))
+        )
+
+    worker = BrowserUseWorker(runner=runner, allowed_domains={"supplier.example"})
+    with pytest.raises(PermissionError, match="approval"):
+        pytest.importorskip("asyncio").run(
+            worker.execute("supplier_research", {"url": "https://supplier.example/product"}, context=SidecarContext(dry_run=False, idempotency_key="research-1"))
+        )
+    with pytest.raises(ValueError, match="idempotency_key"):
+        pytest.importorskip("asyncio").run(
+            worker.execute("supplier_research", {"url": "https://supplier.example/product"}, context=SidecarContext(dry_run=False, approval_state="approved"))
         )
 
 

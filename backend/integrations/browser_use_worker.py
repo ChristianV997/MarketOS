@@ -40,14 +40,19 @@ class BrowserUseWorker:
         if workflow not in self.allowed_workflows:
             raise PermissionError(f"browser workflow is not allowlisted: {workflow}")
         url = payload.get("url")
+        if not context.dry_run and not self.allowed_domains:
+            raise PermissionError("live browser workflows require BROWSER_USE_ALLOWED_DOMAINS")
+        if not context.dry_run and not url:
+            raise ValueError("live browser workflows require an explicit allowlisted URL")
         if url and self.allowed_domains:
             hostname = (urlparse(str(url)).hostname or "").lower()
             if not any(hostname == domain.strip().lower().lstrip(".") or hostname.endswith("." + domain.strip().lower().lstrip(".")) for domain in self.allowed_domains):
                 raise PermissionError(f"browser domain is not allowlisted: {hostname}")
-        if context.approval_state not in {"approved", "not_required"}:
+        if not context.dry_run and context.approval_state != "approved":
             raise PermissionError("browser workflow requires MarketOS approval")
         if context.dry_run:
             return {"workflow": workflow, "status": "planned", "dry_run": True, "payload": dict(payload)}
+        context.require_live_idempotency()
         if self.runner is None:
             raise RuntimeError("Browser Use runner is not configured")
         result = await asyncio.wait_for(self.runner(workflow, payload, context), timeout=self.timeout_s)
