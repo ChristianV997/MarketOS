@@ -39,6 +39,9 @@ jobs:
       - name: Compile check
         run: python -m compileall -q .
 
+      - name: Validate OSS inventory and runtime boundaries
+        run: python scripts/validate_oss_runtime.py --json
+
       - name: Run tests
         run: pytest tests/ -v
 
