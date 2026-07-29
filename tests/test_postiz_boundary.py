@@ -1,3 +1,5 @@
+import pytest
+
 from backend.contracts.adapters import SidecarContext
 from backend.integrations.postiz import PostizPublisherAdapter
 from backend.commerce.contracts import CreativeBundle
@@ -33,6 +35,7 @@ def test_postiz_live_publish_requires_idempotency_key():
 
 def test_postiz_live_publish_requires_explicit_integration_id(monkeypatch):
     monkeypatch.setenv("POSTIZ_COMMERCIAL_APPROVED", "true")
+    monkeypatch.setenv("POSTIZ_ALLOWED_HOSTS", "postiz.invalid")
     class Client:
         def post(self, *_args, **_kwargs):
             raise AssertionError("request should not be sent")
@@ -155,6 +158,37 @@ def test_postiz_fetches_and_normalizes_read_only_analytics():
     assert client.call[0] == "https://postiz/public/v1/analytics/post/post-1"
     assert client.call[1]["params"] == {"date": 7}
     assert result["metrics"] == {"impressions": 250, "clicks": 8, "engagements": 13, "engagement_rate": 0.052}
+
+
+def test_postiz_health_probes_authenticated_read_only_api_without_enabling_publishing(monkeypatch):
+    class Response:
+        status_code = 200
+        is_success = True
+
+    class Client:
+        def __init__(self):
+            self.call = None
+
+        def get(self, *args, **kwargs):
+            self.call = (args, kwargs)
+            return Response()
+
+    monkeypatch.setenv("POSTIZ_ALLOWED_HOSTS", "postiz")
+    monkeypatch.setenv("POSTIZ_COMMERCIAL_APPROVED", "false")
+    client = Client()
+    health = PostizPublisherAdapter(base_url="https://postiz/public/v1", token="secret", client=client).health()
+    assert health.configured is True
+    assert health.reachable is True
+    assert health.capabilities == ("analytics",)
+    assert "publishing disabled" in health.detail
+    assert client.call[0][0] == "https://postiz/public/v1/integrations"
+
+
+def test_postiz_rejects_unallowlisted_hosts_before_read_or_publish(monkeypatch):
+    monkeypatch.setenv("POSTIZ_ALLOWED_HOSTS", "api.postiz.com")
+    adapter = PostizPublisherAdapter(base_url="https://other.example/public/v1", token="secret")
+    with pytest.raises(PermissionError, match="allowlisted"):
+        adapter.fetch_post_analytics("post-1")
 
 
 def test_postiz_analytics_maps_to_canonical_campaign_observation():

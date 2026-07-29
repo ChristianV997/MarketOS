@@ -5,6 +5,7 @@ import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 from backend.contracts.adapters import AdapterHealth, ContentPublisher, SidecarContext
 from backend.integrations.webhook_dedup import WebhookEventLedger
@@ -25,7 +26,13 @@ class PostizPublisherAdapter:
         self.token = token or os.getenv("POSTIZ_API_TOKEN", "")
         self.integration_id = integration_id or os.getenv("POSTIZ_INTEGRATION_ID", "")
         self.path = os.getenv("POSTIZ_PUBLISH_PATH", "/posts")
+        self.health_path = os.getenv("POSTIZ_HEALTH_PATH", "/integrations")
         self.auth_scheme = os.getenv("POSTIZ_AUTH_SCHEME", "").strip()
+        self.allowed_hosts = frozenset(
+            host.strip().lower().lstrip(".")
+            for host in os.getenv("POSTIZ_ALLOWED_HOSTS", "api.postiz.com,postiz").split(",")
+            if host.strip()
+        )
         self.max_retries = max(0, int(os.getenv("POSTIZ_MAX_RETRIES", "2")))
         self.retry_backoff_s = max(0.0, float(os.getenv("POSTIZ_RETRY_BACKOFF_S", "0.25")))
         self._client = client
@@ -36,17 +43,44 @@ class PostizPublisherAdapter:
         """Keep AGPL-reviewed publishing disabled until an owner opts in."""
         return os.getenv("POSTIZ_COMMERCIAL_APPROVED", "false").strip().lower() in {"1", "true", "yes", "on"}
 
+    def _base_url_error(self) -> str:
+        parsed = urlparse(self.base_url)
+        hostname = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+            return "POSTIZ_BASE_URL must be an http(s) URL without embedded credentials"
+        if not self.allowed_hosts or not any(hostname == host or hostname.endswith("." + host) for host in self.allowed_hosts):
+            return "POSTIZ_BASE_URL host is not allowlisted by POSTIZ_ALLOWED_HOSTS"
+        return ""
+
     def health(self) -> AdapterHealth:
         if not self.base_url or not self.token:
             return AdapterHealth(self.name, configured=False, reachable=False, detail="POSTIZ_BASE_URL or POSTIZ_API_TOKEN is unset")
-        if not self._commercial_approval_granted():
+        error = self._base_url_error()
+        if error:
+            return AdapterHealth(self.name, configured=False, reachable=False, detail=error)
+        if httpx is None and self._client is None:
+            return AdapterHealth(self.name, configured=True, reachable=False, detail="httpx is required for Postiz health probes")
+        client = self._client or httpx.Client(timeout=2.0)
+        owns_client = self._client is None
+        try:
+            response = client.get(f"{self.base_url}{self.health_path}", headers=self._headers())
+            reachable = bool(getattr(response, "is_success", int(getattr(response, "status_code", 500)) < 400))
+            commercial = self._commercial_approval_granted()
             return AdapterHealth(
                 self.name,
-                configured=False,
-                reachable=False,
-                detail="Postiz live publishing is disabled pending explicit AGPL commercial approval",
+                configured=True,
+                reachable=reachable,
+                capabilities=("analytics", "publish") if reachable and commercial else (("analytics",) if reachable else ()),
+                detail=(
+                    "Postiz API reachable"
+                    if commercial else "Postiz analytics reachable; live publishing disabled pending explicit AGPL commercial approval"
+                ) if reachable else f"Postiz health endpoint returned {getattr(response, 'status_code', 'unknown')}",
             )
-        return AdapterHealth(self.name, configured=True, reachable=True, capabilities=("publish",))
+        except Exception as exc:
+            return AdapterHealth(self.name, configured=True, reachable=False, detail=f"Postiz health probe failed: {exc}")
+        finally:
+            if owns_client:
+                client.close()
 
     def accept_webhook(self, event_id: str) -> bool:
         return self.webhook_events.accept(self.name, event_id)
@@ -98,19 +132,27 @@ class PostizPublisherAdapter:
             raise ValueError("post_id is required")
         if not self.base_url or not self.token:
             raise RuntimeError("Postiz is not configured")
+        error = self._base_url_error()
+        if error:
+            raise PermissionError(error)
         if httpx is None and self._client is None:
             raise RuntimeError("httpx is required for the Postiz adapter")
         lookback_days = days if days is not None else int(os.getenv("POSTIZ_ANALYTICS_DAYS", "30"))
         if not 1 <= int(lookback_days) <= 365:
             raise ValueError("Postiz analytics days must be between 1 and 365")
         client = self._client or httpx.Client(timeout=15.0)
-        response = client.get(
-            f"{self.base_url}/analytics/post/{post_id}",
-            params={"date": int(lookback_days)},
-            headers=self._headers(),
-        )
-        response.raise_for_status()
-        return self.normalize_analytics(post_id, response.json())
+        owns_client = self._client is None
+        try:
+            response = client.get(
+                f"{self.base_url}/analytics/post/{post_id}",
+                params={"date": int(lookback_days)},
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return self.normalize_analytics(post_id, response.json())
+        finally:
+            if owns_client:
+                client.close()
 
     def fetch_campaign_observation(
         self,
@@ -190,28 +232,37 @@ class PostizPublisherAdapter:
             raise PermissionError("Postiz live publishing is disabled pending explicit AGPL commercial approval")
         if not self.base_url or not self.token:
             raise RuntimeError("Postiz is not configured")
+        error = self._base_url_error()
+        if error:
+            raise PermissionError(error)
         if httpx is None and self._client is None:
             raise RuntimeError("httpx is required for the Postiz adapter")
         headers = self._headers(context)
         client = self._client or httpx.Client(timeout=15.0)
+        owns_client = self._client is None
         last_error: Exception | None = None
-        for attempt in range(self.max_retries + 1):
-            try:
-                response = client.post(f"{self.base_url}{self.path}", json=self._payload(content), headers=headers)
-                status_code = int(getattr(response, "status_code", 200) or 200)
-                if status_code >= 500 and attempt < self.max_retries:
+        try:
+            for attempt in range(self.max_retries + 1):
+                response = None
+                try:
+                    response = client.post(f"{self.base_url}{self.path}", json=self._payload(content), headers=headers)
+                    status_code = int(getattr(response, "status_code", 200) or 200)
+                    if status_code >= 500 and attempt < self.max_retries:
+                        time.sleep(self.retry_backoff_s * (2 ** attempt))
+                        continue
+                    response.raise_for_status()
+                    return response.json()
+                except Exception as exc:
+                    last_error = exc
+                    status_code = int(getattr(response, "status_code", 0) or 0)
+                    retryable = status_code == 0 or status_code >= 500
+                    if not retryable or attempt >= self.max_retries:
+                        raise
                     time.sleep(self.retry_backoff_s * (2 ** attempt))
-                    continue
-                response.raise_for_status()
-                return response.json()
-            except Exception as exc:
-                last_error = exc
-                status_code = int(getattr(locals().get("response"), "status_code", 0) or 0)
-                retryable = status_code == 0 or status_code >= 500
-                if not retryable or attempt >= self.max_retries:
-                    raise
-                time.sleep(self.retry_backoff_s * (2 ** attempt))
-        raise RuntimeError("Postiz publish exhausted retries") from last_error
+            raise RuntimeError("Postiz publish exhausted retries") from last_error
+        finally:
+            if owns_client:
+                client.close()
 
 
 publisher: ContentPublisher = PostizPublisherAdapter()

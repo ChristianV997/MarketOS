@@ -31,6 +31,14 @@ unset `MEDUSA_BASE_URL`.
 Postiz requires a separate AGPL compliance review before commercial delivery.
 Read-only analytics may be configured independently, but live publishing is
 fail-closed until `POSTIZ_COMMERCIAL_APPROVED=true` is set by the review owner.
+Use `docker-compose.postiz.example.yml` only after that approval: it pins the
+official Postiz image by digest, keeps Postiz off a host port, disables
+registration, and requires durable database/JWT settings. It is an adapter
+sidecar—not vendored Postiz source. Point MarketOS at `POSTIZ_BASE_URL` and
+allowlist that host with `POSTIZ_ALLOWED_HOSTS`; the adapter probes the
+authenticated read-only integrations endpoint for health and still exposes
+only analytics until commercial publishing is approved. Run
+`python scripts/validate_postiz_compose.py` before enabling the overlay.
 Browser Use and Crawl4AI remain isolated optional workers with allowlists,
 approval gates, timeouts, and dry-run defaults. Enable Browser Use only through
 the `browser-use-worker` service in `docker-compose.oss.example.yml`: set a
