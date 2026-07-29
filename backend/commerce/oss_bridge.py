@@ -24,11 +24,32 @@ try:
 except ImportError:  # pragma: no cover
     _oss_cache_hits = _oss_refreshes = _oss_failures = _oss_refresh_duration = None
 
-_research_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_research_cache: dict[tuple[str, bool], tuple[float, list[dict[str, Any]]]] = {}
 
 
 def clear_oss_cache() -> None:
     _research_cache.clear()
+
+
+def _retryable(exc: Exception) -> bool:
+    """Classify transport failures without retrying unsafe requests."""
+    if isinstance(exc, (PermissionError, ValueError, TypeError)):
+        return False
+    return isinstance(exc, (TimeoutError, ConnectionError, OSError)) or exc.__class__.__name__ in {
+        "ConnectError", "ReadTimeout", "RemoteProtocolError", "HTTPStatusError",
+    }
+
+
+async def _discover_with_retry(research: Any, url: str, *, context: SidecarContext) -> list[dict[str, Any]]:
+    retries = max(0, min(int(os.getenv("MARKETOS_OSS_MAX_RETRIES", "2")), 5))
+    backoff_s = max(0.0, float(os.getenv("MARKETOS_OSS_RETRY_BACKOFF_S", "0.25")))
+    for attempt in range(retries + 1):
+        try:
+            return list(await research.discover(url, context=context))
+        except Exception as exc:
+            if attempt >= retries or not _retryable(exc):
+                raise
+            await asyncio.sleep(backoff_s * (2 ** attempt))
 
 
 def _research_signal(record: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -69,7 +90,8 @@ def collect_oss_inputs(
     for url in urls:
         provider_name = getattr(research, "name", "research")
         ttl_s = max(0.0, float(os.getenv("MARKETOS_OSS_CACHE_TTL_S", "300")))
-        cached = _research_cache.get(url)
+        cache_key = (url, bool(context.dry_run))
+        cached = _research_cache.get(cache_key)
         if cached and time.monotonic() - cached[0] < ttl_s:
             records = cached[1]
             if _oss_cache_hits is not None:
@@ -78,8 +100,8 @@ def collect_oss_inputs(
             continue
         started = time.monotonic()
         try:
-            records = asyncio.run(research.discover(url, context=context))
-            _research_cache[url] = (time.monotonic(), list(records))
+            records = asyncio.run(_discover_with_retry(research, url, context=context))
+            _research_cache[cache_key] = (time.monotonic(), list(records))
             if _oss_refreshes is not None:
                 _oss_refreshes.labels(provider=provider_name).inc()
                 _oss_refresh_duration.labels(provider=provider_name).observe(time.monotonic() - started)

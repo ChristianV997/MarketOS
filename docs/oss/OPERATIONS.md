@@ -16,3 +16,9 @@ unset `MEDUSA_BASE_URL`.
 Postiz requires a separate AGPL compliance review before commercial delivery.
 Browser Use and Crawl4AI remain isolated optional workers with allowlists,
 approval gates, timeouts, and dry-run defaults.
+
+Research retries are limited by `MARKETOS_OSS_MAX_RETRIES` (default `2`) and
+`MARKETOS_OSS_RETRY_BACKOFF_S` (default `0.25`). Only transport-like failures
+are retried; permission, validation, and malformed-input failures fail fast.
+Dry-run and live research caches are isolated so synthetic results cannot be
+reused as live evidence.
