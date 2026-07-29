@@ -20,6 +20,28 @@ Shadow validation workflow:
   4. Compute validation metrics per phase
   5. Compare against success bar (regression threshold, correlation minimum)
   6. Report pass/fail and flag-flip recommendation per phase
+
+Relationship to other validation modules in this package:
+  - shadow_validator_v2.py is a second, independently-calibrated framework
+    over the same event_store, written after auditing the real event
+    schemas (see its module docstring). It is the one
+    backend/monitoring/production_monitor.py reads from. This module (v1)
+    is still the one backend/validation/validate_phases.py's CLI drives —
+    both are kept because each has a live caller, not because either is
+    obsolete. Do not add a third framework; extend whichever of the two a
+    given caller already uses.
+  - backend/validation/shadow_flag_report.py is a separate, narrower
+    harness purpose-built for the seven `_LIVE` shadow flags in
+    backend/decision|learning|regime (SCORING_NORMALIZE_LIVE,
+    PRODUCT_BANDIT_LIVE, etc.) — prefer it for flag-flip go/no-go
+    decisions; this module's per-phase reports are a broader diagnostic
+    view, not a replacement for that harness.
+  - "unit_economics"/"geo_economics" here and in v2 have no corresponding
+    shadow event anywhere in the codebase (evaluation/economics.py has no
+    `_LIVE` flag — it is a straight-through calculation, not a
+    legacy/shadow split) and will therefore never accumulate events.
+    UnitEconomicsValidator's "insufficient_data" is expected, not a
+    symptom of misconfiguration.
 """
 from __future__ import annotations
 
@@ -46,6 +68,11 @@ class ValidationCriteria:
     max_regression: float = 0.05   # 5% regression = fail
     correlation_threshold: float = 0.60  # minimum Spearman ρ (where applicable)
     metric_threshold: dict[str, float] = field(default_factory=dict)
+    # The event_store "event" field this phase's shadow events are journaled
+    # under. Defaults to f"shadow_{phase}" when empty — set explicitly
+    # whenever the phase name doesn't match the emitter's actual event type
+    # (see EventStoreReader.read_shadow_events).
+    event_type: str = ""
 
 
 PHASE_CRITERIA = {
@@ -62,6 +89,11 @@ PHASE_CRITERIA = {
         min_cycles=50,
         max_regression=0.05,
         correlation_threshold=0.60,  # new scoring ρ ≥ 0.60 with realized ROAS
+        # The emitter (backend/decision/engine.py) journals this event as
+        # "shadow_decision_scoring", not "shadow_decision_normalize" —
+        # without this override read_shadow_events() silently reads zero
+        # events every time.
+        event_type="shadow_decision_scoring",
     ),
     "regime_detection": ValidationCriteria(
         phase="regime_detection",
@@ -70,7 +102,10 @@ PHASE_CRITERIA = {
         metric_threshold={
             "mae_delta": 0.0,  # new calibration MAE ≤ old (no regression)
             "detection_latency_days": 2,  # detect shift ≥2 days early
-        }
+        },
+        # The emitter (backend/execution/loop.py) journals this event as
+        # "shadow_regime_changepoint", not "shadow_regime_detection".
+        event_type="shadow_regime_changepoint",
     ),
     "adaptive_risk": ValidationCriteria(
         phase="adaptive_risk",
@@ -147,11 +182,15 @@ class EventStoreReader:
         """Filter events by type (e.g., 'shadow_capital_policy')."""
         return [e for e in events if e.get("event") == event_type]
 
-    def read_shadow_events(self, phase: str) -> list[dict]:
-        """Read all shadow events for a single phase."""
+    def read_shadow_events(self, phase: str, event_type: str = "") -> list[dict]:
+        """Read all shadow events for a single phase.
+
+        ``event_type`` overrides the default ``f"shadow_{phase}"`` guess —
+        pass it whenever the phase name doesn't match the emitter's actual
+        event type (see ValidationCriteria.event_type).
+        """
         all_events = self.read_all_events()
-        event_type = f"shadow_{phase}"
-        return self.events_by_type(all_events, event_type)
+        return self.events_by_type(all_events, event_type or f"shadow_{phase}")
 
 
 # ── phase validators ──────────────────────────────────────────────────────
@@ -746,7 +785,7 @@ def validate_all_phases(event_store_path: str | None = None) -> ValidationReport
     results: dict[str, ValidationResult] = {}
 
     for phase_name, criteria in PHASE_CRITERIA.items():
-        shadow_events = reader.read_shadow_events(phase_name)
+        shadow_events = reader.read_shadow_events(phase_name, criteria.event_type)
         validator_cls = VALIDATORS.get(phase_name)
 
         if not validator_cls:

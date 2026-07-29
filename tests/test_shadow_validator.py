@@ -42,6 +42,39 @@ class TestEventStoreReader:
         assert filtered[0]["data"]["x"] == 1
         assert filtered[1]["data"]["x"] == 3
 
+    def test_read_shadow_events_defaults_to_phase_derived_type(self, tmp_path):
+        """Without an override, the event type is guessed as f"shadow_{phase}"."""
+        store = tmp_path / "events.jsonl"
+        store.write_text(
+            '{"event": "shadow_capital_policy", "data": {}}\n'
+            '{"event": "shadow_decision_scoring", "data": {}}\n'
+        )
+        reader = EventStoreReader(str(store))
+        assert len(reader.read_shadow_events("capital_policy")) == 1
+        # "decision_normalize" would guess "shadow_decision_normalize", which
+        # doesn't exist — confirms the default-guess path is exercised.
+        assert len(reader.read_shadow_events("decision_normalize")) == 0
+
+    def test_read_shadow_events_honors_event_type_override(self, tmp_path):
+        """PHASE_CRITERIA.event_type overrides the phase-name guess for
+        phases whose emitter uses a different event name (decision_normalize
+        → shadow_decision_scoring, regime_detection → shadow_regime_changepoint)."""
+        store = tmp_path / "events.jsonl"
+        store.write_text(
+            '{"event": "shadow_decision_scoring", "data": {}}\n'
+            '{"event": "shadow_regime_changepoint", "data": {}}\n'
+        )
+        reader = EventStoreReader(str(store))
+        assert len(reader.read_shadow_events("decision_normalize", "shadow_decision_scoring")) == 1
+        assert len(reader.read_shadow_events("regime_detection", "shadow_regime_changepoint")) == 1
+
+    def test_phase_criteria_event_type_overrides_match_real_emitters(self):
+        """PHASE_CRITERIA for decision_normalize/regime_detection must carry
+        the event_type override — without it validate_all_phases() silently
+        reads zero events for these two phases forever."""
+        assert PHASE_CRITERIA["decision_normalize"].event_type == "shadow_decision_scoring"
+        assert PHASE_CRITERIA["regime_detection"].event_type == "shadow_regime_changepoint"
+
 
 class TestValidationCriteria:
     """Test validation criteria definitions."""

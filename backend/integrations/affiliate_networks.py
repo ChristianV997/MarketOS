@@ -14,11 +14,44 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
+from backend.patterns.worker import RateLimiter
+
 _log = logging.getLogger(__name__)
+
+# Module-level dry-run convention, matching every other integration in this
+# codebase (e.g. backend/integrations/tiktok_ads.py, meta_ads_client.py):
+# a single env-derived switch, not a bare constructor-argument default.
+# Previously AffiliateNetworkConnector/OrganicChannelExpander each took a
+# plain `dry_run: bool = True` constructor default with no env tie-in — a
+# caller that forgot to pass `dry_run=True` explicitly (or that flipped
+# PHASE8_AFFILIATE_SCALING_LIVE without realizing dry_run was a separate,
+# unlinked knob) could end up live by accident.
+_DRY_RUN = os.getenv("AFFILIATE_NETWORKS_DRY_RUN", "true").lower() != "false"
+
+
+def _live() -> bool:
+    """True only when real recruitment/fetch calls should actually be made."""
+    return not _DRY_RUN
+
+
+# Recruitment is real-world outreach with a commission-rate commitment —
+# rate-limit it the same way other spend/outreach-adjacent workers are
+# (e.g. orchestrator/main.py's _dropship_limiter, _organic_post_limiter).
+# One shared limiter across all networks/products, not per-key, matching
+# the codebase's existing global-gate pattern.
+_RECRUITMENT_MIN_INTERVAL_S = float(os.getenv("AFFILIATE_RECRUITMENT_MIN_INTERVAL_S", "3600"))
+_recruitment_limiter = RateLimiter(interval_s=_RECRUITMENT_MIN_INTERVAL_S)
+
+# Cap on recruitment attempts per (product_id, network) so a caller retrying
+# a failed/rejected recruitment doesn't resubmit indefinitely — mirrors
+# backend/commerce/fulfillment.py's _MAX_FULFILLMENT_ATTEMPTS pattern.
+_MAX_RECRUITMENT_ATTEMPTS = int(os.getenv("AFFILIATE_MAX_RECRUITMENT_ATTEMPTS", "3"))
+_recruitment_attempts: dict[tuple[str, str], int] = {}
 
 
 class AffiliateNetwork(str, Enum):
@@ -79,10 +112,17 @@ class AffiliateRecruitment:
 class AffiliateNetworkConnector:
     """Base connector for affiliate networks."""
 
-    def __init__(self, network: AffiliateNetwork, api_key: str | None = None, dry_run: bool = True):
+    def __init__(
+        self,
+        network: AffiliateNetwork,
+        api_key: str | None = None,
+        dry_run: bool | None = None,
+    ):
         self.network = network
         self.api_key = api_key
-        self.dry_run = dry_run
+        # None means "not explicitly specified" — defer to the module-level
+        # env-derived switch instead of silently defaulting to a bare True.
+        self.dry_run = _DRY_RUN if dry_run is None else dry_run
 
     async def fetch_performance(
         self,
@@ -119,6 +159,25 @@ class AffiliateNetworkConnector:
                 f"commission={recruitment.commission_rate_pct}%"
             )
             return True, "Dry-run recruitment submitted"
+
+        attempt_key = (recruitment.product_id, self.network.value)
+        attempts = _recruitment_attempts.get(attempt_key, 0)
+        if attempts >= _MAX_RECRUITMENT_ATTEMPTS:
+            _log.warning(
+                "affiliate_recruitment_attempts_exhausted network=%s product=%s attempts=%d",
+                self.network, recruitment.product_id, attempts,
+            )
+            return False, f"Recruitment attempt cap ({_MAX_RECRUITMENT_ATTEMPTS}) reached"
+
+        if not _recruitment_limiter.ready():
+            _log.info(
+                "affiliate_recruitment_rate_limited network=%s product=%s",
+                self.network, recruitment.product_id,
+            )
+            return False, "Recruitment rate-limited"
+
+        _recruitment_attempts[attempt_key] = attempts + 1
+        _recruitment_limiter.mark()
 
         # Real implementation would submit to API. No real network client
         # exists yet — degrade gracefully instead of raising into the live
@@ -162,8 +221,8 @@ class AffiliateNetworkConnector:
 class OrganicChannelExpander:
     """Orchestrates affiliate network recruitment and performance tracking."""
 
-    def __init__(self, dry_run: bool = True):
-        self.dry_run = dry_run
+    def __init__(self, dry_run: bool | None = None):
+        self.dry_run = _DRY_RUN if dry_run is None else dry_run
         self.connectors = {
             network: AffiliateNetworkConnector(network, dry_run=dry_run)
             for network in AffiliateNetwork

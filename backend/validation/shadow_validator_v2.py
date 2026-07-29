@@ -12,6 +12,19 @@ Maps:
   shadow_geo_economics → unit_economics validator (minimal, 27 events)
   shadow_regime_confidence_weighting → regime_confidence validator
   shadow_supplier_ranking → supplier_feedback validator
+
+Relationship to other validation modules in this package:
+  - shadow_validator.py (v1) is an earlier, class-based framework over the
+    same event_store; backend/validation/validate_phases.py's CLI drives
+    it, while backend/monitoring/production_monitor.py drives this module.
+    Both are kept because each has a live caller — see v1's module
+    docstring for the fuller cross-reference.
+  - "shadow_geo_economics" has no corresponding emitter anywhere in the
+    codebase (evaluation/economics.py has no `_LIVE` flag — unit economics
+    is a straight-through calculation, not a legacy/shadow split), so
+    validate_unit_economics will always see 0 events here; the "minimal,
+    27 events" note above refers to a one-time historical audit snapshot,
+    not steady-state behavior.
 """
 from __future__ import annotations
 
