@@ -68,6 +68,24 @@
         {"refId": "B", "expr": "sum by (source) (rate(marketos_signal_source_failures_total[15m]))", "legendFormat": "{{source}} failures/s"}
       ],
       "fieldConfig": {"defaults": {"unit": "ops", "min": 0}}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "OSS Provider Refresh Latency (p95)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "datasource": {"type": "prometheus", "uid": "marketos-prometheus"},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (provider, le) (rate(marketos_oss_provider_refresh_duration_seconds_bucket[10m])))", "legendFormat": "{{provider}}"}],
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 2}, {"color": "red", "value": 5}]}}}
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Sidecar Webhook Outcomes",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "datasource": {"type": "prometheus", "uid": "marketos-prometheus"},
+      "targets": [{"refId": "A", "expr": "sum by (source, outcome) (rate(marketos_integration_webhook_events_total[15m]))", "legendFormat": "{{source}} / {{outcome}}"}],
+      "fieldConfig": {"defaults": {"unit": "ops", "min": 0}}
     }
   ]
 }
