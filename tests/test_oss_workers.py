@@ -29,3 +29,11 @@ def test_browser_worker_dry_run_returns_plan():
     )
     assert result["status"] == "planned"
     assert result["dry_run"] is True
+
+
+def test_crawl4ai_rejects_non_allowlisted_live_domain():
+    adapter = Crawl4AIResearchAdapter(allowed_domains={"example.com"})
+    with pytest.raises(PermissionError):
+        pytest.importorskip("asyncio").run(
+            adapter.discover("https://evil.example/test", context=SidecarContext(dry_run=False))
+        )

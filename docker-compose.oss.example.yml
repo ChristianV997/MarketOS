@@ -1,0 +1,21 @@
+services:
+  medusa:
+    image: ${MEDUSA_IMAGE:?Set MEDUSA_IMAGE to a reviewed pinned Medusa image}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${MEDUSA_DATABASE_URL:?Set MEDUSA_DATABASE_URL}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9000/health >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+  api:
+    environment:
+      MEDUSA_BASE_URL: http://medusa:9000
+    depends_on:
+      medusa:
+        condition: service_healthy

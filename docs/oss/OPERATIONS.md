@@ -1,0 +1,18 @@
+# OSS sidecar operations
+
+OSS integrations are optional boundaries. They are not installed into the API
+image by default and no third-party source is vendored into MarketOS.
+
+Run `python scripts/validate_oss_inventory.py` before changing the inventory.
+Pin and test each upstream release before enabling it. Record licenses,
+transitive dependencies, smoke tests, and rollback notes in the inventory.
+
+Use `docker-compose.oss.example.yml` only after setting a reviewed pinned
+`MEDUSA_IMAGE` and database URL. Its health check gates API startup on Medusa
+readiness. Keep `MEDUSA_BASE_URL` unset for the default stack. Live orders need
+an approved context and idempotency key; rollback is to stop the overlay and
+unset `MEDUSA_BASE_URL`.
+
+Postiz requires a separate AGPL compliance review before commercial delivery.
+Browser Use and Crawl4AI remain isolated optional workers with allowlists,
+approval gates, timeouts, and dry-run defaults.

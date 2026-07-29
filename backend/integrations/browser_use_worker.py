@@ -1,6 +1,7 @@
 """Permissioned boundary for optional Browser Use workflows."""
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Awaitable, Callable, Mapping
 
 from backend.contracts.adapters import AdapterHealth, BrowserWorkflowProvider, SidecarContext
@@ -18,9 +19,11 @@ class BrowserUseWorker:
 
     name = "browser-use"
 
-    def __init__(self, runner: WorkflowRunner | None = None, *, allowed_workflows: set[str] | None = None):
+    def __init__(self, runner: WorkflowRunner | None = None, *, allowed_workflows: set[str] | None = None, timeout_s: float = 120.0, max_actions: int = 50):
         self.runner = runner
         self.allowed_workflows = allowed_workflows or {"supplier_research", "product_import_review"}
+        self.timeout_s = timeout_s
+        self.max_actions = max_actions
 
     def health(self) -> AdapterHealth:
         if self.runner is None:
@@ -36,7 +39,11 @@ class BrowserUseWorker:
             return {"workflow": workflow, "status": "planned", "dry_run": True, "payload": dict(payload)}
         if self.runner is None:
             raise RuntimeError("Browser Use runner is not configured")
-        return await self.runner(workflow, payload, context)
+        result = await asyncio.wait_for(self.runner(workflow, payload, context), timeout=self.timeout_s)
+        actions = result.get("actions") if isinstance(result, Mapping) else None
+        if isinstance(actions, list) and len(actions) > self.max_actions:
+            raise RuntimeError("browser workflow exceeded the configured action limit")
+        return result
 
 
 browser_use_worker: BrowserWorkflowProvider = BrowserUseWorker()
