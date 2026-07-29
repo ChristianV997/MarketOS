@@ -195,11 +195,32 @@ class MedusaCommerceAdapter:
         """
         return self.create_cart(order, context=context)
 
+    @staticmethod
+    def _cart_with_lineage(cart: Mapping[str, Any], context: SidecarContext) -> dict[str, Any]:
+        """Persist sidecar lineage where Medusa order webhooks can return it."""
+        body = dict(cart)
+        raw_metadata = body.get("metadata") or {}
+        if not isinstance(raw_metadata, Mapping):
+            raise ValueError("Medusa cart metadata must be a mapping")
+        metadata = dict(raw_metadata)
+        lineage = {
+            "marketos_workspace": context.workspace_id,
+            "marketos_run_id": context.run_id,
+            "marketos_artifact_id": context.artifact_id,
+            "marketos_parent_ids": list(context.parent_ids),
+        }
+        for key, value in lineage.items():
+            if value != "" and value != []:
+                metadata.setdefault(key, value)
+        body["metadata"] = metadata
+        return body
+
     def create_cart(self, cart: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:
+        body = self._cart_with_lineage(cart, context)
         if context.dry_run:
-            return {"id": f"dry-medusa-cart-{context.idempotency_key or 'pending'}", "dry_run": True, "cart": dict(cart)}
+            return {"id": f"dry-medusa-cart-{context.idempotency_key or 'pending'}", "dry_run": True, "cart": body}
         self._require_approved_mutation(context, "cart creation")
-        return self._request("POST", "/store/carts", context=context, json=dict(cart))
+        return self._request("POST", "/store/carts", context=context, json=body)
 
     def complete_cart(self, cart_id: str, *, context: SidecarContext) -> Mapping[str, Any]:
         cart_id = str(cart_id).strip()

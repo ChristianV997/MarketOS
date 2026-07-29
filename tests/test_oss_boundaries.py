@@ -30,6 +30,20 @@ def test_medusa_dry_order_never_requires_network():
     assert result["cart"]["items"][0]["product_id"] == "p1"
 
 
+def test_medusa_cart_persists_sidecar_lineage_and_preserves_campaign_metadata():
+    result = MedusaCommerceAdapter(base_url="").create_cart(
+        {"items": [], "metadata": {"marketos_campaign_id": "campaign-1", "marketos_creative_id": "creative-1"}},
+        context=SidecarContext(workspace_id="commerce", run_id="run-1", artifact_id="artifact-1", parent_ids=("signal-1",), idempotency_key="cart-1"),
+    )
+    metadata = result["cart"]["metadata"]
+    assert metadata["marketos_campaign_id"] == "campaign-1"
+    assert metadata["marketos_creative_id"] == "creative-1"
+    assert metadata["marketos_workspace"] == "commerce"
+    assert metadata["marketos_run_id"] == "run-1"
+    assert metadata["marketos_artifact_id"] == "artifact-1"
+    assert metadata["marketos_parent_ids"] == ["signal-1"]
+
+
 def test_medusa_dry_checkout_is_explicit_and_network_free():
     result = MedusaCommerceAdapter(base_url="").complete_cart(
         "cart-1", context=SidecarContext(idempotency_key="checkout-1", dry_run=True)
@@ -147,6 +161,10 @@ def test_medusa_live_order_sends_lineage_and_idempotency_headers():
     assert headers["X-MarketOS-Artifact"] == "launch-1"
     assert headers["X-MarketOS-Parents"] == "candidate-1"
     assert headers["X-MarketOS-Approval"] == "approved"
+    metadata = client.calls[0][2]["json"]["metadata"]
+    assert metadata["marketos_workspace"] == "commerce"
+    assert metadata["marketos_run_id"] == "run-1"
+    assert metadata["marketos_artifact_id"] == "launch-1"
 
 
 def test_medusa_live_order_uses_optional_bearer_token():
