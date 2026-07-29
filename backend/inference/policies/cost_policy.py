@@ -1,7 +1,7 @@
 """CostPolicy — per-token cost estimates for provider selection.
 
 Costs are in USD per token (input + output averaged).
-Local providers (ollama, airllm, vllm) are free at inference time.
+Local providers (ollama, airllm, vllm, andromeda) are free at inference time.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ _COST_TABLE: dict[str, float] = {
     "ollama/*":             0.0,
     "airllm/*":             0.0,
     "vllm/*":               0.0,
+    "andromeda/*":          0.0,
     "litellm/*":            0.0,    # cost depends on underlying provider
     "mock/*":               0.0,
 }

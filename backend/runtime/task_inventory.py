@@ -229,6 +229,15 @@ def _register_all() -> None:
         env_required="FF_PILLAR_A_INGESTION",
         cron=os.getenv("INGESTION_CRON", "0 * * * *"),
     )
+    task_registry.register(
+        "sleep_scheduler",
+        kind="scheduler",
+        description="ReplayScheduler: periodic cognitive sleep consolidation cycles",
+        module="backend.runtime.sleep.replay_scheduler",
+        interval_s=float(os.getenv("SLEEP_CYCLE_INTERVAL_S", "3600")),
+        workspace=os.getenv("SLEEP_WORKSPACE", "default"),
+        enabled=os.getenv("SLEEP_ENABLED", "1") != "0",
+    )
 
     # ── Celery tasks ──────────────────────────────────────────────────────
     # ── queues ────────────────────────────────────────────────────────────

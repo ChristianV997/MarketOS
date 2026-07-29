@@ -1,0 +1,3378 @@
+{
+  "meta": {
+    "total_signals": 160,
+    "filtered_signals": 100,
+    "hooks": 100,
+    "ads": 100,
+    "sources": [
+      "amazon",
+      "google",
+      "google_trends",
+      "linkedin",
+      "meta",
+      "tiktok",
+      "youtube"
+    ],
+    "filter_keywords": [
+      "buy",
+      "price",
+      "worth",
+      "save",
+      "make money",
+      "earn",
+      "hack",
+      "secret",
+      "tool",
+      "productivity",
+      "automation",
+      "scale",
+      "growth"
+    ]
+  },
+  "signals": [
+    {
+      "source": "tiktok",
+      "raw_text": "This $12 product changed my morning routine forever",
+      "engagement": 0.1326,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator8153/video/695804470524",
+      "external_id": "tt_258695804470524"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "POV: you found the best budget skincare that actually works",
+      "engagement": 0.11,
+      "category": "beauty",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator4490/video/803121713986",
+      "external_id": "tt_410803121713986"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Day in my life saving $500/month with these hacks",
+      "engagement": 0.0654,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator2569/video/250599415406",
+      "external_id": "tt_948250599415406"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "This one tool doubled my productivity — not clickbait",
+      "engagement": 0.0637,
+      "category": "productivity",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator9794/video/241857888132",
+      "external_id": "tt_214241857888132"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Honest review: worth every penny or total scam?",
+      "engagement": 0.3267,
+      "category": "review",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator9722/video/065405231374",
+      "external_id": "tt_480065405231374"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "How I make an extra $1,000/month from home",
+      "engagement": 0.0423,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator1706/video/668588516190",
+      "external_id": "tt_115668588516190"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "The Amazon find everyone is buying right now",
+      "engagement": 0.0821,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator2903/video/008281816071",
+      "external_id": "tt_399008281816071"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Why I switched and never looked back (price breakdown)",
+      "engagement": 0.4215,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator5600/video/488546300379",
+      "external_id": "tt_071488546300379"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Duped this $200 product for $18 and it's identical",
+      "engagement": 0.1103,
+      "category": "beauty",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator0527/video/936254055943",
+      "external_id": "tt_370936254055943"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "GRWM using products under $25 that look expensive",
+      "engagement": 0.0812,
+      "category": "beauty",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator8765/video/678336885951",
+      "external_id": "tt_962678336885951"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "My secret to getting 10x results in half the time",
+      "engagement": 1.0,
+      "category": "productivity",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator0498/video/739609042114",
+      "external_id": "tt_215739609042114"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "This free tool saves me 3 hours every single day",
+      "engagement": 0.3448,
+      "category": "productivity",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator0323/video/258722141307",
+      "external_id": "tt_465258722141307"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "The hack nobody talks about for saving money online",
+      "engagement": 0.0945,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator1490/video/475273224894",
+      "external_id": "tt_981475273224894"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "I tested every budget option — here's the winner",
+      "engagement": 0.3962,
+      "category": "review",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator0064/video/012710859607",
+      "external_id": "tt_507012710859607"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "How this one purchase paid for itself in a week",
+      "engagement": 0.1423,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator4144/video/036109631663",
+      "external_id": "tt_521036109631663"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "The real reason influencers push this product (it works)",
+      "engagement": 0.1256,
+      "category": "marketing",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator0753/video/814873759652",
+      "external_id": "tt_568814873759652"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Trying viral TikTok products so you don't have to",
+      "engagement": 0.0875,
+      "category": "review",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator6166/video/643086210370",
+      "external_id": "tt_494643086210370"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "From broke to $5k/month — the tools I used",
+      "engagement": 0.279,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator2217/video/194684986223",
+      "external_id": "tt_774194684986223"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "This app is genuinely life-changing (and free)",
+      "engagement": 0.2402,
+      "category": "productivity",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator9741/video/801866415424",
+      "external_id": "tt_522801866415424"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Every entrepreneur needs this — here's why",
+      "engagement": 0.1502,
+      "category": "business",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator2019/video/663798149677",
+      "external_id": "tt_217663798149677"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Stop wasting money on this — buy this instead",
+      "engagement": 0.2123,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator6266/video/630380504049",
+      "external_id": "tt_652630380504049"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "I compared 10 products so you don't have to",
+      "engagement": 0.3199,
+      "category": "review",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator7443/video/077728172339",
+      "external_id": "tt_125077728172339"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "The truth about this viral trend (buyer's guide)",
+      "engagement": 0.051,
+      "category": "marketing",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator9836/video/958312536747",
+      "external_id": "tt_345958312536747"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "How to get premium results on a starter budget",
+      "engagement": 0.0741,
+      "category": "beauty",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator9389/video/964828493874",
+      "external_id": "tt_998964828493874"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "This is why your ads aren't converting (fix this)",
+      "engagement": 0.2097,
+      "category": "marketing",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator6488/video/634939997934",
+      "external_id": "tt_104634939997934"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "I tried every side hustle for 30 days — results",
+      "engagement": 0.0642,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=18917358222",
+      "external_id": "yt_18917358222"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "The TRUTH about passive income (what nobody tells you)",
+      "engagement": 0.0961,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=96593004906",
+      "external_id": "yt_96593004906"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Best budget products that outperform luxury brands",
+      "engagement": 0.0139,
+      "category": "review",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=63325878217",
+      "external_id": "yt_63325878217"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "How I automated my business and 10x'd revenue",
+      "engagement": 0.0405,
+      "category": "business",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=91189399998",
+      "external_id": "yt_91189399998"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Top 10 productivity tools you need in 2025",
+      "engagement": 0.0103,
+      "category": "productivity",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=72495930474",
+      "external_id": "yt_72495930474"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Honest dropshipping results after 90 days",
+      "engagement": 0.1034,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=18092749754",
+      "external_id": "yt_18092749754"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "The only budgeting system that actually works",
+      "engagement": 0.0593,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=64387494810",
+      "external_id": "yt_64387494810"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "I spent $1,000 testing viral products — winner inside",
+      "engagement": 0.0535,
+      "category": "review",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=02595278018",
+      "external_id": "yt_02595278018"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "How to start earning online with $0 investment",
+      "engagement": 0.0173,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=29899362195",
+      "external_id": "yt_29899362195"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "The best investing strategy for beginners in 2025",
+      "engagement": 0.1873,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=68958193669",
+      "external_id": "yt_68958193669"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Why everyone is switching to this productivity app",
+      "engagement": 0.0301,
+      "category": "productivity",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=57925210325",
+      "external_id": "yt_57925210325"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "How I save $2,000/month on a regular salary",
+      "engagement": 0.0519,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=42865308699",
+      "external_id": "yt_42865308699"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "The side hustle making me $500/week passively",
+      "engagement": 0.056,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=00244813443",
+      "external_id": "yt_00244813443"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "This marketing strategy got me 10,000 customers",
+      "engagement": 0.158,
+      "category": "marketing",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=81784683266",
+      "external_id": "yt_81784683266"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Amazon FBA vs Shopify — full honest breakdown",
+      "engagement": 0.0511,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=00964667786",
+      "external_id": "yt_00964667786"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "How to make money online (no experience required)",
+      "engagement": 0.0379,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=97744657968",
+      "external_id": "yt_97744657968"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "The stock market hack that changed my portfolio",
+      "engagement": 0.0651,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=14974466606",
+      "external_id": "yt_14974466606"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Everything wrong with traditional budgeting (and fix)",
+      "engagement": 0.0576,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=08519364066",
+      "external_id": "yt_08519364066"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Review: is this $49 course actually worth it?",
+      "engagement": 0.1213,
+      "category": "review",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=71472565622",
+      "external_id": "yt_71472565622"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "The tool every freelancer needs (and it's free)",
+      "engagement": 0.0604,
+      "category": "productivity",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=10348932453",
+      "external_id": "yt_10348932453"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "How to earn $100/day from YouTube without a camera",
+      "engagement": 0.0409,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=55543750841",
+      "external_id": "yt_55543750841"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Why the rich buy assets not liabilities — explained",
+      "engagement": 0.0557,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=20605875719",
+      "external_id": "yt_20605875719"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "The secret to making viral content that sells",
+      "engagement": 0.0844,
+      "category": "marketing",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=64083074319",
+      "external_id": "yt_64083074319"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Scaling my Etsy shop from $0 to $10k/month",
+      "engagement": 0.0101,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=18090815202",
+      "external_id": "yt_18090815202"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Complete guide to affiliate marketing in 2025",
+      "engagement": 0.0669,
+      "category": "marketing",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=93179072913",
+      "external_id": "yt_93179072913"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Just hit $10k/month using this exact strategy — sharing it all",
+      "engagement": 0.1411,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=047821172429951",
+      "external_id": "fb_047821172429951"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Stop scrolling — this product literally changed my life",
+      "engagement": 0.0759,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=453942925354247",
+      "external_id": "fb_453942925354247"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The Facebook ads hack no one talks about (works in 2025)",
+      "engagement": 0.1789,
+      "category": "marketing",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=159750462055251",
+      "external_id": "fb_159750462055251"
+    },
+    {
+      "source": "meta",
+      "raw_text": "I quit my 9-5 after discovering this income stream",
+      "engagement": 0.7773,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=151340378566456",
+      "external_id": "fb_151340378566456"
+    },
+    {
+      "source": "meta",
+      "raw_text": "This one product gets 5 stars every single time",
+      "engagement": 0.7012,
+      "category": "review",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=095640742308698",
+      "external_id": "fb_095640742308698"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Moms are making $3k/month with this simple method",
+      "engagement": 0.0924,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=995396287328853",
+      "external_id": "fb_995396287328853"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The real reason your Facebook ads aren't converting",
+      "engagement": 0.1647,
+      "category": "marketing",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=256786736477666",
+      "external_id": "fb_256786736477666"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Free webinar: how I built a $50k/month business from home",
+      "engagement": 0.5347,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=693573770313910",
+      "external_id": "fb_693573770313910"
+    },
+    {
+      "source": "meta",
+      "raw_text": "This supplement changed my energy levels in 3 days",
+      "engagement": 0.1623,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=545667663420393",
+      "external_id": "fb_545667663420393"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The budget hack that helped me save $10k this year",
+      "engagement": 0.0886,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=614892806752517",
+      "external_id": "fb_614892806752517"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Everyone in our group is buying this — here's why",
+      "engagement": 0.1317,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=223795808778572",
+      "external_id": "fb_223795808778572"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Warning: don't buy this product before reading this",
+      "engagement": 0.1268,
+      "category": "review",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=799735518583765",
+      "external_id": "fb_799735518583765"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The tool I use to automate my entire business",
+      "engagement": 0.3181,
+      "category": "productivity",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=602312688035932",
+      "external_id": "fb_602312688035932"
+    },
+    {
+      "source": "meta",
+      "raw_text": "How I generated 500 leads for under $100",
+      "engagement": 0.1771,
+      "category": "marketing",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=177510084952446",
+      "external_id": "fb_177510084952446"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The truth about this trending wellness product",
+      "engagement": 0.9681,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=605327766086373",
+      "external_id": "fb_605327766086373"
+    },
+    {
+      "source": "meta",
+      "raw_text": "This is hands-down the best value purchase of 2025",
+      "engagement": 0.1097,
+      "category": "review",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=357980254950788",
+      "external_id": "fb_357980254950788"
+    },
+    {
+      "source": "meta",
+      "raw_text": "How our community saved $50k collectively this month",
+      "engagement": 0.1497,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=138703030983962",
+      "external_id": "fb_138703030983962"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The influencer marketing strategy that actually works",
+      "engagement": 0.165,
+      "category": "marketing",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=546109772980964",
+      "external_id": "fb_546109772980964"
+    },
+    {
+      "source": "meta",
+      "raw_text": "From side hustle to full-time income — my story",
+      "engagement": 0.5222,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=655233014947244",
+      "external_id": "fb_655233014947244"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The ad creative formula that generates 8x ROAS",
+      "engagement": 0.1308,
+      "category": "marketing",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=005579200222421",
+      "external_id": "fb_005579200222421"
+    },
+    {
+      "source": "meta",
+      "raw_text": "This free resource is worth thousands (grab it now)",
+      "engagement": 0.2046,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=650405747910353",
+      "external_id": "fb_650405747910353"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Why smart buyers always choose this over the alternative",
+      "engagement": 1.0,
+      "category": "review",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=224781932395673",
+      "external_id": "fb_224781932395673"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The scaling strategy that took us from 1k to 100k",
+      "engagement": 0.1019,
+      "category": "business",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=527418512056302",
+      "external_id": "fb_527418512056302"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Real results: members share their wins this week",
+      "engagement": 0.4598,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=121061420855271",
+      "external_id": "fb_121061420855271"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The product everyone is gifting this season",
+      "engagement": 0.0957,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=164137573327271",
+      "external_id": "fb_164137573327271"
+    },
+    {
+      "source": "google",
+      "raw_text": "best productivity app 2025 review",
+      "engagement": 0.356,
+      "category": "productivity",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+productivity+app+2025+review",
+      "external_id": "goog_228509279377"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to make money online fast legitimate",
+      "engagement": 0.196,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+make+money+online+fast+legitimate",
+      "external_id": "goog_311537977328"
+    },
+    {
+      "source": "google",
+      "raw_text": "buy cheap vs expensive — which is worth it",
+      "engagement": 0.2104,
+      "category": "review",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=buy+cheap+vs+expensive+—+which+is+worth+it",
+      "external_id": "goog_173529800689"
+    },
+    {
+      "source": "google",
+      "raw_text": "top rated weight loss supplement that works",
+      "engagement": 0.3106,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=top+rated+weight+loss+supplement+that+works",
+      "external_id": "goog_746752861817"
+    },
+    {
+      "source": "google",
+      "raw_text": "best budget laptop for working from home",
+      "engagement": 0.23,
+      "category": "review",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+budget+laptop+for+working+from+home",
+      "external_id": "goog_164403441743"
+    },
+    {
+      "source": "google",
+      "raw_text": "earn passive income while you sleep strategies",
+      "engagement": 0.363,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=earn+passive+income+while+you+sleep+strategies",
+      "external_id": "goog_376501787431"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to save money on groceries every month",
+      "engagement": 0.2002,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+save+money+on+groceries+every+month",
+      "external_id": "goog_813596659487"
+    },
+    {
+      "source": "google",
+      "raw_text": "best investment for beginners low risk 2025",
+      "engagement": 0.2382,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+investment+for+beginners+low+risk+2025",
+      "external_id": "goog_368191524361"
+    },
+    {
+      "source": "google",
+      "raw_text": "work from home jobs that pay well no experience",
+      "engagement": 0.363,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=work+from+home+jobs+that+pay+well+no+experience",
+      "external_id": "goog_249123290863"
+    },
+    {
+      "source": "google",
+      "raw_text": "best ecommerce platform to start selling online",
+      "engagement": 0.363,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+ecommerce+platform+to+start+selling+online",
+      "external_id": "goog_095657627414"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to grow Instagram followers organically fast",
+      "engagement": 0.1018,
+      "category": "marketing",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+grow+Instagram+followers+organically+fast",
+      "external_id": "goog_196805097999"
+    },
+    {
+      "source": "google",
+      "raw_text": "best email marketing tool for small business",
+      "engagement": 0.0394,
+      "category": "marketing",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+email+marketing+tool+for+small+business",
+      "external_id": "goog_374134115185"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to start dropshipping step by step guide",
+      "engagement": 0.0924,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+start+dropshipping+step+by+step+guide",
+      "external_id": "goog_641424649645"
+    },
+    {
+      "source": "google",
+      "raw_text": "best CRM software for small business affordable",
+      "engagement": 0.17,
+      "category": "productivity",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+CRM+software+for+small+business+affordable",
+      "external_id": "goog_586983239270"
+    },
+    {
+      "source": "google",
+      "raw_text": "top rated skincare routine for beginners budget",
+      "engagement": 0.129,
+      "category": "beauty",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=top+rated+skincare+routine+for+beginners+budget",
+      "external_id": "goog_322551416827"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to start affiliate marketing with no money",
+      "engagement": 0.328,
+      "category": "marketing",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+start+affiliate+marketing+with+no+money",
+      "external_id": "goog_907667696067"
+    },
+    {
+      "source": "google",
+      "raw_text": "best project management tool for remote teams",
+      "engagement": 0.335,
+      "category": "productivity",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+project+management+tool+for+remote+teams",
+      "external_id": "goog_679223584213"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to automate social media posting free",
+      "engagement": 0.2832,
+      "category": "marketing",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+automate+social+media+posting+free",
+      "external_id": "goog_687642293548"
+    },
+    {
+      "source": "google",
+      "raw_text": "best online course platform to sell courses",
+      "engagement": 0.2064,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+online+course+platform+to+sell+courses",
+      "external_id": "goog_277363107740"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to get more clients as a freelancer fast",
+      "engagement": 0.1736,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+get+more+clients+as+a+freelancer+fast",
+      "external_id": "goog_425493008715"
+    },
+    {
+      "source": "google",
+      "raw_text": "earn money from home without investment legit",
+      "engagement": 0.2146,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=earn+money+from+home+without+investment+legit",
+      "external_id": "goog_041639791866"
+    },
+    {
+      "source": "google",
+      "raw_text": "best financial planning app for millennials",
+      "engagement": 0.217,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+financial+planning+app+for+millennials",
+      "external_id": "goog_776831692362"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to scale a business without hiring",
+      "engagement": 0.15,
+      "category": "business",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+scale+a+business+without+hiring",
+      "external_id": "goog_501703938410"
+    },
+    {
+      "source": "google",
+      "raw_text": "best AI tools for entrepreneurs in 2025",
+      "engagement": 0.1802,
+      "category": "productivity",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+AI+tools+for+entrepreneurs+in+2025",
+      "external_id": "goog_581509617176"
+    },
+    {
+      "source": "google",
+      "raw_text": "top conversion rate optimization strategies",
+      "engagement": 0.2474,
+      "category": "marketing",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=top+conversion+rate+optimization+strategies",
+      "external_id": "goog_018110147979"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Worth every penny — this tool saved me $200 in one month",
+      "engagement": 0.6575,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B864319153",
+      "external_id": "amz_B864319153"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Best buy of 2025: this productivity tool has 47,000 5-star reviews",
+      "engagement": 0.5046,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B779899461",
+      "external_id": "amz_B779899461"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "The price is insane — this standing desk earns back productivity daily",
+      "engagement": 0.7585,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B071223751",
+      "external_id": "amz_B071223751"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Save $150/month with this air purifier — best buy in the category",
+      "engagement": 0.4516,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B745028165",
+      "external_id": "amz_B745028165"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "This $18 resistance band set earns its worth vs a $200 gym membership",
+      "engagement": 0.4877,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B882328467",
+      "external_id": "amz_B882328467"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Amazon's best-seller notebook — worth buying 10 at a time",
+      "engagement": 0.8492,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B440943723",
+      "external_id": "amz_B440943723"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Growth hack: this posture corrector scales your work hours pain-free",
+      "engagement": 0.821,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B082155501",
+      "external_id": "amz_B082155501"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "How to save $111 monthly — forget the $600 Vitamix buy this $89 blender",
+      "engagement": 0.8511,
+      "category": "review",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B177515106",
+      "external_id": "amz_B177515106"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "The ergonomic tool worth every cent — eliminated my wrist pain",
+      "engagement": 0.3661,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B458945012",
+      "external_id": "amz_B458945012"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Productivity growth: this under-desk bike earns its price tag in 2 weeks",
+      "engagement": 0.5347,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B944540772",
+      "external_id": "amz_B944540772"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Save $80/month — reusable produce bags worth every penny",
+      "engagement": 0.7045,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B971950745",
+      "external_id": "amz_B971950745"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "This $29 tool makes videos look professional — price-to-value unmatched",
+      "engagement": 0.8251,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B006205309",
+      "external_id": "amz_B006205309"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Scale your desk setup — the cable management tool everyone needs to buy",
+      "engagement": 0.7684,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B446986140",
+      "external_id": "amz_B446986140"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Best meal prep tool for the price — worth every cent, 5 years running",
+      "engagement": 0.4418,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B703906580",
+      "external_id": "amz_B703906580"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Productivity wins: blue light glasses worth buying at this price point",
+      "engagement": 0.7341,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B262885909",
+      "external_id": "amz_B262885909"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Worth the hype — Instant Pot is the best buy for price-conscious cooks",
+      "engagement": 0.4856,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B490971555",
+      "external_id": "amz_B490971555"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Save on therapy — this $15 book earns 4.8 stars and pays back 10x",
+      "engagement": 0.5584,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B526549542",
+      "external_id": "amz_B526549542"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Earn better sleep: this cooling sleep mask worth the premium price",
+      "engagement": 0.4479,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B973160085",
+      "external_id": "amz_B973160085"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Scale your energy: this wireless charger tool earns 3x faster results",
+      "engagement": 0.5788,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B983670784",
+      "external_id": "amz_B983670784"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Productivity essential: foam roller worth buying — PTs earn from referrals",
+      "engagement": 0.7454,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B819606039",
+      "external_id": "amz_B819606039"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best AI productivity tools to scale your business 2025",
+      "engagement": 0.546,
+      "category": "productivity",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20AI%20productivity%20tools%20to%20scale%20your%20business%202025",
+      "external_id": "gt_562530191177"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to make money with automation and ChatGPT",
+      "engagement": 0.7648,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20make%20money%20with%20automation%20and%20ChatGPT",
+      "external_id": "gt_289634869838"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "passive income growth strategies that actually earn",
+      "engagement": 0.6252,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=passive%20income%20growth%20strategies%20that%20actually%20earn",
+      "external_id": "gt_831901394793"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best budgeting tool to save money for millennials",
+      "engagement": 0.3676,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20budgeting%20tool%20to%20save%20money%20for%20millennials",
+      "external_id": "gt_328866335543"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to scale a dropshipping business in 2025",
+      "engagement": 0.7376,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20scale%20a%20dropshipping%20business%20in%202025",
+      "external_id": "gt_860767772404"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "side hustle growth hacks for extra income",
+      "engagement": 0.5872,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=side%20hustle%20growth%20hacks%20for%20extra%20income",
+      "external_id": "gt_239444899018"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best credit card tool for rewards — worth the price",
+      "engagement": 0.5632,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20credit%20card%20tool%20for%20rewards%20—%20worth%20the%20price",
+      "external_id": "gt_053424559834"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to earn from real estate with no money hack",
+      "engagement": 0.5448,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20earn%20from%20real%20estate%20with%20no%20money%20hack",
+      "external_id": "gt_916554555670"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "print on demand — worth it to scale your income",
+      "engagement": 0.4396,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=print%20on%20demand%20—%20worth%20it%20to%20scale%20your%20income",
+      "external_id": "gt_744016872683"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best productivity system and automation tools for entrepreneurs",
+      "engagement": 0.5808,
+      "category": "productivity",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20productivity%20system%20and%20automation%20tools%20for%20entrepreneurs",
+      "external_id": "gt_559979085434"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to get free stuff and save money on Amazon",
+      "engagement": 0.6488,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20get%20free%20stuff%20and%20save%20money%20on%20Amazon",
+      "external_id": "gt_020875797608"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "viral marketing growth strategies that earn results",
+      "engagement": 0.3388,
+      "category": "marketing",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=viral%20marketing%20growth%20strategies%20that%20earn%20results",
+      "external_id": "gt_775551254913"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best online courses worth buying to make money",
+      "engagement": 0.4588,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20online%20courses%20worth%20buying%20to%20make%20money",
+      "external_id": "gt_540904565457"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to scale a business on social media with automation",
+      "engagement": 0.3044,
+      "category": "marketing",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20scale%20a%20business%20on%20social%20media%20with%20automation",
+      "external_id": "gt_155730847635"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best affiliate programs worth the price — high ticket earn",
+      "engagement": 0.3388,
+      "category": "marketing",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20affiliate%20programs%20worth%20the%20price%20—%20high%20ticket%20earn",
+      "external_id": "gt_510465166193"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to automate your business and scale growth in 2025",
+      "engagement": 0.3348,
+      "category": "productivity",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20automate%20your%20business%20and%20scale%20growth%20in%202025",
+      "external_id": "gt_534771277799"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "remote work productivity tools everyone needs to buy",
+      "engagement": 0.4296,
+      "category": "productivity",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=remote%20work%20productivity%20tools%20everyone%20needs%20to%20buy",
+      "external_id": "gt_924902301088"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best way to save money and growth-hack subscriptions",
+      "engagement": 0.5672,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20way%20to%20save%20money%20and%20growth-hack%20subscriptions",
+      "external_id": "gt_830566064220"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to sell on Amazon FBA profitably — earn at scale",
+      "engagement": 0.4844,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20sell%20on%20Amazon%20FBA%20profitably%20—%20earn%20at%20scale",
+      "external_id": "gt_714788488999"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "trending products worth selling online for growth 2025",
+      "engagement": 0.4652,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=trending%20products%20worth%20selling%20online%20for%20growth%202025",
+      "external_id": "gt_364941241217"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "We scaled growth from $0 to $1M ARR using automation — full playbook",
+      "engagement": 0.3996,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:618679480912090327/",
+      "external_id": "li_618679480912090327"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The cold email tool that earns 40% reply rates — worth the price",
+      "engagement": 0.3419,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:812157393182689172/",
+      "external_id": "li_812157393182689172"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Automation is the secret productivity hack of the year — scale faster",
+      "engagement": 0.3179,
+      "category": "productivity",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:507898978958445019/",
+      "external_id": "li_507898978958445019"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "How we cut CAC 60% — the growth hack that earned us 10x returns",
+      "engagement": 0.3404,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:759496704840778196/",
+      "external_id": "li_759496704840778196"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The hiring tool every founder needs — worth the price to scale faster",
+      "engagement": 0.3716,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:234508261213359121/",
+      "external_id": "li_234508261213359121"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "LinkedIn ads are the best buy right now — earn 5x ROAS at this price",
+      "engagement": 0.1821,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:359754971165192025/",
+      "external_id": "li_359754971165192025"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Our B2B productivity tool earns 11% conversion — full scale breakdown",
+      "engagement": 0.537,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:996175006018502376/",
+      "external_id": "li_996175006018502376"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The SaaS pricing hack that earns and scales revenue 3x",
+      "engagement": 0.4166,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:174260494844550590/",
+      "external_id": "li_174260494844550590"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Why founders waste budget — the secret to growth channel automation",
+      "engagement": 0.2852,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:610407428379056053/",
+      "external_id": "li_610407428379056053"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The only sales tool worth buying in 2025 — copy this script to earn",
+      "engagement": 0.3635,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:724812144146010097/",
+      "external_id": "li_724812144146010097"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "We fired our agency to save money and scale in-house — best buy decision",
+      "engagement": 0.2158,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:079288119485233095/",
+      "external_id": "li_079288119485233095"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "How to scale a personal brand that earns leads on automation",
+      "engagement": 0.1355,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:850169722861428142/",
+      "external_id": "li_850169722861428142"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The content tool and growth strategy that earned us 50k followers",
+      "engagement": 0.3092,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:363431298604916513/",
+      "external_id": "li_363431298604916513"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Secret to scaling a remote team — worth every productivity investment",
+      "engagement": 0.3081,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:540744057113714039/",
+      "external_id": "li_540744057113714039"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Our retention tool earned 95% growth — the secret product change",
+      "engagement": 0.5359,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:031965560092595705/",
+      "external_id": "li_031965560092595705"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "B2B founders: the distribution hack worth your time to scale",
+      "engagement": 0.2967,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:779569779363161386/",
+      "external_id": "li_779569779363161386"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The outbound automation tool that earns 30 sales calls per month",
+      "engagement": 0.3435,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:385634567040228690/",
+      "external_id": "li_385634567040228690"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "How I scaled consulting revenue 4x — the earn-more-save-time hack",
+      "engagement": 0.1983,
+      "category": "finance",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:651415803856926446/",
+      "external_id": "li_651415803856926446"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The partnership tool that eliminates cold outreach — worth the price",
+      "engagement": 0.3228,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:858745259821121481/",
+      "external_id": "li_858745259821121481"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Why product-led growth and automation wins in every category",
+      "engagement": 0.6117,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:335414366204993494/",
+      "external_id": "li_335414366204993494"
+    }
+  ],
+  "filtered": [
+    {
+      "source": "tiktok",
+      "raw_text": "My secret to getting 10x results in half the time",
+      "engagement": 1.0,
+      "category": "productivity",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator0498/video/739609042114",
+      "external_id": "tt_215739609042114"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Why smart buyers always choose this over the alternative",
+      "engagement": 1.0,
+      "category": "review",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=224781932395673",
+      "external_id": "fb_224781932395673"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "How to save $111 monthly — forget the $600 Vitamix buy this $89 blender",
+      "engagement": 0.8511,
+      "category": "review",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B177515106",
+      "external_id": "amz_B177515106"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Amazon's best-seller notebook — worth buying 10 at a time",
+      "engagement": 0.8492,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B440943723",
+      "external_id": "amz_B440943723"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "This $29 tool makes videos look professional — price-to-value unmatched",
+      "engagement": 0.8251,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B006205309",
+      "external_id": "amz_B006205309"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Growth hack: this posture corrector scales your work hours pain-free",
+      "engagement": 0.821,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B082155501",
+      "external_id": "amz_B082155501"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Scale your desk setup — the cable management tool everyone needs to buy",
+      "engagement": 0.7684,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B446986140",
+      "external_id": "amz_B446986140"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to make money with automation and ChatGPT",
+      "engagement": 0.7648,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20make%20money%20with%20automation%20and%20ChatGPT",
+      "external_id": "gt_289634869838"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "The price is insane — this standing desk earns back productivity daily",
+      "engagement": 0.7585,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B071223751",
+      "external_id": "amz_B071223751"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Productivity essential: foam roller worth buying — PTs earn from referrals",
+      "engagement": 0.7454,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B819606039",
+      "external_id": "amz_B819606039"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to scale a dropshipping business in 2025",
+      "engagement": 0.7376,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20scale%20a%20dropshipping%20business%20in%202025",
+      "external_id": "gt_860767772404"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Productivity wins: blue light glasses worth buying at this price point",
+      "engagement": 0.7341,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B262885909",
+      "external_id": "amz_B262885909"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Save $80/month — reusable produce bags worth every penny",
+      "engagement": 0.7045,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B971950745",
+      "external_id": "amz_B971950745"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Worth every penny — this tool saved me $200 in one month",
+      "engagement": 0.6575,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B864319153",
+      "external_id": "amz_B864319153"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to get free stuff and save money on Amazon",
+      "engagement": 0.6488,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20get%20free%20stuff%20and%20save%20money%20on%20Amazon",
+      "external_id": "gt_020875797608"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "passive income growth strategies that actually earn",
+      "engagement": 0.6252,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=passive%20income%20growth%20strategies%20that%20actually%20earn",
+      "external_id": "gt_831901394793"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Why product-led growth and automation wins in every category",
+      "engagement": 0.6117,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:335414366204993494/",
+      "external_id": "li_335414366204993494"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "side hustle growth hacks for extra income",
+      "engagement": 0.5872,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=side%20hustle%20growth%20hacks%20for%20extra%20income",
+      "external_id": "gt_239444899018"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best productivity system and automation tools for entrepreneurs",
+      "engagement": 0.5808,
+      "category": "productivity",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20productivity%20system%20and%20automation%20tools%20for%20entrepreneurs",
+      "external_id": "gt_559979085434"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Scale your energy: this wireless charger tool earns 3x faster results",
+      "engagement": 0.5788,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B983670784",
+      "external_id": "amz_B983670784"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best way to save money and growth-hack subscriptions",
+      "engagement": 0.5672,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20way%20to%20save%20money%20and%20growth-hack%20subscriptions",
+      "external_id": "gt_830566064220"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best credit card tool for rewards — worth the price",
+      "engagement": 0.5632,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20credit%20card%20tool%20for%20rewards%20—%20worth%20the%20price",
+      "external_id": "gt_053424559834"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Save on therapy — this $15 book earns 4.8 stars and pays back 10x",
+      "engagement": 0.5584,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B526549542",
+      "external_id": "amz_B526549542"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best AI productivity tools to scale your business 2025",
+      "engagement": 0.546,
+      "category": "productivity",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20AI%20productivity%20tools%20to%20scale%20your%20business%202025",
+      "external_id": "gt_562530191177"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to earn from real estate with no money hack",
+      "engagement": 0.5448,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20earn%20from%20real%20estate%20with%20no%20money%20hack",
+      "external_id": "gt_916554555670"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Our B2B productivity tool earns 11% conversion — full scale breakdown",
+      "engagement": 0.537,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:996175006018502376/",
+      "external_id": "li_996175006018502376"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Our retention tool earned 95% growth — the secret product change",
+      "engagement": 0.5359,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:031965560092595705/",
+      "external_id": "li_031965560092595705"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Productivity growth: this under-desk bike earns its price tag in 2 weeks",
+      "engagement": 0.5347,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B944540772",
+      "external_id": "amz_B944540772"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Best buy of 2025: this productivity tool has 47,000 5-star reviews",
+      "engagement": 0.5046,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B779899461",
+      "external_id": "amz_B779899461"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "This $18 resistance band set earns its worth vs a $200 gym membership",
+      "engagement": 0.4877,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B882328467",
+      "external_id": "amz_B882328467"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Worth the hype — Instant Pot is the best buy for price-conscious cooks",
+      "engagement": 0.4856,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B490971555",
+      "external_id": "amz_B490971555"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to sell on Amazon FBA profitably — earn at scale",
+      "engagement": 0.4844,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20sell%20on%20Amazon%20FBA%20profitably%20—%20earn%20at%20scale",
+      "external_id": "gt_714788488999"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "trending products worth selling online for growth 2025",
+      "engagement": 0.4652,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=trending%20products%20worth%20selling%20online%20for%20growth%202025",
+      "external_id": "gt_364941241217"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best online courses worth buying to make money",
+      "engagement": 0.4588,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20online%20courses%20worth%20buying%20to%20make%20money",
+      "external_id": "gt_540904565457"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Save $150/month with this air purifier — best buy in the category",
+      "engagement": 0.4516,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B745028165",
+      "external_id": "amz_B745028165"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Earn better sleep: this cooling sleep mask worth the premium price",
+      "engagement": 0.4479,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B973160085",
+      "external_id": "amz_B973160085"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "Best meal prep tool for the price — worth every cent, 5 years running",
+      "engagement": 0.4418,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B703906580",
+      "external_id": "amz_B703906580"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "print on demand — worth it to scale your income",
+      "engagement": 0.4396,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=print%20on%20demand%20—%20worth%20it%20to%20scale%20your%20income",
+      "external_id": "gt_744016872683"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "remote work productivity tools everyone needs to buy",
+      "engagement": 0.4296,
+      "category": "productivity",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=remote%20work%20productivity%20tools%20everyone%20needs%20to%20buy",
+      "external_id": "gt_924902301088"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Why I switched and never looked back (price breakdown)",
+      "engagement": 0.4215,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator5600/video/488546300379",
+      "external_id": "tt_071488546300379"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The SaaS pricing hack that earns and scales revenue 3x",
+      "engagement": 0.4166,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:174260494844550590/",
+      "external_id": "li_174260494844550590"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "We scaled growth from $0 to $1M ARR using automation — full playbook",
+      "engagement": 0.3996,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:618679480912090327/",
+      "external_id": "li_618679480912090327"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The hiring tool every founder needs — worth the price to scale faster",
+      "engagement": 0.3716,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:234508261213359121/",
+      "external_id": "li_234508261213359121"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best budgeting tool to save money for millennials",
+      "engagement": 0.3676,
+      "category": "finance",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20budgeting%20tool%20to%20save%20money%20for%20millennials",
+      "external_id": "gt_328866335543"
+    },
+    {
+      "source": "amazon",
+      "raw_text": "The ergonomic tool worth every cent — eliminated my wrist pain",
+      "engagement": 0.3661,
+      "category": "productivity",
+      "timestamp": "2025-05-01T08:00:00+00:00",
+      "url": "https://www.amazon.com/dp/B458945012",
+      "external_id": "amz_B458945012"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The only sales tool worth buying in 2025 — copy this script to earn",
+      "engagement": 0.3635,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:724812144146010097/",
+      "external_id": "li_724812144146010097"
+    },
+    {
+      "source": "google",
+      "raw_text": "earn passive income while you sleep strategies",
+      "engagement": 0.363,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=earn+passive+income+while+you+sleep+strategies",
+      "external_id": "goog_376501787431"
+    },
+    {
+      "source": "google",
+      "raw_text": "best productivity app 2025 review",
+      "engagement": 0.356,
+      "category": "productivity",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+productivity+app+2025+review",
+      "external_id": "goog_228509279377"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "This free tool saves me 3 hours every single day",
+      "engagement": 0.3448,
+      "category": "productivity",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator0323/video/258722141307",
+      "external_id": "tt_465258722141307"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The outbound automation tool that earns 30 sales calls per month",
+      "engagement": 0.3435,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:385634567040228690/",
+      "external_id": "li_385634567040228690"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The cold email tool that earns 40% reply rates — worth the price",
+      "engagement": 0.3419,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:812157393182689172/",
+      "external_id": "li_812157393182689172"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "How we cut CAC 60% — the growth hack that earned us 10x returns",
+      "engagement": 0.3404,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:759496704840778196/",
+      "external_id": "li_759496704840778196"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "viral marketing growth strategies that earn results",
+      "engagement": 0.3388,
+      "category": "marketing",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=viral%20marketing%20growth%20strategies%20that%20earn%20results",
+      "external_id": "gt_775551254913"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "best affiliate programs worth the price — high ticket earn",
+      "engagement": 0.3388,
+      "category": "marketing",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=best%20affiliate%20programs%20worth%20the%20price%20—%20high%20ticket%20earn",
+      "external_id": "gt_510465166193"
+    },
+    {
+      "source": "google",
+      "raw_text": "best project management tool for remote teams",
+      "engagement": 0.335,
+      "category": "productivity",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+project+management+tool+for+remote+teams",
+      "external_id": "goog_679223584213"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to automate your business and scale growth in 2025",
+      "engagement": 0.3348,
+      "category": "productivity",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20automate%20your%20business%20and%20scale%20growth%20in%202025",
+      "external_id": "gt_534771277799"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Honest review: worth every penny or total scam?",
+      "engagement": 0.3267,
+      "category": "review",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator9722/video/065405231374",
+      "external_id": "tt_480065405231374"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The partnership tool that eliminates cold outreach — worth the price",
+      "engagement": 0.3228,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:858745259821121481/",
+      "external_id": "li_858745259821121481"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The tool I use to automate my entire business",
+      "engagement": 0.3181,
+      "category": "productivity",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=602312688035932",
+      "external_id": "fb_602312688035932"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Automation is the secret productivity hack of the year — scale faster",
+      "engagement": 0.3179,
+      "category": "productivity",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:507898978958445019/",
+      "external_id": "li_507898978958445019"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "The content tool and growth strategy that earned us 50k followers",
+      "engagement": 0.3092,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:363431298604916513/",
+      "external_id": "li_363431298604916513"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Secret to scaling a remote team — worth every productivity investment",
+      "engagement": 0.3081,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:540744057113714039/",
+      "external_id": "li_540744057113714039"
+    },
+    {
+      "source": "google_trends",
+      "raw_text": "how to scale a business on social media with automation",
+      "engagement": 0.3044,
+      "category": "marketing",
+      "timestamp": "2025-05-01T07:00:00+00:00",
+      "url": "https://trends.google.com/trends/explore?q=how%20to%20scale%20a%20business%20on%20social%20media%20with%20automation",
+      "external_id": "gt_155730847635"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "B2B founders: the distribution hack worth your time to scale",
+      "engagement": 0.2967,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:779569779363161386/",
+      "external_id": "li_779569779363161386"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "Why founders waste budget — the secret to growth channel automation",
+      "engagement": 0.2852,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:610407428379056053/",
+      "external_id": "li_610407428379056053"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "From broke to $5k/month — the tools I used",
+      "engagement": 0.279,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator2217/video/194684986223",
+      "external_id": "tt_774194684986223"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "We fired our agency to save money and scale in-house — best buy decision",
+      "engagement": 0.2158,
+      "category": "business",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:079288119485233095/",
+      "external_id": "li_079288119485233095"
+    },
+    {
+      "source": "google",
+      "raw_text": "earn money from home without investment legit",
+      "engagement": 0.2146,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=earn+money+from+home+without+investment+legit",
+      "external_id": "goog_041639791866"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Stop wasting money on this — buy this instead",
+      "engagement": 0.2123,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator6266/video/630380504049",
+      "external_id": "tt_652630380504049"
+    },
+    {
+      "source": "google",
+      "raw_text": "buy cheap vs expensive — which is worth it",
+      "engagement": 0.2104,
+      "category": "review",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=buy+cheap+vs+expensive+—+which+is+worth+it",
+      "external_id": "goog_173529800689"
+    },
+    {
+      "source": "meta",
+      "raw_text": "This free resource is worth thousands (grab it now)",
+      "engagement": 0.2046,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=650405747910353",
+      "external_id": "fb_650405747910353"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to save money on groceries every month",
+      "engagement": 0.2002,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+save+money+on+groceries+every+month",
+      "external_id": "goog_813596659487"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "How I scaled consulting revenue 4x — the earn-more-save-time hack",
+      "engagement": 0.1983,
+      "category": "finance",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:651415803856926446/",
+      "external_id": "li_651415803856926446"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to make money online fast legitimate",
+      "engagement": 0.196,
+      "category": "finance",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+make+money+online+fast+legitimate",
+      "external_id": "goog_311537977328"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "LinkedIn ads are the best buy right now — earn 5x ROAS at this price",
+      "engagement": 0.1821,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:359754971165192025/",
+      "external_id": "li_359754971165192025"
+    },
+    {
+      "source": "google",
+      "raw_text": "best AI tools for entrepreneurs in 2025",
+      "engagement": 0.1802,
+      "category": "productivity",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+AI+tools+for+entrepreneurs+in+2025",
+      "external_id": "goog_581509617176"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The Facebook ads hack no one talks about (works in 2025)",
+      "engagement": 0.1789,
+      "category": "marketing",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=159750462055251",
+      "external_id": "fb_159750462055251"
+    },
+    {
+      "source": "google",
+      "raw_text": "how to scale a business without hiring",
+      "engagement": 0.15,
+      "category": "business",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=how+to+scale+a+business+without+hiring",
+      "external_id": "goog_501703938410"
+    },
+    {
+      "source": "meta",
+      "raw_text": "How our community saved $50k collectively this month",
+      "engagement": 0.1497,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=138703030983962",
+      "external_id": "fb_138703030983962"
+    },
+    {
+      "source": "linkedin",
+      "raw_text": "How to scale a personal brand that earns leads on automation",
+      "engagement": 0.1355,
+      "category": "marketing",
+      "timestamp": "2025-05-01T13:00:00+00:00",
+      "url": "https://www.linkedin.com/feed/update/urn:li:activity:850169722861428142/",
+      "external_id": "li_850169722861428142"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Everyone in our group is buying this — here's why",
+      "engagement": 0.1317,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=223795808778572",
+      "external_id": "fb_223795808778572"
+    },
+    {
+      "source": "meta",
+      "raw_text": "Warning: don't buy this product before reading this",
+      "engagement": 0.1268,
+      "category": "review",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=799735518583765",
+      "external_id": "fb_799735518583765"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Review: is this $49 course actually worth it?",
+      "engagement": 0.1213,
+      "category": "review",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=71472565622",
+      "external_id": "yt_71472565622"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "The hack nobody talks about for saving money online",
+      "engagement": 0.0945,
+      "category": "finance",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator1490/video/475273224894",
+      "external_id": "tt_981475273224894"
+    },
+    {
+      "source": "meta",
+      "raw_text": "The budget hack that helped me save $10k this year",
+      "engagement": 0.0886,
+      "category": "finance",
+      "timestamp": "2025-05-01T11:00:00+00:00",
+      "url": "https://www.facebook.com/permalink.php?story_fbid=614892806752517",
+      "external_id": "fb_614892806752517"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "The secret to making viral content that sells",
+      "engagement": 0.0844,
+      "category": "marketing",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=64083074319",
+      "external_id": "yt_64083074319"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "The Amazon find everyone is buying right now",
+      "engagement": 0.0821,
+      "category": "ecommerce",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator2903/video/008281816071",
+      "external_id": "tt_399008281816071"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "Day in my life saving $500/month with these hacks",
+      "engagement": 0.0654,
+      "category": "lifestyle",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator2569/video/250599415406",
+      "external_id": "tt_948250599415406"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "The stock market hack that changed my portfolio",
+      "engagement": 0.0651,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=14974466606",
+      "external_id": "yt_14974466606"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "This one tool doubled my productivity — not clickbait",
+      "engagement": 0.0637,
+      "category": "productivity",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator9794/video/241857888132",
+      "external_id": "tt_214241857888132"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "The tool every freelancer needs (and it's free)",
+      "engagement": 0.0604,
+      "category": "productivity",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=10348932453",
+      "external_id": "yt_10348932453"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Why the rich buy assets not liabilities — explained",
+      "engagement": 0.0557,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=20605875719",
+      "external_id": "yt_20605875719"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "How I save $2,000/month on a regular salary",
+      "engagement": 0.0519,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=42865308699",
+      "external_id": "yt_42865308699"
+    },
+    {
+      "source": "tiktok",
+      "raw_text": "The truth about this viral trend (buyer's guide)",
+      "engagement": 0.051,
+      "category": "marketing",
+      "timestamp": "2025-05-01T09:00:00+00:00",
+      "url": "https://www.tiktok.com/@creator9836/video/958312536747",
+      "external_id": "tt_345958312536747"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "How to earn $100/day from YouTube without a camera",
+      "engagement": 0.0409,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=55543750841",
+      "external_id": "yt_55543750841"
+    },
+    {
+      "source": "google",
+      "raw_text": "best email marketing tool for small business",
+      "engagement": 0.0394,
+      "category": "marketing",
+      "timestamp": "2025-05-01T12:00:00+00:00",
+      "url": "https://www.google.com/search?q=best+email+marketing+tool+for+small+business",
+      "external_id": "goog_374134115185"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "How to make money online (no experience required)",
+      "engagement": 0.0379,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=97744657968",
+      "external_id": "yt_97744657968"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Why everyone is switching to this productivity app",
+      "engagement": 0.0301,
+      "category": "productivity",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=57925210325",
+      "external_id": "yt_57925210325"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "How to start earning online with $0 investment",
+      "engagement": 0.0173,
+      "category": "finance",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=29899362195",
+      "external_id": "yt_29899362195"
+    },
+    {
+      "source": "youtube",
+      "raw_text": "Top 10 productivity tools you need in 2025",
+      "engagement": 0.0103,
+      "category": "productivity",
+      "timestamp": "2025-05-01T10:00:00+00:00",
+      "url": "https://www.youtube.com/watch?v=72495930474",
+      "external_id": "yt_72495930474"
+    }
+  ],
+  "ads": [
+    {
+      "headline": "You won't believe this: My secret to getting 10x results in half the time",
+      "primary_text": "You won't believe this: My secret to getting 10x results in half the time | Engagement score: 1.00",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator0498/video/739609042114",
+      "external_id": "tt_215739609042114",
+      "engagement": 1.0
+    },
+    {
+      "headline": "Stop what you're doing — Why smart buyers always choose this over the alternativ",
+      "primary_text": "Stop what you're doing — Why smart buyers always choose this over the alternative | Engagement score: 1.00",
+      "call_to_action": "See Reviews",
+      "category": "review",
+      "source": "meta",
+      "source_url": "https://www.facebook.com/permalink.php?story_fbid=224781932395673",
+      "external_id": "fb_224781932395673",
+      "engagement": 1.0
+    },
+    {
+      "headline": "The secret nobody tells you: How to save $111 monthly — forget the $600 Vitamix ",
+      "primary_text": "The secret nobody tells you: How to save $111 monthly — forget the $600 Vitamix buy this $89 blende | Engagement score: 0.85",
+      "call_to_action": "See Reviews",
+      "category": "review",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B177515106",
+      "external_id": "amz_B177515106",
+      "engagement": 0.8511
+    },
+    {
+      "headline": "Everyone is switching because: Amazon's best-seller notebook — worth buying 10 a",
+      "primary_text": "Everyone is switching because: Amazon's best-seller notebook — worth buying 10 at a time | Engagement score: 0.85",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B440943723",
+      "external_id": "amz_B440943723",
+      "engagement": 0.8492
+    },
+    {
+      "headline": "Here's why this matters: This $29 tool makes videos look professional — price-to",
+      "primary_text": "Here's why this matters: This $29 tool makes videos look professional — price-to-value unmatche | Engagement score: 0.83",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B006205309",
+      "external_id": "amz_B006205309",
+      "engagement": 0.8251
+    },
+    {
+      "headline": "You won't believe this: Growth hack: this posture corrector scales your work hou",
+      "primary_text": "You won't believe this: Growth hack: this posture corrector scales your work hours pain-free | Engagement score: 0.82",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B082155501",
+      "external_id": "amz_B082155501",
+      "engagement": 0.821
+    },
+    {
+      "headline": "Stop what you're doing — Scale your desk setup — the cable management tool every",
+      "primary_text": "Stop what you're doing — Scale your desk setup — the cable management tool everyone needs to bu | Engagement score: 0.77",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B446986140",
+      "external_id": "amz_B446986140",
+      "engagement": 0.7684
+    },
+    {
+      "headline": "The secret nobody tells you: how to make money with automation and ChatGPT",
+      "primary_text": "The secret nobody tells you: how to make money with automation and ChatGPT | Engagement score: 0.76",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=how%20to%20make%20money%20with%20automation%20and%20ChatGPT",
+      "external_id": "gt_289634869838",
+      "engagement": 0.7648
+    },
+    {
+      "headline": "Everyone is switching because: The price is insane — this standing desk earns ba",
+      "primary_text": "Everyone is switching because: The price is insane — this standing desk earns back productivity daily | Engagement score: 0.76",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B071223751",
+      "external_id": "amz_B071223751",
+      "engagement": 0.7585
+    },
+    {
+      "headline": "Here's why this matters: Productivity essential: foam roller worth buying — PTs ",
+      "primary_text": "Here's why this matters: Productivity essential: foam roller worth buying — PTs earn from refer | Engagement score: 0.75",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B819606039",
+      "external_id": "amz_B819606039",
+      "engagement": 0.7454
+    },
+    {
+      "headline": "You won't believe this: how to scale a dropshipping business in 2025",
+      "primary_text": "You won't believe this: how to scale a dropshipping business in 2025 | Engagement score: 0.74",
+      "call_to_action": "Shop Now",
+      "category": "ecommerce",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=how%20to%20scale%20a%20dropshipping%20business%20in%202025",
+      "external_id": "gt_860767772404",
+      "engagement": 0.7376
+    },
+    {
+      "headline": "Stop what you're doing — Productivity wins: blue light glasses worth buying at t",
+      "primary_text": "Stop what you're doing — Productivity wins: blue light glasses worth buying at this price point | Engagement score: 0.73",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B262885909",
+      "external_id": "amz_B262885909",
+      "engagement": 0.7341
+    },
+    {
+      "headline": "The secret nobody tells you: Save $80/month — reusable produce bags worth every ",
+      "primary_text": "The secret nobody tells you: Save $80/month — reusable produce bags worth every penny | Engagement score: 0.70",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B971950745",
+      "external_id": "amz_B971950745",
+      "engagement": 0.7045
+    },
+    {
+      "headline": "Everyone is switching because: Worth every penny — this tool saved me $200 in on",
+      "primary_text": "Everyone is switching because: Worth every penny — this tool saved me $200 in one month | Engagement score: 0.66",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B864319153",
+      "external_id": "amz_B864319153",
+      "engagement": 0.6575
+    },
+    {
+      "headline": "Here's why this matters: how to get free stuff and save money on Amazon",
+      "primary_text": "Here's why this matters: how to get free stuff and save money on Amazon | Engagement score: 0.65",
+      "call_to_action": "Shop Now",
+      "category": "ecommerce",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=how%20to%20get%20free%20stuff%20and%20save%20money%20on%20Amazon",
+      "external_id": "gt_020875797608",
+      "engagement": 0.6488
+    },
+    {
+      "headline": "You won't believe this: passive income growth strategies that actually earn",
+      "primary_text": "You won't believe this: passive income growth strategies that actually earn | Engagement score: 0.63",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=passive%20income%20growth%20strategies%20that%20actually%20earn",
+      "external_id": "gt_831901394793",
+      "engagement": 0.6252
+    },
+    {
+      "headline": "Stop what you're doing — Why product-led growth and automation wins in every cat",
+      "primary_text": "Stop what you're doing — Why product-led growth and automation wins in every category | Engagement score: 0.61",
+      "call_to_action": "Scale Now",
+      "category": "business",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:335414366204993494/",
+      "external_id": "li_335414366204993494",
+      "engagement": 0.6117
+    },
+    {
+      "headline": "The secret nobody tells you: side hustle growth hacks for extra income",
+      "primary_text": "The secret nobody tells you: side hustle growth hacks for extra income | Engagement score: 0.59",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=side%20hustle%20growth%20hacks%20for%20extra%20income",
+      "external_id": "gt_239444899018",
+      "engagement": 0.5872
+    },
+    {
+      "headline": "Everyone is switching because: best productivity system and automation tools for",
+      "primary_text": "Everyone is switching because: best productivity system and automation tools for entrepreneurs | Engagement score: 0.58",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=best%20productivity%20system%20and%20automation%20tools%20for%20entrepreneurs",
+      "external_id": "gt_559979085434",
+      "engagement": 0.5808
+    },
+    {
+      "headline": "Here's why this matters: Scale your energy: this wireless charger tool earns 3x ",
+      "primary_text": "Here's why this matters: Scale your energy: this wireless charger tool earns 3x faster results | Engagement score: 0.58",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B983670784",
+      "external_id": "amz_B983670784",
+      "engagement": 0.5788
+    },
+    {
+      "headline": "You won't believe this: best way to save money and growth-hack subscriptions",
+      "primary_text": "You won't believe this: best way to save money and growth-hack subscriptions | Engagement score: 0.57",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=best%20way%20to%20save%20money%20and%20growth-hack%20subscriptions",
+      "external_id": "gt_830566064220",
+      "engagement": 0.5672
+    },
+    {
+      "headline": "Stop what you're doing — best credit card tool for rewards — worth the price",
+      "primary_text": "Stop what you're doing — best credit card tool for rewards — worth the price | Engagement score: 0.56",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=best%20credit%20card%20tool%20for%20rewards%20—%20worth%20the%20price",
+      "external_id": "gt_053424559834",
+      "engagement": 0.5632
+    },
+    {
+      "headline": "The secret nobody tells you: Save on therapy — this $15 book earns 4.8 stars and",
+      "primary_text": "The secret nobody tells you: Save on therapy — this $15 book earns 4.8 stars and pays back 10x | Engagement score: 0.56",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B526549542",
+      "external_id": "amz_B526549542",
+      "engagement": 0.5584
+    },
+    {
+      "headline": "Everyone is switching because: best AI productivity tools to scale your business",
+      "primary_text": "Everyone is switching because: best AI productivity tools to scale your business 2025 | Engagement score: 0.55",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=best%20AI%20productivity%20tools%20to%20scale%20your%20business%202025",
+      "external_id": "gt_562530191177",
+      "engagement": 0.546
+    },
+    {
+      "headline": "Here's why this matters: how to earn from real estate with no money hack",
+      "primary_text": "Here's why this matters: how to earn from real estate with no money hack | Engagement score: 0.54",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=how%20to%20earn%20from%20real%20estate%20with%20no%20money%20hack",
+      "external_id": "gt_916554555670",
+      "engagement": 0.5448
+    },
+    {
+      "headline": "You won't believe this: Our B2B productivity tool earns 11% conversion — full sc",
+      "primary_text": "You won't believe this: Our B2B productivity tool earns 11% conversion — full scale breakdown | Engagement score: 0.54",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:996175006018502376/",
+      "external_id": "li_996175006018502376",
+      "engagement": 0.537
+    },
+    {
+      "headline": "Stop what you're doing — Our retention tool earned 95% growth — the secret produ",
+      "primary_text": "Stop what you're doing — Our retention tool earned 95% growth — the secret product change | Engagement score: 0.54",
+      "call_to_action": "Scale Now",
+      "category": "business",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:031965560092595705/",
+      "external_id": "li_031965560092595705",
+      "engagement": 0.5359
+    },
+    {
+      "headline": "The secret nobody tells you: Productivity growth: this under-desk bike earns its",
+      "primary_text": "The secret nobody tells you: Productivity growth: this under-desk bike earns its price tag in 2 wee | Engagement score: 0.53",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B944540772",
+      "external_id": "amz_B944540772",
+      "engagement": 0.5347
+    },
+    {
+      "headline": "Everyone is switching because: Best buy of 2025: this productivity tool has 47,0",
+      "primary_text": "Everyone is switching because: Best buy of 2025: this productivity tool has 47,000 5-star reviews | Engagement score: 0.50",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B779899461",
+      "external_id": "amz_B779899461",
+      "engagement": 0.5046
+    },
+    {
+      "headline": "Here's why this matters: This $18 resistance band set earns its worth vs a $200 ",
+      "primary_text": "Here's why this matters: This $18 resistance band set earns its worth vs a $200 gym membership | Engagement score: 0.49",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B882328467",
+      "external_id": "amz_B882328467",
+      "engagement": 0.4877
+    },
+    {
+      "headline": "You won't believe this: Worth the hype — Instant Pot is the best buy for price-c",
+      "primary_text": "You won't believe this: Worth the hype — Instant Pot is the best buy for price-conscious cooks | Engagement score: 0.49",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B490971555",
+      "external_id": "amz_B490971555",
+      "engagement": 0.4856
+    },
+    {
+      "headline": "Stop what you're doing — how to sell on Amazon FBA profitably — earn at scale",
+      "primary_text": "Stop what you're doing — how to sell on Amazon FBA profitably — earn at scale | Engagement score: 0.48",
+      "call_to_action": "Shop Now",
+      "category": "ecommerce",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=how%20to%20sell%20on%20Amazon%20FBA%20profitably%20—%20earn%20at%20scale",
+      "external_id": "gt_714788488999",
+      "engagement": 0.4844
+    },
+    {
+      "headline": "The secret nobody tells you: trending products worth selling online for growth 2",
+      "primary_text": "The secret nobody tells you: trending products worth selling online for growth 2025 | Engagement score: 0.47",
+      "call_to_action": "Shop Now",
+      "category": "ecommerce",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=trending%20products%20worth%20selling%20online%20for%20growth%202025",
+      "external_id": "gt_364941241217",
+      "engagement": 0.4652
+    },
+    {
+      "headline": "Everyone is switching because: best online courses worth buying to make money",
+      "primary_text": "Everyone is switching because: best online courses worth buying to make money | Engagement score: 0.46",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=best%20online%20courses%20worth%20buying%20to%20make%20money",
+      "external_id": "gt_540904565457",
+      "engagement": 0.4588
+    },
+    {
+      "headline": "Here's why this matters: Save $150/month with this air purifier — best buy in th",
+      "primary_text": "Here's why this matters: Save $150/month with this air purifier — best buy in the category | Engagement score: 0.45",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B745028165",
+      "external_id": "amz_B745028165",
+      "engagement": 0.4516
+    },
+    {
+      "headline": "You won't believe this: Earn better sleep: this cooling sleep mask worth the pre",
+      "primary_text": "You won't believe this: Earn better sleep: this cooling sleep mask worth the premium price | Engagement score: 0.45",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B973160085",
+      "external_id": "amz_B973160085",
+      "engagement": 0.4479
+    },
+    {
+      "headline": "Stop what you're doing — Best meal prep tool for the price — worth every cent, 5",
+      "primary_text": "Stop what you're doing — Best meal prep tool for the price — worth every cent, 5 years running | Engagement score: 0.44",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B703906580",
+      "external_id": "amz_B703906580",
+      "engagement": 0.4418
+    },
+    {
+      "headline": "The secret nobody tells you: print on demand — worth it to scale your income",
+      "primary_text": "The secret nobody tells you: print on demand — worth it to scale your income | Engagement score: 0.44",
+      "call_to_action": "Shop Now",
+      "category": "ecommerce",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=print%20on%20demand%20—%20worth%20it%20to%20scale%20your%20income",
+      "external_id": "gt_744016872683",
+      "engagement": 0.4396
+    },
+    {
+      "headline": "Everyone is switching because: remote work productivity tools everyone needs to ",
+      "primary_text": "Everyone is switching because: remote work productivity tools everyone needs to buy | Engagement score: 0.43",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=remote%20work%20productivity%20tools%20everyone%20needs%20to%20buy",
+      "external_id": "gt_924902301088",
+      "engagement": 0.4296
+    },
+    {
+      "headline": "Here's why this matters: Why I switched and never looked back (price breakdown)",
+      "primary_text": "Here's why this matters: Why I switched and never looked back (price breakdown) | Engagement score: 0.42",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator5600/video/488546300379",
+      "external_id": "tt_071488546300379",
+      "engagement": 0.4215
+    },
+    {
+      "headline": "You won't believe this: The SaaS pricing hack that earns and scales revenue 3x",
+      "primary_text": "You won't believe this: The SaaS pricing hack that earns and scales revenue 3x | Engagement score: 0.42",
+      "call_to_action": "Scale Now",
+      "category": "business",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:174260494844550590/",
+      "external_id": "li_174260494844550590",
+      "engagement": 0.4166
+    },
+    {
+      "headline": "Stop what you're doing — We scaled growth from $0 to $1M ARR using automation — ",
+      "primary_text": "Stop what you're doing — We scaled growth from $0 to $1M ARR using automation — full playbook | Engagement score: 0.40",
+      "call_to_action": "Scale Now",
+      "category": "business",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:618679480912090327/",
+      "external_id": "li_618679480912090327",
+      "engagement": 0.3996
+    },
+    {
+      "headline": "The secret nobody tells you: The hiring tool every founder needs — worth the pri",
+      "primary_text": "The secret nobody tells you: The hiring tool every founder needs — worth the price to scale faster | Engagement score: 0.37",
+      "call_to_action": "Scale Now",
+      "category": "business",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:234508261213359121/",
+      "external_id": "li_234508261213359121",
+      "engagement": 0.3716
+    },
+    {
+      "headline": "Everyone is switching because: best budgeting tool to save money for millennials",
+      "primary_text": "Everyone is switching because: best budgeting tool to save money for millennials | Engagement score: 0.37",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=best%20budgeting%20tool%20to%20save%20money%20for%20millennials",
+      "external_id": "gt_328866335543",
+      "engagement": 0.3676
+    },
+    {
+      "headline": "Here's why this matters: The ergonomic tool worth every cent — eliminated my wri",
+      "primary_text": "Here's why this matters: The ergonomic tool worth every cent — eliminated my wrist pain | Engagement score: 0.37",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "amazon",
+      "source_url": "https://www.amazon.com/dp/B458945012",
+      "external_id": "amz_B458945012",
+      "engagement": 0.3661
+    },
+    {
+      "headline": "You won't believe this: The only sales tool worth buying in 2025 — copy this scr",
+      "primary_text": "You won't believe this: The only sales tool worth buying in 2025 — copy this script to earn | Engagement score: 0.36",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:724812144146010097/",
+      "external_id": "li_724812144146010097",
+      "engagement": 0.3635
+    },
+    {
+      "headline": "Stop what you're doing — earn passive income while you sleep strategies",
+      "primary_text": "Stop what you're doing — earn passive income while you sleep strategies | Engagement score: 0.36",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google",
+      "source_url": "https://www.google.com/search?q=earn+passive+income+while+you+sleep+strategies",
+      "external_id": "goog_376501787431",
+      "engagement": 0.363
+    },
+    {
+      "headline": "The secret nobody tells you: best productivity app 2025 review",
+      "primary_text": "The secret nobody tells you: best productivity app 2025 review | Engagement score: 0.36",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "google",
+      "source_url": "https://www.google.com/search?q=best+productivity+app+2025+review",
+      "external_id": "goog_228509279377",
+      "engagement": 0.356
+    },
+    {
+      "headline": "Everyone is switching because: This free tool saves me 3 hours every single day",
+      "primary_text": "Everyone is switching because: This free tool saves me 3 hours every single day | Engagement score: 0.34",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator0323/video/258722141307",
+      "external_id": "tt_465258722141307",
+      "engagement": 0.3448
+    },
+    {
+      "headline": "Here's why this matters: The outbound automation tool that earns 30 sales calls ",
+      "primary_text": "Here's why this matters: The outbound automation tool that earns 30 sales calls per month | Engagement score: 0.34",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:385634567040228690/",
+      "external_id": "li_385634567040228690",
+      "engagement": 0.3435
+    },
+    {
+      "headline": "You won't believe this: The cold email tool that earns 40% reply rates — worth t",
+      "primary_text": "You won't believe this: The cold email tool that earns 40% reply rates — worth the price | Engagement score: 0.34",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:812157393182689172/",
+      "external_id": "li_812157393182689172",
+      "engagement": 0.3419
+    },
+    {
+      "headline": "Stop what you're doing — How we cut CAC 60% — the growth hack that earned us 10x",
+      "primary_text": "Stop what you're doing — How we cut CAC 60% — the growth hack that earned us 10x returns | Engagement score: 0.34",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:759496704840778196/",
+      "external_id": "li_759496704840778196",
+      "engagement": 0.3404
+    },
+    {
+      "headline": "The secret nobody tells you: viral marketing growth strategies that earn results",
+      "primary_text": "The secret nobody tells you: viral marketing growth strategies that earn results | Engagement score: 0.34",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=viral%20marketing%20growth%20strategies%20that%20earn%20results",
+      "external_id": "gt_775551254913",
+      "engagement": 0.3388
+    },
+    {
+      "headline": "Everyone is switching because: best affiliate programs worth the price — high ti",
+      "primary_text": "Everyone is switching because: best affiliate programs worth the price — high ticket earn | Engagement score: 0.34",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=best%20affiliate%20programs%20worth%20the%20price%20—%20high%20ticket%20earn",
+      "external_id": "gt_510465166193",
+      "engagement": 0.3388
+    },
+    {
+      "headline": "Here's why this matters: best project management tool for remote teams",
+      "primary_text": "Here's why this matters: best project management tool for remote teams | Engagement score: 0.34",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "google",
+      "source_url": "https://www.google.com/search?q=best+project+management+tool+for+remote+teams",
+      "external_id": "goog_679223584213",
+      "engagement": 0.335
+    },
+    {
+      "headline": "You won't believe this: how to automate your business and scale growth in 2025",
+      "primary_text": "You won't believe this: how to automate your business and scale growth in 2025 | Engagement score: 0.33",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=how%20to%20automate%20your%20business%20and%20scale%20growth%20in%202025",
+      "external_id": "gt_534771277799",
+      "engagement": 0.3348
+    },
+    {
+      "headline": "Stop what you're doing — Honest review: worth every penny or total scam?",
+      "primary_text": "Stop what you're doing — Honest review: worth every penny or total scam? | Engagement score: 0.33",
+      "call_to_action": "See Reviews",
+      "category": "review",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator9722/video/065405231374",
+      "external_id": "tt_480065405231374",
+      "engagement": 0.3267
+    },
+    {
+      "headline": "The secret nobody tells you: The partnership tool that eliminates cold outreach ",
+      "primary_text": "The secret nobody tells you: The partnership tool that eliminates cold outreach — worth the price | Engagement score: 0.32",
+      "call_to_action": "Scale Now",
+      "category": "business",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:858745259821121481/",
+      "external_id": "li_858745259821121481",
+      "engagement": 0.3228
+    },
+    {
+      "headline": "Everyone is switching because: The tool I use to automate my entire business",
+      "primary_text": "Everyone is switching because: The tool I use to automate my entire business | Engagement score: 0.32",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "meta",
+      "source_url": "https://www.facebook.com/permalink.php?story_fbid=602312688035932",
+      "external_id": "fb_602312688035932",
+      "engagement": 0.3181
+    },
+    {
+      "headline": "Here's why this matters: Automation is the secret productivity hack of the year ",
+      "primary_text": "Here's why this matters: Automation is the secret productivity hack of the year — scale faster | Engagement score: 0.32",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:507898978958445019/",
+      "external_id": "li_507898978958445019",
+      "engagement": 0.3179
+    },
+    {
+      "headline": "You won't believe this: The content tool and growth strategy that earned us 50k ",
+      "primary_text": "You won't believe this: The content tool and growth strategy that earned us 50k followers | Engagement score: 0.31",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:363431298604916513/",
+      "external_id": "li_363431298604916513",
+      "engagement": 0.3092
+    },
+    {
+      "headline": "Stop what you're doing — Secret to scaling a remote team — worth every productiv",
+      "primary_text": "Stop what you're doing — Secret to scaling a remote team — worth every productivity investment | Engagement score: 0.31",
+      "call_to_action": "Scale Now",
+      "category": "business",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:540744057113714039/",
+      "external_id": "li_540744057113714039",
+      "engagement": 0.3081
+    },
+    {
+      "headline": "The secret nobody tells you: how to scale a business on social media with automa",
+      "primary_text": "The secret nobody tells you: how to scale a business on social media with automation | Engagement score: 0.30",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "google_trends",
+      "source_url": "https://trends.google.com/trends/explore?q=how%20to%20scale%20a%20business%20on%20social%20media%20with%20automation",
+      "external_id": "gt_155730847635",
+      "engagement": 0.3044
+    },
+    {
+      "headline": "Everyone is switching because: B2B founders: the distribution hack worth your ti",
+      "primary_text": "Everyone is switching because: B2B founders: the distribution hack worth your time to scale | Engagement score: 0.30",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:779569779363161386/",
+      "external_id": "li_779569779363161386",
+      "engagement": 0.2967
+    },
+    {
+      "headline": "Here's why this matters: Why founders waste budget — the secret to growth channe",
+      "primary_text": "Here's why this matters: Why founders waste budget — the secret to growth channel automation | Engagement score: 0.29",
+      "call_to_action": "Scale Now",
+      "category": "business",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:610407428379056053/",
+      "external_id": "li_610407428379056053",
+      "engagement": 0.2852
+    },
+    {
+      "headline": "You won't believe this: From broke to $5k/month — the tools I used",
+      "primary_text": "You won't believe this: From broke to $5k/month — the tools I used | Engagement score: 0.28",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator2217/video/194684986223",
+      "external_id": "tt_774194684986223",
+      "engagement": 0.279
+    },
+    {
+      "headline": "Stop what you're doing — We fired our agency to save money and scale in-house — ",
+      "primary_text": "Stop what you're doing — We fired our agency to save money and scale in-house — best buy decisi | Engagement score: 0.22",
+      "call_to_action": "Scale Now",
+      "category": "business",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:079288119485233095/",
+      "external_id": "li_079288119485233095",
+      "engagement": 0.2158
+    },
+    {
+      "headline": "The secret nobody tells you: earn money from home without investment legit",
+      "primary_text": "The secret nobody tells you: earn money from home without investment legit | Engagement score: 0.21",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google",
+      "source_url": "https://www.google.com/search?q=earn+money+from+home+without+investment+legit",
+      "external_id": "goog_041639791866",
+      "engagement": 0.2146
+    },
+    {
+      "headline": "Everyone is switching because: Stop wasting money on this — buy this instead",
+      "primary_text": "Everyone is switching because: Stop wasting money on this — buy this instead | Engagement score: 0.21",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator6266/video/630380504049",
+      "external_id": "tt_652630380504049",
+      "engagement": 0.2123
+    },
+    {
+      "headline": "Here's why this matters: buy cheap vs expensive — which is worth it",
+      "primary_text": "Here's why this matters: buy cheap vs expensive — which is worth it | Engagement score: 0.21",
+      "call_to_action": "See Reviews",
+      "category": "review",
+      "source": "google",
+      "source_url": "https://www.google.com/search?q=buy+cheap+vs+expensive+—+which+is+worth+it",
+      "external_id": "goog_173529800689",
+      "engagement": 0.2104
+    },
+    {
+      "headline": "You won't believe this: This free resource is worth thousands (grab it now)",
+      "primary_text": "You won't believe this: This free resource is worth thousands (grab it now) | Engagement score: 0.20",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "meta",
+      "source_url": "https://www.facebook.com/permalink.php?story_fbid=650405747910353",
+      "external_id": "fb_650405747910353",
+      "engagement": 0.2046
+    },
+    {
+      "headline": "Stop what you're doing — how to save money on groceries every month",
+      "primary_text": "Stop what you're doing — how to save money on groceries every month | Engagement score: 0.20",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google",
+      "source_url": "https://www.google.com/search?q=how+to+save+money+on+groceries+every+month",
+      "external_id": "goog_813596659487",
+      "engagement": 0.2002
+    },
+    {
+      "headline": "The secret nobody tells you: How I scaled consulting revenue 4x — the earn-more-",
+      "primary_text": "The secret nobody tells you: How I scaled consulting revenue 4x — the earn-more-save-time hack | Engagement score: 0.20",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:651415803856926446/",
+      "external_id": "li_651415803856926446",
+      "engagement": 0.1983
+    },
+    {
+      "headline": "Everyone is switching because: how to make money online fast legitimate",
+      "primary_text": "Everyone is switching because: how to make money online fast legitimate | Engagement score: 0.20",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "google",
+      "source_url": "https://www.google.com/search?q=how+to+make+money+online+fast+legitimate",
+      "external_id": "goog_311537977328",
+      "engagement": 0.196
+    },
+    {
+      "headline": "Here's why this matters: LinkedIn ads are the best buy right now — earn 5x ROAS ",
+      "primary_text": "Here's why this matters: LinkedIn ads are the best buy right now — earn 5x ROAS at this price | Engagement score: 0.18",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:359754971165192025/",
+      "external_id": "li_359754971165192025",
+      "engagement": 0.1821
+    },
+    {
+      "headline": "You won't believe this: best AI tools for entrepreneurs in 2025",
+      "primary_text": "You won't believe this: best AI tools for entrepreneurs in 2025 | Engagement score: 0.18",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "google",
+      "source_url": "https://www.google.com/search?q=best+AI+tools+for+entrepreneurs+in+2025",
+      "external_id": "goog_581509617176",
+      "engagement": 0.1802
+    },
+    {
+      "headline": "Stop what you're doing — The Facebook ads hack no one talks about (works in 2025",
+      "primary_text": "Stop what you're doing — The Facebook ads hack no one talks about (works in 2025) | Engagement score: 0.18",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "meta",
+      "source_url": "https://www.facebook.com/permalink.php?story_fbid=159750462055251",
+      "external_id": "fb_159750462055251",
+      "engagement": 0.1789
+    },
+    {
+      "headline": "The secret nobody tells you: how to scale a business without hiring",
+      "primary_text": "The secret nobody tells you: how to scale a business without hiring | Engagement score: 0.15",
+      "call_to_action": "Scale Now",
+      "category": "business",
+      "source": "google",
+      "source_url": "https://www.google.com/search?q=how+to+scale+a+business+without+hiring",
+      "external_id": "goog_501703938410",
+      "engagement": 0.15
+    },
+    {
+      "headline": "Everyone is switching because: How our community saved $50k collectively this mo",
+      "primary_text": "Everyone is switching because: How our community saved $50k collectively this month | Engagement score: 0.15",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "meta",
+      "source_url": "https://www.facebook.com/permalink.php?story_fbid=138703030983962",
+      "external_id": "fb_138703030983962",
+      "engagement": 0.1497
+    },
+    {
+      "headline": "Here's why this matters: How to scale a personal brand that earns leads on autom",
+      "primary_text": "Here's why this matters: How to scale a personal brand that earns leads on automation | Engagement score: 0.14",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "linkedin",
+      "source_url": "https://www.linkedin.com/feed/update/urn:li:activity:850169722861428142/",
+      "external_id": "li_850169722861428142",
+      "engagement": 0.1355
+    },
+    {
+      "headline": "You won't believe this: Everyone in our group is buying this — here's why",
+      "primary_text": "You won't believe this: Everyone in our group is buying this — here's why | Engagement score: 0.13",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "meta",
+      "source_url": "https://www.facebook.com/permalink.php?story_fbid=223795808778572",
+      "external_id": "fb_223795808778572",
+      "engagement": 0.1317
+    },
+    {
+      "headline": "Stop what you're doing — Warning: don't buy this product before reading this",
+      "primary_text": "Stop what you're doing — Warning: don't buy this product before reading this | Engagement score: 0.13",
+      "call_to_action": "See Reviews",
+      "category": "review",
+      "source": "meta",
+      "source_url": "https://www.facebook.com/permalink.php?story_fbid=799735518583765",
+      "external_id": "fb_799735518583765",
+      "engagement": 0.1268
+    },
+    {
+      "headline": "The secret nobody tells you: Review: is this $49 course actually worth it?",
+      "primary_text": "The secret nobody tells you: Review: is this $49 course actually worth it? | Engagement score: 0.12",
+      "call_to_action": "See Reviews",
+      "category": "review",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=71472565622",
+      "external_id": "yt_71472565622",
+      "engagement": 0.1213
+    },
+    {
+      "headline": "Everyone is switching because: The hack nobody talks about for saving money onli",
+      "primary_text": "Everyone is switching because: The hack nobody talks about for saving money online | Engagement score: 0.09",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator1490/video/475273224894",
+      "external_id": "tt_981475273224894",
+      "engagement": 0.0945
+    },
+    {
+      "headline": "Here's why this matters: The budget hack that helped me save $10k this year",
+      "primary_text": "Here's why this matters: The budget hack that helped me save $10k this year | Engagement score: 0.09",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "meta",
+      "source_url": "https://www.facebook.com/permalink.php?story_fbid=614892806752517",
+      "external_id": "fb_614892806752517",
+      "engagement": 0.0886
+    },
+    {
+      "headline": "You won't believe this: The secret to making viral content that sells",
+      "primary_text": "You won't believe this: The secret to making viral content that sells | Engagement score: 0.08",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=64083074319",
+      "external_id": "yt_64083074319",
+      "engagement": 0.0844
+    },
+    {
+      "headline": "Stop what you're doing — The Amazon find everyone is buying right now",
+      "primary_text": "Stop what you're doing — The Amazon find everyone is buying right now | Engagement score: 0.08",
+      "call_to_action": "Shop Now",
+      "category": "ecommerce",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator2903/video/008281816071",
+      "external_id": "tt_399008281816071",
+      "engagement": 0.0821
+    },
+    {
+      "headline": "The secret nobody tells you: Day in my life saving $500/month with these hacks",
+      "primary_text": "The secret nobody tells you: Day in my life saving $500/month with these hacks | Engagement score: 0.07",
+      "call_to_action": "Discover More",
+      "category": "lifestyle",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator2569/video/250599415406",
+      "external_id": "tt_948250599415406",
+      "engagement": 0.0654
+    },
+    {
+      "headline": "Everyone is switching because: The stock market hack that changed my portfolio",
+      "primary_text": "Everyone is switching because: The stock market hack that changed my portfolio | Engagement score: 0.07",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=14974466606",
+      "external_id": "yt_14974466606",
+      "engagement": 0.0651
+    },
+    {
+      "headline": "Here's why this matters: This one tool doubled my productivity — not clickbait",
+      "primary_text": "Here's why this matters: This one tool doubled my productivity — not clickbait | Engagement score: 0.06",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator9794/video/241857888132",
+      "external_id": "tt_214241857888132",
+      "engagement": 0.0637
+    },
+    {
+      "headline": "You won't believe this: The tool every freelancer needs (and it's free)",
+      "primary_text": "You won't believe this: The tool every freelancer needs (and it's free) | Engagement score: 0.06",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=10348932453",
+      "external_id": "yt_10348932453",
+      "engagement": 0.0604
+    },
+    {
+      "headline": "Stop what you're doing — Why the rich buy assets not liabilities — explained",
+      "primary_text": "Stop what you're doing — Why the rich buy assets not liabilities — explained | Engagement score: 0.06",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=20605875719",
+      "external_id": "yt_20605875719",
+      "engagement": 0.0557
+    },
+    {
+      "headline": "The secret nobody tells you: How I save $2,000/month on a regular salary",
+      "primary_text": "The secret nobody tells you: How I save $2,000/month on a regular salary | Engagement score: 0.05",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=42865308699",
+      "external_id": "yt_42865308699",
+      "engagement": 0.0519
+    },
+    {
+      "headline": "Everyone is switching because: The truth about this viral trend (buyer's guide)",
+      "primary_text": "Everyone is switching because: The truth about this viral trend (buyer's guide) | Engagement score: 0.05",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "tiktok",
+      "source_url": "https://www.tiktok.com/@creator9836/video/958312536747",
+      "external_id": "tt_345958312536747",
+      "engagement": 0.051
+    },
+    {
+      "headline": "Here's why this matters: How to earn $100/day from YouTube without a camera",
+      "primary_text": "Here's why this matters: How to earn $100/day from YouTube without a camera | Engagement score: 0.04",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=55543750841",
+      "external_id": "yt_55543750841",
+      "engagement": 0.0409
+    },
+    {
+      "headline": "You won't believe this: best email marketing tool for small business",
+      "primary_text": "You won't believe this: best email marketing tool for small business | Engagement score: 0.04",
+      "call_to_action": "Grow Your Business",
+      "category": "marketing",
+      "source": "google",
+      "source_url": "https://www.google.com/search?q=best+email+marketing+tool+for+small+business",
+      "external_id": "goog_374134115185",
+      "engagement": 0.0394
+    },
+    {
+      "headline": "Stop what you're doing — How to make money online (no experience required)",
+      "primary_text": "Stop what you're doing — How to make money online (no experience required) | Engagement score: 0.04",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=97744657968",
+      "external_id": "yt_97744657968",
+      "engagement": 0.0379
+    },
+    {
+      "headline": "The secret nobody tells you: Why everyone is switching to this productivity app",
+      "primary_text": "The secret nobody tells you: Why everyone is switching to this productivity app | Engagement score: 0.03",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=57925210325",
+      "external_id": "yt_57925210325",
+      "engagement": 0.0301
+    },
+    {
+      "headline": "Everyone is switching because: How to start earning online with $0 investment",
+      "primary_text": "Everyone is switching because: How to start earning online with $0 investment | Engagement score: 0.02",
+      "call_to_action": "Start Saving Today",
+      "category": "finance",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=29899362195",
+      "external_id": "yt_29899362195",
+      "engagement": 0.0173
+    },
+    {
+      "headline": "Here's why this matters: Top 10 productivity tools you need in 2025",
+      "primary_text": "Here's why this matters: Top 10 productivity tools you need in 2025 | Engagement score: 0.01",
+      "call_to_action": "Try It Free",
+      "category": "productivity",
+      "source": "youtube",
+      "source_url": "https://www.youtube.com/watch?v=72495930474",
+      "external_id": "yt_72495930474",
+      "engagement": 0.0103
+    }
+  ]
+}

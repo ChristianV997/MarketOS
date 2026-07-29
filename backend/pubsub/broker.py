@@ -9,7 +9,7 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from backend.events.schemas import (
     LEGACY_SNAPSHOT,
@@ -58,6 +58,19 @@ class EventEnvelope:
             "replay_hash": self.replay_hash,
             **self.payload,
         }, default=str)
+
+    def envelope_dict(self) -> dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "type": self.type,
+            "ts": self.ts,
+            "source": self.source,
+            "event_version": self.event_version,
+            "correlation_id": self.correlation_id,
+            "sequence_id": self.sequence_id,
+            "replay_hash": self.replay_hash,
+            **self.payload,
+        }
 
 
 def _new_id() -> str:
@@ -117,6 +130,7 @@ class PubSubBroker:
         self._lock = threading.Lock()
         self._live: deque[EventEnvelope] = deque()
         self._sequence = 0
+        self._subscribers: dict[str, Callable[[dict[str, Any]], None]] = {}
 
     def _next_sequence(self) -> int:
         with self._lock:
@@ -198,8 +212,21 @@ class PubSubBroker:
 
         with self._lock:
             self._live.append(env)
+            subscribers = list(self._subscribers.values())
 
         self.replay.record(env)
+
+        if subscribers:
+            event = env.envelope_dict()
+            for callback in subscribers:
+                try:
+                    callback(event)
+                except Exception as exc:
+                    _log.warning(
+                        "broker_subscriber_failed type=%s error=%s",
+                        event_type,
+                        exc,
+                    )
 
         try:
             from backend.runtime.replay_store import runtime_replay_store
@@ -212,6 +239,16 @@ class PubSubBroker:
             )
 
         return env.event_id
+
+    def subscribe(self, callback: Callable[[dict[str, Any]], None]) -> str:
+        subscriber_id = _new_id()
+        with self._lock:
+            self._subscribers[subscriber_id] = callback
+        return subscriber_id
+
+    def unsubscribe(self, subscriber_id: str) -> None:
+        with self._lock:
+            self._subscribers.pop(subscriber_id, None)
 
     # ── typed emit helpers ────────────────────────────────────────────────────
 
@@ -337,3 +374,7 @@ class PubSubBroker:
 
 
 broker = PubSubBroker(replay_size=200)
+
+
+def get_broker() -> PubSubBroker:
+    return broker

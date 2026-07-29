@@ -6,6 +6,7 @@ from .openai    import OpenAIProvider
 from .ollama    import OllamaProvider
 from .vllm      import VLLMProvider
 from .airllm    import AirLLMProvider
+from .andromeda import AndromedaProvider
 from .litellm   import LiteLLMProvider
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "OllamaProvider",
     "VLLMProvider",
     "AirLLMProvider",
+    "AndromedaProvider",
     "LiteLLMProvider",
 ]
 
@@ -26,6 +28,7 @@ REGISTRY: dict[str, type[BaseProvider]] = {
     "ollama":    OllamaProvider,
     "vllm":      VLLMProvider,
     "airllm":    AirLLMProvider,
+    "andromeda": AndromedaProvider,
     "litellm":   LiteLLMProvider,
     "mock":      MockProvider,
 }

@@ -22,8 +22,11 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime, timezone
+from typing import Any
 
-from fastapi import FastAPI
+import numpy as np
+from fastapi import Body, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 # ── structured logging ────────────────────────────────────────────────────────
@@ -177,6 +180,59 @@ def _research_runner():
         time.sleep(300)  # check every 5 minutes
 
 
+def _start_runtime_services() -> None:
+    try:
+        from backend.runtime.task_inventory import start_heartbeat_broadcaster
+        start_heartbeat_broadcaster(interval_s=30.0)
+    except Exception:
+        pass
+
+    try:
+        from backend.runtime.sleep.replay_scheduler import get_scheduler
+        get_scheduler().start()
+    except Exception:
+        pass
+
+
+def _stop_runtime_services() -> None:
+    try:
+        from backend.runtime.task_inventory import stop_heartbeat_broadcaster
+        stop_heartbeat_broadcaster()
+    except Exception:
+        pass
+
+    try:
+        from backend.runtime.sleep.replay_scheduler import get_scheduler
+        get_scheduler().stop()
+    except Exception:
+        pass
+
+
+def _public_sleep_result(result: Any) -> dict[str, Any]:
+    if hasattr(result, "cycle_id"):
+        errors = list(getattr(result, "errors", []) or [])
+        return {
+            "cycle_id": getattr(result, "cycle_id", ""),
+            "workspace": getattr(result, "workspace", "default"),
+            "started_at": getattr(result, "started_at", 0.0),
+            "finished_at": getattr(result, "finished_at", 0.0),
+            "duration_s": getattr(result, "duration_s", 0.0),
+            "episodes_read": getattr(result, "episodes_read", 0),
+            "episodes_compacted": getattr(result, "episodes_compacted", 0),
+            "semantic_units_created": getattr(result, "semantic_units_created", 0),
+            "semantic_units_pruned": getattr(result, "semantic_units_pruned", 0),
+            "procedures_reinforced": getattr(result, "procedures_reinforced", 0),
+            "procedures_deprecated": getattr(result, "procedures_deprecated", 0),
+            "lineage_nodes_summarized": getattr(result, "lineage_nodes_summarized", 0),
+            "vectors_indexed": getattr(result, "vectors_indexed", 0),
+            "compression_ratio": getattr(result, "compression_ratio", 0.0),
+            "decay_applied": getattr(result, "decay_applied", False),
+            "error_count": len(errors),
+            "ok": not errors,
+        }
+    return {"result": result}
+
+
 @app.on_event("startup")
 async def _startup():
     global _state, _bg_running
@@ -193,22 +249,14 @@ async def _startup():
     _bg_running = True
     threading.Thread(target=_background_runner, daemon=True).start()
     threading.Thread(target=_research_runner, daemon=True).start()
-    try:
-        from backend.runtime.task_inventory import start_heartbeat_broadcaster
-        start_heartbeat_broadcaster(interval_s=30.0)
-    except Exception:
-        pass
+    _start_runtime_services()
 
 
 @app.on_event("shutdown")
 async def _shutdown():
     global _bg_running
     _bg_running = False
-    try:
-        from backend.runtime.task_inventory import stop_heartbeat_broadcaster
-        stop_heartbeat_broadcaster()
-    except Exception:
-        pass
+    _stop_runtime_services()
     from backend.core.serializer import save
     try:
         save(_state, STATE_PATH)
