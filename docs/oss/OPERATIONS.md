@@ -13,6 +13,9 @@ health and dry-run boundary report.
 Run `python scripts/generate_oss_sbom.py --output artifacts/oss-sbom.json`
 during release preparation to capture the reviewed OSS inventory and installed
 Python package versions without network access.
+When Docker is unavailable, run `python scripts/validate_oss_compose.py` for
+static overlay validation; in Docker-enabled CI, also run `docker compose
+config` with a reviewed pinned `MEDUSA_IMAGE`.
 
 Use `docker-compose.oss.example.yml` only after setting a reviewed pinned
 `MEDUSA_IMAGE` and database URL. Its health check gates API startup on Medusa
