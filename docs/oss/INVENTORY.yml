@@ -33,7 +33,7 @@ candidates:
     status: selected
     owner: browser_automation
     capabilities: [persistent_browser, custom_tools, workflow_recovery]
-    reviewed_ref: v0.13.7
+    reviewed_ref: v0.13.6
   - name: pydantic-ai
     repository: https://github.com/pydantic/pydantic-ai
     license: MIT

@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 from typing import Any, Awaitable, Callable, Mapping
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from backend.contracts.adapters import AdapterHealth, BrowserWorkflowProvider, SidecarContext
 
@@ -124,6 +124,88 @@ class BrowserUseWorker:
 browser_use_worker: BrowserWorkflowProvider = BrowserUseWorker()
 
 
+def _worker_base_url(value: str) -> str:
+    """Validate an internal worker URL before sending lineage to it."""
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError("BROWSER_USE_WORKER_URL must be an http(s) URL without embedded credentials")
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
+
+
+def build_remote_browser_use_runner(base_url: str | None = None, token: str | None = None) -> WorkflowRunner:
+    """Create a runner for the isolated Browser Use worker process.
+
+    The remote worker independently revalidates the MarketOS context; this
+    adapter preserves the same context rather than trusting a worker-local
+    interpretation of approval or lineage.
+    """
+    worker_url = _worker_base_url(base_url or os.getenv("BROWSER_USE_WORKER_URL", ""))
+    worker_token = token if token is not None else os.getenv("BROWSER_USE_WORKER_TOKEN", "")
+    if not worker_token:
+        raise ValueError("BROWSER_USE_WORKER_TOKEN is required for an isolated browser worker")
+
+    async def _run(workflow: str, payload: Mapping[str, Any], context: SidecarContext) -> Mapping[str, Any]:
+        import httpx
+
+        body = {
+            "workflow": workflow,
+            "payload": dict(payload),
+            "context": {
+                "workspace_id": context.workspace_id,
+                "run_id": context.run_id,
+                "artifact_id": context.artifact_id,
+                "parent_ids": list(context.parent_ids),
+                "idempotency_key": context.idempotency_key,
+                "dry_run": context.dry_run,
+                "approval_state": context.approval_state,
+            },
+        }
+        timeout_s = float(os.getenv("BROWSER_USE_WORKER_HTTP_TIMEOUT_S", "125"))
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            response = await client.post(
+                f"{worker_url}/execute",
+                json=body,
+                headers={"Authorization": f"Bearer {worker_token}"},
+            )
+        if response.status_code >= 400:
+            detail = response.text[:500]
+            raise RuntimeError(f"Browser Use worker request failed ({response.status_code}): {detail}")
+        result = response.json()
+        if not isinstance(result, Mapping):
+            raise RuntimeError("Browser Use worker returned a non-object response")
+        return result
+
+    return _run
+
+
+class RemoteBrowserUseWorker(BrowserUseWorker):
+    """Browser workflow boundary backed by a separately deployed worker."""
+
+    def __init__(self, base_url: str | None = None, token: str | None = None, **kwargs: Any):
+        self.worker_url = _worker_base_url(base_url or os.getenv("BROWSER_USE_WORKER_URL", ""))
+        self.worker_token = token if token is not None else os.getenv("BROWSER_USE_WORKER_TOKEN", "")
+        super().__init__(runner=build_remote_browser_use_runner(self.worker_url, self.worker_token), **kwargs)
+
+    def health(self) -> AdapterHealth:
+        if not self.worker_token:
+            return AdapterHealth(self.name, configured=False, reachable=False, detail="BROWSER_USE_WORKER_TOKEN is missing")
+        try:
+            import httpx
+
+            response = httpx.get(f"{self.worker_url}/health", timeout=1.0)
+            payload = response.json() if response.is_success else {}
+            ready = bool(isinstance(payload, Mapping) and payload.get("ready"))
+            return AdapterHealth(
+                self.name,
+                configured=True,
+                reachable=ready,
+                capabilities=tuple(sorted(self.allowed_workflows)) if ready else (),
+                detail="remote browser worker ready" if ready else f"remote browser worker returned {response.status_code}",
+            )
+        except Exception as exc:
+            return AdapterHealth(self.name, configured=True, reachable=False, detail=f"remote browser worker unavailable: {exc}")
+
+
 def build_browser_use_runner() -> WorkflowRunner:
     """Create the optional Browser Use runner lazily.
 
@@ -162,5 +244,17 @@ def build_browser_use_runner() -> WorkflowRunner:
     return _run
 
 
-if os.getenv("BROWSER_USE_ENABLED", "false").lower() == "true":
+_worker_url = os.getenv("BROWSER_USE_WORKER_URL", "")
+if _worker_url:
+    try:
+        browser_use_worker = RemoteBrowserUseWorker(_worker_url)
+    except ValueError:
+        # A missing/malformed worker token must not prevent the API from
+        # starting; integration health reports it unavailable and live calls
+        # remain disabled until the deployment is corrected.
+        browser_use_worker = BrowserUseWorker()
+elif os.getenv("BROWSER_USE_LOCAL_DEVELOPMENT", "false").lower() == "true":
+    # Local execution is intentionally opt-in for development only. Production
+    # execution belongs in the dedicated worker process defined in the OSS
+    # Compose overlay.
     browser_use_worker = BrowserUseWorker(runner=build_browser_use_runner())

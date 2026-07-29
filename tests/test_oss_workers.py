@@ -2,7 +2,7 @@ import pytest
 
 from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
 from backend.contracts.adapters import SidecarContext
-from backend.integrations.browser_use_worker import BrowserUseWorker, _history_trace
+from backend.integrations.browser_use_worker import BrowserUseWorker, RemoteBrowserUseWorker, _history_trace, build_remote_browser_use_runner
 
 
 def test_crawl4ai_is_optional_and_dry_run_is_network_free():
@@ -29,6 +29,28 @@ def test_browser_worker_dry_run_returns_plan():
     )
     assert result["status"] == "planned"
     assert result["dry_run"] is True
+
+
+def test_remote_browser_worker_requires_private_token_and_valid_url():
+    with pytest.raises(ValueError, match="TOKEN"):
+        build_remote_browser_use_runner("http://browser-use-worker:8001", token="")
+    with pytest.raises(ValueError, match="without embedded credentials"):
+        build_remote_browser_use_runner("https://token@example.test", token="secret")
+
+
+def test_remote_browser_worker_health_probes_the_isolated_service(monkeypatch):
+    class Response:
+        is_success = True
+        status_code = 200
+
+        def json(self):
+            return {"ready": True}
+
+    monkeypatch.setattr("httpx.get", lambda *_args, **_kwargs: Response())
+    health = RemoteBrowserUseWorker("http://browser-use-worker:8001", "worker-secret").health()
+    assert health.configured is True
+    assert health.reachable is True
+    assert health.detail == "remote browser worker ready"
 
 
 def test_browser_worker_rejects_non_allowlisted_domain():

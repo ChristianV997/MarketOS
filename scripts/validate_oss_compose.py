@@ -16,6 +16,7 @@ def validate_overlay(path: Path = OVERLAY) -> list[str]:
     services = data.get("services", {})
     medusa = services.get("medusa", {})
     api = services.get("api", {})
+    browser_worker = services.get("browser-use-worker", {})
     if "medusa" not in services or "api" not in services:
         errors.append("overlay must define medusa and api services")
     if ":latest" in str(medusa.get("image", "")) or medusa.get("image") is None:
@@ -27,6 +28,23 @@ def validate_overlay(path: Path = OVERLAY) -> list[str]:
     condition = api.get("depends_on", {}).get("medusa", {}).get("condition")
     if condition != "service_healthy":
         errors.append("api must depend on medusa service_healthy")
+    if "browser-use-worker" not in services:
+        errors.append("overlay must define the browser-use worker service")
+    if "healthcheck" not in browser_worker:
+        errors.append("browser-use worker must define a healthcheck")
+    build = browser_worker.get("build", {})
+    if not isinstance(build, dict) or build.get("dockerfile") != "Dockerfile.browser-use-worker":
+        errors.append("browser-use worker must use the reviewed worker Dockerfile")
+    version = build.get("args", {}).get("BROWSER_USE_VERSION", "") if isinstance(build, dict) else ""
+    if not version or "latest" in str(version):
+        errors.append("browser-use worker version must be explicitly pinned")
+    if browser_worker.get("ports"):
+        errors.append("browser-use worker must not publish a host port")
+    if api.get("environment", {}).get("BROWSER_USE_WORKER_URL") != "http://browser-use-worker:8001":
+        errors.append("api must target the internal browser-use worker")
+    browser_condition = api.get("depends_on", {}).get("browser-use-worker", {}).get("condition")
+    if browser_condition != "service_healthy":
+        errors.append("api must depend on browser-use worker service_healthy")
     return errors
 
 

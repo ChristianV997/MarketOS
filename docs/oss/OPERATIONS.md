@@ -32,9 +32,16 @@ Postiz requires a separate AGPL compliance review before commercial delivery.
 Read-only analytics may be configured independently, but live publishing is
 fail-closed until `POSTIZ_COMMERCIAL_APPROVED=true` is set by the review owner.
 Browser Use and Crawl4AI remain isolated optional workers with allowlists,
-approval gates, timeouts, and dry-run defaults. Live Browser Use executions
-also require an explicit allowlisted URL and idempotency key; dry-run planning
-remains network-free.
+approval gates, timeouts, and dry-run defaults. Enable Browser Use only through
+the `browser-use-worker` service in `docker-compose.oss.example.yml`: set a
+reviewed `BROWSER_USE_VERSION`, a strong private `BROWSER_USE_WORKER_TOKEN`,
+and `BROWSER_USE_ALLOWED_DOMAINS`. The service is intentionally not published
+on a host port. API-to-worker calls carry the full MarketOS context and require
+the shared token; the worker independently rechecks its workflow, domain,
+approval, idempotency, timeout, and action-trace bounds. Live Browser Use
+executions also require an explicit allowlisted URL and idempotency key;
+dry-run planning remains network-free. `BROWSER_USE_LOCAL_DEVELOPMENT` is a
+development-only escape hatch and must remain false in deployed environments.
 n8n is an internal-only automation sidecar for alerts, CRM synchronization,
 approval reminders, and exports. Do not embed it, white-label it, or expose
 its workflow editor as a MarketOS customer capability; keep it behind the
