@@ -96,6 +96,14 @@ def test_signal_metrics_endpoint_exposes_cache_telemetry():
     assert "source_failures" in result
 
 
+def test_optional_integration_health_is_safe_when_unconfigured():
+    from backend.api import integrations_health
+    result = integrations_health()
+    assert "medusa" in result["integrations"]
+    assert "postiz" in result["integrations"]
+    assert result["integrations"]["medusa"]["configured"] is False
+
+
 def test_prometheus_exposes_signal_cache_metric_families():
     pytest.importorskip("prometheus_client")
     from backend.api import prometheus_metrics

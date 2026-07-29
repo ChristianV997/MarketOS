@@ -327,6 +327,31 @@ def ready():
     return {"ready": True}
 
 
+@app.get("/integrations/health")
+def integrations_health():
+    """Expose optional OSS adapter health without making any adapter mandatory."""
+    from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
+    from backend.agents.pydantic_boundary import PydanticAIAgentProvider
+    from backend.integrations.browser_use_worker import browser_use_worker
+    from backend.integrations.medusa import commerce_provider
+    from backend.integrations.postiz import publisher
+
+    providers = [commerce_provider, Crawl4AIResearchAdapter(), browser_use_worker, publisher, PydanticAIAgentProvider()]
+    return {
+        "integrations": {
+            provider.name: {
+                "configured": health.configured,
+                "reachable": health.reachable,
+                "capabilities": list(health.capabilities),
+                "detail": health.detail,
+                "observed_at": health.observed_at.isoformat(),
+            }
+            for provider in providers
+            for health in [provider.health()]
+        }
+    }
+
+
 @app.get("/status")
 def status():
     """Lightweight status snapshot for polling."""
