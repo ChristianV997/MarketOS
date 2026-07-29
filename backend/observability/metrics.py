@@ -83,6 +83,12 @@ sleep_cycle_duration_ms  = _histogram("sleep_cycle_duration_ms","Sleep cycle dur
 sleep_compression_ratio  = _gauge("sleep_compression_ratio",   "Latest consolidation compression ratio")
 sleep_units_created      = _counter("sleep_units_created_total","Semantic units created in sleep cycles")
 
+# ── orchestrator checkpointing ────────────────────────────────────────────────
+checkpoint_writes_total     = _counter("checkpoint_writes_total",     "Total orchestrator state checkpoint writes")
+checkpoint_failures_total   = _counter("checkpoint_failures_total",   "Failed checkpoint writes")
+checkpoint_recoveries_total = _counter("checkpoint_recoveries_total", "Startup recoveries from checkpoint", ["outcome"])
+checkpoint_last_write_ts    = _gauge(  "checkpoint_last_write_ts",    "Unix timestamp of last successful checkpoint")
+
 # ── entropy ───────────────────────────────────────────────────────────────────
 cognitive_entropy        = _gauge("cognitive_entropy",          "Overall cognitive entropy [0,1]",        ["workspace"])
 vector_fragmentation     = _gauge("vector_fragmentation",       "Vector store fragmentation [0,1]")

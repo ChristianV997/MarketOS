@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import time
 from typing import Any
 
@@ -336,6 +337,95 @@ def _persist_lineage() -> None:
 def _persist_calibration() -> None:
     from simulation.calibration import calibration_store
     calibration_store.persist()
+
+
+# ── restart-safe checkpointing ────────────────────────────────────────────────
+#
+# The tick loop below runs indefinitely and is the only long-lived process
+# driving live state forward. A hard kill (OOM, SIGKILL, container
+# reschedule) between graceful shutdowns previously lost everything since
+# backend/api.py's FastAPI lifespan last saved on its own shutdown hook —
+# this orchestrator loop never persisted independently. These helpers close
+# that gap: periodic saves during the loop, a one-shot restore + incomplete-
+# workflow scan at startup, and a final best-effort save on shutdown.
+
+CHECKPOINT_EVERY_N_TICKS = max(1, int(os.getenv("ORCHESTRATOR_CHECKPOINT_TICKS", "6")))
+STATE_PATH = os.getenv("STATE_PATH", "state/state.db")
+
+_shutdown_requested = False
+
+
+def _handle_sigterm(signum: int, frame: Any) -> None:
+    """Signal handler for SIGTERM — only sets a flag, never raises.
+
+    Raising out of a signal handler mid-tick (potentially inside arbitrary
+    worker code) is unsafe; the tick loop checks this flag between ticks
+    and exits cleanly after a final checkpoint.
+    """
+    global _shutdown_requested
+    _shutdown_requested = True
+    _log.info("orchestrator_sigterm_received")
+
+
+def _write_checkpoint(tick: int) -> None:
+    """Best-effort periodic state save. Never raises out to the tick loop."""
+    try:
+        import backend.api as _api
+        from backend.core.serializer import save
+
+        save(_api._state, STATE_PATH)
+        try:
+            from backend.observability.metrics import (
+                checkpoint_writes_total, checkpoint_last_write_ts,
+            )
+            checkpoint_writes_total.inc()
+            checkpoint_last_write_ts.set(time.time())
+        except Exception:
+            pass
+        _log.debug("orchestrator_checkpoint_written tick=%s", tick)
+    except Exception as exc:
+        try:
+            from backend.observability.metrics import checkpoint_failures_total
+            checkpoint_failures_total.inc()
+        except Exception:
+            pass
+        _log.warning("orchestrator_checkpoint_failed tick=%s error=%s", tick, exc)
+
+
+def _restore_checkpoint() -> None:
+    """Best-effort startup restore, plus a one-shot incomplete-workflow scan.
+
+    Restoring here is a no-op when backend.api's own FastAPI lifespan has
+    already loaded state in this process (the common co-deployed case) —
+    load() is idempotent and simply re-reads the same file.
+    """
+    outcome = "none"
+    try:
+        import backend.api as _api
+        from backend.core.serializer import load
+
+        loaded = load(STATE_PATH)
+        if loaded:
+            _api._state = loaded
+            outcome = "restored"
+    except Exception as exc:
+        _log.warning("orchestrator_checkpoint_restore_failed error=%s", exc)
+    try:
+        from backend.observability.metrics import checkpoint_recoveries_total
+        checkpoint_recoveries_total.labels(outcome=outcome).inc()
+    except Exception:
+        pass
+
+    try:
+        from backend.orchestration.event_store import event_store
+        stuck = event_store.incomplete_workflows()
+        if stuck:
+            _log.warning(
+                "orchestrator_startup_incomplete_workflows count=%d ids=%s",
+                len(stuck), [w.get("workflow_id", w.get("id", "?")) for w in stuck][:10],
+            )
+    except Exception as exc:
+        _log.debug("orchestrator_incomplete_workflow_scan_failed error=%s", exc)
 
 
 @worker_safe()
@@ -929,6 +1019,7 @@ except ImportError:
 
 def run() -> None:
     """Run the orchestrator loop indefinitely."""
+    global _shutdown_requested
     _log.info("orchestrator_starting tick_interval=%s", TICK_INTERVAL)
     try:
         from backend.observability.sentry_init import init_sentry
@@ -936,15 +1027,30 @@ def run() -> None:
     except Exception:
         pass
     _init_prometheus()
+    _restore_checkpoint()
+    try:
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+    except Exception as exc:
+        _log.debug("orchestrator_sigterm_handler_unavailable error=%s", exc)
+
+    tick_count = 0
 
     while True:
         try:
+            if _shutdown_requested:
+                _log.info("orchestrator_shutdown_requested")
+                break
+
+            tick_count += 1
             metrics = _collect_metrics()
             phase   = phase_controller.tick(metrics)
             alloc   = resource_allocator.describe(phase, TOTAL_BUDGET)
 
             _record_phase(phase)
             _record_tick()
+
+            if tick_count % CHECKPOINT_EVERY_N_TICKS == 0:
+                _write_checkpoint(tick_count)
 
             _log.info(
                 "orchestrator_tick phase=%s avg_roas=%s capital=%s",
@@ -1014,11 +1120,15 @@ def run() -> None:
 
         except (KeyboardInterrupt, SystemExit):
             _log.info("orchestrator_stopping")
+            _write_checkpoint(tick_count)
             break
         except Exception as exc:
             _log.exception("orchestrator_tick_error error=%s", exc)
 
         time.sleep(TICK_INTERVAL)
+
+    if _shutdown_requested:
+        _write_checkpoint(tick_count)
 
 
 if __name__ == "__main__":
