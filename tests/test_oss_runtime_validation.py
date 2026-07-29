@@ -7,4 +7,5 @@ def test_oss_runtime_report_is_read_only_and_validates_boundaries():
     assert report["inventory_errors"] == []
     assert report["dry_run_boundaries"]["medusa"]["dry_run"] is True
     assert report["dry_run_boundaries"]["postiz"]["dry_run"] is True
+    assert report["dry_run_boundaries"]["n8n"]["dry_run"] is True
     assert {item["name"] for item in report["providers"]} >= {"medusa", "postiz", "crawl4ai"}

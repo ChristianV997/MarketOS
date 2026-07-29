@@ -26,6 +26,11 @@ unset `MEDUSA_BASE_URL`.
 Postiz requires a separate AGPL compliance review before commercial delivery.
 Browser Use and Crawl4AI remain isolated optional workers with allowlists,
 approval gates, timeouts, and dry-run defaults.
+n8n is an internal-only automation sidecar for alerts, CRM synchronization,
+approval reminders, and exports. Do not embed it, white-label it, or expose
+its workflow editor as a MarketOS customer capability; keep it behind the
+allowlisted adapter and use `N8N_BASE_URL` only for an approved internal
+deployment.
 
 `MARKETOS_AGENT_QA_ENABLED=true` enables the typed campaign-QA gate. It is
 disabled by default; when enabled, provider unavailability or rejection marks
