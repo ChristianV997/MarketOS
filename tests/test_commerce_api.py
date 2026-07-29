@@ -121,6 +121,51 @@ def test_prometheus_exposes_signal_cache_metric_families():
     assert "marketos_signal_source_failures_total" in payload
 
 
+def test_prometheus_exposes_commerce_economics_metric_families(monkeypatch):
+    pytest.importorskip("prometheus_client")
+    from api.routes.observability import prometheus_metrics
+    from backend.commerce.loop import CommerceLoop
+    from backend.commerce.launch import LaunchExecutor
+    from backend.commerce.feedback import FeedbackRecorder
+    from backend.commerce.scoring import OpportunityScorer
+    from evaluation.contracts import DataQuality, ProductCandidate
+
+    live = DataQuality(provenance="live", attribution="attributed")
+    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.creative.generate_creative", lambda product, angle: f"{product}:{angle}:script")
+
+    loop = CommerceLoop(
+        scorer=OpportunityScorer(),
+        launcher=LaunchExecutor(
+            create_campaign=lambda **kwargs: {"campaign_id": "camp-metrics"},
+            create_ad_group=lambda **kwargs: {"adgroup_id": "ag-metrics"},
+            create_ad=lambda **kwargs: {"ad_id": "ad-metrics"},
+            metrics_provider=lambda campaign_ids: ({"spend": 10.0, "revenue": 25.0}, live),
+        ),
+        feedback=FeedbackRecorder(
+            campaign_memory=type("FakeCampaignMemory", (), {"index_campaign": lambda self, **kwargs: 1})(),
+            reinforcement_memory=type("FakeReinforcementMemory", (), {"record_outcome": lambda self, **kwargs: None})(),
+            signal_memory=type("FakeSignalMemory", (), {"index_keyword": lambda self, *args, **kwargs: 1})(),
+        ),
+    )
+    loop.run_cycle(
+        signals=[{"id": "s1", "product": "Gadget", "score": 0.9, "engagement": 0.9, "velocity": 0.7, "quality": live}],
+        products={"Gadget": ProductCandidate("gadget", "Gadget", selling_price=100.0, quality=live)},
+        offers={},
+        top_k=1,
+        budget=25.0,
+        dry_run=True,
+    )
+
+    payload = prometheus_metrics().body.decode("utf-8")
+    assert "marketos_commerce_cycle_ranked_total" in payload
+    assert "marketos_commerce_cycle_launchable_total" in payload
+    assert "marketos_commerce_cycle_spend_total" in payload
+    assert "marketos_commerce_cycle_revenue_total" in payload
+    assert "marketos_commerce_cycle_last_roas" in payload
+
+
 def test_api_deployment_smoke_runs_dry_commerce_cycle(monkeypatch):
     """Exercise the public HTTP surface through startup, execution, and shutdown.
 

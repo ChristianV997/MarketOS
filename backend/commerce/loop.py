@@ -23,6 +23,72 @@ from .feedback import FeedbackRecorder
 from .launch import LaunchExecutor
 from .scoring import OpportunityScorer
 
+try:
+    from prometheus_client import Counter, Gauge
+
+    _prom_cycle_ranked_total = Counter(
+        "marketos_commerce_cycle_ranked_total",
+        "Ranked opportunities produced per commerce cycle",
+    )
+    _prom_cycle_launchable_total = Counter(
+        "marketos_commerce_cycle_launchable_total",
+        "Ranked opportunities marked launchable per commerce cycle",
+    )
+    _prom_cycle_rejection_reasons_total = Counter(
+        "marketos_commerce_cycle_rejection_reasons_total",
+        "Non-launchable ranked opportunities by rejection reason",
+        ["reason"],
+    )
+    _prom_cycle_spend = Counter(
+        "marketos_commerce_cycle_spend_total",
+        "Total spend across launched campaign outcomes per commerce cycle",
+    )
+    _prom_cycle_revenue = Counter(
+        "marketos_commerce_cycle_revenue_total",
+        "Total revenue across launched campaign outcomes per commerce cycle",
+    )
+    _prom_cycle_last_roas = Gauge(
+        "marketos_commerce_cycle_last_roas",
+        "Blended ROAS (revenue / spend) of the most recent commerce cycle",
+    )
+except ImportError:
+    _prom_cycle_ranked_total = None
+    _prom_cycle_launchable_total = None
+    _prom_cycle_rejection_reasons_total = None
+    _prom_cycle_spend = None
+    _prom_cycle_revenue = None
+    _prom_cycle_last_roas = None
+
+
+def _emit_cycle_metrics(ranked: list[RankedOpportunity], outcomes: Iterable[CampaignOutcome]) -> None:
+    """Best-effort Prometheus emission — never raises, mirrors the
+    lazy-Counter pattern already used by core/signals.py and
+    backend/commerce/feedback.py.
+    """
+    try:
+        if _prom_cycle_ranked_total is not None:
+            _prom_cycle_ranked_total.inc(len(ranked))
+        if _prom_cycle_launchable_total is not None:
+            _prom_cycle_launchable_total.inc(
+                sum(1 for item in ranked if item.readiness and item.readiness.launchable)
+            )
+        if _prom_cycle_rejection_reasons_total is not None:
+            for item in ranked:
+                if not item.readiness or item.readiness.launchable:
+                    continue
+                for reason in item.readiness.reasons:
+                    _prom_cycle_rejection_reasons_total.labels(reason=reason).inc()
+        spend = round(sum(o.spend for o in outcomes), 4)
+        revenue = round(sum(o.revenue for o in outcomes), 4)
+        if _prom_cycle_spend is not None:
+            _prom_cycle_spend.inc(spend)
+        if _prom_cycle_revenue is not None:
+            _prom_cycle_revenue.inc(revenue)
+        if _prom_cycle_last_roas is not None and spend > 0:
+            _prom_cycle_last_roas.set(round(revenue / spend, 4))
+    except Exception:
+        pass
+
 
 def _key_lookup(*keys: str):
     def _resolver(items: Mapping[str, Any] | None, fallback: str) -> Any:
@@ -172,6 +238,8 @@ class CommerceLoop:
             "feedback_records": len(feedback),
             "launchable": sum(1 for item in ranked if item.readiness and item.readiness.launchable),
         }
+
+        _emit_cycle_metrics(ranked, outcomes)
 
         return CommerceCycleReport(
             artifact_id=f"commerce-cycle-{int(started_at * 1000)}",
