@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any, Awaitable, Callable, Mapping
+from urllib.parse import urlparse
 
 from backend.contracts.adapters import AdapterHealth, BrowserWorkflowProvider, SidecarContext
 
@@ -19,11 +21,13 @@ class BrowserUseWorker:
 
     name = "browser-use"
 
-    def __init__(self, runner: WorkflowRunner | None = None, *, allowed_workflows: set[str] | None = None, timeout_s: float = 120.0, max_actions: int = 50):
+    def __init__(self, runner: WorkflowRunner | None = None, *, allowed_workflows: set[str] | None = None, allowed_domains: set[str] | None = None, timeout_s: float = 120.0, max_actions: int = 50, require_trace: bool = True):
         self.runner = runner
         self.allowed_workflows = allowed_workflows or {"supplier_research", "product_import_review"}
+        self.allowed_domains = allowed_domains or set(filter(None, os.getenv("BROWSER_USE_ALLOWED_DOMAINS", "").split(",")))
         self.timeout_s = timeout_s
         self.max_actions = max_actions
+        self.require_trace = require_trace
 
     def health(self) -> AdapterHealth:
         if self.runner is None:
@@ -33,6 +37,11 @@ class BrowserUseWorker:
     async def execute(self, workflow: str, payload: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]:
         if workflow not in self.allowed_workflows:
             raise PermissionError(f"browser workflow is not allowlisted: {workflow}")
+        url = payload.get("url")
+        if url and self.allowed_domains:
+            hostname = (urlparse(str(url)).hostname or "").lower()
+            if not any(hostname == domain.strip().lower().lstrip(".") or hostname.endswith("." + domain.strip().lower().lstrip(".")) for domain in self.allowed_domains):
+                raise PermissionError(f"browser domain is not allowlisted: {hostname}")
         if context.approval_state not in {"approved", "not_required"}:
             raise PermissionError("browser workflow requires MarketOS approval")
         if context.dry_run:
@@ -43,6 +52,8 @@ class BrowserUseWorker:
         actions = result.get("actions") if isinstance(result, Mapping) else None
         if isinstance(actions, list) and len(actions) > self.max_actions:
             raise RuntimeError("browser workflow exceeded the configured action limit")
+        if self.require_trace and isinstance(result, Mapping) and not (result.get("trace_id") or result.get("trace") or result.get("actions")):
+            raise RuntimeError("browser workflow result must include an execution trace")
         return result
 
 

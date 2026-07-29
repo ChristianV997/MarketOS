@@ -31,6 +31,24 @@ def test_browser_worker_dry_run_returns_plan():
     assert result["dry_run"] is True
 
 
+def test_browser_worker_rejects_non_allowlisted_domain():
+    worker = BrowserUseWorker(allowed_domains={"supplier.example"})
+    with pytest.raises(PermissionError):
+        pytest.importorskip("asyncio").run(
+            worker.execute("supplier_research", {"url": "https://other.example/item"}, context=SidecarContext(dry_run=True))
+        )
+
+
+def test_browser_worker_requires_trace_for_live_runner():
+    async def runner(_workflow, _payload, _context):
+        return {"status": "done"}
+    worker = BrowserUseWorker(runner=runner)
+    with pytest.raises(RuntimeError, match="execution trace"):
+        pytest.importorskip("asyncio").run(
+            worker.execute("supplier_research", {}, context=SidecarContext(dry_run=False, approval_state="approved"))
+        )
+
+
 def test_crawl4ai_rejects_non_allowlisted_live_domain():
     adapter = Crawl4AIResearchAdapter(allowed_domains={"example.com"})
     with pytest.raises(PermissionError):
