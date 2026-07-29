@@ -4,7 +4,7 @@
   "tags": ["marketos", "signals", "cache"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": {"from": "now-6h", "to": "now"},
   "panels": [
@@ -86,6 +86,24 @@
       "datasource": {"type": "prometheus", "uid": "marketos-prometheus"},
       "targets": [{"refId": "A", "expr": "sum by (source, outcome) (rate(marketos_integration_webhook_events_total[15m]))", "legendFormat": "{{source}} / {{outcome}}"}],
       "fieldConfig": {"defaults": {"unit": "ops", "min": 0}}
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Configured Sidecar Reachability",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+      "datasource": {"type": "prometheus", "uid": "marketos-prometheus"},
+      "targets": [{"refId": "A", "expr": "marketos_integration_reachable", "legendFormat": "{{integration}}"}],
+      "fieldConfig": {"defaults": {"unit": "bool", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}}
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Integration Health Probe Latency (p95)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+      "datasource": {"type": "prometheus", "uid": "marketos-prometheus"},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (integration, le) (rate(marketos_integration_health_probe_duration_seconds_bucket[10m])))", "legendFormat": "{{integration}}"}],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0}}
     }
   ]
 }

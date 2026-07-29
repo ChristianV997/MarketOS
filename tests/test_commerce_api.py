@@ -203,6 +203,18 @@ def test_optional_integration_health_is_safe_when_unconfigured():
     assert result["integrations"]["medusa"]["configured"] is False
 
 
+def test_integration_health_is_exported_to_prometheus():
+    pytest.importorskip("prometheus_client")
+    import backend.api as api
+    api._integration_health_cache.clear()
+    result = api.integrations_health()
+    assert "crawl4ai" in result["integrations"]
+    payload = api.prometheus_metrics().body.decode("utf-8")
+    assert "marketos_integration_configured" in payload
+    assert "marketos_integration_reachable" in payload
+    assert "marketos_integration_health_probe_duration_seconds" in payload
+
+
 def test_prometheus_exposes_signal_cache_metric_families():
     pytest.importorskip("prometheus_client")
     from backend.api import prometheus_metrics

@@ -48,10 +48,15 @@ try:
     _prom_regime     = Gauge("marketos_regime",               "Detected regime label", ["regime"])
     _prom_cycle_time = Histogram("marketos_cycle_duration_s", "run_cycle() latency")
     _prom_webhook_events = Counter("marketos_integration_webhook_events_total", "Sidecar webhook events by outcome", ["source", "outcome"])
+    _prom_integration_configured = Gauge("marketos_integration_configured", "Configured optional integrations", ["integration"])
+    _prom_integration_reachable = Gauge("marketos_integration_reachable", "Reachable optional integrations", ["integration"])
+    _prom_integration_probe_duration = Histogram("marketos_integration_health_probe_duration_seconds", "Optional integration health probe duration", ["integration"])
+    _prom_integration_probes = Counter("marketos_integration_health_probes_total", "Optional integration health probes by outcome", ["integration", "outcome"])
     _PROMETHEUS_OK   = True
 except ImportError:
     _PROMETHEUS_OK = False
     _prom_webhook_events = None
+    _prom_integration_configured = _prom_integration_reachable = _prom_integration_probe_duration = _prom_integration_probes = None
 
 from backend.core.state import SystemState
 from backend.execution.loop import run_cycle
@@ -66,6 +71,9 @@ from backend.agents.structural_evolution import structural_engine
 
 STATE_PATH = os.getenv("STATE_PATH", "state/state.db")
 _CYCLES_PER_MINUTE = max(1, int(os.getenv("CYCLES_PER_MINUTE", "10")))
+_INTEGRATION_HEALTH_TTL_S = max(1.0, float(os.getenv("MARKETOS_INTEGRATION_HEALTH_TTL_S", "30")))
+_integration_health_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_integration_health_lock = threading.Lock()
 
 # When ORCHESTRATOR_HANDLES_CYCLES=true the background runner skips run_cycle()
 # and only publishes the current snapshot. Set this when orchestrator/main.py
@@ -342,6 +350,11 @@ def ready():
 @app.get("/integrations/health")
 def integrations_health():
     """Expose optional OSS adapter health without making any adapter mandatory."""
+    return {"integrations": _integration_health_snapshot(force=True)}
+
+
+def _integration_health_snapshot(*, force: bool = False) -> dict[str, dict[str, Any]]:
+    """Probe optional adapters with bounded cache and export safe metric labels."""
     from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
     from backend.agents.pydantic_boundary import PydanticAIAgentProvider
     from backend.integrations.browser_use_worker import browser_use_worker
@@ -350,19 +363,37 @@ def integrations_health():
     from backend.integrations.postiz import publisher
 
     providers = [commerce_provider, Crawl4AIResearchAdapter(), browser_use_worker, publisher, automation_provider, PydanticAIAgentProvider()]
-    return {
-        "integrations": {
-            provider.name: {
-                "configured": health.configured,
-                "reachable": health.reachable,
-                "capabilities": list(health.capabilities),
-                "detail": health.detail,
-                "observed_at": health.observed_at.isoformat(),
-            }
-            for provider in providers
-            for health in [provider.health()]
-        }
-    }
+    now = time.monotonic()
+    snapshot: dict[str, dict[str, Any]] = {}
+    with _integration_health_lock:
+        for provider in providers:
+            cached = _integration_health_cache.get(provider.name)
+            if not force and cached and now - cached[0] < _INTEGRATION_HEALTH_TTL_S:
+                snapshot[provider.name] = dict(cached[1])
+                continue
+            started = time.monotonic()
+            try:
+                health = provider.health()
+                record = {
+                    "configured": health.configured,
+                    "reachable": health.reachable,
+                    "capabilities": list(health.capabilities),
+                    "detail": health.detail,
+                    "observed_at": health.observed_at.isoformat(),
+                }
+                outcome = "reachable" if health.reachable else "unreachable"
+            except Exception as exc:
+                record = {"configured": False, "reachable": False, "capabilities": [], "detail": str(exc), "observed_at": datetime.now(timezone.utc).isoformat()}
+                outcome = "error"
+            duration = time.monotonic() - started
+            if _prom_integration_configured is not None:
+                _prom_integration_configured.labels(integration=provider.name).set(1 if record["configured"] else 0)
+                _prom_integration_reachable.labels(integration=provider.name).set(1 if record["reachable"] else 0)
+                _prom_integration_probe_duration.labels(integration=provider.name).observe(duration)
+                _prom_integration_probes.labels(integration=provider.name, outcome=outcome).inc()
+            _integration_health_cache[provider.name] = (now, dict(record))
+            snapshot[provider.name] = record
+    return snapshot
 
 
 @app.get("/status")
@@ -727,6 +758,7 @@ def prometheus_metrics():
     """Prometheus scrape endpoint — exposes all registered metrics."""
     if not _PROMETHEUS_OK:
         return PlainTextResponse("# prometheus_client not installed\n", media_type="text/plain")
+    _integration_health_snapshot()
     return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 

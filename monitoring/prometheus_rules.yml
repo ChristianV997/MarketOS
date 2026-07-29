@@ -90,3 +90,13 @@ groups:
         annotations:
           summary: MarketOS sidecar webhook failures are repeating
           description: Webhook source {{ $labels.source }} has at least 3 failed or invalid events in the last 15 minutes.
+
+      - alert: MarketOSConfiguredIntegrationUnreachable
+        expr: marketos_integration_configured == 1 and marketos_integration_reachable == 0
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: integrations
+        annotations:
+          summary: MarketOS configured integration is unreachable
+          description: Integration {{ $labels.integration }} has remained configured but unreachable for 5 minutes.
