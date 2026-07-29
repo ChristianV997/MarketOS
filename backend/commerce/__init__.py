@@ -30,8 +30,9 @@ from backend.commerce.contracts import (
 from backend.commerce.creative import CreativeComposer
 from backend.commerce.feedback import FeedbackRecorder
 from backend.commerce.launch import LaunchExecutor
-from backend.commerce.loop import CommerceLoop, run_commerce_cycle
+from backend.commerce.loop import CommerceLoop, run_commerce_cycle, run_provider_cycle
 from backend.commerce.scoring import OpportunityScorer
+from backend.commerce.oss_bridge import clear_oss_cache, collect_oss_inputs
 
 __all__ = [
     "Brand",
@@ -50,5 +51,8 @@ __all__ = [
     "LaunchExecutor",
     "CommerceLoop",
     "run_commerce_cycle",
+    "run_provider_cycle",
     "OpportunityScorer",
+    "collect_oss_inputs",
+    "clear_oss_cache",
 ]

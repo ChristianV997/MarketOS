@@ -24,13 +24,23 @@ try:
         "marketos_feedback_duplicates",
         "Commerce feedback observations ignored as duplicates",
     )
+    _prom_feedback_failures = Counter(
+        "marketos_feedback_failures",
+        "Commerce feedback observations that failed to persist",
+    )
 except ImportError:
     _prom_feedback_records = None
     _prom_feedback_duplicates = None
+    _prom_feedback_failures = None
 
 
 _PROCESSED_OBSERVATIONS: set[str] = set()
 _OBSERVATION_LOCK = threading.Lock()
+
+
+def _release_observation(observation_id: str) -> None:
+    with _OBSERVATION_LOCK:
+        _PROCESSED_OBSERVATIONS.discard(observation_id)
 
 
 def _record_campaign_lineage_outcome(plan: LaunchPlan, outcome: CampaignOutcome) -> None:
@@ -98,6 +108,74 @@ def _observation_from_outcome(outcome: CampaignOutcome) -> CampaignObservation:
     )
 
 
+def observation_from_webhook(payload: dict[str, Any], *, source: str) -> CampaignObservation | None:
+    """Normalize a provider metrics event without inventing missing values."""
+    if source == "medusa":
+        return _medusa_observation_from_webhook(payload)
+    metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else payload
+    campaign_id = str(payload.get("campaign_id") or metrics.get("campaign_id") or "").strip()
+    observation_id = str(payload.get("id") or payload.get("event_id") or "").strip()
+    if not campaign_id or not observation_id:
+        return None
+    try:
+        return CampaignObservation(
+            observation_id=observation_id,
+            campaign_id=campaign_id,
+            product_id=str(payload.get("product_id") or metrics.get("product_id") or ""),
+            creative_id=str(payload.get("creative_id") or metrics.get("creative_id") or ""),
+            spend=float(metrics.get("spend", 0.0) or 0.0),
+            revenue=float(metrics.get("revenue", 0.0) or 0.0),
+            impressions=int(metrics.get("impressions", 0) or 0),
+            clicks=int(metrics.get("clicks", 0) or 0),
+            conversions=int(metrics.get("conversions", metrics.get("conversion", 0)) or 0),
+            refunds=float(metrics.get("refunds", 0.0) or 0.0),
+            currency=str(metrics.get("currency", "USD")),
+            quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"{source}:{observation_id}"),
+            metadata={"source": source, "event_type": payload.get("type", "")},
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _medusa_observation_from_webhook(payload: dict[str, Any]) -> CampaignObservation | None:
+    """Map Medusa revenue only when order metadata proves MarketOS lineage."""
+    event_id = str(payload.get("id") or payload.get("event_id") or payload.get("webhook_id") or "").strip()
+    event_type = str(payload.get("type") or payload.get("event_type") or "").strip().lower()
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    order = payload.get("order") if isinstance(payload.get("order"), dict) else data.get("order")
+    order = order if isinstance(order, dict) else data
+    metadata = order.get("metadata") if isinstance(order.get("metadata"), dict) else {}
+    campaign_id = str(metadata.get("marketos_campaign_id") or "").strip()
+    if not event_id or not campaign_id:
+        return None
+    product_id = str(metadata.get("marketos_product_id") or "").strip()
+    creative_id = str(metadata.get("marketos_creative_id") or "").strip()
+    if not product_id:
+        items = order.get("items") if isinstance(order.get("items"), list) else []
+        first = items[0] if items and isinstance(items[0], dict) else {}
+        product_id = str(first.get("variant_id") or first.get("product_id") or "").strip()
+    refund = order.get("refund") if isinstance(order.get("refund"), dict) else data.get("refund")
+    refund = refund if isinstance(refund, dict) else {}
+    is_refund = "refund" in event_type
+    raw_amount = refund.get("amount") if is_refund else order.get("total", order.get("subtotal", 0.0))
+    try:
+        amount = max(0.0, float(raw_amount or 0.0))
+    except (TypeError, ValueError):
+        return None
+    return CampaignObservation(
+        observation_id=event_id,
+        campaign_id=campaign_id,
+        product_id=product_id,
+        creative_id=creative_id,
+        revenue=0.0 if is_refund else amount,
+        conversions=0 if is_refund else 1,
+        refunds=amount if is_refund else 0.0,
+        currency=str(order.get("currency_code") or order.get("currency") or "USD").upper(),
+        quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"medusa:{event_id}"),
+        metadata={"source": "medusa", "event_type": event_type, "order_id": str(order.get("id") or data.get("id") or ""), "lineage": "order_metadata"},
+    )
+
+
 @dataclass
 class FeedbackRecorder:
     """Persist outcomes into semantic and reinforcement memory."""
@@ -105,6 +183,57 @@ class FeedbackRecorder:
     campaign_memory: CampaignMemory = field(default_factory=CampaignMemory)
     reinforcement_memory: ReinforcementMemory = field(default_factory=ReinforcementMemory)
     signal_memory: SignalMemory = field(default_factory=SignalMemory)
+
+    def record_observation(self, observation: CampaignObservation) -> dict[str, Any]:
+        """Persist an attributed provider observation without a launch bundle.
+
+        Webhook events often arrive after the original process has ended, so
+        they cannot reliably reconstruct the full creative/launch objects.
+        Store only the evidence available in the observation and never infer
+        missing creative metadata.
+        """
+        with _OBSERVATION_LOCK:
+            if observation.observation_id in _PROCESSED_OBSERVATIONS:
+                if _prom_feedback_duplicates is not None:
+                    _prom_feedback_duplicates.inc()
+                return {"observation_id": observation.observation_id, "deduplicated": True}
+            _PROCESSED_OBSERVATIONS.add(observation.observation_id)
+        metadata = dict(observation.metadata)
+        product = observation.product_id or observation.campaign_id
+        roas = observation.revenue / observation.spend if observation.spend > 0 else 0.0
+        hook = str(metadata.get("hook", ""))
+        angle = str(metadata.get("angle", ""))
+        try:
+            self.campaign_memory.index_campaign(
+                campaign_id=observation.campaign_id,
+                product=product,
+                hook=hook,
+                angle=angle,
+                roas=roas,
+                phase="webhook_feedback",
+                spend=observation.spend,
+                revenue=observation.revenue,
+                creative_id=observation.creative_id,
+            )
+            self.reinforcement_memory.record_outcome(
+                hook=hook,
+                angle=angle,
+                product=product,
+                roas=roas,
+                phase="webhook_feedback",
+                campaign_id=observation.campaign_id,
+                creative_id=observation.creative_id,
+            )
+            self.signal_memory.index_keyword(product, source="commerce_webhook_feedback", campaign_id=observation.campaign_id, roas=roas)
+        except Exception as exc:
+            _release_observation(observation.observation_id)
+            if _prom_feedback_failures is not None:
+                _prom_feedback_failures.inc()
+            return {"observation_id": observation.observation_id, "deduplicated": False, "recorded": False, "error": str(exc)}
+        if _prom_feedback_records is not None:
+            _prom_feedback_records.inc()
+        return {"observation_id": observation.observation_id, "deduplicated": False, "recorded": True}
+
 
     def record(self, bundle: CreativeBundle, plan: LaunchPlan, outcome: CampaignOutcome) -> dict[str, Any]:
         observation = _observation_from_outcome(outcome)
@@ -118,49 +247,55 @@ class FeedbackRecorder:
                     "deduplicated": True,
                 }
             _PROCESSED_OBSERVATIONS.add(observation.observation_id)
-        readiness = evaluate_campaign(
-            CampaignCandidate(
-                campaign_id=plan.campaign_id or plan.artifact_id,
-                product_id=plan.product_id,
-                creative_id=plan.creative_id,
-                platform=plan.platform,
-                budget=plan.budget,
-                currency=plan.currency,
-                quality=outcome.quality,
-            ),
-            [observation],
-        )
+        try:
+            readiness = evaluate_campaign(
+                CampaignCandidate(
+                    campaign_id=plan.campaign_id or plan.artifact_id,
+                    product_id=plan.product_id,
+                    creative_id=plan.creative_id,
+                    platform=plan.platform,
+                    budget=plan.budget,
+                    currency=plan.currency,
+                    quality=outcome.quality,
+                ),
+                [observation],
+            )
 
-        if outcome.campaign_id:
-            self.campaign_memory.index_campaign(
-                campaign_id=outcome.campaign_id,
-                product=outcome.product_name or plan.product_name,
+            if outcome.campaign_id:
+                self.campaign_memory.index_campaign(
+                    campaign_id=outcome.campaign_id,
+                    product=outcome.product_name or plan.product_name,
+                    hook=bundle.hook,
+                    angle=bundle.angle,
+                    roas=outcome.roas,
+                    phase="commerce",
+                    spend=outcome.spend,
+                    revenue=outcome.revenue,
+                    creative_id=outcome.creative_id,
+                )
+
+            self.reinforcement_memory.record_outcome(
                 hook=bundle.hook,
                 angle=bundle.angle,
+                product=outcome.product_name or plan.product_name,
                 roas=outcome.roas,
                 phase="commerce",
-                spend=outcome.spend,
-                revenue=outcome.revenue,
+                campaign_id=outcome.campaign_id,
                 creative_id=outcome.creative_id,
             )
 
-        self.reinforcement_memory.record_outcome(
-            hook=bundle.hook,
-            angle=bundle.angle,
-            product=outcome.product_name or plan.product_name,
-            roas=outcome.roas,
-            phase="commerce",
-            campaign_id=outcome.campaign_id,
-            creative_id=outcome.creative_id,
-        )
-
-        self.signal_memory.index_keyword(
-            outcome.product_name or plan.product_name,
-            source="commerce_feedback",
-            campaign_id=outcome.campaign_id,
-            roas=outcome.roas,
-        )
-        _record_campaign_lineage_outcome(plan, outcome)
+            self.signal_memory.index_keyword(
+                outcome.product_name or plan.product_name,
+                source="commerce_feedback",
+                campaign_id=outcome.campaign_id,
+                roas=outcome.roas,
+            )
+            _record_campaign_lineage_outcome(plan, outcome)
+        except Exception:
+            _release_observation(observation.observation_id)
+            if _prom_feedback_failures is not None:
+                _prom_feedback_failures.inc()
+            raise
 
         if _prom_feedback_records is not None:
             _prom_feedback_records.inc()
@@ -170,3 +305,6 @@ class FeedbackRecorder:
             "readiness": readiness.to_dict(),
             "deduplicated": False,
         }
+
+
+webhook_feedback_recorder = FeedbackRecorder()

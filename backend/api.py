@@ -18,6 +18,9 @@ route modules must always go through ``_core._state`` (never a
 destructured ``from backend.api import _state``) so they see the current
 value instead of the one that existed at import time.
 """
+import json
+import hashlib
+import hmac
 import logging
 import os
 import threading
@@ -27,7 +30,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
-from fastapi import Body, FastAPI, Query
+from fastapi import Body, FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
@@ -54,9 +57,16 @@ try:
     _prom_avg_roas   = Gauge("marketos_avg_roas",             "Average ROAS last 100 cycles")
     _prom_regime     = Gauge("marketos_regime",               "Detected regime label", ["regime"])
     _prom_cycle_time = Histogram("marketos_cycle_duration_s", "run_cycle() latency")
+    _prom_webhook_events = Counter("marketos_integration_webhook_events_total", "Sidecar webhook events by outcome", ["source", "outcome"])
+    _prom_integration_configured = Gauge("marketos_integration_configured", "Configured optional integrations", ["integration"])
+    _prom_integration_reachable = Gauge("marketos_integration_reachable", "Reachable optional integrations", ["integration"])
+    _prom_integration_probe_duration = Histogram("marketos_integration_health_probe_duration_seconds", "Optional integration health probe duration", ["integration"])
+    _prom_integration_probes = Counter("marketos_integration_health_probes_total", "Optional integration health probes by outcome", ["integration", "outcome"])
     _PROMETHEUS_OK   = True
 except ImportError:
     _PROMETHEUS_OK = False
+    _prom_webhook_events = None
+    _prom_integration_configured = _prom_integration_reachable = _prom_integration_probe_duration = _prom_integration_probes = None
 
 from backend.core.state import SystemState
 from backend.execution.loop import run_cycle
@@ -65,6 +75,9 @@ from backend.execution.loop import run_cycle
 
 STATE_PATH = os.getenv("STATE_PATH", "state/state.db")
 _CYCLES_PER_MINUTE = max(1, int(os.getenv("CYCLES_PER_MINUTE", "10")))
+_INTEGRATION_HEALTH_TTL_S = max(1.0, float(os.getenv("MARKETOS_INTEGRATION_HEALTH_TTL_S", "30")))
+_integration_health_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_integration_health_lock = threading.Lock()
 
 # When ORCHESTRATOR_HANDLES_CYCLES=true the background runner skips run_cycle()
 # and only publishes the current snapshot. Set this when orchestrator/main.py
@@ -329,11 +342,57 @@ _geo_agent = GeoAgent()
 _audience_agent = AudienceAgent()
 _risk_agent = RiskAgent()
 
-
 def _current_peak_capital() -> float:
     """Read the peak capital tracked by the execution loop (falls back to current capital)."""
     return getattr(_state, "_peak_capital", _state.capital)
 
+@app.get("/integrations/health")
+def integrations_health():
+    """Expose optional OSS adapter health without making any adapter mandatory."""
+    return {"integrations": _integration_health_snapshot(force=True)}
+
+
+def _integration_health_snapshot(*, force: bool = False) -> dict[str, dict[str, Any]]:
+    """Probe optional adapters with bounded cache and export safe metric labels."""
+    from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
+    from backend.agents.pydantic_boundary import PydanticAIAgentProvider
+    from backend.integrations.browser_use_worker import browser_use_worker
+    from backend.integrations.medusa import commerce_provider
+    from backend.integrations.n8n import automation_provider
+    from backend.integrations.postiz import publisher
+
+    providers = [commerce_provider, Crawl4AIResearchAdapter(), browser_use_worker, publisher, automation_provider, PydanticAIAgentProvider()]
+    now = time.monotonic()
+    snapshot: dict[str, dict[str, Any]] = {}
+    with _integration_health_lock:
+        for provider in providers:
+            cached = _integration_health_cache.get(provider.name)
+            if not force and cached and now - cached[0] < _INTEGRATION_HEALTH_TTL_S:
+                snapshot[provider.name] = dict(cached[1])
+                continue
+            started = time.monotonic()
+            try:
+                health = provider.health()
+                record = {
+                    "configured": health.configured,
+                    "reachable": health.reachable,
+                    "capabilities": list(health.capabilities),
+                    "detail": health.detail,
+                    "observed_at": health.observed_at.isoformat(),
+                }
+                outcome = "reachable" if health.reachable else "unreachable"
+            except Exception as exc:
+                record = {"configured": False, "reachable": False, "capabilities": [], "detail": str(exc), "observed_at": datetime.now(timezone.utc).isoformat()}
+                outcome = "error"
+            duration = time.monotonic() - started
+            if _prom_integration_configured is not None:
+                _prom_integration_configured.labels(integration=provider.name).set(1 if record["configured"] else 0)
+                _prom_integration_reachable.labels(integration=provider.name).set(1 if record["reachable"] else 0)
+                _prom_integration_probe_duration.labels(integration=provider.name).observe(duration)
+                _prom_integration_probes.labels(integration=provider.name, outcome=outcome).inc()
+            _integration_health_cache[provider.name] = (now, dict(record))
+            snapshot[provider.name] = record
+    return snapshot
 
 # ── Step 41 mock data (used by api.routes.dashboard_panels via _core.<name>) ─
 # Fixture data for dashboard panels not yet backed by a live data source.
@@ -634,6 +693,155 @@ def commerce_cycle(payload: dict[str, Any] | None = Body(default=None)):
         return report.to_dict()
     except Exception as exc:
         return {"launchable": False, "reasons": ["invalid_commerce_cycle_request", str(exc)]}
+
+
+@app.post("/commerce/provider-cycle")
+def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None)):
+    """Run the canonical loop from allowlisted research URLs.
+
+    This endpoint is dry-run by default and delegates all ranking, QA, launch,
+    and feedback behavior to ``run_provider_cycle``.
+    """
+    try:
+        data = payload or {}
+        urls = data.get("urls") or data.get("research_urls") or []
+        if not isinstance(urls, list) or not urls or len(urls) > 20 or not all(isinstance(url, str) and url.strip() for url in urls):
+            return {"launchable": False, "reasons": ["provider_cycle_requires_1_to_20_urls"]}
+        raw_dry_run = data.get("dry_run", True)
+        dry_run = raw_dry_run if isinstance(raw_dry_run, bool) else str(raw_dry_run).lower() not in {"false", "0", "no", "off"}
+        if not dry_run and data.get("confirm_live") is not True:
+            return {"launchable": False, "reasons": ["live_execution_requires_confirm_live"]}
+        from backend.commerce import run_provider_cycle
+        from backend.contracts.adapters import SidecarContext
+        report = run_provider_cycle(
+            urls,
+            context=SidecarContext(dry_run=dry_run, approval_state="approved" if not dry_run else "not_required"),
+            top_k=max(1, min(int(data.get("top_k", 5) or 5), 50)),
+            budget=max(0.0, float(data.get("budget", 20.0) or 20.0)),
+            dry_run=dry_run,
+        )
+        return report.to_dict()
+    except Exception as exc:
+        return {"launchable": False, "reasons": ["invalid_provider_cycle_request", str(exc)]}
+
+
+def _verify_integration_webhook(source: str, payload: dict[str, Any], signature: str | None) -> bool:
+    secret = os.getenv(f"{source.upper()}_WEBHOOK_SECRET", "")
+    if not secret:
+        return True
+    if not signature:
+        return False
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    provided = signature.removeprefix("sha256=")
+    return hmac.compare_digest(expected, provided)
+
+
+@app.post("/integrations/webhooks/{source}")
+def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webhook_signature: str | None = Header(default=None)):
+    """Receive deduplicated Medusa/Postiz events into the canonical broker."""
+    if source not in {"medusa", "postiz"}:
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source="unknown", outcome="unsupported").inc()
+        return JSONResponse({"accepted": False, "reason": "unsupported_webhook_source"}, status_code=404)
+    if not _verify_integration_webhook(source, payload, x_webhook_signature):
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source=source, outcome="invalid_signature").inc()
+        return JSONResponse({"accepted": False, "reason": "invalid_webhook_signature"}, status_code=401)
+    event_id = str(payload.get("id") or payload.get("event_id") or payload.get("webhook_id") or "")
+    if not event_id:
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source=source, outcome="missing_id").inc()
+        return JSONResponse({"accepted": False, "reason": "webhook_event_id_required"}, status_code=400)
+    try:
+        if source == "medusa":
+            from backend.integrations.medusa import commerce_provider
+            accepted = commerce_provider.accept_webhook(event_id)
+        else:
+            from backend.integrations.postiz import publisher
+            accepted = publisher.accept_webhook(event_id)
+        if not accepted:
+            if _prom_webhook_events is not None:
+                _prom_webhook_events.labels(source=source, outcome="duplicate").inc()
+            return {"accepted": False, "duplicate": True, "event_id": event_id}
+        from backend.pubsub.broker import broker
+        broker_event_id = broker.publish(f"{source}.webhook", payload, source=source, correlation_id=event_id)
+        from backend.commerce.feedback import observation_from_webhook
+        observation = observation_from_webhook(payload, source=source)
+        feedback = None
+        if observation is not None and os.getenv("MARKETOS_WEBHOOK_LEARNING", "true").lower() == "true":
+            from backend.commerce.feedback import webhook_feedback_recorder
+            feedback = webhook_feedback_recorder.record_observation(observation)
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source=source, outcome="accepted").inc()
+        return {
+            "accepted": True, "duplicate": False, "event_id": event_id,
+            "broker_event_id": broker_event_id,
+            "observation": observation.__dict__ if observation else None,
+            "feedback": feedback,
+        }
+    except Exception as exc:
+        # Do not mark an event as permanently handled when downstream
+        # publication failed; the source should be able to retry it.
+        try:
+            if source == "medusa":
+                commerce_provider.release_webhook(event_id)
+            else:
+                publisher.release_webhook(event_id)
+        except Exception:
+            pass
+        if _prom_webhook_events is not None:
+            _prom_webhook_events.labels(source=source, outcome="failed").inc()
+        return JSONResponse({"accepted": False, "reason": "webhook_processing_failed", "detail": str(exc)}, status_code=503)
+
+
+@app.post("/commerce/publish")
+def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
+    """Publish one canonical CreativeBundle through the publishing adapter."""
+    try:
+        data = payload or {}
+        raw_dry_run = data.get("dry_run", True)
+        dry_run = raw_dry_run if isinstance(raw_dry_run, bool) else str(raw_dry_run).lower() not in {"false", "0", "no", "off"}
+        if not dry_run and data.get("confirm_live") is not True:
+            return {"published": False, "reasons": ["live_publishing_requires_confirm_live"]}
+        bundle_data = data.get("bundle") if isinstance(data.get("bundle"), dict) else data
+        from backend.commerce.contracts import CreativeBundle
+        from backend.commerce.loop import CommerceLoop
+        from backend.contracts.adapters import SidecarContext
+        bundle = CreativeBundle(**{key: value for key, value in bundle_data.items() if key in CreativeBundle.__dataclass_fields__})
+        records = CommerceLoop().publish_creatives(
+            [bundle], dry_run=dry_run,
+            approval_state="approved" if not dry_run else "not_required",
+        )
+        return {"published": bool(records), "dry_run": dry_run, "records": records, "artifact_id": bundle.artifact_id}
+    except Exception as exc:
+        return {"published": False, "reasons": ["invalid_publish_request", str(exc)]}
+
+
+@app.post("/integrations/postiz/analytics/reconcile")
+def reconcile_postiz_analytics(payload: dict[str, Any] = Body(...)):
+    """Fetch one Postiz post's analytics and store canonical feedback evidence."""
+    post_id = str(payload.get("post_id") or "").strip()
+    campaign_id = str(payload.get("campaign_id") or "").strip()
+    if not post_id or not campaign_id:
+        return {"reconciled": False, "reasons": ["post_id_and_campaign_id_required"]}
+    try:
+        days = payload.get("days")
+        if days is not None:
+            days = int(days)
+        from backend.integrations.postiz import publisher
+        from backend.commerce.feedback import _observation_dict, webhook_feedback_recorder
+        observation = publisher.fetch_campaign_observation(
+            post_id,
+            campaign_id,
+            product_id=str(payload.get("product_id") or ""),
+            creative_id=str(payload.get("creative_id") or ""),
+            days=days,
+        )
+        feedback = webhook_feedback_recorder.record_observation(observation)
+        return {"reconciled": bool(feedback.get("recorded") or feedback.get("deduplicated")), "observation": _observation_dict(observation), "feedback": feedback}
+    except Exception as exc:
+        return {"reconciled": False, "reasons": ["postiz_analytics_reconcile_failed", str(exc)]}
 
 
 @app.post("/evaluation/campaign")

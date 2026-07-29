@@ -1,0 +1,65 @@
+# Postiz is an AGPL-3.0 sidecar. Enable this overlay only after the explicit
+# commercial review represented by POSTIZ_COMMERCIAL_APPROVED=true.
+services:
+  postiz:
+    image: ghcr.io/gitroomhq/postiz-app:v2.21.7@sha256:29a40ab11ef597c340f7f25764e7f040429c6b72c3eda33d15a429ddb66d0933
+    restart: unless-stopped
+    environment:
+      MAIN_URL: ${POSTIZ_MAIN_URL:?Set the externally routed Postiz URL}
+      FRONTEND_URL: ${POSTIZ_MAIN_URL:?Set the externally routed Postiz URL}
+      NEXT_PUBLIC_BACKEND_URL: ${POSTIZ_BACKEND_URL:?Set the externally routed Postiz API URL}
+      BACKEND_INTERNAL_URL: http://postiz:5000
+      DATABASE_URL: postgresql://postiz:${POSTIZ_DATABASE_PASSWORD:?Set a durable Postiz database password}@postiz-postgres:5432/postiz
+      REDIS_URL: redis://postiz-redis:6379
+      JWT_SECRET: ${POSTIZ_JWT_SECRET:?Set a durable Postiz JWT secret}
+      DISABLE_REGISTRATION: "true"
+    depends_on:
+      postiz-postgres:
+        condition: service_healthy
+      postiz-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:5000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  postiz-postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postiz
+      POSTGRES_PASSWORD: ${POSTIZ_DATABASE_PASSWORD:?Set a durable Postiz database password}
+      POSTGRES_DB: postiz
+    volumes:
+      - postiz_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postiz -d postiz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  postiz-redis:
+    image: redis:7.2
+    restart: unless-stopped
+    volumes:
+      - postiz_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  api:
+    environment:
+      POSTIZ_BASE_URL: http://postiz:5000/public/v1
+      POSTIZ_ALLOWED_HOSTS: postiz
+      POSTIZ_API_TOKEN: ${POSTIZ_API_TOKEN:?Set a Postiz public API/OAuth token}
+      POSTIZ_COMMERCIAL_APPROVED: ${POSTIZ_COMMERCIAL_APPROVED:?Legal review owner must explicitly approve commercial Postiz use}
+    depends_on:
+      postiz:
+        condition: service_healthy
+
+volumes:
+  postiz_postgres_data:
+  postiz_redis_data:

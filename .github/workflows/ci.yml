@@ -39,8 +39,55 @@ jobs:
       - name: Compile check
         run: python -m compileall -q .
 
+      - name: Validate OSS inventory and runtime boundaries
+        run: python scripts/validate_oss_runtime.py --json
+
+      - name: Audit OSS static readiness
+        run: python scripts/audit_oss_readiness.py --json
+
+      - name: Enforce OSS commercial policy
+        run: python scripts/check_oss_policy.py
+
+      - name: Validate OSS Compose overlay
+        run: python scripts/validate_oss_compose.py
+
+      - name: Validate internal n8n Compose overlay
+        run: python scripts/validate_n8n_internal_compose.py
+
+      - name: Validate approval-gated Postiz Compose overlay
+        run: python scripts/validate_postiz_compose.py
+
+      - name: Enforce pinned container images
+        run: python scripts/validate_container_pins.py
+
+      - name: Validate OCI image provenance contract
+        run: python scripts/validate_image_provenance.py
+
+      - name: Generate OSS SBOM manifest
+        run: python scripts/generate_oss_sbom.py --output artifacts/oss-sbom.json
+
+      - name: Retain OSS SBOM manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketos-oss-sbom
+          path: artifacts/oss-sbom.json
+          if-no-files-found: error
+
+      - name: Audit declared Python dependencies
+        run: |
+          python -m pip install -r requirements-security.txt
+          # Base requirements are already installed above. Audit the actual
+          # resolved CI environment instead of resolving the large unpinned
+          # graph a second time through `pip-audit -r`.
+          pip-audit --local --strict
+          python -m pip install -r requirements-oss-agents.txt
+          pip-audit --local --strict
+
       - name: Run tests
         run: pytest tests/ -v
+
+      - name: Enforce dry-run commerce-cycle p95 budget
+        run: python scripts/benchmark_commerce_cycle.py --runs 10 --p95-limit-ms 2000
 
       - name: Smoke run (10 cycles)
         run: |
@@ -97,8 +144,34 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Validate OSS Compose overlay with Docker
+        env:
+          MEDUSA_IMAGE: medusajs/medusa:v2.14.2
+          MEDUSA_DATABASE_URL: postgres://validation.invalid/marketos
+          N8N_ENCRYPTION_KEY: validation-only-encryption-key
+          N8N_USER_MANAGEMENT_JWT_SECRET: validation-only-jwt-secret
+          N8N_WEBHOOK_TOKEN: validation-only-webhook-token
+          POSTIZ_MAIN_URL: https://postiz.validation.invalid
+          POSTIZ_BACKEND_URL: https://postiz.validation.invalid/api
+          POSTIZ_DATABASE_PASSWORD: validation-only-postiz-password
+          POSTIZ_JWT_SECRET: validation-only-postiz-jwt-secret
+          POSTIZ_API_TOKEN: validation-only-postiz-api-token
+          POSTIZ_COMMERCIAL_APPROVED: "true"
+        run: |
+          # The base compose file deliberately uses the local .env contract.
+          # Supply safe example values for config validation; no services start.
+          cp .env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.oss.example.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.n8n.internal.example.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.postiz.example.yml config --quiet
+
       - name: Build production image
-        run: docker build --tag marketos:ci .
+        run: docker build --build-arg VCS_REF=${{ github.sha }} --tag marketos:ci .
+
+      - name: Verify built-image provenance
+        run: |
+          test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.source" }}' marketos:ci)" = "https://github.com/ChristianV997/MarketOS"
+          test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' marketos:ci)" = "${{ github.sha }}"
 
       - name: Start API container
         run: |

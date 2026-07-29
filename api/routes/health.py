@@ -1,6 +1,7 @@
 """api.routes.health — uptime and lightweight status polling."""
 from __future__ import annotations
 
+import os
 import time
 from datetime import datetime, timezone
 
@@ -26,6 +27,14 @@ def ready():
             {"ready": False, "reason": "runtime_services_initializing"},
             status_code=503,
         )
+    if os.getenv("MEDUSA_REQUIRED_FOR_READY", "false").lower() == "true":
+        from backend.integrations.medusa import commerce_provider
+        medusa_health = commerce_provider.health()
+        if not medusa_health.reachable:
+            return JSONResponse(
+                {"ready": False, "reason": "required_medusa_unavailable", "detail": medusa_health.detail},
+                status_code=503,
+            )
     return {"ready": True}
 
 

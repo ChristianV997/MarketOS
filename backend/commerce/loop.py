@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import time
+import asyncio
+import os
+from dataclasses import replace
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
@@ -174,6 +177,33 @@ class CommerceLoop:
     def compose(self, opportunities: Iterable[RankedOpportunity]) -> list[CreativeBundle]:
         return self.composer.compose_batch(opportunities)
 
+    def quality_gate(self, creatives: Iterable[CreativeBundle]) -> tuple[list[CreativeBundle], list[str]]:
+        """Optionally run typed campaign QA before launch, failing closed."""
+        bundles = list(creatives)
+        if os.getenv("MARKETOS_AGENT_QA_ENABLED", "false").lower() != "true":
+            return bundles, []
+        from backend.agents.domain_agents import CampaignQARequest, run_campaign_qa
+        failures: list[str] = []
+        checked: list[CreativeBundle] = []
+        for bundle in bundles:
+            try:
+                result = asyncio.run(run_campaign_qa(CampaignQARequest(
+                    product_id=bundle.product_id,
+                    creative_id=bundle.creative_id,
+                    platform=os.getenv("MARKETOS_DEFAULT_AD_PLATFORM", "tiktok"),
+                    copy_text=bundle.primary_text or bundle.script,
+                    dry_run=True,
+                )))
+                if not result.approved:
+                    checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_rejected", "not_launchable"))))))
+                    failures.append(f"{bundle.creative_id}:rejected")
+                else:
+                    checked.append(bundle)
+            except Exception as exc:
+                checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_unavailable", "not_launchable"))))))
+                failures.append(f"{bundle.creative_id}:unavailable:{exc}")
+        return checked, failures
+
     def launch(
         self,
         creatives: Iterable[CreativeBundle],
@@ -190,6 +220,35 @@ class CommerceLoop:
             plans.append(plan)
             outcomes.append(outcome)
         return plans, outcomes
+
+    def publish_creatives(
+        self,
+        creatives: Iterable[CreativeBundle],
+        *,
+        publisher: Any | None = None,
+        dry_run: bool = True,
+        approval_state: str = "not_required",
+    ) -> list[dict[str, Any]]:
+        """Publish approved creative bundles through the configured adapter."""
+        from backend.integrations.postiz import publisher as default_publisher
+        from backend.contracts.adapters import SidecarContext
+        target = publisher or default_publisher
+        records: list[dict[str, Any]] = []
+        for bundle in creatives:
+            if "not_launchable" in bundle.reasons:
+                continue
+            context = SidecarContext(
+                workspace_id=bundle.workspace,
+                run_id=bundle.artifact_id,
+                artifact_id=bundle.artifact_id,
+                parent_ids=tuple(bundle.parent_ids),
+                idempotency_key=f"publish:{bundle.creative_id}",
+                dry_run=dry_run,
+                approval_state=approval_state,
+            )
+            result = target.publish_bundle(bundle, context=context)
+            records.append(dict(result))
+        return records
 
     def reconcile(
         self,
@@ -225,6 +284,7 @@ class CommerceLoop:
         normalized_signals = [CommerceSignal.from_signal(signal) for signal in raw_signals]
         ranked = self.rank(normalized_signals, products=products, offers=offers, top_k=top_k)
         creatives = self.compose(ranked[:top_k])
+        creatives, qa_failures = self.quality_gate(creatives)
         plans, outcomes = self.launch(creatives, budget=budget, dry_run=dry_run)
         feedback = self.reconcile(creatives, plans, outcomes)
         finished_at = time.time()
@@ -238,6 +298,8 @@ class CommerceLoop:
             "feedback_records": len(feedback),
             "launchable": sum(1 for item in ranked if item.readiness and item.readiness.launchable),
         }
+        if qa_failures:
+            summary["qa_failures"] = len(qa_failures)
 
         _emit_cycle_metrics(ranked, outcomes)
 
@@ -254,6 +316,35 @@ class CommerceLoop:
             outcomes=tuple(outcomes),
             summary=summary,
         )
+
+    def run_provider_cycle(
+        self,
+        urls: Iterable[str],
+        *,
+        research_provider: Any | None = None,
+        commerce_provider: Any | None = None,
+        context: Any | None = None,
+        top_k: int = 5,
+        budget: float = 20.0,
+        dry_run: bool = True,
+    ) -> CommerceCycleReport:
+        """Run the canonical loop using optional OSS provider inputs."""
+        from .oss_bridge import collect_oss_inputs
+        signals, products, metadata = collect_oss_inputs(
+            tuple(urls), research=research_provider, commerce=commerce_provider, context=context,
+        )
+        report = self.run_cycle(
+            signals=signals,
+            products=products,
+            offers=metadata.get("offers", {}),
+            top_k=top_k,
+            budget=budget,
+            dry_run=dry_run,
+        )
+        if metadata.get("failures"):
+            report.summary["provider_failures"] = metadata["failures"]
+        report.summary["provider_signals"] = len(signals)
+        return report
 
 
 def run_commerce_cycle(
@@ -272,4 +363,20 @@ def run_commerce_cycle(
         top_k=top_k,
         budget=budget,
         dry_run=dry_run,
+    )
+
+
+def run_provider_cycle(
+    urls: Iterable[str],
+    *,
+    research_provider: Any | None = None,
+    commerce_provider: Any | None = None,
+    context: Any | None = None,
+    top_k: int = 5,
+    budget: float = 20.0,
+    dry_run: bool = True,
+) -> CommerceCycleReport:
+    return CommerceLoop().run_provider_cycle(
+        urls, research_provider=research_provider, commerce_provider=commerce_provider,
+        context=context, top_k=top_k, budget=budget, dry_run=dry_run,
     )

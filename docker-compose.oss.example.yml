@@ -1,0 +1,43 @@
+services:
+  medusa:
+    image: ${MEDUSA_IMAGE:?Set MEDUSA_IMAGE to a reviewed pinned Medusa image}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${MEDUSA_DATABASE_URL:?Set MEDUSA_DATABASE_URL}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9000/health >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+  api:
+    environment:
+      MEDUSA_BASE_URL: http://medusa:9000
+      BROWSER_USE_WORKER_URL: http://browser-use-worker:8001
+      BROWSER_USE_WORKER_TOKEN: ${BROWSER_USE_WORKER_TOKEN:?Set a strong private worker token}
+    depends_on:
+      medusa:
+        condition: service_healthy
+      browser-use-worker:
+        condition: service_healthy
+
+  browser-use-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.browser-use-worker
+      args:
+        BROWSER_USE_VERSION: ${BROWSER_USE_VERSION:-0.13.6}
+    restart: unless-stopped
+    environment:
+      BROWSER_USE_WORKER_TOKEN: ${BROWSER_USE_WORKER_TOKEN:?Set a strong private worker token}
+      BROWSER_USE_ALLOWED_DOMAINS: ${BROWSER_USE_ALLOWED_DOMAINS:?Set the approved browser domains}
+      BROWSER_USE_HEADLESS: "true"
+      BROWSER_USE_MODEL: ${BROWSER_USE_MODEL:-bu-2-0}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/health >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
