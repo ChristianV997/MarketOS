@@ -6,6 +6,8 @@ image by default and no third-party source is vendored into MarketOS.
 Run `python scripts/validate_oss_inventory.py` before changing the inventory.
 Pin and test each upstream release before enabling it. Record licenses,
 transitive dependencies, smoke tests, and rollback notes in the inventory.
+Run `python scripts/validate_oss_runtime.py --json` for a read-only local
+health and dry-run boundary report.
 
 Use `docker-compose.oss.example.yml` only after setting a reviewed pinned
 `MEDUSA_IMAGE` and database URL. Its health check gates API startup on Medusa
