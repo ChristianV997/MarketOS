@@ -8,17 +8,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 try:
     from scripts.validate_oss_inventory import INVENTORY, validate_inventory
 except ModuleNotFoundError:  # direct ``python scripts/validate_oss_runtime.py``
     from validate_oss_inventory import INVENTORY, validate_inventory
-
-ROOT = Path(__file__).parents[1]
-
 
 def _health_record(provider: Any) -> dict[str, Any]:
     started = time.perf_counter()
