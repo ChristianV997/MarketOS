@@ -1684,7 +1684,13 @@ def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webh
             return {"accepted": False, "duplicate": True, "event_id": event_id}
         from backend.pubsub.broker import broker
         broker_event_id = broker.publish(f"{source}.webhook", payload, source=source, correlation_id=event_id)
-        return {"accepted": True, "duplicate": False, "event_id": event_id, "broker_event_id": broker_event_id}
+        from backend.commerce.feedback import observation_from_webhook
+        observation = observation_from_webhook(payload, source=source)
+        return {
+            "accepted": True, "duplicate": False, "event_id": event_id,
+            "broker_event_id": broker_event_id,
+            "observation": observation.__dict__ if observation else None,
+        }
     except Exception as exc:
         return JSONResponse({"accepted": False, "reason": "webhook_processing_failed", "detail": str(exc)}, status_code=503)
 

@@ -98,6 +98,33 @@ def _observation_from_outcome(outcome: CampaignOutcome) -> CampaignObservation:
     )
 
 
+def observation_from_webhook(payload: dict[str, Any], *, source: str) -> CampaignObservation | None:
+    """Normalize a provider metrics event without inventing missing values."""
+    metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else payload
+    campaign_id = str(payload.get("campaign_id") or metrics.get("campaign_id") or "").strip()
+    observation_id = str(payload.get("id") or payload.get("event_id") or "").strip()
+    if not campaign_id or not observation_id:
+        return None
+    try:
+        return CampaignObservation(
+            observation_id=observation_id,
+            campaign_id=campaign_id,
+            product_id=str(payload.get("product_id") or metrics.get("product_id") or ""),
+            creative_id=str(payload.get("creative_id") or metrics.get("creative_id") or ""),
+            spend=float(metrics.get("spend", 0.0) or 0.0),
+            revenue=float(metrics.get("revenue", 0.0) or 0.0),
+            impressions=int(metrics.get("impressions", 0) or 0),
+            clicks=int(metrics.get("clicks", 0) or 0),
+            conversions=int(metrics.get("conversions", metrics.get("conversion", 0)) or 0),
+            refunds=float(metrics.get("refunds", 0.0) or 0.0),
+            currency=str(metrics.get("currency", "USD")),
+            quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"{source}:{observation_id}"),
+            metadata={"source": source, "event_type": payload.get("type", "")},
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class FeedbackRecorder:
     """Persist outcomes into semantic and reinforcement memory."""
