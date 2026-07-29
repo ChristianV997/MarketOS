@@ -35,6 +35,8 @@ Medusa and Postiz adapters expose bounded in-process webhook deduplication.
 Production webhook receivers should persist accepted event IDs in the durable
 event store before acknowledging events; the adapter ledger is a first-line
 replay guard, not a cross-process replacement for durable persistence.
+Set `MARKETOS_WEBHOOK_DEDUP_DB` to a shared SQLite path for cross-process
+deduplication; the default `:memory:` mode is intended for local/testing use.
 
 Research retries are limited by `MARKETOS_OSS_MAX_RETRIES` (default `2`) and
 `MARKETOS_OSS_RETRY_BACKOFF_S` (default `0.25`). Only transport-like failures

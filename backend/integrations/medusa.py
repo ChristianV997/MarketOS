@@ -26,7 +26,7 @@ class MedusaCommerceAdapter:
         self.token = token or os.getenv("MEDUSA_API_TOKEN", "")
         self.timeout_s = timeout_s
         self._client = client
-        self.webhook_events = WebhookEventLedger()
+        self.webhook_events = WebhookEventLedger(db_path=os.getenv("MARKETOS_WEBHOOK_DEDUP_DB", ":memory:"))
 
     @property
     def configured(self) -> bool:

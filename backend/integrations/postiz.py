@@ -21,7 +21,7 @@ class PostizPublisherAdapter:
         self.token = token or os.getenv("POSTIZ_API_TOKEN", "")
         self.path = os.getenv("POSTIZ_PUBLISH_PATH", "/api/posts")
         self._client = client
-        self.webhook_events = WebhookEventLedger()
+        self.webhook_events = WebhookEventLedger(db_path=os.getenv("MARKETOS_WEBHOOK_DEDUP_DB", ":memory:"))
 
     def health(self) -> AdapterHealth:
         if not self.base_url or not self.token:
