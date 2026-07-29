@@ -48,6 +48,9 @@ jobs:
       - name: Validate OSS Compose overlay
         run: python scripts/validate_oss_compose.py
 
+      - name: Enforce pinned container images
+        run: python scripts/validate_container_pins.py
+
       - name: Generate OSS SBOM manifest
         run: python scripts/generate_oss_sbom.py --output /tmp/marketos-oss-sbom.json
 

@@ -20,3 +20,9 @@ def test_ci_has_container_health_and_commerce_smoke_gate():
     assert "/health" in workflow
     assert "/ready" in workflow
     assert "/commerce/cycle" in workflow
+
+
+def test_compose_images_are_pinned_by_policy():
+    from scripts.validate_container_pins import validate_manifests
+
+    assert validate_manifests() == []

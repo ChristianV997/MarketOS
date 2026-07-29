@@ -10,6 +10,11 @@ Pin and test each upstream release before enabling it. Record licenses,
 transitive dependencies, smoke tests, and rollback notes in the inventory.
 Run `python scripts/validate_oss_runtime.py --json` for a read-only local
 health and dry-run boundary report.
+Run `python scripts/evaluate_medusa_sidecar.py` to emit the pinned Medusa
+runtime-evaluation plan. A real local evaluation is intentionally opt-in and
+requires `MEDUSA_IMAGE`, `MEDUSA_DATABASE_URL`, and both `--execute` and
+`--teardown`; it reports startup time, health latency, container memory, and
+whether an unauthenticated negative probe is rejected.
 Run `python scripts/generate_oss_sbom.py --output artifacts/oss-sbom.json`
 during release preparation to capture the reviewed OSS inventory and installed
 Python package versions without network access.
