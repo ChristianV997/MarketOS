@@ -73,6 +73,14 @@ def test_sidecar_context_carries_lineage_and_approval():
     assert context.approval_state == "approved"
 
 
+def test_sidecar_context_builds_canonical_headers():
+    context = SidecarContext(workspace_id="w", run_id="r", artifact_id="a", parent_ids=("p1", "p2"), idempotency_key="k", approval_state="approved")
+    assert context.to_headers() == {
+        "X-MarketOS-Workspace": "w", "X-MarketOS-Run": "r", "X-MarketOS-Artifact": "a",
+        "X-MarketOS-Parents": "p1,p2", "X-MarketOS-Approval": "approved", "Idempotency-Key": "k",
+    }
+
+
 def test_medusa_live_order_sends_lineage_and_idempotency_headers():
     class Response:
         def raise_for_status(self):

@@ -20,6 +20,19 @@ class SidecarContext:
     dry_run: bool = True
     approval_state: str = "not_required"
 
+    def to_headers(self) -> dict[str, str]:
+        """Return the canonical lineage and safety headers for sidecars."""
+        headers = {
+            "X-MarketOS-Workspace": self.workspace_id,
+            "X-MarketOS-Run": self.run_id,
+            "X-MarketOS-Artifact": self.artifact_id,
+            "X-MarketOS-Parents": ",".join(self.parent_ids),
+            "X-MarketOS-Approval": self.approval_state,
+        }
+        if self.idempotency_key:
+            headers["Idempotency-Key"] = self.idempotency_key
+        return headers
+
 
 @dataclass(frozen=True)
 class AdapterHealth:

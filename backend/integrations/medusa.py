@@ -40,16 +40,8 @@ class MedusaCommerceAdapter:
         headers = dict(kwargs.pop("headers", {}) or {})
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        if context and context.idempotency_key:
-            headers["Idempotency-Key"] = context.idempotency_key
         if context:
-            headers.update({
-                "X-MarketOS-Workspace": context.workspace_id,
-                "X-MarketOS-Run": context.run_id,
-                "X-MarketOS-Artifact": context.artifact_id,
-                "X-MarketOS-Parents": ",".join(context.parent_ids),
-                "X-MarketOS-Approval": context.approval_state,
-            })
+            headers.update(context.to_headers())
         client = self._client or httpx.Client(base_url=self.base_url, timeout=self.timeout_s)
         response = client.request(method, path, headers=headers, **kwargs)
         response.raise_for_status()

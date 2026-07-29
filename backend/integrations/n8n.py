@@ -47,17 +47,9 @@ class N8nAutomationAdapter:
             raise RuntimeError("n8n is not configured")
         if httpx is None and self._client is None:
             raise RuntimeError("httpx is required for the n8n adapter")
-        headers = {
-            "X-MarketOS-Workspace": context.workspace_id,
-            "X-MarketOS-Run": context.run_id,
-            "X-MarketOS-Artifact": context.artifact_id,
-            "X-MarketOS-Parents": ",".join(context.parent_ids),
-            "X-MarketOS-Approval": context.approval_state,
-        }
+        headers = context.to_headers()
         if self.token:
             headers["X-N8N-API-KEY"] = self.token
-        if context.idempotency_key:
-            headers["Idempotency-Key"] = context.idempotency_key
         client = self._client or httpx.Client(timeout=15.0)
         url = f"{self.base_url}{self.path_template.format(workflow=workflow)}"
         body = {"workflow": workflow, "payload": dict(payload), "context": context.__dict__}
