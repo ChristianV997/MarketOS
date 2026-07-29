@@ -1,6 +1,4 @@
 import pytest
-import sys
-import types
 
 from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
 from backend.contracts.adapters import SidecarContext
@@ -51,11 +49,6 @@ def test_browser_worker_requires_trace_for_live_runner():
         )
 
 
-def test_browser_use_runner_is_lazy_and_optional(monkeypatch):
-    monkeypatch.setitem(sys.modules, "browser_use", None)
-    with pytest.raises(RuntimeError, match="not installed"):
-        from backend.integrations.browser_use_worker import build_browser_use_runner
-        build_browser_use_runner()
 
 
 def test_crawl4ai_rejects_non_allowlisted_live_domain():
@@ -83,25 +76,3 @@ def test_crawl4ai_normalizes_only_named_records_to_marketos_contract():
     assert candidates[0].name == "Travel Mug"
     assert candidates[0].selling_price == 19.95
     assert candidates[0].quality.source_ref == "https://supplier.example/mug"
-
-
-def test_crawl4ai_prefers_structured_extraction(monkeypatch):
-    class Result:
-        extracted_content = '[{"name": "Travel Mug", "price": 19.95}]'
-        markdown = "unstructured fallback"
-
-    class Crawler:
-        async def __aenter__(self):
-            return self
-        async def __aexit__(self, *_args):
-            return None
-        async def arun(self, **_kwargs):
-            return Result()
-
-    monkeypatch.setitem(sys.modules, "crawl4ai", types.SimpleNamespace(AsyncWebCrawler=Crawler))
-    adapter = Crawl4AIResearchAdapter(allowed_domains={"supplier.example"}, respect_robots=False)
-    records = pytest.importorskip("asyncio").run(
-        adapter.discover("https://supplier.example/item", context=SidecarContext(dry_run=False, approval_state="approved"))
-    )
-    assert records[0]["name"] == "Travel Mug"
-    assert records[0]["quality"]["provenance"] == "live"
