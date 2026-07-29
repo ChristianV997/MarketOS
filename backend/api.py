@@ -1749,6 +1749,32 @@ def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
         return {"published": False, "reasons": ["invalid_publish_request", str(exc)]}
 
 
+@app.post("/integrations/postiz/analytics/reconcile")
+def reconcile_postiz_analytics(payload: dict[str, Any] = Body(...)):
+    """Fetch one Postiz post's analytics and store canonical feedback evidence."""
+    post_id = str(payload.get("post_id") or "").strip()
+    campaign_id = str(payload.get("campaign_id") or "").strip()
+    if not post_id or not campaign_id:
+        return {"reconciled": False, "reasons": ["post_id_and_campaign_id_required"]}
+    try:
+        days = payload.get("days")
+        if days is not None:
+            days = int(days)
+        from backend.integrations.postiz import publisher
+        from backend.commerce.feedback import _observation_dict, webhook_feedback_recorder
+        observation = publisher.fetch_campaign_observation(
+            post_id,
+            campaign_id,
+            product_id=str(payload.get("product_id") or ""),
+            creative_id=str(payload.get("creative_id") or ""),
+            days=days,
+        )
+        feedback = webhook_feedback_recorder.record_observation(observation)
+        return {"reconciled": bool(feedback.get("recorded") or feedback.get("deduplicated")), "observation": _observation_dict(observation), "feedback": feedback}
+    except Exception as exc:
+        return {"reconciled": False, "reasons": ["postiz_analytics_reconcile_failed", str(exc)]}
+
+
 @app.post("/evaluation/campaign")
 def evaluation_campaign(payload: dict[str, Any] = Body(...)):
     """Evaluate campaign observations without changing campaign state."""

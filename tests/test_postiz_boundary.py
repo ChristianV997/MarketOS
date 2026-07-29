@@ -142,3 +142,21 @@ def test_postiz_fetches_and_normalizes_read_only_analytics():
     assert client.call[0] == "https://postiz/public/v1/analytics/post/post-1"
     assert client.call[1]["params"] == {"date": 7}
     assert result["metrics"] == {"impressions": 250, "clicks": 8, "engagements": 13, "engagement_rate": 0.052}
+
+
+def test_postiz_analytics_maps_to_canonical_campaign_observation():
+    class Response:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return [{"label": "Impressions", "data": [{"total": "100"}]}, {"label": "Likes", "data": [{"total": "5"}]}]
+    class Client:
+        def get(self, *_args, **_kwargs):
+            return Response()
+    observation = PostizPublisherAdapter(base_url="https://postiz/public/v1", token="secret", client=Client()).fetch_campaign_observation(
+        "post-1", "campaign-1", product_id="p1", creative_id="cr1", days=7
+    )
+    assert observation.observation_id == "postiz-analytics:post-1:7"
+    assert observation.impressions == 100
+    assert observation.metadata["engagement_rate"] == 0.05
+    assert observation.quality.is_live_attributed is True

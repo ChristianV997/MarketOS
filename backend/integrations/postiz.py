@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from backend.contracts.adapters import AdapterHealth, ContentPublisher, SidecarContext
 from backend.integrations.webhook_dedup import WebhookEventLedger
 from backend.commerce.contracts import CreativeBundle
+from evaluation.contracts import CampaignObservation, DataQuality
 
 try:
     import httpx
@@ -98,6 +99,33 @@ class PostizPublisherAdapter:
         )
         response.raise_for_status()
         return self.normalize_analytics(post_id, response.json())
+
+    def fetch_campaign_observation(
+        self,
+        post_id: str,
+        campaign_id: str,
+        *,
+        product_id: str = "",
+        creative_id: str = "",
+        days: int | None = None,
+    ) -> CampaignObservation:
+        """Convert read-only Postiz analytics into MarketOS feedback evidence."""
+        campaign_id = str(campaign_id).strip()
+        if not campaign_id:
+            raise ValueError("campaign_id is required to reconcile Postiz analytics")
+        analytics = self.fetch_post_analytics(post_id, days=days)
+        metrics = analytics["metrics"]
+        lookback_days = days if days is not None else int(os.getenv("POSTIZ_ANALYTICS_DAYS", "30"))
+        return CampaignObservation(
+            observation_id=f"postiz-analytics:{post_id}:{lookback_days}",
+            campaign_id=campaign_id,
+            product_id=str(product_id),
+            creative_id=str(creative_id),
+            impressions=int(metrics["impressions"]),
+            clicks=int(metrics["clicks"]),
+            quality=DataQuality(provenance="live", attribution="attributed", source_ref=f"postiz:{post_id}"),
+            metadata={"source": "postiz", "post_id": post_id, "engagements": metrics["engagements"], "engagement_rate": metrics["engagement_rate"], "labels": analytics["labels"]},
+        )
 
     def publish_bundle(self, bundle: CreativeBundle, *, context: SidecarContext) -> Mapping[str, Any]:
         """Publish one canonical MarketOS creative artifact."""

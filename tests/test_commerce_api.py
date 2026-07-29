@@ -144,6 +144,33 @@ def test_commerce_publish_requires_explicit_live_confirmation():
     assert commerce_publish({"bundle": bundle, "dry_run": False})["reasons"] == ["live_publishing_requires_confirm_live"]
 
 
+def test_postiz_analytics_reconcile_translates_and_records_feedback(monkeypatch):
+    import backend.api as api
+    from evaluation.contracts import CampaignObservation, DataQuality
+
+    class Publisher:
+        def fetch_campaign_observation(self, post_id, campaign_id, **kwargs):
+            assert post_id == "post-1"
+            assert campaign_id == "campaign-1"
+            assert kwargs["days"] == 7
+            return CampaignObservation(
+                observation_id="postiz-analytics:post-1:7", campaign_id=campaign_id,
+                product_id=kwargs["product_id"], creative_id=kwargs["creative_id"], impressions=100, clicks=5,
+                quality=DataQuality(provenance="live", attribution="attributed", source_ref="postiz:post-1"),
+            )
+
+    class Recorder:
+        def record_observation(self, observation):
+            assert observation.impressions == 100
+            return {"recorded": True, "deduplicated": False}
+
+    monkeypatch.setattr("backend.integrations.postiz.publisher", Publisher())
+    monkeypatch.setattr("backend.commerce.feedback.webhook_feedback_recorder", Recorder())
+    result = api.reconcile_postiz_analytics({"post_id": "post-1", "campaign_id": "campaign-1", "product_id": "p1", "creative_id": "cr1", "days": 7})
+    assert result["reconciled"] is True
+    assert result["observation"]["campaign_id"] == "campaign-1"
+
+
 def test_integration_webhook_verifies_configured_hmac_secret(monkeypatch):
     import hashlib
     import hmac
