@@ -26,6 +26,18 @@ def test_oss_bridge_feeds_canonical_signal_inputs_and_degrades_safely():
     assert metadata["failures"] == {}
 
 
+def test_oss_bridge_marks_live_attributed_research_and_preserves_economics():
+    # Verify the conversion helper directly to isolate source-quality semantics.
+    from backend.commerce.oss_bridge import _research_signal
+    normalized = _research_signal({
+        "name": "Attributed Product", "url": "https://source.example/p",
+        "price": 29.0, "unit_cost": 8.0, "quality": {"provenance": "live"},
+    })
+    assert normalized["quality"]["attribution"] == "attributed"
+    assert normalized["price"] == 29.0
+    assert normalized["unit_cost"] == 8.0
+
+
 class FailingResearch:
     async def discover(self, url, *, context):
         raise RuntimeError("source unavailable")

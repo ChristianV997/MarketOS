@@ -57,7 +57,11 @@ def _research_signal(record: Mapping[str, Any]) -> dict[str, Any] | None:
     if not name:
         return None
     quality = dict(record.get("quality") or {})
-    return {
+    source_ref = str(record.get("url") or record.get("source_ref") or "")
+    if quality.get("provenance") == "live" and source_ref:
+        quality.setdefault("attribution", "attributed")
+        quality.setdefault("source_ref", source_ref)
+    signal = {
         "signal_id": str(record.get("signal_id") or record.get("url") or name),
         "product_id": str(record.get("product_id") or name),
         "product": name,
@@ -65,8 +69,12 @@ def _research_signal(record: Mapping[str, Any]) -> dict[str, Any] | None:
         "source": str(record.get("source") or "oss_research"),
         "score": float(record.get("score", 0.0) or 0.0),
         "quality": quality,
-        "metadata": {"source_ref": record.get("url") or record.get("source_ref", "")},
+        "metadata": {"source_ref": source_ref},
     }
+    for field in ("selling_price", "price", "unit_cost", "shipping_cost", "fulfillment_days", "inventory_units"):
+        if field in record:
+            signal[field] = record[field]
+    return signal
 
 
 def collect_oss_inputs(
