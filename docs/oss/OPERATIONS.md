@@ -8,6 +8,9 @@ Pin and test each upstream release before enabling it. Record licenses,
 transitive dependencies, smoke tests, and rollback notes in the inventory.
 Run `python scripts/validate_oss_runtime.py --json` for a read-only local
 health and dry-run boundary report.
+Run `python scripts/generate_oss_sbom.py --output artifacts/oss-sbom.json`
+during release preparation to capture the reviewed OSS inventory and installed
+Python package versions without network access.
 
 Use `docker-compose.oss.example.yml` only after setting a reviewed pinned
 `MEDUSA_IMAGE` and database URL. Its health check gates API startup on Medusa
