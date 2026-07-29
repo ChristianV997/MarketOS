@@ -1,0 +1,9 @@
+# Optional OSS integrations. Install only after the validation harness records
+# a pinned, security-reviewed release for the deployment environment.
+#
+# crawl4ai==0.8.6
+# browser-use==0.13.2
+# pydantic-ai==<reviewed-release>
+#
+# Large sidecars are deployed independently and are intentionally not pip
+# dependencies of the MarketOS API image: Medusa, Postiz, and n8n.

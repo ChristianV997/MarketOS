@@ -1,0 +1,67 @@
+schema_version: 1
+commercial_distribution: true
+integration_policy: adapters_and_sidecars
+candidates:
+  - name: medusa
+    repository: https://github.com/medusajs/medusa
+    license: MIT
+    mode: sidecar
+    status: selected
+    owner: commerce
+    capabilities: [catalog, inventory, orders, fulfillment, pricing]
+  - name: saleor
+    repository: https://github.com/saleor/saleor
+    license: review_required
+    mode: benchmark
+    status: deferred
+    owner: commerce
+    capabilities: [headless_commerce, graphql, multichannel_inventory]
+  - name: crawl4ai
+    repository: https://github.com/unclecode/crawl4ai
+    license: Apache-2.0-with-attribution
+    mode: optional_worker
+    status: selected
+    owner: research
+    capabilities: [structured_extraction, browser_crawl, caching]
+  - name: browser-use
+    repository: https://github.com/browser-use/browser-use
+    license: MIT
+    mode: optional_worker
+    status: selected
+    owner: browser_automation
+    capabilities: [persistent_browser, custom_tools, workflow_recovery]
+  - name: pydantic-ai
+    repository: https://github.com/pydantic/pydantic-ai
+    license: MIT
+    mode: optional_library
+    status: selected
+    owner: agents
+    capabilities: [typed_agents, structured_output, mcp, approvals]
+  - name: postiz
+    repository: https://github.com/gitroomhq/postiz-app
+    license: AGPL-3.0
+    mode: sidecar
+    status: legal_review_required
+    owner: publishing
+    capabilities: [social_scheduling, oauth_publishing]
+  - name: n8n
+    repository: https://github.com/n8n-io/n8n
+    license: Sustainable-Use
+    mode: internal_sidecar
+    status: internal_only
+    owner: automation
+    capabilities: [workflow_automation, connectors, approvals]
+  - name: erpnext
+    repository: https://github.com/frappe/erpnext
+    license: GPL-3.0
+    mode: sidecar
+    status: deferred
+    owner: operations
+    capabilities: [accounting, purchasing, inventory, fulfillment]
+  - name: airbyte
+    repository: https://github.com/airbytehq/airbyte
+    license: review_required
+    mode: sidecar
+    status: deferred
+    owner: data
+    capabilities: [batch_ingestion, connectors, warehouse_sync]
