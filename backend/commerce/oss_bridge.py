@@ -69,7 +69,10 @@ def _research_signal(record: Mapping[str, Any]) -> dict[str, Any] | None:
         "source": str(record.get("source") or "oss_research"),
         "score": float(record.get("score", 0.0) or 0.0),
         "quality": quality,
-        "metadata": {"source_ref": source_ref},
+        "metadata": {
+            "source_ref": source_ref,
+            "currency": str(record.get("currency") or "USD").upper(),
+        },
     }
     for field in ("selling_price", "price", "unit_cost", "shipping_cost", "fulfillment_days", "inventory_units"):
         if field in record:
@@ -94,6 +97,7 @@ def collect_oss_inputs(
     research = research or Crawl4AIResearchAdapter()
     commerce = commerce or MedusaCommerceAdapter()
     signals: list[dict[str, Any]] = []
+    research_products: dict[str, Any] = {}
     failures: dict[str, Any] = {}
     for url in urls:
         provider_name = getattr(research, "name", "research")
@@ -105,6 +109,10 @@ def collect_oss_inputs(
             if _oss_cache_hits is not None:
                 _oss_cache_hits.labels(provider=provider_name).inc()
             signals.extend(filter(None, (_research_signal(record) for record in records)))
+            normalizer = getattr(research, "normalize_candidates", None)
+            if callable(normalizer):
+                for candidate in normalizer(records):
+                    research_products[candidate.product_id] = candidate
             continue
         started = time.monotonic()
         try:
@@ -114,26 +122,38 @@ def collect_oss_inputs(
                 _oss_refreshes.labels(provider=provider_name).inc()
                 _oss_refresh_duration.labels(provider=provider_name).observe(time.monotonic() - started)
             signals.extend(filter(None, (_research_signal(record) for record in records)))
+            normalizer = getattr(research, "normalize_candidates", None)
+            if callable(normalizer):
+                for candidate in normalizer(records):
+                    research_products[candidate.product_id] = candidate
         except Exception as exc:
             if _oss_failures is not None:
                 _oss_failures.labels(provider=provider_name).inc()
             failures[f"research:{url}"] = str(exc)
 
-    products: dict[str, Any] = {}
+    # Research facts make the candidate usable even without Medusa. When the
+    # commerce sidecar is live, its catalog remains the source of truth for
+    # matching IDs/prices and replaces any same-ID external observation.
+    products: dict[str, Any] = dict(research_products)
     offers: dict[str, Any] = {}
     if commerce.configured:
         try:
             rows = commerce.list_products()
-            products = {candidate.product_id: candidate for candidate in commerce.normalize_products(rows)}
-            if products:
+            medusa_products = {candidate.product_id: candidate for candidate in commerce.normalize_products(rows)}
+            products.update(medusa_products)
+            if medusa_products:
                 if hasattr(commerce, "get_offers"):
-                    normalized_offers = commerce.get_offers(tuple(products))
+                    normalized_offers = commerce.get_offers(tuple(medusa_products))
                 else:
-                    inventory = commerce.get_inventory(tuple(products))
+                    inventory = commerce.get_inventory(tuple(medusa_products))
                     normalized_offers = commerce.normalize_inventory(inventory)
                 offers = {offer.product_id: offer for offer in normalized_offers}
         except Exception as exc:
             if _oss_failures is not None:
                 _oss_failures.labels(provider=getattr(commerce, "name", "commerce")).inc()
             failures["commerce"] = str(exc)
-    return signals, products, {"offers": offers, "failures": failures}
+    return signals, products, {
+        "offers": offers,
+        "failures": failures,
+        "research_products": len(research_products),
+    }

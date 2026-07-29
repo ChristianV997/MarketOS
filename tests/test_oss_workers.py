@@ -100,3 +100,27 @@ def test_crawl4ai_normalizes_only_named_records_to_marketos_contract():
     assert candidates[0].name == "Travel Mug"
     assert candidates[0].selling_price == 19.95
     assert candidates[0].quality.source_ref == "https://supplier.example/mug"
+
+
+def test_crawl4ai_extracts_only_explicit_jsonld_product_evidence():
+    html = '''
+      <script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"Product","name":"Travel Mug","sku":"mug-blue",
+         "offers":{"@type":"Offer","price":"19.95","priceCurrency":"usd","availability":"https://schema.org/InStock"}}
+      </script>
+      <script type="application/ld+json">{"@type":"Organization","name":"Not a product"}</script>
+    '''
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(html, "https://supplier.example/mug")
+    assert len(records) == 1
+    assert records[0]["product_id"] == "mug-blue"
+    assert records[0]["selling_price"] == 19.95
+    assert records[0]["currency"] == "USD"
+    assert records[0]["quality"]["attribution"] == "attributed"
+
+
+def test_crawl4ai_rejects_unnamed_structured_records():
+    records = Crawl4AIResearchAdapter._normalized_structured_records(
+        [{"price": 20}, {"product_name": "Travel Mug", "price": 20}], "https://supplier.example/mug"
+    )
+    assert len(records) == 1
+    assert records[0]["name"] == "Travel Mug"

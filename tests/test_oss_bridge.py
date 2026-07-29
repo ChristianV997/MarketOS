@@ -1,6 +1,7 @@
 from backend.commerce.oss_bridge import clear_oss_cache, collect_oss_inputs
 from backend.commerce.loop import run_provider_cycle
 from backend.contracts.adapters import AdapterHealth, SidecarContext
+from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
 
 
 class Research:
@@ -36,6 +37,26 @@ def test_oss_bridge_marks_live_attributed_research_and_preserves_economics():
     assert normalized["quality"]["attribution"] == "attributed"
     assert normalized["price"] == 29.0
     assert normalized["unit_cost"] == 8.0
+    assert normalized["metadata"]["currency"] == "USD"
+
+
+def test_oss_bridge_preserves_typed_crawl4ai_candidate_for_ranking():
+    clear_oss_cache()
+
+    class StructuredResearch(Crawl4AIResearchAdapter):
+        async def discover(self, url, *, context):
+            return [{
+                "name": "Travel Mug", "product_id": "mug-blue", "url": url,
+                "selling_price": 19.95, "currency": "USD",
+                "quality": {"provenance": "live", "attribution": "attributed", "source_ref": url},
+            }]
+
+    signals, products, metadata = collect_oss_inputs(
+        ["https://supplier.example/mug"], research=StructuredResearch(), commerce=Commerce(), context=SidecarContext(dry_run=False),
+    )
+    assert signals[0]["product_id"] == "mug-blue"
+    assert products["mug-blue"].selling_price == 19.95
+    assert metadata["research_products"] == 1
 
 
 class FailingResearch:

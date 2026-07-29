@@ -412,7 +412,7 @@ def build_product_candidate(signal: CommerceSignal, *, selling_price: float = 0.
     return ProductCandidate(
         product_id=signal.product_id or signal.product_name or signal.signal_id,
         name=signal.product_name or signal.product_id or signal.signal_id,
-        currency="USD",
+        currency=str(signal.metadata.get("currency") or "USD").upper(),
         selling_price=float(selling_price),
         source_signal_ids=(signal.signal_id,),
         quality=signal.quality,
