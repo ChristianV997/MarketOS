@@ -32,3 +32,17 @@ def test_bandit_weight_grows_with_mean():
     w = bandit_weight(action, g)
     bu.bandit_memory = orig
     assert w > 0
+
+
+def test_differently_ordered_equal_dicts_share_one_bandit_key():
+    """str(action) is dict-insertion-order-sensitive — two semantically
+    identical action dicts built with keys in a different order must still
+    land in the same bandit-memory bucket."""
+    bm = BanditMemory()
+    action_a = {"variant": "x", "phase": "SCALE"}
+    action_b = {"phase": "SCALE", "variant": "x"}
+    bm.update(action_a, 1.0)
+    bm.update(action_b, 3.0)
+    stats = bm.stats(action_a)
+    assert stats["mean"] == 2.0
+    assert len(bm.history) == 1
