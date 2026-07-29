@@ -1619,6 +1619,36 @@ def commerce_cycle(payload: dict[str, Any] | None = Body(default=None)):
         return {"launchable": False, "reasons": ["invalid_commerce_cycle_request", str(exc)]}
 
 
+@app.post("/commerce/provider-cycle")
+def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None)):
+    """Run the canonical loop from allowlisted research URLs.
+
+    This endpoint is dry-run by default and delegates all ranking, QA, launch,
+    and feedback behavior to ``run_provider_cycle``.
+    """
+    try:
+        data = payload or {}
+        urls = data.get("urls") or data.get("research_urls") or []
+        if not isinstance(urls, list) or not urls or len(urls) > 20 or not all(isinstance(url, str) and url.strip() for url in urls):
+            return {"launchable": False, "reasons": ["provider_cycle_requires_1_to_20_urls"]}
+        raw_dry_run = data.get("dry_run", True)
+        dry_run = raw_dry_run if isinstance(raw_dry_run, bool) else str(raw_dry_run).lower() not in {"false", "0", "no", "off"}
+        if not dry_run and data.get("confirm_live") is not True:
+            return {"launchable": False, "reasons": ["live_execution_requires_confirm_live"]}
+        from backend.commerce import run_provider_cycle
+        from backend.contracts.adapters import SidecarContext
+        report = run_provider_cycle(
+            urls,
+            context=SidecarContext(dry_run=dry_run, approval_state="approved" if not dry_run else "not_required"),
+            top_k=max(1, min(int(data.get("top_k", 5) or 5), 50)),
+            budget=max(0.0, float(data.get("budget", 20.0) or 20.0)),
+            dry_run=dry_run,
+        )
+        return report.to_dict()
+    except Exception as exc:
+        return {"launchable": False, "reasons": ["invalid_provider_cycle_request", str(exc)]}
+
+
 @app.post("/evaluation/campaign")
 def evaluation_campaign(payload: dict[str, Any] = Body(...)):
     """Evaluate campaign observations without changing campaign state."""

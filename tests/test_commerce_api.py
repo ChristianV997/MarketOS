@@ -114,6 +114,12 @@ def test_signal_metrics_endpoint_exposes_cache_telemetry():
     assert "source_failures" in result
 
 
+def test_provider_cycle_endpoint_requires_urls_and_live_confirmation():
+    from backend.api import commerce_provider_cycle
+    assert commerce_provider_cycle({})["reasons"] == ["provider_cycle_requires_1_to_20_urls"]
+    assert commerce_provider_cycle({"urls": ["https://example.com"], "dry_run": False})["reasons"] == ["live_execution_requires_confirm_live"]
+
+
 def test_optional_integration_health_is_safe_when_unconfigured():
     from backend.api import integrations_health
     result = integrations_health()
