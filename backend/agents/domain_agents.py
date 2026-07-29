@@ -67,10 +67,12 @@ def create_campaign_qa_agent(*, provider: AgentProvider = agent_provider) -> Any
 async def run_product_research(request: ProductResearchRequest, *, provider: AgentProvider = agent_provider) -> ProductResearchResult:
     agent = create_product_research_agent(provider=provider)
     result = await agent.run(request.model_dump_json())
-    return result.output if isinstance(result.output, ProductResearchResult) else ProductResearchResult.model_validate(result.output)
+    output = getattr(result, "output", getattr(result, "data", result))
+    return output if isinstance(output, ProductResearchResult) else ProductResearchResult.model_validate(output)
 
 
 async def run_campaign_qa(request: CampaignQARequest, *, provider: AgentProvider = agent_provider) -> CampaignQAResult:
     agent = create_campaign_qa_agent(provider=provider)
     result = await agent.run(request.model_dump_json())
-    return result.output if isinstance(result.output, CampaignQAResult) else CampaignQAResult.model_validate(result.output)
+    output = getattr(result, "output", getattr(result, "data", result))
+    return output if isinstance(output, CampaignQAResult) else CampaignQAResult.model_validate(output)

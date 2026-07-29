@@ -1,4 +1,5 @@
 import pytest
+import asyncio
 
 from backend.agents.domain_agents import (
     CampaignQARequest, CampaignQAResult, ProductResearchRequest, ProductResearchResult,
@@ -30,3 +31,28 @@ def test_domain_agent_requests_reject_empty_execution_inputs():
         ProductResearchRequest(query="")
     with pytest.raises(Exception):
         CampaignQARequest(product_id="", creative_id="c", platform="meta", copy_text="Buy")
+
+
+def test_domain_agent_runners_validate_mocked_provider_results():
+    class Result:
+        def __init__(self, data):
+            self.data = data
+
+    class Agent:
+        def __init__(self, data):
+            self.data = data
+        async def run(self, _prompt):
+            return Result(self.data)
+
+    class RunnerProvider:
+        def create(self, *, name, instructions, output_type):
+            if name == "product-research":
+                return Agent({"product_name": "Mug", "confidence": 0.8})
+            return Agent({"approved": True, "policy_checks": {"copy": True}})
+
+    from backend.agents.domain_agents import run_campaign_qa, run_product_research
+    research = asyncio.run(run_product_research(ProductResearchRequest(query="mugs"), provider=RunnerProvider()))
+    qa = asyncio.run(run_campaign_qa(CampaignQARequest(product_id="p", creative_id="c", platform="meta", copy_text="Buy"), provider=RunnerProvider()))
+    assert research.product_name == "Mug"
+    assert research.confidence == 0.8
+    assert qa.approved is True
