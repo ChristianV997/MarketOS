@@ -1,10 +1,15 @@
 """api.routes.observability — Prometheus, phase, topology, and misc system introspection."""
 from __future__ import annotations
 
-from fastapi import APIRouter
+import logging
+from typing import Any
+
+from fastapi import APIRouter, Body
 from fastapi.responses import PlainTextResponse
 
 from backend import api as _core
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -187,6 +192,92 @@ def governance_schemas():
         return get_governance_registry().to_dict()
     except Exception as exc:
         return {"error": str(exc)}
+
+
+@router.get("/runtime/inference/providers")
+def runtime_inference_providers():
+    """Expose current inference provider availability and configured order."""
+    try:
+        from backend.inference import get_router
+        from backend.inference.policies.fallback_policy import FallbackPolicy
+
+        return {
+            "providers": get_router().provider_status(),
+            "fallback_chain": FallbackPolicy().with_guaranteed_mock(),
+        }
+    except Exception:
+        _log.exception("runtime_inference_providers_failed")
+        return {"error": "provider status unavailable"}
+
+
+@router.get("/runtime/sleep/status")
+def runtime_sleep_status():
+    """Expose cognitive sleep scheduler status."""
+    try:
+        from backend.runtime.sleep.replay_scheduler import get_scheduler
+
+        return get_scheduler().status()
+    except Exception:
+        _log.exception("runtime_sleep_status_failed")
+        return {"error": "sleep status unavailable"}
+
+
+@router.post("/runtime/sleep/run")
+def runtime_sleep_run(workspace: str | None = None, window_hours: float | None = None):
+    """Trigger one cognitive sleep cycle immediately."""
+    try:
+        from backend.runtime.sleep.replay_scheduler import get_scheduler
+
+        scheduler = get_scheduler()
+        if workspace is not None:
+            scheduler.workspace = workspace
+        if window_hours is not None:
+            scheduler.window_hours = window_hours
+        result = scheduler.run_now()
+        if result is None:
+            return {"error": "sleep cycle failed", "workspace": workspace or scheduler.workspace}
+        return _core._public_sleep_result(result)
+    except Exception:
+        _log.exception("runtime_sleep_run_failed")
+        return {"error": "sleep cycle failed", "workspace": workspace}
+
+
+@router.get("/runtime/skills")
+def runtime_skills():
+    """Expose registered runtime skills."""
+    try:
+        from backend.runtime.skills import get_skill_registry
+
+        return {"skills": get_skill_registry().list_skills()}
+    except Exception:
+        _log.exception("runtime_skills_failed")
+        return {"error": "skill registry unavailable"}
+
+
+@router.get("/runtime/skills/traces")
+def runtime_skill_traces():
+    """Expose recent runtime skill execution traces."""
+    try:
+        from backend.runtime.skills import get_skill_registry
+
+        return {"traces": get_skill_registry().traces()}
+    except Exception:
+        _log.exception("runtime_skill_traces_failed")
+        return {"error": "skill traces unavailable"}
+
+
+@router.post("/runtime/skills/{skill_name}/execute")
+def runtime_skill_execute(skill_name: str, payload: dict[str, Any] | None = Body(None)):
+    """Execute a registered runtime skill."""
+    try:
+        from backend.runtime.skills import get_skill_registry
+
+        return get_skill_registry().execute(skill_name, payload or {})
+    except KeyError:
+        return {"error": f"unknown skill: {skill_name}", "skill": skill_name}
+    except Exception:
+        _log.exception("runtime_skill_execute_failed skill=%s", skill_name)
+        return {"error": "skill execution failed", "skill": skill_name}
 
 
 __all__ = ["router"]
