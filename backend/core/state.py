@@ -1,9 +1,14 @@
+import os
+
 from backend.data.event_log import EventLog
 from backend.causal.graph import CausalGraph
+from backend.core.fx import to_usd
 
 DEFAULT_FATIGUE = 0.1
 DEFAULT_LOAD = 0.2
-DEFAULT_CAPITAL = 1000.0
+# INITIAL_CAPITAL is denominated in CAPITAL_CURRENCY (default USD, so this
+# is exactly 1000.0 unless an operator sets both — see backend.core.fx).
+DEFAULT_CAPITAL = to_usd(float(os.getenv("INITIAL_CAPITAL", "1000.0")))
 
 
 class SystemState:

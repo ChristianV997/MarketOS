@@ -171,6 +171,7 @@ def test_campaign_artifacts_populated_after_scaling():
     )
     playbook_memory.upsert(pb)
     orch._campaign_artifacts.clear()
+    orch._scaling_limiter.last_run = 0.0
 
     orch._run_scaling()
 
@@ -196,6 +197,7 @@ def test_artifact_carries_hook_and_angle():
     )
     playbook_memory.upsert(pb)
     orch._campaign_artifacts.clear()
+    orch._scaling_limiter.last_run = 0.0
 
     orch._run_scaling()
 
@@ -299,6 +301,7 @@ def test_full_launch_to_patternstore_round_trip():
     from core.content.patterns import PatternStore
     import core.content.patterns as pat_mod
 
+    orch._scaling_limiter.last_run = 0.0  # bypass rate limiting so _run_scaling actually runs
     local_store = PatternStore()
     original = pat_mod.pattern_store
     pat_mod.pattern_store = local_store

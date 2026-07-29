@@ -11,8 +11,14 @@ The RiskAgent has *priority override*: its decision supersedes all others.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
+
+from backend.risk.config import (
+    BASE_MAX_DRAWDOWN, BASE_MAX_DAILY_SPEND, DEFAULT_INITIAL_CAPITAL,
+    risk_adaptive_live, adaptive_max_drawdown, adaptive_max_daily_spend,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -114,34 +120,64 @@ class GeoAgent:
         input_data:
             Must contain ``country`` (str) and ``roas`` (float).
             Optional: ``spend``.
+            Phase 6 adaptive geo-economics (optional; absent means legacy
+            raw-ROAS behavior regardless of GEO_ECONOMICS_LIVE):
+                ``geo_margin_pct`` (float) — net margin % from
+                ``calculate_margin_geo`` for this country/payment mix.
         """
         country = str(input_data.get("country", "unknown"))
         roas = float(input_data.get("roas", 0.0))
+        geo_margin_pct = input_data.get("geo_margin_pct")
 
-        if roas >= self.expand_roas:
+        geo_economics_live = os.getenv("GEO_ECONOMICS_LIVE", "false").lower() == "true"
+        effective_roas = roas
+        margin_adjusted_roas = roas
+        if geo_margin_pct is not None:
+            from backend.validation.margin_calculator import geo_margin_adjusted_roas
+            margin_adjusted_roas = geo_margin_adjusted_roas(roas, float(geo_margin_pct))
+            if geo_economics_live:
+                effective_roas = margin_adjusted_roas
+
+        try:
+            from backend.orchestration.event_store import event_store, new_workflow_id
+            event_store.append(
+                new_workflow_id("geoagent"), "shadow_geo_economics",
+                workflow="geo_agent", step="decide",
+                data={
+                    "country": country,
+                    "raw_roas": roas,
+                    "geo_margin_pct": geo_margin_pct,
+                    "margin_adjusted_roas": round(margin_adjusted_roas, 4),
+                    "live": geo_economics_live,
+                },
+            )
+        except Exception:
+            pass  # journaling must never block a geo decision
+
+        if effective_roas >= self.expand_roas:
             return AgentDecision(
                 agent="geo",
                 action="expand",
-                confidence=min(1.0, roas / (self.expand_roas * 1.5)),
-                reason=f"{country}: roas={roas} >= expand_threshold={self.expand_roas}",
-                metadata={"country": country, "roas": roas},
+                confidence=min(1.0, effective_roas / (self.expand_roas * 1.5)),
+                reason=f"{country}: roas={effective_roas} >= expand_threshold={self.expand_roas}",
+                metadata={"country": country, "roas": effective_roas},
             )
 
-        if roas < self.pause_roas:
+        if effective_roas < self.pause_roas:
             return AgentDecision(
                 agent="geo",
                 action="pause",
                 confidence=0.9,
-                reason=f"{country}: roas={roas} < pause_threshold={self.pause_roas}",
-                metadata={"country": country, "roas": roas},
+                reason=f"{country}: roas={effective_roas} < pause_threshold={self.pause_roas}",
+                metadata={"country": country, "roas": effective_roas},
             )
 
         return AgentDecision(
             agent="geo",
             action="test",
             confidence=0.6,
-            reason=f"{country}: roas={roas} in test band",
-            metadata={"country": country, "roas": roas},
+            reason=f"{country}: roas={effective_roas} in test band",
+            metadata={"country": country, "roas": effective_roas},
         )
 
 
@@ -205,8 +241,8 @@ class RiskAgent:
 
     def __init__(
         self,
-        max_drawdown: float = 0.30,
-        max_daily_spend: float = 10_000.0,
+        max_drawdown: float = BASE_MAX_DRAWDOWN,
+        max_daily_spend: float = BASE_MAX_DAILY_SPEND,
         kill_roas: float = 0.5,
     ):
         self.max_drawdown = max_drawdown
@@ -218,18 +254,55 @@ class RiskAgent:
         Parameters
         ----------
         input_data:
-            Optional:
+            Required-ish:
                 ``current_capital`` (float),
                 ``peak_capital`` (float),
                 ``today_spend`` (float),
                 ``roas`` (float),
                 ``kill_switch`` (bool).
+            Optional (Phase 5 adaptive risk — absent means legacy static
+            thresholds apply regardless of ``RISK_ADAPTIVE_LIVE``):
+                ``initial_capital`` (float), ``volatility`` (float),
+                ``concentration_frac`` (float, 0-1).
         """
         capital = float(input_data.get("current_capital", 1.0))
         peak = float(input_data.get("peak_capital", capital))
         today_spend = float(input_data.get("today_spend", 0.0))
         roas = float(input_data.get("roas", 1.0))
         kill_switch = bool(input_data.get("kill_switch", False))
+
+        initial_capital = float(input_data.get("initial_capital", DEFAULT_INITIAL_CAPITAL))
+        volatility = input_data.get("volatility")
+        concentration_frac = float(input_data.get("concentration_frac", 0.0))
+
+        static_max_drawdown = self.max_drawdown
+        static_max_daily_spend = self.max_daily_spend
+        adaptive_dd = adaptive_max_drawdown(
+            concentration_frac, volatility, base_drawdown=self.max_drawdown)
+        adaptive_spend = adaptive_max_daily_spend(
+            capital, initial_capital, volatility, base_spend=self.max_daily_spend)
+
+        adaptive_live = risk_adaptive_live()
+        effective_max_drawdown = adaptive_dd if adaptive_live else static_max_drawdown
+        effective_max_daily_spend = adaptive_spend if adaptive_live else static_max_daily_spend
+
+        try:
+            from backend.orchestration.event_store import event_store, new_workflow_id
+            event_store.append(
+                new_workflow_id("riskagent"), "shadow_adaptive_risk",
+                workflow="risk_agent", step="decide",
+                data={
+                    "static_max_drawdown": round(static_max_drawdown, 4),
+                    "adaptive_max_drawdown": round(adaptive_dd, 4),
+                    "static_max_daily_spend": round(static_max_daily_spend, 2),
+                    "adaptive_max_daily_spend": round(adaptive_spend, 2),
+                    "concentration_frac": round(concentration_frac, 4),
+                    "volatility": volatility,
+                    "live": adaptive_live,
+                },
+            )
+        except Exception:
+            pass  # journaling must never block a risk decision
 
         # Hard kill-switch
         if kill_switch:
@@ -244,22 +317,22 @@ class RiskAgent:
         # Drawdown check
         if peak > 0:
             drawdown = (peak - capital) / peak
-            if drawdown > self.max_drawdown:
+            if drawdown > effective_max_drawdown:
                 return AgentDecision(
                     agent="risk",
                     action="kill",
                     confidence=1.0,
-                    reason=f"drawdown={drawdown:.2%} > max_drawdown={self.max_drawdown:.2%}",
+                    reason=f"drawdown={drawdown:.2%} > max_drawdown={effective_max_drawdown:.2%}",
                     metadata={"override": True, "drawdown": drawdown},
                 )
 
         # Daily spend cap
-        if today_spend >= self.max_daily_spend:
+        if today_spend >= effective_max_daily_spend:
             return AgentDecision(
                 agent="risk",
                 action="pause",
                 confidence=1.0,
-                reason=f"daily_spend={today_spend:.2f} >= cap={self.max_daily_spend:.2f}",
+                reason=f"daily_spend={today_spend:.2f} >= cap={effective_max_daily_spend:.2f}",
                 metadata={"override": True, "today_spend": today_spend},
             )
 

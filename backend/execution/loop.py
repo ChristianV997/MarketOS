@@ -9,7 +9,7 @@ from backend.learning.bandit_update import update_from_delayed
 from backend.learning.update import learn
 from backend.learning.calibration import calibration_model
 from backend.learning.calibration_log import calibration_log
-from backend.learning.contextual_bandit import select_arm, record_reward
+from backend.learning.contextual_bandit import select_arm, record_reward, product_bandit
 from backend.learning.replay_buffer import replay_buffer
 from backend.learning.world_model_calibration import world_model_calibrator
 from backend.causal.update import update_causal
@@ -65,15 +65,103 @@ _POOL_TTL:      float = 60.0
 _DEFAULT_ANGLES = ["problem-solution", "social-proof", "urgency", "curiosity", "authority"]
 
 
+# Lineage: previous cycle's node id, so cycles chain into a worldline
+_last_cycle_node: str = ""
+
+
+def _cognitive_writethrough(state, results: list[dict], avg_roas: float) -> None:
+    """Feed the cycle's outcomes into the cognitive subsystem.
+
+    Three fail-silent writes per cycle:
+      episodic memory  — one episode per execution outcome (raw history)
+      vector store     — winning creatives indexed for semantic recall
+      lineage tracker  — decision→outcome edges chained across cycles
+    Failures never disturb the execution loop.
+    """
+    global _last_cycle_node
+
+    # 1. Episodic memory write-through
+    try:
+        from backend.memory.episodic import get_episodic_store
+        epi = get_episodic_store()
+        for r in results:
+            epi.record_event(
+                "execution.outcome",
+                payload={
+                    "product": r.get("product", ""),
+                    "hook":    r.get("hook", ""),
+                    "angle":   r.get("angle", ""),
+                    "roas":    r.get("roas", 0.0),
+                    "cost":    r.get("cost", 0.0),
+                    "revenue": r.get("revenue", 0.0),
+                    "ctr":     r.get("ctr", 0.0),
+                    "cvr":     r.get("cvr", 0.0),
+                    "regime":  state.detected_regime,
+                },
+                source="execution_loop",
+            )
+    except Exception:
+        _log.debug("episodic_writethrough_failed", exc_info=True)
+
+    # 2. Vector indexing of winning creatives (ROAS > 1.5)
+    try:
+        from backend.vector.embeddings import embed_text
+        from backend.vector.indexing import creative_record, index_batch
+        records = []
+        for r in results:
+            if r.get("roas", 0.0) <= 1.5 or not r.get("hook"):
+                continue
+            text = f"{r.get('hook', '')} | {r.get('angle', '')} | {r.get('product', '')}"
+            records.append(creative_record(
+                creative_id=f"cyc{state.total_cycles}_{r.get('product', '')[:24]}",
+                vector=embed_text(text),
+                hook=r.get("hook", ""),
+                product=r.get("product", ""),
+                roas=float(r.get("roas", 0.0)),
+                angle=r.get("angle", ""),
+            ))
+        if records:
+            index_batch(records)
+    except Exception:
+        _log.debug("vector_writethrough_failed", exc_info=True)
+
+    # 3. Lineage: decision node → outcome node, chained to the previous cycle
+    try:
+        from backend.lineage import get_tracker
+        tracker = get_tracker()
+        decision_node = tracker.track(
+            "execution.decision",
+            label=f"cycle_{state.total_cycles}_decision",
+            parent_ids=[_last_cycle_node] if _last_cycle_node else [],
+            source="execution_loop",
+            payload={"regime": state.detected_regime, "n_decisions": len(results)},
+        )
+        outcome_node = tracker.track(
+            "execution.outcome",
+            label=f"cycle_{state.total_cycles}_outcome",
+            parent_ids=[decision_node],
+            source="execution_loop",
+            payload={
+                "avg_roas": round(avg_roas, 4),
+                "capital":  round(getattr(state, "capital", 0.0), 2),
+                "winners":  sum(1 for r in results if r.get("roas", 0) > 1.5),
+            },
+        )
+        _last_cycle_node = outcome_node
+    except Exception:
+        _log.debug("lineage_writethrough_failed", exc_info=True)
+
+
 def _refresh_pools() -> tuple[list[str], list[str]]:
     global _hook_pool, _angle_pool, _pool_ts
     import time as _time
     if _hook_pool and (_time.time() - _pool_ts) < _POOL_TTL:
         return _hook_pool, _angle_pool
     try:
-        from core.content.patterns import pattern_store
-        hooks  = pattern_store.get_top_hooks(n=5)
-        angles = pattern_store.get_top_angles(n=5)
+        from core.creative.hooks import HOOKS
+        from core.creative.selection import select_hooks, select_angles
+        hooks  = select_hooks(n=5, fallback=list(HOOKS))
+        angles = select_angles(n=5, fallback=list(_DEFAULT_ANGLES))
     except Exception:
         hooks, angles = [], []
     if not hooks:
@@ -138,14 +226,29 @@ def _refresh_real_roas():
 
 
 def execute(decisions, state):
-    budgets = budget_allocate(decisions, total_budget=TOTAL_CYCLE_BUDGET)
-    _log.debug(allocation_summary(decisions, budgets))
-
     # Track peak capital for drawdown monitoring (stored on state object)
     peak_capital = getattr(state, "_peak_capital", state.capital)
     if state.capital > peak_capital:
         peak_capital = state.capital
     state._peak_capital = peak_capital
+
+    # Unified capital policy (shadow-mode: legacy LP result is returned and
+    # both allocations are journaled until CAPITAL_POLICY_LIVE=true).
+    from backend.decision.capital_policy import allocate_with_shadow
+    arms = [
+        {"id": str(d.get("action", {}).get("variant", i)),
+         "pred": d.get("pred", 1.0),
+         "pred_width": d.get("pred_width", 0.5),
+         "group": str(d.get("action", {}).get("variant", ""))}
+        for i, d in enumerate(decisions)
+    ]
+    budgets = allocate_with_shadow(
+        arms, TOTAL_CYCLE_BUDGET,
+        legacy_fn=lambda: budget_allocate(decisions, total_budget=TOTAL_CYCLE_BUDGET),
+        risk_context={"capital": state.capital, "peak_capital": peak_capital},
+        context_label="cycle_variant_budgets",
+    )
+    _log.debug(allocation_summary(decisions, budgets))
 
     hook_pool, angle_pool = _refresh_pools()
     results = []
@@ -184,6 +287,15 @@ def execute(decisions, state):
         # Record agent-level metrics
         agent_metrics_registry.record_pnl("execution", revenue, cost)
 
+        # Phase 7: feed realized ROAS into creative fatigue tracking
+        # (always recorded; only the gated selection in _refresh_pools()
+        # acts on it, per PHASE7_FATIGUE_DETECTION_LIVE)
+        try:
+            from core.creative.selection import record_creative_outcome
+            record_creative_outcome(hook, angle, roas)
+        except Exception:
+            _log.debug("creative_fatigue_record_failed", exc_info=True)
+
         outcome = {
             "product":       product,
             "hook":          hook,
@@ -207,6 +319,11 @@ def execute(decisions, state):
             "env_regime":    ENV["regime"],
             "env_trend":     round(ENV["trend"], 4),
         }
+        # Preserve the nested action so downstream consumers (portfolio
+        # bucketing, kill/amplify sets, replay buffer) can recover the
+        # variant. Also flatten action keys onto the outcome for readers
+        # that expect the legacy flat shape.
+        outcome["action"] = action
         outcome.update(action)
 
         # structural evolution scoring
@@ -215,6 +332,13 @@ def execute(decisions, state):
 
         # regime performance feedback
         strategy_memory.update(ENV["regime"], roas)
+
+        # per-product LinUCB contextual bandit feedback (feeds decide()'s
+        # product_bandit.score() shadow term)
+        try:
+            product_bandit.update(product, roas, category=d.get("category", ""))
+        except Exception:
+            _log.debug("product_bandit_update_failed", exc_info=True)
 
         # reality gap — feed real ROAS when Shopify/Meta credentials present
         reality_gap_engine.update(roas, _refresh_real_roas())
@@ -253,6 +377,10 @@ def run_cycle(state):
         except Exception:
             pass
 
+    # expose the current market trend on state so the bandit's trend
+    # feature is live (ENV is module-level; the bandit reads state.trend)
+    state.trend = ENV["trend"]
+
     # select high-level arm from LinUCB contextual bandit
     bandit_arm = select_arm(state)
 
@@ -270,6 +398,16 @@ def run_cycle(state):
     portfolio_ingest(results)
 
     # auto_kill: pause underperforming campaigns via AJO (ROAS < 0.5)
+    # This is a second, independent kill/scale decision system alongside
+    # backend.optimization.budget_scaling — AJO campaigns never appear in
+    # campaign_metrics.jsonl (no record_metric() call site emits platform
+    # "ajo"), and AJO's scale_campaign() takes a budget_multiplier with no
+    # absolute dollar figure exposed, so there's nothing to gate against
+    # backend.risk.gate the way TikTok/Meta spend is. Rather than force a
+    # fake dollar amount through the shared gate, this stays a separate,
+    # narrower decision path — but its actuation failures must be visible,
+    # not silently swallowed (a failed pause here means a flagged-for-kill
+    # campaign keeps spending with zero signal anywhere).
     _cycle_kill = {
         str(r.get("action", {}).get("variant", ""))
         for r in results
@@ -280,9 +418,12 @@ def run_cycle(state):
             from backend.integrations.adobe_ajo import pause_campaign, is_configured as _ajo_ok
             if _ajo_ok():
                 for cid in _cycle_kill:
-                    pause_campaign(cid)
-        except Exception:
-            pass
+                    result = pause_campaign(cid)
+                    if result.get("error"):
+                        _log.error("ajo_pause_failed campaign=%s error=%s",
+                                  cid, result["error"])
+        except Exception as exc:
+            _log.error("ajo_auto_kill_failed error=%s", exc, exc_info=True)
 
     # amplifier: scale high-ROAS campaigns via AJO (ROAS > 2.0)
     _amplified_ids = [
@@ -295,9 +436,12 @@ def run_cycle(state):
             from backend.integrations.adobe_ajo import scale_campaign, is_configured as _ajo_ok
             if _ajo_ok():
                 for cid in _amplified_ids[-5:]:
-                    scale_campaign(cid)
-        except Exception:
-            pass
+                    result = scale_campaign(cid)
+                    if result.get("error"):
+                        _log.error("ajo_scale_failed campaign=%s error=%s",
+                                  cid, result["error"])
+        except Exception as exc:
+            _log.error("ajo_amplifier_failed error=%s", exc, exc_info=True)
 
     try:
         state = learn(state, results)
@@ -312,6 +456,9 @@ def run_cycle(state):
     # update LinUCB bandit reward using mean ROAS this cycle
     avg_roas_cycle = sum(r.get("roas", 0) for r in results) / max(len(results), 1)
     record_reward(bandit_arm, state, avg_roas_cycle)
+
+    # feed outcomes into the cognitive subsystem (episodic/vector/lineage)
+    _cognitive_writethrough(state, results, avg_roas_cycle)
 
     # push experiences into the replay buffer
     for r in results:
@@ -328,6 +475,20 @@ def run_cycle(state):
     previous_regime = state.detected_regime
     state.detected_regime = detector.detect(state.event_log, _macro_cache or None)
     transition_detected = detect_transition(previous_regime, state.detected_regime)
+
+    # Phase 4: shadow-mode CUSUM changepoint signal — computed and journaled
+    # every cycle, does not gate any decision yet (deliberate deferral until
+    # shadow data validates false-positive rate / detection delay in practice).
+    try:
+        cp_result = detector.detect_changepoint(state.event_log)
+        from backend.orchestration.event_store import event_store, new_workflow_id
+        event_store.append(
+            new_workflow_id("regimecp"), "shadow_regime_changepoint",
+            workflow="regime_detector", step="detect_changepoint",
+            data=cp_result,
+        )
+    except Exception:
+        _log.debug("changepoint_detection_failed", exc_info=True)
     state.previous_regime = previous_regime
     state.transition = {
         "occurred": transition_detected,
@@ -385,7 +546,7 @@ def run_cycle(state):
 
     # persist cycle summary to Supabase (no-op when credentials absent)
     try:
-        from connectors.supabase_connector import save_cycle_summary
+        from backend.integrations.supabase_client import save_cycle_summary
         save_cycle_summary({
             "total_cycles": state.total_cycles,
             "capital": round(state.capital, 2),

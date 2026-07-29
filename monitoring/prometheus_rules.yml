@@ -1,0 +1,62 @@
+groups:
+  - name: marketos-signal-health
+    rules:
+      - alert: MarketOSSignalRefreshLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(marketos_signal_cache_refresh_duration_seconds_bucket[10m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+          subsystem: signal-ingestion
+        annotations:
+          summary: MarketOS signal refresh latency is high
+          description: The p95 signal refresh duration has exceeded 5 seconds for 10 minutes.
+
+      - alert: MarketOSSignalCacheHitRateLow
+        expr: 100 * sum(rate(marketos_signal_cache_hits_total[10m])) / clamp_min(sum(rate(marketos_signal_cache_lookups_total[10m])), 0.001) < 50
+        for: 15m
+        labels:
+          severity: warning
+          subsystem: signal-cache
+        annotations:
+          summary: MarketOS signal cache hit rate is degraded
+          description: Signal cache hit rate has remained below 50 percent for 15 minutes.
+
+      - alert: MarketOSSignalSourceFailuresRepeated
+        expr: sum by (source) (increase(marketos_signal_source_failures_total[15m])) >= 3
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: signal-ingestion
+        annotations:
+          summary: MarketOS signal source is repeatedly failing
+          description: Signal source {{ $labels.source }} has failed at least 3 times in the last 15 minutes.
+
+      - alert: MarketOSSignalSourceRefreshLatencyHigh
+        expr: histogram_quantile(0.95, sum by (source, le) (rate(marketos_signal_source_refresh_duration_seconds_bucket[10m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+          subsystem: signal-ingestion
+        annotations:
+          summary: MarketOS signal source refresh latency is high
+          description: Signal source {{ $labels.source }} has p95 refresh latency above 5 seconds for 10 minutes.
+
+      - alert: MarketOSSignalSourceFailureRateHigh
+        expr: |
+          (
+            sum by (source) (increase(marketos_signal_source_failures_total[15m]))
+            /
+            clamp_min(
+              sum by (source) (increase(marketos_signal_source_failures_total[15m]))
+              + sum by (source) (increase(marketos_signal_source_successes_total[15m])),
+              1
+            )
+          ) > 0.5
+          and sum by (source) (increase(marketos_signal_source_failures_total[15m])) >= 3
+        for: 10m
+        labels:
+          severity: critical
+          subsystem: signal-ingestion
+        annotations:
+          summary: MarketOS signal source failure rate is high
+          description: Signal source {{ $labels.source }} has exceeded a 50 percent failure rate over the last 15 minutes.

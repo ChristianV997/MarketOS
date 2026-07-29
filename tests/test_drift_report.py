@@ -12,6 +12,7 @@ from scripts.drift_report import (
     _load_window,
     _parse_snapshot,
     _markdown_report,
+    build_drift_snapshot,
     main as drift_main,
 )
 
@@ -59,13 +60,12 @@ class TestLoadWindow:
 
 class TestParseSnapshot:
     @pytest.fixture(scope="class")
-    def snapshot(self):
-        from evidently import Report
-        from evidently.presets import DataDriftPreset
+    @classmethod
+    def snapshot(cls):
         rng = np.random.default_rng(0)
         ref = pd.DataFrame({"roas": rng.normal(1.2, 0.3, 100), "error": rng.normal(0, 0.1, 100)})
         cur = pd.DataFrame({"roas": rng.normal(2.5, 0.5, 60),  "error": rng.normal(0.5, 0.2, 60)})
-        return Report([DataDriftPreset()]).run(reference_data=ref, current_data=cur)
+        return build_drift_snapshot(ref, cur)
 
     def test_columns_present(self, snapshot):
         r = _parse_snapshot(snapshot)
@@ -84,11 +84,9 @@ class TestParseSnapshot:
             assert 0.0 <= info["p_value"] <= 1.0
 
     def test_no_drift_on_identical_data(self):
-        from evidently import Report
-        from evidently.presets import DataDriftPreset
         rng = np.random.default_rng(1)
         data = pd.DataFrame({"roas": rng.normal(1.2, 0.3, 100)})
-        snap = Report([DataDriftPreset()]).run(reference_data=data, current_data=data.copy())
+        snap = build_drift_snapshot(data, data.copy())
         r = _parse_snapshot(snap)
         # p-values on identical data should be high (no drift)
         for col, info in r["columns"].items():

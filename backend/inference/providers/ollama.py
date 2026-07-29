@@ -21,6 +21,7 @@ _log = logging.getLogger(__name__)
 _BASE    = os.getenv("OLLAMA_URL",        "http://localhost:11434")
 _MODEL   = os.getenv("OLLAMA_MODEL",      "llama3.2")
 _TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT_S", "30"))
+_HEALTH_TIMEOUT = float(os.getenv("OLLAMA_HEALTH_TIMEOUT_S", "0.25"))
 
 
 class OllamaProvider(BaseProvider):
@@ -33,7 +34,7 @@ class OllamaProvider(BaseProvider):
     def is_available(self) -> bool:
         try:
             import httpx
-            r = httpx.get(f"{_BASE}/api/tags", timeout=2.0)
+            r = httpx.get(f"{_BASE}/api/tags", timeout=_HEALTH_TIMEOUT)
             return r.status_code == 200
         except Exception:
             return False

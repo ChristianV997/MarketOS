@@ -8,7 +8,6 @@ def test_registry_has_all_kinds():
     kinds = {t["kind"] for t in tasks}
     assert "thread" in kinds
     assert "loop" in kinds
-    assert "celery" in kinds
     assert "scheduler" in kinds
     assert "ws" in kinds
     assert "queue" in kinds
@@ -27,8 +26,6 @@ def test_registry_covers_key_tasks():
         "feedback_collection_worker",
         "scaling_worker",
         "ingestion_scheduler",
-        "celery_run_real_cycle",
-        "celery_run_discovery",
         "redis_stream_upos_events",
         "ws_event_stream",
         "sw_event_log",

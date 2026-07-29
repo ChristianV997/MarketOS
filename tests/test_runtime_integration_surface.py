@@ -105,21 +105,25 @@ def test_runtime_service_helpers_start_and_stop(monkeypatch):
 
 
 def test_runtime_skill_registry_and_endpoints():
-    import backend.api as api
+    # These endpoints live in api.routes.observability (extracted from
+    # backend/api.py during the Tier-0-style route-split refactor, which
+    # predates the branch-unification merge that brought this test in from
+    # main) rather than as bare module-level functions on backend.api.
+    from api.routes import observability as obs
 
-    skills = api.runtime_skills()
+    skills = obs.runtime_skills()
     assert any(skill["name"] == "safe_command" for skill in skills["skills"])
 
-    executed = api.runtime_skill_execute("safe_command", {"command": "pwd"})
+    executed = obs.runtime_skill_execute("safe_command", {"command": "pwd"})
     assert executed["trace"]["status"] == "ok"
     assert executed["result"]["success"] is True
 
-    traces = api.runtime_skill_traces()
+    traces = obs.runtime_skill_traces()
     assert any(trace["skill"] == "safe_command" for trace in traces["traces"])
 
 
 def test_runtime_sleep_status_and_provider_status_endpoints(monkeypatch):
-    import backend.api as api
+    from api.routes import observability as obs
 
     class FakeRouter:
         def provider_status(self):
@@ -135,8 +139,8 @@ def test_runtime_sleep_status_and_provider_status_endpoints(monkeypatch):
     )
     monkeypatch.setattr("backend.inference.get_router", lambda: FakeRouter())
     monkeypatch.setattr("backend.inference.policies.fallback_policy.FallbackPolicy", FakeFallbackPolicy)
-    sleep_status = api.runtime_sleep_status()
-    provider_status = api.runtime_inference_providers()
+    sleep_status = obs.runtime_sleep_status()
+    provider_status = obs.runtime_inference_providers()
 
     assert "running" in sleep_status
     assert "providers" in provider_status

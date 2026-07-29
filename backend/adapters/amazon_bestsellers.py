@@ -20,7 +20,7 @@ _CACHE_TTL = 3600  # 1 hour
 
 _CATEGORIES = os.getenv(
     "AMAZON_BESTSELLER_CATEGORIES",
-    "beauty,electronics,home-kitchen,sports-outdoors,toys-games",
+    "beauty,electronics,home-kitchen,sports-outdoors,toys-games,pet-supplies,baby-products",
 ).split(",")
 
 _HEADERS = {
@@ -41,6 +41,11 @@ _MOCK_PRODUCTS = [
     {"product": "Portable Charger 20000",  "category": "electronics",     "rank": 6, "score": 0.80},
     {"product": "Collagen Peptides",       "category": "health",          "rank": 7, "score": 0.78},
     {"product": "Yoga Mat Non Slip",       "category": "sports-outdoors", "rank": 8, "score": 0.75},
+    {"product": "Automatic Pet Feeder",       "category": "pet-supplies",   "rank": 1, "score": 0.90},
+    {"product": "Dog Puzzle Slow Feeder Bowl", "category": "pet-supplies",  "rank": 2, "score": 0.86},
+    {"product": "Pet Grooming Deshedding Glove", "category": "pet-supplies", "rank": 3, "score": 0.83},
+    {"product": "Silicone Baby Feeding Set",  "category": "baby-products", "rank": 1, "score": 0.89},
+    {"product": "Baby Bath Toy Set",          "category": "baby-products", "rank": 2, "score": 0.84},
 ]
 
 
@@ -101,4 +106,9 @@ def fetch() -> list[dict]:
 def register(signal_engine: Any) -> None:
     """Register this adapter with the provided SignalEngine instance."""
     signal_engine.register_source("amazon_bestsellers", fetch)
+    try:
+        from backend.discovery.registry import discovery_registry
+        discovery_registry.register("amazon_bestsellers", credential_env_vars=[], requires_auth=False)
+    except Exception:
+        pass
     _log.info("amazon_bestsellers adapter registered")

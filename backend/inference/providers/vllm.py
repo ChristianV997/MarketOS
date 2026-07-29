@@ -27,6 +27,7 @@ _ENDPOINT = os.getenv("VLLM_ENDPOINT", "http://localhost:8001")
 _MODEL    = os.getenv("VLLM_MODEL",    "meta-llama/Llama-3.2-1B")
 _API_KEY  = os.getenv("VLLM_API_KEY",  "")
 _TIMEOUT  = float(os.getenv("VLLM_TIMEOUT_S", "60"))
+_HEALTH_TIMEOUT = float(os.getenv("VLLM_HEALTH_TIMEOUT_S", "0.25"))
 
 
 def _headers() -> dict[str, str]:
@@ -44,7 +45,7 @@ class VLLMProvider(BaseProvider):
     def is_available(self) -> bool:
         try:
             import httpx
-            r = httpx.get(f"{_ENDPOINT}/health", timeout=2.0)
+            r = httpx.get(f"{_ENDPOINT}/health", timeout=_HEALTH_TIMEOUT)
             return r.status_code == 200
         except Exception:
             return False

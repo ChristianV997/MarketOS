@@ -14,8 +14,6 @@ x-common: &common
   env_file: .env
   environment:
     REDIS_URL: redis://redis:6379/0
-    CELERY_BROKER_URL: redis://redis:6379/0
-    CELERY_RESULT_BACKEND: redis://redis:6379/1
     QDRANT_HOST: qdrant
     QDRANT_PORT: "6333"
   volumes:
@@ -31,19 +29,11 @@ services:
   # ── API ────────────────────────────────────────────────────────────────────
   api:
     <<: *common
-    command: uvicorn backend.api:app --host 0.0.0.0 --port 3000 --reload
+    # The orchestrator service owns execution in this multi-service stack.
+    # Without this guard both it and the API background runner mutate cycles.
+    command: sh -c "ORCHESTRATOR_HANDLES_CYCLES=true exec uvicorn backend.api:app --host 0.0.0.0 --port 3000 --reload"
     ports:
       - "3000:3000"
-
-  # ── Celery worker ──────────────────────────────────────────────────────────
-  worker:
-    <<: *common
-    command: celery -A core.celery_app worker --loglevel=info --concurrency=4
-
-  # ── Celery beat scheduler ──────────────────────────────────────────────────
-  beat:
-    <<: *common
-    command: celery -A core.celery_app beat --loglevel=info
 
   # ── Orchestrator ──────────────────────────────────────────────────────────
   orchestrator:
@@ -79,6 +69,7 @@ services:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus_rules.yml:/etc/prometheus/marketos-rules.yml:ro
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -94,6 +85,10 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
 
 volumes:
   grafana_data:

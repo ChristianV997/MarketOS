@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import time
 from typing import Any
 
@@ -36,189 +37,589 @@ except ImportError:
 from core.system.phase_controller import Phase, phase_controller
 from core.system.resource_allocator import resource_allocator
 from core.signals import signal_engine
+from backend.patterns.worker import RateLimiter, worker_safe
 
 TICK_INTERVAL   = float(os.getenv("ORCHESTRATOR_TICK_S", "10"))
 TOTAL_BUDGET    = float(os.getenv("ORCHESTRATOR_BUDGET", "500"))
 TOTAL_WORKERS   = int(os.getenv("ORCHESTRATOR_WORKERS", "4"))
+
+# The canonical commerce loop is deliberately safe-by-default.  It is part of
+# the normal orchestrator path, but only a deliberate environment change can
+# turn a scheduler tick into a paid-platform launch.
+_COMMERCE_LOOP_ENABLED = os.getenv("COMMERCE_LOOP_ENABLED", "true").lower() == "true"
+_COMMERCE_LOOP_LIVE = os.getenv("COMMERCE_LOOP_LIVE", "false").lower() == "true"
+_COMMERCE_LOOP_TOP_K = max(1, int(os.getenv("COMMERCE_LOOP_TOP_K", "3")))
+_COMMERCE_LOOP_BUDGET = max(0.0, float(os.getenv("COMMERCE_LOOP_BUDGET", "20")))
 
 # Full attribution lineage for every launched campaign (survives within process lifetime)
 # campaign_id → CampaignArtifact (product + hook + angle + phase + budget)
 from core.content.schemas import CampaignArtifact as _CampaignArtifact
 _campaign_artifacts: dict[str, _CampaignArtifact] = {}
 
+# campaign_id → ad platform ("tiktok"/"meta"), captured at launch registration
+# (CampaignArtifact has no platform field; this sidecar keeps attribution
+# without touching the shared schema)
+_campaign_platforms: dict[str, str] = {}
+
+# campaign_id → last metric-observation timestamp, for prorating daily budget
+# into per-observation spend estimates
+_campaign_last_metric_ts: dict[str, float] = {}
+
+# Signal ingestion precedes the commerce worker in each phase dispatch.  Keep
+# the most recent batch so ranking consumes the exact evidence that advanced
+# the phase controller instead of issuing a second, potentially divergent pull.
+_latest_signal_batch: list[dict[str, Any]] = []
+
 
 # ── worker dispatchers ────────────────────────────────────────────────────────
 
+@worker_safe()
 def _run_signal_ingestion() -> dict[str, Any]:
     """Pull fresh signals and feed them to the intelligence loop."""
+    signals = signal_engine.get(force_refresh=True)
+    global _latest_signal_batch
+    _latest_signal_batch = [dict(signal) for signal in signals]
+    for _ in signals:
+        phase_controller.record_signal()
+    # Phase 7: accumulate velocity/saturation trend history per product so
+    # urgency scoring (core/signals.py) can detect lifecycle stage over time.
     try:
-        signals = signal_engine.get()
-        for _ in signals:
-            phase_controller.record_signal()
-        # Feed top keywords to core/intelligence_loop if available
+        from backend.discovery.ad_intelligence import competition_summary
+        from backend.discovery.trend_history import trend_history
+        for s in signals:
+            product = s.get("product", "")
+            if not product:
+                continue
+            velocity = float(s.get("velocity", 0.5))
+            try:
+                saturation = competition_summary(product).get("market_saturation", 0.5)
+            except Exception:
+                saturation = 0.5
+            trend_history.record(product, velocity=velocity, saturation=saturation)
+    except Exception as exc:
+        _log.debug("trend_history_record_failed error=%s", exc)
+    # Feed top keywords to core/intelligence_loop if available
+    try:
+        from core.intelligence_loop import run_intelligence
+        keywords = [s.get("product", "") for s in signals if s.get("product")][:20]
+        if keywords:
+            run_intelligence(keywords)
+    except Exception as exc:
+        _log.debug("intelligence_loop_failed error=%s", exc)
+    # Index signals in the vector store for semantic recall (fail-silent,
+    # but logged — a silent bare pass here would hide a real indexing
+    # defect and leave semantic recall permanently empty)
+    try:
+        from backend.vector.embeddings import embed_text
+        from backend.vector.indexing import signal_record, index_batch
+        records = [
+            signal_record(
+                signal_key=s["product"],
+                vector=embed_text(s["product"]),
+                signal_type=s.get("source", ""),
+                score=float(s.get("score", 0.0)),
+            )
+            for s in signals if s.get("product")
+        ]
+        if records:
+            index_batch(records)
+    except Exception as exc:
+        # warning, not debug: this comment previously noted debug-level
+        # logging here would hide a real indexing defect behind a level
+        # most deployments don't surface — semantic recall silently going
+        # empty is worth a visible log line, even though the worker itself
+        # still completes successfully (indexing is a nice-to-have, not a
+        # blocker for signal ingestion).
+        _log.warning("signal_vector_index_failed error=%s", exc)
+    return {"status": "ok", "signals": len(signals)}
+
+
+_SLEEP_MIN_INTERVAL_S = float(os.getenv("SLEEP_MIN_INTERVAL_S", "300"))
+_sleep_limiter = RateLimiter(interval_s=_SLEEP_MIN_INTERVAL_S)
+
+
+@worker_safe(rate_limiter=_sleep_limiter)
+def _run_sleep_consolidation() -> dict[str, Any]:
+    """Run one cognitive sleep cycle (episodic compaction, semantic compression,
+    procedural reinforcement, memory decay).  Rate-limited so back-to-back
+    ticks don't re-consolidate; a no-op between windows."""
+    from backend.runtime.sleep.consolidation_engine import ConsolidationEngine
+    result = ConsolidationEngine(workspace="default").run_cycle()
+    # Snapshot the high-volume cognitive stores to disk so they survive a
+    # restart (episodic + lineage are persisted here rather than on every
+    # write; playbook/calibration/patternstore persist on their own writes).
+    for _persist in (_persist_episodic, _persist_lineage, _persist_calibration):
         try:
-            from core.intelligence_loop import run_intelligence
-            keywords = [s.get("product", "") for s in signals if s.get("product")][:20]
-            if keywords:
-                run_intelligence(keywords)
+            _persist()
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            _log.debug("cognitive_persist_failed fn=%s error=%s", _persist, exc)
+    return {
+        "status":   "ok",
+        "cycle_id": result.cycle_id,
+        "episodes_compacted": getattr(result, "episodes_compacted", 0),
+    }
+
+
+_DROPSHIP_MIN_INTERVAL_S = float(os.getenv("DROPSHIP_MIN_INTERVAL_S", "900"))
+_dropship_limiter = RateLimiter(interval_s=_DROPSHIP_MIN_INTERVAL_S)
+
+_ORGANIC_POST_MIN_INTERVAL_S = float(os.getenv("ORGANIC_POST_MIN_INTERVAL_S", "21600"))
+_organic_post_limiter = RateLimiter(interval_s=_ORGANIC_POST_MIN_INTERVAL_S)
+
+_ENGAGEMENT_MIN_INTERVAL_S = float(os.getenv("ENGAGEMENT_MIN_INTERVAL_S", "3600"))
+_engagement_limiter = RateLimiter(interval_s=_ENGAGEMENT_MIN_INTERVAL_S)
+
+_INVENTORY_SYNC_MIN_INTERVAL_S = float(os.getenv("INVENTORY_SYNC_MIN_INTERVAL_S", "3600"))
+_inventory_sync_limiter = RateLimiter(interval_s=_INVENTORY_SYNC_MIN_INTERVAL_S)
+
+
+@worker_safe(rate_limiter=_inventory_sync_limiter)
+def _run_inventory_sync() -> dict[str, Any]:
+    """Phase B: re-quote every brand's live catalog and reprice/pause as
+    supplier costs drift or stock runs out.
+
+    Always journals shadow_inventory_sync; only mutates storefronts when
+    INVENTORY_SYNC_LIVE=true.
+    """
+    from backend.commerce.inventory_sync import reconcile_all_brands
+    return reconcile_all_brands()
+
+
+_FULFILLMENT_MIN_INTERVAL_S = float(os.getenv("FULFILLMENT_MIN_INTERVAL_S", "300"))
+_fulfillment_limiter = RateLimiter(interval_s=_FULFILLMENT_MIN_INTERVAL_S)
+
+
+@worker_safe(rate_limiter=_fulfillment_limiter)
+def _run_fulfillment() -> dict[str, Any]:
+    """Phase D: route RECEIVED orders to their bound supplier and place
+    them, then poll PLACED orders for shipped/delivered status.
+
+    Runs every tick regardless of phase (orders can't wait for SCALE) —
+    registered in every phase table below. Dry-run under
+    SUPPLIER_ORDERS_DRY_RUN (default true, independent of quoting's own
+    dry-run flag) and FULFILLMENT_LIVE (default false) gates whether the
+    order's fulfillment_status actually advances outside of rehearsal.
+    """
+    from backend.commerce.fulfillment import poll_placed_orders, process_new_orders
+    placed = process_new_orders()
+    polled = poll_placed_orders()
+    return {"status": "ok", "placed": placed, "polled": polled}
+
+
+@worker_safe(rate_limiter=_organic_post_limiter)
+def _run_organic_posting() -> dict[str, Any]:
+    """Phase E: publish organic posts for catalog/playbook products (Postiz).
+
+    Dry-run by default (ORGANIC_DRY_RUN=true) — posts get deterministic dry
+    ids and the loop is fully rehearsable without credentials. This is the
+    owner's funnel step 1: organic validation BEFORE paid spend.
+    """
+    from backend.organic import run_organic_posting
+    return run_organic_posting()
+
+
+@worker_safe(rate_limiter=_engagement_limiter)
+def _run_engagement_ingestion() -> dict[str, Any]:
+    """Phase E: fetch organic post metrics and feed engagement_rate into the
+    content feedback loop (finally populating the field the classifier has
+    always read). The per-product rollup drives the Phase F organic->paid gate.
+    """
+    from backend.organic import ingest_engagement
+    return ingest_engagement()
+
+
+@worker_safe(rate_limiter=_dropship_limiter)
+def _run_dropship_pipeline() -> dict[str, Any]:
+    """Run one discover→validate→create→launch dropship cycle (rate-limited).
+
+    Launched campaigns are registered in _campaign_artifacts so the existing
+    metrics-ingestion worker picks up their ROAS, closes the calibration
+    loop, and the scaling worker can kill/amplify them — Pipeline 5 is the
+    live loop itself, no separate optimizer needed.
+    """
+    from backend.dropship import run_dropship_cycle
+    summary = run_dropship_cycle()
+
+    # Register launched campaigns for attribution + ROAS tracking
+    for launch in summary.get("launches", []):
+        for c in launch.get("campaigns", []):
+            cid = c.get("campaign_id", "")
+            if not cid or c.get("status") != "live":
+                continue
+            artifact = _CampaignArtifact(
+                campaign_id    = cid,
+                adgroup_id     = c.get("adgroup_id", ""),
+                ad_ids         = c.get("ad_ids", []),
+                product        = launch.get("product", ""),
+                hook           = c.get("hook", ""),
+                angle          = c.get("angle", ""),
+                phase          = "DROPSHIP",
+                estimated_roas = launch.get("predicted_roas", 1.0),
+                budget         = c.get("budget", 0.0),
+                dry_run        = str(cid).startswith("dry"),
+            )
+            _campaign_artifacts[cid] = artifact
+            _campaign_platforms[cid] = c.get("platform", "")
+            try:
+                from backend.events.emitter import emit_campaign_launched
+                emit_campaign_launched(
+                    campaign_id=cid,
+                    product=artifact.product,
+                    hook=artifact.hook,
+                    angle=artifact.angle,
+                    phase="DROPSHIP",
+                    budget=artifact.budget,
+                    dry_run=artifact.dry_run,
+                )
+            except Exception as exc:
+                _log.debug("dropship_emit_failed error=%s", exc)
+
+    return {
+        "status":     summary.get("status", "ok"),
+        "discovered": summary.get("discovered", 0),
+        "green":      summary.get("green", 0),
+        "launched":   summary.get("launched", 0),
+    }
+
+
+_BUDGET_SCALING_MIN_INTERVAL_S = float(os.getenv("BUDGET_SCALING_MIN_INTERVAL_S", "3600"))
+_budget_scaling_limiter = RateLimiter(interval_s=_BUDGET_SCALING_MIN_INTERVAL_S)
+
+
+@worker_safe(rate_limiter=_budget_scaling_limiter)
+def _run_budget_scaling() -> dict[str, Any]:
+    """Turn observed campaign ROAS into budget decisions (rate-limited).
+
+    Decisions are persisted to the scaling log and mirrored onto in-memory
+    campaign artifacts, so spend proration and the next scaling round
+    compound from the updated budgets rather than the launch-time ones.
+    """
+    from backend.optimization.budget_scaling import (
+        apply_scaling_decisions, compute_scaling_decisions)
+    decisions = compute_scaling_decisions()
+    result = apply_scaling_decisions(decisions)
+    for d in decisions:
+        artifact = _campaign_artifacts.get(d["campaign_id"])
+        if artifact is not None:
+            artifact.budget = d["new_budget"]
+    kills = sum(1 for d in decisions if d["action"] == "kill")
+    ups   = sum(1 for d in decisions if d["action"] == "scale_up")
+    if decisions:
+        _log.info("budget_scaling decisions=%d scale_up=%d kills=%d change=%.2f",
+                  len(decisions), ups, kills, result.get("budget_change", 0.0))
+    return {"status": "ok", "decisions": len(decisions),
+            "scale_up": ups, "kills": kills,
+            "budget_change": result.get("budget_change", 0.0)}
+
+
+_ALERTING_MIN_INTERVAL_S = float(os.getenv("ALERTING_MIN_INTERVAL_S", "600"))
+_alerting_limiter = RateLimiter(interval_s=_ALERTING_MIN_INTERVAL_S)
+
+
+@worker_safe(rate_limiter=_alerting_limiter)
+def _run_alerting() -> dict[str, Any]:
+    """Evaluate alert conditions over local state (rate-limited, cheap)."""
+    from backend.monitoring.alerts import evaluate_alerts
+    fired = evaluate_alerts()
+    return {"status": "ok", "alerts_fired": len(fired)}
+
+
+def _persist_episodic() -> None:
+    from backend.memory.episodic import persist_episodic
+    persist_episodic()
+
+
+def _persist_lineage() -> None:
+    from backend.lineage.tracker import persist_lineage
+    persist_lineage()
+
+
+def _persist_calibration() -> None:
+    from simulation.calibration import calibration_store
+    calibration_store.persist()
+
+
+# ── restart-safe checkpointing ────────────────────────────────────────────────
+#
+# The tick loop below runs indefinitely and is the only long-lived process
+# driving live state forward. A hard kill (OOM, SIGKILL, container
+# reschedule) between graceful shutdowns previously lost everything since
+# backend/api.py's FastAPI lifespan last saved on its own shutdown hook —
+# this orchestrator loop never persisted independently. These helpers close
+# that gap: periodic saves during the loop, a one-shot restore + incomplete-
+# workflow scan at startup, and a final best-effort save on shutdown.
+
+CHECKPOINT_EVERY_N_TICKS = max(1, int(os.getenv("ORCHESTRATOR_CHECKPOINT_TICKS", "6")))
+STATE_PATH = os.getenv("STATE_PATH", "state/state.db")
+
+_shutdown_requested = False
+
+
+def _handle_sigterm(signum: int, frame: Any) -> None:
+    """Signal handler for SIGTERM — only sets a flag, never raises.
+
+    Raising out of a signal handler mid-tick (potentially inside arbitrary
+    worker code) is unsafe; the tick loop checks this flag between ticks
+    and exits cleanly after a final checkpoint.
+    """
+    global _shutdown_requested
+    _shutdown_requested = True
+    _log.info("orchestrator_sigterm_received")
+
+
+def _write_checkpoint(tick: int) -> None:
+    """Best-effort periodic state save. Never raises out to the tick loop."""
+    try:
+        import backend.api as _api
+        from backend.core.serializer import save
+
+        save(_api._state, STATE_PATH)
+        try:
+            from backend.observability.metrics import (
+                checkpoint_writes_total, checkpoint_last_write_ts,
+            )
+            checkpoint_writes_total.inc()
+            checkpoint_last_write_ts.set(time.time())
         except Exception:
             pass
-        return {"status": "ok", "signals": len(signals)}
+        _log.debug("orchestrator_checkpoint_written tick=%s", tick)
     except Exception as exc:
-        _log.exception("signal_ingestion_failed error=%s", exc)
-        return {"status": "error", "error": str(exc)}
-
-
-def _run_execution_cycle() -> dict[str, Any]:
-    """Run one backend decision→execute→learn cycle."""
-    try:
-        from backend.execution.loop import run_cycle
-        from backend.core.state import SystemState
-        # Import shared state from api if running together; else use fresh state
         try:
-            from backend.api import _state  # type: ignore[attr-defined]
-            state = _state
+            from backend.observability.metrics import checkpoint_failures_total
+            checkpoint_failures_total.inc()
         except Exception:
-            state = SystemState()
-        updated = run_cycle(state)
+            pass
+        _log.warning("orchestrator_checkpoint_failed tick=%s error=%s", tick, exc)
+
+
+def _restore_checkpoint() -> None:
+    """Best-effort startup restore, plus a one-shot incomplete-workflow scan.
+
+    Restoring here is a no-op when backend.api's own FastAPI lifespan has
+    already loaded state in this process (the common co-deployed case) —
+    load() is idempotent and simply re-reads the same file.
+    """
+    outcome = "none"
+    try:
+        import backend.api as _api
+        from backend.core.serializer import load
+
+        loaded = load(STATE_PATH)
+        if loaded:
+            _api._state = loaded
+            outcome = "restored"
+    except Exception as exc:
+        _log.warning("orchestrator_checkpoint_restore_failed error=%s", exc)
+    try:
+        from backend.observability.metrics import checkpoint_recoveries_total
+        checkpoint_recoveries_total.labels(outcome=outcome).inc()
+    except Exception:
+        pass
+
+    try:
+        from backend.orchestration.event_store import event_store
+        stuck = event_store.incomplete_workflows()
+        if stuck:
+            _log.warning(
+                "orchestrator_startup_incomplete_workflows count=%d ids=%s",
+                len(stuck), [w.get("workflow_id", w.get("id", "?")) for w in stuck][:10],
+            )
+    except Exception as exc:
+        _log.debug("orchestrator_incomplete_workflow_scan_failed error=%s", exc)
+
+
+@worker_safe()
+def _run_commerce_cycle() -> dict[str, Any]:
+    """Run the canonical signal → rank → creative → launch → feedback path.
+
+    The worker consumes the signal batch just ingested by this tick.  In a
+    standalone invocation it falls back to the commerce loop's signal source.
+    Live execution is opt-in through ``COMMERCE_LOOP_LIVE=true``; scheduler
+    deployments remain dry-run by default.
+    """
+    if not _COMMERCE_LOOP_ENABLED:
+        return {"status": "skipped", "reason": "commerce_loop_disabled"}
+    try:
+        from backend.commerce import run_commerce_cycle
+
+        report = run_commerce_cycle(
+            signals=list(_latest_signal_batch) or None,
+            top_k=_COMMERCE_LOOP_TOP_K,
+            budget=_COMMERCE_LOOP_BUDGET,
+            dry_run=not _COMMERCE_LOOP_LIVE,
+        )
+        summary = report.summary
         return {
-            "status":  "ok",
-            "cycles":  updated.total_cycles,
-            "capital": round(updated.capital, 2),
-            "regime":  updated.detected_regime,
+            "status": "ok",
+            "cycle_id": report.artifact_id,
+            "dry_run": report.dry_run,
+            "signals": report.total_signals,
+            "ranked": int(summary.get("ranked", 0)),
+            "creatives": int(summary.get("creatives", 0)),
+            "launches": int(summary.get("launches", 0)),
+            "feedback_records": int(summary.get("feedback_records", 0)),
         }
     except Exception as exc:
-        _log.exception("execution_cycle_failed error=%s", exc)
+        _log.exception("commerce_cycle_failed error=%s", exc)
         return {"status": "error", "error": str(exc)}
 
 
+@worker_safe()
+def _run_execution_cycle() -> dict[str, Any]:
+    """Run one backend decision→execute→learn cycle."""
+    from backend.execution.loop import run_cycle
+    from backend.core.state import SystemState
+    # Import shared state from api if running together; else use fresh state
+    try:
+        from backend.api import _state  # type: ignore[attr-defined]
+        state = _state
+    except Exception:
+        state = SystemState()
+    updated = run_cycle(state)
+    return {
+        "status":  "ok",
+        "cycles":  updated.total_cycles,
+        "capital": round(updated.capital, 2),
+        "regime":  updated.detected_regime,
+    }
+
+
+@worker_safe()
 def _run_feedback_collection() -> dict[str, Any]:
     """Classify recent content events, extract patterns, and update playbooks."""
+    from core.content.feedback import batch_classify
+    from core.content.patterns import extract_patterns, pattern_store
+    from core.content.playbook import generate_playbook, playbook_memory
     try:
-        from core.content.feedback import batch_classify
-        from core.content.patterns import extract_patterns, pattern_store
-        from core.content.playbook import generate_playbook, playbook_memory
-        try:
-            from backend.api import _state  # type: ignore[attr-defined]
-            rows = list(_state.event_log.rows[-50:])
-        except Exception:
-            rows = []
-        if not rows:
-            return {"status": "skipped", "reason": "no_events"}
-        classified = batch_classify(rows)
-        winners = [e for e in classified if e.get("label") == "WINNER"]
-        if winners:
-            patterns = extract_patterns(winners)
-            pattern_store.update(patterns)
-            products = {e.get("product", "") for e in winners if e.get("product")}
-            for product in products:
-                product_events = [e for e in classified if e.get("product") == product]
-                try:
-                    from core.system.phase_controller import phase_controller
-                    phase = phase_controller.current.value
-                except Exception:
-                    phase = "EXPLORE"
-                playbook_memory.upsert(generate_playbook(product, product_events, phase))
-        return {"status": "ok", "classified": len(classified), "winners": len(winners)}
-    except Exception as exc:
-        _log.exception("feedback_collection_failed error=%s", exc)
-        return {"status": "error", "error": str(exc)}
+        from backend.api import _state  # type: ignore[attr-defined]
+        rows = list(_state.event_log.rows[-50:])
+    except Exception:
+        rows = []
+    if not rows:
+        return {"status": "skipped", "reason": "no_events"}
+    classified = batch_classify(rows)
+    winners = [e for e in classified if e.get("label") == "WINNER"]
+    if winners:
+        patterns = extract_patterns(winners)
+        pattern_store.update(patterns)
+        products = {e.get("product", "") for e in winners if e.get("product")}
+        for product in products:
+            product_events = [e for e in classified if e.get("product") == product]
+            try:
+                from core.system.phase_controller import phase_controller
+                phase = phase_controller.current.value
+            except Exception:
+                phase = "EXPLORE"
+            playbook_memory.upsert(generate_playbook(product, product_events, phase))
+    return {"status": "ok", "classified": len(classified), "winners": len(winners)}
 
 
+_SCALING_MIN_INTERVAL_S = float(os.getenv("SCALING_MIN_INTERVAL_S", "900"))
+_scaling_limiter = RateLimiter(interval_s=_SCALING_MIN_INTERVAL_S)
+
+_PLAYBOOK_RELAUNCH_COOLDOWN_S = float(os.getenv("PLAYBOOK_RELAUNCH_COOLDOWN_S", "21600"))
+
+
+@worker_safe(rate_limiter=_scaling_limiter)
 def _run_scaling() -> dict[str, Any]:
     """Scale/kill campaigns and launch new ones from high-confidence playbooks.
 
     Two execution paths (both run independently):
     1. AJO scale — if Adobe AJO is configured, scale existing winners.
     2. Playbook launch — for products with confidence >= 0.6, launch a fresh
-       TikTok campaign via launch_from_playbook() (dry-run safe).
+       TikTok campaign via launch_from_playbook() (dry-run safe), gated by
+       PLAYBOOK_RELAUNCH_COOLDOWN_S so a playbook that stays above the
+       confidence bar doesn't mint a brand-new campaign every time this
+       worker runs — confidence rises with evidence and never resets on its
+       own, so without a cooldown this path would relaunch indefinitely.
     """
     scaled   = 0
     launched = 0
+    from backend.decision.portfolio_engine import top_products
+
+    # ── Path 1: AJO scale existing campaigns ─────────────────────────────
     try:
-        from backend.decision.portfolio_engine import top_products
-
-        # ── Path 1: AJO scale existing campaigns ─────────────────────────────
-        try:
-            from backend.integrations.adobe_ajo import scale_campaign, is_configured as ajo_ok
-            if ajo_ok():
-                winners = top_products(n=3)
-                for p in winners:
-                    if p.get("weight", 0) > 0.3:
-                        scale_campaign(str(p.get("product_id", "")))
-                        scaled += 1
-        except Exception as exc:
-            _log.debug("ajo_scale_failed error=%s", exc)
-
-        # ── Path 2: Launch new campaigns from high-confidence playbooks ───────
-        try:
-            from core.content.playbook import playbook_memory
-            from backend.integrations.tiktok_ads import launch_from_playbook, _DRY_RUN
-            from backend.events.emitter import emit_campaign_launched
-            phase = "SCALE"
-            try:
-                phase = phase_controller.current.value
-            except Exception:
-                pass
-            for pb in playbook_memory.all():
-                confidence = getattr(pb, "confidence", 0.0)
-                if confidence < 0.6:
-                    continue
-                result = launch_from_playbook(vars(pb), phase=phase)
-                if result.get("status") != "error":
-                    cid = result.get("campaign_id", "")
-                    if cid:
-                        hook  = (pb.top_hooks[0]  if pb.top_hooks  else "")
-                        angle = (pb.top_angles[0] if pb.top_angles else "")
-                        artifact = _CampaignArtifact(
-                            campaign_id    = cid,
-                            adgroup_id     = result.get("adgroup_id", ""),
-                            ad_ids         = result.get("ad_ids", []),
-                            product        = pb.product,
-                            hook           = hook,
-                            angle          = angle,
-                            phase          = phase,
-                            estimated_roas = pb.estimated_roas,
-                            budget         = result.get("budget", 0.0),
-                            dry_run        = result.get("dry_run", True),
-                        )
-                        _campaign_artifacts[cid] = artifact
-                        emit_campaign_launched(
-                            campaign_id=cid,
-                            product=pb.product,
-                            hook=hook,
-                            angle=angle,
-                            phase=phase,
-                            budget=artifact.budget,
-                            dry_run=artifact.dry_run,
-                        )
-                    launched += 1
-                    _log.info("playbook_launched product=%s confidence=%s campaign=%s",
-                              pb.product, confidence, cid)
-                if launched >= 3:   # cap launches per tick to avoid runaway spend
-                    break
-        except Exception as exc:
-            _log.debug("playbook_launch_failed error=%s", exc)
-
-        if scaled == 0 and launched == 0:
-            return {"status": "skipped", "reason": "no_qualified_campaigns"}
-        return {"status": "ok", "scaled": scaled, "launched": launched}
+        from backend.integrations.adobe_ajo import scale_campaign, is_configured as ajo_ok
+        if ajo_ok():
+            winners = top_products(n=3)
+            for p in winners:
+                if p.get("weight", 0) > 0.3:
+                    scale_campaign(str(p.get("product_id", "")))
+                    scaled += 1
     except Exception as exc:
-        _log.exception("scaling_failed error=%s", exc)
-        return {"status": "error", "error": str(exc)}
+        _log.debug("ajo_scale_failed error=%s", exc)
+
+    # Canonical commerce owns live campaign creation to prevent duplicate spend.
+    if _COMMERCE_LOOP_LIVE:
+        return {"status": "ok", "scaled": scaled, "launched": 0}
+
+    # ── Path 2: Launch new campaigns from high-confidence playbooks ───────
+    try:
+        from core.content.playbook import playbook_memory
+        from backend.integrations.tiktok_ads import launch_from_playbook, _DRY_RUN
+        from backend.events.emitter import emit_campaign_launched
+        phase = "SCALE"
+        try:
+            phase = phase_controller.current.value
+        except Exception:
+            pass
+        from backend.decision.organic_gate import gate_launch
+        for pb in playbook_memory.all():
+            if not gate_launch(pb):
+                continue
+            now = time.time()
+            if now - getattr(pb, "last_launched_at", 0.0) < _PLAYBOOK_RELAUNCH_COOLDOWN_S:
+                continue
+            result = launch_from_playbook(vars(pb), phase=phase)
+            if result.get("status") != "error":
+                playbook_memory.mark_launched(pb.product, pb.phase, now)
+                cid = result.get("campaign_id", "")
+                if cid:
+                    hook  = (pb.top_hooks[0]  if pb.top_hooks  else "")
+                    angle = (pb.top_angles[0] if pb.top_angles else "")
+                    artifact = _CampaignArtifact(
+                        campaign_id    = cid,
+                        adgroup_id     = result.get("adgroup_id", ""),
+                        ad_ids         = result.get("ad_ids", []),
+                        product        = pb.product,
+                        hook           = hook,
+                        angle          = angle,
+                        phase          = phase,
+                        estimated_roas = pb.estimated_roas,
+                        budget         = result.get("budget", 0.0),
+                        dry_run        = result.get("dry_run", True),
+                    )
+                    _campaign_artifacts[cid] = artifact
+                    emit_campaign_launched(
+                        campaign_id=cid,
+                        product=pb.product,
+                        hook=hook,
+                        angle=angle,
+                        phase=phase,
+                        budget=artifact.budget,
+                        dry_run=artifact.dry_run,
+                    )
+                launched += 1
+                _log.info("playbook_launched product=%s confidence=%s campaign=%s",
+                          pb.product, confidence, cid)
+            if launched >= 3:   # cap launches per tick to avoid runaway spend
+                break
+    except Exception as exc:
+        _log.debug("playbook_launch_failed error=%s", exc)
+
+    if scaled == 0 and launched == 0:
+        return {"status": "skipped", "reason": "no_qualified_campaigns"}
+    return {"status": "ok", "scaled": scaled, "launched": launched}
 
 
+@worker_safe()
 def _run_simulation() -> dict[str, Any]:
     """Score and rank signal candidates before execution (simulation layer)."""
-    try:
-        from simulation.integration import _run_simulation as _sim
-        result = _sim()
-        return result
-    except Exception as exc:
-        _log.exception("simulation_worker_failed error=%s", exc)
-        return {"status": "error", "error": str(exc)}
+    from simulation.integration import _run_simulation as _sim
+    return _sim()
 
 
+@worker_safe()
 def _run_content_generation() -> dict[str, Any]:
     """Generate hooks and scripts for the top-ranked trending products.
 
@@ -227,61 +628,148 @@ def _run_content_generation() -> dict[str, Any]:
     generates a script per product, and upserts into playbook_memory so
     _run_scaling() can launch campaigns from the result.
     """
+    from core.content.playbook import playbook_memory, generate_playbook, Playbook
+    from core.creative.generator import generate_creative
+    from core.creative.selection import select_hooks, select_angles
+    from core.signals import signal_engine
+
+    # ── hooks / angles (Phase 7: fatigue + A/B-validity gated) ────────────
+    from core.creative.hooks import HOOKS
+    top_hooks  = select_hooks(n=3, fallback=list(HOOKS)[:3])
+    top_angles = select_angles(n=3, fallback=["problem-solution", "social-proof", "urgency"])
+
+    # ── real trending products ────────────────────────────────────────────
     try:
-        from core.content.patterns import pattern_store
-        from core.content.playbook import playbook_memory, generate_playbook, Playbook
-        from core.creative.generator import generate_creative
-        from core.signals import signal_engine
+        signals  = signal_engine.get()
+        products = list({s.get("product", "") for s in signals if s.get("product")})[:5]
+    except Exception:
+        products = []
+    if not products:
+        products = ["trending product"]
 
-        # ── hooks / angles ────────────────────────────────────────────────────
-        top_hooks  = pattern_store.get_top_hooks(n=3)
-        top_angles = pattern_store.get_top_angles(n=3)
-        if not top_hooks:
-            from core.creative.hooks import HOOKS
-            top_hooks = list(HOOKS)[:3]
-        if not top_angles:
-            top_angles = ["problem-solution", "social-proof", "urgency"]
-
-        # ── real trending products ────────────────────────────────────────────
+    generated = 0
+    for product in products[:3]:
+        angle  = top_angles[0]
+        hook   = top_hooks[0]
         try:
-            signals  = signal_engine.get()
-            products = list({s.get("product", "") for s in signals if s.get("product")})[:5]
-        except Exception:
-            products = []
-        if not products:
-            products = ["trending product"]
+            script = generate_creative(product, angle)
+            # Upsert a playbook so _run_scaling() can launch it
+            existing = playbook_memory.get(product)
+            if existing is None:
+                pb = Playbook(
+                    product=product,
+                    phase="EXPLORE",
+                    top_hooks=top_hooks,
+                    top_angles=top_angles,
+                    estimated_roas=1.2,
+                    confidence=0.0,
+                    evidence_count=0,
+                )
+                playbook_memory.upsert(pb)
+            _log.info("content_generated product=%s hook=%r angle=%s len=%d",
+                      product, hook, angle, len(script))
+            generated += 1
+        except Exception as gen_exc:
+            _log.warning("content_generate_failed product=%s error=%s", product, gen_exc)
 
-        generated = 0
-        for product in products[:3]:
-            angle  = top_angles[0]
-            hook   = top_hooks[0]
+    return {"status": "ok", "generated": generated, "top_hooks": top_hooks}
+
+
+@worker_safe()
+def _run_organic_channel_evaluation() -> dict[str, Any]:
+    """Phase 8: evaluate top products for affiliate-network organic scaling.
+
+    Always evaluates and journals recommendations (network CAC vs current
+    organic/paid CAC) via OrganicChannelExpander. Recruitment submissions
+    to affiliate networks only fire once PHASE8_AFFILIATE_SCALING_LIVE=true
+    — until then this worker is purely observational.
+    """
+    import asyncio
+    import os
+
+    from backend.decision.portfolio_engine import top_products
+    from backend.integrations.affiliate_networks import OrganicChannelExpander
+    from core.ugc.creator_tracker import creator_tracker
+
+    affiliate_live = os.getenv("PHASE8_AFFILIATE_SCALING_LIVE", "false").lower() == "true"
+
+    products = [p["product_id"] for p in top_products(n=5)]
+    if not products:
+        return {"status": "skipped", "reason": "no_products"}
+
+    expander = OrganicChannelExpander(dry_run=True)
+    evaluated = 0
+    recruited = 0
+
+    for product_id in products:
+        stats = creator_tracker.product_stats(product_id)
+        current_organic_cac = stats.get("avg_cost_per_order", 0.0) or 20.0
+        try:
+            result = asyncio.run(expander.evaluate_product_for_affiliate_scaling(
+                product_id, current_organic_cac=current_organic_cac,
+            ))
+        except Exception as exc:
+            _log.debug("organic_channel_eval_failed product=%s error=%s", product_id, exc)
+            continue
+        evaluated += 1
+
+        if affiliate_live and result["recommendation"] == "SCALE":
             try:
-                script = generate_creative(product, angle)
-                # Upsert a playbook so _run_scaling() can launch it
-                existing = playbook_memory.get(product)
-                if existing is None:
-                    pb = Playbook(
-                        product=product,
-                        phase="EXPLORE",
-                        top_hooks=top_hooks,
-                        top_angles=top_angles,
-                        estimated_roas=1.2,
-                        confidence=0.0,
-                        evidence_count=0,
-                    )
-                    playbook_memory.upsert(pb)
-                _log.info("content_generated product=%s hook=%r angle=%s len=%d",
-                          product, hook, angle, len(script))
-                generated += 1
-            except Exception as gen_exc:
-                _log.warning("content_generate_failed product=%s error=%s", product, gen_exc)
+                asyncio.run(expander.recruit_on_qualified_networks(
+                    product_id, result["qualified_networks"],
+                ))
+                recruited += 1
+            except Exception as exc:
+                _log.debug("affiliate_recruit_failed product=%s error=%s", product_id, exc)
 
-        return {"status": "ok", "generated": generated, "top_hooks": top_hooks}
+    if evaluated == 0:
+        return {"status": "skipped", "reason": "no_evaluations"}
+    return {"status": "ok", "evaluated": evaluated, "recruited": recruited, "live": affiliate_live}
+
+
+def _reconcile_delayed_commerce_metrics(calibration_store: Any) -> int:
+    """Apply later, attributable TikTok ROAS to commerce launch artifacts.
+
+    TikTok's dry-run ROAS is useful for isolated tests but must never be
+    accepted as production feedback. Only a configured live client can close a
+    pending commerce campaign's durable attribution record.
+    """
+    try:
+        from backend.contracts.registry import get_registry
+        from backend.integrations.tiktok_ads import _DRY_RUN, fetch_roas, is_configured
+
+        if _DRY_RUN or not is_configured():
+            return 0
+        registry = get_registry()
+        assets_by_id = {
+            asset.artifact_id: asset for asset in registry.by_type("campaign")
+        }
+        assets = [
+            asset for asset in assets_by_id.values()
+            if getattr(asset, "phase", "") == "commerce"
+            and not getattr(asset, "dry_run", True)
+            and not getattr(asset, "outcome_recorded", False)
+            and getattr(asset, "campaign_id", "")
+        ]
+        campaign_ids = list(dict.fromkeys(asset.campaign_id for asset in assets))[:10]
+        if not campaign_ids:
+            return 0
+        roas_map = fetch_roas(campaign_ids)
+        reconciled = 0
+        for asset in assets:
+            roas = roas_map.get(asset.campaign_id)
+            if roas is None:
+                continue
+            registry.register(asset.with_outcome(float(roas)))
+            calibration_store.record_outcome(asset.product, actual_roas=float(roas))
+            reconciled += 1
+        return reconciled
     except Exception as exc:
-        _log.exception("content_generation_failed error=%s", exc)
-        return {"status": "error", "error": str(exc)}
+        _log.debug("commerce_delayed_metrics_failed error=%s", exc)
+        return 0
 
 
+@worker_safe()
 def _run_metrics_ingestion() -> dict[str, Any]:
     """Ingest real platform metrics and close the prediction→reality loop.
 
@@ -294,85 +782,107 @@ def _run_metrics_ingestion() -> dict[str, Any]:
     are corrected by actual performance, not just simulated ROAS.
     Emits a metrics.ingested event for the dashboard.
     """
+    from simulation.calibration import calibration_store
+    from backend.events.emitter import emit_metrics_ingested
+
+    metrics: dict[str, Any] = {}
+
+    # Shopify revenue
     try:
-        from simulation.calibration import calibration_store
-        from backend.events.emitter import emit_metrics_ingested
-
-        metrics: dict[str, Any] = {}
-
-        # Shopify revenue
-        try:
-            from backend.integrations.shopify_client import get_orders, compute_metrics
-            orders  = get_orders(last_n_minutes=60)
-            shopify = compute_metrics(orders)
-            metrics["shopify_revenue"]    = shopify.get("revenue", 0.0)
-            metrics["shopify_order_count"] = shopify.get("order_count", 0)
-        except Exception as exc:
-            _log.debug("metrics_shopify_failed error=%s", exc)
-
-        # Meta ad spend
-        try:
-            from backend.integrations.meta_ads_client import get_ad_spend
-            meta = get_ad_spend(last_n_minutes=60)
-            metrics["meta_spend"]     = meta.get("total_spend", 0.0)
-            metrics["meta_campaigns"] = len(meta.get("campaigns", []))
-        except Exception as exc:
-            _log.debug("metrics_meta_failed error=%s", exc)
-
-        # Compute blended real ROAS and record into calibration store
-        revenue = float(metrics.get("shopify_revenue", 0.0))
-        spend   = float(metrics.get("meta_spend", 0.0))
-        if spend > 0 and revenue > 0:
-            real_roas = round(revenue / spend, 4)
-            metrics["real_roas"] = real_roas
-            # Record outcome against any pending predictions for "blended" product
-            calibration_store.record_outcome("blended", actual_roas=real_roas)
-            _log.info("metrics_real_roas_recorded roas=%s", real_roas)
-
-        # TikTok ROAS for tracked campaigns — full lineage via _campaign_artifacts
-        try:
-            from backend.integrations.tiktok_ads import fetch_roas
-            from core.content.patterns import extract_patterns, pattern_store
-            from core.content.feedback import classify_video, engagement_score
-
-            campaign_ids = list(_campaign_artifacts.keys())[:10]
-            if campaign_ids:
-                roas_map = fetch_roas(campaign_ids)
-                metrics["tiktok_campaign_count"] = len(roas_map)
-                for cid, roas in roas_map.items():
-                    artifact = _campaign_artifacts.get(cid)
-                    product  = artifact.product if artifact else cid
-                    # ── CalibrationStore: record per-product outcome ───────────
-                    calibration_store.record_outcome(product, actual_roas=roas)
-                    # ── PatternStore: backfill from real TikTok ROAS ──────────
-                    # Build a synthetic classified event so pattern learning sees
-                    # real campaign performance, not just simulated outcomes.
-                    if artifact:
-                        synth = {
-                            "product":   artifact.product,
-                            "hook":      artifact.hook,
-                            "angle":     artifact.angle,
-                            "roas":      roas,
-                            "ctr":       0.0,   # not available from ROAS endpoint
-                            "cvr":       0.0,
-                            "env_regime": artifact.phase,
-                        }
-                        synth["label"]     = classify_video(synth)
-                        synth["eng_score"] = engagement_score(synth)
-                        pattern_store.update(extract_patterns([synth]))
-                    _log.debug("metrics_tiktok campaign=%s product=%s roas=%s", cid, product, roas)
-        except Exception as exc:
-            _log.debug("metrics_tiktok_failed error=%s", exc)
-
-        if not metrics:
-            return {"status": "skipped", "reason": "no_metrics_available"}
-
-        emit_metrics_ingested("orchestrator", metrics)
-        return {"status": "ok", "metrics": {k: v for k, v in metrics.items()
-                                             if isinstance(v, (int, float, str))}}
+        from backend.integrations.shopify_client import get_orders, compute_metrics
+        orders  = get_orders(last_n_minutes=60)
+        shopify = compute_metrics(orders)
+        metrics["shopify_revenue"]    = shopify.get("revenue", 0.0)
+        metrics["shopify_order_count"] = shopify.get("order_count", 0)
     except Exception as exc:
-        _log.exception("metrics_ingestion_failed error=%s", exc)
-        return {"status": "error", "error": str(exc)}
+        _log.debug("metrics_shopify_failed error=%s", exc)
+
+    # Meta ad spend
+    try:
+        from backend.integrations.meta_ads_client import get_ad_spend
+        meta = get_ad_spend(last_n_minutes=60)
+        metrics["meta_spend"]     = meta.get("total_spend", 0.0)
+        metrics["meta_campaigns"] = len(meta.get("campaigns", []))
+    except Exception as exc:
+        _log.debug("metrics_meta_failed error=%s", exc)
+
+    # Compute blended real ROAS and record into calibration store
+    revenue = float(metrics.get("shopify_revenue", 0.0))
+    spend   = float(metrics.get("meta_spend", 0.0))
+    if spend > 0 and revenue > 0:
+        real_roas = round(revenue / spend, 4)
+        metrics["real_roas"] = real_roas
+        # Record outcome against any pending predictions for "blended" product
+        calibration_store.record_outcome("blended", actual_roas=real_roas)
+        _log.info("metrics_real_roas_recorded roas=%s", real_roas)
+
+    # TikTok ROAS for tracked campaigns — full lineage via _campaign_artifacts
+    try:
+        from backend.integrations.tiktok_ads import fetch_roas
+        from core.content.patterns import extract_patterns, pattern_store
+        from core.content.feedback import classify_video, engagement_score
+
+        campaign_ids = list(_campaign_artifacts.keys())[:10]
+        if campaign_ids:
+            roas_map = fetch_roas(campaign_ids)
+            metrics["tiktok_campaign_count"] = len(roas_map)
+            for cid, roas in roas_map.items():
+                artifact = _campaign_artifacts.get(cid)
+                product  = artifact.product if artifact else cid
+                # ── CalibrationStore: record per-product outcome ───────────
+                calibration_store.record_outcome(product, actual_roas=roas)
+                # ── CampaignMetrics: persist observation for profitability ─
+                # Spend is prorated from the campaign's daily budget over
+                # the interval since the last observation (first sight
+                # assumes a 1h window), so per-day totals stay honest no
+                # matter how often this worker fires.
+                try:
+                    from backend.metrics.campaign_metrics import record_metric
+                    now_obs = time.time()
+                    budget  = artifact.budget if artifact else 0.0
+                    last    = _campaign_last_metric_ts.get(cid, now_obs - 3600)
+                    elapsed = min(max(now_obs - last, 0.0), 86400.0)
+                    est_spend = budget * (elapsed / 86400.0)
+                    record_metric(
+                        cid,
+                        platform=_campaign_platforms.get(cid, "tiktok"),
+                        product=product,
+                        spend_usd=est_spend,
+                        revenue_usd=est_spend * roas,
+                    )
+                    _campaign_last_metric_ts[cid] = now_obs
+                except Exception as exc:
+                    _log.debug("campaign_metric_record_failed error=%s", exc)
+                # ── PatternStore: backfill from real TikTok ROAS ──────────
+                # Build a synthetic classified event so pattern learning sees
+                # real campaign performance, not just simulated outcomes.
+                if artifact:
+                    synth = {
+                        "product":   artifact.product,
+                        "hook":      artifact.hook,
+                        "angle":     artifact.angle,
+                        "roas":      roas,
+                        "ctr":       0.0,   # not available from ROAS endpoint
+                        "cvr":       0.0,
+                        "env_regime": artifact.phase,
+                    }
+                    synth["label"]     = classify_video(synth)
+                    synth["eng_score"] = engagement_score(synth)
+                    pattern_store.update(extract_patterns([synth]))
+                _log.debug("metrics_tiktok campaign=%s product=%s roas=%s", cid, product, roas)
+    except Exception as exc:
+        _log.debug("metrics_tiktok_failed error=%s", exc)
+
+    commerce_reconciled = _reconcile_delayed_commerce_metrics(calibration_store)
+    if commerce_reconciled:
+        metrics["commerce_campaigns_reconciled"] = commerce_reconciled
+
+    if not metrics:
+        return {"status": "skipped", "reason": "no_metrics_available"}
+
+    emit_metrics_ingested("orchestrator", metrics)
+    return {"status": "ok", "metrics": {k: v for k, v in metrics.items()
+                                         if isinstance(v, (int, float, str))}}
 
 
 # ── worker retry + anomaly ────────────────────────────────────────────────────
@@ -424,19 +934,29 @@ def _with_retry(fn: Any, attempts: int = 2) -> dict[str, Any]:
 _PHASE_WORKERS: dict[Phase, list[Any]] = {
     # RESEARCH: discover signals + warm simulation; ingest first metrics
     Phase.RESEARCH:  [_run_simulation, _run_signal_ingestion, _run_signal_ingestion,
-                      _run_execution_cycle, _run_metrics_ingestion],
-    # EXPLORE: signal → simulate → execute × 2 → feedback → generate content
-    Phase.EXPLORE:   [_run_simulation, _run_signal_ingestion, _run_execution_cycle,
-                      _run_execution_cycle, _run_feedback_collection,
-                      _run_content_generation, _run_metrics_ingestion],
-    # VALIDATE: execution + feedback × 2 + metrics ingestion to close loop
-    Phase.VALIDATE:  [_run_signal_ingestion, _run_execution_cycle,
+                      _run_execution_cycle, _run_fulfillment,
+                      _run_metrics_ingestion, _run_alerting],
+    # → organic posting → dropship cycle (rate-limited internally)
+    Phase.EXPLORE:   [_run_simulation, _run_signal_ingestion, _run_commerce_cycle,
+                      _run_execution_cycle, _run_execution_cycle, _run_feedback_collection,
+                      _run_content_generation, _run_organic_posting,
+                      _run_engagement_ingestion, _run_dropship_pipeline,
+                      _run_fulfillment, _run_metrics_ingestion, _run_alerting],
+    # VALIDATE: execution + feedback × 2 + organic validation + inventory + sleep
+    Phase.VALIDATE:  [_run_signal_ingestion, _run_commerce_cycle, _run_execution_cycle,
                       _run_feedback_collection, _run_feedback_collection,
-                      _run_content_generation, _run_metrics_ingestion],
+                      _run_content_generation, _run_organic_posting,
+                      _run_engagement_ingestion, _run_inventory_sync,
+                      _run_fulfillment, _run_metrics_ingestion,
+                      _run_alerting, _run_sleep_consolidation],
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
-    Phase.SCALE:     [_run_execution_cycle, _run_feedback_collection,
-                      _run_content_generation, _run_scaling, _run_scaling,
-                      _run_metrics_ingestion],
+    Phase.SCALE:     [_run_signal_ingestion, _run_commerce_cycle, _run_execution_cycle,
+                      _run_feedback_collection, _run_content_generation, _run_scaling,
+                      _run_dropship_pipeline, _run_organic_channel_evaluation,
+                      _run_engagement_ingestion, _run_inventory_sync,
+                      _run_fulfillment, _run_metrics_ingestion,
+                      _run_budget_scaling, _run_alerting,
+                      _run_sleep_consolidation],
 }
 
 
@@ -499,17 +1019,38 @@ except ImportError:
 
 def run() -> None:
     """Run the orchestrator loop indefinitely."""
+    global _shutdown_requested
     _log.info("orchestrator_starting tick_interval=%s", TICK_INTERVAL)
+    try:
+        from backend.observability.sentry_init import init_sentry
+        init_sentry(component="orchestrator")
+    except Exception:
+        pass
     _init_prometheus()
+    _restore_checkpoint()
+    try:
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+    except Exception as exc:
+        _log.debug("orchestrator_sigterm_handler_unavailable error=%s", exc)
+
+    tick_count = 0
 
     while True:
         try:
+            if _shutdown_requested:
+                _log.info("orchestrator_shutdown_requested")
+                break
+
+            tick_count += 1
             metrics = _collect_metrics()
             phase   = phase_controller.tick(metrics)
             alloc   = resource_allocator.describe(phase, TOTAL_BUDGET)
 
             _record_phase(phase)
             _record_tick()
+
+            if tick_count % CHECKPOINT_EVERY_N_TICKS == 0:
+                _write_checkpoint(tick_count)
 
             _log.info(
                 "orchestrator_tick phase=%s avg_roas=%s capital=%s",
@@ -560,7 +1101,16 @@ def run() -> None:
                     "_run_scaling":             "scaling_worker",
                     "_run_simulation":          "simulation_worker",
                     "_run_content_generation":  "content_generation_worker",
+                    "_run_dropship_pipeline":   "dropship_pipeline_worker",
+                    "_run_organic_channel_evaluation": "organic_channel_worker",
+                    "_run_organic_posting":     "organic_posting_worker",
+                    "_run_engagement_ingestion": "engagement_ingestion_worker",
+                    "_run_inventory_sync":      "inventory_sync_worker",
+                    "_run_fulfillment":         "fulfillment_worker",
                     "_run_metrics_ingestion":   "metrics_ingestion_worker",
+                    "_run_budget_scaling":      "budget_scaling_worker",
+                    "_run_alerting":            "alerting_worker",
+                    "_run_commerce_cycle":      "commerce_cycle_worker",
                 }.get(worker_fn.__name__, worker_fn.__name__)
                 try:
                     from backend.runtime.task_inventory import task_registry as _tr
@@ -570,11 +1120,15 @@ def run() -> None:
 
         except (KeyboardInterrupt, SystemExit):
             _log.info("orchestrator_stopping")
+            _write_checkpoint(tick_count)
             break
         except Exception as exc:
             _log.exception("orchestrator_tick_error error=%s", exc)
 
         time.sleep(TICK_INTERVAL)
+
+    if _shutdown_requested:
+        _write_checkpoint(tick_count)
 
 
 if __name__ == "__main__":

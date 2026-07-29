@@ -2,21 +2,9 @@ version: '3.9'
 services:
   api:
     build: .
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn backend.api:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
-    depends_on:
-      - redis
-      - db
-  worker:
-    build: .
-    command: celery -A core.celery_app worker --loglevel=info
-    depends_on:
-      - redis
-      - db
-  beat:
-    build: .
-    command: celery -A core.celery_app beat --loglevel=info
     depends_on:
       - redis
       - db

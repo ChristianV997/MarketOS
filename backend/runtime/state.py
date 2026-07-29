@@ -15,6 +15,7 @@ build_snapshot(system_state)      → RuntimeSnapshot ← kept for backward comp
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -160,7 +161,29 @@ def build_runtime_state(state: Any) -> RuntimeState:
     try:
         from core.signals import signal_engine
         raw_signals = signal_engine.get()
-        opps = signal_engine.top_opportunities(raw_signals, n=8)
+
+        # Phase 7: urgency-weighted ranking (velocity * (1-saturation)),
+        # gated by PHASE7_URGENCY_SCORING_LIVE. Both rankings are always
+        # computed and journaled so shadow-mode validation can compare
+        # them before the flag flips.
+        urgency_live = os.getenv("PHASE7_URGENCY_SCORING_LIVE", "false").lower() == "true"
+        legacy_opps = signal_engine.top_opportunities(raw_signals, n=8, use_urgency=False)
+        urgency_opps = signal_engine.top_opportunities(raw_signals, n=8, use_urgency=True)
+        try:
+            from backend.orchestration.event_store import event_store, new_workflow_id
+            event_store.append(
+                new_workflow_id("urgency"), "shadow_urgency_scoring",
+                workflow="runtime_state", step="top_opportunities",
+                data={
+                    "legacy_products": [s.get("product", "") for s in legacy_opps],
+                    "urgency_products": [s.get("product", "") for s in urgency_opps],
+                    "live": urgency_live,
+                },
+            )
+        except Exception:
+            pass
+
+        opps = urgency_opps if urgency_live else legacy_opps
         signals = [SignalRecord.from_dict(s) for s in opps]
     except Exception:
         pass

@@ -27,7 +27,7 @@ from typing import Any
 @dataclass
 class TaskRecord:
     name: str
-    kind: str           # thread | celery | scheduler | ws | state_writer | queue | loop
+    kind: str           # thread | scheduler | ws | state_writer | queue | loop
     description: str
     module: str = ""
     interval_s: float | None = None   # None = event-driven / on-demand
@@ -190,6 +190,14 @@ def _register_all() -> None:
         interval_s=_TICK,
     )
     task_registry.register(
+        "commerce_cycle_worker",
+        kind="loop",
+        description="_run_commerce_cycle(): signal ranking → creative bundle → launch plan → feedback memory",
+        module="orchestrator.main",
+        interval_s=_TICK,
+        enabled=os.getenv("COMMERCE_LOOP_ENABLED", "true").lower() == "true",
+    )
+    task_registry.register(
         "execution_cycle_worker",
         kind="loop",
         description="_run_execution_cycle(): decide→execute→learn→causal update via run_cycle()",
@@ -209,21 +217,14 @@ def _register_all() -> None:
         description="_run_scaling(): portfolio.top_products → AJO scale_campaign (SCALE phase only)",
         module="orchestrator.main",
         interval_s=_TICK,
-        env_required="ADOBE_AJO_TOKEN",
+        env_required="ADOBE_CLIENT_ID",
     )
     task_registry.register(
-        "core_master_loop",
+        "run_py_shim",
         kind="loop",
-        description="core.engine.master_loop: execution_step + RL train_loop (standalone mode)",
-        module="core.engine.master_loop",
-        interval_s=60.0,
-    )
-    task_registry.register(
-        "legacy_run_forever",
-        kind="loop",
-        description="run.py::run_forever(): legacy 300s polling loop (superseded by orchestrator)",
+        description="run.py: thin shim delegating to orchestrator.main.run() (single entrypoint)",
         module="run",
-        interval_s=300,
+        interval_s=10,
     )
 
     # ── schedulers ────────────────────────────────────────────────────────
@@ -247,21 +248,6 @@ def _register_all() -> None:
     )
 
     # ── Celery tasks ──────────────────────────────────────────────────────
-    task_registry.register(
-        "celery_run_real_cycle",
-        kind="celery",
-        description="Celery task: execute one paid campaign cycle from a product signal dict",
-        module="tasks.pipeline",
-        broker=os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0"),
-    )
-    task_registry.register(
-        "celery_run_discovery",
-        kind="celery",
-        description="Celery task: keyword discovery via core.bridge.Bridge (Bridge pattern)",
-        module="tasks.discovery",
-        broker=os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0"),
-    )
-
     # ── queues ────────────────────────────────────────────────────────────
     task_registry.register(
         "redis_stream_upos_events",
@@ -300,8 +286,8 @@ def _register_all() -> None:
     task_registry.register(
         "sw_supabase",
         kind="state_writer",
-        description="supabase_connector.save_cycle_summary(): upserts cycle KPIs to Supabase (optional)",
-        module="connectors.supabase_connector",
+        description="supabase_client.save_cycle_summary(): inserts cycle KPIs to Supabase (optional)",
+        module="backend.integrations.supabase_client",
         env_required="SUPABASE_URL",
     )
     task_registry.register(

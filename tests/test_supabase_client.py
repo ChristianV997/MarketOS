@@ -50,3 +50,18 @@ def test_load_state_no_requests(monkeypatch):
     monkeypatch.setattr(sc, "SUPABASE_SERVICE_ROLE_KEY", "secret")
     monkeypatch.setattr(sc, "_requests", None)
     assert sc.load_state() is None
+
+
+def test_save_cycle_summary_no_credentials(monkeypatch):
+    monkeypatch.setattr(sc, "SUPABASE_URL", "")
+    monkeypatch.setattr(sc, "SUPABASE_SERVICE_ROLE_KEY", "")
+    result = sc.save_cycle_summary({"total_cycles": 1, "capital": 1000.0})
+    assert result is False
+
+
+def test_save_cycle_summary_no_requests(monkeypatch):
+    monkeypatch.setattr(sc, "SUPABASE_URL", "https://test.supabase.co")
+    monkeypatch.setattr(sc, "SUPABASE_SERVICE_ROLE_KEY", "secret")
+    monkeypatch.setattr(sc, "_requests", None)
+    result = sc.save_cycle_summary({"total_cycles": 5})
+    assert result is False

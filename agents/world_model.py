@@ -1,6 +1,9 @@
 import numpy as np
 from sklearn.linear_model import Ridge
-from mapie.regression import SplitConformalRegressor
+try:  # MAPIE improves intervals, but must not make the execution loop unimportable.
+    from mapie.regression import SplitConformalRegressor
+except ImportError:  # pragma: no cover - covered through the fallback behaviour
+    SplitConformalRegressor = None  # type: ignore[assignment,misc]
 
 # Minimum rows needed so calibration set has ≥ 1/alpha = 10 samples
 # at 40% cal split: need ≥ 10/0.4 = 25 rows; use 30 for margin
@@ -18,7 +21,8 @@ class WorldModel:
     def __init__(self):
         # per-horizon: fitted Ridge (for point prediction) + SplitConformal (for intervals)
         self._ridge: dict[str, Ridge] = {}
-        self._conformal: dict[str, SplitConformalRegressor] = {}
+        self._conformal: dict[str, object] = {}
+        self._residual_quantiles: dict[str, float] = {}
         self._fitted: set[str] = set()
 
     def _featurize(self, action: dict) -> np.ndarray:
@@ -52,14 +56,19 @@ class WorldModel:
             ridge.fit(X_train, y_train)
             self._ridge[h] = ridge
 
-            # 2. wrap fitted Ridge in SplitConformalRegressor + conformalize
-            conformal = SplitConformalRegressor(
-                estimator=ridge,
-                prefit=True,
-                confidence_level=_CONFIDENCE,
-            )
-            conformal.conformalize(X_cal, y_cal)
-            self._conformal[h] = conformal
+            # 2. Use MAPIE when installed; otherwise retain conformal-style
+            # residual calibration around the same Ridge point estimator.
+            if SplitConformalRegressor is not None:
+                conformal = SplitConformalRegressor(
+                    estimator=ridge,
+                    prefit=True,
+                    confidence_level=_CONFIDENCE,
+                )
+                conformal.conformalize(X_cal, y_cal)
+                self._conformal[h] = conformal
+            else:
+                residuals = np.abs(y_cal - ridge.predict(X_cal))
+                self._residual_quantiles[h] = float(np.quantile(residuals, _CONFIDENCE)) if len(residuals) else 0.3
             self._fitted.add(h)
 
     def predict(self, action: dict) -> dict:
@@ -84,14 +93,18 @@ class WorldModel:
                 continue
 
             pt = float(self._ridge[h].predict(x)[0])
-            try:
-                _, intervals = self._conformal[h].predict_interval(x)
-                lo = float(intervals[0, 0, 0])
-                hi = float(intervals[0, 1, 0])
-            except ValueError:
-                # calibration set too small for the requested confidence level
-                lo = pt - 0.3
-                hi = pt + 0.3
+            if h in self._residual_quantiles:
+                radius = self._residual_quantiles[h]
+                lo, hi = pt - radius, pt + radius
+            else:
+                try:
+                    _, intervals = self._conformal[h].predict_interval(x)  # type: ignore[union-attr]
+                    lo = float(intervals[0, 0, 0])
+                    hi = float(intervals[0, 1, 0])
+                except ValueError:
+                    # calibration set too small for the requested confidence level
+                    lo = pt - 0.3
+                    hi = pt + 0.3
 
             result[f"roas_{h}"] = pt
             result[f"lo_{h}"] = lo
@@ -108,8 +121,11 @@ class WorldModel:
         widths = []
         dummy = self._featurize({"variant": 1}).reshape(1, -1)
         for h in self._fitted:
-            _, ivs = self._conformal[h].predict_interval(dummy)
-            widths.append(max(0.0, float(ivs[0, 1, 0]) - float(ivs[0, 0, 0])))
+            if h in self._residual_quantiles:
+                widths.append(max(0.0, 2 * self._residual_quantiles[h]))
+            else:
+                _, ivs = self._conformal[h].predict_interval(dummy)  # type: ignore[union-attr]
+                widths.append(max(0.0, float(ivs[0, 1, 0]) - float(ivs[0, 0, 0])))
         return sum(widths) / len(widths)
 
 

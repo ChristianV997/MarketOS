@@ -62,14 +62,10 @@ class EpisodicStore:
         self._max      = max_episodes
         self._lock     = threading.Lock()
         self._episodes: deque[Episode] = deque(maxlen=max_episodes)
-        self._by_type: dict[str, list[Episode]]      = {}
-        self._by_ws:   dict[str, list[Episode]]      = {}
 
     def record(self, episode: Episode) -> None:
         with self._lock:
             self._episodes.append(episode)
-            self._by_type.setdefault(episode.event_type, []).append(episode)
-            self._by_ws.setdefault(episode.workspace, []).append(episode)
 
     def record_event(
         self,
@@ -97,12 +93,16 @@ class EpisodicStore:
             return list(self._episodes)[-n:]
 
     def by_type(self, event_type: str, limit: int = 500) -> list[Episode]:
+        # Derived from the bounded deque so no secondary index can grow
+        # unbounded as old episodes are evicted.
         with self._lock:
-            return self._by_type.get(event_type, [])[-limit:]
+            matches = [e for e in self._episodes if e.event_type == event_type]
+        return matches[-limit:]
 
     def by_workspace(self, workspace: str, limit: int = 500) -> list[Episode]:
         with self._lock:
-            return self._by_ws.get(workspace, [])[-limit:]
+            matches = [e for e in self._episodes if e.workspace == workspace]
+        return matches[-limit:]
 
     def count(self) -> int:
         with self._lock:
@@ -111,3 +111,29 @@ class EpisodicStore:
     def window(self, start_ts: float, end_ts: float) -> list[Episode]:
         with self._lock:
             return [e for e in self._episodes if start_ts <= e.ts <= end_ts]
+
+    # ── persistence ─────────────────────────────────────────────────────────
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a JSON-safe snapshot of all episodes (newest last)."""
+        with self._lock:
+            return {"episodes": [e.to_dict() for e in self._episodes]}
+
+    def restore(self, data: dict[str, Any]) -> None:
+        """Rebuild the store from a snapshot produced by ``snapshot()``."""
+        rows = data.get("episodes", []) if isinstance(data, dict) else []
+        with self._lock:
+            self._episodes.clear()
+            for d in rows:
+                try:
+                    self._episodes.append(Episode(
+                        episode_id=d["episode_id"],
+                        event_type=d.get("event_type", ""),
+                        ts=d.get("ts", 0.0),
+                        payload=d.get("payload", {}),
+                        source=d.get("source", ""),
+                        workspace=d.get("workspace", "default"),
+                        parent_episode_id=d.get("parent_episode_id", ""),
+                    ))
+                except Exception:
+                    continue

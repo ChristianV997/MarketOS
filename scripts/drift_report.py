@@ -11,6 +11,7 @@ Usage:
     python scripts/drift_report.py --state-path state/state.db --window 200 --out drift_report.json
 """
 import argparse
+from dataclasses import dataclass
 import json
 import os
 import sys
@@ -18,8 +19,17 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
-from evidently import Report
-from evidently.presets import DataDriftPreset
+from scipy.stats import ks_2samp
+
+try:
+    from evidently import Report
+    from evidently.presets import DataDriftPreset
+
+    EVIDENTLY_AVAILABLE = True
+except ImportError:  # Evidently is optional in lean/local deployments.
+    Report = None
+    DataDriftPreset = None
+    EVIDENTLY_AVAILABLE = False
 
 from backend.core.db_serializer import query as db_query
 
@@ -33,6 +43,73 @@ DRIFT_THRESHOLD = 0.05
 
 # Minimum rows required in both reference and current windows
 MIN_WINDOW = 20
+
+
+@dataclass
+class _FallbackSnapshot:
+    """Minimal Evidently-compatible snapshot backed by SciPy's K-S test.
+
+    Evidently remains the preferred renderer when installed.  This fallback
+    preserves the report's decision semantics and JSON parsing contract for
+    local development and minimal runtime images where the optional package is
+    intentionally absent.
+    """
+
+    results: dict
+
+    def json(self) -> str:
+        metrics = [
+            {
+                "metric_name": "DriftedColumnsCount()",
+                "value": {"share": self.results["share_drifted"]},
+            }
+        ]
+        for column, info in self.results["columns"].items():
+            metrics.append(
+                {
+                    "metric_name": f"ValueDrift(column={column}, threshold={info['threshold']})",
+                    "value": info["p_value"],
+                }
+            )
+        return json.dumps({"metrics": metrics})
+
+    def save_html(self, path: str) -> None:
+        rows = "".join(
+            "<tr><td>{}</td><td>{:.6f}</td><td>{}</td></tr>".format(
+                col, info["p_value"], "drift" if info["drifted"] else "ok"
+            )
+            for col, info in sorted(self.results["columns"].items())
+        )
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "<html><body><h1>Drift Report (SciPy fallback)</h1>"
+                "<table><tr><th>Feature</th><th>p-value</th><th>Status</th></tr>"
+                f"{rows}</table></body></html>"
+            )
+
+
+def build_drift_snapshot(reference_data: pd.DataFrame, current_data: pd.DataFrame):
+    """Run Evidently when available, otherwise use a deterministic K-S fallback."""
+    if EVIDENTLY_AVAILABLE:
+        return Report([DataDriftPreset()]).run(
+            reference_data=reference_data,
+            current_data=current_data,
+        )
+
+    columns = {}
+    for column in reference_data.columns.intersection(current_data.columns):
+        reference = reference_data[column].dropna()
+        current = current_data[column].dropna()
+        if not len(reference) or not len(current):
+            continue
+        p_value = float(ks_2samp(reference, current).pvalue)
+        columns[column] = {
+            "p_value": round(p_value, 6),
+            "threshold": DRIFT_THRESHOLD,
+            "drifted": p_value < DRIFT_THRESHOLD,
+        }
+    share = sum(info["drifted"] for info in columns.values()) / len(columns) if columns else 0.0
+    return _FallbackSnapshot({"share_drifted": share, "columns": columns})
 
 
 def _load_window(state_path: str, window: int) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -182,11 +259,8 @@ def main():
               f"(ref={len(ref_df)}, cur={len(cur_df)}, min={MIN_WINDOW}).")
         return
 
-    # -- run Evidently --
-    snap = Report([DataDriftPreset()]).run(
-        reference_data=ref_df,
-        current_data=cur_df,
-    )
+    # -- run Evidently, with an equivalent SciPy fallback for lean installs --
+    snap = build_drift_snapshot(ref_df, cur_df)
 
     results = _parse_snapshot(snap)
     md = _markdown_report(results, len(ref_df), len(cur_df), total_events, args.window)

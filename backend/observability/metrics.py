@@ -83,6 +83,12 @@ sleep_cycle_duration_ms  = _histogram("sleep_cycle_duration_ms","Sleep cycle dur
 sleep_compression_ratio  = _gauge("sleep_compression_ratio",   "Latest consolidation compression ratio")
 sleep_units_created      = _counter("sleep_units_created_total","Semantic units created in sleep cycles")
 
+# ── orchestrator checkpointing ────────────────────────────────────────────────
+checkpoint_writes_total     = _counter("checkpoint_writes_total",     "Total orchestrator state checkpoint writes")
+checkpoint_failures_total   = _counter("checkpoint_failures_total",   "Failed checkpoint writes")
+checkpoint_recoveries_total = _counter("checkpoint_recoveries_total", "Startup recoveries from checkpoint", ["outcome"])
+checkpoint_last_write_ts    = _gauge(  "checkpoint_last_write_ts",    "Unix timestamp of last successful checkpoint")
+
 # ── entropy ───────────────────────────────────────────────────────────────────
 cognitive_entropy        = _gauge("cognitive_entropy",          "Overall cognitive entropy [0,1]",        ["workspace"])
 vector_fragmentation     = _gauge("vector_fragmentation",       "Vector store fragmentation [0,1]")
@@ -94,6 +100,15 @@ inference_requests_total = _counter("inference_requests_total", "Inference reque
 inference_latency_ms     = _histogram("inference_latency_ms",   "Inference latency (ms)",                ["provider"],
                                        buckets=[50, 100, 200, 500, 1000, 3000, 10000])
 inference_fallbacks_total= _counter("inference_fallbacks_total","Provider fallbacks triggered")
+
+# ── ollama (local inference) ─────────────────────────────────────────────────
+ollama_health_check_failures_total = _counter(
+    "ollama_health_check_failures_total", "Ollama daemon health-check failures")
+ollama_model_pull_duration_ms = _histogram(
+    "ollama_model_pull_duration_ms", "Ollama model pull duration (ms)", ["model"],
+    buckets=[100, 500, 1000, 5000, 15000, 60000, 300000])
+ollama_model_pulls_total = _counter(
+    "ollama_model_pulls_total", "Ollama model pull attempts", ["model", "status"])
 
 # ── tracing ───────────────────────────────────────────────────────────────────
 trace_spans_total        = _counter("trace_spans_total",        "Trace spans completed",                  ["name", "status"])
