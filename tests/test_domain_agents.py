@@ -3,7 +3,10 @@ import asyncio
 
 from backend.agents.domain_agents import (
     CampaignQARequest, CampaignQAResult, ProductResearchRequest, ProductResearchResult,
-    create_campaign_qa_agent, create_product_research_agent,
+    CreativeBriefRequest, CreativeBriefResult, MetricsReconciliationRequest, MetricsReconciliationResult,
+    SupplierComparisonRequest, SupplierComparisonResult,
+    create_campaign_qa_agent, create_creative_brief_agent, create_metrics_reconciliation_agent,
+    create_product_research_agent, create_supplier_comparison_agent,
 )
 
 
@@ -20,10 +23,19 @@ def test_domain_agents_are_typed_and_use_one_provider_boundary():
     provider = Provider()
     create_product_research_agent(provider=provider)
     create_campaign_qa_agent(provider=provider)
+    create_supplier_comparison_agent(provider=provider)
+    create_creative_brief_agent(provider=provider)
+    create_metrics_reconciliation_agent(provider=provider)
     assert provider.calls[0]["output_type"] is ProductResearchResult
     assert provider.calls[1]["output_type"] is CampaignQAResult
+    assert provider.calls[2]["output_type"] is SupplierComparisonResult
+    assert provider.calls[3]["output_type"] is CreativeBriefResult
+    assert provider.calls[4]["output_type"] is MetricsReconciliationResult
     assert ProductResearchRequest(query="mugs").dry_run is True
     assert CampaignQARequest(product_id="p", creative_id="c", platform="meta", copy_text="Buy").dry_run is True
+    assert SupplierComparisonRequest(product_id="p", offers=[{"supplier_id": "s", "unit_cost": 2}]).dry_run is True
+    assert CreativeBriefRequest(product_id="p", product_name="Mug", platform="meta").dry_run is True
+    assert MetricsReconciliationRequest(campaign_id="c").dry_run is True
 
 
 def test_domain_agent_requests_reject_empty_execution_inputs():
@@ -31,6 +43,8 @@ def test_domain_agent_requests_reject_empty_execution_inputs():
         ProductResearchRequest(query="")
     with pytest.raises(Exception):
         CampaignQARequest(product_id="", creative_id="c", platform="meta", copy_text="Buy")
+    with pytest.raises(Exception):
+        SupplierComparisonRequest(product_id="p", offers=[])
 
 
 def test_domain_agent_runners_validate_mocked_provider_results():
@@ -48,14 +62,31 @@ def test_domain_agent_runners_validate_mocked_provider_results():
         def create(self, *, name, instructions, output_type):
             if name == "product-research":
                 return Agent({"product_name": "Mug", "confidence": 0.8})
-            return Agent({"approved": True, "policy_checks": {"copy": True}})
+            if name == "campaign-qa":
+                return Agent({"approved": True, "policy_checks": {"copy": True}})
+            if name == "supplier-comparison":
+                return Agent({"selected_supplier_id": "supplier-a", "confidence": 0.7})
+            if name == "creative-brief":
+                return Agent({"product_id": "p", "brief": "Focus on portability", "hooks": ["Carry less"]})
+            if name == "metrics-reconciliation":
+                return Agent({"campaign_id": "c", "reconciled_metrics": {"spend": 10.0}, "confidence": 0.9})
+            raise AssertionError(f"unexpected agent {name}")
 
-    from backend.agents.domain_agents import run_campaign_qa, run_product_research
+    from backend.agents.domain_agents import run_campaign_qa, run_product_research, run_supplier_comparison, run_creative_brief, run_metrics_reconciliation
     research = asyncio.run(run_product_research(ProductResearchRequest(query="mugs"), provider=RunnerProvider()))
     qa = asyncio.run(run_campaign_qa(CampaignQARequest(product_id="p", creative_id="c", platform="meta", copy_text="Buy"), provider=RunnerProvider()))
+    supplier = asyncio.run(run_supplier_comparison(SupplierComparisonRequest(product_id="p", offers=[{"supplier_id": "supplier-a", "unit_cost": 2}],), provider=RunnerProvider()))
+    brief = asyncio.run(run_creative_brief(CreativeBriefRequest(product_id="p", product_name="Mug", platform="meta"), provider=RunnerProvider()))
+    metrics = asyncio.run(run_metrics_reconciliation(MetricsReconciliationRequest(campaign_id="c", source_metrics={"spend": 10}), provider=RunnerProvider()))
     assert research.product_name == "Mug"
     assert research.confidence == 0.8
     assert qa.approved is True
+    assert supplier.selected_supplier_id == "supplier-a"
+    assert brief.hooks == ["Carry less"]
+    assert metrics.reconciled_metrics["spend"] == 10.0
+    from backend.observability.tracing import tracer
+    names = {trace.name for trace in tracer.recent_traces()}
+    assert {"agent.supplier_comparison", "agent.creative_brief", "agent.metrics_reconciliation"}.issubset(names)
 
 
 def test_domain_agent_runners_emit_marketos_trace():
