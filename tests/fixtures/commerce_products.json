@@ -1,0 +1,13 @@
+{
+  "fixture-product-1": {
+    "product_id": "fixture-product-1",
+    "name": "Portable Blender",
+    "selling_price": 59.99,
+    "currency": "USD",
+    "quality": {
+      "provenance": "live",
+      "attribution": "attributed",
+      "source_ref": "fixture://portable-blender"
+    }
+  }
+}

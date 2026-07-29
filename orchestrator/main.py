@@ -41,10 +41,23 @@ TICK_INTERVAL   = float(os.getenv("ORCHESTRATOR_TICK_S", "10"))
 TOTAL_BUDGET    = float(os.getenv("ORCHESTRATOR_BUDGET", "500"))
 TOTAL_WORKERS   = int(os.getenv("ORCHESTRATOR_WORKERS", "4"))
 
+# The canonical commerce loop is deliberately safe-by-default.  It is part of
+# the normal orchestrator path, but only a deliberate environment change can
+# turn a scheduler tick into a paid-platform launch.
+_COMMERCE_LOOP_ENABLED = os.getenv("COMMERCE_LOOP_ENABLED", "true").lower() == "true"
+_COMMERCE_LOOP_LIVE = os.getenv("COMMERCE_LOOP_LIVE", "false").lower() == "true"
+_COMMERCE_LOOP_TOP_K = max(1, int(os.getenv("COMMERCE_LOOP_TOP_K", "3")))
+_COMMERCE_LOOP_BUDGET = max(0.0, float(os.getenv("COMMERCE_LOOP_BUDGET", "20")))
+
 # Full attribution lineage for every launched campaign (survives within process lifetime)
 # campaign_id → CampaignArtifact (product + hook + angle + phase + budget)
 from core.content.schemas import CampaignArtifact as _CampaignArtifact
 _campaign_artifacts: dict[str, _CampaignArtifact] = {}
+
+# Signal ingestion precedes the commerce worker in each phase dispatch.  Keep
+# the most recent batch so ranking consumes the exact evidence that advanced
+# the phase controller instead of issuing a second, potentially divergent pull.
+_latest_signal_batch: list[dict[str, Any]] = []
 
 
 # ── worker dispatchers ────────────────────────────────────────────────────────
@@ -52,7 +65,9 @@ _campaign_artifacts: dict[str, _CampaignArtifact] = {}
 def _run_signal_ingestion() -> dict[str, Any]:
     """Pull fresh signals and feed them to the intelligence loop."""
     try:
-        signals = signal_engine.get()
+        signals = signal_engine.get(force_refresh=True)
+        global _latest_signal_batch
+        _latest_signal_batch = [dict(signal) for signal in signals]
         for _ in signals:
             phase_controller.record_signal()
         # Feed top keywords to core/intelligence_loop if available
@@ -66,6 +81,41 @@ def _run_signal_ingestion() -> dict[str, Any]:
         return {"status": "ok", "signals": len(signals)}
     except Exception as exc:
         _log.exception("signal_ingestion_failed error=%s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
+def _run_commerce_cycle() -> dict[str, Any]:
+    """Run the canonical signal → rank → creative → launch → feedback path.
+
+    The worker consumes the signal batch just ingested by this tick.  In a
+    standalone invocation it falls back to the commerce loop's signal source.
+    Live execution is opt-in through ``COMMERCE_LOOP_LIVE=true``; scheduler
+    deployments remain dry-run by default.
+    """
+    if not _COMMERCE_LOOP_ENABLED:
+        return {"status": "skipped", "reason": "commerce_loop_disabled"}
+    try:
+        from backend.commerce import run_commerce_cycle
+
+        report = run_commerce_cycle(
+            signals=list(_latest_signal_batch) or None,
+            top_k=_COMMERCE_LOOP_TOP_K,
+            budget=_COMMERCE_LOOP_BUDGET,
+            dry_run=not _COMMERCE_LOOP_LIVE,
+        )
+        summary = report.summary
+        return {
+            "status": "ok",
+            "cycle_id": report.artifact_id,
+            "dry_run": report.dry_run,
+            "signals": report.total_signals,
+            "ranked": int(summary.get("ranked", 0)),
+            "creatives": int(summary.get("creatives", 0)),
+            "launches": int(summary.get("launches", 0)),
+            "feedback_records": int(summary.get("feedback_records", 0)),
+        }
+    except Exception as exc:
+        _log.exception("commerce_cycle_failed error=%s", exc)
         return {"status": "error", "error": str(exc)}
 
 
@@ -149,6 +199,17 @@ def _run_scaling() -> dict[str, Any]:
                         scaled += 1
         except Exception as exc:
             _log.debug("ajo_scale_failed error=%s", exc)
+
+        # Canonical commerce owns live campaign creation to prevent duplicate spend.
+        if _COMMERCE_LOOP_LIVE:
+            if scaled == 0:
+                return {
+                    "status": "skipped",
+                    "reason": "commerce_loop_owns_live_launches",
+                    "scaled": 0,
+                    "launched": 0,
+                }
+            return {"status": "ok", "scaled": scaled, "launched": 0}
 
         # ── Path 2: Launch new campaigns from high-confidence playbooks ───────
         try:
@@ -282,6 +343,48 @@ def _run_content_generation() -> dict[str, Any]:
         return {"status": "error", "error": str(exc)}
 
 
+def _reconcile_delayed_commerce_metrics(calibration_store: Any) -> int:
+    """Apply later, attributable TikTok ROAS to commerce launch artifacts.
+
+    TikTok's dry-run ROAS is useful for isolated tests but must never be
+    accepted as production feedback. Only a configured live client can close a
+    pending commerce campaign's durable attribution record.
+    """
+    try:
+        from backend.contracts.registry import get_registry
+        from backend.integrations.tiktok_ads import _DRY_RUN, fetch_roas, is_configured
+
+        if _DRY_RUN or not is_configured():
+            return 0
+        registry = get_registry()
+        assets_by_id = {
+            asset.artifact_id: asset for asset in registry.by_type("campaign")
+        }
+        assets = [
+            asset for asset in assets_by_id.values()
+            if getattr(asset, "phase", "") == "commerce"
+            and not getattr(asset, "dry_run", True)
+            and not getattr(asset, "outcome_recorded", False)
+            and getattr(asset, "campaign_id", "")
+        ]
+        campaign_ids = list(dict.fromkeys(asset.campaign_id for asset in assets))[:10]
+        if not campaign_ids:
+            return 0
+        roas_map = fetch_roas(campaign_ids)
+        reconciled = 0
+        for asset in assets:
+            roas = roas_map.get(asset.campaign_id)
+            if roas is None:
+                continue
+            registry.register(asset.with_outcome(float(roas)))
+            calibration_store.record_outcome(asset.product, actual_roas=float(roas))
+            reconciled += 1
+        return reconciled
+    except Exception as exc:
+        _log.debug("commerce_delayed_metrics_failed error=%s", exc)
+        return 0
+
+
 def _run_metrics_ingestion() -> dict[str, Any]:
     """Ingest real platform metrics and close the prediction→reality loop.
 
@@ -364,6 +467,10 @@ def _run_metrics_ingestion() -> dict[str, Any]:
         except Exception as exc:
             _log.debug("metrics_tiktok_failed error=%s", exc)
 
+        commerce_reconciled = _reconcile_delayed_commerce_metrics(calibration_store)
+        if commerce_reconciled:
+            metrics["commerce_campaigns_reconciled"] = commerce_reconciled
+
         if not metrics:
             return {"status": "skipped", "reason": "no_metrics_available"}
 
@@ -426,15 +533,15 @@ _PHASE_WORKERS: dict[Phase, list[Any]] = {
     Phase.RESEARCH:  [_run_simulation, _run_signal_ingestion, _run_signal_ingestion,
                       _run_execution_cycle, _run_metrics_ingestion],
     # EXPLORE: signal → simulate → execute × 2 → feedback → generate content
-    Phase.EXPLORE:   [_run_simulation, _run_signal_ingestion, _run_execution_cycle,
+    Phase.EXPLORE:   [_run_simulation, _run_signal_ingestion, _run_commerce_cycle, _run_execution_cycle,
                       _run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_metrics_ingestion],
     # VALIDATE: execution + feedback × 2 + metrics ingestion to close loop
-    Phase.VALIDATE:  [_run_signal_ingestion, _run_execution_cycle,
+    Phase.VALIDATE:  [_run_signal_ingestion, _run_commerce_cycle, _run_execution_cycle,
                       _run_feedback_collection, _run_feedback_collection,
                       _run_content_generation, _run_metrics_ingestion],
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
-    Phase.SCALE:     [_run_execution_cycle, _run_feedback_collection,
+    Phase.SCALE:     [_run_signal_ingestion, _run_commerce_cycle, _run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_scaling, _run_scaling,
                       _run_metrics_ingestion],
 }
@@ -561,6 +668,7 @@ def run() -> None:
                     "_run_simulation":          "simulation_worker",
                     "_run_content_generation":  "content_generation_worker",
                     "_run_metrics_ingestion":   "metrics_ingestion_worker",
+                    "_run_commerce_cycle":      "commerce_cycle_worker",
                 }.get(worker_fn.__name__, worker_fn.__name__)
                 try:
                     from backend.runtime.task_inventory import task_registry as _tr

@@ -190,6 +190,14 @@ def _register_all() -> None:
         interval_s=_TICK,
     )
     task_registry.register(
+        "commerce_cycle_worker",
+        kind="loop",
+        description="_run_commerce_cycle(): signal ranking → creative bundle → launch plan → feedback memory",
+        module="orchestrator.main",
+        interval_s=_TICK,
+        enabled=os.getenv("COMMERCE_LOOP_ENABLED", "true").lower() == "true",
+    )
+    task_registry.register(
         "execution_cycle_worker",
         kind="loop",
         description="_run_execution_cycle(): decide→execute→learn→causal update via run_cycle()",

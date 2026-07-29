@@ -20,7 +20,10 @@ import os
 import sys
 
 import numpy as np
-from statsmodels.tsa.stattools import grangercausalitytests
+try:  # Statsmodels is an optional statistical refinement.
+    from statsmodels.tsa.stattools import grangercausalitytests
+except ImportError:  # pragma: no cover - minimal-runtime fallback
+    grangercausalitytests = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +79,13 @@ def update_causal(graph, event_log):
             continue
 
         # Granger causality F-test: does x_{t-1} help predict roas_t?
+        # In lean deployments, retain a conservative lagged-correlation edge
+        # rather than making the whole decision engine unavailable.
+        if grangercausalitytests is None:
+            lagged_corr = float(np.corrcoef(x[:-1], roas_col[1:])[0, 1])
+            if not np.isnan(lagged_corr) and abs(lagged_corr) >= _PEARSON_FLOOR:
+                graph.add_edge(k, "roas", round(abs(lagged_corr), 4))
+            continue
         try:
             test_data = np.column_stack([roas_col, x])
             # suppress the printed table statsmodels writes to stdout

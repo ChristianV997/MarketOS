@@ -31,7 +31,9 @@ services:
   # ── API ────────────────────────────────────────────────────────────────────
   api:
     <<: *common
-    command: uvicorn backend.api:app --host 0.0.0.0 --port 3000 --reload
+    # The orchestrator service owns execution in this multi-service stack.
+    # Without this guard both it and the API background runner mutate cycles.
+    command: sh -c "ORCHESTRATOR_HANDLES_CYCLES=true exec uvicorn backend.api:app --host 0.0.0.0 --port 3000 --reload"
     ports:
       - "3000:3000"
 

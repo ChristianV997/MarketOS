@@ -15,7 +15,7 @@ import hashlib
 import json
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any
 
 
@@ -70,6 +70,12 @@ class BaseArtifact:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "BaseArtifact":
+        # Subclasses are dataclasses too. Recreate them through their public
+        # constructor so restored artifacts retain domain fields such as
+        # campaign_id and outcome_recorded, not merely BaseArtifact fields.
+        if is_dataclass(cls):
+            valid_fields = {item.name for item in fields(cls)}
+            return cls(**{key: value for key, value in d.items() if key in valid_fields})
         obj = cls.__new__(cls)
         obj.artifact_id    = d.get("artifact_id", "")
         obj.artifact_type  = d.get("artifact_type", "base")

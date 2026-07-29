@@ -21,6 +21,51 @@ def test_get_uses_registered_source():
     assert any(s["product"] == "super_widget" for s in signals)
 
 
+def test_get_reuses_recent_result_unless_refresh_is_requested():
+    engine = SignalEngine()
+    calls = []
+
+    def source():
+        calls.append(True)
+        return [{"product": f"widget-{len(calls)}", "score": 0.9}]
+
+    engine.register_source("test", source)
+    first = engine.get()
+    second = engine.get()
+    refreshed = engine.get(force_refresh=True)
+
+    assert [item["product"] for item in first] == ["widget-1"]
+    assert [item["product"] for item in second] == ["widget-1"]
+    assert [item["product"] for item in refreshed] == ["widget-2"]
+    assert len(calls) == 2
+
+
+def test_cached_results_are_not_mutated_by_callers():
+    engine = SignalEngine()
+    engine.register_source("test", lambda: [{"product": "widget", "score": 0.9}])
+    first = engine.get()
+    first[0]["product"] = "changed"
+    second = engine.get()
+    assert second[0]["product"] == "widget"
+
+
+def test_cache_stats_report_hits_refreshes_and_source_failures():
+    engine = SignalEngine()
+
+    def broken_source():
+        raise RuntimeError("offline")
+
+    engine.register_source("broken", broken_source)
+    engine.get(force_refresh=True)
+    engine.get()
+    stats = engine.cache_stats()
+    assert stats["refresh_count"] == 1
+    assert stats["cache_hits"] == 1
+    assert stats["cache_hit_rate"] == 0.5
+    assert stats["source_failures"] == {"broken": 1}
+    assert stats["last_refresh_duration_s"] >= 0
+
+
 def test_get_falls_back_on_source_error():
     engine = SignalEngine()
 

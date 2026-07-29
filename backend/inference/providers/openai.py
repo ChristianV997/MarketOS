@@ -17,6 +17,7 @@ _log = logging.getLogger(__name__)
 _DEFAULT_CHAT_MODEL  = os.getenv("OPENAI_MODEL",       "gpt-4o-mini")
 _DEFAULT_EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
 _EMBED_DIM           = 1536  # text-embedding-3-small default dimension
+_TIMEOUT_S           = float(os.getenv("OPENAI_TIMEOUT_S", "10"))
 
 
 class OpenAIProvider(BaseProvider):
@@ -37,7 +38,11 @@ class OpenAIProvider(BaseProvider):
     def _get_client(self):
         if self._client is None:
             import openai  # noqa: PLC0415  lazy import — optional dependency
-            self._client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            self._client = openai.OpenAI(
+                api_key=os.getenv("OPENAI_API_KEY"),
+                timeout=_TIMEOUT_S,
+                max_retries=0,
+            )
         return self._client
 
     # ── inference ─────────────────────────────────────────────────────────────

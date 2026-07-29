@@ -13,13 +13,14 @@ import logging
 import os
 import threading
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
 from fastapi import Body, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 # ── structured logging ────────────────────────────────────────────────────────
 try:
@@ -71,7 +72,35 @@ _ORCHESTRATOR_HANDLES_CYCLES = (
 
 # ── app ───────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="MarketOS v4", version="4.0.0")
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    """Start and stop MarketOS runtime services with the FastAPI app."""
+    global _state, _bg_running, _runtime_services_ready
+    from backend.core.serializer import load, save
+
+    loaded = load(STATE_PATH)
+    if loaded:
+        _state = loaded
+
+    _bg_running = True
+    _runtime_services_ready = False
+    threading.Thread(target=_background_runner, daemon=True).start()
+    threading.Thread(target=_research_runner, daemon=True).start()
+    _start_runtime_services()
+    _runtime_services_ready = True
+    try:
+        yield
+    finally:
+        _bg_running = False
+        _runtime_services_ready = False
+        _stop_runtime_services()
+        try:
+            save(_state, STATE_PATH)
+        except Exception:
+            pass
+
+
+app = FastAPI(title="MarketOS v4", version="4.0.0", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -86,6 +115,7 @@ app.add_middleware(
 _state = SystemState()
 _lock = threading.Lock()
 _bg_running = False
+_runtime_services_ready = False
 _started_at = time.time()
 _last_cycle_at: float | None = None
 
@@ -180,6 +210,12 @@ def _research_runner():
 
 def _start_runtime_services() -> None:
     try:
+        from backend.contracts.registry import get_registry
+        get_registry().hydrate_from_replay()
+    except Exception:
+        pass
+
+    try:
         from backend.runtime.task_inventory import start_heartbeat_broadcaster
         start_heartbeat_broadcaster(interval_s=30.0)
     except Exception:
@@ -231,32 +267,6 @@ def _public_sleep_result(result: Any) -> dict[str, Any]:
     return {"result": result}
 
 
-@app.on_event("startup")
-async def _startup():
-    global _state, _bg_running
-    from backend.core.serializer import load
-    loaded = load(STATE_PATH)
-    if loaded:
-        _state = loaded
-
-    _bg_running = True
-    threading.Thread(target=_background_runner, daemon=True).start()
-    threading.Thread(target=_research_runner, daemon=True).start()
-    _start_runtime_services()
-
-
-@app.on_event("shutdown")
-async def _shutdown():
-    global _bg_running
-    _bg_running = False
-    _stop_runtime_services()
-    from backend.core.serializer import save
-    try:
-        save(_state, STATE_PATH)
-    except Exception:
-        pass
-
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _roas_trend_slope(rows: list[dict], tail: int = 20) -> float:
@@ -304,6 +314,17 @@ def _cac_estimate() -> float | None:
 def health():
     """Replit uptime monitor / health check."""
     return {"ok": True}
+
+
+@app.get("/ready")
+def ready():
+    """Readiness probe that waits for the application lifespan to initialize."""
+    if not _bg_running or not _runtime_services_ready:
+        return JSONResponse(
+            {"ready": False, "reason": "runtime_services_initializing"},
+            status_code=503,
+        )
+    return {"ready": True}
 
 
 @app.get("/status")
@@ -421,6 +442,7 @@ def decisions():
 @app.get("/metrics")
 def metrics():
     """Rich dashboard payload — all key metrics in one call."""
+    from core.signals import signal_engine
     rows = _state.event_log.rows
     recent = rows[-100:] if rows else []
 
@@ -472,6 +494,7 @@ def metrics():
         "population_diversity": diversity,
         "event_count": len(rows),
         "cac_estimate": _cac_estimate(),
+        "signal_cache": signal_engine.cache_stats(),
     }
 
 
@@ -667,6 +690,13 @@ def prometheus_metrics():
     if not _PROMETHEUS_OK:
         return PlainTextResponse("# prometheus_client not installed\n", media_type="text/plain")
     return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/metrics/signals")
+def signal_metrics():
+    """Signal cache freshness and per-source failure telemetry."""
+    from core.signals import signal_engine
+    return signal_engine.cache_stats()
 
 
 @app.get("/phase")
@@ -1471,6 +1501,108 @@ def governance_schemas():
         return get_governance_registry().to_dict()
     except Exception as exc:
         return {"error": str(exc)}
+
+
+# ── commerce evaluation (vendor-neutral, read-only) ──────────────────────────
+
+@app.post("/evaluation/product")
+def evaluation_product(payload: dict[str, Any] = Body(...)):
+    """Evaluate product economics and launch readiness from normalized records."""
+    try:
+        from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
+        from evaluation.readiness import evaluate_product
+        product_data = dict(payload.get("product", {}))
+        offer_data = payload.get("offer")
+        product_quality = DataQuality(**product_data.pop("quality", {}))
+        product = ProductCandidate(**product_data, quality=product_quality)
+        offer = None
+        if offer_data:
+            offer_data = dict(offer_data)
+            offer_quality = DataQuality(**offer_data.pop("quality", {}))
+            offer = SupplierOffer(**offer_data, quality=offer_quality)
+        return evaluate_product(product, offer).to_dict()
+    except Exception as exc:
+        return {"launchable": False, "reasons": ["invalid_evaluation_request", str(exc)]}
+
+
+@app.post("/commerce/cycle")
+def commerce_cycle(payload: dict[str, Any] | None = Body(default=None)):
+    """Run the complementary commerce loop from signal to feedback.
+
+    Live platform execution requires an explicit JSON ``confirm_live: true``
+    acknowledgement; omitted or malformed boolean values remain dry-run.
+    """
+    try:
+        from backend.commerce import run_commerce_cycle
+
+        data = payload or {}
+        raw_dry_run = data.get("dry_run", True)
+        dry_run = (
+            raw_dry_run
+            if isinstance(raw_dry_run, bool)
+            else str(raw_dry_run).strip().lower() not in {"false", "0", "no", "off"}
+        )
+        if not dry_run and data.get("confirm_live") is not True:
+            return {
+                "launchable": False,
+                "reasons": ["live_execution_requires_confirm_live"],
+            }
+        top_k = int(data.get("top_k", 5) or 5)
+        budget = float(data.get("budget", 20.0) or 20.0)
+        if top_k < 1 or budget < 0:
+            return {
+                "launchable": False,
+                "reasons": ["invalid_commerce_cycle_limits"],
+            }
+        signals = data.get("signals")
+        products_payload = data.get("products") or {}
+        offers_payload = data.get("offers") or {}
+        products = (
+            dict(products_payload)
+            if isinstance(products_payload, dict)
+            else {
+                str(item.get("product_id") or item.get("name") or item.get("product")): dict(item)
+                for item in products_payload
+            }
+        )
+        offers = (
+            dict(offers_payload)
+            if isinstance(offers_payload, dict)
+            else {
+                str(item.get("product_id") or item.get("supplier_id") or item.get("product")): dict(item)
+                for item in offers_payload
+            }
+        )
+        report = run_commerce_cycle(
+            signals=signals,
+            products=products,
+            offers=offers,
+            top_k=top_k,
+            budget=budget,
+            dry_run=dry_run,
+        )
+        return report.to_dict()
+    except Exception as exc:
+        return {"launchable": False, "reasons": ["invalid_commerce_cycle_request", str(exc)]}
+
+
+@app.post("/evaluation/campaign")
+def evaluation_campaign(payload: dict[str, Any] = Body(...)):
+    """Evaluate campaign observations without changing campaign state."""
+    try:
+        from evaluation.contracts import CampaignCandidate, CampaignObservation, DataQuality
+        from evaluation.readiness import evaluate_campaign
+        campaign_data = dict(payload.get("campaign", {}))
+        campaign_quality = DataQuality(**campaign_data.pop("quality", {}))
+        campaign = CampaignCandidate(**campaign_data, quality=campaign_quality)
+        observations = []
+        for row in payload.get("observations", []):
+            row = dict(row)
+            quality = DataQuality(**row.pop("quality", {}))
+            observations.append(CampaignObservation(**row, quality=quality))
+        return evaluate_campaign(campaign, observations).to_dict()
+    except Exception as exc:
+        return {"launchable": False, "reasons": ["invalid_evaluation_request", str(exc)]}
 
 
 # ── WebSocket live event stream ────────────────────────────────────────────────
