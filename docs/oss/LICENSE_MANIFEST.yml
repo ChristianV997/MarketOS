@@ -43,8 +43,8 @@ components:
     distribution: sidecar
     notice: Deferred pending license and integration review.
   - name: saleor
-    license: review_required
-    reviewed_ref: pending-benchmark-review
+    license: BSD-3-Clause
+    reviewed_ref: 3.23.7
     distribution: benchmark
     notice: Benchmark only; do not deploy alongside Medusa.
   - name: twenty-crm
