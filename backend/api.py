@@ -1699,12 +1699,17 @@ def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webh
         broker_event_id = broker.publish(f"{source}.webhook", payload, source=source, correlation_id=event_id)
         from backend.commerce.feedback import observation_from_webhook
         observation = observation_from_webhook(payload, source=source)
+        feedback = None
+        if observation is not None and os.getenv("MARKETOS_WEBHOOK_LEARNING", "true").lower() == "true":
+            from backend.commerce.feedback import webhook_feedback_recorder
+            feedback = webhook_feedback_recorder.record_observation(observation)
         if _prom_webhook_events is not None:
             _prom_webhook_events.labels(source=source, outcome="accepted").inc()
         return {
             "accepted": True, "duplicate": False, "event_id": event_id,
             "broker_event_id": broker_event_id,
             "observation": observation.__dict__ if observation else None,
+            "feedback": feedback,
         }
     except Exception as exc:
         # Do not mark an event as permanently handled when downstream

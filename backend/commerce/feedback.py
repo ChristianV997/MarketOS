@@ -133,6 +133,54 @@ class FeedbackRecorder:
     reinforcement_memory: ReinforcementMemory = field(default_factory=ReinforcementMemory)
     signal_memory: SignalMemory = field(default_factory=SignalMemory)
 
+    def record_observation(self, observation: CampaignObservation) -> dict[str, Any]:
+        """Persist an attributed provider observation without a launch bundle.
+
+        Webhook events often arrive after the original process has ended, so
+        they cannot reliably reconstruct the full creative/launch objects.
+        Store only the evidence available in the observation and never infer
+        missing creative metadata.
+        """
+        with _OBSERVATION_LOCK:
+            if observation.observation_id in _PROCESSED_OBSERVATIONS:
+                if _prom_feedback_duplicates is not None:
+                    _prom_feedback_duplicates.inc()
+                return {"observation_id": observation.observation_id, "deduplicated": True}
+            _PROCESSED_OBSERVATIONS.add(observation.observation_id)
+        metadata = dict(observation.metadata)
+        product = observation.product_id or observation.campaign_id
+        roas = observation.revenue / observation.spend if observation.spend > 0 else 0.0
+        hook = str(metadata.get("hook", ""))
+        angle = str(metadata.get("angle", ""))
+        try:
+            self.campaign_memory.index_campaign(
+                campaign_id=observation.campaign_id,
+                product=product,
+                hook=hook,
+                angle=angle,
+                roas=roas,
+                phase="webhook_feedback",
+                spend=observation.spend,
+                revenue=observation.revenue,
+                creative_id=observation.creative_id,
+            )
+            self.reinforcement_memory.record_outcome(
+                hook=hook,
+                angle=angle,
+                product=product,
+                roas=roas,
+                phase="webhook_feedback",
+                campaign_id=observation.campaign_id,
+                creative_id=observation.creative_id,
+            )
+            self.signal_memory.index_keyword(product, source="commerce_webhook_feedback", campaign_id=observation.campaign_id, roas=roas)
+        except Exception as exc:
+            return {"observation_id": observation.observation_id, "deduplicated": False, "recorded": False, "error": str(exc)}
+        if _prom_feedback_records is not None:
+            _prom_feedback_records.inc()
+        return {"observation_id": observation.observation_id, "deduplicated": False, "recorded": True}
+
+
     def record(self, bundle: CreativeBundle, plan: LaunchPlan, outcome: CampaignOutcome) -> dict[str, Any]:
         observation = _observation_from_outcome(outcome)
         with _OBSERVATION_LOCK:
@@ -197,3 +245,6 @@ class FeedbackRecorder:
             "readiness": readiness.to_dict(),
             "deduplicated": False,
         }
+
+
+webhook_feedback_recorder = FeedbackRecorder()
