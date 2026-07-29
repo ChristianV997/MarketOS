@@ -82,6 +82,25 @@ def test_readiness_distinguishes_health_from_runtime_startup(monkeypatch):
     monkeypatch.setattr(api, "_start_runtime_services", lambda: None)
     monkeypatch.setattr(api, "_stop_runtime_services", lambda: None)
 
+    # Unlike its sibling tests in this file, this test previously left
+    # api.threading.Thread unstubbed — `with TestClient(...)` below runs
+    # the real FastAPI lifespan, which starts real daemon background
+    # threads (_background_runner/_research_runner) that call run_cycle()
+    # for real. Those threads outlive this test (the lifespan's shutdown
+    # only flips _bg_running; the thread body doesn't necessarily notice
+    # before its next sleep interval), corrupting global learning-state
+    # singletons (bandit_memory, event_log, calibration stores, etc.) for
+    # every test that runs afterward in the same process — a real,
+    # non-deterministic cross-test pollution bug, not just theoretical.
+    class InertThread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(api.threading, "Thread", InertThread)
+
     api._bg_running = False
     api._runtime_services_ready = False
     assert health_routes.ready().status_code == 503

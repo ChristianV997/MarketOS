@@ -173,7 +173,14 @@ class GoogleTrendsAdapterV1(ResearchSourceAdapter):
         if not isinstance(raw_record, dict):
             raise AdapterFetchError(ERROR_SCHEMA, "raw trend record must be an object")
 
-        topic = str(raw_record.get("title", {}).get("query", "")).strip()
+        title = raw_record.get("title", {})
+        # A malformed upstream record can have "title" present but not a
+        # dict (e.g. a bare string) — .get() on it would raise
+        # AttributeError, which only fetch_google_trends_signals()'s
+        # `except AdapterFetchError` catches, not AttributeError. Treat a
+        # non-dict title the same as a missing one instead of crashing the
+        # whole adapter fetch loop.
+        topic = str(title.get("query", "") if isinstance(title, dict) else "").strip()
         if not topic:
             raise AdapterFetchError(ERROR_SCHEMA, "trend record missing topic query")
 

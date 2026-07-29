@@ -34,6 +34,19 @@ def test_trend_mapping_transforms_payload_to_canonical_entity():
     assert record["raw"] == raw
 
 
+def test_to_canonical_non_dict_title_raises_adapter_error_not_attributeerror():
+    """A malformed upstream record can have "title" present but not a dict
+    (e.g. a bare string). Previously raw_record.get("title", {}).get(...)
+    would raise AttributeError in that case, which the only caller
+    (fetch_google_trends_signals) doesn't catch — crashing the whole
+    adapter fetch loop instead of skipping the one bad record."""
+    adapter = GoogleTrendsAdapterV1(max_pages=1)
+    raw = {"title": "not-a-dict", "formattedTraffic": "50K+", "articles": []}
+
+    with pytest.raises(AdapterFetchError):
+        adapter.to_canonical(raw)
+
+
 class TestTrendspygFetch:
     """trendspyg's RSS downloader (no Selenium/browser needed) replaced the
     hand-scrape of Google's undocumented dailytrends endpoint as the

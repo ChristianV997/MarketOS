@@ -201,12 +201,13 @@ def save(state: SystemState, path: str) -> None:
                 [(p, c, w) for (p, c), w in state.graph.edges.items()],
             )
 
-        # bandit_history — snapshot
+        # bandit_history — snapshot (history values are bounded deques, not
+        # lists — json.dumps needs a plain list)
         con.execute("DELETE FROM bandit_history")
         if bu.bandit_memory.history:
             con.executemany(
                 "INSERT INTO bandit_history VALUES (?, ?)",
-                [(k, json.dumps(v)) for k, v in bu.bandit_memory.history.items()],
+                [(k, json.dumps(list(v))) for k, v in bu.bandit_memory.history.items()],
             )
 
         # calibration_errs — snapshot
@@ -294,12 +295,15 @@ def load(path: str) -> SystemState | None:
     for parent, child, weight in con.execute("SELECT * FROM graph_edges").fetchall():
         state.graph.add_edge(parent, child, weight)
 
-    # bandit_history
-    bu.bandit_memory.history = {
-        action: json.loads(rewards_json)
+    # bandit_history — rebuild as the same bounded OrderedDict-of-deques
+    # shape bandit_memory.update() maintains, not a plain unbounded dict of
+    # lists (which would silently drop the memory cap on every restore).
+    from collections import OrderedDict, deque
+    bu.bandit_memory.history = OrderedDict(
+        (action, deque(json.loads(rewards_json), maxlen=bu._MAX_REWARDS_PER_KEY))
         for action, rewards_json
         in con.execute("SELECT * FROM bandit_history").fetchall()
-    }
+    )
 
     # calibration_errs
     cal.calibration_model.errors = [

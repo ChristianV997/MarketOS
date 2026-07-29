@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import os
 import signal
+import threading
 import time
 from typing import Any
 
@@ -64,6 +65,16 @@ _campaign_platforms: dict[str, str] = {}
 # campaign_id → last metric-observation timestamp, for prorating daily budget
 # into per-observation spend estimates
 _campaign_last_metric_ts: dict[str, float] = {}
+
+# The three dicts above are mutated from multiple independent worker entry
+# points (_run_dropship_pipeline, _run_scaling, _run_budget_scaling,
+# _run_metrics_ingestion) — this module's own docstring describes them as
+# "Celery task"-dispatchable, i.e. potentially concurrent across
+# worker threads/processes, not guaranteed sequential just because today's
+# run() loop happens to call them one at a time. One shared lock guards all
+# three so a launch registration can't race with a budget-scaling update or
+# a metrics-ingestion read/write on the same campaign_id.
+_campaign_state_lock = threading.Lock()
 
 # Signal ingestion precedes the commerce worker in each phase dispatch.  Keep
 # the most recent batch so ranking consumes the exact evidence that advanced
@@ -258,8 +269,9 @@ def _run_dropship_pipeline() -> dict[str, Any]:
                 budget         = c.get("budget", 0.0),
                 dry_run        = str(cid).startswith("dry"),
             )
-            _campaign_artifacts[cid] = artifact
-            _campaign_platforms[cid] = c.get("platform", "")
+            with _campaign_state_lock:
+                _campaign_artifacts[cid] = artifact
+                _campaign_platforms[cid] = c.get("platform", "")
             try:
                 from backend.events.emitter import emit_campaign_launched
                 emit_campaign_launched(
@@ -298,10 +310,11 @@ def _run_budget_scaling() -> dict[str, Any]:
         apply_scaling_decisions, compute_scaling_decisions)
     decisions = compute_scaling_decisions()
     result = apply_scaling_decisions(decisions)
-    for d in decisions:
-        artifact = _campaign_artifacts.get(d["campaign_id"])
-        if artifact is not None:
-            artifact.budget = d["new_budget"]
+    with _campaign_state_lock:
+        for d in decisions:
+            artifact = _campaign_artifacts.get(d["campaign_id"])
+            if artifact is not None:
+                artifact.budget = d["new_budget"]
     kills = sum(1 for d in decisions if d["action"] == "kill")
     ups   = sum(1 for d in decisions if d["action"] == "scale_up")
     if decisions:
@@ -466,16 +479,30 @@ def _run_commerce_cycle() -> dict[str, Any]:
 
 @worker_safe()
 def _run_execution_cycle() -> dict[str, Any]:
-    """Run one backend decision→execute→learn cycle."""
+    """Run one backend decision→execute→learn cycle.
+
+    Writes the resulting state back to backend.api._state (under its
+    lock) when running co-deployed with the API — previously this only
+    read the shared state, ran the cycle, and returned the computed
+    result without ever publishing it back, so capital/regime/decisions
+    never actually advanced: the dashboard, /metrics, and
+    _write_checkpoint() (which persists backend.api._state) all saw a
+    permanently frozen snapshot while this worker's own return value
+    showed cycles incrementing every tick.
+    """
     from backend.execution.loop import run_cycle
     from backend.core.state import SystemState
-    # Import shared state from api if running together; else use fresh state
+    # Import the module (not a destructured `from ... import _state`) so we
+    # see the live current value and can publish the updated state back to
+    # it — a destructured import captures a snapshot at import time.
     try:
-        from backend.api import _state  # type: ignore[attr-defined]
-        state = _state
+        import backend.api as _api
+        with _api._lock:
+            state = _api._state
+            updated = run_cycle(state)
+            _api._state = updated
     except Exception:
-        state = SystemState()
-    updated = run_cycle(state)
+        updated = run_cycle(SystemState())
     return {
         "status":  "ok",
         "cycles":  updated.total_cycles,
@@ -589,7 +616,8 @@ def _run_scaling() -> dict[str, Any]:
                         budget         = result.get("budget", 0.0),
                         dry_run        = result.get("dry_run", True),
                     )
-                    _campaign_artifacts[cid] = artifact
+                    with _campaign_state_lock:
+                        _campaign_artifacts[cid] = artifact
                     emit_campaign_launched(
                         campaign_id=cid,
                         product=pb.product,
@@ -822,12 +850,14 @@ def _run_metrics_ingestion() -> dict[str, Any]:
         from core.content.patterns import extract_patterns, pattern_store
         from core.content.feedback import classify_video, engagement_score
 
-        campaign_ids = list(_campaign_artifacts.keys())[:10]
+        with _campaign_state_lock:
+            campaign_ids = list(_campaign_artifacts.keys())[:10]
         if campaign_ids:
             roas_map = fetch_roas(campaign_ids)
             metrics["tiktok_campaign_count"] = len(roas_map)
             for cid, roas in roas_map.items():
-                artifact = _campaign_artifacts.get(cid)
+                with _campaign_state_lock:
+                    artifact = _campaign_artifacts.get(cid)
                 product  = artifact.product if artifact else cid
                 # ── CalibrationStore: record per-product outcome ───────────
                 calibration_store.record_outcome(product, actual_roas=roas)
@@ -840,17 +870,20 @@ def _run_metrics_ingestion() -> dict[str, Any]:
                     from backend.metrics.campaign_metrics import record_metric
                     now_obs = time.time()
                     budget  = artifact.budget if artifact else 0.0
-                    last    = _campaign_last_metric_ts.get(cid, now_obs - 3600)
+                    with _campaign_state_lock:
+                        last = _campaign_last_metric_ts.get(cid, now_obs - 3600)
+                        platform = _campaign_platforms.get(cid, "tiktok")
                     elapsed = min(max(now_obs - last, 0.0), 86400.0)
                     est_spend = budget * (elapsed / 86400.0)
                     record_metric(
                         cid,
-                        platform=_campaign_platforms.get(cid, "tiktok"),
+                        platform=platform,
                         product=product,
                         spend_usd=est_spend,
                         revenue_usd=est_spend * roas,
                     )
-                    _campaign_last_metric_ts[cid] = now_obs
+                    with _campaign_state_lock:
+                        _campaign_last_metric_ts[cid] = now_obs
                 except Exception as exc:
                     _log.debug("campaign_metric_record_failed error=%s", exc)
                 # ── PatternStore: backfill from real TikTok ROAS ──────────
