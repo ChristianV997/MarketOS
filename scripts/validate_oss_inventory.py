@@ -9,7 +9,7 @@ import yaml
 
 ROOT = Path(__file__).parents[1]
 INVENTORY = ROOT / "docs" / "oss" / "INVENTORY.yml"
-REQUIRED = {"name", "repository", "license", "mode", "status", "owner", "capabilities"}
+REQUIRED = {"name", "repository", "license", "mode", "status", "owner", "capabilities", "reviewed_ref"}
 FORBIDDEN_VENDOR_MODES = {"vendored", "monorepo_copy"}
 
 
