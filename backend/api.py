@@ -1649,6 +1649,30 @@ def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None))
         return {"launchable": False, "reasons": ["invalid_provider_cycle_request", str(exc)]}
 
 
+@app.post("/integrations/webhooks/{source}")
+def integration_webhook(source: str, payload: dict[str, Any] = Body(...)):
+    """Receive deduplicated Medusa/Postiz events into the canonical broker."""
+    if source not in {"medusa", "postiz"}:
+        return JSONResponse({"accepted": False, "reason": "unsupported_webhook_source"}, status_code=404)
+    event_id = str(payload.get("id") or payload.get("event_id") or payload.get("webhook_id") or "")
+    if not event_id:
+        return JSONResponse({"accepted": False, "reason": "webhook_event_id_required"}, status_code=400)
+    try:
+        if source == "medusa":
+            from backend.integrations.medusa import commerce_provider
+            accepted = commerce_provider.accept_webhook(event_id)
+        else:
+            from backend.integrations.postiz import publisher
+            accepted = publisher.accept_webhook(event_id)
+        if not accepted:
+            return {"accepted": False, "duplicate": True, "event_id": event_id}
+        from backend.pubsub.broker import broker
+        broker_event_id = broker.publish(f"{source}.webhook", payload, source=source, correlation_id=event_id)
+        return {"accepted": True, "duplicate": False, "event_id": event_id, "broker_event_id": broker_event_id}
+    except Exception as exc:
+        return JSONResponse({"accepted": False, "reason": "webhook_processing_failed", "detail": str(exc)}, status_code=503)
+
+
 @app.post("/evaluation/campaign")
 def evaluation_campaign(payload: dict[str, Any] = Body(...)):
     """Evaluate campaign observations without changing campaign state."""

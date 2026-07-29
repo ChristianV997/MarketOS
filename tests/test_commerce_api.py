@@ -120,6 +120,23 @@ def test_provider_cycle_endpoint_requires_urls_and_live_confirmation():
     assert commerce_provider_cycle({"urls": ["https://example.com"], "dry_run": False})["reasons"] == ["live_execution_requires_confirm_live"]
 
 
+def test_integration_webhook_deduplicates_and_publishes_to_broker(monkeypatch):
+    from backend.api import integration_webhook
+    from backend.integrations.medusa import commerce_provider
+    commerce_provider.webhook_events.clear()
+    first = integration_webhook("medusa", {"id": "evt-api-1", "type": "order.created"})
+    second = integration_webhook("medusa", {"id": "evt-api-1", "type": "order.created"})
+    assert first["accepted"] is True
+    assert first["broker_event_id"]
+    assert second == {"accepted": False, "duplicate": True, "event_id": "evt-api-1"}
+
+
+def test_integration_webhook_rejects_unsupported_or_unidentified_events():
+    from backend.api import integration_webhook
+    assert integration_webhook("unknown", {"id": "evt"}).status_code == 404
+    assert integration_webhook("medusa", {"type": "order.created"}).status_code == 400
+
+
 def test_optional_integration_health_is_safe_when_unconfigured():
     from backend.api import integrations_health
     result = integrations_health()
