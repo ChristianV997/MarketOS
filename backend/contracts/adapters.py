@@ -81,6 +81,14 @@ class ContentPublisher(Protocol):
     def publish(self, content: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
 
 
+class WorkflowAutomationProvider(Protocol):
+    """Internal operational automation boundary (not a product runtime)."""
+
+    def health(self) -> AdapterHealth: ...
+
+    def trigger(self, workflow: str, payload: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+
 class AgentProvider(Protocol):
     def health(self) -> AdapterHealth: ...
 

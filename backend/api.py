@@ -346,9 +346,10 @@ def integrations_health():
     from backend.agents.pydantic_boundary import PydanticAIAgentProvider
     from backend.integrations.browser_use_worker import browser_use_worker
     from backend.integrations.medusa import commerce_provider
+    from backend.integrations.n8n import automation_provider
     from backend.integrations.postiz import publisher
 
-    providers = [commerce_provider, Crawl4AIResearchAdapter(), browser_use_worker, publisher, PydanticAIAgentProvider()]
+    providers = [commerce_provider, Crawl4AIResearchAdapter(), browser_use_worker, publisher, automation_provider, PydanticAIAgentProvider()]
     return {
         "integrations": {
             provider.name: {
