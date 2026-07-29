@@ -51,6 +51,13 @@ def test_browser_worker_requires_trace_for_live_runner():
         )
 
 
+def test_browser_use_runner_is_lazy_and_optional(monkeypatch):
+    monkeypatch.setitem(sys.modules, "browser_use", None)
+    with pytest.raises(RuntimeError, match="not installed"):
+        from backend.integrations.browser_use_worker import build_browser_use_runner
+        build_browser_use_runner()
+
+
 def test_crawl4ai_rejects_non_allowlisted_live_domain():
     adapter = Crawl4AIResearchAdapter(allowed_domains={"example.com"})
     with pytest.raises(PermissionError):

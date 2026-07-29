@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 from typing import Any, Awaitable, Callable, Mapping
 from urllib.parse import urlparse
@@ -58,3 +60,37 @@ class BrowserUseWorker:
 
 
 browser_use_worker: BrowserWorkflowProvider = BrowserUseWorker()
+
+
+def build_browser_use_runner() -> WorkflowRunner:
+    """Create the optional Browser Use runner lazily.
+
+    The dependency is deliberately imported only when the worker is enabled;
+    the API process remains usable without the optional browser profile.
+    """
+    try:
+        from browser_use.beta import Agent, BrowserProfile, ChatBrowserUse
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError("Browser Use is not installed; install the reviewed optional worker profile") from exc
+
+    async def _run(workflow: str, payload: Mapping[str, Any], context: SidecarContext) -> Mapping[str, Any]:
+        task = {
+            "supplier_research": "Research the supplier/product page and return structured product facts.",
+            "product_import_review": "Review the proposed product import and report any blocking issues.",
+        }.get(workflow, workflow)
+        task = f"{task}\nInput JSON: {json.dumps(dict(payload), sort_keys=True)}\nDo not purchase, publish, or change account settings."
+        profile = BrowserProfile(
+            headless=os.getenv("BROWSER_USE_HEADLESS", "true").lower() == "true",
+            allowed_domains=sorted({d.strip() for d in os.getenv("BROWSER_USE_ALLOWED_DOMAINS", "").split(",") if d.strip()}),
+        )
+        agent = Agent(task=task, llm=ChatBrowserUse(model=os.getenv("BROWSER_USE_MODEL", "bu-2-0")), browser_profile=profile)
+        history = await agent.run()
+        final = history.final_result() if hasattr(history, "final_result") else str(history)
+        trace_id = hashlib.sha256(f"{context.run_id}:{context.artifact_id}:{workflow}".encode()).hexdigest()[:24]
+        return {"workflow": workflow, "status": "completed", "result": final, "trace_id": trace_id}
+
+    return _run
+
+
+if os.getenv("BROWSER_USE_ENABLED", "false").lower() == "true":
+    browser_use_worker = BrowserUseWorker(runner=build_browser_use_runner())
