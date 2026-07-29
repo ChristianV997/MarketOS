@@ -27,3 +27,19 @@ def test_webhook_ledger_can_persist_across_instances(tmp_path: Path):
     second = WebhookEventLedger(db_path=db_path)
     assert first.accept("medusa", "evt-persisted") is True
     assert second.accept("medusa", "evt-persisted") is False
+
+
+def test_webhook_ledger_can_release_failed_delivery(tmp_path: Path):
+    db_path = str(tmp_path / "webhooks.sqlite")
+    ledger = WebhookEventLedger(db_path=db_path)
+    assert ledger.accept("postiz", "evt-failed") is True
+    ledger.release("postiz", "evt-failed")
+    assert ledger.accept("postiz", "evt-failed") is True
+
+
+def test_webhook_ledger_persistence_is_restart_safe(tmp_path: Path):
+    db_path = str(tmp_path / "webhooks.sqlite")
+    first = WebhookEventLedger(db_path=db_path, ttl_s=3600)
+    assert first.accept("medusa", "evt-restart") is True
+    second = WebhookEventLedger(db_path=db_path, ttl_s=3600)
+    assert second.accept("medusa", "evt-restart") is False

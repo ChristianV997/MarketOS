@@ -22,7 +22,10 @@ class WebhookEventLedger:
         key = f"{source}:{event_id}".strip()
         if not event_id:
             return False
-        now = time.monotonic()
+        # Persist wall-clock timestamps. ``monotonic()`` is only meaningful
+        # inside one process and would make durable deduplication incorrect
+        # after a restart.
+        now = time.time()
         with self._lock:
             row = self._db.execute("SELECT seen_at FROM webhook_events WHERE event_key = ?", (key,)).fetchone()
             if row is not None and now - float(row[0]) < self.ttl_s:
@@ -42,6 +45,16 @@ class WebhookEventLedger:
             self._db.execute("DELETE FROM webhook_events WHERE event_key NOT IN (SELECT event_key FROM webhook_events ORDER BY seen_at DESC LIMIT ?)", (self.max_entries,))
             self._db.commit()
             return True
+
+    def release(self, source: str, event_id: str) -> None:
+        """Allow a failed delivery to be retried by the upstream sender."""
+        key = f"{source}:{event_id}".strip()
+        if not event_id:
+            return
+        with self._lock:
+            self._events.pop(key, None)
+            self._db.execute("DELETE FROM webhook_events WHERE event_key = ?", (key,))
+            self._db.commit()
 
     def clear(self) -> None:
         with self._lock:

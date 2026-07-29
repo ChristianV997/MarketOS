@@ -32,6 +32,9 @@ class PostizPublisherAdapter:
     def accept_webhook(self, event_id: str) -> bool:
         return self.webhook_events.accept(self.name, event_id)
 
+    def release_webhook(self, event_id: str) -> None:
+        self.webhook_events.release(self.name, event_id)
+
     def publish_bundle(self, bundle: CreativeBundle, *, context: SidecarContext) -> Mapping[str, Any]:
         """Publish one canonical MarketOS creative artifact."""
         return self.publish({

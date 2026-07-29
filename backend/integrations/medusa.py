@@ -68,6 +68,9 @@ class MedusaCommerceAdapter:
     def accept_webhook(self, event_id: str) -> bool:
         return self.webhook_events.accept(self.name, event_id)
 
+    def release_webhook(self, event_id: str) -> None:
+        self.webhook_events.release(self.name, event_id)
+
     def list_products(self, *, limit: int = 50) -> Sequence[Mapping[str, Any]]:
         payload = self._request("GET", "/store/products", params={"limit": max(1, min(limit, 100))})
         return payload.get("products", payload.get("data", []))

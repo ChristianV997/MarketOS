@@ -1704,6 +1704,15 @@ def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webh
             "observation": observation.__dict__ if observation else None,
         }
     except Exception as exc:
+        # Do not mark an event as permanently handled when downstream
+        # publication failed; the source should be able to retry it.
+        try:
+            if source == "medusa":
+                commerce_provider.release_webhook(event_id)
+            else:
+                publisher.release_webhook(event_id)
+        except Exception:
+            pass
         if _prom_webhook_events is not None:
             _prom_webhook_events.labels(source=source, outcome="failed").inc()
         return JSONResponse({"accepted": False, "reason": "webhook_processing_failed", "detail": str(exc)}, status_code=503)
