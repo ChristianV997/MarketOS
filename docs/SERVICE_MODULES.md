@@ -98,9 +98,9 @@ client's launch-readiness/scale-decision service — see
 two genuinely require the caller's real spend/order numbers to be
 trustworthy). Decision values: `kill | iterate_offer | iterate_creative | continue_test | scale_cautiously | scale_approved | blocked`, each with an explicit reason.
 
-**CLI/API**: not yet wrapped (composed of 4 separate functions used across
-a real launch's lifecycle, not a single one-shot call — see the workflow
-doc for how they compose).
+**CLI**: `python -m marketos.cli services ecommerce-operator --product "NAME" --roas R [--validation-json J] [--unit-economics-json J] [--supplier-assumptions-json J] [--budget-ceiling B] [--kill-criteria-json J] [--attribution-method M] [--proposed-scale-amount A] [--live-action] [--workspace W] [--json]`
+
+**API**: `POST /api/services/ecommerce-operator` — both CLI and API run the same `create_commerce_experiment -> evaluate_launch_readiness -> contribution_profit.from_ledger -> make_kill_scale_decision` pipeline as one call, composing the 4 underlying functions rather than exposing them as 4 separate endpoints (the workflow doc documents each function individually for callers who need finer-grained control).
 
 **Report**: *MarketOS E-commerce Validation Experiment*
 
@@ -127,7 +127,9 @@ a structured testing system instead of ad-hoc creative requests.
 **Outputs**: `CreativeGrowthPlan` — hooks, angles, hook×angle matrix, UGC
 briefs, content calendar status, fatigue report, next-batch recommendation, `status`.
 
-**CLI**: not yet wrapped (planned: `creative-plan`, matching the original spec's example).
+**CLI**: `python -m marketos.cli services creative-growth --product "NAME" [--category CAT] [--workspace W] [--json]`
+
+**API**: `POST /api/services/creative-growth`
 
 **Report**: *MarketOS Creative Testing & UGC Growth System*
 
@@ -157,7 +159,9 @@ triggers, offer angles, lead sources, outreach channels, ad angles,
 landing-page structure, qualification questions, appointment-setting
 logic, monetization model, risks), `status`.
 
-**CLI**: not yet wrapped (planned: `customer-intel`, matching the original spec's example).
+**CLI**: `python -m marketos.cli services customer-intelligence --business-type "TYPE" [--vertical V] [--target-geo GEO] [--category CAT] [--workspace W] [--json]`
+
+**API**: `POST /api/services/customer-intelligence`
 
 **Report**: *MarketOS Customer Acquisition Intelligence Sprint*
 
@@ -184,6 +188,8 @@ design/testing.
 **Outputs**: `ChatSession`, `AppointmentHandoff` (`status=ready_for_internal_use`), qualification flow, follow-up sequence.
 
 **CLI**: `python -m marketos.cli services sales-bot-sim --vertical VERTICAL [--message "..." ...] [--json]`
+
+**API**: `POST /api/services/sales-automation`
 
 **Report**: *MarketOS Appointment Setter Bot Setup Plan*
 
@@ -213,7 +219,9 @@ offer; also usable as a client deliverable for anyone launching a digital produc
 **Outputs**: `DigitalProductPlan` — offer, funnel, content plan, validation,
 launch checklist, metrics to track, kill/iterate/scale criteria, `status`.
 
-**CLI**: not yet wrapped (planned: `digital-product-plan`, matching the original spec's example).
+**CLI**: `python -m marketos.cli services digital-product --offer-name "NAME" [--product-type TYPE] [--target-customer TC] [--transformation TP] [--price P] [--target-buyers N] [--has-existing-audience] [--workspace W] [--json]`
+
+**API**: `POST /api/services/digital-product`
 
 **Report**: *MarketOS Digital Product Launch Plan*
 
@@ -232,11 +240,14 @@ What exists today:
   rendered markdown report (not just the JSON result) via
   `services.reporting.save_report_artifacts`; `services.reporting.export_client_report()`
   resolves the on-disk path for handing to a client.
-- **API wrappers**: `api/routes/services.py` exposes `product-audit` and
-  `unit-economics` as clean `POST` routes (mounted in `backend/api.py`),
-  matching this repo's existing route-module convention. The remaining 5
-  modules are reachable via direct `services.*` imports and `marketos.cli`
-  today, not yet via a route — deliberately scoped down (see below).
+- **API wrappers**: `api/routes/services.py` exposes all 8 modules as clean
+  `POST` routes (mounted in `backend/api.py`), matching this repo's existing
+  route-module convention. Every route sanitizes non-finite floats
+  (`services.reporting.json_safe`) before returning — `core.ugc
+  .content_calendar.has_content_gap` legitimately returns `float("inf")` as
+  a sentinel, which is valid Python but not valid JSON; `marketos.cli`'s
+  `--json` output applies the same sanitizer for the same reason.
+- **CLI**: `marketos/cli.py` exposes all 8 modules as subcommands.
 - **Commercial status labels**: `services.status.commercial_status()` +
   a `status` field on every module's top-level result, per the table above.
 
@@ -251,9 +262,6 @@ rather than silently skipped):
   names across all 7 already-tested schemas was judged too invasive/risky
   to do blind at the end of a long session. Flagged here as real, scoped
   future work rather than silently omitted.
-- **Full API surface** for creative_growth / customer_intelligence /
-  digital_products / sales_automation, and CLI subcommands for the three
-  modules noted "not yet wrapped" above.
 - **Real auth/billing/multi-tenant onboarding** — `ClientWorkspace` isolates
   data structurally but there is no login, no API key, no billing meter
   anywhere in this codebase. This is the single largest gap between

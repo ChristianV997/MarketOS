@@ -2,6 +2,10 @@
 
     python -m marketos.cli services product-audit --product NAME [...]
     python -m marketos.cli services unit-economics --product NAME --cost C --price P [...]
+    python -m marketos.cli services ecommerce-operator --product NAME --roas R [...]
+    python -m marketos.cli services creative-growth --product NAME [...]
+    python -m marketos.cli services customer-intelligence --business-type TYPE [...]
+    python -m marketos.cli services digital-product --offer-name NAME [...]
     python -m marketos.cli services sales-bot-sim --vertical car_sales [--message "..." ...]
 
 Dispatches straight to each service module's run_*/simulate function, which
@@ -33,7 +37,8 @@ def _resolve_workspace(name: str | None):
 
 def _print_result(result: Any, markdown: str, *, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(result.to_dict(), indent=2, default=str))
+        from services.reporting import json_safe
+        print(json.dumps(json_safe(result.to_dict()), indent=2, default=str))
     else:
         print(markdown)
 
@@ -94,17 +99,58 @@ def _cmd_ecommerce_operator(args: argparse.Namespace) -> int:
     )
 
     if args.json:
-        print(json.dumps({
+        from services.reporting import json_safe
+        print(json.dumps(json_safe({
             "readiness": readiness.to_dict(),
             "contribution": contribution.to_dict(),
             "decision": decision.to_dict(),
             "experiment_id": envelope.experiment_id,
-        }, indent=2, default=str))
+        }), indent=2, default=str))
     else:
         print(render_commerce_experiment_markdown(
             args.product, readiness=readiness, contribution=contribution, decision=decision,
             dry_run=workspace.dry_run_default,
         ))
+    return 0
+
+
+def _cmd_creative_growth(args: argparse.Namespace) -> int:
+    from services.creative_growth.plan import build_creative_growth_plan
+    from services.creative_growth.report import render_creative_growth_markdown
+
+    workspace = _resolve_workspace(args.workspace)
+    result, _envelope = build_creative_growth_plan(
+        args.product, category=args.category, workspace=workspace,
+    )
+    _print_result(result, render_creative_growth_markdown(result), as_json=args.json)
+    return 0
+
+
+def _cmd_customer_intelligence(args: argparse.Namespace) -> int:
+    from services.customer_intelligence.sprint import build_customer_intelligence_sprint
+    from services.customer_intelligence.report import render_customer_intelligence_markdown
+
+    workspace = _resolve_workspace(args.workspace)
+    result, _envelope = build_customer_intelligence_sprint(
+        args.business_type, vertical=args.vertical, target_geo=args.target_geo,
+        category=args.category, workspace=workspace,
+    )
+    _print_result(result, render_customer_intelligence_markdown(result), as_json=args.json)
+    return 0
+
+
+def _cmd_digital_product(args: argparse.Namespace) -> int:
+    from services.digital_products.plan import build_digital_product_plan
+    from services.digital_products.report import render_digital_product_markdown
+
+    workspace = _resolve_workspace(args.workspace)
+    result, _envelope = build_digital_product_plan(
+        args.offer_name, product_type=args.product_type, target_customer=args.target_customer,
+        transformation_promised=args.transformation, price=args.price,
+        target_buyers=args.target_buyers, has_existing_audience=args.has_existing_audience,
+        workspace=workspace,
+    )
+    _print_result(result, render_digital_product_markdown(result), as_json=args.json)
     return 0
 
 
@@ -123,9 +169,10 @@ def _cmd_sales_bot_sim(args: argparse.Namespace) -> int:
     session, handoff, flow, _envelope = run_sales_bot_simulation(args.vertical, messages, workspace=workspace)
 
     if args.json:
-        print(json.dumps({
+        from services.reporting import json_safe
+        print(json.dumps(json_safe({
             "session": session.to_dict(), "handoff": handoff.to_dict(), "qualification_flow": flow,
-        }, indent=2, default=str))
+        }), indent=2, default=str))
     else:
         print(render_sales_bot_setup_plan_markdown(session, handoff, flow))
     return 0
@@ -171,6 +218,34 @@ def build_parser() -> argparse.ArgumentParser:
     ecom.add_argument("--workspace", default=None)
     ecom.add_argument("--json", action="store_true")
     ecom.set_defaults(func=_cmd_ecommerce_operator)
+
+    creative = services_sub.add_parser("creative-growth", help="Ad angles/hooks + fatigue analysis + next-batch recommendation")
+    creative.add_argument("--product", required=True)
+    creative.add_argument("--category", default="general")
+    creative.add_argument("--workspace", default=None)
+    creative.add_argument("--json", action="store_true")
+    creative.set_defaults(func=_cmd_creative_growth)
+
+    cust_intel = services_sub.add_parser("customer-intelligence", help="ICP, segments, lead strategy, publicity plan, vertical playbook")
+    cust_intel.add_argument("--business-type", required=True)
+    cust_intel.add_argument("--vertical", default=None, help="e.g. real_estate, car_sales, ecommerce_brand, clinic_wellness, home_services, coaching_consulting, luxury_products")
+    cust_intel.add_argument("--target-geo", default="MX")
+    cust_intel.add_argument("--category", default="general")
+    cust_intel.add_argument("--workspace", default=None)
+    cust_intel.add_argument("--json", action="store_true")
+    cust_intel.set_defaults(func=_cmd_customer_intelligence)
+
+    digital = services_sub.add_parser("digital-product", help="Offer/funnel/content-plan/validation/margin/launch checklist for a digital product")
+    digital.add_argument("--offer-name", required=True)
+    digital.add_argument("--product-type", default="playbook", help="template|playbook|course|cohort|ebook|paid_report|prompt_pack|calculator|dashboard_access|mentorship")
+    digital.add_argument("--target-customer", default="")
+    digital.add_argument("--transformation", default="", help="The transformation_promised text")
+    digital.add_argument("--price", type=float, default=0.0)
+    digital.add_argument("--target-buyers", type=int, default=10)
+    digital.add_argument("--has-existing-audience", action="store_true")
+    digital.add_argument("--workspace", default=None)
+    digital.add_argument("--json", action="store_true")
+    digital.set_defaults(func=_cmd_digital_product)
 
     sales_bot = services_sub.add_parser("sales-bot-sim", help="Simulate a lead-qualification chat conversation (local only, no real messaging)")
     sales_bot.add_argument("--vertical", required=True)

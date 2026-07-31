@@ -1,20 +1,17 @@
-"""api.routes.services — thin route wrappers over services.product_research,
-services.unit_economics, and services.ecommerce_operator (Phase 7: SaaS-lite
-readiness; ecommerce_operator added in the consolidation phase once it had
-ledger wiring). These three are exposed today — they're either pure/
-stateless (product_research, unit_economics) or, for ecommerce_operator,
-produce a decision/readiness verdict without executing anything live
-itself (see docs/LIVE_MODE_SAFETY.md). The remaining service modules
-(creative_growth, customer_intelligence, digital_products, sales_automation)
-are reachable via services.* imports and marketos.cli today; a full API
-surface for all of them, plus real auth/billing, is future SaaS-lite
-work — see docs/SERVICE_MODULES.md.
+"""api.routes.services — thin route wrappers over all 8 services.* modules.
+Every route is pure/stateless, or (ecommerce_operator, sales_automation)
+produces a decision/readiness verdict or a local simulation without
+executing anything live itself (see docs/LIVE_MODE_SAFETY.md,
+docs/SALES_AUTOMATION_MODULE.md). Real auth/billing/multi-tenant
+onboarding is still future SaaS-lite work — see docs/SERVICE_MODULES.md.
 """
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter
+
+from services.reporting import json_safe
 
 router = APIRouter(prefix="/api/services")
 
@@ -43,7 +40,7 @@ def product_audit(product: str, category: str = "general", price: float | None =
         result, envelope = run_product_audit(
             product, category=category, retail_price=price, workspace=_resolve_workspace(workspace),
         )
-        return {"result": result.to_dict(), "experiment_id": envelope.experiment_id}
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
@@ -89,12 +86,12 @@ def ecommerce_operator(
         decision = make_kill_scale_decision(
             envelope, contribution, roas=roas, proposed_scale_amount=proposed_scale_amount,
         )
-        return {
+        return json_safe({
             "readiness": readiness.to_dict(),
             "contribution": contribution.to_dict(),
             "decision": decision.to_dict(),
             "experiment_id": envelope.experiment_id,
-        }
+        })
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
@@ -112,6 +109,83 @@ def unit_economics(
             product, supplier_cost=cost, retail_price=price, shipping_cost=shipping,
             category=category, geo=geo, workspace=_resolve_workspace(workspace),
         )
-        return {"result": result.to_dict(), "experiment_id": envelope.experiment_id}
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
+@router.post("/creative-growth")
+def creative_growth(product: str, category: str = "general", workspace: str | None = None):
+    """Ad angles/hooks + fatigue analysis + next-batch recommendation. Never
+    raises for the same reason as the routes above."""
+    from services.creative_growth.plan import build_creative_growth_plan
+    try:
+        result, envelope = build_creative_growth_plan(
+            product, category=category, workspace=_resolve_workspace(workspace),
+        )
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
+@router.post("/customer-intelligence")
+def customer_intelligence(
+    business_type: str, vertical: str | None = None, target_geo: str = "MX",
+    category: str = "general", workspace: str | None = None,
+):
+    """ICP, segments, lead strategy, publicity plan, vertical playbook. Never
+    raises for the same reason as the routes above."""
+    from services.customer_intelligence.sprint import build_customer_intelligence_sprint
+    try:
+        result, envelope = build_customer_intelligence_sprint(
+            business_type, vertical=vertical, target_geo=target_geo,
+            category=category, workspace=_resolve_workspace(workspace),
+        )
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
+@router.post("/digital-product")
+def digital_product(
+    offer_name: str, product_type: str = "playbook", target_customer: str = "",
+    transformation_promised: str = "", price: float = 0.0, target_buyers: int = 10,
+    has_existing_audience: bool = False, workspace: str | None = None,
+):
+    """Offer/funnel/content-plan/validation/margin/launch checklist for a
+    digital product. Never raises for the same reason as the routes above."""
+    from services.digital_products.plan import build_digital_product_plan
+    try:
+        result, envelope = build_digital_product_plan(
+            offer_name, product_type=product_type, target_customer=target_customer,
+            transformation_promised=transformation_promised, price=price,
+            target_buyers=target_buyers, has_existing_audience=has_existing_audience,
+            workspace=_resolve_workspace(workspace),
+        )
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
+@router.post("/sales-automation")
+def sales_automation(
+    vertical: str, messages: list[str] | None = None, workspace: str | None = None,
+):
+    """Simulate a lead-qualification chat conversation — local only, no real
+    messaging (see docs/SALES_AUTOMATION_MODULE.md). Never raises for the
+    same reason as the routes above."""
+    from services.sales_automation.simulate import run_sales_bot_simulation
+    try:
+        scripted = messages or [
+            "Hi, I'm interested and looking to get started soon",
+            "My budget is around $2,000 and I'm located nearby",
+        ]
+        session, handoff, flow, envelope = run_sales_bot_simulation(
+            vertical, scripted, workspace=_resolve_workspace(workspace),
+        )
+        return json_safe({
+            "session": session.to_dict(), "handoff": handoff.to_dict(),
+            "qualification_flow": flow, "experiment_id": envelope.experiment_id,
+        })
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}

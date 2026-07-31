@@ -83,6 +83,49 @@ class TestEcommerceOperatorRoute:
         assert data["readiness"]["checklist"]["has_margin_analysis"] is True
 
 
+class TestCreativeGrowthRoute:
+    def test_returns_result_no_infinity_leak(self, client):
+        resp = client.post("/api/services/creative-growth", params={"product": "Widget"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["result"]["product_name"] == "Widget"
+        assert data["experiment_id"]
+
+
+class TestCustomerIntelligenceRoute:
+    def test_returns_result_with_vertical(self, client):
+        resp = client.post(
+            "/api/services/customer-intelligence",
+            params={"business_type": "clinic", "vertical": "clinic_wellness"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["result"]["vertical"] == "clinic_wellness"
+        assert data["result"]["vertical_playbook"] is not None
+
+
+class TestDigitalProductRoute:
+    def test_returns_margin_and_validation(self, client):
+        resp = client.post(
+            "/api/services/digital-product",
+            params={"offer_name": "Playbook", "price": 99.0, "target_buyers": 5, "has_existing_audience": True},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["result"]["margin"]
+        assert data["result"]["validation"]["verdict"] == "strong"
+
+
+class TestSalesAutomationRoute:
+    def test_returns_session_and_handoff(self, client):
+        resp = client.post("/api/services/sales-automation", params={"vertical": "car_sales"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session"]
+        assert data["handoff"]
+        assert data["experiment_id"]
+
+
 class TestServicesRouteNeverRaises:
     def test_unexpected_failure_returns_error_dict_not_500(self, client, monkeypatch):
         def _boom(*a, **k):

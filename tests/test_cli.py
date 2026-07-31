@@ -101,6 +101,63 @@ class TestCLIEcommerceOperator:
         assert data["readiness"]["checklist"]["has_margin_analysis"] is True
 
 
+class TestCLICreativeGrowth:
+    def test_markdown_output_exit_zero(self, capsys):
+        code = cli.main(["services", "creative-growth", "--product", "Widget"])
+        out = capsys.readouterr().out
+        assert code == 0
+        assert out.strip()
+
+    def test_json_output_is_valid_json_no_infinity_literal(self, capsys):
+        import json
+        code = cli.main(["services", "creative-growth", "--product", "Widget", "--json"])
+        out = capsys.readouterr().out
+        assert code == 0
+        assert "Infinity" not in out and "NaN" not in out
+        data = json.loads(out)
+        assert data["product_name"] == "Widget"
+
+
+class TestCLICustomerIntelligence:
+    def test_markdown_output_exit_zero(self, capsys):
+        code = cli.main(["services", "customer-intelligence", "--business-type", "dental clinic"])
+        out = capsys.readouterr().out
+        assert code == 0
+        assert out.strip()
+
+    def test_json_output_with_vertical(self, capsys):
+        import json
+        code = cli.main([
+            "services", "customer-intelligence", "--business-type", "clinic",
+            "--vertical", "clinic_wellness", "--json",
+        ])
+        out = capsys.readouterr().out
+        assert code == 0
+        data = json.loads(out)
+        assert data["vertical"] == "clinic_wellness"
+        assert data["vertical_playbook"] is not None
+
+
+class TestCLIDigitalProduct:
+    def test_markdown_output_exit_zero(self, capsys):
+        code = cli.main(["services", "digital-product", "--offer-name", "Playbook", "--price", "99"])
+        out = capsys.readouterr().out
+        assert code == 0
+        assert out.strip()
+
+    def test_json_output_contains_margin_and_validation(self, capsys):
+        import json
+        code = cli.main([
+            "services", "digital-product", "--offer-name", "Playbook",
+            "--price", "99", "--target-buyers", "5", "--has-existing-audience", "--json",
+        ])
+        out = capsys.readouterr().out
+        assert code == 0
+        data = json.loads(out)
+        assert data["margin"]
+        assert data["validation"]["verdict"] == "strong"
+
+
 class TestCLISalesBotSim:
     def test_markdown_output_exit_zero_with_default_script(self, capsys):
         code = cli.main(["services", "sales-bot-sim", "--vertical", "car_sales"])

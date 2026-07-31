@@ -14,6 +14,28 @@ _DRY_RUN_DISCLAIMER = (
 )
 
 
+def json_safe(obj: Any) -> Any:
+    """Recursively replace non-finite floats (inf/-inf/nan) with None.
+
+    Several core engine functions legitimately return float("inf") as a
+    sentinel (e.g. core.ugc.content_calendar.has_content_gap's
+    days_since_last_posted when nothing has ever posted) — valid Python,
+    but not valid JSON (RFC 8259 has no Infinity/NaN literal). Python's own
+    json.dumps happily emits the bare token `Infinity` by default, which a
+    strict JSON parser (jq, JS JSON.parse, most non-Python consumers)
+    rejects — so both marketos.cli's --json output and api.routes.services
+    apply this before serializing, rather than relying on json.dumps's
+    non-standard leniency.
+    """
+    if isinstance(obj, float):
+        return obj if obj == obj and obj not in (float("inf"), float("-inf")) else None
+    if isinstance(obj, dict):
+        return {k: json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [json_safe(v) for v in obj]
+    return obj
+
+
 def _render_body(value: Any, *, indent: int = 0) -> str:
     pad = "  " * indent
     if isinstance(value, dict):
