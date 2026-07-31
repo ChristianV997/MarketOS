@@ -63,6 +63,51 @@ def _cmd_unit_economics(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ecommerce_operator(args: argparse.Namespace) -> int:
+    from services.ecommerce_operator.experiment import create_commerce_experiment
+    from services.ecommerce_operator.launch_guard import evaluate_launch_readiness
+    from services.ecommerce_operator.contribution_profit import from_ledger
+    from services.ecommerce_operator.scale_decision import make_kill_scale_decision
+    from services.ecommerce_operator.report import render_commerce_experiment_markdown
+
+    def _parse_json(raw: str | None) -> dict | None:
+        return json.loads(raw) if raw else None
+
+    workspace = _resolve_workspace(args.workspace)
+    envelope = create_commerce_experiment(
+        args.product,
+        validation=_parse_json(args.validation_json),
+        unit_economics=_parse_json(args.unit_economics_json),
+        supplier_assumptions=_parse_json(args.supplier_assumptions_json),
+        budget_ceiling=args.budget_ceiling,
+        kill_criteria=_parse_json(args.kill_criteria_json),
+        attribution_method=args.attribution_method,
+        category=args.category,
+        workspace=workspace,
+    )
+    readiness = evaluate_launch_readiness(
+        envelope, workspace=workspace, live_action_requested=args.live_action,
+    )
+    contribution = from_ledger(envelope)
+    decision = make_kill_scale_decision(
+        envelope, contribution, roas=args.roas, proposed_scale_amount=args.proposed_scale_amount,
+    )
+
+    if args.json:
+        print(json.dumps({
+            "readiness": readiness.to_dict(),
+            "contribution": contribution.to_dict(),
+            "decision": decision.to_dict(),
+            "experiment_id": envelope.experiment_id,
+        }, indent=2, default=str))
+    else:
+        print(render_commerce_experiment_markdown(
+            args.product, readiness=readiness, contribution=contribution, decision=decision,
+            dry_run=workspace.dry_run_default,
+        ))
+    return 0
+
+
 _DEMO_LEAD_MESSAGES = [
     "Hi, I'm interested and looking to get started soon",
     "My budget is around $2,000 and I'm located nearby",
@@ -110,6 +155,22 @@ def build_parser() -> argparse.ArgumentParser:
     unit_econ.add_argument("--workspace", default=None)
     unit_econ.add_argument("--json", action="store_true")
     unit_econ.set_defaults(func=_cmd_unit_economics)
+
+    ecom = services_sub.add_parser("ecommerce-operator", help="Launch readiness + ledger-derived contribution profit + kill/scale decision")
+    ecom.add_argument("--product", required=True)
+    ecom.add_argument("--category", default="general")
+    ecom.add_argument("--validation-json", default=None, help="JSON blob for the validation prerequisite")
+    ecom.add_argument("--unit-economics-json", default=None, help="JSON blob for the unit_economics prerequisite")
+    ecom.add_argument("--supplier-assumptions-json", default=None)
+    ecom.add_argument("--budget-ceiling", type=float, default=None)
+    ecom.add_argument("--kill-criteria-json", default=None, help='e.g. \'{"min_roas": 1.5}\'')
+    ecom.add_argument("--attribution-method", default=None)
+    ecom.add_argument("--roas", type=float, required=True)
+    ecom.add_argument("--proposed-scale-amount", type=float, default=0.0)
+    ecom.add_argument("--live-action", action="store_true", help="Request live-mode approval check (default: dry-run readiness only)")
+    ecom.add_argument("--workspace", default=None)
+    ecom.add_argument("--json", action="store_true")
+    ecom.set_defaults(func=_cmd_ecommerce_operator)
 
     sales_bot = services_sub.add_parser("sales-bot-sim", help="Simulate a lead-qualification chat conversation (local only, no real messaging)")
     sales_bot.add_argument("--vertical", required=True)

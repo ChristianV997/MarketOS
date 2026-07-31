@@ -54,6 +54,35 @@ class TestUnitEconomicsRoute:
         assert resp.json()["result"]["geo_margin"] is not None
 
 
+class TestEcommerceOperatorRoute:
+    def test_returns_readiness_contribution_decision(self, client):
+        resp = client.post(
+            "/api/services/ecommerce-operator",
+            params={"product": "Widget", "roas": 2.0},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "readiness" in data
+        assert "contribution" in data
+        assert "decision" in data
+        assert data["experiment_id"]
+
+    def test_dict_body_fields_populate_readiness_checklist(self, client):
+        resp = client.post(
+            "/api/services/ecommerce-operator",
+            params={"product": "Widget", "roas": 2.0, "budget_ceiling": 500.0},
+            json={
+                "validation": {"verdict": "green"},
+                "unit_economics": {"net_margin_pct": 20},
+                "kill_criteria": {"min_roas": 1.5},
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["readiness"]["checklist"]["has_product_validation"] is True
+        assert data["readiness"]["checklist"]["has_margin_analysis"] is True
+
+
 class TestServicesRouteNeverRaises:
     def test_unexpected_failure_returns_error_dict_not_500(self, client, monkeypatch):
         def _boom(*a, **k):

@@ -60,6 +60,47 @@ class TestCLIUnitEconomics:
         assert data["geo_margin"] is not None
 
 
+class TestCLIEcommerceOperator:
+    def test_markdown_output_exit_zero(self, capsys):
+        code = cli.main([
+            "services", "ecommerce-operator", "--product", "Widget", "--roas", "2.0",
+        ])
+        out = capsys.readouterr().out
+        assert code == 0
+        assert "MarketOS E-commerce Validation Experiment" in out
+
+    def test_json_output_contains_readiness_contribution_decision(self, capsys):
+        import json
+        code = cli.main([
+            "services", "ecommerce-operator", "--product", "Widget", "--roas", "2.0",
+            "--kill-criteria-json", '{"min_roas": 1.5}', "--json",
+        ])
+        out = capsys.readouterr().out
+        assert code == 0
+        data = json.loads(out)
+        assert "readiness" in data
+        assert "contribution" in data
+        assert "decision" in data
+        assert "experiment_id" in data
+
+    def test_validation_json_flags_populate_readiness_checklist(self, capsys):
+        import json
+        code = cli.main([
+            "services", "ecommerce-operator", "--product", "Widget", "--roas", "2.0",
+            "--validation-json", '{"verdict": "green"}',
+            "--unit-economics-json", '{"net_margin_pct": 20}',
+            "--supplier-assumptions-json", '{"supplier": "cj"}',
+            "--budget-ceiling", "500",
+            "--kill-criteria-json", '{"min_roas": 1.5}',
+            "--attribution-method", "shopify_ground_truth",
+            "--json",
+        ])
+        data = json.loads(capsys.readouterr().out)
+        assert code == 0
+        assert data["readiness"]["checklist"]["has_product_validation"] is True
+        assert data["readiness"]["checklist"]["has_margin_analysis"] is True
+
+
 class TestCLISalesBotSim:
     def test_markdown_output_exit_zero_with_default_script(self, capsys):
         code = cli.main(["services", "sales-bot-sim", "--vertical", "car_sales"])
