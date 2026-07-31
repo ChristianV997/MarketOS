@@ -96,6 +96,44 @@ class TestLiveModeChecklistJournaling:
         assert events[-1]["data"]["allowed"] is True
 
 
+class TestModeIsOrthogonalToLiveGate:
+    """ClientWorkspace.mode is a commercial-maturity label, not a live/
+    dry-run gate — see the docstring on backend.workspaces.client_workspace's
+    MODES constant and docs/LIVE_MODE_SAFETY.md. This is a deliberate design
+    decision, not an oversight: the checklist's result must depend only on
+    live_mode_enabled/credentials/budget, never on `mode`."""
+
+    def test_full_saas_mode_still_blocked_without_live_mode_enabled(self, monkeypatch):
+        monkeypatch.setattr(config, "list_configured_services", lambda: {"shopify": True})
+        ws = ClientWorkspace(
+            name="x", mode="full_saas", live_mode_enabled=False,
+            allowed_integrations=["shopify"], budget_ceiling_monthly=1000.0,
+            budget_ceiling_per_experiment=100.0,
+        )
+        result = lmc.check(ws, "shopify", proposed_amount=50.0)
+        assert result["allowed"] is False
+
+    def test_internal_own_store_mode_can_still_be_allowed(self, monkeypatch):
+        monkeypatch.setattr(config, "list_configured_services", lambda: {"shopify": True})
+        monkeypatch.setattr(config, "is_dry_run", lambda svc: False)
+        monkeypatch.setattr(
+            "backend.experiments.registry.get_experiment_registry",
+            lambda: _FakeExperimentRegistry(spend=0.0),
+        )
+        ws = ClientWorkspace(
+            name="x", mode="internal_own_store", live_mode_enabled=True,
+            allowed_integrations=["shopify"], budget_ceiling_monthly=1000.0,
+            budget_ceiling_per_experiment=100.0,
+        )
+        result = lmc.check(ws, "shopify", proposed_amount=50.0)
+        assert result["allowed"] is True
+
+    def test_result_mode_field_reflects_workspace_mode_for_reporting_only(self, monkeypatch):
+        ws = ClientWorkspace(name="x", mode="saas_lite", live_mode_enabled=False)
+        result = lmc.check(ws, "shopify", proposed_amount=1.0)
+        assert result["mode"] == "saas_lite"  # carried through for context, not used as a gate input
+
+
 class TestLiveModeChecklistNeverRaises:
     def test_never_raises_on_garbage_integration(self, monkeypatch):
         ws = ClientWorkspace(name="x")

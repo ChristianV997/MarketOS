@@ -17,6 +17,22 @@ throughout this codebase (`TIKTOK_DRY_RUN`, `META_DRY_RUN`,
 per the README's "Everything is dry-run by default" section) — formalized
 into one reusable checklist for the new service-module layer.
 
+## `mode` vs. `live_mode_enabled` — deliberately orthogonal, not the same gate
+
+`ClientWorkspace.mode` (`internal_own_store | client_service | saas_lite |
+full_saas | dao_future`, `backend/workspaces/client_workspace.py`) is a
+commercial-maturity label — which rung of the business relationship this
+workspace sits at — carried onto every `CommercialRunEnvelope` for
+reporting/segmentation context. It is **not** consulted by the checklist
+below, and that is intentional, not an oversight: `mode` answers "which
+commercial tier is this workspace on," while `live_mode_enabled` +
+`live_action_requested` answer "is this specific action allowed to touch
+real money." Those are genuinely different questions — a `full_saas`
+workspace can still be dry-run for an integration with no credentials
+configured, and an `internal_own_store` workspace can go fully live the
+moment its owner flips `live_mode_enabled`. Folding `mode` into the gate
+would incorrectly couple the two.
+
 ## The checklist
 
 `backend.workspaces.live_mode_checklist.check(workspace, integration, *, proposed_amount=0.0)`

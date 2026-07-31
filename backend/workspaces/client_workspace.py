@@ -26,6 +26,21 @@ WORKSPACE_TYPES = (
 )
 
 # mode values (mirrors the operating-mode ladder from the task's spec)
+#
+# `mode` is a commercial-maturity/business-relationship label — which rung
+# of internal-use -> client-service -> SaaS-lite -> full-SaaS -> DAO-future
+# this workspace sits at — used today for reporting/segmentation and
+# recorded onto every CommercialRunEnvelope for context. It is deliberately
+# NOT a live/dry-run gate: that's `live_mode_enabled` (below) plus the
+# `live_action_requested` flag threaded through
+# backend.workspaces.live_mode_checklist.check() and
+# services.ecommerce_operator.launch_guard.evaluate_launch_readiness().
+# Folding `mode` into that gate would conflate two orthogonal questions —
+# "which commercial tier is this workspace on" is not the same question as
+# "is this specific action allowed to touch real money" (a `full_saas`
+# workspace can still be dry-run for an integration with no credentials
+# configured, and an `internal_own_store` workspace can go fully live once
+# its owner flips `live_mode_enabled`). See docs/LIVE_MODE_SAFETY.md.
 MODES = ("internal_own_store", "client_service", "saas_lite", "full_saas", "dao_future")
 
 
