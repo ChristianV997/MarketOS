@@ -69,9 +69,22 @@ class EventStore:
         }
         line = json.dumps(record, default=str)
         with self._lock:
-            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            with open(self.path, "a") as fh:
-                fh.write(line + "\n")
+            try:
+                os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+                with open(self.path, "a") as fh:
+                    fh.write(line + "\n")
+            except Exception:
+                # Every caller already wraps event_store.append() in its own
+                # try/except (this method itself has never been fail-silent) —
+                # this counter doesn't change that; it just makes a write
+                # failure observable before it propagates to the caller,
+                # instead of only a debug-level log line at best.
+                try:
+                    from backend.observability.metrics import event_log_write_failures_total
+                    event_log_write_failures_total.labels(backend="event_store").inc()
+                except Exception:
+                    pass
+                raise
             # Keep the index current for readers in this same process,
             # without forcing a rebuild — only valid if an index already
             # exists; otherwise the next read builds it fresh from disk.
