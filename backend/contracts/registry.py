@@ -133,7 +133,19 @@ class ArtifactRegistry:
     def deserialize(self, d: dict[str, Any]) -> BaseArtifact:
         """Reconstruct a typed artifact from its dict representation."""
         atype = d.get("artifact_type", "base")
-        cls   = _TYPE_MAP.get(atype, BaseArtifact)
+        cls   = _TYPE_MAP.get(atype)
+        if cls is None and atype == "commercial_run_envelope":
+            # Lazy import (mirrors register()'s own backend.events.log
+            # import below) — backend.experiments imports backend.contracts
+            # at module scope, so importing it back here at module load
+            # time would be circular; importing lazily inside this method
+            # is safe since both packages are fully initialized by call time.
+            try:
+                from backend.experiments.envelope import CommercialRunEnvelope
+                cls = CommercialRunEnvelope
+            except Exception:
+                cls = None
+        cls = cls or BaseArtifact
         return cls.from_dict(d)
 
 
