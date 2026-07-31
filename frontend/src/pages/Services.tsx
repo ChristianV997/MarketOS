@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { useUnitEconomics, useEcommerceOperator } from "@/lib/api";
+import {
+  useUnitEconomics, useEcommerceOperator, useProductAudit,
+  useCreativeGrowth, useCustomerIntelligence, useDigitalProduct, useSalesAutomation,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -88,6 +91,139 @@ function EcommerceOperatorForm() {
   );
 }
 
+function ProductAuditForm() {
+  const [product, setProduct] = useState("Widget");
+  const [category, setCategory] = useState("general");
+  const mutation = useProductAudit();
+
+  return (
+    <Card>
+      <p className="text-sm font-semibold text-zinc-200 mb-3">Product Research</p>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Product">
+          <input className={inputCls} value={product} onChange={(e) => setProduct(e.target.value)} />
+        </Field>
+        <Field label="Category">
+          <input className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)} />
+        </Field>
+      </div>
+      <button
+        onClick={() => mutation.mutate({ product, category })}
+        disabled={mutation.isPending}
+        className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
+      >
+        {mutation.isPending ? "Running…" : "Run audit"}
+      </button>
+      {mutation.isError && <p className="text-xs text-red-400 mt-2">{(mutation.error as Error).message}</p>}
+      <ResultPanel result={mutation.data} />
+    </Card>
+  );
+}
+
+function CreativeGrowthForm() {
+  const [product, setProduct] = useState("Widget");
+  const mutation = useCreativeGrowth();
+
+  return (
+    <Card>
+      <p className="text-sm font-semibold text-zinc-200 mb-3">Creative Growth</p>
+      <Field label="Product">
+        <input className={inputCls} value={product} onChange={(e) => setProduct(e.target.value)} />
+      </Field>
+      <button
+        onClick={() => mutation.mutate({ product })}
+        disabled={mutation.isPending}
+        className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
+      >
+        {mutation.isPending ? "Running…" : "Build creative plan"}
+      </button>
+      {mutation.isError && <p className="text-xs text-red-400 mt-2">{(mutation.error as Error).message}</p>}
+      <ResultPanel result={mutation.data} />
+    </Card>
+  );
+}
+
+function CustomerIntelligenceForm() {
+  const [businessType, setBusinessType] = useState("dental clinic");
+  const [vertical, setVertical] = useState("clinic_wellness");
+  const mutation = useCustomerIntelligence();
+
+  return (
+    <Card>
+      <p className="text-sm font-semibold text-zinc-200 mb-3">Customer Intelligence</p>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Business type">
+          <input className={inputCls} value={businessType} onChange={(e) => setBusinessType(e.target.value)} />
+        </Field>
+        <Field label="Vertical (optional)">
+          <input className={inputCls} value={vertical} onChange={(e) => setVertical(e.target.value)} />
+        </Field>
+      </div>
+      <button
+        onClick={() => mutation.mutate({ business_type: businessType, vertical: vertical || undefined })}
+        disabled={mutation.isPending}
+        className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
+      >
+        {mutation.isPending ? "Running…" : "Build sprint"}
+      </button>
+      {mutation.isError && <p className="text-xs text-red-400 mt-2">{(mutation.error as Error).message}</p>}
+      <ResultPanel result={mutation.data} />
+    </Card>
+  );
+}
+
+function DigitalProductForm() {
+  const [offerName, setOfferName] = useState("Product Validation Playbook");
+  const [price, setPrice] = useState(497);
+  const mutation = useDigitalProduct();
+
+  return (
+    <Card>
+      <p className="text-sm font-semibold text-zinc-200 mb-3">Digital Products</p>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Offer name">
+          <input className={inputCls} value={offerName} onChange={(e) => setOfferName(e.target.value)} />
+        </Field>
+        <Field label="Price">
+          <input className={inputCls} type="number" value={price} onChange={(e) => setPrice(Number(e.target.value))} />
+        </Field>
+      </div>
+      <button
+        onClick={() => mutation.mutate({ offer_name: offerName, price })}
+        disabled={mutation.isPending}
+        className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
+      >
+        {mutation.isPending ? "Running…" : "Build plan"}
+      </button>
+      {mutation.isError && <p className="text-xs text-red-400 mt-2">{(mutation.error as Error).message}</p>}
+      <ResultPanel result={mutation.data} />
+    </Card>
+  );
+}
+
+function SalesAutomationForm() {
+  const [vertical, setVertical] = useState("car_sales");
+  const mutation = useSalesAutomation();
+
+  return (
+    <Card>
+      <p className="text-sm font-semibold text-zinc-200 mb-3">Sales Automation</p>
+      <Field label="Vertical">
+        <input className={inputCls} value={vertical} onChange={(e) => setVertical(e.target.value)} />
+      </Field>
+      <button
+        onClick={() => mutation.mutate({ vertical })}
+        disabled={mutation.isPending}
+        className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
+      >
+        {mutation.isPending ? "Running…" : "Simulate lead conversation"}
+      </button>
+      {mutation.isError && <p className="text-xs text-red-400 mt-2">{(mutation.error as Error).message}</p>}
+      <ResultPanel result={mutation.data} />
+    </Card>
+  );
+}
+
 export default function Services() {
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-4">
@@ -97,8 +233,13 @@ export default function Services() {
           Run a MarketOS service module directly against api/routes/services.py.
         </p>
       </div>
+      <ProductAuditForm />
       <UnitEconomicsForm />
       <EcommerceOperatorForm />
+      <CreativeGrowthForm />
+      <CustomerIntelligenceForm />
+      <DigitalProductForm />
+      <SalesAutomationForm />
     </div>
   );
 }

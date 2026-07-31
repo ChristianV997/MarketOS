@@ -134,3 +134,56 @@ export function useEcommerceOperator() {
       }),
   });
 }
+
+export interface ProductAuditInput {
+  product: string; category?: string; price?: number; workspace?: string;
+}
+export function useProductAudit() {
+  return useMutation({
+    mutationFn: (input: ProductAuditInput) =>
+      postServiceCall<AnyData>("/api/services/product-audit", { ...input }),
+  });
+}
+
+export interface CreativeGrowthInput {
+  product: string; category?: string; workspace?: string;
+}
+export function useCreativeGrowth() {
+  return useMutation({
+    mutationFn: (input: CreativeGrowthInput) =>
+      postServiceCall<AnyData>("/api/services/creative-growth", { ...input }),
+  });
+}
+
+export interface CustomerIntelligenceInput {
+  business_type: string; vertical?: string; target_geo?: string;
+  category?: string; workspace?: string;
+}
+export function useCustomerIntelligence() {
+  return useMutation({
+    mutationFn: (input: CustomerIntelligenceInput) =>
+      postServiceCall<AnyData>("/api/services/customer-intelligence", { ...input }),
+  });
+}
+
+export interface DigitalProductInput {
+  offer_name: string; product_type?: string; target_customer?: string;
+  transformation_promised?: string; price?: number; target_buyers?: number;
+  has_existing_audience?: boolean; workspace?: string;
+}
+export function useDigitalProduct() {
+  return useMutation({
+    mutationFn: (input: DigitalProductInput) =>
+      postServiceCall<AnyData>("/api/services/digital-product", { ...input }),
+  });
+}
+
+export interface SalesAutomationInput {
+  vertical: string; workspace?: string;
+}
+export function useSalesAutomation() {
+  return useMutation({
+    mutationFn: ({ vertical, workspace }: SalesAutomationInput) =>
+      postServiceCall<AnyData>("/api/services/sales-automation", { vertical, workspace }),
+  });
+}
