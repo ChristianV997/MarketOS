@@ -47,3 +47,33 @@ components:
     reviewed_ref: pending-benchmark-review
     distribution: benchmark
     notice: Benchmark only; do not deploy alongside Medusa.
+  - name: twenty-crm
+    license: AGPL-3.0
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Deferred by explicit user decision (consolidation pass); AGPL requires legal review before adoption.
+  - name: chatwoot
+    license: MIT
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Deferred by explicit user decision (consolidation pass); lowest license risk of the deferred candidates if revisited.
+  - name: cal.com
+    license: AGPL-3.0
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Deferred by explicit user decision (consolidation pass); AGPL requires legal review before adoption.
+  - name: posthog
+    license: MIT
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Deferred by explicit user decision (consolidation pass); revisit alongside observability consolidation, not before, to avoid adding a third analytics surface.
+  - name: temporal
+    license: MIT
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Deferred by explicit user decision (consolidation pass); highest-cost candidate, would replace backend.orchestration.event_store's hand-rolled workflow tracking.
+  - name: crawlee
+    license: Apache-2.0
+    reviewed_ref: pending-deferred-review
+    distribution: optional_worker
+    notice: Deferred; redundant with crawl4ai + firecrawl already selected for scraping.

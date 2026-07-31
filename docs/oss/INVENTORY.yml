@@ -74,3 +74,57 @@ candidates:
     owner: data
     capabilities: [batch_ingestion, connectors, warehouse_sync]
     reviewed_ref: pending-deferred-review
+  # The following six were evaluated during the consolidation-plan pass
+  # (docs/SERVICE_MODULES.md / commercial run envelope work) as candidates
+  # to fill genuine gaps (CRM, support inbox, scheduling, product analytics,
+  # durable workflow orchestration, web scraping) surfaced by an external
+  # audit. Explicit user decision: none adopted this round — deferred
+  # pending a dedicated follow-up, not because any is unsuitable.
+  - name: twenty-crm
+    repository: https://github.com/twentyhq/twenty
+    license: AGPL-3.0
+    mode: sidecar
+    status: deferred
+    owner: customer_intelligence
+    capabilities: [crm, pipeline, contact_management]
+    reviewed_ref: pending-deferred-review
+  - name: chatwoot
+    repository: https://github.com/chatwoot/chatwoot
+    license: MIT
+    mode: sidecar
+    status: deferred
+    owner: sales_automation
+    capabilities: [conversation_inbox, support_ticketing]
+    reviewed_ref: pending-deferred-review
+  - name: cal.com
+    repository: https://github.com/calcom/cal.com
+    license: AGPL-3.0
+    mode: sidecar
+    status: deferred
+    owner: sales_automation
+    capabilities: [scheduling, appointment_booking]
+    reviewed_ref: pending-deferred-review
+  - name: posthog
+    repository: https://github.com/PostHog/posthog
+    license: MIT
+    mode: sidecar
+    status: deferred
+    owner: reporting
+    capabilities: [product_analytics, funnels, session_replay]
+    reviewed_ref: pending-deferred-review
+  - name: temporal
+    repository: https://github.com/temporalio/temporal
+    license: MIT
+    mode: sidecar
+    status: deferred
+    owner: orchestration
+    capabilities: [durable_workflow_engine, retries, saga_orchestration]
+    reviewed_ref: pending-deferred-review
+  - name: crawlee
+    repository: https://github.com/apify/crawlee
+    license: Apache-2.0
+    mode: optional_worker
+    status: deferred
+    owner: research
+    capabilities: [web_scraping, browser_crawl]
+    reviewed_ref: pending-deferred-review  # redundant with crawl4ai + firecrawl already selected

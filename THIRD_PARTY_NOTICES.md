@@ -18,6 +18,12 @@ legal advice.
 | erpnext | pending-deferred-review | GPL-3.0 | Deferred; do not vendor into the commercial core. |
 | airbyte | pending-deferred-review | review_required | Deferred pending license and integration review. |
 | saleor | pending-benchmark-review | review_required | Benchmark only; do not deploy alongside Medusa. |
+| twenty-crm | pending-deferred-review | AGPL-3.0 | Deferred by explicit user decision; AGPL requires legal review before adoption. |
+| chatwoot | pending-deferred-review | MIT | Deferred by explicit user decision. |
+| cal.com | pending-deferred-review | AGPL-3.0 | Deferred by explicit user decision; AGPL requires legal review before adoption. |
+| posthog | pending-deferred-review | MIT | Deferred by explicit user decision; revisit alongside observability consolidation. |
+| temporal | pending-deferred-review | MIT | Deferred by explicit user decision; would replace hand-rolled workflow tracking if adopted later. |
+| crawlee | pending-deferred-review | Apache-2.0 | Deferred; redundant with crawl4ai + firecrawl already selected. |
 
 The generated release SBOM captures resolved Python packages actually present
 in the build environment. Before enabling or updating any listed component,
