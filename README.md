@@ -1,8 +1,10 @@
 # MarketOS
 
-### Autonomous commerce decision engine for dropshipping — discover, validate, launch, and optimize products with risk-aware capital allocation.
+### Autonomous commerce decision engine for dropshipping, packaged as a modular revenue operating system — discover, validate, launch, and optimize products with risk-aware capital allocation, and sell any piece of that pipeline as a standalone service.
 
 MarketOS runs a continuous **Discover → Validate → Create → Launch → Optimize** loop over real ad platforms (TikTok, Meta) and a Shopify storefront, driven by a quantitative decision core: convex-optimization budget allocation, contextual bandits, statistically calibrated ROAS prediction, regime/changepoint detection, and adaptive risk limits. Every risky change ships behind a **shadow-mode flag** — the new logic runs and journals its decisions alongside the old one, and only takes over real budget after validation.
+
+On top of that quant core sits a **modular commercial layer**: 8 independently sellable `services/*` modules (product research, unit economics, e-commerce operations, creative growth, customer intelligence, sales automation, digital products, reporting), each reachable via a CLI, a REST API, and a real dashboard UI, backed by a multi-tenant workspace model and an event-sourced commerce ledger. See [Modular commercial layer](#modular-commercial-layer) below for the full picture — this is what turns the quant core from "one internal pipeline" into "a set of things you can run for your own store, sell as a done-for-you service, or eventually offer as self-serve SaaS."
 
 ---
 
@@ -24,9 +26,9 @@ Each cycle: a LinUCB contextual bandit picks a macro action (scale/hold/pause/la
 
 ---
 
-## The ROI overhaul (Phases 1–6, complete)
+## The ROI overhaul (Phases 1–8, complete)
 
-A six-phase quantitative rebuild of the financial decision layer, each phase shipped behind a shadow-mode flag with full old-vs-new journaling to the event store:
+An eight-phase quantitative rebuild of the financial decision layer, each phase shipped behind a shadow-mode flag with full old-vs-new journaling to the event store. Phases 1-6 fixed specific broken math; Phases 7-8 added new capability on top rather than fixing a defect — see the table below for 1-6, and the flags table's Phase 7/8 rows for what each of those adds (creative fatigue detection, statistically valid A/B testing, unified urgency scoring, Monte Carlo pre-launch risk intervals, and the organic/earned-media channel with its own creator-seeding tracker and content calendar in `core/ugc/`).
 
 | Phase | What was broken | The fix |
 |---|---|---|
@@ -52,6 +54,12 @@ All default **off** — legacy behavior is byte-identical until a flag is flippe
 | `GEO_ECONOMICS_LIVE` | GeoAgent expands/pauses on margin-adjusted ROAS, not raw platform ROAS |
 | `SUPPLIER_RISK_RANKING_LIVE` | Return-risk-adjusted supplier ranking replaces cheapest-landed-cost |
 | `SUPPLIER_FEEDBACK_LIVE` | Observed EMA reliability replaces static per-supplier constants |
+| `PHASE7_AB_TEST_VALIDITY_LIVE` | Hook/angle candidate pool restricted to statistically valid (sample-size-gated) winners, not just highest-raw-score |
+| `PHASE7_FATIGUE_DETECTION_LIVE` | Rolling-window-vs-lifetime-average fatigue detection (`core/creative/fatigue_detector.py`, `hook_performance.py`, `sequence_optimizer.py`) drives hook/angle rotation |
+| `PHASE7_URGENCY_SCORING_LIVE` | Unified trend-urgency score (validated in `backend/validation/shadow_validator.py`'s `urgency_scoring` phase) informs early-mover ranking |
+| `PHASE7_MONTE_CARLO_LIVE` | Monte Carlo pre-launch prediction intervals (`simulation/model.py`/`engine.py`, 1,000 bootstrap samples, capped to the top 20 candidates per cycle) replace point-estimate ROAS risk |
+| `PHASE8_ORGANIC_CHANNEL_LIVE` | Organic/earned-media channel (`core/ugc/content_calendar.py`, `creator_tracker.py`) — zero-marginal-CAC creator seeding + content calendar — runs alongside paid |
+| `PHASE8_AFFILIATE_SCALING_LIVE` | Affiliate/organic-winner scaling gate |
 
 The CUSUM changepoint signal is journaled every cycle (`shadow_regime_changepoint`) but deliberately gates nothing yet — its false-positive rate and detection latency are being validated against journal data first.
 
@@ -102,8 +110,64 @@ The CUSUM changepoint signal is journaled every cycle (`shadow_regime_changepoin
 - `core/creative/` + `core/content/` — hook/sequence performance tracking, pattern store (atomic JSON persistence), playbook memory, creative generation pipeline (composer, renderer, voiceover, video generator).
 - `backend/memory/` (episodic/procedural/semantic) + `backend/vector/` (Qdrant embeddings, semantic search) + `backend/lineage/` — cognitive write-through: winning decisions are indexed and traceable decision→outcome.
 - `simulation/` — DuckDB replay store for historical analysis, Ridge scoring model, calibration store.
-- `api/` + `backend/api.py` — FastAPI app (~40 endpoints: decisions, budget, portfolio, agents, risk kill-switch, orchestration traces, observability, dropship dashboard) + WebSocket event stream; background cycle runner.
-- `frontend/` — React 18 + Vite + Tailwind dashboard (command center, metrics, simulation, tasks). Dev-mode only (not served by the backend; run via `vite dev`).
+- `api/` + `backend/api.py` — FastAPI app (100+ endpoints across the quant core and the `services/*` commercial layer: decisions, budget, portfolio, agents, risk kill-switch, orchestration traces, observability, dropship dashboard, `/api/services/*`) + a `/ws` WebSocket event stream that the frontend now actually connects to.
+- `backend/workspaces/` + `backend/experiments/` + `backend/ledger/` + `services/*` + `marketos/cli.py` — the modular commercial layer described in full below.
+- `frontend/` — React 18 + Vite + Tailwind + react-router-dom dashboard. Two things live here now: the router app (`Shell` layout + `Sidebar` nav — Dashboard, Campaigns, Products, Creatives, Signals, Runtime, Risk, Replay, **Services**), which is what actually mounts from `main.tsx`; and the original tab-based `App.tsx` component tree, kept in the repo (unmounted) rather than deleted. Dev-mode only (not served by the backend; run via `vite dev` — see Getting started).
+
+---
+
+## Modular commercial layer
+
+Everything above is the quant core that runs MarketOS's *own* dropshipping operation. Sitting on top of it — reusing its functions, never duplicating them — is a separate layer that turns individual pieces of that pipeline into sellable units: run them for your own store, deliver them as a paid service to a client, or (once the gaps below are closed) offer them as self-serve SaaS.
+
+### Foundations
+
+- **`backend/workspaces/`** — `ClientWorkspace` (a tenant: name, mode, dry-run default, live-mode flag, allowed integrations, budget ceilings), `WorkspaceRegistry` (JSON-file-backed, `workspace_id` derived deterministically from name), `CredentialScope` (per-integration configured/allowed/dry-run status, wrapping `backend.config.list_configured_services()`), `LiveModeChecklist` (the gate every live external mutation must clear — credentials + live-mode + budget ceilings, always journaled, never raises), `ArtifactStore` (per-workspace result/report persistence under `state/workspaces/{workspace_id}/experiments/{experiment_id}/`).
+- **`backend/experiments/`** — `CommercialRunEnvelope` (subclasses the existing `BaseArtifact`, not a parallel system: every service-module call gets an `experiment_id`, `status` lifecycle `created→running→completed/blocked/failed`, and an audit trail), `ExperimentRegistry` (a thin filtered view over the existing `ArtifactRegistry`), `audit_log` (journals every status transition to the same `event_store` every shadow-mode gate already uses).
+- **`backend/ledger/`** — an event-sourced commerce ledger: `OrderCreated`/`PaymentCaptured`/`OrderCanceled`/`RefundIssued`/`ChargebackOpened`/`SupplierCostObserved`/`FulfillmentCompleted`/`AdSpendObserved`/`AttributionClaimObserved` events (thin wrappers over the existing `event_store`, no second log), replayed per-workspace into recognized revenue, cash collected, CAC (blended + per-channel), contribution profit, profit-per-{order,product,channel}, and a cash-conversion-cycle proxy. `services.unit_economics`/`services.ecommerce_operator` get `from_ledger()` entry points that derive their inputs from this instead of requiring the caller to supply pre-aggregated numbers. Full details: `docs/COMMERCE_LEDGER.md`.
+- **`backend/dao_future/`** — placeholder-only dataclasses (`BusinessCell`, `Proposal`, `GovernanceDecision`, `CapitalAllocationRequest`, `OperatorRole`, `RevenueShareRule`) mapping today's real infrastructure to a possible future DAO-governed operating model. Zero behavior, imported by nothing live. See `docs/DAO_FUTURE_ARCHITECTURE.md`.
+
+### The 8 service modules (`services/*`)
+
+| Module | What it does | Status |
+|---|---|---|
+| `product_research` | Discovery + validation pipeline → structured opportunity audit (demand, competitor saturation, supplier quote, pricing, real-vs-mock data provenance) | `ready_for_client_service` |
+| `unit_economics` | Margin/break-even/ROAS diagnostic, ledger-aware (`from_ledger()`) | `ready_for_client_service` |
+| `ecommerce_operator` | Launch-readiness gate, ledger-derived contribution profit, kill/scale decisions | readiness: `ready_for_client_service`; profit/decision: `needs_live_data` (honest — needs your real numbers) |
+| `creative_growth` | Ad angles/hooks (wraps `core/creative`), fatigue analysis, next-batch recommendation | `ready_for_client_service` |
+| `customer_intelligence` | ICP, segments, lead strategy, publicity plan, 7 vertical playbooks (real estate, car sales, e-commerce brand, clinic/wellness, home services, coaching/consulting, luxury) | `ready_for_client_service` |
+| `digital_products` | Offer/funnel/content-plan/validation/margin/launch-checklist for turning an artifact or expertise into a sellable digital product | `ready_for_client_service` |
+| `sales_automation` | Deterministic (no-LLM) chat lead-qualification + appointment handoff simulation | `ready_for_internal_use` (honest — simulation only, no real messaging adapter exists yet) |
+| `reporting` | Shared markdown rendering + artifact persistence + `json_safe()` (non-finite-float sanitization at API/CLI boundaries) used by all of the above | n/a (shared infrastructure) |
+
+Full per-module reference (inputs/outputs/pricing guidance in MXN/exact CLI+API signatures): `docs/SERVICE_MODULES.md`. Full layered-architecture picture: `docs/MARKETOS_MODULAR_ARCHITECTURE.md`.
+
+### How to run a service module
+
+```bash
+# CLI — every module has a subcommand
+python -m marketos.cli services unit-economics --product "Widget" --cost 10 --price 40
+python -m marketos.cli services product-audit --product "Widget" --category general
+python -m marketos.cli services ecommerce-operator --product "Widget" --roas 2.0
+python -m marketos.cli services creative-growth --product "Widget"
+python -m marketos.cli services customer-intelligence --business-type "dental clinic" --vertical clinic_wellness
+python -m marketos.cli services digital-product --offer-name "Product Validation Playbook" --price 497
+python -m marketos.cli services sales-bot-sim --vertical car_sales
+
+# REST API — same 7 modules, mounted at /api/services/* in backend/api.py
+curl -X POST "http://localhost:3000/api/services/unit-economics?product=Widget&cost=10&price=40"
+
+# Dashboard — the Services nav item in the router app (frontend/src/pages/Services.tsx)
+# renders a form + live result panel for all 7, hitting the same API routes above.
+```
+
+### Safety: nothing here spends money or contacts anyone on its own
+
+Every module either produces read-only analysis, or a decision/readiness verdict that a separate, pre-existing, already-dry-run-gated integration (`backend/integrations/*`) must still execute. `LiveModeChecklist` and `services.ecommerce_operator.launch_guard` compose with (never duplicate) the existing `backend.risk.gate.check_spend()` real-money choke point. Full reasoning + a module-by-module "does this ever mutate something real?" table: `docs/LIVE_MODE_SAFETY.md`.
+
+### What's still a gap here
+
+No real multi-tenant auth or Postgres-backed persistence (workspaces are JSON files, isolated by convention, not by a database), no billing/metering. See Known gaps below for the full, current list.
 
 ---
 
@@ -113,7 +177,8 @@ The CUSUM changepoint signal is journaled every cycle (`shadow_regime_changepoin
 # Requirements: Python 3.11+, pip install -r requirements.txt
 
 # Run the test suite (no credentials or network needed)
-python -m pytest -q          # 1,276 passed, 4 skipped
+python -m pytest -q                 # 2,495 passed, 4 skipped (2,499 collected)
+python -m pytest -q -n auto         # same, parallelized via pytest-xdist (~4-5 min vs ~10-13 min serial)
 
 # Run the API + background decision loop
 uvicorn backend.api:app --port 3000
@@ -123,6 +188,12 @@ python run.py                # == python -m orchestrator.main
 
 # Guided MVP run: credential wizard + one dropship cycle (3 products, $50/day)
 ./run_mvp.sh
+
+# Run a sellable service module directly (see Modular commercial layer above)
+python -m marketos.cli services unit-economics --product "Widget" --cost 10 --price 40
+
+# Frontend dashboard (dev-mode; proxies /api and /ws to the backend above)
+cd frontend && npm install && npm run dev
 
 # Docker
 docker compose up            # api, orchestrator, redis, qdrant, prometheus, grafana
@@ -146,15 +217,17 @@ State persists under `state/` (`STATE_DIR`/`MARKETOS_STATE_DIR`): DuckDB system 
 
 ## Status & roadmap
 
-**Complete** — orchestration framework (event sourcing, circuit breakers, transactions), multi-agent arbitration, the full dropshipping pipeline (dry-run verified end to end), the six-phase ROI overhaul, 103 test files / 1,276 passing tests.
+**Complete** — orchestration framework (event sourcing, circuit breakers, transactions), multi-agent arbitration, the full dropshipping pipeline (dry-run verified end to end), the eight-phase ROI overhaul (Phases 1-6 quant core + Phase 7 creative fatigue/A-B-testing/urgency/Monte Carlo + Phase 8 organic/UGC channel — all shadow-gated, see the flags table above), the full modular commercial layer (see [Modular commercial layer](#modular-commercial-layer)), and the frontend router + Services UI. 232 test files / 2,499 collected tests, 2,495 passing / 4 skipped.
 
-**Shadow validation in progress** — all nine `*_LIVE` flags are off pending journal-data validation that each new path outperforms its legacy counterpart on reconciled metrics.
+**Shadow validation in progress** — every `*_LIVE` flag defaults off pending journal-data validation that each new path outperforms its legacy counterpart on reconciled metrics. This includes both the six original quant-core flags and the six Phase 7/8 flags added since.
 
-**Next (designed, not yet implemented):**
-- **Phase 7** — creative fatigue detection (rolling-window trend vs lifetime average), statistically valid A/B testing (sample-size gates + significance tests), a unified trend-urgency score, Monte Carlo pre-launch simulation.
-- **Phase 8** — organic/earned-media channel (`core/ugc/` is currently an empty stub): creator-seeding tracker and content calendar, so a zero-marginal-CAC channel exists alongside paid.
-
-**Known gaps** (tracked, honest): the frontend is dev-mode only with a broken WS path (`/ws/events` vs `/ws`); the LTV tracker has no production caller wiring orders in yet (rates sit at category priors); the `Workflow`/`PlatformAdapter` abstractions are test-covered but not yet on the production path; live (non-dry-run) API paths are implemented but unverified against real accounts.
+**Known gaps** (tracked, honest):
+- **No real multi-tenant auth or database.** `ClientWorkspace`/`WorkspaceRegistry` (`backend/workspaces/`) isolate data by a `workspace_id` convention over JSON files — real, but there's no login, no API key, no billing meter, no Postgres. This is the single largest gap between "ready to sell as a service" and "self-serve SaaS anyone could sign up for." A full Supabase-Auth-plus-Postgres-with-RLS migration is designed (schema, shadow-mode dual-write, auth middleware, cutover) but intentionally not yet built — ask if you want to see the design.
+- **Two audit logs, unified only structurally.** `backend/events/log.py` (DuckDB-backed, artifact/lineage replay) and `backend/orchestration/event_store.py` (JSONL, every dry-run/shadow gate + the commerce ledger) are genuinely different logs for different purposes; they now share a `backend.contracts.event_log.EventLogProtocol` structural interface, but nothing merges their storage or schema.
+- **The LTV tracker** has no production caller wiring real orders in yet (rates sit at category priors from the Amazon Reviews 2023 / Olist datasets).
+- **`Workflow`/`PlatformAdapter` abstractions** are test-covered but not yet on the production path.
+- **Live (non-dry-run) API paths** are implemented but unverified against real ad-platform/Shopify accounts.
+- **A handful of OSS integrations remain deliberately deferred** pending explicit sign-off before adoption: Twenty CRM, Chatwoot, Cal.com, Temporal/Prefect (see `docs/oss/LICENSE_MANIFEST.yml` for the full reasoning per tool — PostHog was the one candidate adopted, client-side only, default-off).
 
 ---
 
@@ -176,11 +249,27 @@ backend/
   launch/         launch orchestrator (plain + transactional)
   integrations/   TikTok, Meta, Shopify clients (dry-run default)
   memory/ vector/ lineage/   cognitive layer (episodic memory, Qdrant, lineage)
+  workspaces/     ClientWorkspace, CredentialScope, LiveModeChecklist, ArtifactStore
+  experiments/    CommercialRunEnvelope, ExperimentRegistry, audit_log
+  ledger/         event-sourced commerce ledger (events + replay projections)
+  dao_future/     placeholder-only future-governance dataclasses, zero behavior
+  contracts/      BaseArtifact/ArtifactRegistry + adapter Protocols (incl. event_log)
 agents/           Scaling/Geo/Audience/Risk agents + veto/consensus arbitration
-core/             portfolio, LinUCB, risk engines, creative pipeline, content patterns
+core/             portfolio, LinUCB, risk engines, creative pipeline, content patterns,
+                  core/ugc/ (organic/UGC content calendar + creator tracker, Phase 8)
 orchestrator/     phase-scheduled worker runtime (the production spine)
-api/              FastAPI route modules, dashboards, WebSocket stream
-frontend/         React dashboard (dev-mode)
-simulation/       DuckDB replay, scoring model, calibration store
-tests/            103 test files — 1,276 passing
+services/         8 sellable modules — product_research, unit_economics,
+                  ecommerce_operator, creative_growth, customer_intelligence,
+                  digital_products, sales_automation, reporting
+marketos/         CLI entrypoint (marketos/cli.py) for the services/* modules
+api/              FastAPI route modules incl. api/routes/services.py, dashboards, WS stream
+frontend/         React + Vite + react-router-dom dashboard: Shell/Sidebar router app
+                  (Dashboard, Campaigns, Products, Creatives, Signals, Runtime, Risk,
+                  Replay, Services) + the original tab-based App.tsx (kept, unmounted)
+simulation/       DuckDB replay, scoring model, calibration store, Monte Carlo (Phase 7)
+docs/             SERVICE_MODULES.md, MARKETOS_MODULAR_ARCHITECTURE.md,
+                  COMMERCE_LEDGER.md, LIVE_MODE_SAFETY.md, DAO_FUTURE_ARCHITECTURE.md,
+                  OWN_ECOMMERCE_VALIDATION_WORKFLOW.md, DIGITAL_PRODUCT_WORKFLOW.md,
+                  SALES_AUTOMATION_MODULE.md, oss/ (dependency + license governance)
+tests/            232 test files — 2,495 passing / 4 skipped (2,499 collected)
 ```

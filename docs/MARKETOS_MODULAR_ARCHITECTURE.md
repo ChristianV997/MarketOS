@@ -75,8 +75,9 @@ Two things sit alongside every layer above, not inside one of them:
 | `backend/ledger/` | Event-sourced commerce ledger (OrderCreated/PaymentCaptured/.../AdSpendObserved) + derived CAC/contribution-profit/cash-conversion-cycle projections — see `docs/COMMERCE_LEDGER.md` |
 | `backend/dao_future/` | Placeholder-only future governance schemas (Phase 8) |
 | `marketos/cli.py` | Terminal entrypoint for the service modules |
-| `api/routes/services.py` | REST wrappers for the 2 stateless modules exposed via API so far |
-| `docs/` | This doc + `SERVICE_MODULES.md`, `COMMERCIAL_RUN_ENVELOPE.md`, `LIVE_MODE_SAFETY.md`, `OWN_ECOMMERCE_VALIDATION_WORKFLOW.md`, `DIGITAL_PRODUCT_WORKFLOW.md`, `SALES_AUTOMATION_MODULE.md`, `DAO_FUTURE_ARCHITECTURE.md` |
+| `api/routes/services.py` | REST wrappers for all 8 service modules (`/api/services/*`) |
+| `frontend/src/pages/Services.tsx` | Dashboard UI — a form + live result panel per module, hitting the same `/api/services/*` routes as the CLI |
+| `docs/` | This doc + `SERVICE_MODULES.md`, `COMMERCIAL_RUN_ENVELOPE.md`, `LIVE_MODE_SAFETY.md`, `OWN_ECOMMERCE_VALIDATION_WORKFLOW.md`, `DIGITAL_PRODUCT_WORKFLOW.md`, `SALES_AUTOMATION_MODULE.md`, `DAO_FUTURE_ARCHITECTURE.md`, `COMMERCE_LEDGER.md` |
 | everything else (`backend/discovery`, `backend/decision`, `core/*`, `orchestrator/`, ...) | Pre-existing core engine — reused, never duplicated |
 
 ## Operating modes

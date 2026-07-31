@@ -268,9 +268,13 @@ rather than silently skipped):
   "ready_for_client_service" (the analysis is real) and "self-serve SaaS"
   (anyone could sign up and pay). Explicitly named as `future_saas` in the
   status vocabulary rather than glossed over.
-- **Dashboard integration**: `frontend/`'s existing Command Center is wired
-  to the orchestrator's own metrics/portfolio/decision endpoints, not to
-  these service modules. Adding service-module panels would follow the same
-  pattern as the existing dashboard sections (`api/routes/dashboard_panels.py`
-  → a new `frontend/src/components/*.tsx`), but no frontend work was done
-  this phase — noted as a real gap, not implied to exist.
+- **Dashboard integration**: done, in a later pass. `frontend/src/pages/Services.tsx`
+  (routed at `/services` in the router app mounted from `frontend/src/main.tsx`)
+  renders a form + live result panel for all 7 non-`reporting` modules,
+  backed by mutation hooks in `frontend/src/lib/api.ts` (`useUnitEconomics`,
+  `useEcommerceOperator`, `useProductAudit`, `useCreativeGrowth`,
+  `useCustomerIntelligence`, `useDigitalProduct`, `useSalesAutomation`) that
+  call the same `/api/services/*` routes the CLI and direct API callers use
+  — one code path, not two. The original Command Center's own
+  metrics/portfolio/decision panels are unaffected and still live at their
+  own router pages (Dashboard, Campaigns, etc.).
