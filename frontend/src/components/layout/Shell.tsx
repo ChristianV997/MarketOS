@@ -1,11 +1,12 @@
-import { useCallback } from "react";
-import { Outlet } from "react-router-dom";
+import { useCallback, useEffect } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useWsStore } from "@/store/ws";
 import { useRuntimeStore } from "@/runtimeStore";
 import { useSnapshot } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { capturePageview } from "@/lib/posthog";
 import type { WsEvent } from "@/types";
 
 const PHASE_COLORS: Record<string, string> = {
@@ -16,6 +17,11 @@ const PHASE_COLORS: Record<string, string> = {
 };
 
 export default function Shell() {
+  const location = useLocation();
+  useEffect(() => {
+    capturePageview(location.pathname); // no-op unless VITE_POSTHOG_KEY is set
+  }, [location.pathname]);
+
   const handleMessage = useWsStore((s) => s.handleMessage);
   const appendRuntimeEvent = useRuntimeStore((s) => s.append);
   const onMessage = useCallback(

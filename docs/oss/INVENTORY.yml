@@ -107,11 +107,18 @@ candidates:
   - name: posthog
     repository: https://github.com/PostHog/posthog
     license: MIT
-    mode: sidecar
-    status: deferred
-    owner: reporting
-    capabilities: [product_analytics, funnels, session_replay]
-    reviewed_ref: pending-deferred-review
+    mode: optional_library
+    status: selected
+    owner: frontend
+    capabilities: [product_analytics, pageviews, custom_events]
+    reviewed_ref: posthog-js@1.x
+    # Consumed as the posthog-js client SDK against PostHog Cloud (SaaS),
+    # not self-hosted — no MarketOS-operated PostHog server exists.
+    # Default-off: frontend/src/lib/posthog.ts is a no-op unless
+    # VITE_POSTHOG_KEY is set, matching this repo's credential-presence-
+    # is-the-opt-in convention (e.g. FIRECRAWL_API_KEY). Session-replay is
+    # not enabled in this integration — only pageviews + a small set of
+    # explicit product events (service_run) are captured.
   - name: temporal
     repository: https://github.com/temporalio/temporal
     license: MIT

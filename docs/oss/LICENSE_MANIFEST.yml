@@ -64,9 +64,9 @@ components:
     notice: Deferred by explicit user decision (consolidation pass); AGPL requires legal review before adoption.
   - name: posthog
     license: MIT
-    reviewed_ref: pending-deferred-review
-    distribution: sidecar
-    notice: Deferred by explicit user decision (consolidation pass); revisit alongside observability consolidation, not before, to avoid adding a third analytics surface.
+    reviewed_ref: posthog-js@1.x
+    distribution: optional_library
+    notice: Selected by explicit user decision, adopted after the frontend router/Services UI shipped (revisit-after-UI condition satisfied). Client SDK against PostHog Cloud, default-off via VITE_POSTHOG_KEY, no session-replay enabled.
   - name: temporal
     license: MIT
     reviewed_ref: pending-deferred-review

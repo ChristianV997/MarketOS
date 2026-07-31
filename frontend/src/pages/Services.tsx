@@ -4,6 +4,7 @@ import {
   useCreativeGrowth, useCustomerIntelligence, useDigitalProduct, useSalesAutomation,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { captureEvent } from "@/lib/posthog";
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return <div className={cn("bg-[#111113] border border-white/[0.07] rounded-xl p-4", className)}>{children}</div>;
@@ -50,7 +51,7 @@ function UnitEconomicsForm() {
         </Field>
       </div>
       <button
-        onClick={() => mutation.mutate({ product, cost, price })}
+        onClick={() => { captureEvent("service_run", { module: "unit_economics" }); mutation.mutate({ product, cost, price }); }}
         disabled={mutation.isPending}
         className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
       >
@@ -79,7 +80,7 @@ function EcommerceOperatorForm() {
         </Field>
       </div>
       <button
-        onClick={() => mutation.mutate({ product, roas })}
+        onClick={() => { captureEvent("service_run", { module: "ecommerce_operator" }); mutation.mutate({ product, roas }); }}
         disabled={mutation.isPending}
         className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
       >
@@ -108,7 +109,7 @@ function ProductAuditForm() {
         </Field>
       </div>
       <button
-        onClick={() => mutation.mutate({ product, category })}
+        onClick={() => { captureEvent("service_run", { module: "product_research" }); mutation.mutate({ product, category }); }}
         disabled={mutation.isPending}
         className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
       >
@@ -131,7 +132,7 @@ function CreativeGrowthForm() {
         <input className={inputCls} value={product} onChange={(e) => setProduct(e.target.value)} />
       </Field>
       <button
-        onClick={() => mutation.mutate({ product })}
+        onClick={() => { captureEvent("service_run", { module: "creative_growth" }); mutation.mutate({ product }); }}
         disabled={mutation.isPending}
         className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
       >
@@ -160,7 +161,7 @@ function CustomerIntelligenceForm() {
         </Field>
       </div>
       <button
-        onClick={() => mutation.mutate({ business_type: businessType, vertical: vertical || undefined })}
+        onClick={() => { captureEvent("service_run", { module: "customer_intelligence" }); mutation.mutate({ business_type: businessType, vertical: vertical || undefined }); }}
         disabled={mutation.isPending}
         className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
       >
@@ -189,7 +190,7 @@ function DigitalProductForm() {
         </Field>
       </div>
       <button
-        onClick={() => mutation.mutate({ offer_name: offerName, price })}
+        onClick={() => { captureEvent("service_run", { module: "digital_products" }); mutation.mutate({ offer_name: offerName, price }); }}
         disabled={mutation.isPending}
         className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
       >
@@ -212,7 +213,7 @@ function SalesAutomationForm() {
         <input className={inputCls} value={vertical} onChange={(e) => setVertical(e.target.value)} />
       </Field>
       <button
-        onClick={() => mutation.mutate({ vertical })}
+        onClick={() => { captureEvent("service_run", { module: "sales_automation" }); mutation.mutate({ vertical }); }}
         disabled={mutation.isPending}
         className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
       >

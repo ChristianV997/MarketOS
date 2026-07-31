@@ -21,7 +21,7 @@ legal advice.
 | twenty-crm | pending-deferred-review | AGPL-3.0 | Deferred by explicit user decision; AGPL requires legal review before adoption. |
 | chatwoot | pending-deferred-review | MIT | Deferred by explicit user decision. |
 | cal.com | pending-deferred-review | AGPL-3.0 | Deferred by explicit user decision; AGPL requires legal review before adoption. |
-| posthog | pending-deferred-review | MIT | Deferred by explicit user decision; revisit alongside observability consolidation. |
+| posthog | posthog-js@1.x | MIT | Client SDK (posthog-js) against PostHog Cloud; retain upstream MIT notice. Default-off via VITE_POSTHOG_KEY; no session-replay enabled. |
 | temporal | pending-deferred-review | MIT | Deferred by explicit user decision; would replace hand-rolled workflow tracking if adopted later. |
 | crawlee | pending-deferred-review | Apache-2.0 | Deferred; redundant with crawl4ai + firecrawl already selected. |
 

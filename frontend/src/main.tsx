@@ -13,6 +13,9 @@ import Runtime from "./pages/Runtime";
 import Risk from "./pages/Risk";
 import Replay from "./pages/Replay";
 import Services from "./pages/Services";
+import { initPosthog } from "./lib/posthog";
+
+initPosthog(); // no-op unless VITE_POSTHOG_KEY is set — see lib/posthog.ts
 
 const queryClient = new QueryClient();
 
