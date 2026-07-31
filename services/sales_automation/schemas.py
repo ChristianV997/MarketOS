@@ -69,6 +69,7 @@ class AppointmentHandoff:
     transcript_summary: str
     lead_quality_score: float
     recommended_human_action: str
+    status: str = "ready_for_internal_use"
     generated_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
@@ -77,5 +78,6 @@ class AppointmentHandoff:
             "transcript_summary": self.transcript_summary,
             "lead_quality_score": self.lead_quality_score,
             "recommended_human_action": self.recommended_human_action,
+            "status": self.status,
             "generated_at": self.generated_at,
         }

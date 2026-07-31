@@ -95,7 +95,14 @@ def build_creative_growth_plan(
         dry_run=workspace.dry_run_default,
     )
 
-    store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+    try:
+        from services.reporting import save_report_artifacts
+        from .report import render_creative_growth_markdown
+        save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id,
+                               render_creative_growth_markdown(result), result.to_dict())
+    except Exception:  # noqa: BLE001 — the JSON result below is the durable fallback
+        store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+
     envelope.mark_completed(result.to_dict())
     log_transition(envelope, "experiment_completed")
 

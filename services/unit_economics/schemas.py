@@ -19,6 +19,7 @@ class UnitEconomicsResult:
     scenarios: list[dict[str, Any]] = field(default_factory=list)
     verdict: str = "unknown"
     dry_run: bool = True
+    status: str = "ready_for_client_service"
     generated_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
@@ -34,5 +35,6 @@ class UnitEconomicsResult:
             "scenarios": self.scenarios,
             "verdict": self.verdict,
             "dry_run": self.dry_run,
+            "status": self.status,
             "generated_at": self.generated_at,
         }

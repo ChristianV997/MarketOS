@@ -18,6 +18,7 @@ class LaunchReadiness:
     blocked_reasons: list[str] = field(default_factory=list)
     checklist: dict[str, bool] = field(default_factory=dict)
     live_mode_checklist: dict[str, Any] | None = None
+    status: str = "ready_for_client_service"
     generated_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
@@ -26,6 +27,7 @@ class LaunchReadiness:
             "blocked_reasons": list(self.blocked_reasons),
             "checklist": dict(self.checklist),
             "live_mode_checklist": self.live_mode_checklist,
+            "status": self.status,
             "generated_at": self.generated_at,
         }
 
@@ -43,6 +45,7 @@ class ContributionProfitResult:
     contribution_profit: float = 0.0
     contribution_margin: float = 0.0
     reconciliation: dict[str, Any] = field(default_factory=dict)
+    status: str = "needs_live_data"
     generated_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
@@ -58,6 +61,7 @@ class ContributionProfitResult:
             "contribution_profit": round(self.contribution_profit, 2),
             "contribution_margin": round(self.contribution_margin, 4),
             "reconciliation": self.reconciliation,
+            "status": self.status,
             "generated_at": self.generated_at,
         }
 
@@ -70,6 +74,7 @@ class ScaleDecision:
     contribution_profit: float = 0.0
     contribution_margin: float = 0.0
     roas: float = 0.0
+    status: str = "needs_live_data"
     generated_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
@@ -80,5 +85,6 @@ class ScaleDecision:
             "contribution_profit": round(self.contribution_profit, 2),
             "contribution_margin": round(self.contribution_margin, 4),
             "roas": round(self.roas, 4),
+            "status": self.status,
             "generated_at": self.generated_at,
         }

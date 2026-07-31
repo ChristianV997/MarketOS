@@ -540,6 +540,7 @@ from api.routes import (
     tiktok as _r_tiktok,
     simulation as _r_simulation,
     orchestration as _r_orchestration,
+    services as _r_services,
 )
 
 app.include_router(_r_health.router)
@@ -553,6 +554,7 @@ app.include_router(_r_agents_risk.router)
 app.include_router(_r_tiktok.router)
 app.include_router(_r_simulation.router)
 app.include_router(_r_orchestration.router)
+app.include_router(_r_services.router)
 
 
 # ── Prometheus scrape endpoint ────────────────────────────────────────────────

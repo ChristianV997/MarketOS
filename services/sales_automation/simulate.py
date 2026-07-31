@@ -69,7 +69,14 @@ def run_sales_bot_simulation(
         "qualification_flow": qualification_flow,
         "follow_up_sequence": follow_up,
     }
-    store.save(workspace.workspace_id, envelope.experiment_id, "result.json", outputs)
+    try:
+        from services.reporting import save_report_artifacts
+        from .report import render_sales_bot_setup_plan_markdown
+        markdown = render_sales_bot_setup_plan_markdown(session, handoff, qualification_flow, dry_run=workspace.dry_run_default)
+        save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id, markdown, outputs)
+    except Exception:  # noqa: BLE001 — the JSON result below is the durable fallback
+        store.save(workspace.workspace_id, envelope.experiment_id, "result.json", outputs)
+
     envelope.mark_completed(outputs)
     log_transition(envelope, "experiment_completed")
 

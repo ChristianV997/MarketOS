@@ -82,3 +82,15 @@ def save_report_artifacts(
         "report_md": store.save_text(workspace_id, experiment_id, "report.md", markdown),
         "result_json": store.save(workspace_id, experiment_id, "result.json", data),
     }
+
+
+def export_client_report(
+    store: ArtifactStore, workspace_id: str, experiment_id: str, filename: str = "report.md",
+) -> str | None:
+    """Return the on-disk path to a saved report — the single file a client
+    deliverable actually is (hand it over, email it, attach it). Never
+    raises; returns None if the report was never saved (e.g. the
+    experiment failed before a report.md was written)."""
+    path = store.path_for(workspace_id, experiment_id, filename)
+    import os
+    return path if path and os.path.exists(path) else None

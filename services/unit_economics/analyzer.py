@@ -105,6 +105,9 @@ def run_unit_economics(
     except Exception as exc:  # noqa: BLE001
         _log.debug("unit_economics_effective_cac_failed product=%s error=%s", product_name, exc)
 
+    from services.status import commercial_status
+    status = commercial_status(workspace=workspace)  # pure math, no external credentials/live data needed
+
     result = UnitEconomicsResult(
         product_name=product_name,
         category=category,
@@ -115,10 +118,19 @@ def run_unit_economics(
         required_roas=roas,
         effective_cac=eff_cac,
         verdict=verdict_from_margin(base_margin) if base_margin else "unknown",
+        status=status,
         dry_run=workspace.dry_run_default,
     )
 
-    store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+    try:
+        from services.reporting import save_report_artifacts
+        from .report import render_unit_economics_markdown
+        save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id,
+                               render_unit_economics_markdown(result), result.to_dict())
+    except Exception as exc:  # noqa: BLE001 — the JSON result below is the durable fallback
+        _log.debug("unit_economics_report_save_failed error=%s", exc)
+        store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+
     envelope.mark_completed(result.to_dict())
     log_transition(envelope, "experiment_completed")
 

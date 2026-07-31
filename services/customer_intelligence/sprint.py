@@ -31,6 +31,7 @@ class CustomerIntelligenceSprint:
     publicity_strategy: dict[str, Any] = field(default_factory=dict)
     vertical_playbook: dict[str, Any] | None = None
     dry_run: bool = True
+    status: str = "ready_for_client_service"
     generated_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
@@ -38,7 +39,7 @@ class CustomerIntelligenceSprint:
             "business_type": self.business_type, "vertical": self.vertical,
             "icp": self.icp, "segments": self.segments, "lead_strategy": self.lead_strategy,
             "publicity_strategy": self.publicity_strategy, "vertical_playbook": self.vertical_playbook,
-            "dry_run": self.dry_run, "generated_at": self.generated_at,
+            "dry_run": self.dry_run, "status": self.status, "generated_at": self.generated_at,
         }
 
 
@@ -82,7 +83,14 @@ def build_customer_intelligence_sprint(
         vertical_playbook=playbook, dry_run=workspace.dry_run_default,
     )
 
-    store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+    try:
+        from services.reporting import save_report_artifacts
+        from .report import render_customer_intelligence_markdown
+        save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id,
+                               render_customer_intelligence_markdown(result), result.to_dict())
+    except Exception:  # noqa: BLE001 — the JSON result below is the durable fallback
+        store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+
     envelope.mark_completed(result.to_dict())
     log_transition(envelope, "experiment_completed")
 

@@ -95,6 +95,9 @@ def run_product_audit(
         except Exception as exc:  # noqa: BLE001
             _log.debug("product_audit_pricing_failed error=%s", exc)
 
+    from services.status import commercial_status
+    status = commercial_status(workspace=workspace)  # no external credentials/live data needed
+
     result = ProductAuditResult(
         product_name=product_name,
         category=category,
@@ -105,9 +108,18 @@ def run_product_audit(
         data_provenance=data_provenance,
         recommendation=validation.get("recommendation", "unknown"),
         dry_run=workspace.dry_run_default,
+        status=status,
     )
 
-    store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+    try:
+        from services.reporting import save_report_artifacts
+        from .report import render_product_audit_markdown
+        save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id,
+                               render_product_audit_markdown(result), result.to_dict())
+    except Exception as exc:  # noqa: BLE001 — the JSON result below is the durable fallback
+        _log.debug("product_audit_report_save_failed error=%s", exc)
+        store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+
     envelope.mark_completed(result.to_dict())
     log_transition(envelope, "experiment_completed")
 
