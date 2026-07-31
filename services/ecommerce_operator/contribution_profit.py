@@ -29,10 +29,17 @@ def reconcile_contribution_profit(
     refunds: float = 0.0,
     supplier_costs: float = 0.0,
     payment_fees: float = 0.0,
+    has_data: bool = True,
 ) -> ContributionProfitResult:
     """Never raises: reconcile_revenue is already never-raise; this wraps
     it anyway so a surprise failure degrades to a raw (unreconciled)
-    contribution-profit estimate rather than aborting."""
+    contribution-profit estimate rather than aborting.
+
+    ``has_data`` defaults True — a direct caller supplying these numbers
+    is asserting they're real, even if the true value happens to be zero.
+    from_ledger() below passes has_data=False when the ledger has no
+    recorded events yet, so a zero result there reads as "no data" rather
+    than "genuinely zero profit" (previously indistinguishable)."""
     product_name = (envelope.inputs or {}).get("product_name", "")
     store = ArtifactStore()
 
@@ -62,6 +69,7 @@ def reconcile_contribution_profit(
         contribution_profit=contribution_profit,
         contribution_margin=contribution_margin,
         reconciliation=reconciliation,
+        has_data=has_data,
     )
 
     envelope.actual_spend = actual_spend
@@ -80,7 +88,10 @@ def from_ledger(envelope: CommercialRunEnvelope) -> ContributionProfitResult:
     supplying pre-aggregated scalars. Additive: reconcile_contribution_profit's
     direct-input signature is unchanged for callers who already have real
     numbers in hand. Never raises — an empty/missing ledger degrades to
-    an all-zero result (status stays needs_live_data), not a failure.
+    an all-zero result, but ``has_data=False`` on that result now makes
+    "no events recorded yet" distinguishable from "genuinely zero-profit
+    business result" (previously indistinguishable — see
+    docs/COMMERCE_LEDGER.md).
     """
     campaign_revenue: dict[str, float] = {}
     ground_truth_revenue: float | None = None
@@ -88,6 +99,7 @@ def from_ledger(envelope: CommercialRunEnvelope) -> ContributionProfitResult:
     actual_orders = 0
     refunds = 0.0
     supplier_costs = 0.0
+    has_data = False
 
     try:
         from backend.ledger.projections import compute_projection
@@ -98,6 +110,7 @@ def from_ledger(envelope: CommercialRunEnvelope) -> ContributionProfitResult:
         actual_orders = snapshot.order_count
         refunds = snapshot.total_refunds
         supplier_costs = snapshot.total_supplier_costs
+        has_data = snapshot.order_count > 0
     except Exception as exc:  # noqa: BLE001
         _log.debug("contribution_profit_from_ledger_projection_failed workspace=%s error=%s",
                    envelope.workspace_id, exc)
@@ -110,4 +123,5 @@ def from_ledger(envelope: CommercialRunEnvelope) -> ContributionProfitResult:
         actual_orders=actual_orders,
         refunds=refunds,
         supplier_costs=supplier_costs,
+        has_data=has_data,
     )

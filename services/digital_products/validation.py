@@ -6,6 +6,12 @@ number of buyers, given a conservative conversion-rate assumption? These
 assumptions are explicitly labeled as assumptions (not fabricated "real"
 data) — override assumed_conversion_rate_pct with your own funnel data
 once you have it.
+
+This is a traffic/conversion-funnel estimate, deliberately distinct from
+services.digital_products.economics (unit-economics/margin, wrapping
+backend.validation.margin_calculator) and from backend/validation itself
+(product-opportunity validation) — a required_traffic_estimate is not a
+margin and shouldn't be computed alongside one in the same function.
 """
 from __future__ import annotations
 

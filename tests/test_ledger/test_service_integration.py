@@ -64,6 +64,7 @@ def test_contribution_profit_from_ledger_empty_ledger_yields_zero_result():
     assert result.actual_orders == 0
     assert result.contribution_profit == 0.0
     assert result.status == "needs_live_data"
+    assert result.has_data is False  # no events recorded yet, not "genuinely zero profit"
 
 
 def test_contribution_profit_from_ledger_matches_hand_computed_projection():
@@ -93,3 +94,4 @@ def test_contribution_profit_from_ledger_matches_hand_computed_projection():
     # raw campaign_revenue (100.0, from revenue_by_channel) against it.
     assert result.actual_revenue_raw == 100.0
     assert result.actual_revenue_reconciled <= 100.0
+    assert result.has_data is True

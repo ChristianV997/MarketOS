@@ -11,6 +11,7 @@ from backend.workspaces.client_workspace import ClientWorkspace
 
 from .checklist import build_launch_checklist
 from .content_plan import generate_content_plan
+from .economics import estimate_digital_product_margin
 from .funnel import build_funnel_plan
 from .offer import create_digital_offer
 from .schemas import DigitalProductPlan
@@ -58,6 +59,7 @@ def build_digital_product_plan(
     funnel = build_funnel_plan(offer)
     content_plan = generate_content_plan(offer)
     validation = validate_digital_product(offer, target_buyers=target_buyers, has_existing_audience=has_existing_audience)
+    margin = estimate_digital_product_margin(price)
     checklist = build_launch_checklist(offer, funnel, validation)
 
     decision_criteria = {
@@ -68,7 +70,7 @@ def build_digital_product_plan(
 
     result = DigitalProductPlan(
         offer=offer.to_dict(), funnel=funnel.to_dict(), content_plan=content_plan,
-        validation=validation.to_dict(), launch_checklist=checklist,
+        validation=validation.to_dict(), margin=margin, launch_checklist=checklist,
         metrics_to_track=list(_DEFAULT_METRICS), decision_criteria=decision_criteria,
         dry_run=workspace.dry_run_default,
     )

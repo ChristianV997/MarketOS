@@ -19,6 +19,8 @@ def test_returns_plan_and_completed_envelope():
     assert plan.offer["offer_name"] == "My Playbook"
     assert plan.validation["verdict"] == "strong"
     assert plan.launch_checklist
+    assert plan.margin
+    assert plan.margin["retail_price"] == 99.0
     assert envelope.service_name == "digital_products"
     assert envelope.status == "completed"
 

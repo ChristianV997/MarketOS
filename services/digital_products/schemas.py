@@ -62,6 +62,7 @@ class DigitalProductPlan:
     funnel: dict[str, Any] = field(default_factory=dict)
     content_plan: dict[str, Any] = field(default_factory=dict)
     validation: dict[str, Any] = field(default_factory=dict)
+    margin: dict[str, Any] = field(default_factory=dict)
     launch_checklist: list[dict[str, Any]] = field(default_factory=list)
     metrics_to_track: list[str] = field(default_factory=list)
     decision_criteria: dict[str, Any] = field(default_factory=dict)
@@ -72,7 +73,7 @@ class DigitalProductPlan:
     def to_dict(self) -> dict[str, Any]:
         return {
             "offer": self.offer, "funnel": self.funnel, "content_plan": self.content_plan,
-            "validation": self.validation, "launch_checklist": self.launch_checklist,
+            "validation": self.validation, "margin": self.margin, "launch_checklist": self.launch_checklist,
             "metrics_to_track": self.metrics_to_track, "decision_criteria": self.decision_criteria,
             "dry_run": self.dry_run, "status": self.status, "generated_at": self.generated_at,
         }

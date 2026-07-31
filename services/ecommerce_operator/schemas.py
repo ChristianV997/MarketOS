@@ -45,6 +45,7 @@ class ContributionProfitResult:
     contribution_profit: float = 0.0
     contribution_margin: float = 0.0
     reconciliation: dict[str, Any] = field(default_factory=dict)
+    has_data: bool = True
     status: str = "needs_live_data"
     generated_at: float = field(default_factory=time.time)
 
@@ -61,6 +62,7 @@ class ContributionProfitResult:
             "contribution_profit": round(self.contribution_profit, 2),
             "contribution_margin": round(self.contribution_margin, 4),
             "reconciliation": self.reconciliation,
+            "has_data": self.has_data,
             "status": self.status,
             "generated_at": self.generated_at,
         }
