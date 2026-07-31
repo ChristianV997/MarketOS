@@ -75,5 +75,6 @@ qdrant-client>=1.9.0   # Qdrant vector store (in-memory fallback used without Do
 # ── dev / test ────────────────────────────────────────────────────────────────
 pytest
 pytest-asyncio
+pytest-xdist
 PyYAML>=6.0
 streamlit
