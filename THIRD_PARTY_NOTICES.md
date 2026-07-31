@@ -12,7 +12,7 @@ legal advice.
 | medusa | v2.14.2 | MIT | Commerce sidecar; retain its upstream MIT notice. |
 | crawl4ai | v0.8.6 | Apache-2.0-with-attribution | Optional research worker; retain Apache notice and required attribution. |
 | browser-use | v0.13.6 | MIT | Optional browser worker; retain upstream MIT notice. |
-| pydantic-ai | v1.104.0 | MIT | Optional typed-agent profile; retain upstream MIT notice. |
+| pydantic-ai | v2.20.0 | MIT | Optional typed-agent profile; retain upstream MIT notice. |
 | postiz | pending-legal-review | AGPL-3.0 | Independently deployed sidecar only; commercial use requires explicit legal approval. |
 | n8n | n8n@2.30.5 | Sustainable-Use | Internal operational sidecar only; do not embed or white-label without review. |
 | erpnext | pending-deferred-review | GPL-3.0 | Deferred; do not vendor into the commercial core. |

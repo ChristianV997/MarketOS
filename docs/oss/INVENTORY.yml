@@ -41,7 +41,7 @@ candidates:
     status: selected
     owner: agents
     capabilities: [typed_agents, structured_output, mcp, approvals]
-    reviewed_ref: v1.104.0
+    reviewed_ref: v2.20.0
   - name: postiz
     repository: https://github.com/gitroomhq/postiz-app
     license: AGPL-3.0

@@ -10,4 +10,4 @@
 # wired in, a larger follow-up beyond the current last-order-timestamp
 # tracking), the existing Beta-Binomial estimate remains the one actually
 # used. Installing this package alone does not change behavior.
-pymc-marketing>=0.8
+pymc-marketing>=0.19.4
