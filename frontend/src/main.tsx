@@ -7,6 +7,12 @@ import App from "./App";
 import Shell from "./components/layout/Shell";
 import Dashboard from "./pages/Dashboard";
 import Campaigns from "./pages/Campaigns";
+import Products from "./pages/Products";
+import Creatives from "./pages/Creatives";
+import Signals from "./pages/Signals";
+import Runtime from "./pages/Runtime";
+import Risk from "./pages/Risk";
+import Replay from "./pages/Replay";
 
 const queryClient = new QueryClient();
 
@@ -16,6 +22,12 @@ const router = createBrowserRouter([
     children: [
       { path: "/", element: <Dashboard /> },
       { path: "/campaigns", element: <Campaigns /> },
+      { path: "/products", element: <Products /> },
+      { path: "/creatives", element: <Creatives /> },
+      { path: "/signals", element: <Signals /> },
+      { path: "/runtime", element: <Runtime /> },
+      { path: "/risk", element: <Risk /> },
+      { path: "/replay", element: <Replay /> },
     ],
   },
   // Retained during the Stratum 2 migration (see docs/SERVICE_MODULES.md) —
