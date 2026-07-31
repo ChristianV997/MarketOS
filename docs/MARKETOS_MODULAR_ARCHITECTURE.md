@@ -73,11 +73,14 @@ Two things sit alongside every layer above, not inside one of them:
 | `backend/workspaces/` | ClientWorkspace, CredentialScope, LiveModeChecklist, ArtifactStore (Phase 1) |
 | `backend/experiments/` | CommercialRunEnvelope, ExperimentRegistry, audit_log (Phase 1) |
 | `backend/ledger/` | Event-sourced commerce ledger (OrderCreated/PaymentCaptured/.../AdSpendObserved) + derived CAC/contribution-profit/cash-conversion-cycle projections — see `docs/COMMERCE_LEDGER.md` |
+| `backend/providers/` | Provider Registry — static commerce/payment/hosting/automation provider catalog + cost-component data — see `docs/PROVIDER_REGISTRY.md` |
+| `backend/costs/` | Cost Engine — composes `backend.validation.margin_calculator` to price a specific provider stack (fixed cost, payment fees, margin-after-stack-cost, break-even client price) |
+| `backend/stack_planner/` | Stack Planner — recommends a commerce/payment/automation stack per business, applying hard cost-governance rules — see `docs/STACK_PLANNER.md`; wrapped as a sellable service by `services/profit_stack_advisor/` |
 | `backend/dao_future/` | Placeholder-only future governance schemas (Phase 8) |
 | `marketos/cli.py` | Terminal entrypoint for the service modules |
 | `api/routes/services.py` | REST wrappers for all 8 service modules (`/api/services/*`) |
 | `frontend/src/pages/Services.tsx` | Dashboard UI — a form + live result panel per module, hitting the same `/api/services/*` routes as the CLI |
-| `docs/` | This doc + `SERVICE_MODULES.md`, `COMMERCIAL_RUN_ENVELOPE.md`, `LIVE_MODE_SAFETY.md`, `OWN_ECOMMERCE_VALIDATION_WORKFLOW.md`, `DIGITAL_PRODUCT_WORKFLOW.md`, `SALES_AUTOMATION_MODULE.md`, `DAO_FUTURE_ARCHITECTURE.md`, `COMMERCE_LEDGER.md` |
+| `docs/` | This doc + `SERVICE_MODULES.md`, `COMMERCIAL_RUN_ENVELOPE.md`, `LIVE_MODE_SAFETY.md`, `OWN_ECOMMERCE_VALIDATION_WORKFLOW.md`, `DIGITAL_PRODUCT_WORKFLOW.md`, `SALES_AUTOMATION_MODULE.md`, `DAO_FUTURE_ARCHITECTURE.md`, `COMMERCE_LEDGER.md`, `COST_AWARE_INTEGRATION_AUDIT.md`, `PROVIDER_REGISTRY.md`, `STACK_PLANNER.md`, `LOW_COST_MEXICO_STACK.md` |
 | everything else (`backend/discovery`, `backend/decision`, `core/*`, `orchestrator/`, ...) | Pre-existing core engine — reused, never duplicated |
 
 ## Operating modes

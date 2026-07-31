@@ -56,7 +56,7 @@ components:
     license: MIT
     reviewed_ref: pending-deferred-review
     distribution: sidecar
-    notice: Deferred by explicit user decision (consolidation pass); lowest license risk of the deferred candidates if revisited.
+    notice: Advanced to candidate_for_conversation_sidecar during the cost-aware stack-planner pass (lowest license risk of the deferred candidates); no adapter or code exists yet — status advancement only.
   - name: cal.com
     license: AGPL-3.0
     reviewed_ref: pending-deferred-review
@@ -77,3 +77,18 @@ components:
     reviewed_ref: pending-deferred-review
     distribution: optional_worker
     notice: Deferred; redundant with crawl4ai + firecrawl already selected for scraping.
+  - name: woocommerce
+    license: GPL-3.0
+    reviewed_ref: pending-version-pin
+    distribution: sidecar
+    notice: Merchant-operated WordPress plugin; no MarketOS-vendored source. Adapter implements the existing CommerceProvider Protocol. GPL-3.0 is a restricted license under commercial OSS policy (same precedent as Postiz) — legal review required before commercial deployment.
+  - name: mautic
+    license: GPL-3.0-or-later
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Catalog/cost-comparison data only; no MarketingAutomationPort or adapter built yet (Phase 2, deferred).
+  - name: activepieces
+    license: MIT
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Catalog/cost-comparison data only; no WorkflowPort or adapter built yet (Phase 2, deferred).

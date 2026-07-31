@@ -29,6 +29,14 @@ behavior unless a caller explicitly supplies the new parameters):
     single-order CAC, so a consumable with real repeat-purchase potential
     correctly outranks a one-off novelty item with identical first-order
     margin.
+
+Cost Engine additions (``backend/costs``, all opt-in): ``calculate_margin``
+and ``suggest_retail_price`` accept optional ``payment_fee_pct``,
+``payment_fee_fixed``, and ``platform_monthly_fee`` overrides so a caller
+modeling a specific provider stack (e.g. WooCommerce + Mercado Pago MX) can
+drive this same math with that stack's real fees instead of the global
+env-tunable defaults. Omitting all three is byte-identical to pre-existing
+behavior.
 """
 from __future__ import annotations
 
@@ -93,6 +101,9 @@ def calculate_margin(
     expected_monthly_revenue: float = 5000.0,
     return_rate: float | None = None,
     category: str = "general",
+    payment_fee_pct: float | None = None,
+    payment_fee_fixed: float | None = None,
+    platform_monthly_fee: float | None = None,
 ) -> dict:
     """Return the full unit-economics breakdown for one sale.
 
@@ -104,9 +115,21 @@ def calculate_margin(
     today's 12% default; callers that pass ``return_rate`` explicitly keep
     that exact value regardless of category (unchanged legacy override
     behavior).
+
+    ``payment_fee_pct``/``payment_fee_fixed``/``platform_monthly_fee``, when
+    omitted (``None``), fall back to the module's env-tunable defaults
+    (``_PAYMENT_FEE_PCT``/``_PAYMENT_FEE_FIXED``/``_PLATFORM_MONTHLY``) —
+    byte-identical to pre-existing behavior. Pass them explicitly to model a
+    specific provider stack's real fees (see ``backend/costs``).
     """
     if return_rate is None:
         return_rate = category_return_rate(category)
+    if payment_fee_pct is None:
+        payment_fee_pct = _PAYMENT_FEE_PCT
+    if payment_fee_fixed is None:
+        payment_fee_fixed = _PAYMENT_FEE_FIXED
+    if platform_monthly_fee is None:
+        platform_monthly_fee = _PLATFORM_MONTHLY
 
     if retail_price <= 0:
         return {
@@ -123,11 +146,11 @@ def calculate_margin(
     landed_cost  = supplier_cost + shipping_cost
     gross_margin = retail_price - landed_cost
 
-    payment_fee = retail_price * _PAYMENT_FEE_PCT + _PAYMENT_FEE_FIXED
+    payment_fee = retail_price * payment_fee_pct + payment_fee_fixed
 
     # Subscription amortized per order: monthly fee spread over expected orders
     expected_orders = max(expected_monthly_revenue / retail_price, 1.0)
-    platform_fee    = _PLATFORM_MONTHLY / expected_orders
+    platform_fee    = platform_monthly_fee / expected_orders
 
     # Expected loss from returns: refunded revenue minus recovered nothing
     # (dropship returns are rarely restocked) → lose the gross margin on
@@ -364,11 +387,18 @@ def suggest_retail_price(
     monthly_ad_spend: float = 500.0,
     expected_monthly_revenue: float = 5000.0,
     return_rate: float = 0.12,
+    payment_fee_pct: float | None = None,
+    payment_fee_fixed: float | None = None,
+    platform_monthly_fee: float | None = None,
 ) -> float:
     """Find the lowest retail price hitting the target net margin (bisection).
 
     Searches between 1x and 10x landed cost; returns the 10x cap if even that
     can't reach the target (caller should treat the product as unviable).
+
+    ``payment_fee_pct``/``payment_fee_fixed``/``platform_monthly_fee`` are
+    forwarded to ``calculate_margin`` unchanged (see its docstring); omitting
+    all three is byte-identical to pre-existing behavior.
     """
     if landed_cost <= 0:
         return 0.0
@@ -380,6 +410,9 @@ def suggest_retail_price(
             monthly_ad_spend=monthly_ad_spend,
             expected_monthly_revenue=expected_monthly_revenue,
             return_rate=return_rate,
+            payment_fee_pct=payment_fee_pct,
+            payment_fee_fixed=payment_fee_fixed,
+            platform_monthly_fee=platform_monthly_fee,
         )
         if result["net_margin_pct"] < target_net_margin_pct:
             lo = mid

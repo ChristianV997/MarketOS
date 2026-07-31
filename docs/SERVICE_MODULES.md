@@ -229,6 +229,52 @@ launch checklist, metrics to track, kill/iterate/scale criteria, `status`.
 
 ---
 
+## 8. Profit Stack Advisor (`services.profit_stack_advisor`)
+
+**What it does**: recommends the cheapest sufficient commerce/payment stack
+for a business (Hostinger+WooCommerce vs. Shopify vs. Medusa; Stripe MX vs.
+Mercado Pago MX), applies hard cost-governance rules (no GoHighLevel below
+its revenue threshold, no Shopify when WooCommerce is sufficient and the
+business is margin-sensitive, n8n never for a white-labeled client-facing
+product, Postiz never without explicit legal approval), and reports the
+resulting fixed/variable cost, margin-after-stack-cost, and break-even
+client price — composing `backend.providers`, `backend.costs`, and
+`backend.stack_planner` rather than reimplementing any of that logic. See
+`docs/STACK_PLANNER.md` and `docs/COST_AWARE_INTEGRATION_AUDIT.md`.
+
+**Who buys it**: anyone standing up a new store or client engagement who
+wants the stack decision made for them instead of guessing, or an agency
+that wants a defensible, documented cost/margin case for its recommended
+stack.
+
+**Inputs**: `business_name`, `business_model`, `target_geo`,
+`expected_monthly_revenue`, `expected_monthly_orders`, `margin_sensitivity`,
+`is_white_labeled_client_facing`, `postiz_legal_approval`, `category`,
+`supplier_cost`, `retail_price`, `workspace`.
+
+**Outputs**: `ProfitStackAdvisorResult` — the `BusinessStackRecommendation`
+(commerce/payment/automation provider picks, reasons, blocked providers with
+reasons), an optional cost comparison against the premium Shopify
+alternative, `dry_run`, `status`.
+
+**CLI**: `python -m marketos.cli services profit-stack-advisor --business-name "NAME" --business-model own_ecommerce [--target-geo MX] [--expected-monthly-revenue R] [--expected-monthly-orders N] [--margin-sensitivity S] [--white-labeled-client-facing] [--postiz-legal-approval] [--category CAT] [--supplier-cost C] [--retail-price P] [--workspace W] [--json]`
+— a lighter, non-billable variant with the same request shape but no
+envelope/audit-log is also available: `python -m marketos.cli stack recommend ...`.
+
+**API**: `POST /api/services/profit-stack-advisor`
+
+**Report**: *MarketOS Profit Stack Advisor*
+
+**Status**: `ready_for_client_service`
+
+**Phase 2 (deferred, not built yet)**: CRM/Conversation/Analytics/Marketing-
+Automation/Hosting provider ports and their adapters (Twenty, Chatwoot,
+Mautic, Activepieces, PostHog backend, Hostinger), and the
+`high_ticket_lead_gen_*`/`agency_white_label_fast` strategies that depend on
+them — see `docs/COST_AWARE_INTEGRATION_AUDIT.md`.
+
+---
+
 ## SaaS-lite readiness (Phase 7)
 
 What exists today:

@@ -113,6 +113,27 @@ class WorkflowAutomationProvider(Protocol):
     def trigger(self, workflow: str, payload: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
 
 
+class PaymentProvider(Protocol):
+    """Fee-estimation and read-only payment/refund reconciliation boundary.
+
+    Distinct from connectors.stripe_connector.get_revenue's ground-truth
+    revenue job: no PaymentProvider implementation moves money directly or
+    reconciles recognized revenue — it only estimates processing fees and
+    reads payment/refund records for stack-cost planning."""
+
+    def health(self) -> AdapterHealth: ...
+
+    def estimate_fee(self, amount: float, *, currency: str = "MXN", payment_method: str = "card") -> Mapping[str, Any]: ...
+
+    def list_payments(self, *, limit: int = 50, since: str | None = None) -> Sequence[Mapping[str, Any]]: ...
+
+    def get_payment(self, payment_id: str) -> Mapping[str, Any]: ...
+
+    def list_refunds(self, payment_id: str) -> Sequence[Mapping[str, Any]]: ...
+
+    def handle_webhook(self, payload: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+
 class AgentProvider(Protocol):
     def health(self) -> AdapterHealth: ...
 

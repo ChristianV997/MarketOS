@@ -37,6 +37,20 @@ class TestCredentialScopeUnsupported:
             assert scope[integration]["status"] == "not_yet_supported"
 
 
+class TestCredentialScopeStackPlannerIntegrations:
+    def test_woocommerce_and_mx_payment_keys_resolve(self, monkeypatch):
+        monkeypatch.setattr(config, "list_configured_services", lambda: {"woocommerce": True, "stripe": False, "mercadopago_mx": True})
+        monkeypatch.setattr(config, "is_dry_run", lambda svc: svc != "woocommerce")
+        ws = ClientWorkspace(name="x")
+
+        scope = scope_for(ws)
+
+        assert scope["woocommerce"]["status"] == "configured"
+        assert scope["woocommerce"]["dry_run"] is False
+        assert scope["payment_provider_mx_stripe"]["status"] == "not_configured"
+        assert scope["payment_provider_mx_mercadopago"]["status"] == "configured"
+
+
 class TestCredentialScopeWorkspaceAllowList:
     def test_allowed_integrations_restricts_allowed_flag(self, monkeypatch):
         monkeypatch.setattr(config, "list_configured_services", lambda: {"shopify": True})

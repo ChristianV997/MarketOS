@@ -40,13 +40,17 @@ def build_report(inventory: Path = INVENTORY) -> dict[str, Any]:
     from backend.agents.pydantic_boundary import PydanticAIAgentProvider
     from backend.integrations.browser_use_worker import BrowserUseWorker
     from backend.integrations.medusa import MedusaCommerceAdapter
+    from backend.integrations.mercado_pago_mx import MercadoPagoMxPaymentAdapter
     from backend.integrations.n8n import N8nAutomationAdapter
     from backend.integrations.postiz import PostizPublisherAdapter
+    from backend.integrations.stripe_mx import StripeMxPaymentAdapter
+    from backend.integrations.woocommerce import WooCommerceCommerceAdapter
     from backend.contracts.adapters import SidecarContext
 
     providers = [
         MedusaCommerceAdapter(), Crawl4AIResearchAdapter(), BrowserUseWorker(),
         PostizPublisherAdapter(), N8nAutomationAdapter(), PydanticAIAgentProvider(),
+        WooCommerceCommerceAdapter(), StripeMxPaymentAdapter(), MercadoPagoMxPaymentAdapter(),
     ]
     return {
         "inventory": str(inventory),
@@ -57,6 +61,9 @@ def build_report(inventory: Path = INVENTORY) -> dict[str, Any]:
             "medusa": MedusaCommerceAdapter().create_order({}, context=SidecarContext()),
             "postiz": PostizPublisherAdapter().publish({}, context=SidecarContext()),
             "n8n": N8nAutomationAdapter().trigger("alerts", {}, context=SidecarContext()),
+            "woocommerce": WooCommerceCommerceAdapter().create_order({}, context=SidecarContext()),
+            "stripe_mx": StripeMxPaymentAdapter().handle_webhook({}, context=SidecarContext()),
+            "mercado_pago_mx": MercadoPagoMxPaymentAdapter().handle_webhook({}, context=SidecarContext()),
         },
     }
 

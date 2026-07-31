@@ -189,3 +189,35 @@ def sales_automation(
         })
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
+
+
+@router.post("/profit-stack-advisor")
+def profit_stack_advisor(
+    business_name: str,
+    business_model: str = "own_ecommerce",
+    target_geo: str = "MX",
+    expected_monthly_revenue: float = 5000.0,
+    expected_monthly_orders: float = 0.0,
+    margin_sensitivity: str = "standard",
+    is_white_labeled_client_facing: bool = False,
+    postiz_legal_approval: bool = False,
+    category: str = "general",
+    supplier_cost: float = 0.0,
+    retail_price: float = 0.0,
+    workspace: str | None = None,
+):
+    """Cost-aware commerce/payment stack recommendation + margin/break-even
+    report (backend.stack_planner + backend.costs). Never raises for the
+    same reason as the routes above."""
+    from services.profit_stack_advisor.advisor import run_profit_stack_advisor
+    try:
+        result, envelope = run_profit_stack_advisor(
+            business_name, business_model=business_model, target_geo=target_geo,
+            expected_monthly_revenue=expected_monthly_revenue, expected_monthly_orders=expected_monthly_orders,
+            margin_sensitivity=margin_sensitivity, is_white_labeled_client_facing=is_white_labeled_client_facing,
+            postiz_legal_approval=postiz_legal_approval, category=category,
+            supplier_cost=supplier_cost, retail_price=retail_price, workspace=_resolve_workspace(workspace),
+        )
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}

@@ -7,6 +7,8 @@
     python -m marketos.cli services customer-intelligence --business-type TYPE [...]
     python -m marketos.cli services digital-product --offer-name NAME [...]
     python -m marketos.cli services sales-bot-sim --vertical car_sales [--message "..." ...]
+    python -m marketos.cli services profit-stack-advisor --business-name NAME --business-model own_ecommerce [...]
+    python -m marketos.cli stack recommend --business-model own_ecommerce --target-geo MX [...]
 
 Dispatches straight to each service module's run_*/simulate function, which
 are already never-raise; this module's own try/except at main() is the one
@@ -178,6 +180,68 @@ def _cmd_sales_bot_sim(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_stack_request_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--business-model", default="own_ecommerce", help="e.g. own_ecommerce, client_ecommerce, marketos_owned_stack")
+    parser.add_argument("--target-geo", default="MX")
+    parser.add_argument("--expected-monthly-revenue", type=float, default=5000.0)
+    parser.add_argument("--expected-monthly-orders", type=float, default=0.0)
+    parser.add_argument("--margin-sensitivity", default="standard", help="low_cost_validation|standard|premium_brand")
+    parser.add_argument("--white-labeled-client-facing", action="store_true")
+    parser.add_argument("--postiz-legal-approval", action="store_true")
+    parser.add_argument("--category", default="general")
+    parser.add_argument("--supplier-cost", type=float, default=0.0)
+    parser.add_argument("--retail-price", type=float, default=0.0)
+    parser.add_argument("--workspace", default=None)
+    parser.add_argument("--json", action="store_true")
+
+
+def _cmd_profit_stack_advisor(args: argparse.Namespace) -> int:
+    from services.profit_stack_advisor.advisor import run_profit_stack_advisor
+    from services.profit_stack_advisor.report import render_profit_stack_advisor_markdown
+
+    workspace = _resolve_workspace(args.workspace)
+    result, _envelope = run_profit_stack_advisor(
+        args.business_name, business_model=args.business_model, target_geo=args.target_geo,
+        expected_monthly_revenue=args.expected_monthly_revenue, expected_monthly_orders=args.expected_monthly_orders,
+        margin_sensitivity=args.margin_sensitivity, is_white_labeled_client_facing=args.white_labeled_client_facing,
+        postiz_legal_approval=args.postiz_legal_approval, category=args.category,
+        supplier_cost=args.supplier_cost, retail_price=args.retail_price, workspace=workspace,
+    )
+    _print_result(result, render_profit_stack_advisor_markdown(result), as_json=args.json)
+    return 0
+
+
+def _cmd_stack_recommend(args: argparse.Namespace) -> int:
+    """Lighter, non-billable planning utility — no CommercialRunEnvelope/audit
+    log, unlike the sellable `services profit-stack-advisor`."""
+    from backend.stack_planner.planner import recommend_stack
+    from backend.stack_planner.schemas import BusinessStackRequest
+
+    workspace = _resolve_workspace(args.workspace)
+    request = BusinessStackRequest(
+        business_model=args.business_model, target_geo=args.target_geo,
+        expected_monthly_revenue_usd=args.expected_monthly_revenue, expected_monthly_orders=args.expected_monthly_orders,
+        margin_sensitivity=args.margin_sensitivity, is_white_labeled_client_facing=args.white_labeled_client_facing,
+        postiz_legal_approval=args.postiz_legal_approval, category=args.category,
+        supplier_cost=args.supplier_cost, retail_price=args.retail_price, workspace=workspace,
+    )
+    result = recommend_stack(request)
+    if args.json:
+        from services.reporting import json_safe
+        print(json.dumps(json_safe(result.to_dict()), indent=2, default=str))
+    else:
+        print(f"strategy: {result.strategy_id} ({result.status})")
+        if result.commerce_provider_recommendation:
+            print(f"commerce: {result.commerce_provider_recommendation.provider_id}")
+        if result.payment_provider_recommendation:
+            print(f"payment: {result.payment_provider_recommendation.provider_id}")
+        for rec in result.automation_recommendations:
+            print(f"automation: {rec.provider_id} blocked={rec.blocked} {rec.blocked_reason}")
+        for warning in result.warnings:
+            print(f"warning: {warning}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="marketos", description="MarketOS service modules CLI")
     top = parser.add_subparsers(dest="group", required=True)
@@ -253,6 +317,17 @@ def build_parser() -> argparse.ArgumentParser:
     sales_bot.add_argument("--workspace", default=None)
     sales_bot.add_argument("--json", action="store_true")
     sales_bot.set_defaults(func=_cmd_sales_bot_sim)
+
+    profit_stack = services_sub.add_parser("profit-stack-advisor", help="Cost-aware commerce/payment stack recommendation + margin/break-even report")
+    profit_stack.add_argument("--business-name", required=True)
+    _add_stack_request_args(profit_stack)
+    profit_stack.set_defaults(func=_cmd_profit_stack_advisor)
+
+    stack = top.add_parser("stack", help="Cost-aware business stack planning (backend.stack_planner)")
+    stack_sub = stack.add_subparsers(dest="command", required=True)
+    stack_recommend = stack_sub.add_parser("recommend", help="Recommend a commerce/payment/automation stack for a business model (non-billable utility)")
+    _add_stack_request_args(stack_recommend)
+    stack_recommend.set_defaults(func=_cmd_stack_recommend)
 
     return parser
 

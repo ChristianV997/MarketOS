@@ -126,6 +126,22 @@ class TestSalesAutomationRoute:
         assert data["experiment_id"]
 
 
+class TestProfitStackAdvisorRoute:
+    def test_returns_result_and_experiment_id(self, client):
+        resp = client.post(
+            "/api/services/profit-stack-advisor",
+            params={"business_name": "Own Store", "business_model": "own_ecommerce"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["result"]["recommendation"]["commerce_provider_recommendation"]["provider_id"] == "woocommerce"
+        assert data["experiment_id"]
+
+    def test_missing_required_param_returns_422(self, client):
+        resp = client.post("/api/services/profit-stack-advisor")
+        assert resp.status_code == 422
+
+
 class TestServicesRouteNeverRaises:
     def test_unexpected_failure_returns_error_dict_not_500(self, client, monkeypatch):
         def _boom(*a, **k):

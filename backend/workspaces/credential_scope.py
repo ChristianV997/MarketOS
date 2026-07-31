@@ -28,6 +28,9 @@ _INTEGRATION_TO_CONFIG_SERVICE: dict[str, str | None] = {
     "email": None,
     "calendar": None,
     "content_scheduler": None,
+    "woocommerce": "woocommerce",
+    "payment_provider_mx_stripe": "stripe",
+    "payment_provider_mx_mercadopago": "mercadopago_mx",
 }
 
 _STATUS_CONFIGURED = "configured"
