@@ -72,12 +72,23 @@ def test_alert_summary_aggregates(isolated_alerts):
 
 class TestStuckWorkflowAlert:
     def test_fires_for_a_workflow_stuck_past_the_age_threshold(self, isolated_alerts, monkeypatch):
+        import importlib
+        es_mod = importlib.import_module("backend.orchestration.event_store")
+
         monkeypatch.setattr(alerts_mod, "_STUCK_WORKFLOW_MIN_AGE_S", 1.0)
         from backend.orchestration.event_store import event_store, new_workflow_id
         wid = new_workflow_id("fulfillment")
-        event_store.append(wid, "workflow_started", workflow="fulfillment",
-                           step="place_order", data={"order_id": "crashed_order"})
-        time.sleep(1.1)
+        # Backdate the append instead of sleeping past the age threshold —
+        # restored immediately after, without disturbing isolated_alerts'
+        # other monkeypatches (a bare monkeypatch.undo() here would revert
+        # those too).
+        real_time = es_mod.time.time
+        es_mod.time.time = lambda: real_time() - 1.1
+        try:
+            event_store.append(wid, "workflow_started", workflow="fulfillment",
+                               step="place_order", data={"order_id": "crashed_order"})
+        finally:
+            es_mod.time.time = real_time
 
         fired = alerts_mod.evaluate_alerts()
         assert any(a["key"] == "stuck_workflow" for a in fired)
@@ -92,12 +103,19 @@ class TestStuckWorkflowAlert:
         assert not any(a["key"] == "stuck_workflow" for a in fired)
 
     def test_completed_workflow_does_not_fire(self, isolated_alerts, monkeypatch):
+        import importlib
+        es_mod = importlib.import_module("backend.orchestration.event_store")
+
         monkeypatch.setattr(alerts_mod, "_STUCK_WORKFLOW_MIN_AGE_S", 1.0)
         from backend.orchestration.event_store import event_store, new_workflow_id
         wid = new_workflow_id("fulfillment")
-        event_store.append(wid, "workflow_started", workflow="fulfillment", step="place_order")
-        event_store.append(wid, "workflow_completed", workflow="fulfillment", step="place_order")
-        time.sleep(1.1)
+        real_time = es_mod.time.time
+        es_mod.time.time = lambda: real_time() - 1.1
+        try:
+            event_store.append(wid, "workflow_started", workflow="fulfillment", step="place_order")
+            event_store.append(wid, "workflow_completed", workflow="fulfillment", step="place_order")
+        finally:
+            es_mod.time.time = real_time
         fired = alerts_mod.evaluate_alerts()
         assert not any(a["key"] == "stuck_workflow" for a in fired)
 

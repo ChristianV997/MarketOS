@@ -70,11 +70,16 @@ def test_cost_report_error_rate():
     assert report["error_rate"] > 0
 
 
-def test_cost_timeline_bucketing():
+def test_cost_timeline_bucketing(monkeypatch):
     """Cost timeline buckets costs by time."""
+    import backend.cost_tracking as ct
+
+    real_time = time.time
+    monkeypatch.setattr(ct.time, "time", lambda: real_time())
     with track_api_call("test", "op", cost_usd=0.001):
         pass
-    time.sleep(0.1)  # Small delay to ensure bucket separation
+    # Jump forward instead of sleeping, to deterministically separate buckets
+    monkeypatch.setattr(ct.time, "time", lambda: real_time() + 0.1)
     with track_api_call("test", "op", cost_usd=0.002):
         pass
 
