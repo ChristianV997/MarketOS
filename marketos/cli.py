@@ -2,12 +2,12 @@
 
     python -m marketos.cli services product-audit --product NAME [...]
     python -m marketos.cli services unit-economics --product NAME --cost C --price P [...]
+    python -m marketos.cli services sales-bot-sim --vertical car_sales [--message "..." ...]
 
-Two subcommands only for this phase (see docs/plan for what's deferred).
-Dispatches straight to services.product_research/services.unit_economics'
-run_* functions, which are already never-raise; this module's own
-try/except at main() is the one place allowed to be a normal exception
-boundary, since it isn't the money path itself.
+Dispatches straight to each service module's run_*/simulate function, which
+are already never-raise; this module's own try/except at main() is the one
+place allowed to be a normal exception boundary, since it isn't the money
+path itself.
 """
 from __future__ import annotations
 
@@ -63,6 +63,29 @@ def _cmd_unit_economics(args: argparse.Namespace) -> int:
     return 0
 
 
+_DEMO_LEAD_MESSAGES = [
+    "Hi, I'm interested and looking to get started soon",
+    "My budget is around $2,000 and I'm located nearby",
+]
+
+
+def _cmd_sales_bot_sim(args: argparse.Namespace) -> int:
+    from services.sales_automation.report import render_sales_bot_setup_plan_markdown
+    from services.sales_automation.simulate import run_sales_bot_simulation
+
+    workspace = _resolve_workspace(args.workspace)
+    messages = args.message or list(_DEMO_LEAD_MESSAGES)
+    session, handoff, flow, _envelope = run_sales_bot_simulation(args.vertical, messages, workspace=workspace)
+
+    if args.json:
+        print(json.dumps({
+            "session": session.to_dict(), "handoff": handoff.to_dict(), "qualification_flow": flow,
+        }, indent=2, default=str))
+    else:
+        print(render_sales_bot_setup_plan_markdown(session, handoff, flow))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="marketos", description="MarketOS service modules CLI")
     top = parser.add_subparsers(dest="group", required=True)
@@ -87,6 +110,13 @@ def build_parser() -> argparse.ArgumentParser:
     unit_econ.add_argument("--workspace", default=None)
     unit_econ.add_argument("--json", action="store_true")
     unit_econ.set_defaults(func=_cmd_unit_economics)
+
+    sales_bot = services_sub.add_parser("sales-bot-sim", help="Simulate a lead-qualification chat conversation (local only, no real messaging)")
+    sales_bot.add_argument("--vertical", required=True)
+    sales_bot.add_argument("--message", action="append", help="A scripted lead message; repeat for a multi-turn conversation. Defaults to a short demo script if omitted.")
+    sales_bot.add_argument("--workspace", default=None)
+    sales_bot.add_argument("--json", action="store_true")
+    sales_bot.set_defaults(func=_cmd_sales_bot_sim)
 
     return parser
 

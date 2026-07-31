@@ -60,6 +60,33 @@ class TestCLIUnitEconomics:
         assert data["geo_margin"] is not None
 
 
+class TestCLISalesBotSim:
+    def test_markdown_output_exit_zero_with_default_script(self, capsys):
+        code = cli.main(["services", "sales-bot-sim", "--vertical", "car_sales"])
+        out = capsys.readouterr().out
+        assert code == 0
+        assert "MarketOS Appointment Setter Bot Setup Plan" in out
+
+    def test_json_output_contains_session_and_handoff(self, capsys):
+        import json
+        code = cli.main(["services", "sales-bot-sim", "--vertical", "car_sales", "--json"])
+        data = json.loads(capsys.readouterr().out)
+        assert code == 0
+        assert "session" in data and "handoff" in data
+
+    def test_repeated_message_flag_drives_scripted_conversation(self, capsys):
+        import json
+        code = cli.main([
+            "services", "sales-bot-sim", "--vertical", "real_estate",
+            "--message", "I'm looking to buy a house in Austin",
+            "--message", "asap, budget is $500,000",
+            "--json",
+        ])
+        data = json.loads(capsys.readouterr().out)
+        assert code == 0
+        assert data["session"]["slots"]["intent"] == "buying"
+
+
 class TestCLIBadArguments:
     def test_missing_required_argument_exits_nonzero_no_traceback(self, capsys):
         code = cli.main(["services", "unit-economics", "--product", "Widget"])
