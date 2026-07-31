@@ -13,7 +13,8 @@ const PHASE_COLORS: Record<string, string> = {
 };
 
 export default function Shell() {
-  useWebSocket();
+  const handleMessage = useWsStore((s) => s.handleMessage);
+  useWebSocket(handleMessage);
 
   const connected = useWsStore((s) => s.connected);
   const wsSnap    = useWsStore((s) => s.snapshot);
