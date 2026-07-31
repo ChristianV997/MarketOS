@@ -18,6 +18,30 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return r.json() as T;
 }
 
+// api/routes/services.py's scalar params (product, category, price, ...)
+// are plain FastAPI function args, which bind from the query string, not a
+// JSON body — dict-typed params (validation, kill_criteria, ...) are the
+// only ones that bind from a JSON body. This helper sends both: scalars as
+// a query string, an optional dict payload as the JSON body.
+async function postServiceCall<T>(
+  path: string,
+  query: Record<string, string | number | boolean | undefined>,
+  body?: Record<string, unknown>
+): Promise<T> {
+  const qs = new URLSearchParams();
+  Object.entries(query).forEach(([k, v]) => {
+    if (v !== undefined) qs.set(k, String(v));
+  });
+  const url = `${BASE}${path}${qs.toString() ? `?${qs}` : ""}`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error(`${r.status} ${path}`);
+  return r.json() as T;
+}
+
 const FAST = 5_000;
 const MED  = 15_000;
 const SLOW = 60_000;
@@ -76,4 +100,37 @@ export function useCampaignOverride() {
 export function useTikTokLaunch() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: () => post("/tiktok/launch"), onSuccess: () => qc.invalidateQueries() });
+}
+
+// ── services.* module routes (api/routes/services.py) ───────────────────
+// Form-submitted actions, not polling reads — mutation hooks, matching the
+// pattern above, not the useQuery polling hooks used for read-only panels.
+
+export interface UnitEconomicsInput {
+  product: string; cost: number; price: number; shipping?: number;
+  category?: string; geo?: string; workspace?: string;
+}
+export function useUnitEconomics() {
+  return useMutation({
+    mutationFn: (input: UnitEconomicsInput) =>
+      postServiceCall<AnyData>("/api/services/unit-economics", { ...input }),
+  });
+}
+
+export interface EcommerceOperatorInput {
+  product: string; roas: number; category?: string; budget_ceiling?: number;
+  attribution_method?: string; proposed_scale_amount?: number;
+  live_action?: boolean; workspace?: string;
+  validation?: Record<string, unknown>; unit_economics?: Record<string, unknown>;
+  supplier_assumptions?: Record<string, unknown>; kill_criteria?: Record<string, unknown>;
+}
+export function useEcommerceOperator() {
+  return useMutation({
+    mutationFn: ({
+      validation, unit_economics, supplier_assumptions, kill_criteria, ...query
+    }: EcommerceOperatorInput) =>
+      postServiceCall<AnyData>("/api/services/ecommerce-operator", query, {
+        validation, unit_economics, supplier_assumptions, kill_criteria,
+      }),
+  });
 }

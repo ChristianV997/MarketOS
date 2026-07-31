@@ -13,6 +13,7 @@ import Signals from "./pages/Signals";
 import Runtime from "./pages/Runtime";
 import Risk from "./pages/Risk";
 import Replay from "./pages/Replay";
+import Services from "./pages/Services";
 
 const queryClient = new QueryClient();
 
@@ -28,6 +29,7 @@ const router = createBrowserRouter([
       { path: "/runtime", element: <Runtime /> },
       { path: "/risk", element: <Risk /> },
       { path: "/replay", element: <Replay /> },
+      { path: "/services", element: <Services /> },
     ],
   },
   // Retained during the Stratum 2 migration (see docs/SERVICE_MODULES.md) —
