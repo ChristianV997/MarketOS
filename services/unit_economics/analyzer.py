@@ -1,0 +1,125 @@
+"""services.unit_economics.analyzer — run_unit_economics, the paid-service
+entrypoint wrapping MarketOS's existing margin_calculator/ltv math. No new
+margin logic lives here beyond break_even.py's derived formulas.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from backend.experiments.audit_log import log_transition
+from backend.experiments.envelope import CommercialRunEnvelope
+from backend.experiments.registry import get_experiment_registry
+from backend.workspaces.artifact_store import ArtifactStore
+from backend.workspaces.client_workspace import ClientWorkspace
+
+from .break_even import break_even_cac, required_roas, verdict_from_margin
+from .schemas import UnitEconomicsResult
+
+_log = logging.getLogger(__name__)
+
+SERVICE_NAME = "unit_economics"
+
+
+def _default_workspace() -> ClientWorkspace:
+    return ClientWorkspace(name="ephemeral", workspace_type="internal")
+
+
+def run_unit_economics(
+    product_name: str,
+    supplier_cost: float,
+    retail_price: float,
+    *,
+    shipping_cost: float = 0.0,
+    category: str = "general",
+    geo: str | None = None,
+    workspace: ClientWorkspace | None = None,
+) -> tuple[UnitEconomicsResult, CommercialRunEnvelope]:
+    """Never raises: calculate_margin/calculate_margin_geo/
+    calculate_ltv_adjusted_margin/effective_cac are all already never-raise;
+    this function wraps them anyway so a surprise failure degrades to a
+    partial result instead of aborting."""
+    workspace = workspace or _default_workspace()
+    registry = get_experiment_registry()
+    store = ArtifactStore()
+
+    envelope = CommercialRunEnvelope(
+        service_name=SERVICE_NAME,
+        workspace_id=workspace.workspace_id,
+        mode="dry_run" if workspace.dry_run_default else workspace.mode,
+        inputs={
+            "product_name": product_name, "supplier_cost": supplier_cost, "retail_price": retail_price,
+            "shipping_cost": shipping_cost, "category": category, "geo": geo,
+        },
+    )
+    registry.register(envelope)
+    log_transition(envelope, "experiment_created")
+    envelope.mark_running()
+    log_transition(envelope, "experiment_running")
+
+    base_margin: dict[str, Any] = {}
+    geo_margin: dict[str, Any] | None = None
+    ltv_margin: dict[str, Any] = {}
+    be_cac = 0.0
+    roas = 0.0
+    eff_cac = 0.0
+
+    try:
+        from backend.validation.margin_calculator import calculate_margin
+        base_margin = calculate_margin(
+            supplier_cost=supplier_cost, retail_price=retail_price,
+            shipping_cost=shipping_cost, category=category,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("unit_economics_base_margin_failed product=%s error=%s", product_name, exc)
+
+    if geo:
+        try:
+            from backend.validation.margin_calculator import calculate_margin_geo
+            geo_margin = calculate_margin_geo(
+                supplier_cost=supplier_cost, retail_price=retail_price,
+                shipping_cost=shipping_cost, category=category, geo=geo,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("unit_economics_geo_margin_failed product=%s geo=%s error=%s", product_name, geo, exc)
+
+    try:
+        from backend.validation.margin_calculator import calculate_ltv_adjusted_margin
+        ltv_margin = calculate_ltv_adjusted_margin(
+            supplier_cost=supplier_cost, retail_price=retail_price,
+            shipping_cost=shipping_cost, category=category,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("unit_economics_ltv_margin_failed product=%s error=%s", product_name, exc)
+
+    try:
+        be_cac = break_even_cac(supplier_cost, retail_price, shipping_cost, category=category)
+        roas = required_roas(supplier_cost, retail_price, shipping_cost, category=category)
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("unit_economics_break_even_failed product=%s error=%s", product_name, exc)
+
+    try:
+        from backend.economics.ltv import effective_cac
+        base_cac = base_margin.get("cac", 0.0)
+        eff_cac = round(effective_cac(base_cac, category=category), 2) if base_cac else 0.0
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("unit_economics_effective_cac_failed product=%s error=%s", product_name, exc)
+
+    result = UnitEconomicsResult(
+        product_name=product_name,
+        category=category,
+        base_margin=base_margin,
+        geo_margin=geo_margin,
+        ltv_adjusted_margin=ltv_margin,
+        break_even_cac=be_cac,
+        required_roas=roas,
+        effective_cac=eff_cac,
+        verdict=verdict_from_margin(base_margin) if base_margin else "unknown",
+        dry_run=workspace.dry_run_default,
+    )
+
+    store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+    envelope.mark_completed(result.to_dict())
+    log_transition(envelope, "experiment_completed")
+
+    return result, envelope
