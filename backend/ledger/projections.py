@@ -30,10 +30,10 @@ from .events import EVENT_TYPES
 
 
 def _events_for_workspace(workspace_id: str, event_type: str) -> list[dict]:
-    return [
-        e for e in event_store.events_of_type(event_type)
-        if (e.get("data") or {}).get("workspace_id") == workspace_id
-    ]
+    # event_store.events_of_type reads from an in-process index (rebuilt
+    # only when the underlying file changes), so this no longer re-scans
+    # the entire event log on every projection call.
+    return event_store.events_of_type(event_type, workspace_id=workspace_id)
 
 
 def raw_events_for_workspace(workspace_id: str) -> dict[str, list[dict]]:
