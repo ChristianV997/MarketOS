@@ -3,7 +3,6 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
-import App from "./App";
 import Shell from "./components/layout/Shell";
 import Dashboard from "./pages/Dashboard";
 import Campaigns from "./pages/Campaigns";
@@ -32,11 +31,12 @@ const router = createBrowserRouter([
       { path: "/services", element: <Services /> },
     ],
   },
-  // Retained during the Stratum 2 migration (see docs/SERVICE_MODULES.md) —
-  // the previous tab-based app stays reachable at /legacy until every
-  // Sidebar nav item has a page and the migration is verified end-to-end.
-  { path: "/legacy", element: <App /> },
 ]);
+// Note: the previous tab-based App.tsx (and its exclusive-use components —
+// CommandCenter, MobileCommandCenter, DesktopWorkspace, etc.) is no longer
+// mounted anywhere (was reachable at /legacy during the Stratum 2
+// migration, now retired). The files themselves are left in place rather
+// than deleted, in case they're still wanted for reference.
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
