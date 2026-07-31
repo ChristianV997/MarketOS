@@ -70,3 +70,44 @@ def reconcile_contribution_profit(
     log_transition(envelope, "contribution_profit_reconciled", data=result.to_dict())
 
     return result
+
+
+def from_ledger(envelope: CommercialRunEnvelope) -> ContributionProfitResult:
+    """Same result shape as reconcile_contribution_profit, but every input
+    (campaign revenue by channel, ground-truth revenue, spend, orders,
+    refunds, supplier costs) is derived from backend.ledger's replayed
+    commerce events for this envelope's workspace instead of the caller
+    supplying pre-aggregated scalars. Additive: reconcile_contribution_profit's
+    direct-input signature is unchanged for callers who already have real
+    numbers in hand. Never raises — an empty/missing ledger degrades to
+    an all-zero result (status stays needs_live_data), not a failure.
+    """
+    campaign_revenue: dict[str, float] = {}
+    ground_truth_revenue: float | None = None
+    actual_spend = 0.0
+    actual_orders = 0
+    refunds = 0.0
+    supplier_costs = 0.0
+
+    try:
+        from backend.ledger.projections import compute_projection
+        snapshot = compute_projection(envelope.workspace_id)
+        campaign_revenue = dict(snapshot.revenue_by_channel)
+        ground_truth_revenue = snapshot.cash_collected if snapshot.order_count else None
+        actual_spend = snapshot.total_ad_spend
+        actual_orders = snapshot.order_count
+        refunds = snapshot.total_refunds
+        supplier_costs = snapshot.total_supplier_costs
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("contribution_profit_from_ledger_projection_failed workspace=%s error=%s",
+                   envelope.workspace_id, exc)
+
+    return reconcile_contribution_profit(
+        envelope,
+        campaign_revenue=campaign_revenue,
+        ground_truth_revenue=ground_truth_revenue,
+        actual_spend=actual_spend,
+        actual_orders=actual_orders,
+        refunds=refunds,
+        supplier_costs=supplier_costs,
+    )

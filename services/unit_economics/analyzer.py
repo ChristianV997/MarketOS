@@ -135,3 +135,67 @@ def run_unit_economics(
     log_transition(envelope, "experiment_completed")
 
     return result, envelope
+
+
+def from_ledger(
+    product_name: str,
+    *,
+    workspace: ClientWorkspace,
+    supplier_cost: float,
+    retail_price: float,
+    shipping_cost: float = 0.0,
+    category: str = "general",
+    geo: str | None = None,
+) -> tuple[UnitEconomicsResult, CommercialRunEnvelope]:
+    """Same result shape as run_unit_economics, but monthly_ad_spend and
+    expected_monthly_revenue are derived from backend.ledger's replayed
+    commerce events for this workspace instead of the caller supplying
+    them directly. Additive: run_unit_economics's direct-input signature
+    is unchanged, and callers with no ledger history yet should keep
+    using it. Never raises — an empty/missing ledger degrades to
+    calculate_margin's own defaults (monthly_ad_spend=500.0,
+    expected_monthly_revenue=5000.0), not a failure.
+    """
+    monthly_ad_spend = 500.0
+    expected_monthly_revenue = 5000.0
+    try:
+        from backend.ledger.projections import compute_projection
+        snapshot = compute_projection(workspace.workspace_id)
+        if snapshot.total_ad_spend > 0:
+            monthly_ad_spend = snapshot.total_ad_spend
+        if snapshot.recognized_revenue > 0:
+            expected_monthly_revenue = snapshot.recognized_revenue
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("unit_economics_from_ledger_projection_failed workspace=%s error=%s",
+                   workspace.workspace_id, exc)
+
+    result, envelope = run_unit_economics(
+        product_name, supplier_cost, retail_price,
+        shipping_cost=shipping_cost, category=category, geo=geo, workspace=workspace,
+    )
+
+    try:
+        from backend.validation.margin_calculator import calculate_margin
+        ledger_margin = calculate_margin(
+            supplier_cost=supplier_cost, retail_price=retail_price,
+            shipping_cost=shipping_cost, category=category,
+            monthly_ad_spend=monthly_ad_spend, expected_monthly_revenue=expected_monthly_revenue,
+        )
+        result.base_margin = ledger_margin
+        result.verdict = verdict_from_margin(ledger_margin)
+        envelope.outputs["base_margin"] = ledger_margin
+
+        store = ArtifactStore()
+        try:
+            from services.reporting import save_report_artifacts
+            from .report import render_unit_economics_markdown
+            save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id,
+                                   render_unit_economics_markdown(result), result.to_dict())
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("unit_economics_from_ledger_report_save_failed error=%s", exc)
+            store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+        log_transition(envelope, "experiment_updated_from_ledger")
+    except Exception as exc:  # noqa: BLE001 — direct-input result above is the fallback
+        _log.debug("unit_economics_from_ledger_margin_failed product=%s error=%s", product_name, exc)
+
+    return result, envelope

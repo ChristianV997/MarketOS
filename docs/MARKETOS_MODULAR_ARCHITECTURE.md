@@ -72,6 +72,7 @@ Two things sit alongside every layer above, not inside one of them:
 | `services/` | Sellable service modules (Phase 2/3/5/6 of this effort) |
 | `backend/workspaces/` | ClientWorkspace, CredentialScope, LiveModeChecklist, ArtifactStore (Phase 1) |
 | `backend/experiments/` | CommercialRunEnvelope, ExperimentRegistry, audit_log (Phase 1) |
+| `backend/ledger/` | Event-sourced commerce ledger (OrderCreated/PaymentCaptured/.../AdSpendObserved) + derived CAC/contribution-profit/cash-conversion-cycle projections — see `docs/COMMERCE_LEDGER.md` |
 | `backend/dao_future/` | Placeholder-only future governance schemas (Phase 8) |
 | `marketos/cli.py` | Terminal entrypoint for the service modules |
 | `api/routes/services.py` | REST wrappers for the 2 stateless modules exposed via API so far |

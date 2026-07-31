@@ -75,6 +75,8 @@ spending on ads or suppliers — also usable as an internal pre-launch gate.
 
 **Status**: `ready_for_client_service`
 
+**Ledger-derived variant**: `services.unit_economics.analyzer.from_ledger(product_name, workspace=, supplier_cost=, retail_price=, ...)` — same result shape, but `monthly_ad_spend`/`expected_monthly_revenue` are derived from `backend.ledger`'s replayed commerce events for the workspace instead of the caller supplying them. See `docs/COMMERCE_LEDGER.md`.
+
 ---
 
 ## 3. E-commerce Operator (`services.ecommerce_operator`)
@@ -105,6 +107,8 @@ doc for how they compose).
 **Price range**: 25,000–75,000 MXN (e-commerce validation sprint)
 
 **Status**: `ready_for_client_service` (readiness gate) / `needs_live_data` (contribution-profit + decision, by design)
+
+**Ledger-derived variant**: `services.ecommerce_operator.contribution_profit.from_ledger(envelope)` — same result shape as `reconcile_contribution_profit`, but campaign revenue by channel, ground-truth revenue, spend, orders, refunds, and supplier costs are all derived from `backend.ledger`'s replayed commerce events for the envelope's workspace instead of the caller supplying pre-aggregated scalars. See `docs/COMMERCE_LEDGER.md`.
 
 ---
 
