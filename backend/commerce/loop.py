@@ -115,12 +115,25 @@ class CommerceLoop:
     def quality_gate(self, creatives: Iterable[CreativeBundle]) -> tuple[list[CreativeBundle], list[str]]:
         """Optionally run typed campaign QA before launch, failing closed."""
         bundles = list(creatives)
-        if os.getenv("MARKETOS_AGENT_QA_ENABLED", "false").lower() != "true":
-            return bundles, []
-        from backend.agents.domain_agents import CampaignQARequest, run_campaign_qa
         failures: list[str] = []
         checked: list[CreativeBundle] = []
         for bundle in bundles:
+            artifact = bundle.artifact
+            if artifact is not None and not artifact.usable_for_launch():
+                checked.append(replace(
+                    bundle,
+                    reasons=tuple(sorted(set((*bundle.reasons, "creative_artifact_unusable", "not_launchable")))),
+                ))
+                failures.append(f"{bundle.creative_id}:artifact_unusable")
+            else:
+                checked.append(bundle)
+        if os.getenv("MARKETOS_AGENT_QA_ENABLED", "false").lower() != "true":
+            return checked, failures
+        from backend.agents.domain_agents import CampaignQARequest, run_campaign_qa
+        qa_checked: list[CreativeBundle] = []
+        for bundle in checked:
+            if "creative_artifact_unusable" in bundle.reasons:
+                continue
             try:
                 result = asyncio.run(run_campaign_qa(CampaignQARequest(
                     product_id=bundle.product_id,
@@ -130,14 +143,14 @@ class CommerceLoop:
                     dry_run=True,
                 )))
                 if not result.approved:
-                    checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_rejected", "not_launchable"))))))
+                    qa_checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_rejected", "not_launchable"))))))
                     failures.append(f"{bundle.creative_id}:rejected")
                 else:
-                    checked.append(bundle)
+                    qa_checked.append(bundle)
             except Exception as exc:
-                checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_unavailable", "not_launchable"))))))
+                qa_checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_unavailable", "not_launchable"))))))
                 failures.append(f"{bundle.creative_id}:unavailable:{exc}")
-        return checked, failures
+        return [bundle for bundle in checked if "creative_artifact_unusable" in bundle.reasons] + qa_checked, failures
 
     def launch(
         self,

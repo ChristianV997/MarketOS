@@ -116,3 +116,25 @@ Verification: **71 focused tests passed, 3 skipped**; full suite **1089 passed,
 2. `git status --short` and `git diff origin/codex/marketos-ai-tooling-scaffold`
 3. `docs/ai/PERFORMANCE_BASELINE.md`
 4. Claude-owned plan paths before editing
+
+## Integration branch update — creative contract hardening
+
+Branch: `codex/marketos-integration`
+
+The existing typed `CreativeArtifact` boundary was hardened without adding a
+second creative pipeline. It now validates the allowed lifecycle statuses and
+fails closed through `usable_for_launch()` for unavailable, failed, or
+unverified media artifacts. The commerce quality gate marks unusable creative
+artifacts `not_launchable`, and existing launch code skips them.
+
+Verification: **7 focused tests passed**; compileall clean; Semgrep blocking
+findings **0**; commerce benchmark 20-run p95 **2.397 ms**, within the
+2,000 ms limit.
+
+Environment note: the merged branch declares `pytest-asyncio` and `stripe` in
+its requirements, but this environment initially lacked both packages. The
+async test dependency was installed locally. Stripe webhook tests remain
+blocked until the declared Stripe dependency is installed; the full suite also
+exceeded the 300-second execution bound in this state. No fallback webhook
+implementation was added because that would weaken the official SDK security
+boundary.

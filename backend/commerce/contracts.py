@@ -166,6 +166,26 @@ class CreativeArtifact:
     dry_run: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    VALID_STATUSES = frozenset({
+        "not_requested",
+        "planned",
+        "generated",
+        "validated",
+        "provider_unavailable",
+        "failed",
+        "published",
+    })
+
+    def __post_init__(self) -> None:
+        if self.status not in self.VALID_STATUSES:
+            raise ValueError(f"unknown creative artifact status: {self.status}")
+
+    def usable_for_launch(self, *, require_media: bool = False) -> bool:
+        """Return whether this artifact can satisfy a launch request."""
+        if self.status not in {"generated", "validated", "published"}:
+            return False
+        return not require_media or bool(self.content_ref)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
