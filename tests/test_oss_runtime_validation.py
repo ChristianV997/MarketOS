@@ -11,6 +11,11 @@ def test_oss_runtime_report_is_read_only_and_validates_boundaries():
     assert report["dry_run_boundaries"]["woocommerce"]["dry_run"] is True
     assert report["dry_run_boundaries"]["stripe_mx"]["dry_run"] is True
     assert report["dry_run_boundaries"]["mercado_pago_mx"]["dry_run"] is True
+    assert report["dry_run_boundaries"]["chatwoot"]["dry_run"] is True
+    assert report["dry_run_boundaries"]["mautic"]["dry_run"] is True
+    assert report["dry_run_boundaries"]["activepieces"]["dry_run"] is True
+    assert report["dry_run_boundaries"]["posthog_backend"]["dry_run"] is True
     assert {item["name"] for item in report["providers"]} >= {
         "medusa", "postiz", "crawl4ai", "woocommerce", "stripe_mx", "mercado_pago_mx",
+        "chatwoot", "mautic", "activepieces", "posthog_backend", "hostinger",
     }

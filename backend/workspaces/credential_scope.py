@@ -3,10 +3,11 @@
 Wraps backend.config.list_configured_services() rather than reinventing
 credential tracking. Never exposes secret values, never raises.
 
-backend.config only has real credential keys for meta/tiktok/shopify/
-stripe/supabase/ga4 (confirmed via backend/config.py::_SERVICE_CREDENTIALS).
-Integrations the task asks us to track that have no backing credential key
-yet (CRM, WhatsApp, email, calendar, content scheduler, generic suppliers)
+backend.config has real credential keys for meta/tiktok/shopify/stripe/
+supabase/ga4/woocommerce/mercadopago_mx/chatwoot/mautic/activepieces/
+posthog_backend/hostinger (confirmed via backend/config.py::_SERVICE_CREDENTIALS).
+Integrations that have no backing credential key yet (Twenty CRM — AGPL-3.0,
+deferred pending legal review; WhatsApp, email, calendar, generic suppliers)
 are reported honestly as "not_yet_supported" rather than faking a status.
 """
 from __future__ import annotations
@@ -31,6 +32,15 @@ _INTEGRATION_TO_CONFIG_SERVICE: dict[str, str | None] = {
     "woocommerce": "woocommerce",
     "payment_provider_mx_stripe": "stripe",
     "payment_provider_mx_mercadopago": "mercadopago_mx",
+    "conversation_provider_chatwoot": "chatwoot",
+    "marketing_automation_provider_mautic": "mautic",
+    "customer_automation_provider_activepieces": "activepieces",
+    "analytics_provider_posthog_backend": "posthog_backend",
+    "hosting_provider_hostinger": "hostinger",
+    # Twenty CRM remains unwired: AGPL-3.0, deferred pending legal review
+    # (explicit prior user decision, left untouched — see
+    # docs/oss/LICENSE_MANIFEST.yml and docs/COST_AWARE_INTEGRATION_AUDIT.md).
+    "crm_provider_twenty": None,
 }
 
 _STATUS_CONFIGURED = "configured"

@@ -29,6 +29,8 @@ class BusinessStackRecommendation:
     strategy_id: str = ""
     commerce_provider_recommendation: ProviderRecommendation | None = None
     payment_provider_recommendation: ProviderRecommendation | None = None
+    # Only populated for lead-gen/agency strategies (no checkout involved).
+    crm_provider_recommendation: ProviderRecommendation | None = None
     automation_recommendations: list[ProviderRecommendation] = field(default_factory=list)
     monthly_cost_estimate: StackCostEstimate | None = None
     margin_after_stack_cost: dict[str, Any] = field(default_factory=dict)
@@ -43,6 +45,7 @@ class BusinessStackRecommendation:
             "strategy_id": self.strategy_id,
             "commerce_provider_recommendation": self.commerce_provider_recommendation.to_dict() if self.commerce_provider_recommendation else None,
             "payment_provider_recommendation": self.payment_provider_recommendation.to_dict() if self.payment_provider_recommendation else None,
+            "crm_provider_recommendation": self.crm_provider_recommendation.to_dict() if self.crm_provider_recommendation else None,
             "automation_recommendations": [r.to_dict() for r in self.automation_recommendations],
             "monthly_cost_estimate": self.monthly_cost_estimate.to_dict() if self.monthly_cost_estimate else None,
             "margin_after_stack_cost": self.margin_after_stack_cost,

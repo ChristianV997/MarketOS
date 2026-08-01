@@ -83,7 +83,26 @@ def build_payment_recommendation(request) -> ProviderRecommendation:
     )
 
 
-def build_automation_recommendations(request) -> list[ProviderRecommendation]:
+def build_gohighlevel_recommendation(request) -> ProviderRecommendation:
+    if gohighlevel_allowed(request):
+        ghl = provider_registry.get("gohighlevel")
+        eligible = [p for p in ghl.plans if request.expected_monthly_revenue_usd >= p.min_monthly_revenue_usd]
+        plan = max(eligible, key=lambda p: p.min_monthly_revenue_usd)
+        return ProviderRecommendation(
+            provider_id="gohighlevel", category="crm", selected_plan_id=plan.plan_id,
+            reasons=[f"Client revenue (${request.expected_monthly_revenue_usd:,.0f}/mo) clears the {plan.plan_id} plan's ${plan.min_monthly_revenue_usd:,.0f}/mo threshold."],
+        )
+    cheapest_threshold = min(p.min_monthly_revenue_usd for p in provider_registry.get("gohighlevel").plans)
+    return ProviderRecommendation(
+        provider_id="gohighlevel", category="crm", blocked=True,
+        blocked_reason=f"Expected revenue is below GoHighLevel's cheapest plan threshold (${cheapest_threshold:,.0f}/mo).",
+    )
+
+
+def build_automation_recommendations(request, *, include_gohighlevel: bool = True) -> list[ProviderRecommendation]:
+    """`include_gohighlevel=False` is used by lead-gen strategies, which
+    already represent GoHighLevel via `crm_provider_recommendation` — listing
+    it again here would be a duplicate, not a second independent gate."""
     recs: list[ProviderRecommendation] = []
 
     if n8n_allowed(request):
@@ -97,20 +116,8 @@ def build_automation_recommendations(request) -> list[ProviderRecommendation]:
             blocked_reason="n8n is internal-only per existing governance; never recommended for a white-labeled, client-facing product.",
         ))
 
-    if gohighlevel_allowed(request):
-        ghl = provider_registry.get("gohighlevel")
-        eligible = [p for p in ghl.plans if request.expected_monthly_revenue_usd >= p.min_monthly_revenue_usd]
-        plan = max(eligible, key=lambda p: p.min_monthly_revenue_usd)
-        recs.append(ProviderRecommendation(
-            provider_id="gohighlevel", category="crm", selected_plan_id=plan.plan_id,
-            reasons=[f"Client revenue (${request.expected_monthly_revenue_usd:,.0f}/mo) clears the {plan.plan_id} plan's ${plan.min_monthly_revenue_usd:,.0f}/mo threshold."],
-        ))
-    else:
-        cheapest_threshold = min(p.min_monthly_revenue_usd for p in provider_registry.get("gohighlevel").plans)
-        recs.append(ProviderRecommendation(
-            provider_id="gohighlevel", category="crm", blocked=True,
-            blocked_reason=f"Expected revenue is below GoHighLevel's cheapest plan threshold (${cheapest_threshold:,.0f}/mo).",
-        ))
+    if include_gohighlevel:
+        recs.append(build_gohighlevel_recommendation(request))
 
     if postiz_allowed(request):
         recs.append(ProviderRecommendation(
@@ -124,3 +131,41 @@ def build_automation_recommendations(request) -> list[ProviderRecommendation]:
         ))
 
     return recs
+
+
+def build_crm_recommendation(strategy_id: str, request) -> ProviderRecommendation:
+    """Only called for lead-gen/agency strategies. `high_ticket_lead_gen_low_cost`
+    reports the CRM gap honestly (Twenty is deferred pending legal review —
+    AGPL-3.0) rather than recommending it or fabricating a substitute."""
+    if strategy_id in ("high_ticket_lead_gen_gohighlevel_fast", "agency_white_label_fast"):
+        return build_gohighlevel_recommendation(request)
+    return ProviderRecommendation(
+        provider_id="twenty", category="crm", blocked=True,
+        blocked_reason=(
+            "Twenty CRM (the catalog's one low-cost CRM candidate) is AGPL-3.0 "
+            "and deferred pending legal review — no CRM adapter is recommended "
+            "for the low-cost lead-gen stack this pass. Consider GoHighLevel "
+            "once expected revenue clears its threshold (see warnings)."
+        ),
+    )
+
+
+def build_lead_gen_automation_recommendations(strategy_id: str, request) -> list[ProviderRecommendation]:
+    """Chatwoot + Mautic fill the conversation/marketing-automation gap left
+    by Twenty's deferral for the low-cost strategy. GoHighLevel-based
+    strategies already bundle conversation + marketing automation, so no
+    extra entries are needed there."""
+    if strategy_id != "high_ticket_lead_gen_low_cost":
+        return []
+    chatwoot = provider_registry.get("chatwoot")
+    mautic = provider_registry.get("mautic")
+    return [
+        ProviderRecommendation(
+            provider_id="chatwoot", category="conversation_inbox", selected_plan_id=chatwoot.plans[0].plan_id,
+            reasons=["Self-hosted conversation inbox for lead qualification at near-zero fixed cost."],
+        ),
+        ProviderRecommendation(
+            provider_id="mautic", category="marketing_automation", selected_plan_id=mautic.plans[0].plan_id,
+            reasons=["Self-hosted email/segment automation for lead nurture at near-zero fixed cost."],
+        ),
+    ]

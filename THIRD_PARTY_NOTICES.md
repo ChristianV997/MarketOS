@@ -19,14 +19,14 @@ legal advice.
 | airbyte | pending-deferred-review | review_required | Deferred pending license and integration review. |
 | saleor | pending-benchmark-review | review_required | Benchmark only; do not deploy alongside Medusa. |
 | twenty-crm | pending-deferred-review | AGPL-3.0 | Deferred by explicit user decision; AGPL requires legal review before adoption. |
-| chatwoot | pending-deferred-review | MIT | Advanced to `candidate_for_conversation_sidecar` during the cost-aware stack-planner pass (lowest license risk of the deferred candidates); no adapter or code exists yet. |
+| chatwoot | pending-deferred-review | MIT | ConversationProvider adapter built and tested (backend/integrations/chatwoot.py); MIT, no legal-review gate needed. |
 | cal.com | pending-deferred-review | AGPL-3.0 | Deferred by explicit user decision; AGPL requires legal review before adoption. |
-| posthog | posthog-js@1.x | MIT | Client SDK (posthog-js) against PostHog Cloud; retain upstream MIT notice. Default-off via VITE_POSTHOG_KEY; no session-replay enabled. |
+| posthog | posthog-js@1.x | MIT | Client SDK (posthog-js) against PostHog Cloud; retain upstream MIT notice. Default-off via VITE_POSTHOG_KEY; no session-replay enabled. Also consumed server-side via the optional `posthog` Python SDK for backend event capture + query. |
 | temporal | pending-deferred-review | MIT | Deferred by explicit user decision; would replace hand-rolled workflow tracking if adopted later. |
 | crawlee | pending-deferred-review | Apache-2.0 | Deferred; redundant with crawl4ai + firecrawl already selected. |
 | woocommerce | pending-version-pin | GPL-3.0 | Merchant-operated WordPress plugin; adapter implements the existing CommerceProvider Protocol. Restricted license (same precedent as Postiz) — legal review required before commercial deployment. |
-| mautic | pending-deferred-review | GPL-3.0-or-later | Catalog/cost-comparison data only; no adapter built yet (Phase 2, deferred). |
-| activepieces | pending-deferred-review | MIT | Catalog/cost-comparison data only; no adapter built yet (Phase 2, deferred). |
+| mautic | pending-deferred-review | GPL-3.0-or-later | MarketingAutomationProvider adapter built and tested; copyleft license treated with the same legal-review precedent as GPL-3.0/AGPL-3.0 candidates. |
+| activepieces | pending-deferred-review | MIT | CustomerAutomationProvider adapter built and tested; MIT, no legal-review gate needed. |
 
 The generated release SBOM captures resolved Python packages actually present
 in the build environment. Before enabling or updating any listed component,

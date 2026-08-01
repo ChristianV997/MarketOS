@@ -15,6 +15,7 @@ def test_expected_providers_registered():
         "hostinger", "woocommerce", "medusa", "shopify",
         "stripe_mx", "mercado_pago_mx", "chatwoot", "n8n",
         "mautic", "activepieces", "gohighlevel", "postiz",
+        "posthog", "twenty",
     ):
         assert expected in ids
 
@@ -43,6 +44,17 @@ def test_n8n_is_internal_only():
 def test_postiz_requires_legal_approval():
     postiz = provider_registry.get("postiz")
     assert postiz.risk.requires_legal_approval is True
+
+
+def test_twenty_requires_legal_approval_and_is_catalog_only():
+    twenty = provider_registry.get("twenty")
+    assert twenty.risk.requires_legal_approval is True
+    assert twenty.integration_status == "catalog_only"
+
+
+def test_chatwoot_mautic_activepieces_posthog_have_adapters():
+    for provider_id in ("chatwoot", "mautic", "activepieces", "posthog", "hostinger"):
+        assert provider_registry.get(provider_id).integration_status == "adapter_available"
 
 
 def test_no_unknown_license_provider_marked_safe_against_oss_inventory():

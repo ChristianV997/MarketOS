@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   useUnitEconomics, useEcommerceOperator, useProductAudit,
   useCreativeGrowth, useCustomerIntelligence, useDigitalProduct, useSalesAutomation,
+  useProfitStackAdvisor,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { captureEvent } from "@/lib/posthog";
@@ -225,6 +226,42 @@ function SalesAutomationForm() {
   );
 }
 
+function ProfitStackAdvisorForm() {
+  const [businessName, setBusinessName] = useState("Own Store");
+  const [businessModel, setBusinessModel] = useState("own_ecommerce");
+  const [expectedMonthlyRevenue, setExpectedMonthlyRevenue] = useState(5000);
+  const mutation = useProfitStackAdvisor();
+
+  return (
+    <Card>
+      <p className="text-sm font-semibold text-zinc-200 mb-3">Profit Stack Advisor</p>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Business name">
+          <input className={inputCls} value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
+        </Field>
+        <Field label="Business model">
+          <input className={inputCls} value={businessModel} onChange={(e) => setBusinessModel(e.target.value)} />
+        </Field>
+        <Field label="Expected monthly revenue">
+          <input className={inputCls} type="number" value={expectedMonthlyRevenue} onChange={(e) => setExpectedMonthlyRevenue(Number(e.target.value))} />
+        </Field>
+      </div>
+      <button
+        onClick={() => {
+          captureEvent("service_run", { module: "profit_stack_advisor" });
+          mutation.mutate({ business_name: businessName, business_model: businessModel, expected_monthly_revenue: expectedMonthlyRevenue });
+        }}
+        disabled={mutation.isPending}
+        className="mt-3 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors disabled:opacity-50"
+      >
+        {mutation.isPending ? "Running…" : "Recommend stack"}
+      </button>
+      {mutation.isError && <p className="text-xs text-red-400 mt-2">{(mutation.error as Error).message}</p>}
+      <ResultPanel result={mutation.data} />
+    </Card>
+  );
+}
+
 export default function Services() {
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-4">
@@ -241,6 +278,7 @@ export default function Services() {
       <CustomerIntelligenceForm />
       <DigitalProductForm />
       <SalesAutomationForm />
+      <ProfitStackAdvisorForm />
     </div>
   );
 }

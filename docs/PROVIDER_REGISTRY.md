@@ -62,9 +62,12 @@ configured, dry-run state) — separate from the static catalog data above.
    (`backend/contracts/adapters.py` Protocol → `backend/integrations/*`
    implementation → `backend/workspaces/credential_scope.py` wiring).
 
-## Current catalog (Phase 1)
+## Current catalog
 
 `hostinger`, `woocommerce`, `medusa`, `shopify`, `stripe_mx`,
 `mercado_pago_mx`, `chatwoot`, `n8n`, `mautic`, `activepieces`,
-`gohighlevel`, `postiz` — see `backend/providers/provider_catalog.py` for
-exact plans/pricing.
+`gohighlevel`, `postiz`, `posthog`, `twenty` — see
+`backend/providers/provider_catalog.py` for exact plans/pricing.
+`integration_status="adapter_available"` means a concrete adapter exists
+(see `docs/INTEGRATION_PORTS.md`); `"catalog_only"` (currently just
+`twenty`) means catalog/cost-comparison data only, no adapter.

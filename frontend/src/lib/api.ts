@@ -187,3 +187,17 @@ export function useSalesAutomation() {
       postServiceCall<AnyData>("/api/services/sales-automation", { vertical, workspace }),
   });
 }
+
+export interface ProfitStackAdvisorInput {
+  business_name: string; business_model?: string; target_geo?: string;
+  expected_monthly_revenue?: number; expected_monthly_orders?: number;
+  margin_sensitivity?: string; is_white_labeled_client_facing?: boolean;
+  postiz_legal_approval?: boolean; category?: string;
+  supplier_cost?: number; retail_price?: number; workspace?: string;
+}
+export function useProfitStackAdvisor() {
+  return useMutation({
+    mutationFn: (input: ProfitStackAdvisorInput) =>
+      postServiceCall<AnyData>("/api/services/profit-stack-advisor", { ...input }),
+  });
+}

@@ -81,9 +81,14 @@ def run_profit_stack_advisor(
         rec = recommend_stack(request)
         recommendation = rec.to_dict()
 
-        if rec.status == "recommended" and margin_sensitivity != "premium_brand":
+        from backend.stack_planner.strategies import is_lead_gen_strategy
+
+        if rec.status == "recommended" and margin_sensitivity != "premium_brand" and not is_lead_gen_strategy(rec.strategy_id):
             # Show the client what the premium alternative would cost, so the
             # recommendation reads as a comparison rather than a bare answer.
+            # Only meaningful for e-commerce strategies (checkout/payment
+            # stack comparison) — lead-gen/agency strategies have no Shopify-
+            # style alternative to compare against.
             from backend.costs.compare import compare_stacks
 
             premium_request = BusinessStackRequest(

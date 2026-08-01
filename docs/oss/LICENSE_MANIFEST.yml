@@ -56,7 +56,7 @@ components:
     license: MIT
     reviewed_ref: pending-deferred-review
     distribution: sidecar
-    notice: Advanced to candidate_for_conversation_sidecar during the cost-aware stack-planner pass (lowest license risk of the deferred candidates); no adapter or code exists yet — status advancement only.
+    notice: Advanced from deferred to selected across the cost-aware stack-planner pass; ConversationProvider adapter (backend/integrations/chatwoot.py) built and tested. MIT license, no legal-review gate needed.
   - name: cal.com
     license: AGPL-3.0
     reviewed_ref: pending-deferred-review
@@ -66,7 +66,7 @@ components:
     license: MIT
     reviewed_ref: posthog-js@1.x
     distribution: optional_library
-    notice: Selected by explicit user decision, adopted after the frontend router/Services UI shipped (revisit-after-UI condition satisfied). Client SDK against PostHog Cloud, default-off via VITE_POSTHOG_KEY, no session-replay enabled.
+    notice: Selected by explicit user decision, adopted after the frontend router/Services UI shipped (revisit-after-UI condition satisfied). Client SDK against PostHog Cloud, default-off via VITE_POSTHOG_KEY, no session-replay enabled. Also consumed server-side via the optional `posthog` Python SDK (backend/integrations/posthog_backend.py, AnalyticsProvider) for backend event capture + HogQL query — still PostHog Cloud only.
   - name: temporal
     license: MIT
     reviewed_ref: pending-deferred-review
@@ -86,9 +86,9 @@ components:
     license: GPL-3.0-or-later
     reviewed_ref: pending-deferred-review
     distribution: sidecar
-    notice: Catalog/cost-comparison data only; no MarketingAutomationPort or adapter built yet (Phase 2, deferred).
+    notice: MarketingAutomationProvider adapter (backend/integrations/mautic.py) built and tested. GPL-3.0-or-later is copyleft — treated with the same legal-review precedent as GPL-3.0/AGPL-3.0 candidates (WooCommerce, Postiz), more conservative than scripts/check_oss_policy.py's exact-string RESTRICTED match requires.
   - name: activepieces
     license: MIT
     reviewed_ref: pending-deferred-review
     distribution: sidecar
-    notice: Catalog/cost-comparison data only; no WorkflowPort or adapter built yet (Phase 2, deferred).
+    notice: CustomerAutomationProvider adapter (backend/integrations/activepieces.py) built and tested — distinct from the internal-only n8n WorkflowAutomationProvider. MIT license, no legal-review gate needed.

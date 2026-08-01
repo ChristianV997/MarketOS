@@ -51,6 +51,31 @@ class TestCredentialScopeStackPlannerIntegrations:
         assert scope["payment_provider_mx_mercadopago"]["status"] == "configured"
 
 
+class TestCredentialScopePhase2Integrations:
+    def test_new_provider_keys_resolve(self, monkeypatch):
+        monkeypatch.setattr(config, "list_configured_services", lambda: {
+            "chatwoot": True, "mautic": False, "activepieces": True,
+            "posthog_backend": False, "hostinger": True,
+        })
+        ws = ClientWorkspace(name="x")
+
+        scope = scope_for(ws)
+
+        assert scope["conversation_provider_chatwoot"]["status"] == "configured"
+        assert scope["marketing_automation_provider_mautic"]["status"] == "not_configured"
+        assert scope["customer_automation_provider_activepieces"]["status"] == "configured"
+        assert scope["analytics_provider_posthog_backend"]["status"] == "not_configured"
+        assert scope["hosting_provider_hostinger"]["status"] == "configured"
+
+    def test_twenty_crm_remains_not_yet_supported(self, monkeypatch):
+        monkeypatch.setattr(config, "list_configured_services", lambda: {})
+        ws = ClientWorkspace(name="x")
+
+        scope = scope_for(ws)
+
+        assert scope["crm_provider_twenty"]["status"] == "not_yet_supported"
+
+
 class TestCredentialScopeWorkspaceAllowList:
     def test_allowed_integrations_restricts_allowed_flag(self, monkeypatch):
         monkeypatch.setattr(config, "list_configured_services", lambda: {"shopify": True})

@@ -61,13 +61,49 @@ def test_postiz_blocked_without_legal_approval():
     assert postiz.blocked is False
 
 
-def test_deferred_strategies_return_explicit_stub_never_raise():
+def test_lead_gen_low_cost_reports_crm_gap_honestly():
+    request = BusinessStackRequest(business_model="high_ticket_lead_gen_low_cost", expected_monthly_revenue_usd=500.0)
+    rec = recommend_stack(request)
+    assert rec.status == "recommended"
+    assert rec.crm_provider_recommendation.provider_id == "twenty"
+    assert rec.crm_provider_recommendation.blocked is True
+    assert rec.commerce_provider_recommendation is None
+    provider_ids = {r.provider_id for r in rec.automation_recommendations}
+    assert "chatwoot" in provider_ids
+    assert "mautic" in provider_ids
+
+
+def test_lead_gen_gohighlevel_fast_recommends_gohighlevel_above_threshold():
+    request = BusinessStackRequest(business_model="high_ticket_lead_gen_gohighlevel_fast", expected_monthly_revenue_usd=20000.0)
+    rec = recommend_stack(request)
+    assert rec.crm_provider_recommendation.provider_id == "gohighlevel"
+    assert rec.crm_provider_recommendation.blocked is False
+    # GoHighLevel already bundles CRM+conversation+automation — no duplicate entry.
+    assert not any(r.provider_id == "gohighlevel" for r in rec.automation_recommendations)
+
+
+def test_lead_gen_gohighlevel_fast_blocked_below_threshold():
+    request = BusinessStackRequest(business_model="high_ticket_lead_gen_gohighlevel_fast", expected_monthly_revenue_usd=500.0)
+    rec = recommend_stack(request)
+    assert rec.crm_provider_recommendation.provider_id == "gohighlevel"
+    assert rec.crm_provider_recommendation.blocked is True
+
+
+def test_agency_white_label_fast_recommends_gohighlevel_above_threshold():
+    request = BusinessStackRequest(business_model="agency_white_label_fast", expected_monthly_revenue_usd=20000.0)
+    rec = recommend_stack(request)
+    assert rec.crm_provider_recommendation.provider_id == "gohighlevel"
+    assert rec.crm_provider_recommendation.blocked is False
+
+
+def test_lead_gen_strategies_never_raise_and_skip_margin_math():
     for strategy in ("high_ticket_lead_gen_low_cost", "high_ticket_lead_gen_gohighlevel_fast", "agency_white_label_fast"):
         request = BusinessStackRequest(business_model=strategy)
         rec = recommend_stack(request)
-        assert rec.status == "not_yet_supported"
+        assert rec.status == "recommended"
         assert rec.strategy_id == strategy
-        assert rec.warnings
+        assert rec.margin_after_stack_cost == {}
+        assert rec.break_even_client_price == 0.0
 
 
 def test_mx_geo_defaults_to_mercado_pago():

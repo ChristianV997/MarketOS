@@ -4,7 +4,7 @@
 
 MarketOS runs a continuous **Discover → Validate → Create → Launch → Optimize** loop over real ad platforms (TikTok, Meta) and a Shopify storefront, driven by a quantitative decision core: convex-optimization budget allocation, contextual bandits, statistically calibrated ROAS prediction, regime/changepoint detection, and adaptive risk limits. Every risky change ships behind a **shadow-mode flag** — the new logic runs and journals its decisions alongside the old one, and only takes over real budget after validation.
 
-On top of that quant core sits a **modular commercial layer**: 8 independently sellable `services/*` modules (product research, unit economics, e-commerce operations, creative growth, customer intelligence, sales automation, digital products, reporting), each reachable via a CLI, a REST API, and a real dashboard UI, backed by a multi-tenant workspace model and an event-sourced commerce ledger. See [Modular commercial layer](#modular-commercial-layer) below for the full picture — this is what turns the quant core from "one internal pipeline" into "a set of things you can run for your own store, sell as a done-for-you service, or eventually offer as self-serve SaaS."
+On top of that quant core sits a **modular commercial layer**: 9 independently sellable `services/*` modules (product research, unit economics, e-commerce operations, creative growth, customer intelligence, sales automation, digital products, profit stack advisor, reporting), each reachable via a CLI, a REST API, and a real dashboard UI, backed by a multi-tenant workspace model, an event-sourced commerce ledger, and a cost-aware commerce/payment/automation Provider Registry + Stack Planner. See [Modular commercial layer](#modular-commercial-layer) below for the full picture — this is what turns the quant core from "one internal pipeline" into "a set of things you can run for your own store, sell as a done-for-you service, or eventually offer as self-serve SaaS."
 
 ---
 
@@ -111,7 +111,7 @@ The CUSUM changepoint signal is journaled every cycle (`shadow_regime_changepoin
 - `backend/memory/` (episodic/procedural/semantic) + `backend/vector/` (Qdrant embeddings, semantic search) + `backend/lineage/` — cognitive write-through: winning decisions are indexed and traceable decision→outcome.
 - `simulation/` — DuckDB replay store for historical analysis, Ridge scoring model, calibration store.
 - `api/` + `backend/api.py` — FastAPI app (100+ endpoints across the quant core and the `services/*` commercial layer: decisions, budget, portfolio, agents, risk kill-switch, orchestration traces, observability, dropship dashboard, `/api/services/*`) + a `/ws` WebSocket event stream that the frontend now actually connects to.
-- `backend/workspaces/` + `backend/experiments/` + `backend/ledger/` + `services/*` + `marketos/cli.py` — the modular commercial layer described in full below.
+- `backend/workspaces/` + `backend/experiments/` + `backend/ledger/` + `backend/providers/` + `backend/costs/` + `backend/stack_planner/` + `services/*` + `marketos/cli.py` — the modular commercial layer described in full below.
 - `frontend/` — React 18 + Vite + Tailwind + react-router-dom dashboard. Two things live here now: the router app (`Shell` layout + `Sidebar` nav — Dashboard, Campaigns, Products, Creatives, Signals, Runtime, Risk, Replay, **Services**), which is what actually mounts from `main.tsx`; and the original tab-based `App.tsx` component tree, kept in the repo (unmounted) rather than deleted. Dev-mode only (not served by the backend; run via `vite dev` — see Getting started).
 
 ---
@@ -126,8 +126,9 @@ Everything above is the quant core that runs MarketOS's *own* dropshipping opera
 - **`backend/experiments/`** — `CommercialRunEnvelope` (subclasses the existing `BaseArtifact`, not a parallel system: every service-module call gets an `experiment_id`, `status` lifecycle `created→running→completed/blocked/failed`, and an audit trail), `ExperimentRegistry` (a thin filtered view over the existing `ArtifactRegistry`), `audit_log` (journals every status transition to the same `event_store` every shadow-mode gate already uses).
 - **`backend/ledger/`** — an event-sourced commerce ledger: `OrderCreated`/`PaymentCaptured`/`OrderCanceled`/`RefundIssued`/`ChargebackOpened`/`SupplierCostObserved`/`FulfillmentCompleted`/`AdSpendObserved`/`AttributionClaimObserved` events (thin wrappers over the existing `event_store`, no second log), replayed per-workspace into recognized revenue, cash collected, CAC (blended + per-channel), contribution profit, profit-per-{order,product,channel}, and a cash-conversion-cycle proxy. `services.unit_economics`/`services.ecommerce_operator` get `from_ledger()` entry points that derive their inputs from this instead of requiring the caller to supply pre-aggregated numbers. Full details: `docs/COMMERCE_LEDGER.md`.
 - **`backend/dao_future/`** — placeholder-only dataclasses (`BusinessCell`, `Proposal`, `GovernanceDecision`, `CapitalAllocationRequest`, `OperatorRole`, `RevenueShareRule`) mapping today's real infrastructure to a possible future DAO-governed operating model. Zero behavior, imported by nothing live. See `docs/DAO_FUTURE_ARCHITECTURE.md`.
+- **`backend/providers/`** + **`backend/costs/`** + **`backend/stack_planner/`** — a cost-aware Provider Registry (static commerce/payment/hosting/automation provider catalog), Cost Engine (composes `backend.validation.margin_calculator` — no duplicated fee/margin math), and Stack Planner (recommends Hostinger+WooCommerce vs. Shopify vs. Medusa vs. GoHighLevel, Stripe MX vs. Mercado Pago MX, applying hard cost-governance rules — no unjustified SaaS cost recommended). Wrapped as the sellable `services.profit_stack_advisor` module. Full details: `docs/COST_AWARE_INTEGRATION_AUDIT.md`, `docs/PROVIDER_REGISTRY.md`, `docs/STACK_PLANNER.md`.
 
-### The 8 service modules (`services/*`)
+### The 9 service modules (`services/*`)
 
 | Module | What it does | Status |
 |---|---|---|
@@ -138,6 +139,7 @@ Everything above is the quant core that runs MarketOS's *own* dropshipping opera
 | `customer_intelligence` | ICP, segments, lead strategy, publicity plan, 7 vertical playbooks (real estate, car sales, e-commerce brand, clinic/wellness, home services, coaching/consulting, luxury) | `ready_for_client_service` |
 | `digital_products` | Offer/funnel/content-plan/validation/margin/launch-checklist for turning an artifact or expertise into a sellable digital product | `ready_for_client_service` |
 | `sales_automation` | Deterministic (no-LLM) chat lead-qualification + appointment handoff simulation | `ready_for_internal_use` (honest — simulation only, no real messaging adapter exists yet) |
+| `profit_stack_advisor` | Cost-aware commerce/payment/automation stack recommendation (Hostinger+WooCommerce vs. Shopify vs. Medusa vs. GoHighLevel; Stripe MX vs. Mercado Pago MX) + margin/break-even numbers, composing `backend/providers`+`backend/costs`+`backend/stack_planner` | `ready_for_client_service` |
 | `reporting` | Shared markdown rendering + artifact persistence + `json_safe()` (non-finite-float sanitization at API/CLI boundaries) used by all of the above | n/a (shared infrastructure) |
 
 Full per-module reference (inputs/outputs/pricing guidance in MXN/exact CLI+API signatures): `docs/SERVICE_MODULES.md`. Full layered-architecture picture: `docs/MARKETOS_MODULAR_ARCHITECTURE.md`.
@@ -153,12 +155,15 @@ python -m marketos.cli services creative-growth --product "Widget"
 python -m marketos.cli services customer-intelligence --business-type "dental clinic" --vertical clinic_wellness
 python -m marketos.cli services digital-product --offer-name "Product Validation Playbook" --price 497
 python -m marketos.cli services sales-bot-sim --vertical car_sales
+python -m marketos.cli services profit-stack-advisor --business-name "Own Store" --business-model own_ecommerce --expected-monthly-revenue 5000
+python -m marketos.cli stack recommend --business-model own_ecommerce --target-geo MX --expected-monthly-revenue 5000   # lighter, non-billable
 
-# REST API — same 7 modules, mounted at /api/services/* in backend/api.py
+# REST API — same 8 non-reporting modules, mounted at /api/services/* in backend/api.py
+# (plus the lighter POST /api/stack/recommend, not tied to a service module)
 curl -X POST "http://localhost:3000/api/services/unit-economics?product=Widget&cost=10&price=40"
 
 # Dashboard — the Services nav item in the router app (frontend/src/pages/Services.tsx)
-# renders a form + live result panel for all 7, hitting the same API routes above.
+# renders a form + live result panel for all 8, hitting the same API routes above.
 ```
 
 ### Safety: nothing here spends money or contacts anyone on its own
@@ -252,17 +257,20 @@ backend/
   workspaces/     ClientWorkspace, CredentialScope, LiveModeChecklist, ArtifactStore
   experiments/    CommercialRunEnvelope, ExperimentRegistry, audit_log
   ledger/         event-sourced commerce ledger (events + replay projections)
+  providers/      Provider Registry — commerce/payment/hosting/automation catalog
+  costs/          Cost Engine — composes margin_calculator, no duplicated fee math
+  stack_planner/  recommends a commerce/payment/automation stack per business
   dao_future/     placeholder-only future-governance dataclasses, zero behavior
   contracts/      BaseArtifact/ArtifactRegistry + adapter Protocols (incl. event_log)
 agents/           Scaling/Geo/Audience/Risk agents + veto/consensus arbitration
 core/             portfolio, LinUCB, risk engines, creative pipeline, content patterns,
                   core/ugc/ (organic/UGC content calendar + creator tracker, Phase 8)
 orchestrator/     phase-scheduled worker runtime (the production spine)
-services/         8 sellable modules — product_research, unit_economics,
+services/         9 sellable modules — product_research, unit_economics,
                   ecommerce_operator, creative_growth, customer_intelligence,
-                  digital_products, sales_automation, reporting
-marketos/         CLI entrypoint (marketos/cli.py) for the services/* modules
-api/              FastAPI route modules incl. api/routes/services.py, dashboards, WS stream
+                  digital_products, sales_automation, profit_stack_advisor, reporting
+marketos/         CLI entrypoint (marketos/cli.py) for the services/* modules + stack recommend
+api/              FastAPI route modules incl. api/routes/{services,stack}.py, dashboards, WS stream
 frontend/         React + Vite + react-router-dom dashboard: Shell/Sidebar router app
                   (Dashboard, Campaigns, Products, Creatives, Signals, Runtime, Risk,
                   Replay, Services) + the original tab-based App.tsx (kept, unmounted)

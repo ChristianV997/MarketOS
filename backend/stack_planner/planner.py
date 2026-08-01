@@ -11,32 +11,36 @@ from backend.costs.schemas import StackCostEstimate
 from backend.costs.stack_total import break_even_client_price, margin_after_stack_cost, stack_total_monthly_cost
 from backend.providers import provider_registry
 
-from .recommendations import build_automation_recommendations, build_commerce_recommendation, build_payment_recommendation
+from .recommendations import (
+    build_automation_recommendations,
+    build_commerce_recommendation,
+    build_crm_recommendation,
+    build_lead_gen_automation_recommendations,
+    build_payment_recommendation,
+)
 from .schemas import BusinessStackRecommendation
-from .strategies import is_deferred_strategy, select_strategy
+from .strategies import is_lead_gen_strategy, select_strategy
 
-# Hosting is bundled into fixed cost for WooCommerce-based strategies (no
-# HostingPort/adapter exists yet — Phase 2 — but the catalog cost is real
-# and cheap to include today).
+# Hosting is bundled into fixed cost for WooCommerce-based strategies.
 _HOSTING_PROVIDER_ID = "hostinger"
 
 
+def _selections_fixed_cost(selections) -> float:
+    return stack_fixed_monthly_cost(selections)
+
+
 def recommend_stack(request) -> BusinessStackRecommendation:
-    """Never raises. Deferred strategies (needing CRM/Conversation providers
-    this increment doesn't model) return an explicit `status="not_yet_supported"`
-    result rather than a partial or fabricated recommendation."""
+    """Never raises. Dispatches to the e-commerce or lead-gen branch based
+    on the resolved strategy — the two have structurally different stacks
+    (checkout+payment vs. CRM+conversation+marketing-automation) rather
+    than being squeezed into one shape."""
     strategy_id = select_strategy(request)
+    if is_lead_gen_strategy(strategy_id):
+        return _recommend_lead_gen_stack(strategy_id, request)
+    return _recommend_ecommerce_stack(strategy_id, request)
 
-    if is_deferred_strategy(strategy_id):
-        return BusinessStackRecommendation(
-            strategy_id=strategy_id,
-            status="not_yet_supported",
-            warnings=[
-                f"Strategy '{strategy_id}' requires CRM/Conversation providers not yet modeled "
-                "in this Stack Planner increment (see docs/COST_AWARE_INTEGRATION_AUDIT.md's Phase 2 list).",
-            ],
-        )
 
+def _recommend_ecommerce_stack(strategy_id: str, request) -> BusinessStackRecommendation:
     rules_applied: list[str] = [f"strategy={strategy_id}"]
 
     commerce_rec = build_commerce_recommendation(strategy_id, request)
@@ -59,7 +63,7 @@ def recommend_stack(request) -> BusinessStackRecommendation:
     payment_plan = next(p for p in payment_provider.plans if p.plan_id == payment_rec.selected_plan_id)
     payment_pct, payment_fixed = payment_fee_rate(payment_provider, payment_plan)
 
-    fixed_monthly = stack_fixed_monthly_cost(selections)
+    fixed_monthly = _selections_fixed_cost(selections)
     commerce_rec.monthly_cost_estimate = fixed_monthly
     payment_rec.monthly_cost_estimate = 0.0  # payment cost is per-order, not fixed
 
@@ -105,6 +109,60 @@ def recommend_stack(request) -> BusinessStackRecommendation:
         monthly_cost_estimate=cost_estimate,
         margin_after_stack_cost=margin,
         break_even_client_price=be_price,
+        rules_applied=rules_applied,
+        warnings=warnings,
+        status="recommended",
+    )
+
+
+def _recommend_lead_gen_stack(strategy_id: str, request) -> BusinessStackRecommendation:
+    """No checkout/payment involved — a lead-gen or agency business is
+    priced per-lead/retainer, not per-unit margin, so
+    backend.validation.margin_calculator's per-order formula doesn't apply
+    here. margin_after_stack_cost/break_even_client_price are left at their
+    zero defaults with an explicit warning rather than fabricating a
+    misleading per-unit number."""
+    rules_applied = [f"strategy={strategy_id}"]
+
+    crm_rec = build_crm_recommendation(strategy_id, request)
+    rules_applied.append(f"crm:{crm_rec.provider_id}={'blocked' if crm_rec.blocked else 'allowed'}")
+
+    automation_recs = build_automation_recommendations(request, include_gohighlevel=False)
+    automation_recs += build_lead_gen_automation_recommendations(strategy_id, request)
+    for rec in automation_recs:
+        rules_applied.append(f"{rec.provider_id}={'blocked' if rec.blocked else 'allowed'}")
+
+    selections = []
+    if not crm_rec.blocked:
+        crm_provider = provider_registry.get(crm_rec.provider_id)
+        crm_plan = next(p for p in crm_provider.plans if p.plan_id == crm_rec.selected_plan_id)
+        selections.append((crm_provider, crm_plan))
+        crm_rec.monthly_cost_estimate = _selections_fixed_cost([(crm_provider, crm_plan)])
+    for rec in automation_recs:
+        if rec.blocked or not rec.selected_plan_id:
+            continue
+        provider = provider_registry.get(rec.provider_id)
+        plan = next(p for p in provider.plans if p.plan_id == rec.selected_plan_id)
+        selections.append((provider, plan))
+        rec.monthly_cost_estimate = _selections_fixed_cost([(provider, plan)])
+
+    fixed_monthly = _selections_fixed_cost(selections)
+    cost_estimate = StackCostEstimate(
+        stack_id=strategy_id,
+        fixed_monthly_cost=fixed_monthly,
+        monthly_total_cost_at_volume=fixed_monthly,
+        notes=["Lead-gen/agency strategies price per-lead or per-retainer, not per-unit margin — margin_after_stack_cost/break_even_client_price are not applicable here."],
+    )
+
+    warnings = [rec.blocked_reason for rec in automation_recs if rec.blocked]
+    if crm_rec.blocked:
+        warnings.append(crm_rec.blocked_reason)
+
+    return BusinessStackRecommendation(
+        strategy_id=strategy_id,
+        crm_provider_recommendation=crm_rec,
+        automation_recommendations=automation_recs,
+        monthly_cost_estimate=cost_estimate,
         rules_applied=rules_applied,
         warnings=warnings,
         status="recommended",

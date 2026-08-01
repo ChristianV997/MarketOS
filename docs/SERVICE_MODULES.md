@@ -267,11 +267,16 @@ envelope/audit-log is also available: `python -m marketos.cli stack recommend ..
 
 **Status**: `ready_for_client_service`
 
-**Phase 2 (deferred, not built yet)**: CRM/Conversation/Analytics/Marketing-
-Automation/Hosting provider ports and their adapters (Twenty, Chatwoot,
-Mautic, Activepieces, PostHog backend, Hostinger), and the
-`high_ticket_lead_gen_*`/`agency_white_label_fast` strategies that depend on
-them — see `docs/COST_AWARE_INTEGRATION_AUDIT.md`.
+**Phase 2 (done)**: Conversation/Analytics(backend)/MarketingAutomation/
+CustomerAutomation/Hosting provider ports and adapters (Chatwoot, PostHog
+backend, Mautic, Activepieces, Hostinger), and all 3 remaining Stack
+Planner strategies (`high_ticket_lead_gen_low_cost`,
+`high_ticket_lead_gen_gohighlevel_fast`, `agency_white_label_fast`) — see
+`docs/COST_AWARE_INTEGRATION_AUDIT.md`. **Still deliberately not built**: a
+concrete Twenty CRM adapter — Twenty is AGPL-3.0 and stays deferred pending
+legal review by explicit prior user decision; the `CRMProvider` Protocol
+exists but the low-cost lead-gen strategy reports that gap honestly instead
+of recommending it.
 
 ---
 
@@ -281,19 +286,22 @@ What exists today:
 - **Workspace isolation**: every module ties its `CommercialRunEnvelope` and
   `ArtifactStore` paths to a real `workspace_id`; verified with a dedicated
   cross-service integration test (`tests/services/test_workspace_isolation.py`)
-  covering all 7 modules plus `ExperimentRegistry.for_workspace()` leak-checking.
+  covering all 8 non-`reporting` modules (including `profit_stack_advisor`)
+  plus `ExperimentRegistry.for_workspace()` leak-checking.
 - **Client report exports**: every module now actually persists its
   rendered markdown report (not just the JSON result) via
   `services.reporting.save_report_artifacts`; `services.reporting.export_client_report()`
   resolves the on-disk path for handing to a client.
-- **API wrappers**: `api/routes/services.py` exposes all 8 modules as clean
-  `POST` routes (mounted in `backend/api.py`), matching this repo's existing
-  route-module convention. Every route sanitizes non-finite floats
+- **API wrappers**: `api/routes/services.py` exposes all 8 non-`reporting`
+  modules (including `profit_stack_advisor`) as clean `POST` routes (mounted
+  in `backend/api.py`), matching this repo's existing route-module
+  convention. Every route sanitizes non-finite floats
   (`services.reporting.json_safe`) before returning — `core.ugc
   .content_calendar.has_content_gap` legitimately returns `float("inf")` as
   a sentinel, which is valid Python but not valid JSON; `marketos.cli`'s
   `--json` output applies the same sanitizer for the same reason.
-- **CLI**: `marketos/cli.py` exposes all 8 modules as subcommands.
+- **CLI**: `marketos/cli.py` exposes all 8 non-`reporting` modules as
+  subcommands, plus the lighter, non-billable `stack recommend` utility.
 - **Commercial status labels**: `services.status.commercial_status()` +
   a `status` field on every module's top-level result, per the table above.
 
@@ -305,7 +313,7 @@ rather than silently skipped):
   already returns a `status`, `dry_run`, and a real structured result tied
   to a `CommercialRunEnvelope` (whose `experiment_id` + `ArtifactStore` path
   *are* the envelope/report path) — but retrofitting the exact literal key
-  names across all 7 already-tested schemas was judged too invasive/risky
+  names across all already-tested schemas was judged too invasive/risky
   to do blind at the end of a long session. Flagged here as real, scoped
   future work rather than silently omitted.
 - **Real auth/billing/multi-tenant onboarding** — `ClientWorkspace` isolates
@@ -316,10 +324,11 @@ rather than silently skipped):
   status vocabulary rather than glossed over.
 - **Dashboard integration**: done, in a later pass. `frontend/src/pages/Services.tsx`
   (routed at `/services` in the router app mounted from `frontend/src/main.tsx`)
-  renders a form + live result panel for all 7 non-`reporting` modules,
+  renders a form + live result panel for all 8 non-`reporting` modules,
   backed by mutation hooks in `frontend/src/lib/api.ts` (`useUnitEconomics`,
   `useEcommerceOperator`, `useProductAudit`, `useCreativeGrowth`,
-  `useCustomerIntelligence`, `useDigitalProduct`, `useSalesAutomation`) that
+  `useCustomerIntelligence`, `useDigitalProduct`, `useSalesAutomation`,
+  `useProfitStackAdvisor`) that
   call the same `/api/services/*` routes the CLI and direct API callers use
   — one code path, not two. The original Command Center's own
   metrics/portfolio/decision panels are unaffected and still live at their

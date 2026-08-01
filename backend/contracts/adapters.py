@@ -134,6 +134,106 @@ class PaymentProvider(Protocol):
     def handle_webhook(self, payload: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
 
 
+class CRMProvider(Protocol):
+    """CRM pipeline boundary — contacts, opportunities, and activity, not a
+    full customer-data-platform. No concrete adapter exists yet: the one
+    catalog CRM candidate this Protocol was designed against (Twenty) is
+    AGPL-3.0 and deferred pending legal review (see
+    docs/oss/LICENSE_MANIFEST.yml) — GoHighLevel (proprietary) is the only
+    CRM-capable provider with a live recommendation path today, via
+    backend.stack_planner's existing automation recommendations."""
+
+    def health(self) -> AdapterHealth: ...
+
+    def upsert_contact(self, contact: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def create_opportunity(self, opportunity: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def update_stage(self, opportunity_id: str, stage: str, *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def record_activity(self, contact_id: str, activity: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+
+class ConversationProvider(Protocol):
+    """Inbox/support-conversation boundary — draft-and-record only; sending
+    a message to a real customer is a `send_message_draft` result staged
+    for human approval, never an autonomous send (see docs/LIVE_MODE_SAFETY.md's
+    hand-off-to-human convention, matching services.sales_automation)."""
+
+    def health(self) -> AdapterHealth: ...
+
+    def create_contact(self, contact: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def create_conversation(self, conversation: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def send_message_draft(self, conversation_id: str, message: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def record_inbound_message(self, conversation_id: str, message: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def handoff_to_human(self, conversation_id: str, *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+
+class AnalyticsProvider(Protocol):
+    """Backend/server-side product-analytics event capture and query
+    boundary — distinct from the existing frontend-only posthog-js client
+    (frontend/src/lib/posthog.ts), which talks to PostHog Cloud directly
+    from the browser and is unaffected by this Protocol."""
+
+    def health(self) -> AdapterHealth: ...
+
+    def capture_event(self, event: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def query_funnel(self, funnel: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+    def query_events(self, *, event_name: str, limit: int = 50, since: str | None = None) -> Sequence[Mapping[str, Any]]: ...
+
+
+class MarketingAutomationProvider(Protocol):
+    """Email/segment marketing-automation boundary — distinct from
+    WorkflowAutomationProvider (n8n), which is scoped to MarketOS's own
+    internal operational automation, not customer marketing campaigns."""
+
+    def health(self) -> AdapterHealth: ...
+
+    def upsert_contact(self, contact: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def add_to_segment(self, contact_id: str, segment: str, *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def trigger_campaign(self, campaign_id: str, contact_id: str, *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def record_email_event(self, event: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+
+class CustomerAutomationProvider(Protocol):
+    """Customer-facing/product no-code workflow automation boundary (e.g.
+    Activepieces) — distinct from WorkflowAutomationProvider (n8n), which is
+    explicitly scoped to MarketOS's own internal operations, not a runtime a
+    client's product could depend on."""
+
+    def health(self) -> AdapterHealth: ...
+
+    def trigger_workflow(self, workflow_id: str, payload: Mapping[str, Any], *, context: SidecarContext) -> Mapping[str, Any]: ...
+
+    def get_workflow_status(self, run_id: str) -> Mapping[str, Any]: ...
+
+    def list_available_workflows(self) -> Sequence[Mapping[str, Any]]: ...
+
+
+class HostingProvider(Protocol):
+    """Read-only hosting-plan/site-status boundary — MarketOS does not
+    provision or de-provision hosting infrastructure itself; this Protocol
+    exists for cost-plan comparison and basic status checks, not
+    infrastructure management."""
+
+    def health(self) -> AdapterHealth: ...
+
+    def get_status(self) -> Mapping[str, Any]: ...
+
+    def list_sites(self) -> Sequence[Mapping[str, Any]]: ...
+
+    def get_plan_usage(self) -> Mapping[str, Any]: ...
+
+
 class AgentProvider(Protocol):
     def health(self) -> AdapterHealth: ...
 

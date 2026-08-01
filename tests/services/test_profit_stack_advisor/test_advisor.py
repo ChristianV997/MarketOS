@@ -29,10 +29,11 @@ class TestProfitStackAdvisor:
         assert result.cost_comparison is not None
         assert len(result.cost_comparison["stacks"]) == 2
 
-    def test_deferred_strategy_still_completes_with_empty_recommendation(self):
-        result, envelope = run_profit_stack_advisor("Agency", business_model="agency_white_label_fast")
+    def test_lead_gen_strategy_completes_without_ecommerce_cost_comparison(self):
+        result, envelope = run_profit_stack_advisor("Agency", business_model="agency_white_label_fast", expected_monthly_revenue=20000.0)
         assert envelope.status == "completed"
-        assert result.recommendation["status"] == "not_yet_supported"
+        assert result.recommendation["status"] == "recommended"
+        assert result.recommendation["crm_provider_recommendation"]["provider_id"] == "gohighlevel"
         assert result.cost_comparison is None
 
     def test_envelope_registered_and_retrievable(self):

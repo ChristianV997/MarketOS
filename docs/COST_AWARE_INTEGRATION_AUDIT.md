@@ -47,29 +47,44 @@ get right and genuinely differentiated:
 ## 3. Existing OSS sidecars + status
 
 See `docs/oss/INVENTORY.yml` / `docs/oss/LICENSE_MANIFEST.yml` for the
-canonical record. Relevant to this pass:
+canonical record. Status across both Phase 1 and Phase 2:
 
-| Candidate | Status before this pass | Status after this pass |
+| Candidate | Status before Phase 1 | Status after Phase 2 |
 |---|---|---|
 | woocommerce | (absent) | `legal_review_required` — adapter built and tested, same precedent as Postiz: GPL-3.0 is a restricted license under `scripts/check_oss_policy.py`'s blanket policy, so formal legal review is recorded as required before a real commercial rollout, even though the adapter only makes independent API calls to a merchant-operated WooCommerce instance (no MarketOS-vendored/distributed GPL source, no derivative work) |
-| mautic | (absent) | `catalog_candidate` — data only, no adapter |
-| activepieces | (absent) | `catalog_candidate` — data only, no adapter |
-| chatwoot | `deferred` | `candidate_for_conversation_sidecar` — status advanced (MIT, lowest license risk of the three deferred candidates); still no adapter or code |
-| twenty-crm | `deferred` | unchanged — AGPL-3.0, left untouched by explicit scope decision |
+| mautic | (absent) | `legal_review_required` — MarketingAutomationProvider adapter built and tested; GPL-3.0-or-later is copyleft, treated with the same legal-review precedent as GPL-3.0/AGPL-3.0 even though the exact-string policy checker doesn't currently match "-or-later" |
+| activepieces | (absent) | `selected` — CustomerAutomationProvider adapter built and tested; MIT, no legal-review gate needed |
+| chatwoot | `deferred` | `selected` — ConversationProvider adapter built and tested (Phase 1 advanced it to `candidate_for_conversation_sidecar`, Phase 2 to `selected` once the adapter shipped); MIT, no legal-review gate needed |
+| posthog | `selected` (frontend-only) | `selected`, unchanged status — Phase 2 added a second, server-side consumption (backend/integrations/posthog_backend.py, AnalyticsProvider) against the same PostHog Cloud project, noted in the existing entry rather than duplicated |
+| twenty-crm | `deferred` | unchanged — AGPL-3.0, left untouched by explicit prior user decision; no CRMProvider adapter built (see §4) |
 | n8n | `internal_only` | unchanged |
 | postiz | `legal_review_required` | unchanged |
 
-## 4. Missing integration ports (genuine gaps)
+## 4. Missing integration ports — Phase 1 gaps, now closed in Phase 2
 
-Confirmed via repo-wide search before this pass: **no** Protocol existed for
+Phase 1 confirmed via repo-wide search: **no** Protocol existed for
 Hosting, Analytics (backend), CRM, Conversation/Inbox, or Marketing
-Automation. Payment had a bare credential key but no Protocol/adapter.
+Automation, and closed the Payment gap only (the highest-value one for the
+MX commerce/payment decision this spec's own headline example calls for),
+deferring the rest.
 
-This pass closed the Payment gap only. The other five are **explicitly
-deferred to Phase 2** (see §9) — building all five plus their adapters in
-one pass was judged too large a single increment; the Payment gap was the
-highest-value one for the MX commerce/payment stack decision this spec's
-own headline example calls for.
+Phase 2 closed four of the remaining five: `ConversationProvider`
+(Chatwoot), `AnalyticsProvider` (PostHog backend), `MarketingAutomationProvider`
+(Mautic), `CustomerAutomationProvider` (Activepieces — a new Protocol
+distinct from the internal-only `WorkflowAutomationProvider`/n8n), and
+`HostingProvider` (Hostinger, read-only). See `docs/INTEGRATION_PORTS.md`
+for the full Protocol/adapter table.
+
+**`CRMProvider` remains a genuine, deliberate gap.** The Protocol exists
+(`backend/contracts/adapters.py::CRMProvider`), but no concrete adapter was
+built: Twenty, the catalog's one low-cost CRM candidate, is AGPL-3.0 and
+was left deferred pending legal review by an explicit prior user decision
+in an earlier session — reversing that without the user re-confirming it
+would be out of scope for this pass. The Stack Planner's lead-gen
+strategies (§9) report this gap honestly (`crm_provider_recommendation.blocked=True`
+with an explanatory reason) rather than recommending Twenty anyway or
+fabricating a substitute; GoHighLevel (proprietary) fills the CRM need for
+strategies where its revenue threshold is cleared.
 
 ## 5. Where the repo already beats external SaaS
 
@@ -95,8 +110,15 @@ own headline example calls for.
   `backend.validation.margin_calculator` via three small additive overrides
   (`payment_fee_pct`, `payment_fee_fixed`, `platform_monthly_fee`, all
   defaulting to `None` — byte-identical to prior behavior when omitted).
-- No duplicate OSS inventory entries — `chatwoot`/`twenty-crm` were updated
-  in place, not re-added.
+- No duplicate OSS inventory entries — `chatwoot`/`mautic`/`activepieces`/
+  `posthog` were updated in place (status/notice changes), not re-added;
+  `twenty` is a genuinely new `backend/providers` catalog entry but reuses
+  the existing `twenty-crm` OSS inventory record via `oss_inventory_ref`
+  rather than creating a second one.
+- No sibling Protocol for Activepieces alongside `WorkflowAutomationProvider` —
+  a new, distinctly-scoped `CustomerAutomationProvider` was added instead
+  (see `docs/INTEGRATION_PORTS.md`), preserving `WorkflowAutomationProvider`'s
+  internal-only guarantee rather than weakening it.
 
 ## 8. Cost/compatibility risks
 
@@ -119,17 +141,23 @@ own headline example calls for.
 
 ## 9. Recommended implementation sequence
 
-1. **Done, this pass**: Provider Registry, Cost Engine, Stack Planner (4 of
-   7 presets reachable), WooCommerce + Stripe MX + Mercado Pago MX adapters,
+1. **Done, Phase 1**: Provider Registry, Cost Engine, Stack Planner (4 of 7
+   presets reachable), WooCommerce + Stripe MX + Mercado Pago MX adapters,
    Profit Stack Advisor service, CLI/API/docs/tests, OSS governance updates.
-2. **Phase 2 (not started)**: `CRMPort`, `ConversationPort`, `AnalyticsPort`
-   (backend), `MarketingAutomationPort`, `HostingPort` and adapters for
-   Twenty, Chatwoot, Mautic, Activepieces, PostHog (backend), Hostinger; the
-   `high_ticket_lead_gen_low_cost`, `high_ticket_lead_gen_gohighlevel_fast`,
-   and `agency_white_label_fast` Stack Planner strategies (all three need the
-   CRM/Conversation providers Phase 1 doesn't model); `docs/SAAS_MARGIN_POLICY.md`,
+2. **Done, Phase 2**: `CRMProvider` (Protocol only — see §4), `ConversationProvider`,
+   `AnalyticsProvider` (backend), `MarketingAutomationProvider`, `CustomerAutomationProvider`,
+   `HostingProvider` Protocols; adapters for Chatwoot, Mautic, Activepieces,
+   PostHog (backend), Hostinger (Twenty deliberately excluded — see §4); all
+   3 remaining Stack Planner strategies (`high_ticket_lead_gen_low_cost`
+   recommends Chatwoot+Mautic and reports the CRM gap honestly;
+   `high_ticket_lead_gen_gohighlevel_fast`/`agency_white_label_fast`
+   recommend GoHighLevel above its revenue threshold); `docs/SAAS_MARGIN_POLICY.md`,
    `docs/SHOPIFY_VS_HOSTINGER_WOOCOMMERCE.md`, `docs/INTEGRATION_PORTS.md`;
-   a `/api/stack/recommend` route (currently CLI-only).
-3. **Later**: workspace-isolation test + frontend dashboard coverage for
-   `profit_stack_advisor`, matching the other 8 service modules'
-   (see `docs/SERVICE_MODULES.md`'s "SaaS-lite readiness" section).
+   `POST /api/stack/recommend`; the workspace-isolation test + frontend
+   dashboard coverage for `profit_stack_advisor` (see `docs/SERVICE_MODULES.md`'s
+   "SaaS-lite readiness" section).
+3. **Later (not started)**: an actual Twenty CRM adapter, if/when a
+   dedicated legal review of its AGPL-3.0 license is completed and the user
+   explicitly revisits the deferral; a real hosting-provisioning workflow
+   (today's `HostingProvider` is read-only status/plan-usage only, by
+   design — MarketOS does not provision infrastructure).

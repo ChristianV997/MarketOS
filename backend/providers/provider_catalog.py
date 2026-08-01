@@ -37,13 +37,13 @@ def _register_all() -> None:
         name="Hostinger",
         category="hosting",
         capabilities=("shared_hosting", "vps", "wordpress_hosting"),
-        integration_status="catalog_only",
+        integration_status="adapter_available",
         plans=(
             ProviderPlan("business", "Business Web Hosting", (_fixed(3.99, "renews ~13.99 after promo period"),)),
             ProviderPlan("vps_kvm2", "VPS KVM 2", (_fixed(8.99, "renews ~13.99 after promo period"),)),
         ),
         license="proprietary",
-        notes="Lowest-cost path for a self-managed WooCommerce store; no free tier beyond trial windows.",
+        notes="Lowest-cost path for a self-managed WooCommerce store; no free tier beyond trial windows. HostingProvider adapter built (backend/integrations/hostinger.py) — read-only status/plan-usage only, no provisioning.",
     ))
     provider_registry.register(Provider(
         provider_id="woocommerce",
@@ -52,10 +52,10 @@ def _register_all() -> None:
         capabilities=("catalog", "inventory", "orders", "refunds"),
         integration_status="adapter_available",
         plans=(ProviderPlan("core", "WooCommerce (self-hosted plugin)", (_fixed(0.0, "free plugin; hosting cost is separate (see hostinger)"),)),),
-        risk=ProviderRisk(level="low", reasons=("merchant-operated plugin, no vendor lock-in on data",)),
+        risk=ProviderRisk(level="high", reasons=("GPL-3.0 is a restricted license under scripts/check_oss_policy.py",), requires_legal_approval=True),
         license="GPL-3.0",
         oss_inventory_ref="woocommerce",
-        notes="Requires a WordPress host (e.g. hostinger) — its own fixed cost is $0.",
+        notes="Requires a WordPress host (e.g. hostinger) — its own fixed cost is $0. Adapter built and tested; legal review required before commercial deployment (same precedent as Postiz — see docs/oss/LICENSE_MANIFEST.yml).",
     ))
     provider_registry.register(Provider(
         provider_id="medusa",
@@ -108,12 +108,12 @@ def _register_all() -> None:
         name="Chatwoot",
         category="conversation_inbox",
         capabilities=("conversation_inbox", "support_ticketing"),
-        integration_status="catalog_only",
+        integration_status="adapter_available",
         plans=(ProviderPlan("self_hosted", "Chatwoot (self-hosted)", (_fixed(0.0, "self-hosted; infra cost only"),)),),
         risk=ProviderRisk(level="low", reasons=("MIT-licensed",)),
         license="MIT",
         oss_inventory_ref="chatwoot",
-        notes="Phase 2: no ConversationPort/adapter built yet, catalog data only.",
+        notes="ConversationProvider adapter built (backend/integrations/chatwoot.py).",
     ))
     provider_registry.register(Provider(
         provider_id="n8n",
@@ -132,25 +132,26 @@ def _register_all() -> None:
         name="Mautic",
         category="marketing_automation",
         capabilities=("email_marketing", "marketing_automation", "segmentation"),
-        integration_status="catalog_only",
+        integration_status="adapter_available",
         plans=(ProviderPlan("self_hosted", "Mautic (self-hosted)", (_fixed(0.0, "self-hosted; infra cost only"),)),),
+        risk=ProviderRisk(level="medium", reasons=("GPL-3.0-or-later",)),
         license="GPL-3.0-or-later",
         oss_inventory_ref="mautic",
-        notes="Phase 2: no MarketingAutomationPort/adapter built yet, catalog data only.",
+        notes="MarketingAutomationProvider adapter built (backend/integrations/mautic.py).",
     ))
     provider_registry.register(Provider(
         provider_id="activepieces",
         name="Activepieces",
         category="workflow_automation",
         capabilities=("workflow_automation", "connectors"),
-        integration_status="catalog_only",
+        integration_status="adapter_available",
         plans=(
             ProviderPlan("self_hosted", "Activepieces (self-hosted)", (_fixed(0.0, "self-hosted; infra cost only"),)),
             ProviderPlan("cloud_standard", "Cloud Standard", (_fixed(20.0),)),
         ),
         license="MIT",
         oss_inventory_ref="activepieces",
-        notes="Phase 2: no WorkflowPort/adapter built yet, catalog data only.",
+        notes="CustomerAutomationProvider adapter built (backend/integrations/activepieces.py) — distinct from the internal-only n8n WorkflowAutomationProvider.",
     ))
     provider_registry.register(Provider(
         provider_id="gohighlevel",
@@ -178,6 +179,30 @@ def _register_all() -> None:
         license="AGPL-3.0",
         oss_inventory_ref="postiz",
         notes="Never recommended without an explicit legal-approval flag (postiz_legal_approval).",
+    ))
+    provider_registry.register(Provider(
+        provider_id="posthog",
+        name="PostHog",
+        category="analytics",
+        capabilities=("product_analytics", "pageviews", "custom_events"),
+        integration_status="adapter_available",
+        plans=(ProviderPlan("cloud", "PostHog Cloud (usage-based)", (_fixed(0.0, "generous free tier, then usage-based — see posthog.com/pricing"),)),),
+        risk=ProviderRisk(level="low", reasons=("MIT-licensed",)),
+        license="MIT",
+        oss_inventory_ref="posthog",
+        notes="Frontend client (posthog-js) already selected for pageviews/events. AnalyticsProvider adapter (backend/integrations/posthog_backend.py) adds server-side capture + HogQL query, both against PostHog Cloud.",
+    ))
+    provider_registry.register(Provider(
+        provider_id="twenty",
+        name="Twenty CRM",
+        category="crm",
+        capabilities=("crm", "pipeline", "contact_management"),
+        integration_status="catalog_only",
+        plans=(ProviderPlan("self_hosted", "Twenty (self-hosted)", (_fixed(0.0, "self-hosted; infra cost only"),)),),
+        risk=ProviderRisk(level="high", reasons=("AGPL-3.0",), requires_legal_approval=True),
+        license="AGPL-3.0",
+        oss_inventory_ref="twenty-crm",
+        notes="Deferred by explicit prior user decision; left untouched this pass. No CRMProvider adapter — catalog data only, so the Stack Planner's CRM-dependent strategies fall back to GoHighLevel (proprietary) or report the gap honestly.",
     ))
 
 

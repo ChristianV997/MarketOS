@@ -89,6 +89,14 @@ def test_sales_automation_isolated_across_workspaces():
     _assert_isolated(env_a, env_b)
 
 
+def test_profit_stack_advisor_isolated_across_workspaces():
+    from services.profit_stack_advisor.advisor import run_profit_stack_advisor
+    ws_a, ws_b = _two_workspaces()
+    _, env_a = run_profit_stack_advisor("Widget Co", business_model="own_ecommerce", workspace=ws_a)
+    _, env_b = run_profit_stack_advisor("Widget Co", business_model="own_ecommerce", workspace=ws_b)
+    _assert_isolated(env_a, env_b)
+
+
 def test_no_module_leaks_data_between_workspaces_via_experiment_registry():
     """A workspace's ExperimentRegistry.for_workspace() view must never
     include another workspace's experiments, across every service module."""
