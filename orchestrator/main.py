@@ -919,6 +919,7 @@ def _run_metrics_ingestion() -> dict[str, Any]:
     from backend.events.emitter import emit_metrics_ingested
 
     metrics: dict[str, Any] = {}
+    source_status: dict[str, dict[str, Any]] = {}
 
     # Shopify revenue
     try:
@@ -928,11 +929,13 @@ def _run_metrics_ingestion() -> dict[str, Any]:
         shopify = compute_metrics(orders)
         metrics["shopify_revenue"]    = shopify.get("revenue", 0.0)
         metrics["shopify_order_count"] = shopify.get("order_count", 0)
+        source_status["shopify"] = {"status": "ok", "orders": len(orders)}
         for order in orders:
             observation = observation_from_order(order, source="shopify")
             if observation is not None:
                 webhook_feedback_recorder.record_observation(observation)
     except Exception as exc:
+        source_status["shopify"] = {"status": "error", "error": str(exc)}
         _log.debug("metrics_shopify_failed error=%s", exc)
 
     # Meta ad spend
@@ -941,7 +944,13 @@ def _run_metrics_ingestion() -> dict[str, Any]:
         meta = get_ad_spend(last_n_minutes=60)
         metrics["meta_spend"]     = meta.get("total_spend", 0.0)
         metrics["meta_campaigns"] = len(meta.get("campaigns", []))
+        meta_metadata = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+        source_status["meta"] = {
+            "status": "dry_run" if meta_metadata.get("dry_run") else str(meta.get("source", "ok")),
+            "campaigns": len(meta.get("campaigns", [])),
+        }
     except Exception as exc:
+        source_status["meta"] = {"status": "error", "error": str(exc)}
         _log.debug("metrics_meta_failed error=%s", exc)
 
     # Compute blended real ROAS and record into calibration store
@@ -956,7 +965,7 @@ def _run_metrics_ingestion() -> dict[str, Any]:
 
     # TikTok ROAS for tracked campaigns — full lineage via _campaign_artifacts
     try:
-        from backend.integrations.tiktok_ads import fetch_roas
+        from backend.integrations.tiktok_ads import _DRY_RUN as tiktok_dry_run, fetch_roas
         from core.content.patterns import extract_patterns, pattern_store
         from core.content.feedback import classify_video, engagement_score
 
@@ -965,6 +974,10 @@ def _run_metrics_ingestion() -> dict[str, Any]:
         if campaign_ids:
             roas_map = fetch_roas(campaign_ids)
             metrics["tiktok_campaign_count"] = len(roas_map)
+            source_status["tiktok"] = {
+                "status": "dry_run" if tiktok_dry_run else "ok",
+                "campaigns": len(roas_map),
+            }
             for cid, roas in roas_map.items():
                 with _campaign_state_lock:
                     artifact = _campaign_artifacts.get(cid)
@@ -1047,7 +1060,10 @@ def _run_metrics_ingestion() -> dict[str, Any]:
                     synth["eng_score"] = engagement_score(synth)
                     pattern_store.update(extract_patterns([synth]))
                 _log.debug("metrics_tiktok campaign=%s product=%s roas=%s", cid, product, roas)
+        else:
+            source_status["tiktok"] = {"status": "skipped", "reason": "no_tracked_campaigns"}
     except Exception as exc:
+        source_status["tiktok"] = {"status": "error", "error": str(exc)}
         _log.debug("metrics_tiktok_failed error=%s", exc)
 
     commerce_reconciled = _reconcile_delayed_commerce_metrics(calibration_store)
@@ -1055,11 +1071,17 @@ def _run_metrics_ingestion() -> dict[str, Any]:
         metrics["commerce_campaigns_reconciled"] = commerce_reconciled
 
     if not metrics:
-        return {"status": "skipped", "reason": "no_metrics_available"}
+        return {"status": "skipped", "reason": "no_metrics_available", "sources": source_status}
 
+    # Keep structured source health in the emitted event while preserving the
+    # existing scalar-only metrics response used by dashboards.
+    metrics["source_status"] = source_status
     emit_metrics_ingested("orchestrator", metrics)
-    return {"status": "ok", "metrics": {k: v for k, v in metrics.items()
-                                         if isinstance(v, (int, float, str))}}
+    return {
+        "status": "ok",
+        "metrics": {k: v for k, v in metrics.items() if isinstance(v, (int, float, str))},
+        "sources": source_status,
+    }
 
 
 # ── worker retry + anomaly ────────────────────────────────────────────────────

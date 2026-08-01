@@ -29,10 +29,25 @@ try:
         "marketos_feedback_failures",
         "Commerce feedback observations that failed to persist",
     )
+    _prom_feedback_pending = Counter(
+        "marketos_feedback_pending",
+        "Revenue-only commerce observations waiting for campaign spend",
+    )
+    _prom_feedback_reconciled = Counter(
+        "marketos_feedback_reconciled",
+        "Pending commerce observations joined with campaign spend",
+    )
+    _prom_feedback_rejected = Counter(
+        "marketos_feedback_rejected",
+        "Commerce observations rejected before learning",
+    )
 except ImportError:
     _prom_feedback_records = None
     _prom_feedback_duplicates = None
     _prom_feedback_failures = None
+    _prom_feedback_pending = None
+    _prom_feedback_reconciled = None
+    _prom_feedback_rejected = None
 
 
 _PROCESSED_OBSERVATIONS: set[str] = set()
@@ -164,6 +179,8 @@ def observation_from_metrics(
     campaign_id = str(campaign_id or "").strip()
     observation_id = str(observation_id or "").strip()
     if not campaign_id or not observation_id:
+        if _prom_feedback_rejected is not None:
+            _prom_feedback_rejected.inc()
         return None
     try:
         spend_value = max(0.0, float(spend or 0.0))
@@ -172,10 +189,14 @@ def observation_from_metrics(
         clicks_value = max(0, int(clicks or 0))
         impressions_value = max(0, int(impressions or 0))
     except (TypeError, ValueError):
+        if _prom_feedback_rejected is not None:
+            _prom_feedback_rejected.inc()
         return None
     if spend_value <= 0.0 or (revenue_value <= 0.0 and conversions_value <= 0):
         # A spend-only polling row is useful for profitability dashboards but
         # is not enough evidence to train campaign ranking.
+        if _prom_feedback_rejected is not None:
+            _prom_feedback_rejected.inc()
         return None
     return CampaignObservation(
         observation_id=observation_id,
@@ -315,6 +336,8 @@ class FeedbackRecorder:
         result = self.record_observation(combined)
         if result.get("recorded") or result.get("deduplicated"):
             self.ledger.resolve_pending([str(row.get("observation_id", "")) for row in pending])
+            if _prom_feedback_reconciled is not None and result.get("recorded"):
+                _prom_feedback_reconciled.inc()
         return result
 
     def record_observation(self, observation: CampaignObservation) -> dict[str, Any]:
@@ -341,6 +364,8 @@ class FeedbackRecorder:
         if observation.spend <= 0.0:
             if self.ledger is not None:
                 self.ledger.mark_processed(observation.observation_id, pending=True)
+            if _prom_feedback_pending is not None:
+                _prom_feedback_pending.inc()
             return {"observation_id": observation.observation_id, "deduplicated": False, "pending_attribution": True}
         metadata = dict(observation.metadata)
         product = observation.product_id or observation.campaign_id
