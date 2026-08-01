@@ -4,7 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
-from backend.vector.semantic_search import search_all
+from backend.vector.semantic_search import (
+    find_similar_campaigns,
+    find_similar_products,
+    search_all,
+)
 from evaluation import LaunchReadiness, ProductCandidate, SupplierOffer, evaluate_product
 
 from .contracts import (
