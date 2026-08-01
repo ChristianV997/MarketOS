@@ -81,9 +81,6 @@ _campaign_state_lock = threading.Lock()
 # the most recent batch so ranking consumes the exact evidence that advanced
 # the phase controller instead of issuing a second, potentially divergent pull.
 _latest_signal_batch: list[dict[str, Any]] = []
-# Per-tick ownership marker.  The canonical commerce loop owns launch creation
-# when it completes successfully; the legacy scaling worker must not create a
-# second campaign in the same tick.
 _commerce_cycle_completed_this_tick = False
 
 
@@ -458,10 +455,23 @@ def _run_commerce_cycle() -> dict[str, Any]:
     if not _COMMERCE_LOOP_ENABLED:
         return {"status": "skipped", "reason": "commerce_loop_disabled"}
     try:
-        from backend.commerce import run_commerce_cycle
+        from backend.commerce import collect_oss_inputs, run_commerce_cycle
+
+        signal_batch = list(_latest_signal_batch)
+        if not signal_batch and os.getenv("MARKETOS_OSS_DISCOVERY", "false").lower() == "true":
+            urls = tuple(filter(None, os.getenv("MARKETOS_RESEARCH_URLS", "").split(",")))
+            oss_signals, oss_products, oss_meta = collect_oss_inputs(urls, context=SidecarContext(dry_run=not _COMMERCE_LOOP_LIVE))
+            signal_batch = oss_signals
+            if oss_meta.get("failures"):
+                _log.warning("oss_provider_degradation failures=%s", oss_meta["failures"])
+        else:
+            oss_products = {}
+            oss_meta = {"offers": {}}
 
         report = run_commerce_cycle(
-            signals=list(_latest_signal_batch) or None,
+            signals=signal_batch or None,
+            products=oss_products,
+            offers=oss_meta.get("offers", {}),
             top_k=_COMMERCE_LOOP_TOP_K,
             budget=_COMMERCE_LOOP_BUDGET,
             dry_run=not _COMMERCE_LOOP_LIVE,

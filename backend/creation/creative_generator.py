@@ -63,9 +63,15 @@ def generate_listing(product: str, price: float, supplier_days: int = 9) -> dict
     result = _complete_json(prompt)
     if isinstance(result, dict) and result.get("title") and result.get("bullets"):
         result.setdefault("description", "")
+        description = str(result["description"])
+        # Preserve the listing contract even when a configured provider omits
+        # the requested price from otherwise valid copy.
+        price_text = f"{price:.2f}"
+        if price_text not in description:
+            description = f"{description}<p>Price: ${price_text}</p>"
         return {
             "title": str(result["title"])[:70],
-            "description": str(result["description"]),
+            "description": description,
             "bullets": [str(b) for b in result["bullets"]][:5],
             "generated_by": "llm",
         }

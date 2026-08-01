@@ -4,6 +4,27 @@ All calls are no-ops when TIKTOK_DRY_RUN=true (default) or when credentials
 are absent. This ensures the module is always safe to import and test without
 live credentials.
 
+The single TikTok integration surface — creative upload used to live in a
+separate, disjoint pair of modules (core/connectors/tiktok_creatives.py +
+tiktok_ads_variants.py) with no shared client, no dry-run gating, and no
+production caller (only their own tests exercised them). Merged here as
+upload_creative()/create_ads_from_files() so creative upload shares this
+module's dry-run/risk-gate conventions.
+
+Live calls go through the official ``tiktok-business-api-sdk-official``
+package (importable as ``business_api_client``) instead of hand-rolled REST
+— ``_post``/``_get`` keep their original (path, payload/params) -> dict
+signature so every calling function above them is unchanged; only their
+internals dispatch to the right typed SDK request model per path. Two
+real field-name mismatches between the old hand-rolled payloads and
+TikTok's actual schema were found and fixed in that dispatch:
+``creative_id`` -> ``video_id`` (ad creation references a previously
+uploaded video, not an opaque "creative" id) and ``opt_status`` ->
+``operation_status`` (campaign pause/enable) — the old field names would
+have been silently accepted by requests.post's raw dict payload but
+rejected or ignored by TikTok's real API, so this is a live-path
+correctness fix, not just a mechanical swap.
+
 Production activation: set TIKTOK_DRY_RUN=false and supply:
   TIKTOK_ACCESS_TOKEN, TIKTOK_ADVERTISER_ID, TIKTOK_APP_ID
 """
@@ -14,9 +35,10 @@ import os
 import time
 from typing import Any
 
+from backend.patterns.safe_call import safe_call
+
 _log = logging.getLogger(__name__)
 
-_BASE   = "https://business-api.tiktok.com/open_api/v1.3"
 _DRY_RUN = os.getenv("TIKTOK_DRY_RUN", "true").lower() != "false"
 _BUDGET_DAILY = float(os.getenv("TIKTOK_BUDGET_DAILY", "50"))
 
@@ -30,102 +52,154 @@ _KILL_ROAS_FLOOR  = float(os.getenv("TIKTOK_KILL_ROAS_FLOOR", "0.8"))
 # In-process ROAS streak tracker: {campaign_id → [float, ...]}
 _roas_streaks: dict[str, list[float]] = {}
 
-_FALLBACK_METRICS = {
-    "spend": 30.0,
-    "revenue": 0.0,
-    "clicks": 450,
-    "impressions": 15000,
-    "conversions": 12,
-    "ctr": 0.030,
-    "cvr": 0.027,
-    "cpc": 0.067,
-    "cpa": 2.5,
-}
+# Monotonic counter for dry-run IDs. A bare int(time.time()) collides for any
+# two campaigns launched in the same second, which makes distinct launches
+# share a campaign_id and silently overwrite each other in the orchestrator's
+# _campaign_artifacts attribution map. The counter guarantees uniqueness.
+_dry_seq = 0
+
+
+def _next_dry_id(prefix: str = "dry") -> str:
+    global _dry_seq
+    _dry_seq += 1
+    return f"{prefix}_{int(time.time())}_{_dry_seq}"
 
 
 def is_configured() -> bool:
     return bool(os.getenv("TIKTOK_ACCESS_TOKEN") and os.getenv("TIKTOK_ADVERTISER_ID"))
 
 
-def _headers() -> dict[str, str]:
-    return {
-        "Access-Token": os.environ["TIKTOK_ACCESS_TOKEN"],
-        "Content-Type": "application/json",
-    }
+def _unwrap(resp) -> dict:
+    """Normalize an SDK InlineResponse200 back into the plain
+    {"code", "message", "data"} shape the raw-REST response used to have,
+    so every caller's `.get("data", {}).get(...)` parsing is unchanged.
+    `resp.data` is already a plain dict (typed 'object' in the SDK's
+    swagger schema, never further model-parsed) — no bracket-only gotcha
+    here the way there was for Meta's/Stripe's SDK objects.
+    """
+    return {"code": resp.code, "message": resp.message, "data": resp.data or {}}
 
 
 def _post(path: str, payload: dict) -> dict:
     if _DRY_RUN:
         _log.info("tiktok_dry_run path=%s payload=%s", path, payload)
-        return {"code": 0, "message": "OK", "data": {"campaign_id": f"dry_{int(time.time())}"}}
-    import requests
-    r = requests.post(f"{_BASE}{path}", headers=_headers(), json=payload, timeout=15)
-    r.raise_for_status()
-    return r.json()
+        return {"code": 0, "message": "OK", "data": {"campaign_id": _next_dry_id()}}
+
+    from business_api_client.api.campaign_creation_api import CampaignCreationApi
+    from business_api_client.api.adgroup_api import AdgroupApi
+    from business_api_client.api.ad_api import AdApi
+    from business_api_client.models.campaign_create_body import CampaignCreateBody
+    from business_api_client.models.campaign_status_update_body import CampaignStatusUpdateBody
+    from business_api_client.models.campaign_update_body import CampaignUpdateBody
+    from business_api_client.models.adgroup_create_body import AdgroupCreateBody
+    from business_api_client.models.ad_create_body import AdCreateBody
+    from business_api_client.models.adcreate_creatives import AdcreateCreatives
+
+    token = os.environ["TIKTOK_ACCESS_TOKEN"]
+
+    if path == "/campaign/create/":
+        resp = CampaignCreationApi().campaign_create(token, body=CampaignCreateBody(**payload))
+    elif path == "/adgroup/create/":
+        resp = AdgroupApi().adgroup_create(token, body=AdgroupCreateBody(**payload))
+    elif path == "/ad/create/":
+        creatives = [
+            AdcreateCreatives(video_id=c.get("creative_id", ""), ad_text=c.get("ad_text", ""))
+            for c in payload.get("creatives", [])
+        ]
+        body = AdCreateBody(advertiser_id=payload.get("advertiser_id", ""),
+                            adgroup_id=payload.get("adgroup_id", ""), creatives=creatives)
+        resp = AdApi().ad_create(token, body=body)
+    elif path == "/campaign/status/update/":
+        body = CampaignStatusUpdateBody(
+            advertiser_id=payload.get("advertiser_id", ""),
+            campaign_ids=payload.get("campaign_ids", []),
+            operation_status=payload.get("opt_status", ""),
+        )
+        resp = CampaignCreationApi().campaign_status_update(token, body=body)
+    elif path == "/campaign/update/":
+        resp = CampaignCreationApi().campaign_update(token, body=CampaignUpdateBody(**payload))
+    else:
+        raise ValueError(f"unmapped tiktok_ads POST path: {path}")
+
+    return _unwrap(resp)
 
 
 def _get(path: str, params: dict | None = None) -> dict:
     if _DRY_RUN:
         _log.info("tiktok_dry_run GET path=%s params=%s", path, params)
         return {"code": 0, "message": "OK", "data": {"list": []}}
-    import requests
-    r = requests.get(f"{_BASE}{path}", headers=_headers(), params=params or {}, timeout=15)
-    r.raise_for_status()
-    return r.json()
+
+    from business_api_client.api.reporting_api import ReportingApi
+
+    token = os.environ["TIKTOK_ACCESS_TOKEN"]
+
+    if path == "/reports/integrated/get/":
+        p = dict(params or {})
+        report_type = p.pop("report_type", "BASIC")
+        resp = ReportingApi().report_integrated_get(report_type, token, **p)
+    else:
+        raise ValueError(f"unmapped tiktok_ads GET path: {path}")
+
+    return _unwrap(resp)
 
 
 # ── campaign lifecycle ─────────────────────────────────────────────────────────
 
+@safe_call(default="")
 def create_campaign(
     name: str,
     objective: str = "CONVERSIONS",
     budget: float | None = None,
 ) -> str:
     """Create a campaign. Returns campaign_id."""
-    try:
-        resp = _post("/campaign/create/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "campaign_name": name,
-            "objective_type": objective,
-            "budget_mode": "BUDGET_MODE_TOTAL",
-            "budget": budget or _BUDGET_DAILY,
-        })
-        cid = resp.get("data", {}).get("campaign_id", f"dry_{name}")
-        _log.info("tiktok_campaign_created id=%s", cid)
-        return str(cid)
-    except Exception:
-        _log.exception("tiktok create_campaign failed")
-        return ""
+    resp = _post("/campaign/create/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "campaign_name": name,
+        "objective_type": objective,
+        "budget_mode": "BUDGET_MODE_TOTAL",
+        "budget": budget or _BUDGET_DAILY,
+    })
+    cid = resp.get("data", {}).get("campaign_id", f"dry_{name}")
+    _log.info("tiktok_campaign_created id=%s", cid)
+    return str(cid)
 
 
+@safe_call(default="")
 def create_ad_group(
     campaign_id: str,
     name: str,
     daily_budget: float | None = None,
     placements: list[str] | None = None,
+    targeting: dict | None = None,
 ) -> str:
-    """Create an ad group under a campaign. Returns adgroup_id."""
-    try:
-        resp = _post("/adgroup/create/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "campaign_id": campaign_id,
-            "adgroup_name": name,
-            "placement_type": "PLACEMENT_TYPE_NORMAL",
-            "placements": placements or ["PLACEMENT_TIKTOK"],
-            "budget_mode": "BUDGET_MODE_DAY",
-            "budget": daily_budget or _BUDGET_DAILY,
-            "schedule_type": "SCHEDULE_FROM_NOW",
-            "optimization_goal": "CONVERT",
-            "bid_type": "BID_TYPE_NO_BID",
-        })
-        agid = resp.get("data", {}).get("adgroup_id", f"dry_ag_{name}")
-        _log.info("tiktok_adgroup_created id=%s", agid)
-        return str(agid)
-    except Exception:
-        _log.exception("tiktok create_ad_group failed")
-        return ""
+    """Create an ad group under a campaign. Returns adgroup_id.
+
+    *targeting* merges TikTok's real targeting fields (e.g.
+    age_groups, gender, interest_category_ids, location_ids) into the
+    payload — omit it (the default) for the exact previous behavior
+    (TikTok's own defaults, no explicit targeting).
+    """
+    payload = {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "campaign_id": campaign_id,
+        "adgroup_name": name,
+        "placement_type": "PLACEMENT_TYPE_NORMAL",
+        "placements": placements or ["PLACEMENT_TIKTOK"],
+        "budget_mode": "BUDGET_MODE_DAY",
+        "budget": daily_budget or _BUDGET_DAILY,
+        "schedule_type": "SCHEDULE_FROM_NOW",
+        "optimization_goal": "CONVERT",
+        "bid_type": "BID_TYPE_NO_BID",
+    }
+    if targeting:
+        payload.update(targeting)
+    resp = _post("/adgroup/create/", payload)
+    agid = resp.get("data", {}).get("adgroup_id", f"dry_ag_{name}")
+    _log.info("tiktok_adgroup_created id=%s", agid)
+    return str(agid)
 
 
+@safe_call(default="")
 def create_ad(
     adgroup_id: str,
     creative_id: str,
@@ -134,134 +208,209 @@ def create_ad(
     angle: str = "",
 ) -> str:
     """Create an ad within an ad group. Returns ad_id."""
-    try:
-        resp = _post("/ad/create/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "adgroup_id": adgroup_id,
-            "ad_name": name,
-            "creatives": [{
-                "creative_id": creative_id,
-                "ad_text": f"{hook} {angle}".strip()[:100],
-            }],
-        })
-        ad_id = resp.get("data", {}).get("ad_id", f"dry_ad_{name}")
-        _log.info("tiktok_ad_created id=%s", ad_id)
-        return str(ad_id)
-    except Exception:
-        _log.exception("tiktok create_ad failed")
-        return ""
+    resp = _post("/ad/create/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "adgroup_id": adgroup_id,
+        "ad_name": name,
+        "creatives": [{
+            "creative_id": creative_id,
+            "ad_text": f"{hook} {angle}".strip()[:100],
+        }],
+    })
+    ad_id = resp.get("data", {}).get("ad_id", f"dry_ad_{name}")
+    _log.info("tiktok_ad_created id=%s", ad_id)
+    return str(ad_id)
 
 
+@safe_call(default=list)
+def create_ads_batch(adgroup_id: str, ads: list[dict]) -> list[str]:
+    """Create multiple ads concurrently for one ad group.
+
+    Each item in ``ads`` is {"creative_id", "name", "hook", "angle"}.
+    Returns ad_ids in the same order as ``ads``.
+
+    TikTok's Marketing API doesn't expose a documented bulk ad-create
+    endpoint the way Meta's Graph API batch protocol does, so this
+    parallelizes the existing single-ad create_ad() calls with a thread
+    pool instead of guessing at an unverified bulk endpoint shape — the
+    same approach already used for supplier quoting
+    (backend/validation/suppliers.py:quote_all). Each create_ad() call is
+    independently safe_call-wrapped, so one failing ad returns "" at its
+    position without affecting the others.
+    """
+    if not ads:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _create(ad: dict) -> str:
+        return create_ad(
+            adgroup_id=adgroup_id,
+            creative_id=ad.get("creative_id", ""),
+            name=ad.get("name", ""),
+            hook=ad.get("hook", ""),
+            angle=ad.get("angle", ""),
+        )
+
+    with ThreadPoolExecutor(max_workers=min(len(ads), 5)) as pool:
+        return list(pool.map(_create, ads))
+
+
+@safe_call(default=False)
 def pause_campaign(campaign_id: str) -> bool:
     """Pause a campaign (kill-switch)."""
-    try:
-        _post("/campaign/status/update/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "campaign_ids": [campaign_id],
-            "opt_status": "DISABLE",
-        })
-        _log.info("tiktok_campaign_paused id=%s", campaign_id)
-        return True
-    except Exception:
-        _log.exception("tiktok pause_campaign failed id=%s", campaign_id)
-        return False
+    _post("/campaign/status/update/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "campaign_ids": [campaign_id],
+        "opt_status": "DISABLE",
+    })
+    _log.info("tiktok_campaign_paused id=%s", campaign_id)
+    return True
 
 
-def scale_budget(campaign_id: str, new_budget: float) -> bool:
-    """Update campaign daily budget for scaling winners."""
-    try:
-        _post("/campaign/update/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "campaign_id": campaign_id,
-            "budget": round(new_budget, 2),
+@safe_call(default=False)
+def scale_budget(campaign_id: str, new_budget: float, current_budget: float = 0.0) -> bool:
+    """Update campaign daily budget for scaling winners.
+
+    Real (non-dry-run) budget increases pass through the risk gate first —
+    a scale-down/kill (new_budget <= current_budget) never gets blocked
+    since it reduces spend, not increases it. Only the incremental
+    increase over *current_budget* is gated/recorded as new spend commitment
+    (not the full new_budget every call, which would overcount cumulative
+    spend across repeated scale-ups of the same campaign); when the caller
+    doesn't know the prior budget, current_budget defaults to 0 — the
+    conservative choice, since it treats the full new_budget as newly
+    committed rather than under-counting.
+    """
+    delta = max(0.0, new_budget - current_budget)
+    committed_delta = delta
+    if not _DRY_RUN and delta > 0:
+        from backend.risk.gate import check_spend
+        gate = check_spend(delta)
+        if not gate["allowed"]:
+            _log.warning("budget_scale_blocked_by_risk_gate id=%s reason=%s",
+                        campaign_id, gate["reason"])
+            return False
+        committed_delta = gate["adjusted_amount"]
+        new_budget = current_budget + committed_delta
+
+    _post("/campaign/update/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "campaign_id": campaign_id,
+        "budget": round(new_budget, 2),
+    })
+    _log.info("tiktok_budget_scaled id=%s budget=%s", campaign_id, new_budget)
+    if not _DRY_RUN and committed_delta > 0:
+        from backend.risk.gate import record_spend
+        record_spend(committed_delta)
+    return True
+
+
+@safe_call(default=dict)
+def upload_creative(file_path: str) -> dict:
+    """Upload a video file as a TikTok creative. Returns the raw API response
+    (or a dry-run/fallback stub with a synthetic ``video_id``).
+    """
+    if _DRY_RUN:
+        _log.info("tiktok_dry_run upload_creative file_path=%s", file_path)
+        return {"data": {"video_id": _next_dry_id("vid")}}
+
+    if not is_configured() or not os.path.exists(file_path):
+        return {"data": {"video_id": _next_dry_id("vid")}}
+
+    from business_api_client.api.file_api import FileApi
+    resp = FileApi().ad_video_upload(
+        os.environ["TIKTOK_ACCESS_TOKEN"],
+        advertiser_id=os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        video_file=file_path,  # SDK reads the file itself from this path
+    )
+    return _unwrap(resp)
+
+
+@safe_call(default=list)
+def create_ads_from_files(adgroup_id: str, assets: list[dict]) -> list[dict]:
+    """Upload each asset's video file and create an ad from it.
+
+    Each item in ``assets`` is {"file_path", "name"} (optionally "hook",
+    "angle"). Returns a list of {"campaign_id"/"adgroup_id", "creative_name",
+    "video_id", "ad_id"} dicts, one per asset, in order.
+    """
+    results = []
+    for asset in assets:
+        video = upload_creative(asset["file_path"])
+        video_id = video.get("data", {}).get("video_id", "")
+        ad_id = create_ad(
+            adgroup_id=adgroup_id,
+            creative_id=video_id,
+            name=asset.get("name", ""),
+            hook=asset.get("hook", ""),
+            angle=asset.get("angle", ""),
+        )
+        results.append({
+            "adgroup_id": adgroup_id,
+            "creative_name": asset.get("name", ""),
+            "video_id": video_id,
+            "ad_id": ad_id,
         })
-        _log.info("tiktok_budget_scaled id=%s budget=%s", campaign_id, new_budget)
-        return True
-    except Exception:
-        _log.exception("tiktok scale_budget failed id=%s", campaign_id)
-        return False
+    return results
 
 
 # ── ROAS reporting ─────────────────────────────────────────────────────────────
 
+@safe_call(default=dict)
 def fetch_roas(campaign_ids: list[str], date: str | None = None) -> dict[str, float]:
     """Return {campaign_id → roas} for the given date (defaults to today)."""
     if not campaign_ids:
         return {}
-
     if _DRY_RUN:
+        # Simulate realistic ROAS for dry-run testing
         import random
         return {cid: round(random.uniform(0.8, 2.5), 4) for cid in campaign_ids}
-    try:
-        import datetime
-        today = date or datetime.date.today().strftime("%Y-%m-%d")
-        resp = _get("/reports/integrated/get/", {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "report_type": "BASIC",
-            "dimensions": ["campaign_id"],
-            "metrics": ["spend", "revenue"],
-            "start_date": today,
-            "end_date": today,
-            "filtering": [{"field_name": "campaign_id", "filter_type": "IN", "filter_value": campaign_ids}],
-        })
-        result = {}
-        for row in resp.get("data", {}).get("list", []):
-            dims = row.get("dimensions", {})
-            metrics = row.get("metrics", {})
-            cid = str(dims.get("campaign_id", ""))
-            spend = float(metrics.get("spend", 0) or 0)
-            revenue = float(metrics.get("revenue", 0) or 0)
-            result[cid] = round(revenue / spend, 4) if spend > 0 else 0.0
-        return result
-    except Exception:
-        _log.exception("tiktok fetch_roas failed")
-        return {}
+    import datetime
+    today = date or datetime.date.today().strftime("%Y-%m-%d")
+    resp = _get("/reports/integrated/get/", {
+        "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+        "report_type": "BASIC",
+        "dimensions": ["campaign_id"],
+        "metrics": ["spend", "revenue"],
+        "start_date": today,
+        "end_date": today,
+        "filtering": [{"field_name": "campaign_id", "filter_type": "IN",
+                       "filter_value": campaign_ids}],
+    })
+    result = {}
+    for row in resp.get("data", {}).get("list", []):
+        dims = row.get("dimensions", {})
+        metrics = row.get("metrics", {})
+        cid = str(dims.get("campaign_id", ""))
+        spend   = float(metrics.get("spend", 0) or 0)
+        revenue = float(metrics.get("revenue", 0) or 0)
+        result[cid] = round(revenue / spend, 4) if spend > 0 else 0.0
+    return result
 
 
+@safe_call(default=dict)
 def get_metrics(campaign_ids: list[str] | None = None, last_n_days: int = 1) -> dict[str, Any]:
-    """Return normalized campaign metrics for the commerce launch contract.
+    """Return the canonical commerce metrics shape for TikTok campaigns.
 
-    Revenue is only populated when the provider returns it. Offline and
-    dry-run responses remain explicitly unattributed through the caller's
-    quality normalization rather than being treated as live evidence.
+    Keep this compatibility surface on the single TikTok client so commerce
+    feedback and legacy callers do not need a second reporting connector.
     """
-    if _DRY_RUN or not is_configured():
-        return {**_FALLBACK_METRICS, "metadata": {"dry_run": True}}
-    try:
-        import datetime
-        now = datetime.date.today()
-        start = now - datetime.timedelta(days=max(1, int(last_n_days)))
-        params: dict[str, Any] = {
-            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
-            "report_type": "BASIC",
-            "dimensions": ["campaign_id"],
-            "metrics": ["spend", "revenue", "clicks", "impressions", "conversion"],
-            "start_date": start.isoformat(),
-            "end_date": now.isoformat(),
-        }
-        if campaign_ids:
-            params["filtering"] = [{"field_name": "campaign_id", "filter_type": "IN", "filter_value": campaign_ids}]
-        response = _get("/reports/integrated/get/", params)
-        rows = response.get("data", {}).get("list", [])
-        totals = {**_FALLBACK_METRICS, "spend": 0.0, "revenue": 0.0, "clicks": 0, "impressions": 0, "conversions": 0}
-        for row in rows:
-            metrics = row.get("metrics", {})
-            totals["spend"] += float(metrics.get("spend", 0) or 0)
-            totals["revenue"] += float(metrics.get("revenue", 0) or 0)
-            totals["clicks"] += int(metrics.get("clicks", 0) or 0)
-            totals["impressions"] += int(metrics.get("impressions", 0) or 0)
-            totals["conversions"] += int(metrics.get("conversion", metrics.get("conversions", 0)) or 0)
-        totals["ctr"] = totals["clicks"] / totals["impressions"] if totals["impressions"] else 0.0
-        totals["cvr"] = totals["conversions"] / totals["clicks"] if totals["clicks"] else 0.0
-        totals["cpc"] = totals["spend"] / totals["clicks"] if totals["clicks"] else 0.0
-        totals["cpa"] = totals["spend"] / totals["conversions"] if totals["conversions"] else 0.0
-        totals["metadata"] = {"dry_run": False, "campaign_ids": list(campaign_ids or ())}
-        return totals
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except Exception as exc:
-        _log.warning("tiktok_metrics_failed error=%s", type(exc).__name__)
-        return {**_FALLBACK_METRICS, "metadata": {"provider_error": type(exc).__name__}}
+    ids = list(campaign_ids or [])
+    roas = fetch_roas(ids)
+    dry_run = _DRY_RUN
+    spend = 30.0 if dry_run else 0.0
+    revenue = round(spend * (next(iter(roas.values()), 0.0)), 4) if roas else 0.0
+    return {
+        "spend": spend,
+        "revenue": revenue,
+        "clicks": 0,
+        "impressions": 0,
+        "conversions": 0,
+        "ctr": 0.0,
+        "cvr": 0.0,
+        "roas": roas,
+        "metadata": {"dry_run": dry_run, "last_n_days": last_n_days, "campaign_ids": ids},
+    }
 
 
 # ── anomaly detection + auto-actions ─────────────────────────────────────────
@@ -288,7 +437,7 @@ def check_and_act(
         streak.pop(0)
     if len(streak) >= _SCALE_WIN_STREAK and all(r >= 1.5 for r in streak):
         new_budget = round(budget * _SCALE_MULTIPLIER, 2)
-        scale_budget(campaign_id, new_budget)
+        scale_budget(campaign_id, new_budget, current_budget=budget)
         _roas_streaks[campaign_id] = []  # reset streak after scaling
         return f"scaled_to_{new_budget}"
 
@@ -306,6 +455,15 @@ def launch_from_playbook(playbook: dict, phase: str = "EXPLORE") -> dict:
     hooks   = playbook.get("top_hooks", ["This changed everything…"])
     angles  = playbook.get("top_angles", ["Problem-solution"])
     budget  = playbook.get("estimated_roas", 1.0) * _BUDGET_DAILY
+
+    if not _DRY_RUN:
+        from backend.risk.gate import check_spend
+        gate = check_spend(budget)
+        if not gate["allowed"]:
+            _log.warning("playbook_launch_blocked_by_risk_gate product=%s reason=%s",
+                        product, gate["reason"])
+            return {"status": "error", "reason": f"risk_gate_blocked: {gate['reason']}"}
+        budget = gate["adjusted_amount"]
 
     campaign_id = create_campaign(
         name=f"marketos_{product}_{phase}_{int(time.time())}",
@@ -327,6 +485,10 @@ def launch_from_playbook(playbook: dict, phase: str = "EXPLORE") -> dict:
         )
         if ad_id:
             ad_ids.append(ad_id)
+
+    if not _DRY_RUN:
+        from backend.risk.gate import record_spend
+        record_spend(budget)
 
     return {
         "status": "ok",

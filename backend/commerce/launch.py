@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
-import json
 from typing import Any, Callable
 
 from evaluation.contracts import DataQuality
@@ -15,34 +13,12 @@ MetricsProvider = Callable[[list[str]], dict[str, Any] | tuple[dict[str, Any], D
 
 
 def _default_launch_backend() -> tuple[LaunchProvider, LaunchProvider, LaunchProvider, MetricsProvider]:
-    """Build the canonical TikTok-backed launch providers.
-
-    The wrappers preserve LaunchExecutor's dictionary contract while keeping
-    all TikTok HTTP behavior in ``backend.integrations.tiktok_ads``.
-    """
-    from backend.integrations import tiktok_ads
-
-    def _campaign(*, name: str, budget: float) -> dict[str, Any]:
-        return {"campaign_id": tiktok_ads.create_campaign(name=name, budget=budget)}
-
-    def _ad_group(*, campaign_id: str, name: str, budget: float) -> dict[str, Any]:
-        return {"adgroup_id": tiktok_ads.create_ad_group(campaign_id, name=name, daily_budget=budget)}
-
-    def _ad(*, adgroup_id: str, creative: dict[str, Any]) -> dict[str, Any]:
-        canonical = json.dumps(creative, sort_keys=True, separators=(",", ":"))
-        creative_id = f"creative_{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:16]}"
-        return {"ad_id": tiktok_ads.create_ad(
-            adgroup_id=adgroup_id,
-            creative_id=creative_id,
-            name=str(creative.get("headline") or "MarketOS Ad"),
-            hook=str(creative.get("body") or ""),
-            angle=str(creative.get("cta") or ""),
-        )}
+    from backend.integrations.tiktok_ads import create_ad, create_ad_group, create_campaign, fetch_roas
 
     def _metrics(campaign_ids: list[str]) -> dict[str, Any]:
-        return tiktok_ads.get_metrics(campaign_ids)
+        return fetch_roas(campaign_ids)
 
-    return _campaign, _ad_group, _ad, _metrics
+    return create_campaign, create_ad_group, create_ad, _metrics
 
 
 def _normalise_metrics(result: dict[str, Any] | tuple[dict[str, Any], DataQuality], *, dry_run: bool) -> tuple[dict[str, Any], DataQuality]:
