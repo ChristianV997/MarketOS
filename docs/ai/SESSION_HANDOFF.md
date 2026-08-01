@@ -4,22 +4,25 @@ Repository: C:\Users\HP\Documents\MarketOS
 Branch: codex/marketos-ai-tooling-scaffold
 
 ## Objective
-Implement a complementary Codex track without touching Claude-owned work:
-parallel-session synchronization and deterministic performance regression
-coverage.
+Implement the complementary Codex execution-reliability track without
+touching Claude-owned work: canonical commerce execution, partial-failure
+handling, bounded observability, and feedback-to-ranking wiring.
 
 ## Files changed
 Codex commits pushed to origin:
 
 - `2f75fba` — `chore: add parallel session synchronization guards`
 - `52597ef` — `perf: add deterministic inference regression benchmark`
+- `532f61c` — `feat: harden canonical commerce execution loop`
+- `62f432a` — `feat: feed reinforcement patterns into commerce ranking`
 
 New/updated Codex-owned files include `docs/ai/PARALLEL_WORK_MATRIX.md`,
 `docs/ai/PERFORMANCE_BASELINE.md`, `scripts/ai/session_start.py`,
 `scripts/ai/session_finish.py`, `scripts/benchmark_inference_stack.py`,
 `tests/test_parallel_workflow.py`, `tests/test_inference_stack_benchmark.py`,
-and `.github/workflows/performance-regression.yml`. Shared AI instructions
-and command/status references were updated.
+and `.github/workflows/performance-regression.yml`, plus the canonical
+commerce loop, scoring, contracts, orchestrator, and targeted tests. Shared
+AI instructions and command/status references were updated.
 
 Existing unrelated user changes were preserved and not staged:
 
@@ -29,23 +32,27 @@ Existing unrelated user changes were preserved and not staged:
 - `.serena/logs/`
 
 ## Interfaces affected
-No application or live-write interfaces changed. The performance workflow is
-read-only/deterministic and forces the mock inference provider.
+The commerce cycle report gains additive `phase_timings`; successful summary
+fields remain compatible. No live credentials or live external writes were
+used during verification.
 
 ## Tests run
 - Targeted workflow, AI tooling, inference, Ollama benchmark, and commerce benchmark tests: **11 passed**.
-- `scripts/ai/session_finish.py --dry-run`: **9 passed**.
+- Commerce/orchestrator/API regression set: **35 passed, 3 skipped** before the final feedback change; **21 passed** after it.
+- Full suite: **1087 passed, 4 skipped**.
 - Inference benchmark, 10 runs: routing p95 **0.519 ms**, completion p95 **4.907 ms**, peak traced memory **145,408 bytes**.
 - Commerce benchmark, 10 runs: p95 **1.536 ms**, within 2,000 ms limit.
+- Final commerce benchmark, 10 runs: p95 **2.763 ms**, within 2,000 ms limit.
 - Semgrep policy at error severity: **0 findings**.
 - Performance workflow YAML parse: **ok**.
 - `git diff --check`: **clean**.
 
 ## Results
-Claude and Codex now have an explicit ownership matrix and read-only
-preflight. Performance-sensitive inference and commerce changes can run a
-small deterministic benchmark locally and in a separate path-scoped CI
-workflow, without network calls, credentials, or live commerce actions.
+The scheduler now suppresses its legacy launch branch only after the
+canonical commerce loop completes in the same tick. Candidate launch errors
+are isolated, failed candidates do not enter feedback learning, phase timing
+is exported to Prometheus, and reinforcement patterns are retrieved by the
+canonical opportunity scorer.
 
 ## Decisions made
 - Claude-owned paths remain untouched: `docs/archive/**`,
@@ -57,6 +64,8 @@ workflow, without network calls, credentials, or live commerce actions.
   mutate the worktree.
 - `session_finish.py` runs bounded tests and `git diff --check`; it does not
   auto-commit or auto-push.
+- Feedback remains on the existing vector `PATTERNS` collection; no second
+  learning or scoring system was introduced.
 
 ## Risks
 - The benchmark is a deterministic local regression signal, not a production
@@ -68,11 +77,14 @@ workflow, without network calls, credentials, or live commerce actions.
 
 ## Remaining blockers
 None for the Codex-owned track. Claude’s plan remains independent and can
-continue on its declared paths.
+continue on its declared paths. The existing unrelated dirty files remain
+unstaged.
 
 ## Next action
 Claude should fetch `origin/codex/marketos-ai-tooling-scaffold`, inspect
 `docs/ai/PARALLEL_WORK_MATRIX.md`, and avoid staging the unrelated dirty paths.
+When integrating, preserve Claude-owned work and use the Codex commits above
+as additive changes.
 At the end of its work it should update this handoff with its own actual
 results or leave the shared handoff update to the designated owner.
 
