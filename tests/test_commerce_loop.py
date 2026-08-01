@@ -43,6 +43,19 @@ def test_ranker_prefers_live_attributed_supported_product(monkeypatch):
     assert "not_launchable" in ranked[1].reasons
 
 
+def test_ranker_consumes_feedback_patterns(monkeypatch):
+    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.scoring.find_similar_patterns", lambda query, top_k=3: [SimilarityResult(record_id="feedback-pattern", score=0.91, payload={"roas": 2.4}, collection="patterns")])
+
+    ranked = OpportunityScorer().rank([
+        {"id": "feedback-signal", "product": "Feedback Product", "score": 0.5, "engagement": 0.5, "velocity": 0.5, "quality": LIVE_ATTRIBUTED},
+    ])
+
+    assert ranked[0].semantic_score > 0
+    assert "winner_match:patterns" in ranked[0].reasons
+
+
 def test_launch_executor_uses_injected_backend():
     calls: list[tuple[str, dict]] = []
 
