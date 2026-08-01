@@ -565,7 +565,7 @@ _PLAYBOOK_RELAUNCH_COOLDOWN_S = float(os.getenv("PLAYBOOK_RELAUNCH_COOLDOWN_S", 
 
 
 @worker_safe(rate_limiter=_scaling_limiter)
-def _run_scaling() -> dict[str, Any]:
+def _run_scaling_worker() -> dict[str, Any]:
     """Scale/kill campaigns and launch new ones from high-confidence playbooks.
 
     Two execution paths (both run independently):
@@ -662,6 +662,18 @@ def _run_scaling() -> dict[str, Any]:
     if scaled == 0 and launched == 0:
         return {"status": "skipped", "reason": "no_qualified_campaigns"}
     return {"status": "ok", "scaled": scaled, "launched": launched}
+
+
+def _run_scaling() -> dict[str, Any]:
+    """Skip legacy launch work before rate limiting when commerce owns it."""
+    if _commerce_cycle_completed_this_tick:
+        return {
+            "status": "skipped",
+            "reason": "canonical_commerce_loop_owns_launches",
+            "scaled": 0,
+            "launched": 0,
+        }
+    return _run_scaling_worker()
 
 
 @worker_safe()
