@@ -15,6 +15,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  semgrep-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Semgrep
+        run: python -m pip install --disable-pip-version-check semgrep==1.172.0
+
+      - name: Run repository safety policy
+        run: |
+          mkdir -p artifacts
+          semgrep scan --config semgrep/ai-safety.yml --json --output artifacts/semgrep-results.json .
+
+      - name: Enforce blocking Semgrep findings
+        run: semgrep scan --config semgrep/ai-safety.yml --severity ERROR --error .
+
+      - name: Upload Semgrep findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketos-semgrep-results
+          path: artifacts/semgrep-results.json
+          if-no-files-found: error
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
