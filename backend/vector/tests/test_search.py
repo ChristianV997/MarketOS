@@ -3,7 +3,7 @@ import pytest
 
 from backend.vector.indexing        import index_hooks, index_products, index_angles
 from backend.vector.semantic_search import (
-    find_similar_hooks, find_similar_products, rank_by_similarity,
+    find_similar_hooks, find_similar_products, rank_by_similarity, search_all,
 )
 from backend.vector.schemas         import SimilarityResult
 
@@ -73,3 +73,20 @@ def test_index_products_and_search(fresh_store):
 def test_empty_store_returns_empty(fresh_store):
     results = find_similar_hooks("anything", top_k=5)
     assert results == []
+
+
+def test_search_all_embeds_once_for_multiple_collections(monkeypatch):
+    calls = []
+
+    class Store:
+        def search(self, query):
+            calls.append(query.collection)
+            return []
+
+    monkeypatch.setattr("backend.vector.semantic_search.embed_text", lambda text: calls.append("embed") or [1.0])
+    monkeypatch.setattr("backend.vector.semantic_search.get_store", lambda: Store())
+
+    result = search_all("shared query", top_k=3, collections=["products", "campaigns", "patterns"])
+
+    assert result == {"products": [], "campaigns": [], "patterns": []}
+    assert calls == ["embed", "products", "campaigns", "patterns"]

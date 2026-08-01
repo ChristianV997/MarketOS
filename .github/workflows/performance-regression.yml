@@ -1,0 +1,54 @@
+name: Performance Regression
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/inference/**'
+      - 'backend/commerce/**'
+      - 'scripts/benchmark_commerce_cycle.py'
+      - 'scripts/benchmark_inference_stack.py'
+      - 'tests/test_commerce_benchmark.py'
+      - 'tests/test_inference_stack_benchmark.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/inference/**'
+      - 'backend/commerce/**'
+      - 'scripts/benchmark_commerce_cycle.py'
+      - 'scripts/benchmark_inference_stack.py'
+      - 'tests/test_commerce_benchmark.py'
+      - 'tests/test_inference_stack_benchmark.py'
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-benchmarks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      INFERENCE_PROVIDERS: mock
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run inference benchmark
+        run: python scripts/benchmark_inference_stack.py --runs 50 --json > inference-benchmark.json
+      - name: Run commerce benchmark
+        run: python scripts/benchmark_commerce_cycle.py --runs 20 --p95-limit-ms 2000 > commerce-benchmark.json
+      - name: Run benchmark tests
+        run: python -m pytest tests/test_inference_stack_benchmark.py tests/test_commerce_benchmark.py -q
+      - name: Upload benchmark reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketos-performance-benchmarks
+          path: '*-benchmark.json'
+          if-no-files-found: error

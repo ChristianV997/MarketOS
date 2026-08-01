@@ -81,6 +81,7 @@ _campaign_state_lock = threading.Lock()
 # the most recent batch so ranking consumes the exact evidence that advanced
 # the phase controller instead of issuing a second, potentially divergent pull.
 _latest_signal_batch: list[dict[str, Any]] = []
+_commerce_cycle_completed_this_tick = False
 
 
 # ── worker dispatchers ────────────────────────────────────────────────────────
@@ -475,6 +476,8 @@ def _run_commerce_cycle() -> dict[str, Any]:
             budget=_COMMERCE_LOOP_BUDGET,
             dry_run=not _COMMERCE_LOOP_LIVE,
         )
+        global _commerce_cycle_completed_this_tick
+        _commerce_cycle_completed_this_tick = True
         summary = report.summary
         return {
             "status": "ok",
@@ -562,7 +565,7 @@ _PLAYBOOK_RELAUNCH_COOLDOWN_S = float(os.getenv("PLAYBOOK_RELAUNCH_COOLDOWN_S", 
 
 
 @worker_safe(rate_limiter=_scaling_limiter)
-def _run_scaling() -> dict[str, Any]:
+def _run_scaling_worker() -> dict[str, Any]:
     """Scale/kill campaigns and launch new ones from high-confidence playbooks.
 
     Two execution paths (both run independently):
@@ -576,6 +579,13 @@ def _run_scaling() -> dict[str, Any]:
     """
     scaled   = 0
     launched = 0
+    if _commerce_cycle_completed_this_tick:
+        return {
+            "status": "skipped",
+            "reason": "canonical_commerce_loop_owns_launches",
+            "scaled": 0,
+            "launched": 0,
+        }
     from backend.decision.portfolio_engine import top_products
 
     # ── Path 1: AJO scale existing campaigns ─────────────────────────────
@@ -652,6 +662,18 @@ def _run_scaling() -> dict[str, Any]:
     if scaled == 0 and launched == 0:
         return {"status": "skipped", "reason": "no_qualified_campaigns"}
     return {"status": "ok", "scaled": scaled, "launched": launched}
+
+
+def _run_scaling() -> dict[str, Any]:
+    """Skip legacy launch work before rate limiting when commerce owns it."""
+    if _commerce_cycle_completed_this_tick:
+        return {
+            "status": "skipped",
+            "reason": "canonical_commerce_loop_owns_launches",
+            "scaled": 0,
+            "launched": 0,
+        }
+    return _run_scaling_worker()
 
 
 @worker_safe()
@@ -1084,6 +1106,8 @@ def run() -> None:
 
     while True:
         try:
+            global _commerce_cycle_completed_this_tick
+            _commerce_cycle_completed_this_tick = False
             if _shutdown_requested:
                 _log.info("orchestrator_shutdown_requested")
                 break

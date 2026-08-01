@@ -25,6 +25,14 @@ runtime-evaluation plan. A real local evaluation is intentionally opt-in and
 requires `MEDUSA_IMAGE`, `MEDUSA_DATABASE_URL`, and both `--execute` and
 `--teardown`; it reports startup time, health latency, container memory, and
 whether an unauthenticated negative probe is rejected.
+Run `python scripts/evaluate_saleor_benchmark.py` only to benchmark the pinned
+Saleor candidate against the same read-only commerce boundary. It does not add
+Saleor to MarketOS: an operator must provide an isolated Compose file, a
+digest-pinned `SALEOR_BENCHMARK_IMAGE`, and an internal
+`SALEOR_BENCHMARK_BASE_URL`, then explicitly pass both `--execute` and
+`--teardown`. The probe reads only Saleor's public `shop` GraphQL record and
+reports startup, query latency, and container memory. Do not run Medusa and
+Saleor as production providers together.
 Run `python scripts/generate_oss_sbom.py --output artifacts/oss-sbom.json`
 during release preparation to capture the reviewed OSS inventory and installed
 Python package versions without network access.

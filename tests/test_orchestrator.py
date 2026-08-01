@@ -158,6 +158,16 @@ def test_live_commerce_loop_suppresses_legacy_playbook_launch(monkeypatch):
     assert result["launched"] == 0
 
 
+def test_completed_canonical_commerce_cycle_suppresses_legacy_launch(monkeypatch):
+    import orchestrator.main as orch
+    orch._commerce_cycle_completed_this_tick = True
+    with patch("backend.integrations.tiktok_ads.launch_from_playbook") as launch:
+        result = orch._run_scaling()
+    assert launch.call_count == 0
+    assert result["reason"] == "canonical_commerce_loop_owns_launches"
+    orch._commerce_cycle_completed_this_tick = False
+
+
 def test_collect_metrics_returns_dict():
     from orchestrator.main import _collect_metrics
     result = _collect_metrics()
