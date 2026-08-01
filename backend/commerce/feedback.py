@@ -137,6 +137,66 @@ def observation_from_webhook(payload: dict[str, Any], *, source: str) -> Campaig
         return None
 
 
+def observation_from_metrics(
+    *,
+    observation_id: str,
+    source: str,
+    campaign_id: str,
+    product_id: str = "",
+    creative_id: str = "",
+    spend: float = 0.0,
+    revenue: float = 0.0,
+    conversions: int = 0,
+    clicks: int = 0,
+    impressions: int = 0,
+    currency: str = "USD",
+    metadata: dict[str, Any] | None = None,
+) -> CampaignObservation | None:
+    """Build one live, attributed observation from a polling result.
+
+    Polling APIs do not provide webhook-shaped envelopes, so they use this
+    small shared boundary instead of teaching each provider how to construct
+    evaluation records.  Callers must provide a stable observation ID (for
+    example, a provider/campaign/time bucket); this is what makes retries and
+    overlapping polling windows safe for ``FeedbackRecorder``.
+    """
+    campaign_id = str(campaign_id or "").strip()
+    observation_id = str(observation_id or "").strip()
+    if not campaign_id or not observation_id:
+        return None
+    try:
+        spend_value = max(0.0, float(spend or 0.0))
+        revenue_value = max(0.0, float(revenue or 0.0))
+        conversions_value = max(0, int(conversions or 0))
+        clicks_value = max(0, int(clicks or 0))
+        impressions_value = max(0, int(impressions or 0))
+    except (TypeError, ValueError):
+        return None
+    if spend_value <= 0.0 or (revenue_value <= 0.0 and conversions_value <= 0):
+        # A spend-only polling row is useful for profitability dashboards but
+        # is not enough evidence to train campaign ranking.
+        return None
+    return CampaignObservation(
+        observation_id=observation_id,
+        campaign_id=campaign_id,
+        product_id=str(product_id or ""),
+        creative_id=str(creative_id or ""),
+        spend=spend_value,
+        revenue=revenue_value,
+        conversions=conversions_value,
+        clicks=clicks_value,
+        impressions=impressions_value,
+        currency=str(currency or "USD").upper(),
+        quality=DataQuality(
+            provenance="live",
+            attribution="attributed",
+            completeness="partial",
+            source_ref=f"{source}:{observation_id}",
+        ),
+        metadata={"source": source, **(metadata or {})},
+    )
+
+
 def _medusa_observation_from_webhook(payload: dict[str, Any]) -> CampaignObservation | None:
     """Map Medusa revenue only when order metadata proves MarketOS lineage."""
     event_id = str(payload.get("id") or payload.get("event_id") or payload.get("webhook_id") or "").strip()

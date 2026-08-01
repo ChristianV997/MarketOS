@@ -987,6 +987,34 @@ def _run_metrics_ingestion() -> dict[str, Any]:
                         spend_usd=est_spend,
                         revenue_usd=est_spend * roas,
                     )
+                    # Feed attributable live polling evidence through the
+                    # same canonical learning boundary as launch/webhook
+                    # outcomes.  The hourly bucket makes repeated polling
+                    # and retries idempotent without training on dry-run ROAS.
+                    try:
+                        from backend.commerce.feedback import (
+                            observation_from_metrics,
+                            webhook_feedback_recorder,
+                        )
+
+                        observation = observation_from_metrics(
+                            observation_id=f"{platform}:{cid}:{int(now_obs // 3600)}",
+                            source=platform,
+                            campaign_id=cid,
+                            product_id=product,
+                            creative_id=(getattr(artifact, "creative_id", "") if artifact else ""),
+                            spend=est_spend,
+                            revenue=est_spend * roas,
+                            metadata={
+                                "hook": getattr(artifact, "hook", "") if artifact else "",
+                                "angle": getattr(artifact, "angle", "") if artifact else "",
+                                "observation_kind": "polling",
+                            },
+                        )
+                        if observation is not None:
+                            webhook_feedback_recorder.record_observation(observation)
+                    except Exception as exc:
+                        _log.debug("canonical_feedback_record_failed campaign=%s error=%s", cid, exc)
                     with _campaign_state_lock:
                         _campaign_last_metric_ts[cid] = now_obs
                 except Exception as exc:

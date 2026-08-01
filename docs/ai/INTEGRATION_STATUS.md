@@ -19,5 +19,6 @@ This is a compact status ledger. Confirm current code before relying on it.
 | Parallel session guard | Implemented | Run `scripts/ai/session_start.py` before work; consult `docs/ai/PARALLEL_WORK_MATRIX.md` before touching shared or Claude-owned paths |
 | Deterministic performance benchmarks | Implemented | Run inference and commerce benchmarks locally; CI workflow is scoped to inference/commerce changes and does not perform live writes |
 | CodeQL | Active scoped CI analysis | Runs the default security-and-quality Python queries for commerce, integrations, orchestration, and connector changes; use locally only for release/security investigations |
+| Real metrics feedback | Canonical polling bridge implemented | Live attributed polling observations flow through `backend.commerce.feedback.FeedbackRecorder`; spend-only rows remain analytics-only |
 
 Avoid adding a second client or loop without documenting migration and ownership.

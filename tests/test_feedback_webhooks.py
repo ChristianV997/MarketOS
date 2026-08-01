@@ -1,5 +1,50 @@
-from backend.commerce.feedback import observation_from_webhook
+from backend.commerce.feedback import observation_from_metrics, observation_from_webhook
 from backend.commerce.feedback import FeedbackRecorder
+
+
+def test_polling_metrics_normalize_only_attributable_evidence():
+    observation = observation_from_metrics(
+        observation_id="tiktok:campaign-1:42",
+        source="tiktok",
+        campaign_id="campaign-1",
+        product_id="p1",
+        spend=10,
+        revenue=25,
+        metadata={"hook": "hook-1"},
+    )
+    assert observation is not None
+    assert observation.quality.is_live_attributed is True
+    assert observation.metadata["source"] == "tiktok"
+    assert observation.metadata["hook"] == "hook-1"
+
+
+def test_polling_spend_only_rows_do_not_train_feedback():
+    assert observation_from_metrics(
+        observation_id="meta:campaign-1:42",
+        source="meta",
+        campaign_id="campaign-1",
+        spend=10,
+        revenue=0,
+    ) is None
+
+
+def test_polling_observation_ids_are_preserved_for_deduplication():
+    first = observation_from_metrics(
+        observation_id="tiktok:campaign-1:42",
+        source="tiktok",
+        campaign_id="campaign-1",
+        spend=10,
+        revenue=25,
+    )
+    second = observation_from_metrics(
+        observation_id="tiktok:campaign-1:42",
+        source="tiktok",
+        campaign_id="campaign-1",
+        spend=11,
+        revenue=27,
+    )
+    assert first is not None and second is not None
+    assert first.observation_id == second.observation_id
 
 
 def test_webhook_metrics_normalize_to_campaign_observation():
