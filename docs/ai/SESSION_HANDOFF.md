@@ -80,6 +80,15 @@ None for the Codex-owned track. Claude’s plan remains independent and can
 continue on its declared paths. The existing unrelated dirty files remain
 unstaged.
 
+## Additional update — 2026-08-01
+
+Commit `da9e517` optimized commerce ranking to share one embedding across
+product, campaign, and reinforcement-pattern searches using the existing
+multi-collection search primitive. Public vector helpers remain unchanged.
+The optimized 20-run commerce benchmark measured p95 **2.233 ms**, within the
+2,000 ms limit. The focused vector/commerce tests passed **19/19**, and the
+full suite remains **1087 passed, 4 skipped**.
+
 ## Next action
 Claude should fetch `origin/codex/marketos-ai-tooling-scaffold`, inspect
 `docs/ai/PARALLEL_WORK_MATRIX.md`, and avoid staging the unrelated dirty paths.
