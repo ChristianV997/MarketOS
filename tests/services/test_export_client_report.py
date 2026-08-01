@@ -29,7 +29,9 @@ class TestEveryServiceModulePersistsAReport:
         store = ArtifactStore()
         path = export_client_report(store, env.workspace_id, env.experiment_id)
         assert path and os.path.exists(path)
-        assert "MarketOS Product & Category Opportunity Audit" in open(path).read()
+        with open(path, encoding="utf-8") as report_file:
+            report_text = report_file.read()
+        assert "MarketOS Product & Category Opportunity Audit" in report_text
 
     def test_unit_economics(self):
         from services.unit_economics.analyzer import run_unit_economics

@@ -27,7 +27,12 @@ _TIMELINE_KEYWORDS = {
     "exploring": ["not sure", "just exploring", "no rush", "eventually"],
 }
 
-_BUDGET_PATTERN = re.compile(r"[\$€£]\s?\d[\d,.]*|\d[\d,.]*\s?(?:usd|mxn|dollars|pesos|k\b)", re.IGNORECASE)
+# Bound repeated numeric groups because messages are user-controlled.  This
+# avoids pathological regex backtracking on adversarial input.
+_BUDGET_PATTERN = re.compile(
+    r"[\$€£]\s?\d{1,18}(?:[\d,.]{0,30})|\d{1,18}(?:[\d,.]{0,30})\s?(?:usd|mxn|dollars|pesos|k\b)",
+    re.IGNORECASE,
+)
 _LOCATION_HINT_PATTERN = re.compile(r"\b(?:in|near|at)\s+([A-Z][a-zA-Z\s]{2,30})")
 
 
@@ -69,7 +74,7 @@ def qualify_lead(slots: QualificationSlots, message: str) -> QualificationSlots:
                     break
 
         if slots.budget is None:
-            match = _BUDGET_PATTERN.search(message)
+            match = _BUDGET_PATTERN.search(message[:512])
             if match:
                 slots.budget = match.group(0).strip()
 
