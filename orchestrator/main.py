@@ -923,10 +923,15 @@ def _run_metrics_ingestion() -> dict[str, Any]:
     # Shopify revenue
     try:
         from backend.integrations.shopify_client import get_orders, compute_metrics
+        from backend.commerce.feedback import observation_from_order, webhook_feedback_recorder
         orders  = get_orders(last_n_minutes=60)
         shopify = compute_metrics(orders)
         metrics["shopify_revenue"]    = shopify.get("revenue", 0.0)
         metrics["shopify_order_count"] = shopify.get("order_count", 0)
+        for order in orders:
+            observation = observation_from_order(order, source="shopify")
+            if observation is not None:
+                webhook_feedback_recorder.record_observation(observation)
     except Exception as exc:
         _log.debug("metrics_shopify_failed error=%s", exc)
 
@@ -1013,6 +1018,12 @@ def _run_metrics_ingestion() -> dict[str, Any]:
                         )
                         if observation is not None:
                             webhook_feedback_recorder.record_observation(observation)
+                            webhook_feedback_recorder.reconcile_pending(
+                                campaign_id=cid,
+                                spend=est_spend,
+                                observation_id=observation.observation_id,
+                                source=platform,
+                            )
                     except Exception as exc:
                         _log.debug("canonical_feedback_record_failed campaign=%s error=%s", cid, exc)
                     with _campaign_state_lock:

@@ -20,5 +20,6 @@ This is a compact status ledger. Confirm current code before relying on it.
 | Deterministic performance benchmarks | Implemented | Run inference and commerce benchmarks locally; CI workflow is scoped to inference/commerce changes and does not perform live writes |
 | CodeQL | Active scoped CI analysis | Runs the default security-and-quality Python queries for commerce, integrations, orchestration, and connector changes; use locally only for release/security investigations |
 | Real metrics feedback | Canonical polling bridge implemented | Live attributed polling observations flow through `backend.commerce.feedback.FeedbackRecorder`; spend-only rows remain analytics-only |
+| Feedback durability | Implemented on SQLite state store | Observation claims survive restarts; revenue-only attributed orders remain pending until joined with live campaign spend |
 
 Avoid adding a second client or loop without documenting migration and ownership.

@@ -12,6 +12,7 @@ from backend.vector.memory.reinforcement_memory import ReinforcementMemory
 from backend.vector.memory.signal_memory import SignalMemory
 
 from .contracts import CampaignOutcome, CreativeBundle, LaunchPlan
+from .observation_ledger import FeedbackObservationLedger
 
 try:
     from prometheus_client import Counter
@@ -197,6 +198,37 @@ def observation_from_metrics(
     )
 
 
+def observation_from_order(order: dict[str, Any], *, source: str) -> CampaignObservation | None:
+    """Map an order only when it carries explicit MarketOS campaign lineage."""
+    order_id = str(order.get("id") or order.get("order_id") or "").strip()
+    metadata = order.get("metadata") if isinstance(order.get("metadata"), dict) else {}
+    campaign_id = str(metadata.get("marketos_campaign_id") or "").strip()
+    if not order_id or not campaign_id:
+        return None
+    try:
+        revenue = max(0.0, float(order.get("total_price", order.get("total", 0.0)) or 0.0))
+        refunds = max(0.0, float(order.get("refunds", 0.0) or 0.0))
+    except (TypeError, ValueError):
+        return None
+    return CampaignObservation(
+        observation_id=f"{source}:order:{order_id}",
+        campaign_id=campaign_id,
+        product_id=str(metadata.get("marketos_product_id") or ""),
+        creative_id=str(metadata.get("marketos_creative_id") or ""),
+        revenue=revenue,
+        refunds=refunds,
+        conversions=1 if revenue > 0 else 0,
+        currency=str(order.get("currency") or order.get("currency_code") or "USD").upper(),
+        quality=DataQuality(
+            provenance="live",
+            attribution="attributed",
+            completeness="partial",
+            source_ref=f"{source}:order:{order_id}",
+        ),
+        metadata={"source": source, "order_id": order_id, "lineage": "order_metadata"},
+    )
+
+
 def _medusa_observation_from_webhook(payload: dict[str, Any]) -> CampaignObservation | None:
     """Map Medusa revenue only when order metadata proves MarketOS lineage."""
     event_id = str(payload.get("id") or payload.get("event_id") or payload.get("webhook_id") or "").strip()
@@ -243,6 +275,47 @@ class FeedbackRecorder:
     campaign_memory: CampaignMemory = field(default_factory=CampaignMemory)
     reinforcement_memory: ReinforcementMemory = field(default_factory=ReinforcementMemory)
     signal_memory: SignalMemory = field(default_factory=SignalMemory)
+    ledger: FeedbackObservationLedger | None = None
+
+    def reconcile_pending(
+        self,
+        *,
+        campaign_id: str,
+        spend: float,
+        observation_id: str,
+        source: str,
+    ) -> dict[str, Any] | None:
+        """Join pending attributed order revenue with one live spend sample."""
+        if self.ledger is None or spend <= 0.0:
+            return None
+        pending = self.ledger.pending_for_campaign(campaign_id)
+        if not pending:
+            return None
+        revenue = sum(max(0.0, float(row.get("revenue", 0.0))) for row in pending)
+        refunds = sum(max(0.0, float(row.get("refunds", 0.0))) for row in pending)
+        product_id = next((str(row.get("product_id") or "") for row in pending if row.get("product_id")), "")
+        creative_id = next((str(row.get("creative_id") or "") for row in pending if row.get("creative_id")), "")
+        combined = CampaignObservation(
+            observation_id=f"reconciled:{source}:{campaign_id}:{observation_id}",
+            campaign_id=campaign_id,
+            product_id=product_id,
+            creative_id=creative_id,
+            spend=float(spend),
+            revenue=max(0.0, revenue - refunds),
+            conversions=sum(int(row.get("conversions", 0) or 0) for row in pending),
+            refunds=refunds,
+            quality=DataQuality(
+                provenance="live",
+                attribution="attributed",
+                completeness="complete",
+                source_ref=f"{source}:reconciled:{campaign_id}",
+            ),
+            metadata={"source": source, "observation_kind": "order_metric_reconciliation", "order_observation_ids": [row.get("observation_id", "") for row in pending]},
+        )
+        result = self.record_observation(combined)
+        if result.get("recorded") or result.get("deduplicated"):
+            self.ledger.resolve_pending([str(row.get("observation_id", "")) for row in pending])
+        return result
 
     def record_observation(self, observation: CampaignObservation) -> dict[str, Any]:
         """Persist an attributed provider observation without a launch bundle.
@@ -252,12 +325,23 @@ class FeedbackRecorder:
         Store only the evidence available in the observation and never infer
         missing creative metadata.
         """
-        with _OBSERVATION_LOCK:
-            if observation.observation_id in _PROCESSED_OBSERVATIONS:
+        if self.ledger is not None:
+            if not self.ledger.claim(observation):
                 if _prom_feedback_duplicates is not None:
                     _prom_feedback_duplicates.inc()
                 return {"observation_id": observation.observation_id, "deduplicated": True}
-            _PROCESSED_OBSERVATIONS.add(observation.observation_id)
+        else:
+            with _OBSERVATION_LOCK:
+                if observation.observation_id in _PROCESSED_OBSERVATIONS:
+                    if _prom_feedback_duplicates is not None:
+                        _prom_feedback_duplicates.inc()
+                    return {"observation_id": observation.observation_id, "deduplicated": True}
+                _PROCESSED_OBSERVATIONS.add(observation.observation_id)
+
+        if observation.spend <= 0.0:
+            if self.ledger is not None:
+                self.ledger.mark_processed(observation.observation_id, pending=True)
+            return {"observation_id": observation.observation_id, "deduplicated": False, "pending_attribution": True}
         metadata = dict(observation.metadata)
         product = observation.product_id or observation.campaign_id
         roas = observation.revenue / observation.spend if observation.spend > 0 else 0.0
@@ -286,10 +370,15 @@ class FeedbackRecorder:
             )
             self.signal_memory.index_keyword(product, source="commerce_webhook_feedback", campaign_id=observation.campaign_id, roas=roas)
         except Exception as exc:
-            _release_observation(observation.observation_id)
+            if self.ledger is not None:
+                self.ledger.release(observation.observation_id)
+            else:
+                _release_observation(observation.observation_id)
             if _prom_feedback_failures is not None:
                 _prom_feedback_failures.inc()
             return {"observation_id": observation.observation_id, "deduplicated": False, "recorded": False, "error": str(exc)}
+        if self.ledger is not None:
+            self.ledger.mark_processed(observation.observation_id)
         if _prom_feedback_records is not None:
             _prom_feedback_records.inc()
         return {"observation_id": observation.observation_id, "deduplicated": False, "recorded": True}
@@ -367,4 +456,4 @@ class FeedbackRecorder:
         }
 
 
-webhook_feedback_recorder = FeedbackRecorder()
+webhook_feedback_recorder = FeedbackRecorder(ledger=FeedbackObservationLedger())

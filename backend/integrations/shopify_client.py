@@ -47,10 +47,18 @@ def get_orders(last_n_minutes=60):
     results = []
 
     for o in orders:
+        note_attributes = getattr(o, "note_attributes", None) or []
+        metadata = {
+            str(item.name): str(item.value)
+            for item in note_attributes
+            if getattr(item, "name", None) and str(item.name).startswith("marketos_")
+        }
         results.append({
             "id": o.id,
             "total_price": float(o.total_price or 0.0),
-            "created_at": o.created_at
+            "created_at": o.created_at,
+            "currency": getattr(o, "currency", "USD") or "USD",
+            "metadata": metadata,
         })
 
     return results
