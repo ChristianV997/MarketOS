@@ -16,5 +16,7 @@ This is a compact status ledger. Confirm current code before relying on it.
 | Obsidian handoff | Ready via local filesystem bridge | Writes only generated handoffs to `AI Engineering/Session Handoffs/`; REST/MCP remains disabled; verify with the same command |
 | Serena | Configured for MarketOS and registered with Codex/Claude Code | Official `oraios/serena` via `uvx`, Python language server, `.serena/project.yml`; use symbol navigation by default |
 | Repomix | Installed and smoke-tested | Global `repomix` `1.17.0`; use only for bounded snapshots such as `backend/inference`, never the whole repository by default |
+| Parallel session guard | Implemented | Run `scripts/ai/session_start.py` before work; consult `docs/ai/PARALLEL_WORK_MATRIX.md` before touching shared or Claude-owned paths |
+| Deterministic performance benchmarks | Implemented | Run inference and commerce benchmarks locally; CI workflow is scoped to inference/commerce changes and does not perform live writes |
 
 Avoid adding a second client or loop without documenting migration and ownership.
