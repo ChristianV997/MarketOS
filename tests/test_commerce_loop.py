@@ -110,6 +110,24 @@ def test_launch_executor_uses_injected_backend():
     assert calls[-1][0] == "metrics"
 
 
+def test_default_launch_backend_delegates_to_canonical_tiktok(monkeypatch):
+    from backend.commerce.launch import _default_launch_backend
+    import backend.integrations.tiktok_ads as tiktok
+
+    calls = []
+    monkeypatch.setattr(tiktok, "create_campaign", lambda **kwargs: calls.append(("campaign", kwargs)) or "canonical-campaign")
+    monkeypatch.setattr(tiktok, "create_ad_group", lambda *args, **kwargs: calls.append(("adgroup", args, kwargs)) or "canonical-adgroup")
+    monkeypatch.setattr(tiktok, "create_ad", lambda **kwargs: calls.append(("ad", kwargs)) or "canonical-ad")
+    monkeypatch.setattr(tiktok, "get_metrics", lambda ids: calls.append(("metrics", ids)) or {"spend": 0.0, "revenue": 0.0})
+
+    create_campaign, create_ad_group, create_ad, get_metrics = _default_launch_backend()
+    assert create_campaign(name="Campaign", budget=10)["campaign_id"] == "canonical-campaign"
+    assert create_ad_group(campaign_id="canonical-campaign", name="Group", budget=10)["adgroup_id"] == "canonical-adgroup"
+    assert create_ad(adgroup_id="canonical-adgroup", creative={"headline": "Headline", "body": "Body", "cta": "Shop"})["ad_id"] == "canonical-ad"
+    assert get_metrics(["canonical-campaign"])["spend"] == 0.0
+    assert [item[0] for item in calls] == ["campaign", "adgroup", "ad", "metrics"]
+
+
 def test_launch_executor_resumes_checkpoint_without_duplicate_platform_resources():
     calls: list[str] = []
     fail_once = {"adgroup": True}

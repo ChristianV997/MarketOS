@@ -30,6 +30,18 @@ _KILL_ROAS_FLOOR  = float(os.getenv("TIKTOK_KILL_ROAS_FLOOR", "0.8"))
 # In-process ROAS streak tracker: {campaign_id → [float, ...]}
 _roas_streaks: dict[str, list[float]] = {}
 
+_FALLBACK_METRICS = {
+    "spend": 30.0,
+    "revenue": 0.0,
+    "clicks": 450,
+    "impressions": 15000,
+    "conversions": 12,
+    "ctr": 0.030,
+    "cvr": 0.027,
+    "cpc": 0.067,
+    "cpa": 2.5,
+}
+
 
 def is_configured() -> bool:
     return bool(os.getenv("TIKTOK_ACCESS_TOKEN") and os.getenv("TIKTOK_ADVERTISER_ID"))
@@ -176,8 +188,8 @@ def fetch_roas(campaign_ids: list[str], date: str | None = None) -> dict[str, fl
     """Return {campaign_id → roas} for the given date (defaults to today)."""
     if not campaign_ids:
         return {}
+
     if _DRY_RUN:
-        # Simulate realistic ROAS for dry-run testing
         import random
         return {cid: round(random.uniform(0.8, 2.5), 4) for cid in campaign_ids}
     try:
@@ -190,21 +202,66 @@ def fetch_roas(campaign_ids: list[str], date: str | None = None) -> dict[str, fl
             "metrics": ["spend", "revenue"],
             "start_date": today,
             "end_date": today,
-            "filtering": [{"field_name": "campaign_id", "filter_type": "IN",
-                           "filter_value": campaign_ids}],
+            "filtering": [{"field_name": "campaign_id", "filter_type": "IN", "filter_value": campaign_ids}],
         })
         result = {}
         for row in resp.get("data", {}).get("list", []):
             dims = row.get("dimensions", {})
             metrics = row.get("metrics", {})
             cid = str(dims.get("campaign_id", ""))
-            spend   = float(metrics.get("spend", 0) or 0)
+            spend = float(metrics.get("spend", 0) or 0)
             revenue = float(metrics.get("revenue", 0) or 0)
             result[cid] = round(revenue / spend, 4) if spend > 0 else 0.0
         return result
     except Exception:
         _log.exception("tiktok fetch_roas failed")
         return {}
+
+
+def get_metrics(campaign_ids: list[str] | None = None, last_n_days: int = 1) -> dict[str, Any]:
+    """Return normalized campaign metrics for the commerce launch contract.
+
+    Revenue is only populated when the provider returns it. Offline and
+    dry-run responses remain explicitly unattributed through the caller's
+    quality normalization rather than being treated as live evidence.
+    """
+    if _DRY_RUN or not is_configured():
+        return {**_FALLBACK_METRICS, "metadata": {"dry_run": True}}
+    try:
+        import datetime
+        now = datetime.date.today()
+        start = now - datetime.timedelta(days=max(1, int(last_n_days)))
+        params: dict[str, Any] = {
+            "advertiser_id": os.getenv("TIKTOK_ADVERTISER_ID", ""),
+            "report_type": "BASIC",
+            "dimensions": ["campaign_id"],
+            "metrics": ["spend", "revenue", "clicks", "impressions", "conversion"],
+            "start_date": start.isoformat(),
+            "end_date": now.isoformat(),
+        }
+        if campaign_ids:
+            params["filtering"] = [{"field_name": "campaign_id", "filter_type": "IN", "filter_value": campaign_ids}]
+        response = _get("/reports/integrated/get/", params)
+        rows = response.get("data", {}).get("list", [])
+        totals = {**_FALLBACK_METRICS, "spend": 0.0, "revenue": 0.0, "clicks": 0, "impressions": 0, "conversions": 0}
+        for row in rows:
+            metrics = row.get("metrics", {})
+            totals["spend"] += float(metrics.get("spend", 0) or 0)
+            totals["revenue"] += float(metrics.get("revenue", 0) or 0)
+            totals["clicks"] += int(metrics.get("clicks", 0) or 0)
+            totals["impressions"] += int(metrics.get("impressions", 0) or 0)
+            totals["conversions"] += int(metrics.get("conversion", metrics.get("conversions", 0)) or 0)
+        totals["ctr"] = totals["clicks"] / totals["impressions"] if totals["impressions"] else 0.0
+        totals["cvr"] = totals["conversions"] / totals["clicks"] if totals["clicks"] else 0.0
+        totals["cpc"] = totals["spend"] / totals["clicks"] if totals["clicks"] else 0.0
+        totals["cpa"] = totals["spend"] / totals["conversions"] if totals["conversions"] else 0.0
+        totals["metadata"] = {"dry_run": False, "campaign_ids": list(campaign_ids or ())}
+        return totals
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        _log.warning("tiktok_metrics_failed error=%s", type(exc).__name__)
+        return {**_FALLBACK_METRICS, "metadata": {"provider_error": type(exc).__name__}}
 
 
 # ── anomaly detection + auto-actions ─────────────────────────────────────────

@@ -1,3 +1,10 @@
+"""Compatibility facade for the canonical TikTok integration.
+
+Campaign lifecycle calls delegate to :mod:`backend.integrations.tiktok_ads`.
+OAuth and legacy spend-report helpers remain here for existing callers, but
+new commerce code must use the backend integration directly.
+"""
+
 import os
 import datetime
 
@@ -114,26 +121,11 @@ def create_campaign(
 
     Falls back to a stub dict when credentials are missing.
     """
-    _FALLBACK = {"campaign_id": "tt_mock_camp_1", "status": "created"}
-
     if not (ACCESS_TOKEN and ADVERTISER_ID) or _requests is None:
-        return _FALLBACK
-
-    try:
-        payload = {
-            "advertiser_id": ADVERTISER_ID,
-            "campaign_name": name,
-            "objective_type": objective,
-            "budget_mode": budget_mode,
-            "budget": budget,
-        }
-        data = _post("/campaign/create/", payload)
-        campaign_id = data.get("data", {}).get("campaign_id", _FALLBACK["campaign_id"])
-        return {"campaign_id": campaign_id, "status": "created"}
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except Exception:
-        return _FALLBACK
+        return {"campaign_id": "tt_mock_camp_1", "status": "created"}
+    from backend.integrations.tiktok_ads import create_campaign as _canonical_create_campaign
+    campaign_id = _canonical_create_campaign(name=name, objective=objective, budget=budget)
+    return {"campaign_id": campaign_id, "status": "created" if campaign_id else "error"}
 
 
 def create_ad_group(
@@ -148,32 +140,11 @@ def create_ad_group(
 
     Falls back to a stub when offline.
     """
-    _FALLBACK = {"adgroup_id": "tt_mock_adgroup_1", "status": "created"}
-
     if not (ACCESS_TOKEN and ADVERTISER_ID) or _requests is None:
-        return _FALLBACK
-
-    if placements is None:
-        placements = ["PLACEMENT_TIKTOK"]
-
-    try:
-        payload = {
-            "advertiser_id": ADVERTISER_ID,
-            "campaign_id": campaign_id,
-            "adgroup_name": name,
-            "budget_mode": budget_mode,
-            "budget": budget,
-            "bid_price": bid,
-            "placement_type": "PLACEMENT_TYPE_NORMAL",
-            "placements": placements,
-        }
-        data = _post("/adgroup/create/", payload)
-        adgroup_id = data.get("data", {}).get("adgroup_id", _FALLBACK["adgroup_id"])
-        return {"adgroup_id": adgroup_id, "status": "created"}
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except Exception:
-        return _FALLBACK
+        return {"adgroup_id": "tt_mock_adgroup_1", "status": "created"}
+    from backend.integrations.tiktok_ads import create_ad_group as _canonical_create_ad_group
+    adgroup_id = _canonical_create_ad_group(campaign_id, name=name, daily_budget=budget, placements=placements)
+    return {"adgroup_id": adgroup_id, "status": "created" if adgroup_id else "error"}
 
 
 def create_ad(
@@ -185,26 +156,17 @@ def create_ad(
     *creative* should contain at least ``headline``, ``body``, and ``cta`` keys.
     Falls back to a stub when offline.
     """
-    _FALLBACK = {"ad_id": "tt_mock_ad_1", "status": "created"}
-
     if not (ACCESS_TOKEN and ADVERTISER_ID) or _requests is None:
-        return _FALLBACK
-
-    try:
-        payload = {
-            "advertiser_id": ADVERTISER_ID,
-            "adgroup_id": adgroup_id,
-            "ad_name": creative.get("headline", "Ad"),
-            "ad_text": creative.get("body", ""),
-            "call_to_action": creative.get("cta", "SHOP_NOW"),
-        }
-        data = _post("/ad/create/", payload)
-        ad_id = data.get("data", {}).get("ad_id", _FALLBACK["ad_id"])
-        return {"ad_id": ad_id, "status": "created"}
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except Exception:
-        return _FALLBACK
+        return {"ad_id": "tt_mock_ad_1", "status": "created"}
+    from backend.integrations.tiktok_ads import create_ad as _canonical_create_ad
+    ad_id = _canonical_create_ad(
+        adgroup_id=adgroup_id,
+        creative_id=str(creative.get("creative_id") or creative.get("headline") or "creative"),
+        name=str(creative.get("headline") or "Ad"),
+        hook=str(creative.get("body") or ""),
+        angle=str(creative.get("cta") or ""),
+    )
+    return {"ad_id": ad_id, "status": "created" if ad_id else "error"}
 
 
 # ---------------------------------------------------------------------------
@@ -220,49 +182,8 @@ def get_metrics(
     Falls back to ``_FALLBACK_METRICS`` when credentials are absent or a
     network error occurs.
     """
-    if not (ACCESS_TOKEN and ADVERTISER_ID) or _requests is None:
-        return dict(_FALLBACK_METRICS)
-
-    now = datetime.datetime.now(datetime.UTC)
-    since = now - datetime.timedelta(days=last_n_days)
-
-    try:
-        params: dict = {
-            "advertiser_id": ADVERTISER_ID,
-            "report_type": "BASIC",
-            "data_level": "AUCTION_CAMPAIGN",
-            "dimensions": '["campaign_id"]',
-            "metrics": '["spend","clicks","impressions","conversion","ctr","cvr","cpc","cpa"]',
-            "start_date": since.date().isoformat(),
-            "end_date": now.date().isoformat(),
-        }
-        if campaign_ids:
-            import json
-            params["filters"] = json.dumps(
-                [{"filter_field": "campaign_ids", "filter_type": "IN", "filter_value": campaign_ids}]
-            )
-        data = _get("/report/integrated/get/", params)
-        rows = data.get("data", {}).get("list", [])
-        if not rows:
-            return dict(_FALLBACK_METRICS)
-
-        totals: dict = {k: 0.0 for k in _FALLBACK_METRICS}
-        for row in rows:
-            m = row.get("metrics", {})
-            totals["spend"] += float(m.get("spend", 0))
-            totals["clicks"] += int(m.get("clicks", 0))
-            totals["impressions"] += int(m.get("impressions", 0))
-            totals["conversions"] += int(m.get("conversion", 0))
-
-        totals["ctr"] = totals["clicks"] / totals["impressions"] if totals["impressions"] else 0.0
-        totals["cvr"] = totals["conversions"] / totals["clicks"] if totals["clicks"] else 0.0
-        totals["cpc"] = totals["spend"] / totals["clicks"] if totals["clicks"] else 0.0
-        totals["cpa"] = totals["spend"] / totals["conversions"] if totals["conversions"] else 0.0
-        return totals
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except Exception:
-        return dict(_FALLBACK_METRICS)
+    from backend.integrations.tiktok_ads import get_metrics as _canonical_get_metrics
+    return _canonical_get_metrics(campaign_ids=campaign_ids, last_n_days=last_n_days)
 
 
 def get_ad_spend(last_n_minutes: int = 60) -> dict:
