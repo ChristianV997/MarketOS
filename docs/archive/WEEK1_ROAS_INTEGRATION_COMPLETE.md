@@ -285,3 +285,5 @@ Ready to proceed to Week 2: Product Discovery & Trends Integration.
 **Prepared By**: Claude Code  
 **Date**: July 19, 2026  
 **Status**: Ready for Week 2 Kick-Off
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

@@ -460,3 +460,5 @@ shadow_record_outcome(
 
 Branch: `claude/analyze-repository-fsGUx` | Tests: 1,513+ passing | Docs: Complete
 
+> **Archived — superseded by current deployment documentation.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md` and `docs/oss/OPERATIONS.md`.

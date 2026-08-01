@@ -500,3 +500,5 @@ All Phase 7-8 components are production-ready with observability:
 **Date**: July 19, 2026  
 **Ready For**: Immediate staging validation or production shadowing
 
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

@@ -201,3 +201,5 @@ To make this customer-ready:
 5. Build customer support documentation
 
 Expected effort: 2-3 weeks for full customer-facing MVP with UI.
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

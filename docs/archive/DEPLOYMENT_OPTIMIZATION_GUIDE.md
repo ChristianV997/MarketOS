@@ -424,3 +424,5 @@ systemctl restart marketOS
 **Next Review**: Monthly validation run (every 1st of month)  
 **Emergency Contact**: [DevOps team]  
 **Rollback Plan**: Phase-by-phase (documented above)
+> **Archived — superseded by current deployment documentation.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md` and `docs/oss/OPERATIONS.md`.

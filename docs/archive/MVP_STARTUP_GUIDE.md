@@ -296,3 +296,5 @@ Run through this to verify the system is working:
 ---
 
 **Ready to launch?** Run `python -m backend.cli_setup` then `python -m backend.dropship`!
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

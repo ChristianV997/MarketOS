@@ -271,3 +271,5 @@ EOF
 **Event Coverage**: 69,605 shadow-mode events logged  
 **Validator Coverage**: 8/8 phases instrumented  
 **Ready for production**: ✅ **YES (6/8 phases confirmed)**
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

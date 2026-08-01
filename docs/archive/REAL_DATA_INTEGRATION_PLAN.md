@@ -993,3 +993,5 @@ After real data is wired (Week 6+):
 - What's the scale of your Shopify store (products, monthly orders)?
 - Should we prioritize specific data sources (e.g., focus on TikTok first)?
 - Any compliance requirements (GDPR, CCPA, data privacy)?
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

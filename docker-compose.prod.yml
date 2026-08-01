@@ -8,6 +8,8 @@ services:
     depends_on:
       - redis
       - db
+  # Redis and Postgres are provisioned for a future persistence layer; the
+  # current backend/api.py path does not wire them yet (see README Known gaps).
   redis:
     image: redis:7
   db:

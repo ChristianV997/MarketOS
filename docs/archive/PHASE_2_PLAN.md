@@ -376,3 +376,5 @@ backend/
 3. **Advanced Features** — Image generation, video generation, audience targeting
 4. **Marketplace Integration** — eBay, Amazon direct launch
 5. **Multi-Account Support** — Let customers manage multiple stores
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

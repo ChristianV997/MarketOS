@@ -389,3 +389,5 @@ The MarketOS ROI optimization system is fully deployed, validated, and live in p
 - Real-time: `python -m backend.monitoring.production_monitor --alerts`
 - Validation: `python backend/validation/shadow_validator_v2.py`
 - Documentation: `WEEK3-6_MONITORING_PLAN.md` for monitoring, `DEPLOYMENT_OPTIMIZATION_GUIDE.md` for operations
+> **Archived — superseded by current deployment documentation.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md` and `docs/oss/OPERATIONS.md`.

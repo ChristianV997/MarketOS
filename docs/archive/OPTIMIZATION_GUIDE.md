@@ -193,3 +193,5 @@ python -m cProfile -s cumulative -m pytest tests/test_backend.py
 - [ ] Review cost per customer weekly
 
 This guide should be updated as optimizations are implemented and measurements are collected.
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

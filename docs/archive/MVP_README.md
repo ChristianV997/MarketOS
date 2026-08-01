@@ -347,3 +347,5 @@ curl http://localhost:8000/api/setup/instructions
 ---
 
 Next: Run `./run_mvp.sh` to launch your first campaigns! 🚀
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

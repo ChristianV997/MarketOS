@@ -230,3 +230,5 @@ If shadow logs clear all gates:
 Phase 7-8 logic shows statistically significant improvements in decision quality, creative performance, A/B testing validity, risk management, and organic channel viability. All validation gates cleared. System is production-safe and ready for 30-day shadow-mode validation before full rollout.
 
 **Next action**: Initiate shadow-mode rollout (see "Immediate" section above).
+> **Archived — superseded by current deployment documentation.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md` and `docs/oss/OPERATIONS.md`.

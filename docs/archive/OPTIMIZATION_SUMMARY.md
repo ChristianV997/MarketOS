@@ -253,3 +253,5 @@ The MarketOS ROI optimization system is fully validated and performance-tuned. A
 **Prepared by**: Claude (Fable 5)  
 **Validation Date**: 2025-01-20  
 **Ready to Deploy**: YES ✅
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

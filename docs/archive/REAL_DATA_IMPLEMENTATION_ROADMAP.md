@@ -917,3 +917,5 @@ Before starting implementation, obtain:
 4. **Week 2**: Proceed with real ROAS ingestion
 
 Ready to begin?
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

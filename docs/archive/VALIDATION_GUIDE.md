@@ -457,3 +457,5 @@ All code is in:
 - CLI tool: `backend/validation/validate_phases.py`
 - Tests: `tests/test_shadow_validator.py`
 - Event store (existing): `backend/orchestration/event_store.py`
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

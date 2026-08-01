@@ -267,3 +267,5 @@ python -m backend.validation.shadow_validator_v2 --summary
 **Validation Date**: Week 3-6 Simulation (570 cycles)  
 **Go/No-Go Decision**: ✅ **GO - ACTIVATE PHASES 7-8**  
 **Next Review**: Post-activation (Day 1-7)
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.

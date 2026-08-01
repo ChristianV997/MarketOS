@@ -306,3 +306,5 @@ By end of Week 6, this system will have generated 400+ decision cycles of produc
 **Created**: Week 2 Stage 2 Complete  
 **Effective**: Immediately  
 **Next Review**: July 1, 2025 (First Monthly Validation)
+> **Archived — superseded by `README.md`.** Kept for history; do not treat claims below as current.
+> Current replacement: `README.md`.
