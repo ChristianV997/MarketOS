@@ -2,12 +2,14 @@ version: '3.9'
 services:
   api:
     build: .
-    command: uvicorn backend.api:app --host 0.0.0.0 --port 8000
+    command: uvicorn backend.api:app --host 0.0.0.0 --port 3000
     ports:
-      - "8000:8000"
+      - "3000:3000"
     depends_on:
       - redis
       - db
+  # Redis and Postgres are provisioned for a future persistence layer; the
+  # current backend/api.py path does not wire them yet (see README Known gaps).
   redis:
     image: redis:7
   db:

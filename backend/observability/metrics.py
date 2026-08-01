@@ -89,6 +89,15 @@ checkpoint_failures_total   = _counter("checkpoint_failures_total",   "Failed ch
 checkpoint_recoveries_total = _counter("checkpoint_recoveries_total", "Startup recoveries from checkpoint", ["outcome"])
 checkpoint_last_write_ts    = _gauge(  "checkpoint_last_write_ts",    "Unix timestamp of last successful checkpoint")
 
+# ── event log write failures ─────────────────────────────────────────────────
+# backend.events.log.append() and backend.orchestration.event_store.EventStore
+# .append() both swallow write failures (except Exception: pass / debug-log
+# only) so a caller recording a fact never crashes — but that meant a silent
+# disk-full/corruption event produced zero operator-visible signal. This
+# counter closes that gap without changing the fail-silent behavior itself.
+event_log_write_failures_total = _counter(
+    "event_log_write_failures_total", "Failed event-log append() calls", ["backend"])
+
 # ── entropy ───────────────────────────────────────────────────────────────────
 cognitive_entropy        = _gauge("cognitive_entropy",          "Overall cognitive entropy [0,1]",        ["workspace"])
 vector_fragmentation     = _gauge("vector_fragmentation",       "Vector store fragmentation [0,1]")

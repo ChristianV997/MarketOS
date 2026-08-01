@@ -70,8 +70,14 @@ def test_stale_fallback_on_fetch_failure(monkeypatch, tmp_path):
         raise RuntimeError("sources down")
     monkeypatch.setattr(signal_engine, "get", _boom)
 
+    # Force the cached snapshot's timestamp into the past instead of
+    # sleeping, so it's expired relative to the tiny TTL below.
+    from backend.core.persistence import load_json, save_json_atomic
+    cached = load_json(sc._CACHE_PATH)
+    cached["ts"] = time.time() - 3600
+    save_json_atomic(sc._CACHE_PATH, cached)
+
     # Even expired (TTL tiny), the stale cache beats an empty result
-    time.sleep(0.01)
     got = sc.get_signals_cached(max_age_hours=1e-9)
     assert got == _fake_signals()
 

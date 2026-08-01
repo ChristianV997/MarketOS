@@ -151,6 +151,9 @@ _SLEEP_MIN_INTERVAL_S = float(os.getenv("SLEEP_MIN_INTERVAL_S", "300"))
 _sleep_limiter = RateLimiter(interval_s=_SLEEP_MIN_INTERVAL_S)
 
 
+_last_consolidation_result: dict[str, Any] = {}
+
+
 @worker_safe(rate_limiter=_sleep_limiter)
 def _run_sleep_consolidation() -> dict[str, Any]:
     """Run one cognitive sleep cycle (episodic compaction, semantic compression,
@@ -158,6 +161,8 @@ def _run_sleep_consolidation() -> dict[str, Any]:
     ticks don't re-consolidate; a no-op between windows."""
     from backend.runtime.sleep.consolidation_engine import ConsolidationEngine
     result = ConsolidationEngine(workspace="default").run_cycle()
+    global _last_consolidation_result
+    _last_consolidation_result = result.to_dict()
     # Snapshot the high-volume cognitive stores to disk so they survive a
     # restart (episodic + lineage are persisted here rather than on every
     # write; playbook/calibration/patternstore persist on their own writes).
@@ -171,6 +176,55 @@ def _run_sleep_consolidation() -> dict[str, Any]:
         "cycle_id": result.cycle_id,
         "episodes_compacted": getattr(result, "episodes_compacted", 0),
     }
+
+
+_OBSIDIAN_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", "")
+_OBSIDIAN_SYNC_MIN_INTERVAL_S = float(os.getenv("OBSIDIAN_SYNC_MIN_INTERVAL_S", "3600"))
+_obsidian_sync_limiter = RateLimiter(interval_s=_OBSIDIAN_SYNC_MIN_INTERVAL_S)
+
+
+@worker_safe(rate_limiter=_obsidian_sync_limiter)
+def _run_obsidian_sync() -> dict[str, Any]:
+    """Export the latest signals, playbooks, and sleep-consolidation insights
+    to the Obsidian vault at OBSIDIAN_VAULT_PATH (core/brain/sync.py).
+
+    A no-op when no vault path is configured — this is opt-in, not a
+    required part of the loop. Rate-limited to ~hourly by default so it
+    doesn't spam a new note every tick."""
+    if not _OBSIDIAN_VAULT_PATH:
+        return {"status": "skipped", "reason": "OBSIDIAN_VAULT_PATH not set"}
+
+    from core.brain.sync import export_to_obsidian
+    from core.content.playbook import playbook_memory
+
+    exported: dict[str, int] = {}
+
+    if _latest_signal_batch:
+        export_to_obsidian(
+            {"signals": _latest_signal_batch},
+            category="signals",
+            vault=_OBSIDIAN_VAULT_PATH,
+        )
+        exported["signals"] = len(_latest_signal_batch)
+
+    playbooks = playbook_memory.snapshot()
+    if playbooks:
+        export_to_obsidian(
+            {"playbooks": playbooks},
+            category="playbooks",
+            vault=_OBSIDIAN_VAULT_PATH,
+        )
+        exported["playbooks"] = len(playbooks)
+
+    if _last_consolidation_result:
+        export_to_obsidian(
+            _last_consolidation_result,
+            category="insights",
+            vault=_OBSIDIAN_VAULT_PATH,
+        )
+        exported["insights"] = 1
+
+    return {"status": "ok", "exported": exported}
 
 
 _DROPSHIP_MIN_INTERVAL_S = float(os.getenv("DROPSHIP_MIN_INTERVAL_S", "900"))
@@ -367,6 +421,16 @@ def _persist_calibration() -> None:
 CHECKPOINT_EVERY_N_TICKS = max(1, int(os.getenv("ORCHESTRATOR_CHECKPOINT_TICKS", "6")))
 STATE_PATH = os.getenv("STATE_PATH", "state/state.db")
 
+# ── AWS standby (deploy/aws/main.tf) ────────────────────────────────────────────
+# Set ORCHESTRATOR_STANDBY=true on the AWS instance only — it then blocks in
+# _await_takeover() instead of ticking, until the primary node's S3
+# heartbeat (backend/aws/heartbeat.py, pushed from _write_checkpoint below)
+# goes stale. The PC (primary) never sets this and ticks immediately.
+_ORCHESTRATOR_STANDBY  = os.getenv("ORCHESTRATOR_STANDBY", "false").lower() == "true"
+_AWS_TAKEOVER_AFTER_S  = float(os.getenv("AWS_TAKEOVER_AFTER_S", "300"))
+_STANDBY_POLL_S        = float(os.getenv("ORCHESTRATOR_STANDBY_POLL_S", "30"))
+_NODE_NAME             = os.getenv("MARKETOS_NODE_NAME", "pc")
+
 _shutdown_requested = False
 
 
@@ -398,6 +462,11 @@ def _write_checkpoint(tick: int) -> None:
         except Exception:
             pass
         _log.debug("orchestrator_checkpoint_written tick=%s", tick)
+        try:
+            from backend.aws.heartbeat import push_heartbeat
+            push_heartbeat(node=_NODE_NAME)
+        except Exception as exc:
+            _log.debug("heartbeat_push_skipped error=%s", exc)
     except Exception as exc:
         try:
             from backend.observability.metrics import checkpoint_failures_total
@@ -1004,20 +1073,21 @@ _PHASE_WORKERS: dict[Phase, list[Any]] = {
     # RESEARCH: discover signals + warm simulation; ingest first metrics
     Phase.RESEARCH:  [_run_simulation, _run_signal_ingestion, _run_signal_ingestion,
                       _run_execution_cycle, _run_fulfillment,
-                      _run_metrics_ingestion, _run_alerting],
+                      _run_metrics_ingestion, _run_alerting, _run_obsidian_sync],
     # → organic posting → dropship cycle (rate-limited internally)
     Phase.EXPLORE:   [_run_simulation, _run_signal_ingestion, _run_commerce_cycle,
                       _run_execution_cycle, _run_execution_cycle, _run_feedback_collection,
                       _run_content_generation, _run_organic_posting,
                       _run_engagement_ingestion, _run_dropship_pipeline,
-                      _run_fulfillment, _run_metrics_ingestion, _run_alerting],
+                      _run_fulfillment, _run_metrics_ingestion, _run_alerting,
+                      _run_obsidian_sync],
     # VALIDATE: execution + feedback × 2 + organic validation + inventory + sleep
     Phase.VALIDATE:  [_run_signal_ingestion, _run_commerce_cycle, _run_execution_cycle,
                       _run_feedback_collection, _run_feedback_collection,
                       _run_content_generation, _run_organic_posting,
                       _run_engagement_ingestion, _run_inventory_sync,
                       _run_fulfillment, _run_metrics_ingestion,
-                      _run_alerting, _run_sleep_consolidation],
+                      _run_alerting, _run_sleep_consolidation, _run_obsidian_sync],
     # SCALE: execute + feedback + launch playbooks + scale winners + ingest metrics
     Phase.SCALE:     [_run_signal_ingestion, _run_commerce_cycle, _run_execution_cycle,
                       _run_feedback_collection, _run_content_generation, _run_scaling,
@@ -1025,7 +1095,7 @@ _PHASE_WORKERS: dict[Phase, list[Any]] = {
                       _run_engagement_ingestion, _run_inventory_sync,
                       _run_fulfillment, _run_metrics_ingestion,
                       _run_budget_scaling, _run_alerting,
-                      _run_sleep_consolidation],
+                      _run_sleep_consolidation, _run_obsidian_sync],
 }
 
 
@@ -1086,6 +1156,32 @@ except ImportError:
 
 # ── main loop ─────────────────────────────────────────────────────────────────
 
+def _await_takeover() -> None:
+    """Block (polling) until the primary node's S3 heartbeat looks stale
+    enough to take over. Only called when ORCHESTRATOR_STANDBY=true (the
+    AWS instance) — the PC primary never calls this.
+
+    Also returns early on SIGTERM, so `docker stop`/systemd stop can
+    interrupt a standby instance that's still waiting.
+    """
+    from backend.aws.heartbeat import heartbeat_age_s
+
+    _log.info(
+        "orchestrator_standby_waiting takeover_after_s=%s poll_s=%s",
+        _AWS_TAKEOVER_AFTER_S, _STANDBY_POLL_S,
+    )
+    while not _shutdown_requested:
+        age = heartbeat_age_s()
+        # age is None means "can't confirm" (no bucket configured, boto3
+        # missing, transient S3 error, or the heartbeat object has never
+        # been written yet) — treat as "primary might still be up" and
+        # keep waiting, never as license to take over.
+        if age is not None and age >= _AWS_TAKEOVER_AFTER_S:
+            _log.warning("orchestrator_standby_taking_over heartbeat_age_s=%.0f", age)
+            return
+        time.sleep(_STANDBY_POLL_S)
+
+
 def run() -> None:
     """Run the orchestrator loop indefinitely."""
     global _shutdown_requested
@@ -1101,6 +1197,12 @@ def run() -> None:
         signal.signal(signal.SIGTERM, _handle_sigterm)
     except Exception as exc:
         _log.debug("orchestrator_sigterm_handler_unavailable error=%s", exc)
+
+    if _ORCHESTRATOR_STANDBY:
+        _await_takeover()
+        if _shutdown_requested:
+            _log.info("orchestrator_shutdown_requested_during_standby")
+            return
 
     tick_count = 0
 
@@ -1182,6 +1284,7 @@ def run() -> None:
                     "_run_budget_scaling":      "budget_scaling_worker",
                     "_run_alerting":            "alerting_worker",
                     "_run_commerce_cycle":      "commerce_cycle_worker",
+                    "_run_obsidian_sync":       "obsidian_sync_worker",
                 }.get(worker_fn.__name__, worker_fn.__name__)
                 try:
                     from backend.runtime.task_inventory import task_registry as _tr

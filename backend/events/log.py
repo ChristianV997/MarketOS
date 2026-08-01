@@ -54,7 +54,11 @@ def append(
         )
         store.append(env)
     except Exception:
-        pass
+        try:
+            from backend.observability.metrics import event_log_write_failures_total
+            event_log_write_failures_total.labels(backend="replay_store").inc()
+        except Exception:
+            pass
     return event_id
 
 

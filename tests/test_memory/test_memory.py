@@ -43,12 +43,15 @@ def test_episodic_by_workspace():
     assert len(store.by_workspace("test")) == 1
 
 
-def test_episodic_window():
+def test_episodic_window(monkeypatch):
+    import backend.memory.episodic.store as store_mod
+
     store = EpisodicStore()
     t0 = time.time()
+    monkeypatch.setattr(store_mod.time, "time", lambda: t0)
     store.record_event("early", {})
-    time.sleep(0.01)
-    t1 = time.time()
+    t1 = t0 + 0.01
+    monkeypatch.setattr(store_mod.time, "time", lambda: t1)
     store.record_event("late", {})
     window = store.window(t0, t1)
     assert all(t0 <= e.ts <= t1 for e in window)

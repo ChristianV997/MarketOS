@@ -1,140 +1,72 @@
 # Session Handoff
 Date: 2026-08-01
-Repository: C:\Users\HP\Documents\MarketOS
-Branch: codex/marketos-ai-tooling-scaffold
-
-## Objective
-Implement the complementary Codex execution-reliability track without
-touching Claude-owned work: canonical commerce execution, partial-failure
-handling, bounded observability, and feedback-to-ranking wiring.
+Repository: C:\Users\HP\Documents\MarketOS-claude-next
+Branch: codex/claude-next
+Objective: Reconcile the unmerged Claude capability line, execute the four-phase documentation/CI/research/service plan, and add only the missing gated Chatwoot handoff without touching parallel dirty worktrees.
 
 ## Files changed
-Codex commits pushed to origin:
 
-- `2f75fba` — `chore: add parallel session synchronization guards`
-- `52597ef` — `perf: add deterministic inference regression benchmark`
-- `532f61c` — `feat: harden canonical commerce execution loop`
-- `62f432a` — `feat: feed reinforcement patterns into commerce ranking`
-
-New/updated Codex-owned files include `docs/ai/PARALLEL_WORK_MATRIX.md`,
-`docs/ai/PERFORMANCE_BASELINE.md`, `scripts/ai/session_start.py`,
-`scripts/ai/session_finish.py`, `scripts/benchmark_inference_stack.py`,
-`tests/test_parallel_workflow.py`, `tests/test_inference_stack_benchmark.py`,
-and `.github/workflows/performance-regression.yml`, plus the canonical
-commerce loop, scoring, contracts, orchestrator, and targeted tests. Shared
-AI instructions and command/status references were updated.
-
-Existing unrelated user changes were preserved and not staged:
-
-- `backend/ci/hyperparams_meta.json`
-- `scripts/validate_oss_runtime.py`
-- `tests/test_oss_runtime_validation.py`
-- `.serena/logs/`
-
+Phase commits: `d94a672` archive stale docs, `7cf92f2` scoped CodeQL,
+`9c4f17f` CRM candidate research, `11bc26a` reconciliation merge,
+`a039659` gated Chatwoot handoff, and `e55c562` CodeQL fixes.
 ## Interfaces affected
-The commerce cycle report gains additive `phase_timings`; successful summary
-fields remain compatible. No live credentials or live external writes were
-used during verification.
+
+`run_sales_bot_simulation` preserves its four-value tuple and adds only the
+keyword `attempt_real_handoff`. API/CLI expose the same explicit opt-in;
+envelope outputs add `real_handoff` and `commercial_status`.
 
 ## Tests run
-- Targeted workflow, AI tooling, inference, Ollama benchmark, and commerce benchmark tests: **11 passed**.
-- Commerce/orchestrator/API regression set: **35 passed, 3 skipped** before the final feedback change; **21 passed** after it.
-- Full suite: **1087 passed, 4 skipped**.
-- Inference benchmark, 10 runs: routing p95 **0.519 ms**, completion p95 **4.907 ms**, peak traced memory **145,408 bytes**.
-- Commerce benchmark, 10 runs: p95 **1.536 ms**, within 2,000 ms limit.
-- Final commerce benchmark, 10 runs: p95 **2.763 ms**, within 2,000 ms limit.
-- Semgrep policy at error severity: **0 findings**.
-- Performance workflow YAML parse: **ok**.
-- `git diff --check`: **clean**.
+
+- Focused sales/Chatwoot/API tests: 41 passed, 12 deselected.
+- Full `tests/services`: 206 passed, 15 warnings.
+- Sales automation plus report export after CodeQL fixes: 43 passed.
+- Capital policy: 21 passed after installing the already-declared local
+  `cvxpy` dependency.
+- Semgrep ERROR policy: 0 findings; compileall passed.
+- GitHub: CodeQL, CodeQL Python analysis, Semgrep, container-smoke, and
+  deterministic-benchmarks pass on the latest pushed commit; test and quality
+  jobs were still running at handoff time.
 
 ## Results
-The scheduler now suppresses its legacy launch branch only after the
-canonical commerce loop completes in the same tick. Candidate launch errors
-are isolated, failed candidates do not enter feedback learning, phase timing
-is exported to Prometheus, and reinforcement patterns are retrieved by the
-canonical opportunity scorer.
+
+The four requested phases are implemented and pushed on `codex/claude-next`.
+Draft PR: https://github.com/ChristianV997/MarketOS/pull/115. Chatwoot is
+record-keeping/draft-only and no live external write was performed.
 
 ## Decisions made
-- Claude-owned paths remain untouched: `docs/archive/**`,
-  `.github/workflows/codeql.yml`, `docs/CRM_CANDIDATE_RESEARCH.md`, and
-  `services/sales_automation/**`.
-- Performance CI is separate from CodeQL and limited to inference/commerce
-  paths plus benchmark assets.
-- `session_start.py` reports ownership conflicts but does not block edits or
-  mutate the worktree.
-- `session_finish.py` runs bounded tests and `git diff --check`; it does not
-  auto-commit or auto-push.
-- Feedback remains on the existing vector `PATTERNS` collection; no second
-  learning or scoring system was introduced.
+
+- Gate requires explicit `attempt_real_handoff=True`, a non-dry workspace, and
+  Chatwoot credential scope with configured, non-dry, allowed status.
+- Sidecar calls carry workspace/run/artifact lineage, approved context, and
+  `sales_automation:<session_id>` idempotency.
+- Each provider operation degrades independently; qualification owns whether
+  human handoff occurs.
+- Fixed CodeQL’s two failure-level findings: bounded user-controlled budget
+  regex and side-effecting file-read assertion.
+- Restored generated `backend/ci/hyperparams_meta.json` after tests mutated it;
+  it is not part of this work.
 
 ## Risks
-- The benchmark is a deterministic local regression signal, not a production
-  capacity or model-quality claim.
-- `session_start.py` detects tools from the current process PATH; a tool may
-  be installed in another shell-specific PATH while appearing unavailable.
-- The generated handoff intentionally lists the unrelated dirty paths so the
-  next agent knows not to stage them.
+
+- Full local repository suite did not produce a captured final summary within
+  the bounded Windows execution window; affected and services suites are
+  green. GitHub is the authoritative full-suite check still in progress.
+- A real Chatwoot smoke test requires credentials and optional inbox ID.
+- Other worktrees containing user changes were left untouched.
 
 ## Remaining blockers
-None for the Codex-owned track. Claude’s plan remains independent and can
-continue on its declared paths. The existing unrelated dirty files remain
-unstaged.
 
-## Additional update — 2026-08-01
-
-Commit `da9e517` optimized commerce ranking to share one embedding across
-product, campaign, and reinforcement-pattern searches using the existing
-multi-collection search primitive. Public vector helpers remain unchanged.
-The optimized 20-run commerce benchmark measured p95 **2.233 ms**, within the
-2,000 ms limit. The focused vector/commerce tests passed **19/19**, and the
-full suite remains **1087 passed, 4 skipped**.
+- Wait for GitHub `test` and `quality-advisory` on PR #115; merge only after
+  they pass.
+- Review/merge the draft PR into `main` after required checks complete.
 
 ## Next action
-Claude should fetch `origin/codex/marketos-ai-tooling-scaffold`, inspect
-`docs/ai/PARALLEL_WORK_MATRIX.md`, and avoid staging the unrelated dirty paths.
-When integrating, preserve Claude-owned work and use the Codex commits above
-as additive changes.
-At the end of its work it should update this handoff with its own actual
-results or leave the shared handoff update to the designated owner.
 
-## Additional update — TikTok consolidation
-
-Commit `7ed0eb1` made `backend/integrations/tiktok_ads.py` the canonical
-TikTok campaign lifecycle and metrics client. `backend/commerce/launch.py`
-now uses compatibility wrappers around that client, while
-`connectors/tiktok_ads.py` preserves legacy return shapes through delegation.
-The only raw requests remaining in the legacy connector are OAuth and legacy
-spend-report helpers; campaign creation, ad-group creation, ad creation, and
-commerce metrics no longer have a second HTTP implementation.
-
-Verification: **71 focused tests passed, 3 skipped**; full suite **1089 passed,
-4 skipped**; Semgrep blocking findings **0**; commerce benchmark 20-run p95
-**1.707 ms**; inference benchmark 50-run completion p95 **2.753 ms**.
+Check `gh pr checks 115`; if all required checks pass, merge PR #115. If a
+check fails, inspect that run before changing code and update this handoff.
 
 ## What the next agent should inspect first
-1. `docs/ai/PARALLEL_WORK_MATRIX.md`
-2. `git status --short` and `git diff origin/codex/marketos-ai-tooling-scaffold`
-3. `docs/ai/PERFORMANCE_BASELINE.md`
-4. Claude-owned plan paths before editing
 
-## Integration branch update — creative contract hardening
-
-Branch: `codex/marketos-integration`
-
-The existing typed `CreativeArtifact` boundary was hardened without adding a
-second creative pipeline. It now validates the allowed lifecycle statuses and
-fails closed through `usable_for_launch()` for unavailable, failed, or
-unverified media artifacts. The commerce quality gate marks unusable creative
-artifacts `not_launchable`, and existing launch code skips them.
-
-Verification: **7 focused tests passed**; compileall clean; Semgrep blocking
-findings **0**; commerce benchmark 20-run p95 **2.397 ms**, within the
-2,000 ms limit.
-
-Environment note: the merged branch declares `pytest-asyncio` and `stripe` in
-its requirements, but this environment initially lacked both packages. The
-async test dependency was installed locally. Stripe webhook tests remain
-blocked until the declared Stripe dependency is installed; the full suite also
-exceeded the 300-second execution bound in this state. No fallback webhook
-implementation was added because that would weaken the official SDK security
-boundary.
+Inspect `services/sales_automation/real_handoff.py`, then the latest PR checks
+and `docs/ai/SESSION_HANDOFF.md`; do not rediscover the full repository or
+touch the separate dirty worktrees.

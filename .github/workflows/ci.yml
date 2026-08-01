@@ -114,7 +114,11 @@ jobs:
           pip-audit --local --strict
 
       - name: Run tests
-        run: pytest tests/ -v
+        # -n auto (pytest-xdist): parallelizes ~2,470 tests across CI's
+        # available cores. Not forced on for local `pytest -q` runs (pytest.ini
+        # is unchanged) since output-interleaving makes ad-hoc debugging
+        # harder — pass -n auto yourself locally when you want the speedup.
+        run: pytest tests/ -v -n auto
 
       - name: Enforce dry-run commerce-cycle p95 budget
         run: python scripts/benchmark_commerce_cycle.py --runs 10 --p95-limit-ms 2000

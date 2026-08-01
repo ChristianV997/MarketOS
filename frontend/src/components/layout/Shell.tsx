@@ -1,9 +1,13 @@
-import { Outlet } from "react-router-dom";
+import { useCallback, useEffect } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useWsStore } from "@/store/ws";
+import { useRuntimeStore } from "@/runtimeStore";
 import { useSnapshot } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { capturePageview } from "@/lib/posthog";
+import type { WsEvent } from "@/types";
 
 const PHASE_COLORS: Record<string, string> = {
   RESEARCH: "bg-blue-500/10 text-blue-300 border-blue-500/20",
@@ -13,7 +17,25 @@ const PHASE_COLORS: Record<string, string> = {
 };
 
 export default function Shell() {
-  useWebSocket();
+  const location = useLocation();
+  useEffect(() => {
+    capturePageview(location.pathname); // no-op unless VITE_POSTHOG_KEY is set
+  }, [location.pathname]);
+
+  const handleMessage = useWsStore((s) => s.handleMessage);
+  const appendRuntimeEvent = useRuntimeStore((s) => s.append);
+  const onMessage = useCallback(
+    (ev: WsEvent) => {
+      handleMessage(ev);
+      // ReplayInspector (the /replay page) reads from useRuntimeStore, the
+      // same store the legacy tab-based app's useMetrics hook feeds — keep
+      // both stores populated from this one websocket connection rather
+      // than opening a second one.
+      appendRuntimeEvent(ev as any);
+    },
+    [handleMessage, appendRuntimeEvent]
+  );
+  useWebSocket(onMessage);
 
   const connected = useWsStore((s) => s.connected);
   const wsSnap    = useWsStore((s) => s.snapshot);
