@@ -17,8 +17,7 @@ def _winner_hit(record_id: str = "hit-1", score: float = 0.91) -> SimilarityResu
 
 
 def test_ranker_prefers_live_attributed_supported_product(monkeypatch):
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [_winner_hit("prod-hit", 0.88)])
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [_winner_hit("camp-hit", 0.94)])
+    monkeypatch.setattr("backend.commerce.scoring.search_all", lambda query, top_k=3, collections=None: {"products": [_winner_hit("prod-hit", 0.88)], "campaigns": [_winner_hit("camp-hit", 0.94)], "patterns": []})
 
     scorer = OpportunityScorer()
     ranked = scorer.rank(
@@ -44,9 +43,7 @@ def test_ranker_prefers_live_attributed_supported_product(monkeypatch):
 
 
 def test_ranker_consumes_feedback_patterns(monkeypatch):
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [])
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [])
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_patterns", lambda query, top_k=3: [SimilarityResult(record_id="feedback-pattern", score=0.91, payload={"roas": 2.4}, collection="patterns")])
+    monkeypatch.setattr("backend.commerce.scoring.search_all", lambda query, top_k=3, collections=None: {"products": [], "campaigns": [], "patterns": [SimilarityResult(record_id="feedback-pattern", score=0.91, payload={"roas": 2.4}, collection="patterns")]})
 
     ranked = OpportunityScorer().rank([
         {"id": "feedback-signal", "product": "Feedback Product", "score": 0.5, "engagement": 0.5, "velocity": 0.5, "quality": LIVE_ATTRIBUTED},
@@ -157,8 +154,7 @@ def test_launch_executor_resumes_checkpoint_without_duplicate_platform_resources
 
 
 def test_commerce_loop_continues_after_one_launch_failure(monkeypatch):
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [])
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.scoring.search_all", lambda query, top_k=3, collections=None: {"products": [], "campaigns": [], "patterns": []})
     monkeypatch.setattr("backend.commerce.creative.generate_creative", lambda product, angle: f"{product}:{angle}")
 
     calls = []
@@ -387,8 +383,7 @@ def test_unattributed_initial_metrics_do_not_close_campaign_lineage():
 
 
 def test_commerce_loop_runs_end_to_end_with_injected_dependencies(monkeypatch):
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [_winner_hit("prod-hit", 0.88)])
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [_winner_hit("camp-hit", 0.94)])
+    monkeypatch.setattr("backend.commerce.scoring.search_all", lambda query, top_k=3, collections=None: {"products": [_winner_hit("prod-hit", 0.88)], "campaigns": [_winner_hit("camp-hit", 0.94)], "patterns": []})
     monkeypatch.setattr("backend.commerce.creative.generate_creative", lambda product, angle: f"{product}:{angle}:script")
 
     def create_campaign(**kwargs):
@@ -444,8 +439,7 @@ def test_commerce_loop_runs_end_to_end_with_injected_dependencies(monkeypatch):
 
 
 def test_loop_preserves_quality_from_json_style_product_and_offer_overrides(monkeypatch):
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [])
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.scoring.search_all", lambda query, top_k=3, collections=None: {"products": [], "campaigns": [], "patterns": []})
 
     report = CommerceLoop().run_cycle(
         signals=[{

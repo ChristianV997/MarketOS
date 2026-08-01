@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
-from backend.vector.semantic_search import find_similar_campaigns, find_similar_patterns, find_similar_products
+from backend.vector.semantic_search import search_all
 from evaluation import LaunchReadiness, ProductCandidate, SupplierOffer, evaluate_product
 
 from .contracts import (
@@ -56,10 +56,12 @@ def _semantic_score(query: str) -> tuple[float, list[str], list[str]]:
     score = 0.0
 
     try:
-        product_hits = find_similar_products(query, top_k=3)
-        campaign_hits = find_similar_campaigns(query, top_k=3)
-        pattern_hits = find_similar_patterns(query, top_k=3)
-        for hit in [*product_hits, *campaign_hits, *pattern_hits]:
+        grouped_hits = search_all(query, top_k=3, collections=["products", "campaigns", "patterns"])
+        for hit in [
+            *grouped_hits.get("products", []),
+            *grouped_hits.get("campaigns", []),
+            *grouped_hits.get("patterns", []),
+        ]:
             payload = hit.payload or {}
             roas = float(payload.get("roas", 0.0) or 0.0)
             candidate = _clamp(hit.score)
