@@ -1,0 +1,42 @@
+rules:
+  - id: marketos-request-without-timeout
+    languages: [python]
+    message: External requests must specify a bounded timeout.
+    severity: WARNING
+    patterns:
+      - pattern: requests.$METHOD(...)
+      - pattern-not: requests.$METHOD(..., timeout=..., ...)
+    paths:
+      exclude: ["**/tests/**", "**/scripts/**"]
+
+  - id: marketos-subprocess-shell-true
+    languages: [python]
+    message: Review shell=True for injection and portability risk.
+    severity: ERROR
+    pattern: subprocess.$METHOD(..., shell=True, ...)
+    paths:
+      exclude: ["**/tests/**"]
+
+  - id: marketos-external-write-call-review
+    languages: [python]
+    message: Review this external write call for dry-run, approval, idempotency, and risk-gate enforcement.
+    severity: WARNING
+    pattern-either:
+      - patterns:
+          - pattern: $CLIENT.$METHOD(...)
+          - metavariable-regex:
+              metavariable: $CLIENT
+              regex: "^(requests|_requests|client|_client|session|_session|api|_api|sdk|provider|target)$"
+          - metavariable-regex:
+              metavariable: $METHOD
+              regex: "^(post|put|patch|delete)$"
+      - patterns:
+          - pattern: $TARGET.$METHOD(...)
+          - metavariable-regex:
+              metavariable: $TARGET
+              regex: "^(self|target|provider|api|_api|client|_client|sdk)$"
+          - metavariable-regex:
+              metavariable: $METHOD
+              regex: "^(create_campaign|create_ad_group|create_ad|create_order|create_cart|fulfill_order|publish_bundle|publish|charge|launch|delete)$"
+    paths:
+      include: ["**/backend/**", "**/connectors/**", "**/orchestrator/**"]
