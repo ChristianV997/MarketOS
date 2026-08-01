@@ -41,7 +41,7 @@ candidates:
     status: selected
     owner: agents
     capabilities: [typed_agents, structured_output, mcp, approvals]
-    reviewed_ref: v1.104.0
+    reviewed_ref: v2.20.0
   - name: postiz
     repository: https://github.com/gitroomhq/postiz-app
     license: AGPL-3.0
@@ -74,3 +74,119 @@ candidates:
     owner: data
     capabilities: [batch_ingestion, connectors, warehouse_sync]
     reviewed_ref: pending-deferred-review
+  # The following six were evaluated during the consolidation-plan pass
+  # (docs/SERVICE_MODULES.md / commercial run envelope work) as candidates
+  # to fill genuine gaps (CRM, support inbox, scheduling, product analytics,
+  # durable workflow orchestration, web scraping) surfaced by an external
+  # audit. Explicit user decision: none adopted this round — deferred
+  # pending a dedicated follow-up, not because any is unsuitable.
+  - name: twenty-crm
+    repository: https://github.com/twentyhq/twenty
+    license: AGPL-3.0
+    mode: sidecar
+    status: deferred
+    owner: customer_intelligence
+    capabilities: [crm, pipeline, contact_management]
+    reviewed_ref: pending-deferred-review
+  - name: chatwoot
+    repository: https://github.com/chatwoot/chatwoot
+    license: MIT
+    mode: sidecar
+    status: selected
+    owner: sales_automation
+    capabilities: [conversation_inbox, support_ticketing]
+    reviewed_ref: pending-deferred-review
+    # Advanced from `deferred` -> `candidate_for_conversation_sidecar` during
+    # the cost-aware stack-planner Phase 1 pass, then to `selected` in Phase
+    # 2 once a real ConversationProvider adapter
+    # (backend/integrations/chatwoot.py) was built and tested. MIT license,
+    # no legal-review gate needed.
+  - name: cal.com
+    repository: https://github.com/calcom/cal.com
+    license: AGPL-3.0
+    mode: sidecar
+    status: deferred
+    owner: sales_automation
+    capabilities: [scheduling, appointment_booking]
+    reviewed_ref: pending-deferred-review
+  - name: posthog
+    repository: https://github.com/PostHog/posthog
+    license: MIT
+    mode: optional_library
+    status: selected
+    owner: frontend
+    capabilities: [product_analytics, pageviews, custom_events]
+    reviewed_ref: posthog-js@1.x
+    # Consumed as the posthog-js client SDK against PostHog Cloud (SaaS),
+    # not self-hosted — no MarketOS-operated PostHog server exists.
+    # Default-off: frontend/src/lib/posthog.ts is a no-op unless
+    # VITE_POSTHOG_KEY is set, matching this repo's credential-presence-
+    # is-the-opt-in convention (e.g. FIRECRAWL_API_KEY). Session-replay is
+    # not enabled in this integration — only pageviews + a small set of
+    # explicit product events (service_run) are captured.
+    # Also consumed server-side via the optional `posthog` Python SDK
+    # (backend/integrations/posthog_backend.py, AnalyticsProvider Protocol)
+    # for backend event capture + HogQL query, still against PostHog Cloud
+    # only — no self-hosted PostHog server.
+  - name: temporal
+    repository: https://github.com/temporalio/temporal
+    license: MIT
+    mode: sidecar
+    status: deferred
+    owner: orchestration
+    capabilities: [durable_workflow_engine, retries, saga_orchestration]
+    reviewed_ref: pending-deferred-review
+  - name: crawlee
+    repository: https://github.com/apify/crawlee
+    license: Apache-2.0
+    mode: optional_worker
+    status: deferred
+    owner: research
+    capabilities: [web_scraping, browser_crawl]
+    reviewed_ref: pending-deferred-review  # redundant with crawl4ai + firecrawl already selected
+  # The following three were added during the cost-aware modular business
+  # stack pass (backend/providers, backend/costs, backend/stack_planner) —
+  # genuinely new candidates with zero prior inventory entries, confirmed
+  # via repo-wide grep before adding. See docs/COST_AWARE_INTEGRATION_AUDIT.md.
+  - name: woocommerce
+    repository: https://github.com/woocommerce/woocommerce
+    license: GPL-3.0
+    mode: sidecar
+    status: legal_review_required
+    owner: commerce
+    capabilities: [catalog, inventory, orders, refunds]
+    reviewed_ref: pending-version-pin
+    # Merchant-operated WordPress plugin — no MarketOS-vendored source. An
+    # adapter (backend/integrations/woocommerce/) implements the existing
+    # CommerceProvider Protocol; no new commerce port was created. GPL-3.0
+    # is a restricted license under this repo's own commercial OSS policy
+    # (scripts/check_oss_policy.py) — same precedent as Postiz
+    # (legal_review_required): the adapter is built and tested, but formal
+    # legal review is required before enabling it for a real commercial
+    # deployment.
+  - name: mautic
+    repository: https://github.com/mautic/mautic
+    license: GPL-3.0-or-later
+    mode: sidecar
+    status: legal_review_required
+    owner: marketing_automation
+    capabilities: [email_marketing, marketing_automation, segmentation]
+    reviewed_ref: pending-deferred-review
+    # MarketingAutomationProvider adapter built and tested
+    # (backend/integrations/mautic.py). GPL-3.0-or-later is copyleft —
+    # treated with the same legal-review precedent as GPL-3.0/AGPL-3.0
+    # candidates (WooCommerce, Postiz) even though scripts/check_oss_policy.py's
+    # RESTRICTED set currently matches the exact string "GPL-3.0" only, not
+    # "-or-later" — this status is intentionally more conservative than the
+    # automated checker requires.
+  - name: activepieces
+    repository: https://github.com/activepieces/activepieces
+    license: MIT
+    mode: sidecar
+    status: selected
+    owner: workflow_automation
+    capabilities: [workflow_automation, connectors]
+    reviewed_ref: pending-deferred-review
+    # CustomerAutomationProvider adapter built and tested
+    # (backend/integrations/activepieces.py) — distinct from the internal-only
+    # n8n WorkflowAutomationProvider. MIT license, no legal-review gate needed.

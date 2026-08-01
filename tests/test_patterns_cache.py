@@ -40,7 +40,7 @@ class TestAggregationCache:
             return len(calls)
 
         cache.get_or_compute("k", compute)
-        time.sleep(0.02)
+        cache._timestamps["k"] = time.time() - 0.02  # simulate the TTL having elapsed
         cache.get_or_compute("k", compute)
         assert len(calls) == 2
 

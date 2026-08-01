@@ -19,7 +19,7 @@ class TestRateLimiter:
     def test_ready_after_interval_elapses(self):
         rl = RateLimiter(interval_s=0.01)
         rl.mark()
-        time.sleep(0.02)
+        rl.last_run = time.time() - 0.02  # simulate the interval having elapsed
         assert rl.ready() is True
 
     def test_reset_via_last_run_attribute(self):
