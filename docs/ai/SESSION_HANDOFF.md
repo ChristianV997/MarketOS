@@ -97,6 +97,20 @@ as additive changes.
 At the end of its work it should update this handoff with its own actual
 results or leave the shared handoff update to the designated owner.
 
+## Additional update — TikTok consolidation
+
+Commit `7ed0eb1` made `backend/integrations/tiktok_ads.py` the canonical
+TikTok campaign lifecycle and metrics client. `backend/commerce/launch.py`
+now uses compatibility wrappers around that client, while
+`connectors/tiktok_ads.py` preserves legacy return shapes through delegation.
+The only raw requests remaining in the legacy connector are OAuth and legacy
+spend-report helpers; campaign creation, ad-group creation, ad creation, and
+commerce metrics no longer have a second HTTP implementation.
+
+Verification: **71 focused tests passed, 3 skipped**; full suite **1089 passed,
+4 skipped**; Semgrep blocking findings **0**; commerce benchmark 20-run p95
+**1.707 ms**; inference benchmark 50-run completion p95 **2.753 ms**.
+
 ## What the next agent should inspect first
 1. `docs/ai/PARALLEL_WORK_MATRIX.md`
 2. `git status --short` and `git diff origin/codex/marketos-ai-tooling-scaffold`
