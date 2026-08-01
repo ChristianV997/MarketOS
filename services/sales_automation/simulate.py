@@ -42,6 +42,7 @@ def run_sales_bot_simulation(
     scripted_lead_messages: list[str],
     *,
     workspace: ClientWorkspace | None = None,
+    attempt_real_handoff: bool = False,
 ) -> tuple[ChatSession, AppointmentHandoff, list[str], CommercialRunEnvelope]:
     """Never raises. Returns (session, handoff, qualification_flow, envelope)."""
     workspace = workspace or _default_workspace()
@@ -63,11 +64,26 @@ def run_sales_bot_simulation(
     handoff = create_appointment_handoff(session)
     follow_up = generate_follow_up_sequence(session) if not session.handed_off else []
 
+    from services.sales_automation.real_handoff import attempt_real_conversation_handoff
+    from services.status import commercial_status
+
+    real_handoff = attempt_real_conversation_handoff(
+        session,
+        handoff,
+        workspace=workspace,
+        envelope_id=envelope.experiment_id,
+        attempt_real_handoff=attempt_real_handoff,
+    )
+
     outputs = {
         "session": session.to_dict(),
         "handoff": handoff.to_dict(),
         "qualification_flow": qualification_flow,
         "follow_up_sequence": follow_up,
+        "real_handoff": real_handoff,
+        "commercial_status": commercial_status(
+            requires_credentials=["conversation_provider_chatwoot"], workspace=workspace,
+        ),
     }
     try:
         from services.reporting import save_report_artifacts

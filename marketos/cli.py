@@ -6,7 +6,7 @@
     python -m marketos.cli services creative-growth --product NAME [...]
     python -m marketos.cli services customer-intelligence --business-type TYPE [...]
     python -m marketos.cli services digital-product --offer-name NAME [...]
-    python -m marketos.cli services sales-bot-sim --vertical car_sales [--message "..." ...]
+    python -m marketos.cli services sales-bot-sim --vertical car_sales [--message "..." ...] [--attempt-real-handoff]
     python -m marketos.cli services profit-stack-advisor --business-name NAME --business-model own_ecommerce [...]
     python -m marketos.cli stack recommend --business-model own_ecommerce --target-geo MX [...]
 
@@ -168,12 +168,17 @@ def _cmd_sales_bot_sim(args: argparse.Namespace) -> int:
 
     workspace = _resolve_workspace(args.workspace)
     messages = args.message or list(_DEMO_LEAD_MESSAGES)
-    session, handoff, flow, _envelope = run_sales_bot_simulation(args.vertical, messages, workspace=workspace)
+    session, handoff, flow, envelope = run_sales_bot_simulation(
+        args.vertical, messages, workspace=workspace,
+        attempt_real_handoff=args.attempt_real_handoff,
+    )
 
     if args.json:
         from services.reporting import json_safe
         print(json.dumps(json_safe({
             "session": session.to_dict(), "handoff": handoff.to_dict(), "qualification_flow": flow,
+            "real_handoff": envelope.outputs.get("real_handoff"),
+            "commercial_status": envelope.outputs.get("commercial_status"),
         }), indent=2, default=str))
     else:
         print(render_sales_bot_setup_plan_markdown(session, handoff, flow))
@@ -311,10 +316,11 @@ def build_parser() -> argparse.ArgumentParser:
     digital.add_argument("--json", action="store_true")
     digital.set_defaults(func=_cmd_digital_product)
 
-    sales_bot = services_sub.add_parser("sales-bot-sim", help="Simulate a lead-qualification chat conversation (local only, no real messaging)")
+    sales_bot = services_sub.add_parser("sales-bot-sim", help="Simulate qualification; optionally stage a gated Chatwoot draft")
     sales_bot.add_argument("--vertical", required=True)
     sales_bot.add_argument("--message", action="append", help="A scripted lead message; repeat for a multi-turn conversation. Defaults to a short demo script if omitted.")
     sales_bot.add_argument("--workspace", default=None)
+    sales_bot.add_argument("--attempt-real-handoff", action="store_true", help="Explicitly request the configured Chatwoot draft-only path")
     sales_bot.add_argument("--json", action="store_true")
     sales_bot.set_defaults(func=_cmd_sales_bot_sim)
 

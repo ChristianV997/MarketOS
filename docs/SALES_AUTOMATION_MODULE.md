@@ -1,11 +1,11 @@
 # Sales automation module (`services.sales_automation`)
 
-Chat-based lead qualification and appointment handoff. **Simulation-only
-today** — there is no real outbound messaging adapter (WhatsApp, web chat,
-CRM, calendar) wired in. Every function operates on in-memory `ChatSession`
-objects; nothing here sends a real message to a real lead.
+Chat-based lead qualification and appointment handoff. Qualification remains
+local and deterministic. An optional, explicitly gated Chatwoot path records
+a contact, conversation, transcript, and human-review draft; it never sends a
+real customer message autonomously.
 
-## Why simulation-only
+## Why qualification is simulation-only
 
 Real outbound messaging is a distinct, higher-risk capability (rate limits,
 opt-in/consent law, platform ToS, cost per message) that deserves its own
@@ -13,9 +13,9 @@ adapter-plus-live-mode-gate design — the same pattern this repo already
 uses for ad platforms (`backend/integrations/tiktok_ads.py`,
 `meta_ads_client.py`) and checkout (`backend/commerce/checkout.py`). Building
 that prematurely, before the qualification logic itself is proven, would
-mean debugging both at once. This phase deliberately stops at "prove the
-qualification logic and appointment scoring work," leaving the messaging
-adapter as clearly-scoped future work.
+mean debugging both at once. The current real path deliberately stops at
+record-keeping and a draft for human approval. Sending remains outside this
+module.
 
 ## How it works
 
@@ -55,6 +55,11 @@ adapter as clearly-scoped future work.
    local simulation harness: drives a full scripted conversation and
    produces a `CommercialRunEnvelope`-backed result, same as every other
    service module in this repo (audit trail, ArtifactStore persistence).
+10. **Optional Chatwoot handoff** — pass `attempt_real_handoff=True` with a
+    non-dry workspace and configured/allowed Chatwoot credentials. The path
+    carries workspace/run lineage and an idempotency key, degrades each
+    external operation independently, and only calls `handoff_to_human` when
+    the existing qualification state already set `session.handed_off`.
 
 ## Try it
 
@@ -63,12 +68,16 @@ python -m marketos.cli services sales-bot-sim --vertical car_sales
 python -m marketos.cli services sales-bot-sim --vertical real_estate \
     --message "I'm looking to buy a house in Austin" \
     --message "asap, budget is $500,000"
+# Explicit opt-in; still draft-only and requires configured Chatwoot scope.
+python -m marketos.cli services sales-bot-sim --vertical car_sales \
+    --attempt-real-handoff --json
 ```
 
 ## Explicitly out of scope (future work)
 
-- Real WhatsApp/web-chat/CRM/calendar adapters and the live-mode gate they'd
-  need (mirroring `backend.workspaces.live_mode_checklist`).
+- Real WhatsApp/web-chat/CRM/calendar adapters and autonomous message sending.
+  Chatwoot record-keeping is the only optional real path currently supported,
+  and it remains draft-only behind an explicit live gate.
 - LLM-generated (vs. templated) bot replies — deliberately deterministic
   for now, matching this repo's "Deterministic First" principle; an LLM
   could later be wired in for FAQ answering specifically via the existing

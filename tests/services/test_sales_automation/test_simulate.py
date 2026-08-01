@@ -38,9 +38,17 @@ class TestRunSalesBotSimulation:
         assert flow
         assert envelope.service_name == "sales_automation"
         assert envelope.status == "completed"
+        assert envelope.outputs["real_handoff"] is None
+        assert envelope.outputs["commercial_status"] in {"needs_credentials", "ready_for_client_service"}
 
     def test_saved_to_artifact_store(self):
         _, _, _, envelope = run_sales_bot_simulation("ecommerce_brand", ["hi"])
         store = ArtifactStore()
         saved = store.load(envelope.workspace_id, envelope.experiment_id, "result.json")
         assert "session" in saved and "handoff" in saved
+
+    def test_explicit_attempt_without_configured_chatwoot_stays_simulation_only(self):
+        _, _, _, envelope = run_sales_bot_simulation(
+            "car_sales", ["hi"], attempt_real_handoff=True,
+        )
+        assert envelope.outputs["real_handoff"] is None

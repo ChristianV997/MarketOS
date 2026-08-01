@@ -176,16 +176,20 @@ logic, monetization model, risks), `status`.
 **What it does**: chat-based lead qualification (deterministic
 keyword/regex slot-filling, no LLM call, no cost), FAQ answering (only from
 supplied context, never fabricated), appointment handoff scoring, and
-follow-up sequences. **Simulation-only** — no real messaging adapter yet.
+follow-up sequences. Qualification is simulation-only; an optional,
+explicitly gated Chatwoot path records CRM/conversation state and stages a
+human-review draft, never an autonomous customer message.
 See `docs/SALES_AUTOMATION_MODULE.md` for the full design and why.
 
-**Who buys it**: not yet sellable as a standalone client deliverable — see
-status below. Useful today for your own internal lead-qualification logic
-design/testing.
+**Who buys it**: qualification and draft record-keeping can support an
+internal or client-service workflow once Chatwoot credentials and approval
+controls are configured; autonomous outbound messaging is not provided.
 
 **Inputs**: `vertical`, `scripted_lead_messages` (a list of strings simulating a lead's messages), `workspace`.
 
-**Outputs**: `ChatSession`, `AppointmentHandoff` (`status=ready_for_internal_use`), qualification flow, follow-up sequence.
+**Outputs**: `ChatSession`, `AppointmentHandoff` (`status=ready_for_internal_use`),
+qualification flow, follow-up sequence, `commercial_status`, and optional
+`real_handoff` operation results.
 
 **CLI**: `python -m marketos.cli services sales-bot-sim --vertical VERTICAL [--message "..." ...] [--json]`
 
