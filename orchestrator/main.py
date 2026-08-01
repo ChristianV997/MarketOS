@@ -59,6 +59,11 @@ _campaign_artifacts: dict[str, _CampaignArtifact] = {}
 # the most recent batch so ranking consumes the exact evidence that advanced
 # the phase controller instead of issuing a second, potentially divergent pull.
 _latest_signal_batch: list[dict[str, Any]] = []
+# Set only after the canonical commerce loop completes during the current
+# scheduler tick. This prevents the legacy playbook branch from duplicating
+# launches while preserving direct/manual _run_scaling compatibility in tests
+# and operational tooling.
+_commerce_cycle_completed_this_tick = False
 
 
 # ── worker dispatchers ────────────────────────────────────────────────────────
@@ -93,6 +98,7 @@ def _run_commerce_cycle() -> dict[str, Any]:
     Live execution is opt-in through ``COMMERCE_LOOP_LIVE=true``; scheduler
     deployments remain dry-run by default.
     """
+    global _commerce_cycle_completed_this_tick
     if not _COMMERCE_LOOP_ENABLED:
         return {"status": "skipped", "reason": "commerce_loop_disabled"}
     try:
@@ -118,6 +124,7 @@ def _run_commerce_cycle() -> dict[str, Any]:
             dry_run=not _COMMERCE_LOOP_LIVE,
         )
         summary = report.summary
+        _commerce_cycle_completed_this_tick = True
         return {
             "status": "ok",
             "cycle_id": report.artifact_id,
@@ -199,6 +206,13 @@ def _run_scaling() -> dict[str, Any]:
     """
     scaled   = 0
     launched = 0
+    if _commerce_cycle_completed_this_tick:
+        return {
+            "status": "skipped",
+            "reason": "canonical_commerce_loop_owns_launches",
+            "scaled": 0,
+            "launched": 0,
+        }
     try:
         from backend.decision.portfolio_engine import top_products
 
@@ -625,6 +639,8 @@ def run() -> None:
 
     while True:
         try:
+            global _commerce_cycle_completed_this_tick
+            _commerce_cycle_completed_this_tick = False
             metrics = _collect_metrics()
             phase   = phase_controller.tick(metrics)
             alloc   = resource_allocator.describe(phase, TOTAL_BUDGET)

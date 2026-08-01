@@ -143,6 +143,62 @@ def test_launch_executor_resumes_checkpoint_without_duplicate_platform_resources
     assert calls == ["campaign", "adgroup", "adgroup", "ad"]
 
 
+def test_commerce_loop_continues_after_one_launch_failure(monkeypatch):
+    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.creative.generate_creative", lambda product, angle: f"{product}:{angle}")
+
+    calls = []
+
+    def create_campaign(**kwargs):
+        calls.append(kwargs["name"])
+        if "Fail" in kwargs["name"]:
+            raise RuntimeError("provider unavailable")
+        return {"campaign_id": "partial-success-campaign"}
+
+    executor = LaunchExecutor(
+        create_campaign=create_campaign,
+        create_ad_group=lambda **kwargs: {"adgroup_id": "partial-adgroup"},
+        create_ad=lambda **kwargs: {"ad_id": "partial-ad"},
+        metrics_provider=lambda ids: {"spend": 0.0, "revenue": 0.0},
+    )
+    loop = CommerceLoop(launcher=executor)
+    opportunities = [
+        RankedOpportunity(artifact_id="partial-fail-opp", product_id="fail-product", product_name="Fail Product", signal_id="partial-fail", score=1.0, quality=LIVE_ATTRIBUTED),
+        RankedOpportunity(artifact_id="partial-pass-opp", product_id="pass-product", product_name="Pass Product", signal_id="partial-pass", score=0.9, quality=LIVE_ATTRIBUTED),
+    ]
+    loop.rank = lambda *args, **kwargs: opportunities
+    loop.compose = lambda items: [CreativeBundle.from_opportunity(
+        item, script="script", hook="Hook", angle="Angle", headline="Headline",
+        primary_text="Primary", cta="Shop Now", quality=LIVE_ATTRIBUTED,
+    ) for item in items]
+    report = loop.run_cycle(
+        signals=[
+            {"id": "partial-fail", "product": "Fail Product", "score": 0.95, "engagement": 0.9, "velocity": 0.9, "quality": LIVE_ATTRIBUTED},
+            {"id": "partial-pass", "product": "Pass Product", "score": 0.8, "engagement": 0.8, "velocity": 0.8, "quality": LIVE_ATTRIBUTED},
+        ],
+        products={
+            "Fail Product": {"product_id": "fail-product", "name": "Fail Product", "selling_price": 50.0},
+            "Pass Product": {"product_id": "pass-product", "name": "Pass Product", "selling_price": 50.0},
+        },
+        offers={
+            "fail-product": {"supplier_id": "supplier-fail", "product_id": "fail-product", "unit_cost": 10.0, "shipping_cost": 2.0},
+            "pass-product": {"supplier_id": "supplier-pass", "product_id": "pass-product", "unit_cost": 10.0, "shipping_cost": 2.0},
+        },
+        top_k=2,
+        dry_run=False,
+    )
+
+    assert len(calls) == 2
+    assert report.summary["launch_failures"] == 1
+    assert report.summary["launches"] == 2
+    assert report.summary["feedback_records"] == 1
+    assert set(report.phase_timings) == {
+        "signal_collection", "normalization", "ranking", "creative_generation",
+        "quality_gate", "launch", "feedback",
+    }
+
+
 def test_feedback_recorder_reconciles_outcome_into_readiness():
     class FakeCampaignMemory:
         def __init__(self):

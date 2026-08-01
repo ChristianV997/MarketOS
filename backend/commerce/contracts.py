@@ -389,6 +389,7 @@ class CommerceCycleReport(BaseArtifact):
     launch_plans: tuple[LaunchPlan, ...] = ()
     outcomes: tuple[CampaignOutcome, ...] = ()
     summary: dict[str, Any] = field(default_factory=dict)
+    phase_timings: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = super().to_dict()
@@ -403,6 +404,7 @@ class CommerceCycleReport(BaseArtifact):
                 "launch_plans": [item.to_dict() for item in self.launch_plans],
                 "outcomes": [item.to_dict() for item in self.outcomes],
                 "summary": self.summary,
+                "phase_timings": self.phase_timings,
             }
         )
         return data

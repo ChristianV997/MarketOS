@@ -25,6 +25,7 @@ from .creative import CreativeComposer
 from .feedback import FeedbackRecorder
 from .launch import LaunchExecutor
 from .scoring import OpportunityScorer
+from . import metrics as commerce_metrics
 
 
 def _key_lookup(*keys: str):
@@ -150,9 +151,23 @@ class CommerceLoop:
         for bundle in creatives:
             if bundle.reasons and "not_launchable" in bundle.reasons:
                 continue
-            plan, outcome = self.launcher.execute(bundle, budget=budget, dry_run=dry_run)
+            try:
+                plan, outcome = self.launcher.execute(bundle, budget=budget, dry_run=dry_run)
+            except Exception as exc:
+                commerce_metrics.launches_total.labels(status="failed", dry_run=str(dry_run).lower()).inc()
+                # Keep the batch alive; the caller records the bounded failure
+                # in the cycle summary without exposing product content as a
+                # metric label.
+                plans.append(LaunchPlan.from_bundle(bundle, budget=budget, dry_run=dry_run))
+                outcomes.append(CampaignOutcome.from_metrics(
+                    plans[-1],
+                    {"metadata": {"launch_error": type(exc).__name__}},
+                    quality=_quality_from_dict({"provenance": "unknown", "attribution": "unknown"}),
+                ))
+                continue
             plans.append(plan)
             outcomes.append(outcome)
+            commerce_metrics.launches_total.labels(status="success", dry_run=str(dry_run).lower()).inc()
         return plans, outcomes
 
     def publish_creatives(
@@ -194,6 +209,9 @@ class CommerceLoop:
         plan_map = {plan.artifact_id: plan for plan in plans}
         records: list[dict[str, Any]] = []
         for outcome in outcomes:
+            if (outcome.metadata or {}).get("launch_error"):
+                commerce_metrics.feedback_total.labels(status="skipped_launch_failure").inc()
+                continue
             plan = next((plan for plan in plans if plan.campaign_id == outcome.campaign_id or plan.creative_id == outcome.creative_id), None)
             if plan is None:
                 plan = plan_map.get(outcome.parent_ids[0] if outcome.parent_ids else "")
@@ -214,13 +232,24 @@ class CommerceLoop:
         dry_run: bool = True,
     ) -> CommerceCycleReport:
         started_at = time.time()
-        raw_signals = self.collect_signals(signals)
-        normalized_signals = [CommerceSignal.from_signal(signal) for signal in raw_signals]
-        ranked = self.rank(normalized_signals, products=products, offers=offers, top_k=top_k)
-        creatives = self.compose(ranked[:top_k])
-        creatives, qa_failures = self.quality_gate(creatives)
-        plans, outcomes = self.launch(creatives, budget=budget, dry_run=dry_run)
-        feedback = self.reconcile(creatives, plans, outcomes)
+        timings: dict[str, float] = {}
+
+        def timed(phase: str, operation):
+            phase_started = time.perf_counter()
+            try:
+                return operation()
+            finally:
+                duration = time.perf_counter() - phase_started
+                timings[phase] = round(duration, 6)
+                commerce_metrics.phase_duration_seconds.labels(phase=phase).observe(duration)
+
+        raw_signals = timed("signal_collection", lambda: self.collect_signals(signals))
+        normalized_signals = timed("normalization", lambda: [CommerceSignal.from_signal(signal) for signal in raw_signals])
+        ranked = timed("ranking", lambda: self.rank(normalized_signals, products=products, offers=offers, top_k=top_k))
+        creatives = timed("creative_generation", lambda: self.compose(ranked[:top_k]))
+        creatives, qa_failures = timed("quality_gate", lambda: self.quality_gate(creatives))
+        plans, outcomes = timed("launch", lambda: self.launch(creatives, budget=budget, dry_run=dry_run))
+        feedback = timed("feedback", lambda: self.reconcile(creatives, plans, outcomes))
         finished_at = time.time()
 
         summary = {
@@ -232,9 +261,15 @@ class CommerceLoop:
             "feedback_records": len(feedback),
             "launchable": sum(1 for item in ranked if item.readiness and item.readiness.launchable),
         }
+        launch_failures = sum(1 for outcome in outcomes if (outcome.metadata or {}).get("launch_error"))
+        if launch_failures:
+            summary["launch_failures"] = launch_failures
         if qa_failures:
             summary["qa_failures"] = len(qa_failures)
 
+        status = "ok" if launch_failures == 0 else "partial_failure"
+        commerce_metrics.cycles_total.labels(status=status, dry_run=str(dry_run).lower()).inc()
+        commerce_metrics.feedback_total.labels(status="recorded").inc(len(feedback))
         return CommerceCycleReport(
             artifact_id=f"commerce-cycle-{int(started_at * 1000)}",
             workspace="commerce",
@@ -247,6 +282,7 @@ class CommerceLoop:
             launch_plans=tuple(plans),
             outcomes=tuple(outcomes),
             summary=summary,
+            phase_timings=timings,
         )
 
     def run_provider_cycle(
