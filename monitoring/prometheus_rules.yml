@@ -60,3 +60,43 @@ groups:
         annotations:
           summary: MarketOS signal source failure rate is high
           description: Signal source {{ $labels.source }} has exceeded a 50 percent failure rate over the last 15 minutes.
+
+      - alert: MarketOSOSSProviderFailuresRepeated
+        expr: sum by (provider) (increase(marketos_oss_provider_failures_total[15m])) >= 3
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: oss-provider
+        annotations:
+          summary: MarketOS OSS provider is repeatedly failing
+          description: OSS provider {{ $labels.provider }} has failed at least 3 times in the last 15 minutes.
+
+      - alert: MarketOSOSSProviderRefreshLatencyHigh
+        expr: histogram_quantile(0.95, sum by (provider, le) (rate(marketos_oss_provider_refresh_duration_seconds_bucket[10m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+          subsystem: oss-provider
+        annotations:
+          summary: MarketOS OSS provider refresh latency is high
+          description: OSS provider {{ $labels.provider }} has p95 refresh latency above 5 seconds for 10 minutes.
+
+      - alert: MarketOSWebhookFailuresRepeated
+        expr: sum by (source) (increase(marketos_integration_webhook_events_total{outcome=~"failed|invalid_signature"}[15m])) >= 3
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: integrations
+        annotations:
+          summary: MarketOS sidecar webhook failures are repeating
+          description: Webhook source {{ $labels.source }} has at least 3 failed or invalid events in the last 15 minutes.
+
+      - alert: MarketOSConfiguredIntegrationUnreachable
+        expr: marketos_integration_configured == 1 and marketos_integration_reachable == 0
+        for: 5m
+        labels:
+          severity: warning
+          subsystem: integrations
+        annotations:
+          summary: MarketOS configured integration is unreachable
+          description: Integration {{ $labels.integration }} has remained configured but unreachable for 5 minutes.

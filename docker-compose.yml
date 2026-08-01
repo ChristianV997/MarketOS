@@ -42,7 +42,7 @@ services:
 
   # ── Qdrant vector store ───────────────────────────────────────────────────
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.18.2
     ports:
       - "6333:6333"   # HTTP / REST
       - "6334:6334"   # gRPC
@@ -64,7 +64,7 @@ services:
 
   # ── Prometheus ────────────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.13.0
     ports:
       - "9090:9090"
     volumes:
@@ -76,7 +76,7 @@ services:
 
   # ── Grafana ───────────────────────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.1.0
     ports:
       - "3001:3000"
     environment:

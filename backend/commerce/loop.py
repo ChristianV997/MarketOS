@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import time
+import asyncio
+import os
+from dataclasses import replace
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
@@ -22,72 +25,7 @@ from .creative import CreativeComposer
 from .feedback import FeedbackRecorder
 from .launch import LaunchExecutor
 from .scoring import OpportunityScorer
-
-try:
-    from prometheus_client import Counter, Gauge
-
-    _prom_cycle_ranked_total = Counter(
-        "marketos_commerce_cycle_ranked_total",
-        "Ranked opportunities produced per commerce cycle",
-    )
-    _prom_cycle_launchable_total = Counter(
-        "marketos_commerce_cycle_launchable_total",
-        "Ranked opportunities marked launchable per commerce cycle",
-    )
-    _prom_cycle_rejection_reasons_total = Counter(
-        "marketos_commerce_cycle_rejection_reasons_total",
-        "Non-launchable ranked opportunities by rejection reason",
-        ["reason"],
-    )
-    _prom_cycle_spend = Counter(
-        "marketos_commerce_cycle_spend_total",
-        "Total spend across launched campaign outcomes per commerce cycle",
-    )
-    _prom_cycle_revenue = Counter(
-        "marketos_commerce_cycle_revenue_total",
-        "Total revenue across launched campaign outcomes per commerce cycle",
-    )
-    _prom_cycle_last_roas = Gauge(
-        "marketos_commerce_cycle_last_roas",
-        "Blended ROAS (revenue / spend) of the most recent commerce cycle",
-    )
-except ImportError:
-    _prom_cycle_ranked_total = None
-    _prom_cycle_launchable_total = None
-    _prom_cycle_rejection_reasons_total = None
-    _prom_cycle_spend = None
-    _prom_cycle_revenue = None
-    _prom_cycle_last_roas = None
-
-
-def _emit_cycle_metrics(ranked: list[RankedOpportunity], outcomes: Iterable[CampaignOutcome]) -> None:
-    """Best-effort Prometheus emission — never raises, mirrors the
-    lazy-Counter pattern already used by core/signals.py and
-    backend/commerce/feedback.py.
-    """
-    try:
-        if _prom_cycle_ranked_total is not None:
-            _prom_cycle_ranked_total.inc(len(ranked))
-        if _prom_cycle_launchable_total is not None:
-            _prom_cycle_launchable_total.inc(
-                sum(1 for item in ranked if item.readiness and item.readiness.launchable)
-            )
-        if _prom_cycle_rejection_reasons_total is not None:
-            for item in ranked:
-                if not item.readiness or item.readiness.launchable:
-                    continue
-                for reason in item.readiness.reasons:
-                    _prom_cycle_rejection_reasons_total.labels(reason=reason).inc()
-        spend = round(sum(o.spend for o in outcomes), 4)
-        revenue = round(sum(o.revenue for o in outcomes), 4)
-        if _prom_cycle_spend is not None:
-            _prom_cycle_spend.inc(spend)
-        if _prom_cycle_revenue is not None:
-            _prom_cycle_revenue.inc(revenue)
-        if _prom_cycle_last_roas is not None and spend > 0:
-            _prom_cycle_last_roas.set(round(revenue / spend, 4))
-    except Exception:
-        pass
+from . import metrics as commerce_metrics
 
 
 def _key_lookup(*keys: str):
@@ -174,6 +112,33 @@ class CommerceLoop:
     def compose(self, opportunities: Iterable[RankedOpportunity]) -> list[CreativeBundle]:
         return self.composer.compose_batch(opportunities)
 
+    def quality_gate(self, creatives: Iterable[CreativeBundle]) -> tuple[list[CreativeBundle], list[str]]:
+        """Optionally run typed campaign QA before launch, failing closed."""
+        bundles = list(creatives)
+        if os.getenv("MARKETOS_AGENT_QA_ENABLED", "false").lower() != "true":
+            return bundles, []
+        from backend.agents.domain_agents import CampaignQARequest, run_campaign_qa
+        failures: list[str] = []
+        checked: list[CreativeBundle] = []
+        for bundle in bundles:
+            try:
+                result = asyncio.run(run_campaign_qa(CampaignQARequest(
+                    product_id=bundle.product_id,
+                    creative_id=bundle.creative_id,
+                    platform=os.getenv("MARKETOS_DEFAULT_AD_PLATFORM", "tiktok"),
+                    copy_text=bundle.primary_text or bundle.script,
+                    dry_run=True,
+                )))
+                if not result.approved:
+                    checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_rejected", "not_launchable"))))))
+                    failures.append(f"{bundle.creative_id}:rejected")
+                else:
+                    checked.append(bundle)
+            except Exception as exc:
+                checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_unavailable", "not_launchable"))))))
+                failures.append(f"{bundle.creative_id}:unavailable:{exc}")
+        return checked, failures
+
     def launch(
         self,
         creatives: Iterable[CreativeBundle],
@@ -186,10 +151,53 @@ class CommerceLoop:
         for bundle in creatives:
             if bundle.reasons and "not_launchable" in bundle.reasons:
                 continue
-            plan, outcome = self.launcher.execute(bundle, budget=budget, dry_run=dry_run)
+            try:
+                plan, outcome = self.launcher.execute(bundle, budget=budget, dry_run=dry_run)
+            except Exception as exc:
+                commerce_metrics.launches_total.labels(status="failed", dry_run=str(dry_run).lower()).inc()
+                # Keep the batch alive; the caller records the bounded failure
+                # in the cycle summary without exposing product content as a
+                # metric label.
+                plans.append(LaunchPlan.from_bundle(bundle, budget=budget, dry_run=dry_run))
+                outcomes.append(CampaignOutcome.from_metrics(
+                    plans[-1],
+                    {"metadata": {"launch_error": type(exc).__name__}},
+                    quality=_quality_from_dict({"provenance": "unknown", "attribution": "unknown"}),
+                ))
+                continue
             plans.append(plan)
             outcomes.append(outcome)
+            commerce_metrics.launches_total.labels(status="success", dry_run=str(dry_run).lower()).inc()
         return plans, outcomes
+
+    def publish_creatives(
+        self,
+        creatives: Iterable[CreativeBundle],
+        *,
+        publisher: Any | None = None,
+        dry_run: bool = True,
+        approval_state: str = "not_required",
+    ) -> list[dict[str, Any]]:
+        """Publish approved creative bundles through the configured adapter."""
+        from backend.integrations.postiz import publisher as default_publisher
+        from backend.contracts.adapters import SidecarContext
+        target = publisher or default_publisher
+        records: list[dict[str, Any]] = []
+        for bundle in creatives:
+            if "not_launchable" in bundle.reasons:
+                continue
+            context = SidecarContext(
+                workspace_id=bundle.workspace,
+                run_id=bundle.artifact_id,
+                artifact_id=bundle.artifact_id,
+                parent_ids=tuple(bundle.parent_ids),
+                idempotency_key=f"publish:{bundle.creative_id}",
+                dry_run=dry_run,
+                approval_state=approval_state,
+            )
+            result = target.publish_bundle(bundle, context=context)
+            records.append(dict(result))
+        return records
 
     def reconcile(
         self,
@@ -201,6 +209,9 @@ class CommerceLoop:
         plan_map = {plan.artifact_id: plan for plan in plans}
         records: list[dict[str, Any]] = []
         for outcome in outcomes:
+            if (outcome.metadata or {}).get("launch_error"):
+                commerce_metrics.feedback_total.labels(status="skipped_launch_failure").inc()
+                continue
             plan = next((plan for plan in plans if plan.campaign_id == outcome.campaign_id or plan.creative_id == outcome.creative_id), None)
             if plan is None:
                 plan = plan_map.get(outcome.parent_ids[0] if outcome.parent_ids else "")
@@ -221,12 +232,24 @@ class CommerceLoop:
         dry_run: bool = True,
     ) -> CommerceCycleReport:
         started_at = time.time()
-        raw_signals = self.collect_signals(signals)
-        normalized_signals = [CommerceSignal.from_signal(signal) for signal in raw_signals]
-        ranked = self.rank(normalized_signals, products=products, offers=offers, top_k=top_k)
-        creatives = self.compose(ranked[:top_k])
-        plans, outcomes = self.launch(creatives, budget=budget, dry_run=dry_run)
-        feedback = self.reconcile(creatives, plans, outcomes)
+        timings: dict[str, float] = {}
+
+        def timed(phase: str, operation):
+            phase_started = time.perf_counter()
+            try:
+                return operation()
+            finally:
+                duration = time.perf_counter() - phase_started
+                timings[phase] = round(duration, 6)
+                commerce_metrics.phase_duration_seconds.labels(phase=phase).observe(duration)
+
+        raw_signals = timed("signal_collection", lambda: self.collect_signals(signals))
+        normalized_signals = timed("normalization", lambda: [CommerceSignal.from_signal(signal) for signal in raw_signals])
+        ranked = timed("ranking", lambda: self.rank(normalized_signals, products=products, offers=offers, top_k=top_k))
+        creatives = timed("creative_generation", lambda: self.compose(ranked[:top_k]))
+        creatives, qa_failures = timed("quality_gate", lambda: self.quality_gate(creatives))
+        plans, outcomes = timed("launch", lambda: self.launch(creatives, budget=budget, dry_run=dry_run))
+        feedback = timed("feedback", lambda: self.reconcile(creatives, plans, outcomes))
         finished_at = time.time()
 
         summary = {
@@ -238,9 +261,15 @@ class CommerceLoop:
             "feedback_records": len(feedback),
             "launchable": sum(1 for item in ranked if item.readiness and item.readiness.launchable),
         }
+        launch_failures = sum(1 for outcome in outcomes if (outcome.metadata or {}).get("launch_error"))
+        if launch_failures:
+            summary["launch_failures"] = launch_failures
+        if qa_failures:
+            summary["qa_failures"] = len(qa_failures)
 
-        _emit_cycle_metrics(ranked, outcomes)
-
+        status = "ok" if launch_failures == 0 else "partial_failure"
+        commerce_metrics.cycles_total.labels(status=status, dry_run=str(dry_run).lower()).inc()
+        commerce_metrics.feedback_total.labels(status="recorded").inc(len(feedback))
         return CommerceCycleReport(
             artifact_id=f"commerce-cycle-{int(started_at * 1000)}",
             workspace="commerce",
@@ -253,7 +282,37 @@ class CommerceLoop:
             launch_plans=tuple(plans),
             outcomes=tuple(outcomes),
             summary=summary,
+            phase_timings=timings,
         )
+
+    def run_provider_cycle(
+        self,
+        urls: Iterable[str],
+        *,
+        research_provider: Any | None = None,
+        commerce_provider: Any | None = None,
+        context: Any | None = None,
+        top_k: int = 5,
+        budget: float = 20.0,
+        dry_run: bool = True,
+    ) -> CommerceCycleReport:
+        """Run the canonical loop using optional OSS provider inputs."""
+        from .oss_bridge import collect_oss_inputs
+        signals, products, metadata = collect_oss_inputs(
+            tuple(urls), research=research_provider, commerce=commerce_provider, context=context,
+        )
+        report = self.run_cycle(
+            signals=signals,
+            products=products,
+            offers=metadata.get("offers", {}),
+            top_k=top_k,
+            budget=budget,
+            dry_run=dry_run,
+        )
+        if metadata.get("failures"):
+            report.summary["provider_failures"] = metadata["failures"]
+        report.summary["provider_signals"] = len(signals)
+        return report
 
 
 def run_commerce_cycle(
@@ -272,4 +331,20 @@ def run_commerce_cycle(
         top_k=top_k,
         budget=budget,
         dry_run=dry_run,
+    )
+
+
+def run_provider_cycle(
+    urls: Iterable[str],
+    *,
+    research_provider: Any | None = None,
+    commerce_provider: Any | None = None,
+    context: Any | None = None,
+    top_k: int = 5,
+    budget: float = 20.0,
+    dry_run: bool = True,
+) -> CommerceCycleReport:
+    return CommerceLoop().run_provider_cycle(
+        urls, research_provider=research_provider, commerce_provider=commerce_provider,
+        context=context, top_k=top_k, budget=budget, dry_run=dry_run,
     )

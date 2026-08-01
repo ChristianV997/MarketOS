@@ -16,7 +16,14 @@ def test_env_example_keeps_standalone_api_cycle_owner_explicit():
 def test_ci_has_container_health_and_commerce_smoke_gate():
     workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "container-smoke:" in workflow
-    assert "docker build --tag marketos:ci ." in workflow
+    assert "docker build --build-arg VCS_REF=${{ github.sha }} --tag marketos:ci ." in workflow
+    assert "Verify built-image provenance" in workflow
     assert "/health" in workflow
     assert "/ready" in workflow
     assert "/commerce/cycle" in workflow
+
+
+def test_compose_images_are_pinned_by_policy():
+    from scripts.validate_container_pins import validate_manifests
+
+    assert validate_manifests() == []

@@ -17,8 +17,7 @@ def _winner_hit(record_id: str = "hit-1", score: float = 0.91) -> SimilarityResu
 
 
 def test_ranker_prefers_live_attributed_supported_product(monkeypatch):
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [_winner_hit("prod-hit", 0.88)])
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [_winner_hit("camp-hit", 0.94)])
+    monkeypatch.setattr("backend.commerce.scoring.search_all", lambda query, top_k=3, collections=None: {"products": [_winner_hit("prod-hit", 0.88)], "campaigns": [_winner_hit("camp-hit", 0.94)], "patterns": []})
 
     scorer = OpportunityScorer()
     ranked = scorer.rank(
@@ -41,6 +40,17 @@ def test_ranker_prefers_live_attributed_supported_product(monkeypatch):
     assert "live_attributed_signal" in ranked[0].reasons
     assert ranked[1].product_name == "Beta"
     assert "not_launchable" in ranked[1].reasons
+
+
+def test_ranker_consumes_feedback_patterns(monkeypatch):
+    monkeypatch.setattr("backend.commerce.scoring.search_all", lambda query, top_k=3, collections=None: {"products": [], "campaigns": [], "patterns": [SimilarityResult(record_id="feedback-pattern", score=0.91, payload={"roas": 2.4}, collection="patterns")]})
+
+    ranked = OpportunityScorer().rank([
+        {"id": "feedback-signal", "product": "Feedback Product", "score": 0.5, "engagement": 0.5, "velocity": 0.5, "quality": LIVE_ATTRIBUTED},
+    ])
+
+    assert ranked[0].semantic_score > 0
+    assert "winner_match:patterns" in ranked[0].reasons
 
 
 def test_launch_executor_uses_injected_backend():
@@ -100,6 +110,24 @@ def test_launch_executor_uses_injected_backend():
     assert calls[-1][0] == "metrics"
 
 
+def test_default_launch_backend_delegates_to_canonical_tiktok(monkeypatch):
+    from backend.commerce.launch import _default_launch_backend
+    import backend.integrations.tiktok_ads as tiktok
+
+    calls = []
+    monkeypatch.setattr(tiktok, "create_campaign", lambda **kwargs: calls.append(("campaign", kwargs)) or "canonical-campaign")
+    monkeypatch.setattr(tiktok, "create_ad_group", lambda *args, **kwargs: calls.append(("adgroup", args, kwargs)) or "canonical-adgroup")
+    monkeypatch.setattr(tiktok, "create_ad", lambda **kwargs: calls.append(("ad", kwargs)) or "canonical-ad")
+    monkeypatch.setattr(tiktok, "get_metrics", lambda ids: calls.append(("metrics", ids)) or {"spend": 0.0, "revenue": 0.0})
+
+    create_campaign, create_ad_group, create_ad, get_metrics = _default_launch_backend()
+    assert create_campaign(name="Campaign", budget=10)["campaign_id"] == "canonical-campaign"
+    assert create_ad_group(campaign_id="canonical-campaign", name="Group", budget=10)["adgroup_id"] == "canonical-adgroup"
+    assert create_ad(adgroup_id="canonical-adgroup", creative={"headline": "Headline", "body": "Body", "cta": "Shop"})["ad_id"] == "canonical-ad"
+    assert get_metrics(["canonical-campaign"])["spend"] == 0.0
+    assert [item[0] for item in calls] == ["campaign", "adgroup", "ad", "metrics"]
+
+
 def test_launch_executor_resumes_checkpoint_without_duplicate_platform_resources():
     calls: list[str] = []
     fail_once = {"adgroup": True}
@@ -141,6 +169,61 @@ def test_launch_executor_resumes_checkpoint_without_duplicate_platform_resources
     assert plan.campaign_id == "resume-campaign"
     assert outcome.campaign_id == "resume-campaign"
     assert calls == ["campaign", "adgroup", "adgroup", "ad"]
+
+
+def test_commerce_loop_continues_after_one_launch_failure(monkeypatch):
+    monkeypatch.setattr("backend.commerce.scoring.search_all", lambda query, top_k=3, collections=None: {"products": [], "campaigns": [], "patterns": []})
+    monkeypatch.setattr("backend.commerce.creative.generate_creative", lambda product, angle: f"{product}:{angle}")
+
+    calls = []
+
+    def create_campaign(**kwargs):
+        calls.append(kwargs["name"])
+        if "Fail" in kwargs["name"]:
+            raise RuntimeError("provider unavailable")
+        return {"campaign_id": "partial-success-campaign"}
+
+    executor = LaunchExecutor(
+        create_campaign=create_campaign,
+        create_ad_group=lambda **kwargs: {"adgroup_id": "partial-adgroup"},
+        create_ad=lambda **kwargs: {"ad_id": "partial-ad"},
+        metrics_provider=lambda ids: {"spend": 0.0, "revenue": 0.0},
+    )
+    loop = CommerceLoop(launcher=executor)
+    opportunities = [
+        RankedOpportunity(artifact_id="partial-fail-opp", product_id="fail-product", product_name="Fail Product", signal_id="partial-fail", score=1.0, quality=LIVE_ATTRIBUTED),
+        RankedOpportunity(artifact_id="partial-pass-opp", product_id="pass-product", product_name="Pass Product", signal_id="partial-pass", score=0.9, quality=LIVE_ATTRIBUTED),
+    ]
+    loop.rank = lambda *args, **kwargs: opportunities
+    loop.compose = lambda items: [CreativeBundle.from_opportunity(
+        item, script="script", hook="Hook", angle="Angle", headline="Headline",
+        primary_text="Primary", cta="Shop Now", quality=LIVE_ATTRIBUTED,
+    ) for item in items]
+    report = loop.run_cycle(
+        signals=[
+            {"id": "partial-fail", "product": "Fail Product", "score": 0.95, "engagement": 0.9, "velocity": 0.9, "quality": LIVE_ATTRIBUTED},
+            {"id": "partial-pass", "product": "Pass Product", "score": 0.8, "engagement": 0.8, "velocity": 0.8, "quality": LIVE_ATTRIBUTED},
+        ],
+        products={
+            "Fail Product": {"product_id": "fail-product", "name": "Fail Product", "selling_price": 50.0},
+            "Pass Product": {"product_id": "pass-product", "name": "Pass Product", "selling_price": 50.0},
+        },
+        offers={
+            "fail-product": {"supplier_id": "supplier-fail", "product_id": "fail-product", "unit_cost": 10.0, "shipping_cost": 2.0},
+            "pass-product": {"supplier_id": "supplier-pass", "product_id": "pass-product", "unit_cost": 10.0, "shipping_cost": 2.0},
+        },
+        top_k=2,
+        dry_run=False,
+    )
+
+    assert len(calls) == 2
+    assert report.summary["launch_failures"] == 1
+    assert report.summary["launches"] == 2
+    assert report.summary["feedback_records"] == 1
+    assert set(report.phase_timings) == {
+        "signal_collection", "normalization", "ranking", "creative_generation",
+        "quality_gate", "launch", "feedback",
+    }
 
 
 def test_feedback_recorder_reconciles_outcome_into_readiness():
@@ -318,8 +401,7 @@ def test_unattributed_initial_metrics_do_not_close_campaign_lineage():
 
 
 def test_commerce_loop_runs_end_to_end_with_injected_dependencies(monkeypatch):
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [_winner_hit("prod-hit", 0.88)])
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [_winner_hit("camp-hit", 0.94)])
+    monkeypatch.setattr("backend.commerce.scoring.search_all", lambda query, top_k=3, collections=None: {"products": [_winner_hit("prod-hit", 0.88)], "campaigns": [_winner_hit("camp-hit", 0.94)], "patterns": []})
     monkeypatch.setattr("backend.commerce.creative.generate_creative", lambda product, angle: f"{product}:{angle}:script")
 
     def create_campaign(**kwargs):
@@ -375,8 +457,7 @@ def test_commerce_loop_runs_end_to_end_with_injected_dependencies(monkeypatch):
 
 
 def test_loop_preserves_quality_from_json_style_product_and_offer_overrides(monkeypatch):
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [])
-    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.scoring.search_all", lambda query, top_k=3, collections=None: {"products": [], "campaigns": [], "patterns": []})
 
     report = CommerceLoop().run_cycle(
         signals=[{

@@ -81,6 +81,14 @@ def test_fetch_roas_dry_run():
         assert 0.0 <= v <= 10.0
 
 
+def test_get_metrics_dry_run_is_normalized():
+    from backend.integrations.tiktok_ads import get_metrics
+    metrics = get_metrics(["cid_1"])
+    assert metrics["metadata"]["dry_run"] is True
+    for key in ("spend", "revenue", "clicks", "impressions", "conversions", "ctr", "cvr"):
+        assert key in metrics
+
+
 def test_check_and_act_kills_overspend():
     from backend.integrations.tiktok_ads import check_and_act, _roas_streaks
     _roas_streaks.clear()

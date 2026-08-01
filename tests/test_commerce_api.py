@@ -112,6 +112,24 @@ def test_readiness_distinguishes_health_from_runtime_startup(monkeypatch):
         assert response.json() == {"ready": True}
 
 
+def test_readiness_can_require_medusa_when_explicitly_configured(monkeypatch):
+    import backend.api as api
+    from backend.contracts.adapters import AdapterHealth
+
+    monkeypatch.setenv("MEDUSA_REQUIRED_FOR_READY", "true")
+    monkeypatch.setattr(api, "_bg_running", True)
+    monkeypatch.setattr(api, "_runtime_services_ready", True)
+
+    class Provider:
+        def health(self):
+            return AdapterHealth("medusa", configured=True, reachable=False, detail="sidecar starting")
+
+    monkeypatch.setattr("backend.integrations.medusa.commerce_provider", Provider())
+    response = api.ready()
+    assert response.status_code == 503
+    assert response.body and b"required_medusa_unavailable" in response.body
+
+
 def test_signal_metrics_endpoint_exposes_cache_telemetry():
     # /metrics/signals lives in api.routes.metrics for the same reason.
     from api.routes.metrics import signal_metrics
@@ -119,6 +137,107 @@ def test_signal_metrics_endpoint_exposes_cache_telemetry():
     assert "cache_hit_rate" in result
     assert "last_refresh_duration_s" in result
     assert "source_failures" in result
+
+
+def test_provider_cycle_endpoint_requires_urls_and_live_confirmation():
+    from backend.api import commerce_provider_cycle
+    assert commerce_provider_cycle({})["reasons"] == ["provider_cycle_requires_1_to_20_urls"]
+    assert commerce_provider_cycle({"urls": ["https://example.com"], "dry_run": False})["reasons"] == ["live_execution_requires_confirm_live"]
+
+
+def test_integration_webhook_deduplicates_and_publishes_to_broker(monkeypatch):
+    from backend.api import integration_webhook
+    from backend.integrations.medusa import commerce_provider
+    commerce_provider.webhook_events.clear()
+    first = integration_webhook("medusa", {"id": "evt-api-1", "type": "order.created"})
+    second = integration_webhook("medusa", {"id": "evt-api-1", "type": "order.created"})
+    assert first["accepted"] is True
+    assert first["broker_event_id"]
+    assert second == {"accepted": False, "duplicate": True, "event_id": "evt-api-1"}
+
+
+def test_integration_webhook_rejects_unsupported_or_unidentified_events():
+    from backend.api import integration_webhook
+    assert integration_webhook("unknown", {"id": "evt"}).status_code == 404
+    assert integration_webhook("medusa", {"type": "order.created"}).status_code == 400
+
+
+def test_commerce_publish_requires_explicit_live_confirmation():
+    from backend.api import commerce_publish
+    bundle = {"artifact_id": "bundle-api", "product_id": "p", "creative_id": "c", "primary_text": "Try it"}
+    assert commerce_publish({"bundle": bundle, "dry_run": True})["published"] is True
+    assert commerce_publish({"bundle": bundle, "dry_run": False})["reasons"] == ["live_publishing_requires_confirm_live"]
+
+
+def test_postiz_analytics_reconcile_translates_and_records_feedback(monkeypatch):
+    import backend.api as api
+    from evaluation.contracts import CampaignObservation, DataQuality
+
+    class Publisher:
+        def fetch_campaign_observation(self, post_id, campaign_id, **kwargs):
+            assert post_id == "post-1"
+            assert campaign_id == "campaign-1"
+            assert kwargs["days"] == 7
+            return CampaignObservation(
+                observation_id="postiz-analytics:post-1:7", campaign_id=campaign_id,
+                product_id=kwargs["product_id"], creative_id=kwargs["creative_id"], impressions=100, clicks=5,
+                quality=DataQuality(provenance="live", attribution="attributed", source_ref="postiz:post-1"),
+            )
+
+    class Recorder:
+        def record_observation(self, observation):
+            assert observation.impressions == 100
+            return {"recorded": True, "deduplicated": False}
+
+    monkeypatch.setattr("backend.integrations.postiz.publisher", Publisher())
+    monkeypatch.setattr("backend.commerce.feedback.webhook_feedback_recorder", Recorder())
+    result = api.reconcile_postiz_analytics({"post_id": "post-1", "campaign_id": "campaign-1", "product_id": "p1", "creative_id": "cr1", "days": 7})
+    assert result["reconciled"] is True
+    assert result["observation"]["campaign_id"] == "campaign-1"
+
+
+def test_integration_webhook_verifies_configured_hmac_secret(monkeypatch):
+    import hashlib
+    import hmac
+    import json
+    from backend.api import integration_webhook
+    from backend.integrations.medusa import commerce_provider
+    payload = {"id": "evt-signature", "type": "order.created"}
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    signature = hmac.new(b"secret", body, hashlib.sha256).hexdigest()
+    monkeypatch.setenv("MEDUSA_WEBHOOK_SECRET", "secret")
+    commerce_provider.webhook_events.clear()
+    accepted = integration_webhook("medusa", payload, x_webhook_signature=signature)
+    assert accepted["accepted"] is True
+    invalid = integration_webhook("medusa", {"id": "evt-signature-2"}, x_webhook_signature="bad")
+    assert invalid.status_code == 401
+
+
+def test_webhook_outcome_metrics_are_exported():
+    pytest.importorskip("prometheus_client")
+    from backend.api import prometheus_metrics
+    payload = prometheus_metrics().body.decode()
+    assert "marketos_integration_webhook_events_total" in payload
+
+
+def test_optional_integration_health_is_safe_when_unconfigured():
+    from backend.api import integrations_health
+    result = integrations_health()
+    assert "medusa" in result["integrations"]
+    assert "postiz" in result["integrations"]
+    assert result["integrations"]["medusa"]["configured"] is False
+
+
+def test_integration_health_is_exported_to_prometheus():
+    pytest.importorskip("prometheus_client")
+    import backend.api as api
+    api._integration_health_cache.clear()
+    result = api.integrations_health()
+    assert "crawl4ai" in result["integrations"]
+    payload = api.prometheus_metrics().body.decode("utf-8")
+    assert "marketos_integration_configured" in payload
+    assert "marketos_integration_reachable" in payload
+    assert "marketos_integration_health_probe_duration_seconds" in payload
 
 
 def test_prometheus_exposes_signal_cache_metric_families():

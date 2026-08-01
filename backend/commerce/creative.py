@@ -8,7 +8,7 @@ from backend.vector.semantic_search import find_creatives_by_hook, find_similar_
 from core.creative.generator import generate_creative
 from evaluation.contracts import DataQuality
 
-from .contracts import CreativeBundle, RankedOpportunity
+from .contracts import CreativeArtifact, CreativeBundle, RankedOpportunity
 
 
 def _angle_from_opportunity(opportunity: RankedOpportunity, *, semantic_hint: str = "") -> str:
@@ -69,6 +69,15 @@ class CreativeComposer:
         hook = semantic_hook or _hook_from_opportunity(opportunity)
         angle = _angle_from_opportunity(opportunity, semantic_hint=semantic_angle)
         script = generate_creative(opportunity.product_name or opportunity.product_id, angle)
+        artifact = CreativeArtifact(
+            status="generated",
+            artifact_id=f"{opportunity.product_id}:{opportunity.signal_id}:copy",
+            provider="core.creative.generator",
+            source_refs=refs,
+            generated_at=__import__("time").time(),
+            dry_run=True,
+            metadata={"kind": "copy", "content_length": len(script)},
+        )
         headline = hook[:80]
         primary_text = script[:200]
         cta = self.default_cta if opportunity.readiness and opportunity.readiness.launchable else "Learn More"
@@ -81,6 +90,7 @@ class CreativeComposer:
             primary_text=primary_text,
             cta=cta,
             source_refs=refs,
+            artifact=artifact,
             quality=opportunity.quality if opportunity.quality else DataQuality(),
         )
 

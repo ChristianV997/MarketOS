@@ -13,6 +13,9 @@ def test_prometheus_rules_cover_signal_health_alerts():
     assert "MarketOSSignalSourceFailuresRepeated" in rules
     assert "MarketOSSignalSourceRefreshLatencyHigh" in rules
     assert "MarketOSSignalSourceFailureRateHigh" in rules
+    assert "MarketOSOSSProviderFailuresRepeated" in rules
+    assert "MarketOSOSSProviderRefreshLatencyHigh" in rules
+    assert "MarketOSWebhookFailuresRepeated" in rules
     assert "marketos_signal_cache_lookups_total" in rules
 
 

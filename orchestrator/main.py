@@ -80,6 +80,10 @@ _campaign_state_lock = threading.Lock()
 # the most recent batch so ranking consumes the exact evidence that advanced
 # the phase controller instead of issuing a second, potentially divergent pull.
 _latest_signal_batch: list[dict[str, Any]] = []
+# Per-tick ownership marker.  The canonical commerce loop owns launch creation
+# when it completes successfully; the legacy scaling worker must not create a
+# second campaign in the same tick.
+_commerce_cycle_completed_this_tick = False
 
 
 # ── worker dispatchers ────────────────────────────────────────────────────────
@@ -461,6 +465,8 @@ def _run_commerce_cycle() -> dict[str, Any]:
             budget=_COMMERCE_LOOP_BUDGET,
             dry_run=not _COMMERCE_LOOP_LIVE,
         )
+        global _commerce_cycle_completed_this_tick
+        _commerce_cycle_completed_this_tick = True
         summary = report.summary
         return {
             "status": "ok",
@@ -562,6 +568,13 @@ def _run_scaling() -> dict[str, Any]:
     """
     scaled   = 0
     launched = 0
+    if _commerce_cycle_completed_this_tick:
+        return {
+            "status": "skipped",
+            "reason": "canonical_commerce_loop_owns_launches",
+            "scaled": 0,
+            "launched": 0,
+        }
     from backend.decision.portfolio_engine import top_products
 
     # ── Path 1: AJO scale existing campaigns ─────────────────────────────
@@ -1070,6 +1083,8 @@ def run() -> None:
 
     while True:
         try:
+            global _commerce_cycle_completed_this_tick
+            _commerce_cycle_completed_this_tick = False
             if _shutdown_requested:
                 _log.info("orchestrator_shutdown_requested")
                 break

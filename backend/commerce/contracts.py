@@ -148,6 +148,37 @@ class RankedOpportunity(BaseArtifact):
         return data
 
 
+@dataclass(frozen=True)
+class CreativeArtifact:
+    """Typed metadata for a generated creative asset.
+
+    The current loop produces copy/script content, not binary media.  An
+    optional ``content_ref`` is only populated by a provider that verifies a
+    real file or URL; no guessed paths are emitted.
+    """
+
+    status: str = "not_requested"
+    artifact_id: str = ""
+    provider: str = ""
+    content_ref: str | None = None
+    source_refs: tuple[str, ...] = ()
+    generated_at: float | None = None
+    dry_run: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "artifact_id": self.artifact_id,
+            "provider": self.provider,
+            "content_ref": self.content_ref,
+            "source_refs": list(self.source_refs),
+            "generated_at": self.generated_at,
+            "dry_run": self.dry_run,
+            "metadata": dict(self.metadata),
+        }
+
+
 @dataclass
 class CreativeBundle(BaseArtifact):
     artifact_type: str = field(default="creative_bundle")
@@ -162,6 +193,7 @@ class CreativeBundle(BaseArtifact):
     primary_text: str = ""
     cta: str = "Learn More"
     source_refs: tuple[str, ...] = ()
+    artifact: CreativeArtifact | None = None
     quality: DataQuality = field(default_factory=DataQuality)
     reasons: tuple[str, ...] = ()
 
@@ -177,6 +209,7 @@ class CreativeBundle(BaseArtifact):
         primary_text: str,
         cta: str,
         source_refs: tuple[str, ...] = (),
+        artifact: CreativeArtifact | None = None,
         quality: DataQuality | None = None,
         workspace: str = "commerce",
     ) -> "CreativeBundle":
@@ -196,6 +229,7 @@ class CreativeBundle(BaseArtifact):
             primary_text=primary_text,
             cta=cta,
             source_refs=source_refs,
+            artifact=artifact,
             quality=quality or opportunity.quality,
             reasons=opportunity.reasons,
         )
@@ -215,6 +249,7 @@ class CreativeBundle(BaseArtifact):
                 "primary_text": self.primary_text,
                 "cta": self.cta,
                 "source_refs": list(self.source_refs),
+                "artifact": self.artifact.to_dict() if self.artifact else None,
                 "quality": _quality_dict(self.quality),
                 "reasons": list(self.reasons),
             }
@@ -389,6 +424,7 @@ class CommerceCycleReport(BaseArtifact):
     launch_plans: tuple[LaunchPlan, ...] = ()
     outcomes: tuple[CampaignOutcome, ...] = ()
     summary: dict[str, Any] = field(default_factory=dict)
+    phase_timings: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = super().to_dict()
@@ -403,6 +439,7 @@ class CommerceCycleReport(BaseArtifact):
                 "launch_plans": [item.to_dict() for item in self.launch_plans],
                 "outcomes": [item.to_dict() for item in self.outcomes],
                 "summary": self.summary,
+                "phase_timings": self.phase_timings,
             }
         )
         return data
@@ -412,7 +449,7 @@ def build_product_candidate(signal: CommerceSignal, *, selling_price: float = 0.
     return ProductCandidate(
         product_id=signal.product_id or signal.product_name or signal.signal_id,
         name=signal.product_name or signal.product_id or signal.signal_id,
-        currency="USD",
+        currency=str(signal.metadata.get("currency") or "USD").upper(),
         selling_price=float(selling_price),
         source_signal_ids=(signal.signal_id,),
         quality=signal.quality,
