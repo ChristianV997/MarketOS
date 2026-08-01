@@ -40,9 +40,13 @@ class TestHookFatigueDetection:
         detector = HookFatigueDetector()
         now = datetime.utcnow()
 
-        # Record historical ROAS (high)
+        # Record historical ROAS (high). Days 30-21 — comfortably outside the
+        # 7-day recent window checked below (a prior 14-5 day range
+        # overlapped days 6-5 with the recent window, letting historical
+        # 0.80 observations leak into the "recent" average and making the
+        # test's outcome depend on exact call-time timing).
         for i in range(10):
-            ts = now - timedelta(days=14 - i)
+            ts = now - timedelta(days=30 - i)
             detector.record_roas("hook_1", 0.80, timestamp=ts)
 
         # Record recent ROAS (low)

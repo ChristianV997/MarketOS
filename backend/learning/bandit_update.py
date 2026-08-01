@@ -1,3 +1,4 @@
+import json
 import os
 from collections import OrderedDict, deque
 
@@ -12,6 +13,20 @@ _MAX_ACTION_KEYS = int(os.getenv("BANDIT_MEMORY_MAX_KEYS", "1000"))
 _MAX_REWARDS_PER_KEY = int(os.getenv("BANDIT_MEMORY_MAX_REWARDS_PER_KEY", "200"))
 
 
+def _stable_key(action) -> str:
+    """Canonical string key for an action, independent of dict insertion
+    order — str(action) on a dict is order-sensitive, so two
+    semantically-identical actions built with keys in a different order
+    (e.g. {"variant": "a", "phase": "x"} vs {"phase": "x", "variant": "a"})
+    would previously land in separate bandit-memory buckets instead of
+    sharing one. Falls back to str() for values json.dumps can't handle.
+    """
+    try:
+        return json.dumps(action, sort_keys=True, default=str)
+    except TypeError:
+        return str(action)
+
+
 class BanditMemory:
 
     def __init__(self):
@@ -20,7 +35,7 @@ class BanditMemory:
         self.history: "OrderedDict[str, deque]" = OrderedDict()
 
     def _key(self, action):
-        return str(action)
+        return _stable_key(action)
 
     def update(self, action, reward):
         k = self._key(action)

@@ -18,6 +18,9 @@ route modules must always go through ``_core._state`` (never a
 destructured ``from backend.api import _state``) so they see the current
 value instead of the one that existed at import time.
 """
+import json
+import hashlib
+import hmac
 import logging
 import os
 import threading
@@ -329,11 +332,57 @@ _geo_agent = GeoAgent()
 _audience_agent = AudienceAgent()
 _risk_agent = RiskAgent()
 
-
 def _current_peak_capital() -> float:
     """Read the peak capital tracked by the execution loop (falls back to current capital)."""
     return getattr(_state, "_peak_capital", _state.capital)
 
+@app.get("/integrations/health")
+def integrations_health():
+    """Expose optional OSS adapter health without making any adapter mandatory."""
+    return {"integrations": _integration_health_snapshot(force=True)}
+
+
+def _integration_health_snapshot(*, force: bool = False) -> dict[str, dict[str, Any]]:
+    """Probe optional adapters with bounded cache and export safe metric labels."""
+    from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
+    from backend.agents.pydantic_boundary import PydanticAIAgentProvider
+    from backend.integrations.browser_use_worker import browser_use_worker
+    from backend.integrations.medusa import commerce_provider
+    from backend.integrations.n8n import automation_provider
+    from backend.integrations.postiz import publisher
+
+    providers = [commerce_provider, Crawl4AIResearchAdapter(), browser_use_worker, publisher, automation_provider, PydanticAIAgentProvider()]
+    now = time.monotonic()
+    snapshot: dict[str, dict[str, Any]] = {}
+    with _integration_health_lock:
+        for provider in providers:
+            cached = _integration_health_cache.get(provider.name)
+            if not force and cached and now - cached[0] < _INTEGRATION_HEALTH_TTL_S:
+                snapshot[provider.name] = dict(cached[1])
+                continue
+            started = time.monotonic()
+            try:
+                health = provider.health()
+                record = {
+                    "configured": health.configured,
+                    "reachable": health.reachable,
+                    "capabilities": list(health.capabilities),
+                    "detail": health.detail,
+                    "observed_at": health.observed_at.isoformat(),
+                }
+                outcome = "reachable" if health.reachable else "unreachable"
+            except Exception as exc:
+                record = {"configured": False, "reachable": False, "capabilities": [], "detail": str(exc), "observed_at": datetime.now(timezone.utc).isoformat()}
+                outcome = "error"
+            duration = time.monotonic() - started
+            if _prom_integration_configured is not None:
+                _prom_integration_configured.labels(integration=provider.name).set(1 if record["configured"] else 0)
+                _prom_integration_reachable.labels(integration=provider.name).set(1 if record["reachable"] else 0)
+                _prom_integration_probe_duration.labels(integration=provider.name).observe(duration)
+                _prom_integration_probes.labels(integration=provider.name, outcome=outcome).inc()
+            _integration_health_cache[provider.name] = (now, dict(record))
+            snapshot[provider.name] = record
+    return snapshot
 
 # ── Step 41 mock data (used by api.routes.dashboard_panels via _core.<name>) ─
 # Fixture data for dashboard panels not yet backed by a live data source.

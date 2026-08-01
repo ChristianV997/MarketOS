@@ -74,7 +74,11 @@ class FatigueDetector:
         else:
             decay_pct = max(0.0, (historical_roas - trend_roas) / historical_roas)
 
-        is_fatigued = decay_pct >= self.decay_threshold
+        # Round before the threshold comparison, not just for display — an
+        # exact-percent decay (e.g. 2.0 -> 1.6, precisely 20%) can compute as
+        # 0.19999999999999996 in IEEE-754 float64 (1.6 has no exact binary
+        # representation), which silently fails a bare `>=` against 0.20.
+        is_fatigued = round(decay_pct, 4) >= self.decay_threshold
 
         details = {
             "trend_roas": round(trend_roas, 4),

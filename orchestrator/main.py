@@ -39,6 +39,7 @@ from core.system.phase_controller import Phase, phase_controller
 from core.system.resource_allocator import resource_allocator
 from core.signals import signal_engine
 from backend.patterns.worker import RateLimiter, worker_safe
+from backend.contracts.adapters import SidecarContext
 
 TICK_INTERVAL   = float(os.getenv("ORCHESTRATOR_TICK_S", "10"))
 TOTAL_BUDGET    = float(os.getenv("ORCHESTRATOR_BUDGET", "500"))
