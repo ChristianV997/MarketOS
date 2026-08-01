@@ -18,8 +18,11 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
-sys.path.insert(0, "/home/user/my_OS")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_smoke_test")
 
@@ -39,6 +42,10 @@ def main() -> int:
 
     print("\nMarketOS Commerce Closed-Loop Smoke Test")
     print("=" * 60)
+    # Use a fresh deterministic-per-run order ID so the smoke test remains
+    # valid after a previous run persisted its side-effect completion flag.
+    smoke_order_id = f"cs_smoke_{int(time.time())}"
+    smoke_event_id = f"evt_smoke_{int(time.time())}"
 
     # 1. Create two brands, three catalog products
     beauty = Brand(brand_id="beauty", name="Beauty Collective", category="beauty")
@@ -78,11 +85,11 @@ def main() -> int:
 
     # 4. Simulate a signed Stripe checkout.session.completed webhook
     event = {
-        "id": "evt_smoke_1",
+        "id": smoke_event_id,
         "object": "event",
         "type": "checkout.session.completed",
         "data": {"object": {
-            "id": "cs_smoke_1",
+            "id": smoke_order_id,
             "amount_total": 1999,
             "currency": "usd",
             "metadata": {"brand_id": "beauty", "product_id": "jade-roller",
@@ -103,7 +110,7 @@ def main() -> int:
 
     # 5. Assert order + customer landed in the system of record
     from backend.data.repositories.order_repository import order_repository
-    order = order_repository.get_order("cs_smoke_1")
+    order = order_repository.get_order(smoke_order_id)
     order_ok = order is not None and order.amount == 19.99 and order.brand_id == "beauty"
     customer = order_repository.get_customer(order.customer_id) if order else None
     customer_ok = customer is not None and customer.email == "smoke@example.com"
@@ -115,7 +122,7 @@ def main() -> int:
     # 6. Forward the order to its supplier
     from backend.commerce.fulfillment import process_new_orders
     fulfillment_result = process_new_orders()
-    order_after = order_repository.get_order("cs_smoke_1")
+    order_after = order_repository.get_order(smoke_order_id)
     placed_ok = order_after and order_after.fulfillment_status == "PLACED"
     print(f"[6] Supplier order placed: {'OK' if placed_ok else 'FAILED'} "
          f"(supplier={order_after.supplier_name if order_after else 'n/a'}, "
@@ -133,7 +140,7 @@ def main() -> int:
     try:
         conn = sqlite3.connect(roas_repo.db_path)
         row = conn.execute(
-            "SELECT product_id, total_price FROM orders WHERE id = ?", ("cs_smoke_1",)
+            "SELECT product_id, total_price FROM orders WHERE id = ?", (smoke_order_id,)
         ).fetchone()
         conn.close()
         roas_ok = row is not None and row[0] == "jade-roller"
@@ -152,7 +159,7 @@ def main() -> int:
     print("=" * 60)
     all_ok = all([webhook_ok, order_ok, customer_ok, placed_ok, ltv_fed,
                   roas_ok, has_order_received, has_fulfillment_wf])
-    print("RESULT:", "✅ Full closed loop verified" if all_ok else "❌ Some steps failed")
+    print("RESULT:", "PASS - Full closed loop verified" if all_ok else "FAIL - Some steps failed")
     print()
     return 0 if all_ok else 1
 

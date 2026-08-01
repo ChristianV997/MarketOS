@@ -33,8 +33,11 @@ import hmac
 import json
 import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "/home/user/my_OS")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_sim_test")
 
@@ -302,9 +305,9 @@ def main() -> int:
 
 
 def _print_and_save(report: dict) -> None:
-    out_path = "/tmp/claude-0/-home-user-my-OS/ddae6c32-c7b9-5228-a23b-19efc6d1c0dd/scratchpad/simulation_report.json"
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w") as f:
+    out_path = Path(os.getenv("MARKETOS_SIMULATION_REPORT", str(PROJECT_ROOT / "state" / "simulation_report.json")))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, default=str)
     print(f"\nFull machine-readable report saved to: {out_path}")
 
