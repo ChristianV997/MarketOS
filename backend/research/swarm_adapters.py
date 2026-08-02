@@ -284,4 +284,3 @@ def benchmark_runtimes(spec: SwarmJobSpec, *, runtimes: Mapping[str, Callable[[M
         except Exception as err:
             results[runtime_name] = {"status": "failed", "error_type": type(err).__name__, "duration_ms": round((time.perf_counter() - started) * 1000, 2)}
     return {"benchmark_id": str(uuid.uuid4()), "job_id": spec.job_id, "results": results, "persisted": False}
-
