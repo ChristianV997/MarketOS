@@ -4,6 +4,7 @@ import math
 import os
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -132,13 +133,22 @@ class TrendRecordStore:
         except (TypeError, ValueError):
             return 30
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         directory = os.path.dirname(self.path)
         if directory:
             os.makedirs(directory, exist_ok=True)
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+        except Exception:
+            conn.rollback()
+            raise
+        else:
+            conn.commit()
+        finally:
+            conn.close()
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
