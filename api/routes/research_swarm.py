@@ -6,6 +6,7 @@ import os
 from fastapi import APIRouter, Query
 
 from backend.research.swarm import SwarmJobStore, swarm_readiness
+from backend.research.swarm_adapters import build_default_swarm_runtimes
 
 router = APIRouter()
 
@@ -17,7 +18,8 @@ def _store() -> SwarmJobStore:
 @router.get("/research/swarm/status")
 def research_swarm_status():
     jobs = _store().list_public(5)
-    return {"readiness": swarm_readiness(), "recent_jobs": jobs}
+    runtimes = build_default_swarm_runtimes()
+    return {"readiness": swarm_readiness(runtime_names=tuple(runtimes)), "recent_jobs": jobs}
 
 
 @router.get("/research/swarm/jobs")
