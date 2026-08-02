@@ -101,6 +101,32 @@ they must be enabled independently with `FF_RESEARCH_SWARM_HERMES` or
 `agent_reach` and `exa` sensor slots are independently gated by
 `FF_RESEARCH_SENSOR_AGENT_REACH` and `FF_RESEARCH_SENSOR_EXA`.
 
+The concrete sidecar adapters live in `backend/research/swarm_adapters.py`.
+Agent-Reach is invoked through `AGENT_REACH_SENSOR_COMMAND`, preferably as a
+JSON argv array. MarketOS sends a bounded `MarketOS.AgentReachRequest.v1`
+object on stdin with no shell; the bridge must return JSON evidence. This is
+intentional because Agent-Reach routes to upstream tools rather than exposing
+a stable MarketOS-facing query RPC. Hermes uses its OpenAI-compatible
+`/v1/chat/completions` endpoint, while DeerFlow uses its LangGraph SSE
+endpoint. Runtime responses are prompted for the governed evidence envelope
+and validated before persistence.
+
+`benchmark_runtimes(...)` executes both runtimes only when their individual
+flags are enabled. It returns latency, record counts, status, and envelope
+hashes without persisting evidence, so runtime comparison cannot change
+ranking data. No endpoint invokes the benchmark automatically. An explicit
+local invocation is available:
+
+```text
+python scripts/benchmark_research_runtimes.py \
+  --query "research tools" \
+  --objective "collect attributable market evidence"
+```
+
+This produces skipped results unless runtime and sensor flags are already
+enabled. Use `--live --allow-domain example.com` only after both sidecars and
+the Agent-Reach bridge have been independently verified.
+
 Jobs are queued through the internal `SwarmJobSpec`/`SwarmJobStore` API and
 executed with bounded workers, per-job timeouts, record limits, and serialized
 byte limits. A runtime must return `MarketOS.ResearchEvidence.v1` evidence.

@@ -21,6 +21,14 @@ from backend.research.swarm import (
     sha256_json,
     swarm_readiness,
 )
+from backend.research.swarm_adapters import (
+    AgentReachSensorAdapter,
+    DeerFlowRuntimeAdapter,
+    HermesRuntimeAdapter,
+    SidecarAdapterError,
+    benchmark_runtimes,
+    build_default_swarm_runtimes,
+)
 
 __all__ = [
     "ResearchMetrics",
@@ -47,4 +55,10 @@ __all__ = [
     "register_swarm_job",
     "sha256_json",
     "swarm_readiness",
+    "AgentReachSensorAdapter",
+    "DeerFlowRuntimeAdapter",
+    "HermesRuntimeAdapter",
+    "SidecarAdapterError",
+    "benchmark_runtimes",
+    "build_default_swarm_runtimes",
 ]
