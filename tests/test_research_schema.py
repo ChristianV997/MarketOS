@@ -149,11 +149,88 @@ def test_existing_not_null_database_is_migrated_without_data_loss(tmp_path):
 
     store = TrendRecordStore(path=str(path))
     assert store.findById("legacy-id")["topic"] == "legacy topic"
+
+
+def test_opportunities_aggregate_normalized_topics_and_preserve_unknown_competition(tmp_path):
+    store = TrendRecordStore(path=str(tmp_path / "research.db"))
+    now = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+    first = _record(topic="Wireless Earbuds!", freshness_ts=now.isoformat())
+    first["source"] = "reddit"
+    first["competition"] = None
+    first["velocity"] = 0.8
+    second = _record(topic="wireless earbuds", freshness_ts=(now - timedelta(minutes=5)).isoformat())
+    second["source"] = "mercadolibre"
+    second["competition"] = 0.4
+    second["confidence"] = 0.9
+    store.upsert(first)
+    store.upsert(second)
+
+    opportunities = store.find_opportunities(10, max_age_hours=24, now=now)
+
+    assert len(opportunities) == 1
+    opportunity = opportunities[0]
+    assert opportunity["topic_key"] == "wireless earbuds"
+    assert opportunity["source_count"] == 2
+    assert opportunity["sources"] == ["mercadolibre", "reddit"]
+    assert opportunity["competition"] == pytest.approx(0.4)
+    assert opportunity["competition_coverage"] == pytest.approx(0.5)
+    assert 0.0 < opportunity["rank_score"] <= 1.0
+
+
+def test_opportunity_source_floor_and_source_summary(tmp_path):
+    store = TrendRecordStore(path=str(tmp_path / "research.db"))
+    now = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+    record = _record(topic="single source", freshness_ts=now.isoformat())
+    record["source"] = "reddit"
+    store.upsert(record)
+
+    assert store.find_opportunities(10, min_sources=2, now=now) == []
+    summary = store.source_summary(max_age_hours=24, now=now)
+    assert summary == [{
+        "source": "reddit",
+        "record_count": 1,
+        "topic_count": 1,
+        "confidence": 0.8,
+        "freshness_ts": now.isoformat(),
+    }]
     nullable = _record(topic="new nullable")
     nullable["competition"] = None
     persisted = store.upsert(nullable)
     assert persisted["competition"] is None
     assert any(item["topic"] == "new nullable" for item in store.findTopN(10))
+
+
+def test_append_many_persists_valid_records_when_one_record_is_invalid(tmp_path):
+    store = TrendRecordStore(path=str(tmp_path / "research.db"))
+    invalid = _record(topic="invalid")
+    invalid["velocity"] = float("nan")
+
+    assert store.append_many([_record(topic="kept"), invalid]) == 1
+    assert [record["topic"] for record in store.findTopN(10)] == ["kept"]
+
+
+def test_nullable_topic_key_is_backfilled_for_existing_database(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "legacy_topic_key.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE research_records (
+                id TEXT PRIMARY KEY, topic TEXT NOT NULL, topic_key TEXT, intent TEXT NOT NULL,
+                velocity REAL NOT NULL, competition REAL, source TEXT NOT NULL,
+                freshness_ts TEXT NOT NULL, confidence REAL NOT NULL, raw TEXT NOT NULL,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, dedupe_key TEXT NOT NULL UNIQUE
+            );
+            INSERT INTO research_records VALUES
+            ('legacy-id', 'Wireless Earbuds!', NULL, 'research', 0.5, NULL, 'legacy',
+             '2026-01-01T10:00:00+00:00', 0.7, '{}',
+             '2026-01-01T10:00:00+00:00', '2026-01-01T10:00:00+00:00', 'legacy:wireless:2026-01-01-10');
+            """
+        )
+
+    store = TrendRecordStore(path=str(path))
+    assert store.find_opportunities(10, now=datetime(2026, 1, 1, 12, tzinfo=timezone.utc))[0]["topic_key"] == "wireless earbuds"
 
 
 def test_research_prune_job_uses_retention_window(tmp_path):
