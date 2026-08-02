@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import sqlite3
 import uuid
@@ -16,7 +17,7 @@ CREATE TABLE IF NOT EXISTS research_records (
     topic TEXT NOT NULL,
     intent TEXT NOT NULL,
     velocity REAL NOT NULL,
-    competition REAL NOT NULL,
+    competition REAL,
     source TEXT NOT NULL,
     freshness_ts TEXT NOT NULL,
     confidence REAL NOT NULL,
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS research_records (
 CREATE INDEX IF NOT EXISTS idx_research_velocity ON research_records (velocity DESC);
 CREATE INDEX IF NOT EXISTS idx_research_confidence ON research_records (confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_research_freshness_ts ON research_records (freshness_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_research_rank ON research_records (velocity DESC, confidence DESC, freshness_ts DESC, id ASC);
 """
 
 
@@ -71,11 +73,22 @@ def validate_research_record(record: dict[str, Any]) -> None:
     if "intent" in record and record["intent"] not in VALID_INTENTS:
         errors.append({"field": "intent", "error": "invalid_enum", "allowed": sorted(VALID_INTENTS)})
 
-    for numeric_field in ("velocity", "competition", "confidence"):
-        if numeric_field in record and not isinstance(record[numeric_field], (int, float)):
+    for numeric_field in ("velocity", "confidence"):
+        if numeric_field in record and (
+            isinstance(record[numeric_field], bool)
+            or not isinstance(record[numeric_field], (int, float))
+        ):
             errors.append({"field": numeric_field, "error": "invalid_type", "expected": "float"})
+        elif numeric_field in record and not math.isfinite(float(record[numeric_field])):
+            errors.append({"field": numeric_field, "error": "non_finite", "expected": "finite float"})
 
-    if isinstance(record.get("competition"), (int, float)) and not 0.0 <= float(record["competition"]) <= 1.0:
+    competition = record.get("competition")
+    if competition is not None:
+        if isinstance(competition, bool) or not isinstance(competition, (int, float)):
+            errors.append({"field": "competition", "error": "invalid_type", "expected": "finite float or null"})
+        elif not math.isfinite(float(competition)):
+            errors.append({"field": "competition", "error": "non_finite", "expected": "finite float or null"})
+    if isinstance(competition, (int, float)) and not 0.0 <= float(competition) <= 1.0:
         errors.append({"field": "competition", "error": "out_of_range", "expected": "[0,1]"})
 
     if isinstance(record.get("confidence"), (int, float)) and not 0.0 <= float(record["confidence"]) <= 1.0:
@@ -129,7 +142,41 @@ class TrendRecordStore:
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
-            conn.executescript(SCHEMA_SQL)
+            table = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'research_records'"
+            ).fetchone()
+            if table is None:
+                conn.executescript(SCHEMA_SQL)
+                return
+
+            columns = {row[1]: row for row in conn.execute("PRAGMA table_info(research_records)")}
+            competition = columns.get("competition")
+            if competition is not None and competition[3] == 1:
+                # SQLite cannot alter a NOT NULL column in place. Rebuild the
+                # local table while preserving all existing records.
+                conn.executescript(
+                    """
+                    DROP INDEX IF EXISTS idx_research_velocity;
+                    DROP INDEX IF EXISTS idx_research_confidence;
+                    DROP INDEX IF EXISTS idx_research_freshness_ts;
+                    DROP INDEX IF EXISTS idx_research_rank;
+                    ALTER TABLE research_records RENAME TO research_records_legacy;
+                    """
+                )
+                conn.executescript(SCHEMA_SQL)
+                conn.execute(
+                    """
+                    INSERT INTO research_records
+                    (id, topic, intent, velocity, competition, source, freshness_ts,
+                     confidence, raw, created_at, updated_at, dedupe_key)
+                    SELECT id, topic, intent, velocity, competition, source, freshness_ts,
+                           confidence, raw, created_at, updated_at, dedupe_key
+                    FROM research_records_legacy
+                    """
+                )
+                conn.execute("DROP TABLE research_records_legacy")
+            else:
+                conn.executescript(SCHEMA_SQL)
 
     def _row_to_record(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
         if row is None:
@@ -153,7 +200,7 @@ class TrendRecordStore:
             "topic": str(record["topic"]).strip(),
             "intent": record["intent"],
             "velocity": float(record["velocity"]),
-            "competition": float(record["competition"]),
+            "competition": None if record["competition"] is None else float(record["competition"]),
             "source": str(record["source"]).strip(),
             "freshness_ts": freshness_ts,
             "confidence": float(record["confidence"]),
@@ -228,13 +275,17 @@ class TrendRecordStore:
             row = conn.execute("SELECT * FROM research_records WHERE id = ?", (record_id,)).fetchone()
         return self._row_to_record(row)
 
-    def findTopN(self, n: int) -> list[dict[str, Any]]:
-        limit = max(1, int(n))
+    def findTopN(self, n: int, *, require_competition: bool = False) -> list[dict[str, Any]]:
+        limit = int(n)
+        if limit <= 0:
+            return []
         with self._connect() as conn:
+            filter_sql = "WHERE competition IS NOT NULL" if require_competition else ""
             rows = conn.execute(
-                """
+                f"""
                 SELECT * FROM research_records
-                ORDER BY velocity DESC, confidence DESC, freshness_ts DESC
+                {filter_sql}
+                ORDER BY velocity DESC, confidence DESC, freshness_ts DESC, id ASC
                 LIMIT ?
                 """,
                 (limit,),

@@ -5,6 +5,7 @@ from backend.research.trend_store import (
     generate_dedupe_key,
     validate_research_record,
 )
+from backend.research.ingestion_store import IngestionRunStore
 
 __all__ = [
     "ResearchMetrics",
@@ -12,4 +13,5 @@ __all__ = [
     "TrendRecordStore",
     "generate_dedupe_key",
     "validate_research_record",
+    "IngestionRunStore",
 ]
