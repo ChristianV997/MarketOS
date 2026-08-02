@@ -170,6 +170,7 @@ def test_opportunities_aggregate_normalized_topics_and_preserve_unknown_competit
     assert len(opportunities) == 1
     opportunity = opportunities[0]
     assert opportunity["topic_key"] == "wireless earbuds"
+    assert opportunity["topic"] == "Wireless Earbuds!"
     assert opportunity["source_count"] == 2
     assert opportunity["sources"] == ["mercadolibre", "reddit"]
     assert opportunity["competition"] == pytest.approx(0.4)

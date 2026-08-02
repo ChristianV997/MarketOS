@@ -381,9 +381,9 @@ class TrendRecordStore:
                 SELECT
                     grouped.*,
                     (SELECT topic FROM filtered f WHERE f.topic_key = grouped.topic_key
-                     ORDER BY freshness_ts DESC, id ASC LIMIT 1) AS topic,
+                     ORDER BY freshness_ts DESC, lower(topic) ASC, topic ASC, id ASC LIMIT 1) AS topic,
                     (SELECT intent FROM filtered f WHERE f.topic_key = grouped.topic_key
-                     ORDER BY freshness_ts DESC, id ASC LIMIT 1) AS intent
+                     ORDER BY freshness_ts DESC, lower(topic) ASC, topic ASC, id ASC LIMIT 1) AS intent
                 FROM grouped
                 """,
                 [*parameters, source_floor],
