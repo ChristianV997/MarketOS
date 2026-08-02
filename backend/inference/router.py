@@ -100,9 +100,11 @@ class InferenceRouter:
             return
         try:
             from ..ollama_manager import OllamaManager
-            model = os.getenv("OLLAMA_MODEL", "llama3.2")
+            model = os.getenv("OLLAMA_MODEL", "mistral:7b")
             manager = OllamaManager()
-            if manager.is_healthy():
+            # ensure_running() is a no-op health check unless OLLAMA_AUTO_START=true,
+            # in which case it also attempts to start the daemon when unhealthy.
+            if manager.ensure_running():
                 manager.ensure_model(model)
         except Exception as exc:
             _log.debug("ollama_ensure_model_startup_skipped error=%s", exc)

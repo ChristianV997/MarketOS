@@ -5,7 +5,7 @@ import {
 import { useWsStore } from "@/store/ws";
 import { useMetricsData, usePlaybook, useTriggerCycle, usePauseRunner, useResumeRunner } from "@/lib/api";
 import { cn, fmt, fmtK, fmtTs } from "@/lib/utils";
-import { TrendingUp, Zap, Target, Activity, Play, Pause, RefreshCw } from "lucide-react";
+import { TrendingUp, Zap, Target, Activity, Play, Pause, RefreshCw, type LucideIcon } from "lucide-react";
 
 const PHASE_COLORS: Record<string, string> = {
   RESEARCH: "text-blue-400",
@@ -24,7 +24,7 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
 
 function KpiCard({ label, value, sub, icon: Icon, accent }: {
   label: string; value: string; sub?: string;
-  icon: React.FC<{ size?: number; strokeWidth?: number }>;
+  icon: LucideIcon;
   accent?: string;
 }) {
   return (

@@ -2,7 +2,7 @@
 from backend.observability.metrics import (
     events_published_total, vector_indexed_total, vector_searched_total,
     episodic_count, semantic_count, sleep_cycles_total, cognitive_entropy,
-    inference_requests_total, trace_spans_total,
+    inference_requests_total, trace_spans_total, event_log_write_failures_total,
 )
 from backend.observability.metrics import _NullMetric
 
@@ -46,6 +46,11 @@ def test_cognitive_entropy_labels():
 
 def test_inference_requests_labels():
     inference_requests_total.labels(provider="openai", status="ok").inc()
+
+
+def test_event_log_write_failures_has_backend_label():
+    event_log_write_failures_total.labels(backend="event_store").inc()
+    event_log_write_failures_total.labels(backend="replay_store").inc()
 
 
 def test_trace_spans_labels():
