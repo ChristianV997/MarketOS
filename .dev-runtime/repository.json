@@ -1,0 +1,61 @@
+{
+  "schema": "RepoDev.Repository.v1",
+  "name": "MarketOS",
+  "root": ".",
+  "source_paths": [
+    "backend",
+    "api",
+    "orchestrator",
+    "signals",
+    "evaluation",
+    "tests",
+    "scripts"
+  ],
+  "test_command": [
+    "python",
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "lint_command": [
+    "python",
+    "scripts/ai/run_semgrep_policy.py",
+    "--severity",
+    "ERROR",
+    "--fail-on-error"
+  ],
+  "security_command": [
+    "python",
+    "scripts/ai/run_semgrep_policy.py",
+    "--severity",
+    "ERROR",
+    "--fail-on-error"
+  ],
+  "allowed_paths": [
+    "backend",
+    "api",
+    "orchestrator",
+    "signals",
+    "evaluation",
+    "tests",
+    "scripts",
+    "docs/ai"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".git",
+    "state",
+    "credentials",
+    "secrets",
+    "deploy"
+  ],
+  "agent_roles": [
+    "planner",
+    "implementer",
+    "tester",
+    "reviewer",
+    "integrator"
+  ],
+  "network_access": false,
+  "pull_request_creation": false
+}
