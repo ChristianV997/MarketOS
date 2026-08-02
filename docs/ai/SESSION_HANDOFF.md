@@ -2,7 +2,7 @@
 Date: 2026-08-01
 Repository: C:\Users\HP\Documents\MarketOS-research-ops
 Branch: codex/marketos-research-ops
-Commit: 01ddf80 (research-only runtime); handoff refresh pending
+Commit: 006f6f2 (research runtime plus handoff)
 Objective: Restrict MarketOS to bounded commerce research and build the dossier/report/approval path.
 
 ## Files changed
