@@ -46,6 +46,15 @@ def test_validation_rejects_missing_fields_and_out_of_range_values():
     assert {"topic", "intent", "competition", "freshness_ts", "confidence", "raw"}.issubset(fields)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), True])
+def test_validation_rejects_non_finite_or_boolean_numeric_values(value):
+    record = _record()
+    record["velocity"] = value
+    with pytest.raises(ResearchValidationError) as err:
+        validate_research_record(record)
+    assert any(item["field"] == "velocity" for item in err.value.errors)
+
+
 def test_dedupe_key_generation_is_deterministic():
     ts = datetime(2026, 1, 1, 10, 59, tzinfo=timezone.utc).isoformat()
     left = generate_dedupe_key("google_trends_v1", "Compare AI Tools", ts)
@@ -98,6 +107,12 @@ def test_top_n_query_is_fast_for_velocity_confidence_ordering(tmp_path):
 
     assert len(top) == 25
     assert elapsed < 1.0
+
+
+def test_top_n_zero_returns_empty(tmp_path):
+    store = TrendRecordStore(path=str(tmp_path / "research.db"))
+    store.upsert(_record(topic="one"))
+    assert store.findTopN(0) == []
 
 
 def test_research_prune_job_uses_retention_window(tmp_path):

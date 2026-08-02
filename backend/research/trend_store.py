@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import sqlite3
 import uuid
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS research_records (
 CREATE INDEX IF NOT EXISTS idx_research_velocity ON research_records (velocity DESC);
 CREATE INDEX IF NOT EXISTS idx_research_confidence ON research_records (confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_research_freshness_ts ON research_records (freshness_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_research_rank ON research_records (velocity DESC, confidence DESC, freshness_ts DESC, id ASC);
 """
 
 
@@ -72,8 +74,13 @@ def validate_research_record(record: dict[str, Any]) -> None:
         errors.append({"field": "intent", "error": "invalid_enum", "allowed": sorted(VALID_INTENTS)})
 
     for numeric_field in ("velocity", "competition", "confidence"):
-        if numeric_field in record and not isinstance(record[numeric_field], (int, float)):
+        if numeric_field in record and (
+            isinstance(record[numeric_field], bool)
+            or not isinstance(record[numeric_field], (int, float))
+        ):
             errors.append({"field": numeric_field, "error": "invalid_type", "expected": "float"})
+        elif numeric_field in record and not math.isfinite(float(record[numeric_field])):
+            errors.append({"field": numeric_field, "error": "non_finite", "expected": "finite float"})
 
     if isinstance(record.get("competition"), (int, float)) and not 0.0 <= float(record["competition"]) <= 1.0:
         errors.append({"field": "competition", "error": "out_of_range", "expected": "[0,1]"})
@@ -229,12 +236,14 @@ class TrendRecordStore:
         return self._row_to_record(row)
 
     def findTopN(self, n: int) -> list[dict[str, Any]]:
-        limit = max(1, int(n))
+        limit = int(n)
+        if limit <= 0:
+            return []
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM research_records
-                ORDER BY velocity DESC, confidence DESC, freshness_ts DESC
+                ORDER BY velocity DESC, confidence DESC, freshness_ts DESC, id ASC
                 LIMIT ?
                 """,
                 (limit,),

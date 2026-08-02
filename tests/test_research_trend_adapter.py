@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -8,7 +9,11 @@ from backend.adapters.research import (
     ResearchAdapterRegistry,
     classify_http_error,
 )
-from backend.jobs.research_trend_v1 import register_research_trend_v1_job
+from backend.jobs.research_trend_v1 import (
+    AdapterMetrics,
+    register_research_sources_job,
+    register_research_trend_v1_job,
+)
 from backend.jobs.runner import JobRegistry
 from backend.research import TrendRecordStore
 
@@ -56,6 +61,9 @@ class TestTrendspygFetch:
     def test_fetch_uses_trendspyg_when_available(self, monkeypatch):
         import backend.adapters.research.trend_source_v1 as mod
 
+        if mod._trendspyg is None:
+            monkeypatch.setattr(mod, "_trendspyg", SimpleNamespace())
+
         fake_trends = [
             {
                 "trend": "best buy laptop deals",
@@ -66,6 +74,7 @@ class TestTrendspygFetch:
         monkeypatch.setattr(
             mod._trendspyg, "download_google_trends_rss",
             lambda **kw: fake_trends,
+            raising=False,
         )
 
         adapter = mod.GoogleTrendsAdapterV1(max_pages=1)
@@ -84,10 +93,13 @@ class TestTrendspygFetch:
     def test_fetch_falls_back_to_legacy_on_trendspyg_failure(self, monkeypatch):
         import backend.adapters.research.trend_source_v1 as mod
 
+        if mod._trendspyg is None:
+            monkeypatch.setattr(mod, "_trendspyg", SimpleNamespace())
+
         def _boom(**kw):
             raise RuntimeError("trendspyg network error")
 
-        monkeypatch.setattr(mod._trendspyg, "download_google_trends_rss", _boom)
+        monkeypatch.setattr(mod._trendspyg, "download_google_trends_rss", _boom, raising=False)
 
         legacy_calls = []
         monkeypatch.setattr(
@@ -218,3 +230,87 @@ def test_feature_flag_disables_adapter_execution(monkeypatch):
     result = registry.run("research.trend.v1")
     assert result["status"] == "succeeded"
     assert called["count"] == 0
+
+
+def test_malformed_record_does_not_discard_valid_records(tmp_path, monkeypatch):
+    monkeypatch.setenv("FF_PILLAR_A_SOURCE_V1", "true")
+
+    class FakeAdapter:
+        name = "google_trends_v1"
+
+        def fetch(self):
+            return [{"valid": True}, {"valid": False}]
+
+        def to_canonical(self, raw_record, fetched_at=None):
+            if not raw_record["valid"]:
+                raise AdapterFetchError("schema", "malformed record")
+            return {
+                "topic": "valid topic",
+                "intent": "research",
+                "velocity": 1.0,
+                "competition": 0.1,
+                "source": self.name,
+                "freshness_ts": (fetched_at or datetime.now(timezone.utc)).isoformat(),
+                "confidence": 0.7,
+                "raw": raw_record,
+            }
+
+    adapters = ResearchAdapterRegistry()
+    adapters.register("google_trends_v1", FakeAdapter())
+    metrics = AdapterMetrics()
+    store = TrendRecordStore(path=str(tmp_path / "research.db"))
+    registry = JobRegistry(max_retries=0)
+    register_research_trend_v1_job(registry, adapter_registry=adapters, store=store, metrics=metrics)
+
+    result = registry.run("research.trend.v1")
+
+    assert result["status"] == "succeeded"
+    assert len(store.findTopN(10)) == 1
+    assert metrics.counters["adapter_records_rejected"] == 1
+    assert metrics.by_source["google_trends_v1"]["records_persisted"] == 1
+
+
+def test_source_fanout_isolates_source_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv("FF_PILLAR_A_SOURCE_V1", "true")
+
+    class GoodAdapter:
+        name = "good"
+
+        def fetch(self):
+            return [{"topic": "good topic"}]
+
+        def to_canonical(self, raw_record, fetched_at=None):
+            return {
+                "topic": raw_record["topic"],
+                "intent": "buy",
+                "velocity": 2.0,
+                "competition": 0.1,
+                "source": self.name,
+                "freshness_ts": (fetched_at or datetime.now(timezone.utc)).isoformat(),
+                "confidence": 0.8,
+                "raw": raw_record,
+            }
+
+    class BrokenAdapter:
+        name = "broken"
+
+        def fetch(self):
+            raise AdapterFetchError("server", "source unavailable")
+
+    adapters = ResearchAdapterRegistry()
+    adapters.register("good", GoodAdapter())
+    adapters.register("broken", BrokenAdapter())
+    store = TrendRecordStore(path=str(tmp_path / "research.db"))
+
+    class CapturingRegistry:
+        def register(self, name, handler):
+            self.handler = handler
+
+    registry = CapturingRegistry()
+    register_research_sources_job(registry, adapter_registry=adapters, store=store)
+    result = registry.handler()
+
+    assert result["status"] == "partial"
+    assert result["sources"]["good"]["status"] == "succeeded"
+    assert result["sources"]["broken"]["status"] == "failed"
+    assert len(store.findTopN(10)) == 1
