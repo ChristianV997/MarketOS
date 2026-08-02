@@ -175,7 +175,9 @@ def _source_max_workers() -> int:
 
 
 def _source_timeout_seconds() -> float:
-    return max(0.1, _float_env("RESEARCH_SOURCE_TIMEOUT_SECONDS", 30.0))
+    # Respect explicitly configured short timeouts for bounded fan-out tests
+    # and low-latency staging runs; never allow zero or negative waits.
+    return max(0.001, _float_env("RESEARCH_SOURCE_TIMEOUT_SECONDS", 30.0))
 
 
 def _circuit_breaker() -> SourceCircuitBreaker:
