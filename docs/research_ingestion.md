@@ -89,4 +89,36 @@ successful runs with at least five live records, under 10% rejection, and
 fresh evidence. The endpoint does not perform a network fetch.
 
 Prometheus metrics are exposed under `/metrics/prometheus`, including
-source-level fetch, record, retry, and duration counters.
+source-level fetch, record, retry, duration, and validated swarm-job counters.
+
+## Governed research swarm
+
+`research.swarm.v1` is registered in the same scheduler registry as
+`research.sources.v1`, but it is a no-op unless `FF_RESEARCH_SWARM_ENABLED`
+is true. Hermes and DeerFlow are sidecar slots, not MarketOS dependencies;
+they must be enabled independently with `FF_RESEARCH_SWARM_HERMES` or
+`FF_RESEARCH_SWARM_DEERFLOW` after a runtime adapter is registered. The
+`agent_reach` and `exa` sensor slots are independently gated by
+`FF_RESEARCH_SENSOR_AGENT_REACH` and `FF_RESEARCH_SENSOR_EXA`.
+
+Jobs are queued through the internal `SwarmJobSpec`/`SwarmJobStore` API and
+executed with bounded workers, per-job timeouts, record limits, and serialized
+byte limits. A runtime must return `MarketOS.ResearchEvidence.v1` evidence.
+Every record requires a canonical MarketOS research record plus an HTTP(S)
+source URL, retrieval timestamp, provider, and content hash. The envelope is
+validated before persistence; invalid or timed-out jobs are retained as failed
+history and cannot write canonical trend records.
+
+Operational status is read-only:
+
+```text
+GET /research/swarm/status
+GET /research/swarm/jobs?limit=20
+```
+
+The status response exposes runtime/sensor readiness and recent job metadata,
+never credential values or raw secrets. Swarm evidence is written through the
+same `TrendRecordStore` only after validation, with provenance stored under
+`raw._marketos_evidence`. This does not promote evidence into downstream
+intelligence automatically; existing source reliability and corroboration
+gates remain authoritative.

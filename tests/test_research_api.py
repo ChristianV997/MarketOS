@@ -62,6 +62,19 @@ def test_source_readiness_route_is_safe_and_reports_flags(client, monkeypatch):
     assert "secret" not in str(payload).lower()
 
 
+def test_swarm_status_and_jobs_routes_are_read_only_and_safe(client, monkeypatch):
+    monkeypatch.delenv("FF_RESEARCH_SWARM_ENABLED", raising=False)
+    status = client.get("/research/swarm/status")
+    jobs = client.get("/research/swarm/jobs")
+
+    assert status.status_code == 200
+    assert status.json()["readiness"]["global_enabled"] is False
+    assert status.json()["recent_jobs"] == []
+    assert jobs.status_code == 200
+    assert jobs.json()["jobs"] == []
+    assert "credential" not in str(status.json()).lower()
+
+
 def test_intelligence_input_uses_ranked_deduplicated_opportunities(monkeypatch, tmp_path):
     from backend.api import _research_intelligence_keywords
 

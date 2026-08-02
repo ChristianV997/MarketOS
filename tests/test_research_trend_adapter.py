@@ -387,7 +387,7 @@ def test_global_ingestion_flag_overrides_legacy_source_flag(monkeypatch, tmp_pat
 
 def test_research_registry_schedules_fanout_and_prune(tmp_path):
     registry = build_research_registry(store=TrendRecordStore(path=str(tmp_path / "research.db")), max_retries=0)
-    assert set(registry._handlers) == {"research.sources.v1", "research.prune"}
+    assert set(registry._handlers) == {"research.sources.v1", "research.prune", "research.swarm.v1"}
 
 
 def test_registry_uses_configured_research_database(monkeypatch, tmp_path):
