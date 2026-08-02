@@ -201,15 +201,15 @@ def _background_runner():
 def _research_runner():
     from backend.jobs.research_trend_v1 import build_research_registry
     from backend.jobs.scheduler import IngestionScheduler
+    from backend.research import TrendRecordStore
     registry = build_research_registry()
     scheduler = IngestionScheduler(registry)
+    trend_store = TrendRecordStore(path=os.getenv("RESEARCH_DB_PATH", "backend/state/research.db"))
     while _bg_running:
         try:
             scheduler.tick()
-            # Feed trend keywords into the core intelligence discovery loop
-            with _lock:
-                recent = list(_state.event_log.rows[-50:])
-            keywords = list({str(r.get("variant", "")) for r in recent if r.get("variant")})[:20]
+            # Feed canonical research topics into the intelligence loop.
+            keywords = [str(record["topic"]) for record in trend_store.findTopN(20)]
             if keywords:
                 try:
                     from core.intelligence_loop import run_intelligence
@@ -537,6 +537,7 @@ from api.routes import (
     tiktok as _r_tiktok,
     simulation as _r_simulation,
     orchestration as _r_orchestration,
+    research as _r_research,
 )
 
 app.include_router(_r_health.router)
@@ -550,6 +551,7 @@ app.include_router(_r_agents_risk.router)
 app.include_router(_r_tiktok.router)
 app.include_router(_r_simulation.router)
 app.include_router(_r_orchestration.router)
+app.include_router(_r_research.router)
 
 
 # ── Prometheus scrape endpoint ────────────────────────────────────────────────

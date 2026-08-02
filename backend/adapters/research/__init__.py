@@ -6,7 +6,13 @@ from backend.adapters.research.trend_source_v1 import (
     classify_http_error,
 )
 from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
-from backend.adapters.research.market_sources import MercadoLibreResearchAdapter, RedditResearchAdapter
+from backend.adapters.research.market_sources import (
+    AmazonBestsellersResearchAdapter,
+    MercadoLibreResearchAdapter,
+    RedditResearchAdapter,
+    TikTokOrganicResearchAdapter,
+    YouTubeResearchAdapter,
+)
 
 __all__ = [
     "AdapterFetchError",
@@ -17,4 +23,7 @@ __all__ = [
     "Crawl4AIResearchAdapter",
     "MercadoLibreResearchAdapter",
     "RedditResearchAdapter",
+    "AmazonBestsellersResearchAdapter",
+    "TikTokOrganicResearchAdapter",
+    "YouTubeResearchAdapter",
 ]

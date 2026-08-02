@@ -4,11 +4,14 @@ from types import SimpleNamespace
 import pytest
 
 from backend.adapters.research import (
+    AmazonBestsellersResearchAdapter,
     AdapterFetchError,
     GoogleTrendsAdapterV1,
     MercadoLibreResearchAdapter,
     ResearchAdapterRegistry,
     RedditResearchAdapter,
+    TikTokOrganicResearchAdapter,
+    YouTubeResearchAdapter,
     classify_http_error,
 )
 from backend.jobs.research_trend_v1 import (
@@ -19,6 +22,7 @@ from backend.jobs.research_trend_v1 import (
 )
 from backend.jobs.runner import JobRegistry
 from backend.research import TrendRecordStore
+from backend.research import IngestionRunStore
 
 
 def test_trend_mapping_transforms_payload_to_canonical_entity():
@@ -382,3 +386,80 @@ def test_global_ingestion_flag_overrides_legacy_source_flag(monkeypatch, tmp_pat
 def test_research_registry_schedules_fanout_and_prune(tmp_path):
     registry = build_research_registry(store=TrendRecordStore(path=str(tmp_path / "research.db")), max_retries=0)
     assert set(registry._handlers) == {"research.sources.v1", "research.prune"}
+
+
+@pytest.mark.parametrize(
+    ("adapter_class", "source"),
+    [
+        (YouTubeResearchAdapter, "youtube_trends"),
+        (AmazonBestsellersResearchAdapter, "amazon_bestsellers"),
+        (TikTokOrganicResearchAdapter, "tiktok_organic"),
+    ],
+)
+def test_additional_research_adapters_have_canonical_source_names(adapter_class, source):
+    adapter = adapter_class()
+    assert adapter.name == source
+    record = adapter.to_canonical({"product": "wireless charger", "velocity": 0.4})
+    assert record["source"] == source
+    assert record["competition"] is None
+
+
+@pytest.mark.parametrize(
+    ("adapter_class", "synthetic_source"),
+    [
+        (AmazonBestsellersResearchAdapter, "amazon_bestsellers_mock"),
+        (TikTokOrganicResearchAdapter, "tiktok_mock"),
+    ],
+)
+def test_synthetic_fallbacks_are_not_research_evidence(adapter_class, synthetic_source):
+    adapter = adapter_class()
+    adapter.fetcher = lambda: [{"product": "fixture", "velocity": 0.5, "source": synthetic_source}]
+    with pytest.raises(AdapterFetchError) as exc:
+        adapter.fetch()
+    assert exc.value.error_type == "unavailable"
+
+
+def test_transient_source_failures_retry_and_persist_run_history(monkeypatch, tmp_path):
+    monkeypatch.setenv("FF_PILLAR_A_INGESTION", "true")
+    monkeypatch.setenv("RESEARCH_SOURCE_MAX_RETRIES", "2")
+    monkeypatch.setenv("RESEARCH_SOURCE_BACKOFF_BASE_SECONDS", "0")
+
+    class FlakyAdapter:
+        name = "flaky"
+
+        def __init__(self):
+            self.calls = 0
+
+        def fetch(self):
+            self.calls += 1
+            if self.calls < 2:
+                raise AdapterFetchError("server", "temporary outage")
+            return [{"topic": "stable topic"}]
+
+        def to_canonical(self, raw_record, fetched_at=None):
+            return {
+                "topic": raw_record["topic"],
+                "intent": "research",
+                "velocity": 0.5,
+                "competition": None,
+                "source": self.name,
+                "freshness_ts": (fetched_at or datetime.now(timezone.utc)).isoformat(),
+                "confidence": 0.5,
+                "raw": raw_record,
+            }
+
+    adapter = FlakyAdapter()
+    adapters = ResearchAdapterRegistry()
+    adapters.register(adapter.name, adapter)
+    db = str(tmp_path / "research.db")
+    registry = build_research_registry(
+        adapter_registry=adapters,
+        store=TrendRecordStore(path=db),
+        ingestion_store=IngestionRunStore(path=db),
+        max_retries=0,
+    )
+    result = registry.run("research.sources.v1")
+
+    assert result["payload"]["status"] == "succeeded"
+    assert result["payload"]["sources"]["flaky"]["retries"] == 1
+    assert IngestionRunStore(path=db).latest()["payload"]["status"] == "succeeded"

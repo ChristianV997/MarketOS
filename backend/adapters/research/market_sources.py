@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from backend.adapters.mercadolibre_trends import fetch as fetch_mercadolibre
+from backend.adapters.amazon_bestsellers import fetch as fetch_amazon_bestsellers
 from backend.adapters.reddit_trends import fetch_reddit_signals
+from backend.adapters.tiktok_organic import fetch as fetch_tiktok_organic
+from backend.adapters.youtube_trends import fetch_youtube_signals
 from backend.adapters.research.base import ResearchSourceAdapter
 from backend.adapters.research.trend_source_v1 import AdapterFetchError
 
@@ -87,3 +90,43 @@ class MercadoLibreResearchAdapter(_SignalResearchAdapter):
     fetcher = staticmethod(fetch_mercadolibre)
     confidence_env = "PILLAR_A_SOURCE_MERCADOLIBRE_CONFIDENCE_BASELINE"
 
+
+class YouTubeResearchAdapter(_SignalResearchAdapter):
+    name = "youtube_trends"
+    fetcher = staticmethod(fetch_youtube_signals)
+    confidence_env = "PILLAR_A_SOURCE_YOUTUBE_CONFIDENCE_BASELINE"
+
+
+class _RealOnlySignalResearchAdapter(_SignalResearchAdapter):
+    """Reject synthetic fallback records from research ingestion."""
+
+    synthetic_sources: frozenset[str] = frozenset()
+
+    def fetch(self) -> list[dict[str, Any]]:
+        records = self.fetcher()
+        real_records = [
+            record for record in records
+            if not isinstance(record, dict)
+            or str(record.get("source", "")) not in self.synthetic_sources
+        ]
+        if records and not real_records:
+            raise AdapterFetchError(
+                "unavailable",
+                f"{self.name} returned synthetic fallback data",
+                context={"record_count": len(records)},
+            )
+        return real_records
+
+
+class AmazonBestsellersResearchAdapter(_RealOnlySignalResearchAdapter):
+    name = "amazon_bestsellers"
+    fetcher = staticmethod(fetch_amazon_bestsellers)
+    synthetic_sources = frozenset({"amazon_bestsellers_mock"})
+    confidence_env = "PILLAR_A_SOURCE_AMAZON_CONFIDENCE_BASELINE"
+
+
+class TikTokOrganicResearchAdapter(_RealOnlySignalResearchAdapter):
+    name = "tiktok_organic"
+    fetcher = staticmethod(fetch_tiktok_organic)
+    synthetic_sources = frozenset({"tiktok_mock"})
+    confidence_env = "PILLAR_A_SOURCE_TIKTOK_CONFIDENCE_BASELINE"
