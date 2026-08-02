@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from backend.research.topic_intelligence import normalize_topic, summarize_opportunity
+
 logger = logging.getLogger(__name__)
 
 VALID_INTENTS = {"buy", "research", "compare", "unknown"}
@@ -16,6 +18,7 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS research_records (
     id TEXT PRIMARY KEY,
     topic TEXT NOT NULL,
+    topic_key TEXT NOT NULL,
     intent TEXT NOT NULL,
     velocity REAL NOT NULL,
     competition REAL,
@@ -31,6 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_research_velocity ON research_records (velocity D
 CREATE INDEX IF NOT EXISTS idx_research_confidence ON research_records (confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_research_freshness_ts ON research_records (freshness_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_research_rank ON research_records (velocity DESC, confidence DESC, freshness_ts DESC, id ASC);
+CREATE INDEX IF NOT EXISTS idx_research_topic_key ON research_records (topic_key, freshness_ts DESC);
 """
 
 
@@ -140,6 +144,7 @@ class TrendRecordStore:
             os.makedirs(directory, exist_ok=True)
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 5000")
         try:
             yield conn
         except Exception:
@@ -152,6 +157,7 @@ class TrendRecordStore:
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
+            conn.execute("PRAGMA journal_mode = WAL")
             table = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'research_records'"
             ).fetchone()
@@ -161,6 +167,11 @@ class TrendRecordStore:
 
             columns = {row[1]: row for row in conn.execute("PRAGMA table_info(research_records)")}
             competition = columns.get("competition")
+            topic_key_needs_backfill = (
+                "topic_key" not in columns
+                or columns.get("topic_key", (None, None, None, 0))[3] != 1
+            )
+            rebuilt_for_nullable_competition = False
             if competition is not None and competition[3] == 1:
                 # SQLite cannot alter a NOT NULL column in place. Rebuild the
                 # local table while preserving all existing records.
@@ -170,6 +181,7 @@ class TrendRecordStore:
                     DROP INDEX IF EXISTS idx_research_confidence;
                     DROP INDEX IF EXISTS idx_research_freshness_ts;
                     DROP INDEX IF EXISTS idx_research_rank;
+                    DROP INDEX IF EXISTS idx_research_topic_key;
                     ALTER TABLE research_records RENAME TO research_records_legacy;
                     """
                 )
@@ -177,16 +189,25 @@ class TrendRecordStore:
                 conn.execute(
                     """
                     INSERT INTO research_records
-                    (id, topic, intent, velocity, competition, source, freshness_ts,
+                    (id, topic, topic_key, intent, velocity, competition, source, freshness_ts,
                      confidence, raw, created_at, updated_at, dedupe_key)
-                    SELECT id, topic, intent, velocity, competition, source, freshness_ts,
+                    SELECT id, topic, lower(trim(topic)), intent, velocity, competition, source, freshness_ts,
                            confidence, raw, created_at, updated_at, dedupe_key
                     FROM research_records_legacy
                     """
                 )
                 conn.execute("DROP TABLE research_records_legacy")
-            else:
-                conn.executescript(SCHEMA_SQL)
+                topic_key_needs_backfill = True
+                rebuilt_for_nullable_competition = True
+            if "topic_key" not in columns and not rebuilt_for_nullable_competition:
+                conn.execute("ALTER TABLE research_records ADD COLUMN topic_key TEXT")
+            if topic_key_needs_backfill:
+                rows = conn.execute("SELECT id, topic FROM research_records").fetchall()
+                conn.executemany(
+                    "UPDATE research_records SET topic_key = ? WHERE id = ?",
+                    [(normalize_topic(row["topic"]), row["id"]) for row in rows],
+                )
+            conn.executescript(SCHEMA_SQL)
 
     def _row_to_record(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
         if row is None:
@@ -208,6 +229,7 @@ class TrendRecordStore:
         return {
             "id": record.get("id") or str(uuid.uuid4()),
             "topic": str(record["topic"]).strip(),
+            "topic_key": normalize_topic(str(record["topic"])),
             "intent": record["intent"],
             "velocity": float(record["velocity"]),
             "competition": None if record["competition"] is None else float(record["competition"]),
@@ -226,10 +248,10 @@ class TrendRecordStore:
             conn.execute(
                 """
                 INSERT INTO research_records (
-                    id, topic, intent, velocity, competition, source, freshness_ts,
+                    id, topic, topic_key, intent, velocity, competition, source, freshness_ts,
                     confidence, raw, created_at, updated_at, dedupe_key
                 ) VALUES (
-                    :id, :topic, :intent, :velocity, :competition, :source, :freshness_ts,
+                    :id, :topic, :topic_key, :intent, :velocity, :competition, :source, :freshness_ts,
                     :confidence, :raw, :created_at, :updated_at, :dedupe_key
                 )
                 """,
@@ -240,45 +262,51 @@ class TrendRecordStore:
     def upsert(self, record: dict[str, Any]) -> dict[str, Any]:
         payload = self._serialize(record)
         with self._connect() as conn:
-            existing = conn.execute(
-                "SELECT id, created_at FROM research_records WHERE dedupe_key = ?",
-                (payload["dedupe_key"],),
-            ).fetchone()
-            if existing:
-                payload["id"] = existing["id"]
-                payload["created_at"] = existing["created_at"]
-                conn.execute(
-                    """
-                    UPDATE research_records
-                    SET topic = :topic,
-                        intent = :intent,
-                        velocity = :velocity,
-                        competition = :competition,
-                        source = :source,
-                        freshness_ts = :freshness_ts,
-                        confidence = :confidence,
-                        raw = :raw,
-                        updated_at = :updated_at
-                    WHERE dedupe_key = :dedupe_key
-                    """,
-                    payload,
-                )
-                self.metrics.record_dedupe_hit()
-            else:
-                conn.execute(
-                    """
-                    INSERT INTO research_records (
-                        id, topic, intent, velocity, competition, source, freshness_ts,
-                        confidence, raw, created_at, updated_at, dedupe_key
-                    ) VALUES (
-                        :id, :topic, :intent, :velocity, :competition, :source, :freshness_ts,
-                        :confidence, :raw, :created_at, :updated_at, :dedupe_key
-                    )
-                    """,
-                    payload,
-                )
-            row = conn.execute("SELECT * FROM research_records WHERE dedupe_key = ?", (payload["dedupe_key"],)).fetchone()
+            row = self._upsert_payload(conn, payload)
         return self._row_to_record(row) or {}
+
+    def _upsert_payload(self, conn: sqlite3.Connection, payload: dict[str, Any]) -> sqlite3.Row | None:
+        existing = conn.execute(
+            "SELECT id, created_at FROM research_records WHERE dedupe_key = ?",
+            (payload["dedupe_key"],),
+        ).fetchone()
+        if existing:
+            payload["id"] = existing["id"]
+            payload["created_at"] = existing["created_at"]
+            conn.execute(
+                """
+                UPDATE research_records
+                SET topic = :topic,
+                    topic_key = :topic_key,
+                    intent = :intent,
+                    velocity = :velocity,
+                    competition = :competition,
+                    source = :source,
+                    freshness_ts = :freshness_ts,
+                    confidence = :confidence,
+                    raw = :raw,
+                    updated_at = :updated_at
+                WHERE dedupe_key = :dedupe_key
+                """,
+                payload,
+            )
+            self.metrics.record_dedupe_hit()
+        else:
+            conn.execute(
+                """
+                INSERT INTO research_records (
+                    id, topic, topic_key, intent, velocity, competition, source, freshness_ts,
+                    confidence, raw, created_at, updated_at, dedupe_key
+                ) VALUES (
+                    :id, :topic, :topic_key, :intent, :velocity, :competition, :source, :freshness_ts,
+                    :confidence, :raw, :created_at, :updated_at, :dedupe_key
+                )
+                """,
+                payload,
+            )
+        return conn.execute(
+            "SELECT * FROM research_records WHERE dedupe_key = ?", (payload["dedupe_key"],)
+        ).fetchone()
 
     def findById(self, record_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -301,6 +329,103 @@ class TrendRecordStore:
                 (limit,),
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
+
+    def find_opportunities(
+        self,
+        n: int,
+        *,
+        max_age_hours: float | None = None,
+        min_sources: int = 1,
+        intent: str | None = None,
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return corroborated, freshness-aware opportunities across sources."""
+        limit = int(n)
+        if limit <= 0:
+            return []
+        source_floor = max(1, int(min_sources))
+        if intent is not None and intent not in VALID_INTENTS:
+            raise ValueError(f"unsupported intent: {intent}")
+        now = now or datetime.now(timezone.utc)
+        filters: list[str] = []
+        parameters: list[Any] = []
+        if max_age_hours is not None:
+            age = max(0.0, float(max_age_hours))
+            filters.append("freshness_ts >= ?")
+            parameters.append((now - timedelta(hours=age)).isoformat())
+        if intent is not None:
+            filters.append("intent = ?")
+            parameters.append(intent)
+        where = f"WHERE {' AND '.join(filters)}" if filters else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                WITH filtered AS (
+                    SELECT * FROM research_records
+                    {where}
+                ), grouped AS (
+                    SELECT
+                        topic_key,
+                        COUNT(*) AS record_count,
+                        COUNT(DISTINCT source) AS source_count,
+                        GROUP_CONCAT(DISTINCT source) AS sources,
+                        MAX(velocity) AS velocity,
+                        AVG(confidence) AS confidence,
+                        AVG(competition) AS competition,
+                        AVG(CASE WHEN competition IS NULL THEN 0.0 ELSE 1.0 END) AS competition_coverage,
+                        MAX(freshness_ts) AS freshness_ts
+                    FROM filtered
+                    GROUP BY topic_key
+                    HAVING COUNT(DISTINCT source) >= ?
+                )
+                SELECT
+                    grouped.*,
+                    (SELECT topic FROM filtered f WHERE f.topic_key = grouped.topic_key
+                     ORDER BY freshness_ts DESC, lower(topic) ASC, topic ASC, id ASC LIMIT 1) AS topic,
+                    (SELECT intent FROM filtered f WHERE f.topic_key = grouped.topic_key
+                     ORDER BY freshness_ts DESC, lower(topic) ASC, topic ASC, id ASC LIMIT 1) AS intent
+                FROM grouped
+                """,
+                [*parameters, source_floor],
+            ).fetchall()
+        half_life = self._freshness_half_life_hours()
+        opportunities = [
+            summarize_opportunity(dict(row), now=now, freshness_half_life_hours=half_life)
+            for row in rows
+        ]
+        return sorted(
+            opportunities,
+            key=lambda item: (-item["rank_score"], -item["source_count"], item["topic_key"]),
+        )[:limit]
+
+    def source_summary(self, *, max_age_hours: float | None = None, now: datetime | None = None) -> list[dict[str, Any]]:
+        """Return per-source coverage and freshness diagnostics for operators."""
+        now = now or datetime.now(timezone.utc)
+        parameters: list[Any] = []
+        where = ""
+        if max_age_hours is not None:
+            where = "WHERE freshness_ts >= ?"
+            parameters.append((now - timedelta(hours=max(0.0, float(max_age_hours)))).isoformat())
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT source, COUNT(*) AS record_count, COUNT(DISTINCT topic_key) AS topic_count,
+                       AVG(confidence) AS confidence, MAX(freshness_ts) AS freshness_ts
+                FROM research_records
+                {where}
+                GROUP BY source
+                ORDER BY freshness_ts DESC, source ASC
+                """,
+                parameters,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _freshness_half_life_hours() -> float:
+        try:
+            return max(0.1, float(os.getenv("RESEARCH_FRESHNESS_HALF_LIFE_HOURS", "24")))
+        except (TypeError, ValueError):
+            return 24.0
 
     def findBySource(self, source: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -326,13 +451,14 @@ class TrendRecordStore:
 
     def append_many(self, records: list[dict[str, Any]]) -> int:
         persisted = 0
-        for record in records:
-            try:
-                self.upsert(record)
-                persisted += 1
-            except ResearchValidationError as err:
-                logger.error(
-                    "Research record rejected",
-                    extra={"event": "research_record_rejected", "errors": err.errors, "source": record.get("source")},
-                )
+        with self._connect() as conn:
+            for record in records:
+                try:
+                    self._upsert_payload(conn, self._serialize(record))
+                    persisted += 1
+                except ResearchValidationError as err:
+                    logger.error(
+                        "Research record rejected",
+                        extra={"event": "research_record_rejected", "errors": err.errors, "source": record.get("source")},
+                    )
         return persisted

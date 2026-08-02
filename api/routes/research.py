@@ -36,3 +36,25 @@ def top_research_trends(
     return {
         "records": _store().findTopN(limit, require_competition=require_competition),
     }
+
+
+@router.get("/research/opportunities")
+def research_opportunities(
+    limit: int = Query(default=20, ge=1, le=100),
+    max_age_hours: float | None = Query(default=72.0, ge=0.0, le=24.0 * 365),
+    min_sources: int = Query(default=1, ge=1, le=20),
+    intent: str | None = Query(default=None, pattern="^(buy|research|compare|unknown)$"),
+):
+    return {
+        "opportunities": _store().find_opportunities(
+            limit,
+            max_age_hours=max_age_hours,
+            min_sources=min_sources,
+            intent=intent,
+        )
+    }
+
+
+@router.get("/research/sources")
+def research_sources(max_age_hours: float | None = Query(default=72.0, ge=0.0, le=24.0 * 365)):
+    return {"sources": _store().source_summary(max_age_hours=max_age_hours)}

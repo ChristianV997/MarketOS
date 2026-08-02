@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -388,6 +390,15 @@ def test_research_registry_schedules_fanout_and_prune(tmp_path):
     assert set(registry._handlers) == {"research.sources.v1", "research.prune"}
 
 
+def test_registry_uses_configured_research_database(monkeypatch, tmp_path):
+    path = tmp_path / "configured-research.db"
+    monkeypatch.setenv("RESEARCH_DB_PATH", str(path))
+
+    build_research_registry(max_retries=0)
+
+    assert path.exists()
+
+
 @pytest.mark.parametrize(
     ("adapter_class", "source"),
     [
@@ -463,3 +474,140 @@ def test_transient_source_failures_retry_and_persist_run_history(monkeypatch, tm
     assert result["payload"]["status"] == "succeeded"
     assert result["payload"]["sources"]["flaky"]["retries"] == 1
     assert IngestionRunStore(path=db).latest()["payload"]["status"] == "succeeded"
+
+
+def test_fanout_fetches_enabled_sources_concurrently(monkeypatch, tmp_path):
+    monkeypatch.setenv("FF_PILLAR_A_INGESTION", "true")
+    monkeypatch.setenv("RESEARCH_SOURCE_MAX_WORKERS", "2")
+    monkeypatch.setenv("RESEARCH_SOURCE_MAX_RETRIES", "0")
+    barrier = threading.Barrier(2)
+
+    class ConcurrentAdapter:
+        def __init__(self, name):
+            self.name = name
+
+        def fetch(self):
+            barrier.wait(timeout=2)
+            return [{"topic": self.name}]
+
+        def to_canonical(self, raw_record, fetched_at=None):
+            return {
+                "topic": raw_record["topic"], "intent": "research", "velocity": 0.5,
+                "competition": None, "source": self.name,
+                "freshness_ts": (fetched_at or datetime.now(timezone.utc)).isoformat(),
+                "confidence": 0.5, "raw": raw_record,
+            }
+
+    adapters = ResearchAdapterRegistry()
+    adapters.register("first", ConcurrentAdapter("first"))
+    adapters.register("second", ConcurrentAdapter("second"))
+    store = TrendRecordStore(path=str(tmp_path / "research.db"))
+
+    class CapturingRegistry:
+        def register(self, name, handler):
+            self.handler = handler
+
+    registry = CapturingRegistry()
+    register_research_sources_job(registry, adapter_registry=adapters, store=store)
+    result = registry.handler()
+
+    assert result["status"] == "succeeded"
+    assert len(store.findTopN(10)) == 2
+    assert result["execution_policy"]["max_workers"] == 2
+    assert result["execution_policy"]["worker_batches"] == 1
+
+
+def test_circuit_breaker_skips_repeatedly_failing_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("FF_PILLAR_A_INGESTION", "true")
+    monkeypatch.setenv("RESEARCH_SOURCE_MAX_RETRIES", "0")
+    monkeypatch.setenv("RESEARCH_SOURCE_FAILURE_THRESHOLD", "2")
+    monkeypatch.setenv("RESEARCH_SOURCE_COOLDOWN_SECONDS", "60")
+
+    class GoodAdapter:
+        name = "good"
+
+        def fetch(self):
+            return [{"topic": "good"}]
+
+        def to_canonical(self, raw_record, fetched_at=None):
+            return {
+                "topic": raw_record["topic"], "intent": "research", "velocity": 0.5,
+                "competition": None, "source": self.name,
+                "freshness_ts": (fetched_at or datetime.now(timezone.utc)).isoformat(),
+                "confidence": 0.5, "raw": raw_record,
+            }
+
+    class BrokenAdapter:
+        name = "broken"
+
+        def __init__(self):
+            self.calls = 0
+
+        def fetch(self):
+            self.calls += 1
+            raise AdapterFetchError("schema", "bad upstream payload")
+
+    broken = BrokenAdapter()
+    adapters = ResearchAdapterRegistry()
+    adapters.register("good", GoodAdapter())
+    adapters.register("broken", broken)
+    store = TrendRecordStore(path=str(tmp_path / "research.db"))
+
+    class CapturingRegistry:
+        def register(self, name, handler):
+            self.handler = handler
+
+    registry = CapturingRegistry()
+    register_research_sources_job(registry, adapter_registry=adapters, store=store)
+    registry.handler()
+    registry.handler()
+    third = registry.handler()
+
+    assert broken.calls == 2
+    assert third["sources"]["broken"]["status"] == "skipped"
+    assert third["sources"]["broken"]["reason"] == "circuit_open"
+
+
+def test_fanout_timeout_is_bounded_by_worker_batches(monkeypatch, tmp_path):
+    monkeypatch.setenv("FF_PILLAR_A_INGESTION", "true")
+    monkeypatch.setenv("RESEARCH_SOURCE_MAX_WORKERS", "2")
+    monkeypatch.setenv("RESEARCH_SOURCE_TIMEOUT_SECONDS", "0.03")
+    monkeypatch.setenv("RESEARCH_SOURCE_MAX_RETRIES", "0")
+
+    class SlowAdapter:
+        def __init__(self, name):
+            self.name = name
+
+        def fetch(self):
+            time.sleep(0.45)
+            return [{"topic": self.name}]
+
+        def to_canonical(self, raw_record, fetched_at=None):
+            return {
+                "topic": raw_record["topic"], "intent": "research", "velocity": 0.5,
+                "competition": None, "source": self.name,
+                "freshness_ts": (fetched_at or datetime.now(timezone.utc)).isoformat(),
+                "confidence": 0.5, "raw": raw_record,
+            }
+
+    adapters = ResearchAdapterRegistry()
+    for name in ("first", "second", "third", "fourth", "fifth"):
+        adapters.register(name, SlowAdapter(name))
+    store = TrendRecordStore(path=str(tmp_path / "research.db"))
+    metrics = AdapterMetrics()
+
+    class CapturingRegistry:
+        def register(self, name, handler):
+            self.handler = handler
+
+    registry = CapturingRegistry()
+    register_research_sources_job(registry, adapter_registry=adapters, store=store, metrics=metrics)
+    started = time.perf_counter()
+    with pytest.raises(RuntimeError, match="all configured research sources failed"):
+        registry.handler()
+    elapsed = time.perf_counter() - started
+
+    # Five serial 100 ms waits would take at least 500 ms. Two workers cap
+    # this batch to three timeout windows.
+    assert elapsed < 0.4
+    assert metrics.snapshot["adapter_fetch_errors_total"] == 5

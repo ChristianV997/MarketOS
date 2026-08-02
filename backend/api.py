@@ -198,6 +198,30 @@ def _background_runner():
 
 # ── lifecycle ─────────────────────────────────────────────────────────────────
 
+def _research_intelligence_keywords(trend_store: Any) -> list[str]:
+    """Select fresh, deduplicated research topics for expensive enrichment."""
+    try:
+        limit = max(1, int(os.getenv("RESEARCH_INTELLIGENCE_MAX_TOPICS", "20")))
+    except ValueError:
+        limit = 20
+    try:
+        max_age_hours = max(0.0, float(os.getenv("RESEARCH_INTELLIGENCE_MAX_AGE_HOURS", "72")))
+    except ValueError:
+        max_age_hours = 72.0
+    try:
+        min_sources = max(1, int(os.getenv("RESEARCH_INTELLIGENCE_MIN_SOURCES", "1")))
+    except ValueError:
+        min_sources = 1
+    return [
+        str(opportunity["topic"])
+        for opportunity in trend_store.find_opportunities(
+            limit,
+            max_age_hours=max_age_hours,
+            min_sources=min_sources,
+        )
+    ]
+
+
 def _research_runner():
     from backend.jobs.research_trend_v1 import build_research_registry
     from backend.jobs.scheduler import IngestionScheduler
@@ -208,8 +232,8 @@ def _research_runner():
     while _bg_running:
         try:
             scheduler.tick()
-            # Feed canonical research topics into the intelligence loop.
-            keywords = [str(record["topic"]) for record in trend_store.findTopN(20)]
+            # Feed fresh, cross-source-deduplicated topics into the intelligence loop.
+            keywords = _research_intelligence_keywords(trend_store)
             if keywords:
                 try:
                     from core.intelligence_loop import run_intelligence
