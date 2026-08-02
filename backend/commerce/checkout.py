@@ -26,6 +26,9 @@ _SESSION_SEQ = 0
 
 
 def _dry_run() -> bool:
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return True
     if os.getenv("CHECKOUT_DRY_RUN", "true").lower() != "false":
         return True
     return not os.getenv("STRIPE_SECRET_KEY")

@@ -19,6 +19,7 @@ class SidecarContext:
     idempotency_key: str = ""
     dry_run: bool = True
     approval_state: str = "not_required"
+    research_only: bool | None = None
 
     def to_headers(self) -> dict[str, str]:
         """Return the canonical lineage and safety headers for sidecars."""
@@ -35,6 +36,13 @@ class SidecarContext:
 
     def require_live_idempotency(self) -> None:
         """Reject live sidecar mutations that cannot be safely retried."""
+        from backend.research.mode import require_write_allowed
+
+        require_write_allowed(
+            dry_run=self.dry_run,
+            approval_state=self.approval_state,
+            action="sidecar_mutation",
+        )
         if not self.idempotency_key:
             raise ValueError("live sidecar operations require an idempotency_key")
 

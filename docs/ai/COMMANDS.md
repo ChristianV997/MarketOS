@@ -31,6 +31,19 @@ repomix backend/inference scripts/ai docs/ai --compress --no-files --stdout
 
 Never put credentials or unfiltered giant logs into handoffs.
 
+Research-only operation:
+
+```powershell
+$env:MARKETOS_RESEARCH_ONLY = "true"
+.\scripts\research\Start-MarketOSResearch.ps1 -Category fitness -Once
+python scripts/research/run_category_research.py fitness --max-products 20 --json
+.\scripts\research\Get-MarketOSResearchStatus.ps1
+```
+
+The research worker is the only continuous worker to run while this mode is
+active. It owns a single-writer lease and produces dossier/report artifacts;
+it does not create or publish external commerce objects.
+
 Parallel work:
 
 ```powershell

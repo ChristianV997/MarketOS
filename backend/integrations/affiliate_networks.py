@@ -36,7 +36,8 @@ _DRY_RUN = os.getenv("AFFILIATE_NETWORKS_DRY_RUN", "true").lower() != "false"
 
 def _live() -> bool:
     """True only when real recruitment/fetch calls should actually be made."""
-    return not _DRY_RUN
+    from backend.research.mode import is_research_only
+    return not is_research_only() and not _DRY_RUN
 
 
 # Recruitment is real-world outreach with a commission-rate commitment —
@@ -151,7 +152,10 @@ class AffiliateNetworkConnector:
 
         Returns (success: bool, message: str)
         """
-        if self.dry_run:
+        from backend.research.mode import is_research_only
+        if self.dry_run or is_research_only():
+            if is_research_only() and not self.dry_run:
+                return False, "research_only"
             _log.info(
                 f"[DRY-RUN] {self.network} recruitment: "
                 f"product={recruitment.product_id}, "

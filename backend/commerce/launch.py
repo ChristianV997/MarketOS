@@ -165,6 +165,9 @@ class LaunchExecutor:
             self.metrics_provider = self.metrics_provider or metrics
 
     def execute(self, bundle: CreativeBundle, *, budget: float = 20.0, dry_run: bool = True) -> tuple[LaunchPlan, CampaignOutcome]:
+        from backend.research.mode import is_research_only
+        if is_research_only() and not dry_run:
+            raise PermissionError("campaign launch blocked: research_only")
         plan = LaunchPlan.from_bundle(bundle, budget=budget, dry_run=dry_run)
 
         if dry_run:

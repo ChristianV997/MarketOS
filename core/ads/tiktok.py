@@ -19,6 +19,9 @@ def create_campaign(token: str, payload: dict[str, Any]) -> dict[str, Any]:
     dict
         API response dict, or an error dict when the request fails.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "blocked", "reason": "research_only"}
     try:
         import requests  # type: ignore[import]
     except ImportError:

@@ -46,6 +46,12 @@ def run_dropship_cycle(
     """
     started = time.time()
 
+    # Research mode deliberately stops before product/store/campaign creation.
+    # Discovery and validation remain useful and are the only stages allowed
+    # to run until a human approves a launch plan.
+    from backend.research.mode import is_research_only
+    research_only = is_research_only()
+
     # ── Pipeline 1: discover ──────────────────────────────────────────────────
     try:
         from backend.discovery import discover_products
@@ -68,6 +74,26 @@ def run_dropship_cycle(
             _log.debug("dropship_validate_failed product=%s error=%s",
                        opp.get("product"), exc)
     green = [v for v in verdicts if v.get("ready_for_creation")][:max_products]
+
+    if research_only:
+        summary = {
+            "status": "research_only",
+            "reason": "external_creation_and_launch_disabled",
+            "discovered": len(opportunities),
+            "validated": len(verdicts),
+            "green": len(green),
+            "launched": 0,
+            "launches": [],
+            "research_candidates": [
+                {"product": item.get("product"), "confidence": item.get("confidence"),
+                 "recommendation": item.get("recommendation"), "margin": item.get("margin")}
+                for item in green
+            ],
+            "duration_s": round(time.time() - started, 2),
+            "ts": time.time(),
+        }
+        save_json_atomic(_SNAPSHOT_PATH, summary)
+        return summary
 
     if not green:
         summary = {

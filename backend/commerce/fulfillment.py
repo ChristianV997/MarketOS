@@ -33,7 +33,8 @@ _MAX_FULFILLMENT_ATTEMPTS = int(os.getenv("FULFILLMENT_MAX_ATTEMPTS", "3"))
 
 
 def _live() -> bool:
-    return os.getenv("FULFILLMENT_LIVE", "false").lower() == "true"
+    from backend.research.mode import is_research_only
+    return not is_research_only() and os.getenv("FULFILLMENT_LIVE", "false").lower() == "true"
 
 
 def route_order(order: Any) -> Any | None:

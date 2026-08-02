@@ -51,6 +51,24 @@ def save_json_atomic(path: str, data: Any) -> bool:
         return False
 
 
+def save_text_atomic(path: str, text: str) -> bool:
+    """Atomically write UTF-8 text using the shared persistence convention."""
+    if not path:
+        return False
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+        os.replace(tmp, path)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("persist_text_failed path=%s error=%s", path, exc)
+        return False
+
+
 def load_json(path: str, default: Any = None) -> Any:
     """Load JSON from *path*, returning *default* if missing or unreadable.
 

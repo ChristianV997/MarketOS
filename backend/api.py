@@ -153,6 +153,13 @@ def _background_runner():
     global _state, _last_cycle_at
     sleep_s = 60.0 / _CYCLES_PER_MINUTE
     while _bg_running:
+        from backend.research.mode import is_research_only
+        if is_research_only():
+            # Research-only deployments use scripts/research/continuous_research.py;
+            # the API remains available for read/report endpoints but does not
+            # advance execution, creative, commerce, or feedback state.
+            time.sleep(sleep_s)
+            continue
         t0 = time.time()
         try:
             if not _ORCHESTRATOR_HANDLES_CYCLES:
@@ -207,6 +214,12 @@ def _research_runner():
     register_research_prune_job(registry)
     scheduler = IngestionScheduler(registry)
     while _bg_running:
+        from backend.research.mode import is_research_only
+        if is_research_only():
+            # The dedicated research supervisor owns bounded category runs;
+            # API startup must not create a second writer or generic loop.
+            time.sleep(300)
+            continue
         try:
             scheduler.tick()
             # Feed trend keywords into the core intelligence discovery loop
@@ -655,6 +668,9 @@ def commerce_cycle(payload: dict[str, Any] | None = Body(default=None)):
             if isinstance(raw_dry_run, bool)
             else str(raw_dry_run).strip().lower() not in {"false", "0", "no", "off"}
         )
+        from backend.research.mode import is_research_only
+        if is_research_only() and not dry_run:
+            return {"launchable": False, "reasons": ["research_only"]}
         if not dry_run and data.get("confirm_live") is not True:
             return {
                 "launchable": False,
@@ -713,6 +729,9 @@ def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None))
             return {"launchable": False, "reasons": ["provider_cycle_requires_1_to_20_urls"]}
         raw_dry_run = data.get("dry_run", True)
         dry_run = raw_dry_run if isinstance(raw_dry_run, bool) else str(raw_dry_run).lower() not in {"false", "0", "no", "off"}
+        from backend.research.mode import is_research_only
+        if is_research_only() and not dry_run:
+            return {"launchable": False, "reasons": ["research_only"]}
         if not dry_run and data.get("confirm_live") is not True:
             return {"launchable": False, "reasons": ["live_execution_requires_confirm_live"]}
         from backend.commerce import run_provider_cycle
@@ -806,6 +825,9 @@ def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
         data = payload or {}
         raw_dry_run = data.get("dry_run", True)
         dry_run = raw_dry_run if isinstance(raw_dry_run, bool) else str(raw_dry_run).lower() not in {"false", "0", "no", "off"}
+        from backend.research.mode import is_research_only
+        if is_research_only() and not dry_run:
+            return {"published": False, "reasons": ["research_only"]}
         if not dry_run and data.get("confirm_live") is not True:
             return {"published": False, "reasons": ["live_publishing_requires_confirm_live"]}
         bundle_data = data.get("bundle") if isinstance(data.get("bundle"), dict) else data

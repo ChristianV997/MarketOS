@@ -49,7 +49,8 @@ def _is_dry_run() -> bool:
 def _live() -> bool:
     """True only when real API calls should actually be made — dry-run is
     off, credentials are present, and the SDK is importable."""
-    return not _is_dry_run() and FacebookAdsApi is not None
+    from backend.research.mode import is_research_only
+    return not is_research_only() and not _is_dry_run() and FacebookAdsApi is not None
 
 
 # Monotonic counter keeps dry-run IDs unique within one second

@@ -79,6 +79,9 @@ def create_post(
     """
     platforms = platforms or ["tiktok"]
 
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "blocked", "reason": "research_only", "dry_run": True}
     if _dry_run():
         post_id = _next_dry_post_id(text)
         _log.info("organic_dry_post id=%s platforms=%s len=%d",

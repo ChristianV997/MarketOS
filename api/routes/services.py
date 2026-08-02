@@ -45,6 +45,42 @@ def product_audit(product: str, category: str = "general", price: float | None =
         return {"error": str(exc)}
 
 
+@router.post("/category-research")
+def category_research(category: str, max_products: int = 20, force_refresh: bool = False):
+    """Bounded research-only category dossier; never creates or launches."""
+    from services.product_research.run import ResearchRunConfig, run_category_research
+    try:
+        dossier = run_category_research(ResearchRunConfig(category, max_products, force_refresh=force_refresh))
+        return json_safe(dossier.to_dict())
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "status": "research_only"}
+
+
+@router.post("/research-approval")
+def research_approval(subject_type: str, subject_id: str, requested_action: str, reason: str = ""):
+    """Persist a human approval request; this endpoint never performs the action."""
+    from services.product_research.dossier_store import DossierStore
+    from services.product_research.dossiers import ApprovalRequest
+    try:
+        request = ApprovalRequest(subject_type, subject_id, requested_action, reason=reason)
+        return json_safe(DossierStore().save_approval(request))
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "status": "approval_not_created"}
+
+
+@router.post("/research-approval/decide")
+def decide_research_approval(subject_type: str, subject_id: str, requested_action: str,
+                             state: str, decided_by: str, reason: str = ""):
+    """Record a human approval decision; it never performs the requested action."""
+    from services.product_research.dossier_store import DossierStore
+    try:
+        return json_safe(DossierStore().decide_approval(
+            subject_type, subject_id, requested_action, state=state, decided_by=decided_by, reason=reason,
+        ))
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "status": "approval_not_decided"}
+
+
 @router.post("/ecommerce-operator")
 def ecommerce_operator(
     product: str,

@@ -143,6 +143,9 @@ class SupplierClient:
         placement is idempotent (a retry after a crash mid-place resolves
         to the same supplier_order_id rather than double-ordering).
         """
+        from backend.research.mode import is_research_only
+        if is_research_only():
+            return {"status": "blocked", "supplier_order_id": "", "error": "research_only", "dry_run": True}
         if _ORDERS_DRY_RUN or not self.is_configured():
             return self._dry_place_order(order)
         try:

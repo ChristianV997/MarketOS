@@ -223,6 +223,10 @@ class CommerceLoop:
         budget: float = 20.0,
         dry_run: bool = True,
     ) -> tuple[list[LaunchPlan], list[CampaignOutcome]]:
+        from backend.research.mode import is_research_only
+
+        if is_research_only() and not dry_run:
+            raise PermissionError("commerce launch blocked: research_only")
         plans: list[LaunchPlan] = []
         outcomes: list[CampaignOutcome] = []
         for bundle in creatives:
@@ -252,6 +256,10 @@ class CommerceLoop:
         approval_state: str = "not_required",
     ) -> list[dict[str, Any]]:
         """Publish approved creative bundles through the configured adapter."""
+        from backend.research.mode import is_research_only
+
+        if is_research_only() and not dry_run:
+            raise PermissionError("creative publication blocked: research_only")
         from backend.integrations.postiz import publisher as default_publisher
         from backend.contracts.adapters import SidecarContext
         target = publisher or default_publisher

@@ -248,6 +248,9 @@ def _run_inventory_sync() -> dict[str, Any]:
     Always journals shadow_inventory_sync; only mutates storefronts when
     INVENTORY_SYNC_LIVE=true.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     from backend.commerce.inventory_sync import reconcile_all_brands
     return reconcile_all_brands()
 
@@ -267,6 +270,9 @@ def _run_fulfillment() -> dict[str, Any]:
     dry-run flag) and FULFILLMENT_LIVE (default false) gates whether the
     order's fulfillment_status actually advances outside of rehearsal.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     from backend.commerce.fulfillment import poll_placed_orders, process_new_orders
     placed = process_new_orders()
     polled = poll_placed_orders()
@@ -281,6 +287,9 @@ def _run_organic_posting() -> dict[str, Any]:
     ids and the loop is fully rehearsable without credentials. This is the
     owner's funnel step 1: organic validation BEFORE paid spend.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     from backend.organic import run_organic_posting
     return run_organic_posting()
 
@@ -291,6 +300,9 @@ def _run_engagement_ingestion() -> dict[str, Any]:
     content feedback loop (finally populating the field the classifier has
     always read). The per-product rollup drives the Phase F organic->paid gate.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     from backend.organic import ingest_engagement
     return ingest_engagement()
 
@@ -304,6 +316,9 @@ def _run_dropship_pipeline() -> dict[str, Any]:
     loop, and the scaling worker can kill/amplify them — Pipeline 5 is the
     live loop itself, no separate optimizer needed.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     from backend.dropship import run_dropship_cycle
     summary = run_dropship_cycle()
 
@@ -521,6 +536,9 @@ def _run_commerce_cycle() -> dict[str, Any]:
     Live execution is opt-in through ``COMMERCE_LOOP_LIVE=true``; scheduler
     deployments remain dry-run by default.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only", "research_entrypoint": "scripts/research/continuous_research.py"}
     if not _COMMERCE_LOOP_ENABLED:
         return {"status": "skipped", "reason": "commerce_loop_disabled"}
     try:
@@ -576,6 +594,9 @@ def _run_execution_cycle() -> dict[str, Any]:
     permanently frozen snapshot while this worker's own return value
     showed cycles incrementing every tick.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     from backend.execution.loop import run_cycle
     from backend.core.state import SystemState
     # Import the module (not a destructured `from ... import _state`) so we
@@ -600,6 +621,9 @@ def _run_execution_cycle() -> dict[str, Any]:
 @worker_safe()
 def _run_feedback_collection() -> dict[str, Any]:
     """Classify recent content events, extract patterns, and update playbooks."""
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     from core.content.feedback import batch_classify
     from core.content.patterns import extract_patterns, pattern_store
     from core.content.playbook import generate_playbook, playbook_memory
@@ -646,6 +670,9 @@ def _run_scaling_worker() -> dict[str, Any]:
        worker runs — confidence rises with evidence and never resets on its
        own, so without a cooldown this path would relaunch indefinitely.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only", "scaled": 0, "launched": 0}
     scaled   = 0
     launched = 0
     if _commerce_cycle_completed_this_tick:
@@ -748,6 +775,9 @@ def _run_scaling() -> dict[str, Any]:
 @worker_safe()
 def _run_simulation() -> dict[str, Any]:
     """Score and rank signal candidates before execution (simulation layer)."""
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     from simulation.integration import _run_simulation as _sim
     return _sim()
 
@@ -761,6 +791,9 @@ def _run_content_generation() -> dict[str, Any]:
     generates a script per product, and upserts into playbook_memory so
     _run_scaling() can launch campaigns from the result.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     from core.content.playbook import playbook_memory, generate_playbook, Playbook
     from core.creative.generator import generate_creative
     from core.creative.selection import select_hooks, select_angles
@@ -817,6 +850,9 @@ def _run_organic_channel_evaluation() -> dict[str, Any]:
     to affiliate networks only fire once PHASE8_AFFILIATE_SCALING_LIVE=true
     — until then this worker is purely observational.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     import asyncio
     import os
 
@@ -915,6 +951,9 @@ def _run_metrics_ingestion() -> dict[str, Any]:
     are corrected by actual performance, not just simulated ROAS.
     Emits a metrics.ingested event for the dashboard.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "skipped", "reason": "research_only"}
     from simulation.calibration import calibration_store
     from backend.events.emitter import emit_metrics_ingested
 

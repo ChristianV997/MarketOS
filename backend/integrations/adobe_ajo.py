@@ -109,6 +109,9 @@ def pause_campaign(campaign_id: str) -> dict:
     Returns a result dict with ``status`` and ``campaign_id`` keys.
     Falls back to ``{"status": "paused_mock", ...}`` when credentials absent.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "blocked", "reason": "research_only", "campaign_id": campaign_id}
     if not _is_configured():
         return {"status": "paused_mock", "campaign_id": campaign_id}
 
@@ -123,6 +126,10 @@ def scale_campaign(campaign_id: str, budget_multiplier: float = 1.5) -> dict:
     Returns a result dict with ``status``, ``campaign_id``, and
     ``budget_multiplier`` keys.  Falls back to stub when credentials absent.
     """
+    from backend.research.mode import is_research_only
+    if is_research_only():
+        return {"status": "blocked", "reason": "research_only", "campaign_id": campaign_id,
+                "budget_multiplier": budget_multiplier}
     if not _is_configured():
         return {
             "status": "scaled_mock",

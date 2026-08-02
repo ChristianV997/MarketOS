@@ -40,6 +40,11 @@ from backend.patterns.safe_call import safe_call
 _log = logging.getLogger(__name__)
 
 _DRY_RUN = os.getenv("TIKTOK_DRY_RUN", "true").lower() != "false"
+
+
+def _research_only() -> bool:
+    from backend.research.mode import is_research_only
+    return is_research_only()
 _BUDGET_DAILY = float(os.getenv("TIKTOK_BUDGET_DAILY", "50"))
 
 # Consecutive-win threshold before budget scale-up
@@ -81,7 +86,7 @@ def _unwrap(resp) -> dict:
 
 
 def _post(path: str, payload: dict) -> dict:
-    if _DRY_RUN:
+    if _DRY_RUN or _research_only():
         _log.info("tiktok_dry_run path=%s payload=%s", path, payload)
         return {"code": 0, "message": "OK", "data": {"campaign_id": _next_dry_id()}}
 
@@ -125,7 +130,7 @@ def _post(path: str, payload: dict) -> dict:
 
 
 def _get(path: str, params: dict | None = None) -> dict:
-    if _DRY_RUN:
+    if _DRY_RUN or _research_only():
         _log.info("tiktok_dry_run GET path=%s params=%s", path, params)
         return {"code": 0, "message": "OK", "data": {"list": []}}
 
@@ -283,7 +288,7 @@ def scale_budget(campaign_id: str, new_budget: float, current_budget: float = 0.
     """
     delta = max(0.0, new_budget - current_budget)
     committed_delta = delta
-    if not _DRY_RUN and delta > 0:
+    if not _DRY_RUN and not _research_only() and delta > 0:
         from backend.risk.gate import check_spend
         gate = check_spend(delta)
         if not gate["allowed"]:
@@ -299,7 +304,7 @@ def scale_budget(campaign_id: str, new_budget: float, current_budget: float = 0.
         "budget": round(new_budget, 2),
     })
     _log.info("tiktok_budget_scaled id=%s budget=%s", campaign_id, new_budget)
-    if not _DRY_RUN and committed_delta > 0:
+    if not _DRY_RUN and not _research_only() and committed_delta > 0:
         from backend.risk.gate import record_spend
         record_spend(committed_delta)
     return True
@@ -310,7 +315,7 @@ def upload_creative(file_path: str) -> dict:
     """Upload a video file as a TikTok creative. Returns the raw API response
     (or a dry-run/fallback stub with a synthetic ``video_id``).
     """
-    if _DRY_RUN:
+    if _DRY_RUN or _research_only():
         _log.info("tiktok_dry_run upload_creative file_path=%s", file_path)
         return {"data": {"video_id": _next_dry_id("vid")}}
 
@@ -361,7 +366,7 @@ def fetch_roas(campaign_ids: list[str], date: str | None = None) -> dict[str, fl
     """Return {campaign_id → roas} for the given date (defaults to today)."""
     if not campaign_ids:
         return {}
-    if _DRY_RUN:
+    if _DRY_RUN or _research_only():
         # Simulate realistic ROAS for dry-run testing
         import random
         return {cid: round(random.uniform(0.8, 2.5), 4) for cid in campaign_ids}
@@ -397,7 +402,7 @@ def get_metrics(campaign_ids: list[str] | None = None, last_n_days: int = 1) -> 
     """
     ids = list(campaign_ids or [])
     roas = fetch_roas(ids)
-    dry_run = _DRY_RUN
+    dry_run = _DRY_RUN or _research_only()
     spend = 30.0 if dry_run else 0.0
     revenue = round(spend * (next(iter(roas.values()), 0.0)), 4) if roas else 0.0
     return {
@@ -456,7 +461,7 @@ def launch_from_playbook(playbook: dict, phase: str = "EXPLORE") -> dict:
     angles  = playbook.get("top_angles", ["Problem-solution"])
     budget  = playbook.get("estimated_roas", 1.0) * _BUDGET_DAILY
 
-    if not _DRY_RUN:
+    if not _DRY_RUN and not _research_only():
         from backend.risk.gate import check_spend
         gate = check_spend(budget)
         if not gate["allowed"]:
@@ -486,13 +491,13 @@ def launch_from_playbook(playbook: dict, phase: str = "EXPLORE") -> dict:
         if ad_id:
             ad_ids.append(ad_id)
 
-    if not _DRY_RUN:
+    if not _DRY_RUN and not _research_only():
         from backend.risk.gate import record_spend
         record_spend(budget)
 
     return {
         "status": "ok",
-        "dry_run": _DRY_RUN,
+        "dry_run": _DRY_RUN or _research_only(),
         "campaign_id": campaign_id,
         "adgroup_id": adgroup_id,
         "ad_ids": ad_ids,
