@@ -19,7 +19,9 @@ from backend.adapters.research import (
 )
 from backend.jobs.runner import JobRegistry
 from backend.research import IngestionRunStore, TrendRecordStore
+from backend.research.credentials import load_research_credentials
 from backend.research import metrics as research_metrics
+from backend.research.readiness import source_readiness
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +210,9 @@ def _fetch_records(adapter: Any, *, metrics: AdapterMetrics) -> tuple[list[dict[
 
 
 def build_default_adapter_registry() -> ResearchAdapterRegistry:
+    credential_state = load_research_credentials()
+    if credential_state.configured and not credential_state.loaded:
+        logger.warning("research_credentials_unavailable error_type=%s", credential_state.error_type)
     registry = ResearchAdapterRegistry()
     registry.register(
         GoogleTrendsAdapterV1.name,
@@ -389,12 +394,22 @@ def register_research_sources_job(
 
         started = time.perf_counter()
         fetched_at = datetime.now(timezone.utc)
+        credential_state = load_research_credentials()
         sources: dict[str, Any] = {}
         enabled: list[tuple[str, Any]] = []
         for name, adapter in sorted(adapters.all().items()):
             if not _source_flag_enabled(name):
                 fetch_metrics.record_skip(source=name)
                 sources[name] = {"status": "skipped", "reason": "feature_flag_disabled"}
+                continue
+            readiness = source_readiness(name, credentials=credential_state)
+            if readiness["status"] != "ready":
+                fetch_metrics.record_skip(source=name)
+                sources[name] = {
+                    "status": "skipped",
+                    "reason": readiness["status"],
+                    "readiness": readiness,
+                }
                 continue
             cooldown_remaining = circuit_breaker.cooldown_remaining(name)
             if cooldown_remaining > 0:

@@ -50,16 +50,20 @@ _MOCK_SIGNALS = [
 
 def _fetch_creative_center() -> list[dict]:
     """TikTok Creative Center Trending Products (official API)."""
-    if not _ACCESS_TOKEN:
+    # Read credentials at call time so task restarts or Secrets Manager
+    # injection do not require importing this module again.
+    access_token = os.getenv("TIKTOK_ACCESS_TOKEN", _ACCESS_TOKEN)
+    advertiser_id = os.getenv("TIKTOK_ADVERTISER_ID", _ADVERTISER_ID)
+    if not access_token or not advertiser_id:
         return []
     try:
         import requests
         url = "https://business-api.tiktok.com/open_api/v1.3/creative_center/trending_products/"
         headers = {
-            "Access-Token": _ACCESS_TOKEN,
+            "Access-Token": access_token,
             "Content-Type": "application/json",
         }
-        params = {"advertiser_id": _ADVERTISER_ID, "page_size": 20}
+        params = {"advertiser_id": advertiser_id, "page_size": 20}
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()

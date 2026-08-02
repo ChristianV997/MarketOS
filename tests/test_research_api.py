@@ -48,6 +48,20 @@ def test_opportunity_route_rejects_unknown_intent(client):
     assert response.status_code == 422
 
 
+def test_source_readiness_route_is_safe_and_reports_flags(client, monkeypatch):
+    monkeypatch.setenv("FF_PILLAR_A_INGESTION", "false")
+    monkeypatch.delenv("MARKETOS_RESEARCH_SECRET_ID", raising=False)
+
+    response = client.get("/research/sources/readiness")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["global_ingestion_enabled"] is False
+    assert len(payload["sources"]) == 6
+    assert all(item["status"] == "disabled" for item in payload["sources"])
+    assert "secret" not in str(payload).lower()
+
+
 def test_intelligence_input_uses_ranked_deduplicated_opportunities(monkeypatch, tmp_path):
     from backend.api import _research_intelligence_keywords
 

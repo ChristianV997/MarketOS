@@ -6,6 +6,8 @@ import os
 from fastapi import APIRouter, Query
 
 from backend.research import IngestionRunStore, TrendRecordStore
+from backend.research.credentials import load_research_credentials
+from backend.research.readiness import all_source_readiness
 
 router = APIRouter()
 
@@ -58,3 +60,15 @@ def research_opportunities(
 @router.get("/research/sources")
 def research_sources(max_age_hours: float | None = Query(default=72.0, ge=0.0, le=24.0 * 365)):
     return {"sources": _store().source_summary(max_age_hours=max_age_hours)}
+
+
+@router.get("/research/sources/readiness")
+def research_sources_readiness(
+    max_age_hours: float | None = Query(default=72.0, ge=0.0, le=24.0 * 365),
+):
+    """Return safe source configuration and live-evidence readiness metadata."""
+    return all_source_readiness(
+        summaries=_store().source_summary(max_age_hours=max_age_hours),
+        credentials=load_research_credentials(),
+        runs=_runs().list(100),
+    )
