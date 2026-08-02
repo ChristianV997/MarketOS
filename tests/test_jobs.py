@@ -106,3 +106,14 @@ def test_job_result_structure_for_success_and_failure():
     assert expected_keys.issubset(failed.keys())
     assert failed["status"] == "failed"
     assert failed["error"] == "validation failed"
+
+
+def test_job_result_preserves_structured_handler_payload():
+    registry = JobRegistry(max_retries=0)
+    registry.register("research.sources.v1", lambda: {"status": "partial", "sources": {"reddit": "failed"}})
+
+    result = registry.run("research.sources.v1")
+
+    assert result["status"] == "succeeded"
+    assert result["payload"]["status"] == "partial"
+    assert result["payload"]["sources"]["reddit"] == "failed"

@@ -6,11 +6,14 @@ import pytest
 from backend.adapters.research import (
     AdapterFetchError,
     GoogleTrendsAdapterV1,
+    MercadoLibreResearchAdapter,
     ResearchAdapterRegistry,
+    RedditResearchAdapter,
     classify_http_error,
 )
 from backend.jobs.research_trend_v1 import (
     AdapterMetrics,
+    build_research_registry,
     register_research_sources_job,
     register_research_trend_v1_job,
 )
@@ -314,3 +317,68 @@ def test_source_fanout_isolates_source_failure(tmp_path, monkeypatch):
     assert result["sources"]["good"]["status"] == "succeeded"
     assert result["sources"]["broken"]["status"] == "failed"
     assert len(store.findTopN(10)) == 1
+
+
+@pytest.mark.parametrize(
+    ("adapter_class", "signal"),
+    [
+        (RedditResearchAdapter, {"product": "best desk lamp", "velocity": 0.8}),
+        (MercadoLibreResearchAdapter, {"product": "wireless earbuds", "velocity": 0.6}),
+    ],
+)
+def test_public_market_adapters_preserve_unknown_competition(adapter_class, signal):
+    record = adapter_class().to_canonical(signal, fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    assert record["topic"] == signal["product"]
+    assert record["competition"] is None
+    assert record["raw"]["competition_evidence"] == "unavailable"
+
+
+def test_source_flags_skip_new_sources_but_preserve_google_compatibility(monkeypatch, tmp_path):
+    monkeypatch.setenv("FF_PILLAR_A_INGESTION", "true")
+    monkeypatch.setenv("FF_PILLAR_A_SOURCE_V1", "true")
+    monkeypatch.delenv("FF_RESEARCH_SOURCE_GOOGLE_TRENDS_V1", raising=False)
+    monkeypatch.delenv("FF_RESEARCH_SOURCE_REDDIT", raising=False)
+    monkeypatch.delenv("FF_RESEARCH_SOURCE_MERCADOLIBRE", raising=False)
+
+    class CapturingRegistry:
+        def register(self, name, handler):
+            self.handler = handler
+
+    registry = CapturingRegistry()
+    adapters = ResearchAdapterRegistry()
+    adapters.register("google_trends_v1", type("Google", (), {
+        "name": "google_trends_v1",
+        "fetch": lambda self: [],
+        "to_canonical": lambda self, raw, fetched_at=None: raw,
+    })())
+    adapters.register("reddit", RedditResearchAdapter())
+    adapters.register("mercadolibre", MercadoLibreResearchAdapter())
+    register_research_sources_job(registry, adapter_registry=adapters, store=TrendRecordStore(path=str(tmp_path / "research.db")))
+
+    result = registry.handler()
+    assert result["status"] == "succeeded"
+    assert result["sources"]["google_trends_v1"]["status"] == "succeeded"
+    assert result["sources"]["reddit"]["status"] == "skipped"
+    assert result["sources"]["mercadolibre"]["status"] == "skipped"
+
+
+def test_global_ingestion_flag_overrides_legacy_source_flag(monkeypatch, tmp_path):
+    monkeypatch.setenv("FF_PILLAR_A_SOURCE_V1", "true")
+    monkeypatch.setenv("FF_PILLAR_A_INGESTION", "false")
+    class CapturingRegistry:
+        def register(self, name, handler):
+            self.handler = handler
+
+    registry = CapturingRegistry()
+    register_research_sources_job(
+        registry,
+        adapter_registry=ResearchAdapterRegistry(),
+        store=TrendRecordStore(path=str(tmp_path / "research.db")),
+    )
+
+    assert registry.handler()["status"] == "skipped"
+
+
+def test_research_registry_schedules_fanout_and_prune(tmp_path):
+    registry = build_research_registry(store=TrendRecordStore(path=str(tmp_path / "research.db")), max_retries=0)
+    assert set(registry._handlers) == {"research.sources.v1", "research.prune"}

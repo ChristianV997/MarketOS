@@ -199,12 +199,9 @@ def _background_runner():
 # ── lifecycle ─────────────────────────────────────────────────────────────────
 
 def _research_runner():
-    from backend.jobs.runner import JobRegistry
+    from backend.jobs.research_trend_v1 import build_research_registry
     from backend.jobs.scheduler import IngestionScheduler
-    from backend.jobs.research_trend_v1 import register_research_trend_v1_job, register_research_prune_job
-    registry = JobRegistry()
-    register_research_trend_v1_job(registry)
-    register_research_prune_job(registry)
+    registry = build_research_registry()
     scheduler = IngestionScheduler(registry)
     while _bg_running:
         try:

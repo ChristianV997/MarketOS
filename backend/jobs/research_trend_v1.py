@@ -4,7 +4,13 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.adapters.research import AdapterFetchError, GoogleTrendsAdapterV1, ResearchAdapterRegistry
+from backend.adapters.research import (
+    AdapterFetchError,
+    GoogleTrendsAdapterV1,
+    MercadoLibreResearchAdapter,
+    RedditResearchAdapter,
+    ResearchAdapterRegistry,
+)
 from backend.jobs.runner import JobRegistry
 from backend.research import TrendRecordStore
 
@@ -18,6 +24,7 @@ class AdapterMetrics:
             "adapter_fetch_errors_total": 0,
             "adapter_records_fetched": 0,
             "adapter_records_rejected": 0,
+            "adapter_sources_skipped": 0,
         }
         self.by_source: dict[str, dict[str, int]] = {}
 
@@ -28,6 +35,7 @@ class AdapterMetrics:
             "records_fetched": 0,
             "records_persisted": 0,
             "records_rejected": 0,
+            "skips": 0,
         })
 
     def record_fetch(self, count: int, *, source: str = "unknown", persisted: int | None = None, rejected: int = 0):
@@ -44,6 +52,10 @@ class AdapterMetrics:
         self.counters["adapter_fetch_errors_total"] += 1
         self._source(source)["errors"] += 1
 
+    def record_skip(self, *, source: str) -> None:
+        self.counters["adapter_sources_skipped"] += 1
+        self._source(source)["skips"] += 1
+
     @property
     def snapshot(self) -> dict[str, Any]:
         return {**self.counters, "by_source": {key: dict(value) for key, value in self.by_source.items()}}
@@ -51,6 +63,33 @@ class AdapterMetrics:
 
 def _source_enabled() -> bool:
     return str(os.getenv("FF_PILLAR_A_SOURCE_V1", "false")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ingestion_enabled() -> bool:
+    # The scheduler owns the global gate. Fall back to the legacy source flag
+    # for direct callers that predate research.sources.v1.
+    if "FF_PILLAR_A_INGESTION" not in os.environ:
+        return _source_enabled()
+    return _flag_enabled("FF_PILLAR_A_INGESTION")
+
+
+def _flag_enabled(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _source_flag_enabled(source: str) -> bool:
+    if source == GoogleTrendsAdapterV1.name:
+        return _flag_enabled("FF_RESEARCH_SOURCE_GOOGLE_TRENDS_V1", default=_source_enabled())
+    if source == RedditResearchAdapter.name:
+        return _flag_enabled("FF_RESEARCH_SOURCE_REDDIT")
+    if source == MercadoLibreResearchAdapter.name:
+        return _flag_enabled("FF_RESEARCH_SOURCE_MERCADOLIBRE")
+    # Injected test or extension adapters remain enabled unless their owner
+    # supplies a dedicated flag in a custom registry wrapper.
+    return True
 
 
 def _int_env(name: str, default: int) -> int:
@@ -80,6 +119,8 @@ def build_default_adapter_registry() -> ResearchAdapterRegistry:
             confidence_baseline=_float_env("PILLAR_A_SOURCE_V1_CONFIDENCE_BASELINE", 0.7),
         ),
     )
+    registry.register(RedditResearchAdapter.name, RedditResearchAdapter())
+    registry.register(MercadoLibreResearchAdapter.name, MercadoLibreResearchAdapter())
     return registry
 
 
@@ -188,13 +229,19 @@ def register_research_sources_job(
     fetch_metrics = metrics or AdapterMetrics()
 
     def run_job() -> dict[str, Any]:
-        if not _source_enabled():
+        if not _ingestion_enabled():
             return {"status": "skipped", "sources": {}, "metrics": fetch_metrics.snapshot}
 
         started = time.perf_counter()
         fetched_at = datetime.now(timezone.utc)
         sources: dict[str, Any] = {}
+        enabled_count = 0
         for name, adapter in sorted(adapters.all().items()):
+            if not _source_flag_enabled(name):
+                fetch_metrics.record_skip(source=name)
+                sources[name] = {"status": "skipped", "reason": "feature_flag_disabled"}
+                continue
+            enabled_count += 1
             try:
                 stats = _canonicalize_and_persist(
                     adapter,
@@ -208,6 +255,13 @@ def register_research_sources_job(
                 sources[name] = {"status": "failed", "error": str(err)}
                 logger.exception("research_source_failed source=%s", name)
 
+        if enabled_count == 0:
+            return {
+                "status": "skipped",
+                "sources": sources,
+                "metrics": fetch_metrics.snapshot,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            }
         succeeded = sum(item["status"] == "succeeded" for item in sources.values())
         failed = sum(item["status"] == "failed" for item in sources.values())
         status = "succeeded" if failed == 0 else ("partial" if succeeded else "failed")
@@ -233,3 +287,16 @@ def register_research_prune_job(job_registry: JobRegistry, *, store: TrendRecord
         return {"status": "succeeded", "deleted_records": deleted}
 
     job_registry.register("research.prune", run_job)
+
+
+def build_research_registry(
+    *,
+    adapter_registry: ResearchAdapterRegistry | None = None,
+    store: TrendRecordStore | None = None,
+    max_retries: int | None = None,
+) -> JobRegistry:
+    """Build the scheduler registry used by the API research runner."""
+    registry = JobRegistry(max_retries=max_retries)
+    register_research_sources_job(registry, adapter_registry=adapter_registry, store=store)
+    register_research_prune_job(registry, store=store)
+    return registry
