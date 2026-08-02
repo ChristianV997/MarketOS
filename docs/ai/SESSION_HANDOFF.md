@@ -1,72 +1,63 @@
 # Session Handoff
 Date: 2026-08-01
-Repository: C:\Users\HP\Documents\MarketOS-claude-next
-Branch: codex/claude-next
-Objective: Reconcile the unmerged Claude capability line, execute the four-phase documentation/CI/research/service plan, and add only the missing gated Chatwoot handoff without touching parallel dirty worktrees.
+Repository: C:\Users\HP\Documents\MarketOS-research-ops
+Branch: codex/marketos-research-ops
+Commit: 01ddf80 (research-only runtime); handoff refresh pending
+Objective: Restrict MarketOS to bounded commerce research and build the dossier/report/approval path.
 
 ## Files changed
+- `backend/research/mode.py`, `cache.py`, `lease.py`, `ollama.py`
+- `services/product_research/dossiers.py`, `dossier_store.py`, `run.py`, `portfolio.py`, `launch_gate.py`, report exports
+- Research-only guards in API, orchestrator, commerce launch/checkout/fulfillment, Meta/TikTok/AJO/Postiz/affiliate/supplier paths
+- `scripts/research/*` PowerShell and Python supervisor/CLI entrypoints
+- `docs/RESEARCH_ONLY_MODE.md`, `.env.example`, `docs/ai/COMMANDS.md`
+- `tests/test_research_ops.py`
 
-Phase commits: `d94a672` archive stale docs, `7cf92f2` scoped CodeQL,
-`9c4f17f` CRM candidate research, `11bc26a` reconciliation merge,
-`a039659` gated Chatwoot handoff, and `e55c562` CodeQL fixes.
 ## Interfaces affected
-
-`run_sales_bot_simulation` preserves its four-value tuple and adds only the
-keyword `attempt_real_handoff`. API/CLI expose the same explicit opt-in;
-envelope outputs add `real_handoff` and `commercial_status`.
+- `MARKETOS_RESEARCH_ONLY=true` blocks non-dry-run external mutations.
+- `SidecarContext.require_live_idempotency()` now consults the central mode gate.
+- New `POST /api/services/category-research` and research approval request/decision routes.
+- New `ResearchRunConfig`/`run_category_research`, `CategoryDossier`, `ProductDossier`, supplier/evidence contracts.
+- No live launch path was enabled; the launch gate requires research evidence plus five human approvals.
 
 ## Tests run
-
-- Focused sales/Chatwoot/API tests: 41 passed, 12 deselected.
-- Full `tests/services`: 206 passed, 15 warnings.
-- Sales automation plus report export after CodeQL fixes: 43 passed.
-- Capital policy: 21 passed after installing the already-declared local
-  `cvxpy` dependency.
-- Semgrep ERROR policy: 0 findings; compileall passed.
-- GitHub: CodeQL, CodeQL Python analysis, Semgrep, container-smoke, and
-  deterministic-benchmarks pass on the latest pushed commit; test and quality
-  jobs were still running at handoff time.
+- Focused research/product/commercial suite: 20 passed.
+- Research safety suite after approval additions: 6 passed.
+- Broader compatibility set: 46 passed, 4 skipped.
+- Full suite: 2649 passed, 9 skipped, 11 failures from missing optional local dependencies and an existing numerical shadow-validator test; see final report.
+- `python -m compileall -q backend services orchestrator scripts/research`: passed.
+- Semgrep policy at error severity: 0 findings.
+- PowerShell one-shot supervisor smoke test: passed; generated a research-only dossier and Markdown/JSON report.
 
 ## Results
-
-The four requested phases are implemented and pushed on `codex/claude-next`.
-Draft PR: https://github.com/ChristianV997/MarketOS/pull/115. Chatwoot is
-record-keeping/draft-only and no live external write was performed.
+- Research worker produces bounded, deduplicated category dossiers with source provenance, supplier quotes, shipping/landed-cost fields, source cache/health, audience hypotheses, competitor evidence, experiment cells, related top-three portfolio selection, pessimistic/base/optimistic simulations, and tipping-point scoring.
+- Reports are written atomically under `state/research_reports/`; cache/dossiers/approvals use atomic JSON persistence.
+- Single-writer lease prevents two workers sharing a local state directory from writing concurrently.
+- Ollama enrichment is optional (`MARKETOS_RESEARCH_OLLAMA=true`) and limited to untrusted summaries/hypotheses/questions.
 
 ## Decisions made
-
-- Gate requires explicit `attempt_real_handoff=True`, a non-dry workspace, and
-  Chatwoot credential scope with configured, non-dry, allowed status.
-- Sidecar calls carry workspace/run/artifact lineage, approved context, and
-  `sales_automation:<session_id>` idempotency.
-- Each provider operation degrades independently; qualification owns whether
-  human handoff occurs.
-- Fixed CodeQL’s two failure-level findings: bounded user-controlled budget
-  regex and side-effecting file-read assertion.
-- Restored generated `backend/ci/hyperparams_meta.json` after tests mutated it;
-  it is not part of this work.
+- Keep existing discovery, supplier, validator, audit, and report infrastructure; compose it instead of adding duplicate engines.
+- Research-only is enabled by the PowerShell supervisor and documented in `docs/RESEARCH_ONLY_MODE.md`; the Python library default remains backward-compatible for existing unit tests.
+- No Postgres/S3/Dynamo shared writer was invented; a real PC/AWS shared lease/state backend remains a deployment follow-up.
 
 ## Risks
-
-- Full local repository suite did not produce a captured final summary within
-  the bounded Windows execution window; affected and services suites are
-  green. GitHub is the authoritative full-suite check still in progress.
-- A real Chatwoot smoke test requires credentials and optional inbox ID.
-- Other worktrees containing user changes were left untouched.
+- The full suite still reports 11 environment/baseline failures: missing `prometheus_client`, `trendspyg`, `sentry_sdk`, optional Firecrawl assumptions, and an existing shadow-validator array/constant-input issue.
+- External discovery sources returned 403/404 in the smoke run and therefore produced honest fallback/mock evidence; reports retain source health rather than treating it as live evidence.
+- The five-part launch approval gate is implemented but has no authentication layer yet; do not use the decision route as a substitute for operator identity/access control.
 
 ## Remaining blockers
-
-- Wait for GitHub `test` and `quality-advisory` on PR #115; merge only after
-  they pass.
-- Review/merge the draft PR into `main` after required checks complete.
+- Configure approved real research sources and credentials, then run repeated category passes to accumulate evidence.
+- Decide and implement the shared AWS lease/state backend before enabling a second active machine.
+- Resolve the 11 baseline environment/test failures in a separate dependency/tooling phase.
+- Do not enable live creation or launch until a category dossier is `candidate`, all five approval types are approved, credentials and budget checks pass, and the operator explicitly requests the launch.
 
 ## Next action
-
-Check `gh pr checks 115`; if all required checks pass, merge PR #115. If a
-check fails, inspect that run before changing code and update this handoff.
+Review `state/research_reports/<category-id>.md` and run:
+`$env:MARKETOS_RESEARCH_ONLY="true"; .\scripts\research\Start-MarketOSResearch.ps1 -Category <category> -Once -MaxProducts 20`
 
 ## What the next agent should inspect first
-
-Inspect `services/sales_automation/real_handoff.py`, then the latest PR checks
-and `docs/ai/SESSION_HANDOFF.md`; do not rediscover the full repository or
-touch the separate dirty worktrees.
+1. `docs/RESEARCH_ONLY_MODE.md`
+2. `backend/research/mode.py`
+3. `services/product_research/run.py` and `services/product_research/dossiers.py`
+4. `state/research_reports/` and `state/research_cache.json` (local, ignored)
+5. `git fetch origin; git diff origin/codex/marketos-research-ops` before editing
