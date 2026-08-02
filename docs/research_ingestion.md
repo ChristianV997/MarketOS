@@ -14,6 +14,12 @@ FF_RESEARCH_SOURCE_AMAZON_BESTSELLERS=false
 FF_RESEARCH_SOURCE_TIKTOK_ORGANIC=false
 ```
 
+Staging credentials are loaded from AWS Secrets Manager when
+`MARKETOS_RESEARCH_SECRET_ID` is set. The secret is a JSON object containing
+only allowlisted research keys such as `TIKTOK_ACCESS_TOKEN` and
+`TIKTOK_ADVERTISER_ID`. Secret values are never returned by readiness APIs or
+written to ingestion history. Public sources do not require credentials.
+
 `FF_PILLAR_A_SOURCE_V1` remains a compatibility alias for Google Trends when
 the newer Google flag is unset. Reddit and MercadoLibre confidence baselines
 can be configured with:
@@ -72,7 +78,15 @@ GET /research/ingestion/runs?limit=20
 GET /research/trends/top?limit=20&require_competition=false
 GET /research/opportunities?limit=20&max_age_hours=72&min_sources=1
 GET /research/sources?max_age_hours=72
+GET /research/sources/readiness?max_age_hours=72
 ```
+
+Use `/research/sources/readiness` before enabling a source. It reports safe
+credential state, feature flags, missing key names, last live evidence, record
+coverage, and the deterministic three-run reliability gate. The `promotion`
+section becomes `ready` only after at least two sources each have three
+successful runs with at least five live records, under 10% rejection, and
+fresh evidence. The endpoint does not perform a network fetch.
 
 Prometheus metrics are exposed under `/metrics/prometheus`, including
 source-level fetch, record, retry, and duration counters.

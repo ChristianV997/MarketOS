@@ -7,6 +7,8 @@ from backend.research.trend_store import (
 )
 from backend.research.ingestion_store import IngestionRunStore
 from backend.research.topic_intelligence import normalize_topic, rank_opportunity
+from backend.research.credentials import CredentialLoadStatus, credential_status, load_research_credentials
+from backend.research.readiness import SOURCE_SPECS, all_source_readiness, source_readiness
 
 __all__ = [
     "ResearchMetrics",
@@ -17,4 +19,10 @@ __all__ = [
     "IngestionRunStore",
     "normalize_topic",
     "rank_opportunity",
+    "CredentialLoadStatus",
+    "credential_status",
+    "load_research_credentials",
+    "SOURCE_SPECS",
+    "all_source_readiness",
+    "source_readiness",
 ]

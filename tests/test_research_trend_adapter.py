@@ -611,3 +611,35 @@ def test_fanout_timeout_is_bounded_by_worker_batches(monkeypatch, tmp_path):
     # this batch to three timeout windows.
     assert elapsed < 0.4
     assert metrics.snapshot["adapter_fetch_errors_total"] == 5
+
+
+def test_enabled_tiktok_source_is_skipped_before_fetch_when_credentials_missing(monkeypatch, tmp_path):
+    monkeypatch.setenv("FF_PILLAR_A_INGESTION", "true")
+    monkeypatch.setenv("FF_RESEARCH_SOURCE_TIKTOK_ORGANIC", "true")
+    monkeypatch.delenv("MARKETOS_RESEARCH_SECRET_ID", raising=False)
+    monkeypatch.delenv("TIKTOK_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("TIKTOK_ADVERTISER_ID", raising=False)
+
+    class MustNotFetch:
+        name = "tiktok_organic"
+
+        def fetch(self):
+            raise AssertionError("preflight should prevent fetch")
+
+    class CapturingRegistry:
+        def register(self, name, handler):
+            self.handler = handler
+
+    adapters = ResearchAdapterRegistry()
+    adapters.register("tiktok_organic", MustNotFetch())
+    registry = CapturingRegistry()
+    register_research_sources_job(
+        registry,
+        adapter_registry=adapters,
+        store=TrendRecordStore(path=str(tmp_path / "research.db")),
+    )
+
+    result = registry.handler()
+
+    assert result["status"] == "skipped"
+    assert result["sources"]["tiktok_organic"]["reason"] == "missing_credentials"
