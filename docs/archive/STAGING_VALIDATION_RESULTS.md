@@ -1,3 +1,5 @@
+> **Archived — superseded by deploy/aws/README.md.** Kept for history; do not treat any claim below as current.
+
 # Phase 7-8 Staging Validation Results
 
 **Date**: July 19, 2026  

@@ -1,3 +1,5 @@
+> **Archived — superseded by deploy/aws/README.md.** Kept for history; do not treat any claim below as current.
+
 # MarketOS ROI Optimization: COMPLETE DEPLOYMENT SUMMARY
 
 **Status**: ✅ **FULLY DEPLOYED & LIVE IN PRODUCTION**  

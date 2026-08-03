@@ -2,7 +2,7 @@
 organic blending, and simulation/engine.py Monte Carlo gating.
 
 These modules were originally built standalone with no call sites in the
-live execution path (see DEPLOYMENT_GUIDE.md "Live Wiring"). This suite
+live execution path (see docs/archive/DEPLOYMENT_GUIDE.md "Live Wiring"). This suite
 locks in the selection ladder, the flag gating, and the shadow journaling
 added when they were wired in.
 """

@@ -8,6 +8,9 @@ services:
     depends_on:
       - redis
       - db
+  # redis/db: provisioned for a future Postgres-backed persistence layer
+  # (see README.md's "Known gaps"). Not currently wired into backend/api.py
+  # or backend/config.py — workspaces are JSON files today, not a database.
   redis:
     image: redis:7
   db:

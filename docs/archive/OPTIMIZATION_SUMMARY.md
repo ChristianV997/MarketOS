@@ -1,3 +1,5 @@
+> **Archived — superseded by README.md.** Kept for history; do not treat any claim below as current.
+
 # MarketOS System Optimization: Complete Summary
 
 **Completion Date**: 2025-01-20  

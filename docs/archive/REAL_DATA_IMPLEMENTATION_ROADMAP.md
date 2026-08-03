@@ -1,3 +1,5 @@
+> **Archived — superseded by README.md.** Kept for history; do not treat any claim below as current.
+
 # MarketOS Real Data Implementation Roadmap
 
 **Phase**: Weeks 1-6 (Parallel with Production Monitoring)  

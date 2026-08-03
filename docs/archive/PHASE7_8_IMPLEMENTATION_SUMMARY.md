@@ -1,3 +1,5 @@
+> **Archived — superseded by README.md.** Kept for history; do not treat any claim below as current.
+
 # Phase 7-8 Implementation: Creative Optimization & Organic Channel
 
 **Date**: July 19, 2026  

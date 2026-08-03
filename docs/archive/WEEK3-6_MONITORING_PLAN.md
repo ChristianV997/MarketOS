@@ -1,3 +1,5 @@
+> **Archived — superseded by README.md.** Kept for history; do not treat any claim below as current.
+
 # Week 3-6 Continuous Monitoring & Monthly Validation Plan
 
 **Status**: Week 2 Stage 2 Complete  

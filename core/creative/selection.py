@@ -2,7 +2,7 @@
 
 Single source of truth for choosing which hooks/angles enter the live
 rotation, gated by two independently-flippable flags (matching the rolling
-hour-by-hour rollout in DEPLOYMENT_GUIDE.md):
+hour-by-hour rollout in docs/archive/DEPLOYMENT_GUIDE.md):
 
   PHASE7_AB_TEST_VALIDITY_LIVE      restrict the candidate pool to hooks/
                                     angles that have reached statistical

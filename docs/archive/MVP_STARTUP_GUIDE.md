@@ -1,3 +1,5 @@
+> **Archived — superseded by README.md.** Kept for history; do not treat any claim below as current.
+
 # MarketOS Dropship MVP — Startup Guide
 
 This guide walks you through running the MVP dropship system to launch real (sandboxed) ad campaigns and track profitability.

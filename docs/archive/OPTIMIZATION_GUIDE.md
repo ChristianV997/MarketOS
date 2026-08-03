@@ -1,3 +1,5 @@
+> **Archived — superseded by README.md.** Kept for history; do not treat any claim below as current.
+
 # MarketOS Performance & Cost Optimization Guide
 
 This guide identifies the hottest code paths and provides specific optimization strategies for the MVP.

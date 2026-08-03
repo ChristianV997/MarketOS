@@ -1,3 +1,5 @@
+> **Archived — superseded by README.md.** Kept for history; do not treat any claim below as current.
+
 # MarketOS MVP — Phase 2-4 Execution Plan
 
 **Goal**: Transform MVP from functional to revenue-generating system that optimizes costs and validates profitability predictions against real campaign data.

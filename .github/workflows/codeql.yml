@@ -1,0 +1,48 @@
+name: CodeQL
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend/commerce/**'
+      - 'backend/integrations/**'
+      - 'orchestrator/**'
+      - 'connectors/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'backend/commerce/**'
+      - 'backend/integrations/**'
+      - 'orchestrator/**'
+      - 'connectors/**'
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          # Default security-and-quality query suite; no custom pack yet.
+          # Scoped (via the on.push/on.pull_request paths above) to the same
+          # external-write boundary semgrep/ai-safety.yml's
+          # marketos-external-write-call-review rule already targets.
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:python'

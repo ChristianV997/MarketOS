@@ -1,3 +1,5 @@
+> **Archived — superseded by README.md.** Kept for history; do not treat any claim below as current.
+
 # Week 1: Real ROAS Data Integration — COMPLETE ✅
 
 **Status**: Implementation & Testing Complete  

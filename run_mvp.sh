@@ -63,4 +63,4 @@ if result['status'] == 'ok':
 "
 
 echo ""
-echo "📚 For more information, see MVP_STARTUP_GUIDE.md"
+echo "📚 For more information, see docs/archive/MVP_STARTUP_GUIDE.md"

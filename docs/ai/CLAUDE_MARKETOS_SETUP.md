@@ -117,5 +117,9 @@ Policy: `semgrep/ai-safety.yml`. Current warning findings are review prompts aro
 
 - Graphify is not installed because the package identity was ambiguous.
 - Context7 is not configured because no verified local client configuration is present.
-- CodeQL is deferred to release/security-sensitive analysis.
+- CodeQL runs as a scoped, gated CI job (`.github/workflows/codeql.yml`) on
+  `backend/commerce/**`, `backend/integrations/**`, `orchestrator/**`, and
+  `connectors/**` — the same security-sensitive boundary
+  `semgrep/ai-safety.yml`'s `marketos-external-write-call-review` rule
+  targets. It is CI-only, not a local dev-loop tool in either environment.
 - Ollama is local and optional; its small model requires frontier-model review for any generated artifact.

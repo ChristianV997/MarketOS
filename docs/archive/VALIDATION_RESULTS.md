@@ -1,3 +1,5 @@
+> **Archived — superseded by README.md.** Kept for history; do not treat any claim below as current.
+
 # Phase 3 Validation: Full Results & Recommendations
 
 **Date**: 2025-01-20  
