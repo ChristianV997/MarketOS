@@ -168,12 +168,15 @@ def _cmd_sales_bot_sim(args: argparse.Namespace) -> int:
 
     workspace = _resolve_workspace(args.workspace)
     messages = args.message or list(_DEMO_LEAD_MESSAGES)
-    session, handoff, flow, _envelope = run_sales_bot_simulation(args.vertical, messages, workspace=workspace)
+    session, handoff, flow, envelope = run_sales_bot_simulation(
+        args.vertical, messages, workspace=workspace, attempt_real_handoff=args.attempt_real_handoff,
+    )
 
     if args.json:
         from services.reporting import json_safe
         print(json.dumps(json_safe({
             "session": session.to_dict(), "handoff": handoff.to_dict(), "qualification_flow": flow,
+            "real_handoff": envelope.outputs.get("real_handoff"), "status": envelope.outputs.get("status"),
         }), indent=2, default=str))
     else:
         print(render_sales_bot_setup_plan_markdown(session, handoff, flow))
@@ -315,6 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     sales_bot.add_argument("--vertical", required=True)
     sales_bot.add_argument("--message", action="append", help="A scripted lead message; repeat for a multi-turn conversation. Defaults to a short demo script if omitted.")
     sales_bot.add_argument("--workspace", default=None)
+    sales_bot.add_argument("--attempt-real-handoff", action="store_true", help="Also attempt a real (draft-only) Chatwoot conversation record; no-op unless the workspace is live with Chatwoot configured")
     sales_bot.add_argument("--json", action="store_true")
     sales_bot.set_defaults(func=_cmd_sales_bot_sim)
 

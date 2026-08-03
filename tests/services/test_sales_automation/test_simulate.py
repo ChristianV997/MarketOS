@@ -44,3 +44,22 @@ class TestRunSalesBotSimulation:
         store = ArtifactStore()
         saved = store.load(envelope.workspace_id, envelope.experiment_id, "result.json")
         assert "session" in saved and "handoff" in saved
+
+    def test_default_call_never_attempts_a_real_handoff(self):
+        _, _, _, envelope = run_sales_bot_simulation("ecommerce_brand", ["hi"])
+        assert envelope.outputs["real_handoff"] is None
+        assert envelope.outputs["status"] == "ready_for_client_service"
+
+    def test_attempt_real_handoff_on_unconfigured_workspace_behaves_like_simulation_only(self):
+        # No Chatwoot env vars are set in tests, so even with the flag on
+        # and a live workspace, the gate stays closed — same as the default.
+        from backend.workspaces.client_workspace import ClientWorkspace
+
+        workspace = ClientWorkspace(name="live-unconfigured", dry_run_default=False)
+        session, handoff, flow, envelope = run_sales_bot_simulation(
+            "ecommerce_brand", ["hi"], workspace=workspace, attempt_real_handoff=True,
+        )
+        assert isinstance(session, ChatSession)
+        assert isinstance(handoff, AppointmentHandoff)
+        assert envelope.outputs["real_handoff"] is None
+        assert envelope.outputs["status"] == "needs_credentials"

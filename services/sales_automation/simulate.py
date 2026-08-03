@@ -14,9 +14,12 @@ from backend.experiments.registry import get_experiment_registry
 from backend.workspaces.artifact_store import ArtifactStore
 from backend.workspaces.client_workspace import ClientWorkspace
 
+from services.status import commercial_status
+
 from .appointment_flow import create_appointment_handoff, handle_chat_turn
 from .follow_up import generate_follow_up_sequence
 from .qualification import generate_qualification_flow
+from .real_handoff import INTEGRATION_KEY, attempt_real_conversation_handoff
 from .schemas import AppointmentHandoff, ChatSession
 
 SERVICE_NAME = "sales_automation"
@@ -42,8 +45,15 @@ def run_sales_bot_simulation(
     scripted_lead_messages: list[str],
     *,
     workspace: ClientWorkspace | None = None,
+    attempt_real_handoff: bool = False,
 ) -> tuple[ChatSession, AppointmentHandoff, list[str], CommercialRunEnvelope]:
-    """Never raises. Returns (session, handoff, qualification_flow, envelope)."""
+    """Never raises. Returns (session, handoff, qualification_flow, envelope) —
+    unchanged from before `attempt_real_handoff` existed. When
+    attempt_real_handoff=True and the workspace has a live, configured
+    Chatwoot credential, a real (draft-only) conversation record is also
+    attempted; its result and a commercial `status` label live in
+    envelope.outputs, not in this return tuple, so existing callers are
+    unaffected."""
     workspace = workspace or _default_workspace()
     registry = get_experiment_registry()
     store = ArtifactStore()
@@ -63,11 +73,25 @@ def run_sales_bot_simulation(
     handoff = create_appointment_handoff(session)
     follow_up = generate_follow_up_sequence(session) if not session.handed_off else []
 
+    real_handoff = attempt_real_conversation_handoff(
+        session, handoff, workspace=workspace, envelope_id=envelope.experiment_id,
+        attempt_real_handoff=attempt_real_handoff,
+    )
+    # Credentials are only required when a real handoff was actually
+    # requested — the qualification simulation itself never needs them, so
+    # simulation-only callers (the default) never see "needs_credentials".
+    status = commercial_status(
+        requires_credentials=[INTEGRATION_KEY] if attempt_real_handoff else None,
+        workspace=workspace,
+    )
+
     outputs = {
         "session": session.to_dict(),
         "handoff": handoff.to_dict(),
         "qualification_flow": qualification_flow,
         "follow_up_sequence": follow_up,
+        "real_handoff": real_handoff,
+        "status": status,
     }
     try:
         from services.reporting import save_report_artifacts

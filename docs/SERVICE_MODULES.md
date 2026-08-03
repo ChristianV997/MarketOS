@@ -176,18 +176,23 @@ logic, monetization model, risks), `status`.
 **What it does**: chat-based lead qualification (deterministic
 keyword/regex slot-filling, no LLM call, no cost), FAQ answering (only from
 supplied context, never fabricated), appointment handoff scoring, and
-follow-up sequences. **Simulation-only** — no real messaging adapter yet.
-See `docs/SALES_AUTOMATION_MODULE.md` for the full design and why.
+follow-up sequences. The qualification logic is simulation-only; an
+optional, explicitly-gated **real, draft-only** conversation/CRM
+record-keeping path exists via `real_handoff.py`
+(`attempt_real_handoff=True` + a live workspace + configured Chatwoot
+credential — see `docs/SALES_AUTOMATION_MODULE.md` for the full design and
+gate conditions).
 
 **Who buys it**: not yet sellable as a standalone client deliverable — see
 status below. Useful today for your own internal lead-qualification logic
-design/testing.
+design/testing, or with `attempt_real_handoff` for real Chatwoot
+conversation/contact record-keeping once configured.
 
-**Inputs**: `vertical`, `scripted_lead_messages` (a list of strings simulating a lead's messages), `workspace`.
+**Inputs**: `vertical`, `scripted_lead_messages` (a list of strings simulating a lead's messages), `workspace`, `attempt_real_handoff` (optional).
 
-**Outputs**: `ChatSession`, `AppointmentHandoff` (`status=ready_for_internal_use`), qualification flow, follow-up sequence.
+**Outputs**: `ChatSession`, `AppointmentHandoff` (`status=ready_for_internal_use`), qualification flow, follow-up sequence, plus `real_handoff` and a `status` label (via `services.status.commercial_status`) in the envelope outputs.
 
-**CLI**: `python -m marketos.cli services sales-bot-sim --vertical VERTICAL [--message "..." ...] [--json]`
+**CLI**: `python -m marketos.cli services sales-bot-sim --vertical VERTICAL [--message "..." ...] [--attempt-real-handoff] [--json]`
 
 **API**: `POST /api/services/sales-automation`
 
@@ -195,7 +200,7 @@ design/testing.
 
 **Price range**: 30,000–100,000 MXN setup (once real messaging is wired) · 7,500–30,000 MXN monthly retainer · future performance bonus per qualified appointment once tracking exists
 
-**Status**: `ready_for_internal_use` (honest: this is not yet a sellable client service until a real messaging adapter exists)
+**Status**: `ready_for_internal_use` (honest: this is not yet a sellable client service — the qualification core has no live messaging send path, only an optional draft-only Chatwoot record-keeping bridge)
 
 ---
 

@@ -124,6 +124,15 @@ class TestSalesAutomationRoute:
         assert data["session"]
         assert data["handoff"]
         assert data["experiment_id"]
+        assert data["real_handoff"] is None
+
+    def test_attempt_real_handoff_flag_is_a_noop_without_credentials(self, client):
+        resp = client.post(
+            "/api/services/sales-automation",
+            params={"vertical": "car_sales", "attempt_real_handoff": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["real_handoff"] is None
 
 
 class TestProfitStackAdvisorRoute:

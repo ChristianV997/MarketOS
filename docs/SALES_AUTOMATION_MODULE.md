@@ -1,9 +1,11 @@
 # Sales automation module (`services.sales_automation`)
 
-Chat-based lead qualification and appointment handoff. **Simulation-only
-today** — there is no real outbound messaging adapter (WhatsApp, web chat,
-CRM, calendar) wired in. Every function operates on in-memory `ChatSession`
-objects; nothing here sends a real message to a real lead.
+Chat-based lead qualification and appointment handoff. **The qualification
+logic itself is simulation-only** — every function still operates on
+in-memory `ChatSession` objects, and no real message is ever sent to a real
+lead. Conversation/CRM record-keeping now has an optional, explicitly-gated
+**real, draft-only** path via Chatwoot (see "Real conversation handoff"
+below) — WhatsApp, web chat, CRM, and calendar adapters remain unwired.
 
 ## Why simulation-only
 
@@ -65,10 +67,49 @@ python -m marketos.cli services sales-bot-sim --vertical real_estate \
     --message "asap, budget is $500,000"
 ```
 
+## Real conversation handoff (`real_handoff.py`, optional)
+
+`attempt_real_conversation_handoff` bridges a completed simulation to
+`backend.contracts.adapters.ConversationProvider`
+(`backend/integrations/chatwoot.py`'s `conversation_provider_chatwoot`) —
+but only when explicitly asked to. It is a no-op (returns `None`) unless
+**all** of the following hold:
+
+1. The caller passed `attempt_real_handoff=True` (CLI:
+   `--attempt-real-handoff`; API: `attempt_real_handoff` body param).
+2. `workspace.dry_run_default` is `False`.
+3. `backend.workspaces.credential_scope.scope_for(workspace)` reports
+   Chatwoot as `configured`, non-dry-run, and allowed.
+
+This mirrors the existing `confirm_live` precedent in `backend/api.py` and
+the `live_action_requested` flag in
+`services/ecommerce_operator/launch_guard.py` — a real attempt always
+requires an explicit opt-in on top of a live workspace, never an implicit
+one. It deliberately does not reuse
+`backend.workspaces.live_mode_checklist.check()`, since that gate is
+spend/budget-ceiling-shaped and would wrongly block a non-monetary
+conversation action.
+
+When the gate is open, it creates a Chatwoot contact and conversation,
+backfills the lead's transcript, and stages a draft reply — `draft`, per
+`ConversationProvider`'s own contract, is always
+`draft_pending_human_approval`; this module never gains a live-send path.
+It only calls `handoff_to_human` when `session.handed_off` is already
+`True` from `appointment_flow.py`'s existing decision logic — it never
+makes a second, independent handoff decision. Every provider call is
+independently try/excepted, so one failure never aborts the rest.
+
+Default calls (`attempt_real_handoff` omitted or `False`) are unaffected —
+`run_sales_bot_simulation`'s 4-tuple return stays byte-identical; the real
+handoff result and a `status` label (via `services.status.commercial_status`)
+live in `envelope.outputs`, not in the return tuple.
+
 ## Explicitly out of scope (future work)
 
-- Real WhatsApp/web-chat/CRM/calendar adapters and the live-mode gate they'd
-  need (mirroring `backend.workspaces.live_mode_checklist`).
+- Real WhatsApp/web-chat/calendar adapters, and a CRM adapter (see
+  `docs/CRM_CANDIDATE_RESEARCH.md` for research on permissively-licensed
+  candidates) — the live-mode gate pattern above is designed to extend to
+  those the same way once they exist.
 - LLM-generated (vs. templated) bot replies — deliberately deterministic
   for now, matching this repo's "Deterministic First" principle; an LLM
   could later be wired in for FAQ answering specifically via the existing

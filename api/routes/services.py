@@ -170,10 +170,13 @@ def digital_product(
 @router.post("/sales-automation")
 def sales_automation(
     vertical: str, messages: list[str] | None = None, workspace: str | None = None,
+    attempt_real_handoff: bool = False,
 ):
     """Simulate a lead-qualification chat conversation — local only, no real
-    messaging (see docs/SALES_AUTOMATION_MODULE.md). Never raises for the
-    same reason as the routes above."""
+    messaging by default (see docs/SALES_AUTOMATION_MODULE.md).
+    attempt_real_handoff additionally attempts a real, draft-only Chatwoot
+    conversation record — a no-op unless the workspace is live with Chatwoot
+    configured. Never raises for the same reason as the routes above."""
     from services.sales_automation.simulate import run_sales_bot_simulation
     try:
         scripted = messages or [
@@ -182,10 +185,12 @@ def sales_automation(
         ]
         session, handoff, flow, envelope = run_sales_bot_simulation(
             vertical, scripted, workspace=_resolve_workspace(workspace),
+            attempt_real_handoff=attempt_real_handoff,
         )
         return json_safe({
             "session": session.to_dict(), "handoff": handoff.to_dict(),
             "qualification_flow": flow, "experiment_id": envelope.experiment_id,
+            "real_handoff": envelope.outputs.get("real_handoff"),
         })
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
