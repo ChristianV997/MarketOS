@@ -57,7 +57,7 @@ jobs:
             -x "state/*" \
             -x ".pytest_cache/*"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-assets
           path: |
