@@ -65,7 +65,7 @@ openai>=2.50.0         # OpenAI provider (cloud completions + embeddings)
 #   pip install llama-cpp-python # llama.cpp: CPU-only GGUF inference
 
 # ── vector cognition fabric ───────────────────────────────────────────────────
-qdrant-client>=1.9.0   # Qdrant vector store (in-memory fallback used without Docker)
+qdrant-client>=1.18.0   # Qdrant vector store (in-memory fallback used without Docker)
 
 # ── AWS standby (optional) ────────────────────────────────────────────────────
 # boto3: only needed if MARKETOS_HEARTBEAT_BUCKET is set (backend/aws/heartbeat.py,
