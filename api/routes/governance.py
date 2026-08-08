@@ -6,6 +6,7 @@ from fastapi import APIRouter, Body, Query
 
 from backend.governance.registry import get_governance_registry
 from backend.organization.planner_executor_reviewer import run_planner_executor_reviewer
+from backend.organization.service_contract import get_service_contract_registry
 
 router = APIRouter(prefix="/api/governance", tags=["governance"])
 
@@ -21,6 +22,28 @@ def proposal(proposal_id: str) -> dict:
     registry = get_governance_registry(); item = registry.get_proposal(proposal_id)
     if item is None: return {"status": "not_found", "proposal_id": proposal_id}
     return {"proposal": item.to_dict(), "decisions": [d.to_dict() for d in registry.list_decisions(proposal_id)]}
+
+
+@router.get("/proposals/{proposal_id}/decisions")
+def proposal_decisions(proposal_id: str) -> dict:
+    return {"proposal_id": proposal_id, "decisions": [d.to_dict() for d in get_governance_registry().list_decisions(proposal_id)]}
+
+
+@router.get("/service-contracts")
+def service_contracts() -> dict:
+    return {"services": [item.to_dict() for item in get_service_contract_registry().list()]}
+
+
+@router.post("/proposals/{proposal_id}/transition")
+def transition_proposal(proposal_id: str, payload: dict[str, Any] = Body(default_factory=dict)) -> dict:
+    try:
+        registry = get_governance_registry(); item = registry.get_proposal(proposal_id)
+        if item is None: return {"status": "not_found", "proposal_id": proposal_id}
+        result = item.transition(str(payload.get("status", "")), str(payload.get("reason", "")))
+        registry.register_proposal(item)
+        return {"status": "ok" if result["allowed"] else "invalid_transition", "transition": result, "proposal": item.to_dict()}
+    except Exception as exc:
+        return {"status": "error", "error_type": type(exc).__name__, "error": "proposal_transition_failed"}
 
 
 @router.post("/run-loop")

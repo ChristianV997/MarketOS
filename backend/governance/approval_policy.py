@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 
 @dataclass
@@ -16,10 +16,11 @@ class ApprovalPolicy:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def evaluate_proposal_approval(proposal, agent_role, workspace=None, live_action_requested: bool = False) -> dict[str, Any]:
+def evaluate_proposal_approval(proposal, agent_role, workspace=None, live_action_requested: bool = False,
+                               policy: ApprovalPolicy | None = None, prior_decisions: Iterable[Any] = ()) -> dict[str, Any]:
     blocked: list[str] = []
     reviews: list[str] = []
-    policy = ApprovalPolicy()
+    policy = policy or ApprovalPolicy()
     if workspace is None or (isinstance(workspace, str) and not workspace.strip()): blocked.append("workspace_required")
     if agent_role is None or not getattr(agent_role, "active", False): blocked.append("active_agent_required")
     if live_action_requested:
@@ -30,10 +31,26 @@ def evaluate_proposal_approval(proposal, agent_role, workspace=None, live_action
     if budget > authority:
         reviews.extend(["finance", "risk"])
         blocked.extend(["finance_review_required", "risk_review_required"])
-    if policy.require_reviewer and not live_action_requested:
+    budget_review_required = budget > float(getattr(agent_role, "requires_review_above", float("inf"))) if agent_role else True
+    if budget_review_required:
         reviews.append("reviewer")
-        if getattr(agent_role, "role_type", "") not in {"manager", "executive"}:
-            blocked.append("reviewer_required")
+    specialist_review_required = getattr(agent_role, "role_type", "") == "specialist"
+    if policy.require_reviewer and not live_action_requested and getattr(agent_role, "role_type", "") not in {"manager", "executive", "reviewer"}:
+        reviews.append("reviewer")
+    if (budget_review_required or specialist_review_required) and not live_action_requested:
+        blocked.append("reviewer_required")
+    finance_review_required = budget > policy.require_finance_for_budget_above
+    risk_review_required = budget > policy.require_risk_for_budget_above
+    if finance_review_required: reviews.append("finance")
+    if risk_review_required: reviews.append("risk")
+    if finance_review_required and not any(getattr(item, "decision", "") == "approved" and "finance" in getattr(item, "decided_by_agent_id", "") for item in prior_decisions):
+        blocked.append("finance_policy_review_required")
+    if risk_review_required and not any(getattr(item, "decision", "") == "approved" and "risk" in getattr(item, "decided_by_agent_id", "") for item in prior_decisions):
+        blocked.append("risk_policy_review_required")
+    if budget > authority and not any(getattr(item, "decision", "") == "approved" and ("finance" in getattr(item, "decided_by_agent_id", "") or "risk" in getattr(item, "decided_by_agent_id", "") or "human" in getattr(item, "decided_by_agent_id", "")) for item in prior_decisions):
+        blocked.append("budget_authority_exceeded")
     dry_run_safe = not live_action_requested and policy.allowed_dry_run_without_human
-    return {"allowed": not blocked, "blocked_reasons": blocked, "required_reviews": list(dict.fromkeys(reviews)),
-            "policy_id": policy.policy_id, "dry_run_safe": dry_run_safe}
+    return {"allowed": not blocked, "blocked_reasons": list(dict.fromkeys(blocked)), "required_reviews": list(dict.fromkeys(reviews)),
+            "policy_id": policy.policy_id, "dry_run_safe": dry_run_safe,
+            "budget_review_required": budget_review_required, "finance_review_required": finance_review_required,
+            "risk_review_required": risk_review_required, "human_review_required": live_action_requested}

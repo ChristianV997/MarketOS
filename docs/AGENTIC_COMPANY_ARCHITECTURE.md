@@ -28,13 +28,17 @@ Implemented now:
 - proposal and decision lifecycle records;
 - deterministic dry-run approval evaluation;
 - a small planner/executor/reviewer compatibility loop;
+- a fail-closed service contract registry with verified read-only fallbacks for
+  unit economics and creative-script generation;
 - route modules for organization inspection and governance runs;
 - path-safe filesystem Obsidian rendering, skipped when no vault is configured.
 
-The loop will report an unavailable service rather than inventing a service
-module. This checkout does not contain the requested `services/*` package, so
-those service adapters remain an integration follow-up rather than duplicated
-implementations.
+The current safe service map is intentionally narrow. Unit economics wraps the
+existing deterministic `evaluation.calculate_unit_economics`; creative growth
+wraps the existing text generator in dry-run mode. Product research, customer
+intelligence, and profit-stack advisory remain unavailable because this
+checkout has no verified read-only service boundary for them. The loop reports
+an unavailable service rather than inventing business logic.
 
 Future work: authentication, billing, real human accounts, external approval
 workflows, Slack/Telegram approvals, Obsidian REST/MCP, durable multi-process
