@@ -45,14 +45,21 @@ def default_capabilities() -> list[ServiceCapability]:
     }
     items: list[ServiceCapability] = []
     for service_name, (module_path, function_name) in _SERVICE_TARGETS.items():
+        using_verified_fallback = False
+        primary_available = False
+        try:
+            importlib.import_module(module_path)
+            primary_available = True
+        except ImportError:
+            pass
         if service_name in fallback:
-            try:
-                importlib.import_module(module_path)
-            except ImportError:
+            if not primary_available:
                 module_path, function_name = fallback[service_name]
+                using_verified_fallback = True
         items.append(ServiceCapability(service_name=service_name, module_path=module_path, function_name=function_name,
-                                       read_only=True, dry_run_required=True, live_mutation_possible=False,
-                                       external_io_possible=service_name == "creative_growth", allowed_departments=allowed[service_name]))
+                                       read_only=True, dry_run_required=True, live_mutation_possible=primary_available and not using_verified_fallback,
+                                       external_io_possible=service_name == "creative_growth", allowed_departments=allowed[service_name],
+                                       metadata={"verified": using_verified_fallback, "requires_explicit_audit": not using_verified_fallback}))
     return items
 
 
