@@ -114,6 +114,18 @@ async def _lifespan(_: FastAPI):
 
 app = FastAPI(title="MarketOS v4", version="4.0.0", lifespan=_lifespan)
 
+# Governed, dry-run-only organization endpoints are kept in route modules so
+# they can evolve without duplicating the legacy runtime API below.
+try:
+    from api.routes.governance import router as _governance_router
+    from api.routes.organization import router as _organization_router
+    app.include_router(_organization_router)
+    app.include_router(_governance_router)
+except Exception:
+    # The legacy API must remain importable if an optional route dependency is
+    # unavailable in a minimal deployment image.
+    logging.getLogger(__name__).exception("governance routes unavailable")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("ALLOWED_ORIGINS", "*").split(","),
