@@ -28,9 +28,17 @@ def test_loop_rejects_live_input_even_without_top_level_flag(monkeypatch, tmp_pa
     assert "live_execution_forbidden_in_governance_loop" in result["approval"]["blocked_reasons"]
 
 
-def test_unavailable_service_is_not_completed(monkeypatch, tmp_path):
+def test_invalid_service_input_is_not_completed(monkeypatch, tmp_path):
     monkeypatch.setattr(org_registry, "_singleton", OrganizationRegistry(tmp_path / "org.json"))
     monkeypatch.setattr(governance_registry, "_singleton", governance_registry.GovernanceRegistry(tmp_path / "gov.json"))
     result = run_planner_executor_reviewer("x", "w", "product", "product_research", {})
     assert result["status"] == "blocked"
-    assert result["execution"]["status"] == "service_module_unavailable"
+    assert result["execution"]["status"] == "service_execution_failed"
+
+
+def test_loop_returns_commercial_report(monkeypatch, tmp_path):
+    monkeypatch.setattr(org_registry, "_singleton", OrganizationRegistry(tmp_path / "org.json"))
+    monkeypatch.setattr(governance_registry, "_singleton", governance_registry.GovernanceRegistry(tmp_path / "gov.json"))
+    result = run_planner_executor_reviewer("Research bottle", "w", "product", "product_research", {"product_name": "Bottle", "category": "home", "retail_price": 499})
+    assert result["status"] == "completed"
+    assert result["report"]["status"] == "completed"

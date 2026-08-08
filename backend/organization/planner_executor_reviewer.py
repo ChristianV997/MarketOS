@@ -10,6 +10,7 @@ from backend.governance.registry import get_governance_registry
 from backend.obsidian.sync import sync_proposal_note
 from .org_registry import get_organization_registry
 from .service_adapters import execute_governed_service
+from .commercial_report import build_report_from_execution
 
 
 def _safe(value: Any) -> Any:
@@ -74,7 +75,8 @@ def run_planner_executor_reviewer(objective: str, workspace, department_id: str,
                                       department_id=department_id, decided_by_agent_id=reviewer_agent_id or proposed_by,
                                       decision=decision_value, reason=reason)
     gov.register_proposal(proposal); gov.register_decision(decision)
-    obsidian = sync_proposal_note(proposal, approval, decision, execution)
+    report = build_report_from_execution(proposal, execution, decision)
+    obsidian = sync_proposal_note(proposal, approval, decision, execution, report=report)
     return {"proposal": _safe(proposal), "approval": _safe(approval), "decision": _safe(decision),
             "execution": _safe(execution), "experiment_id": proposal.linked_experiment_id,
-            "obsidian": _safe(obsidian), "status": proposal.status}
+            "report": _safe(report), "obsidian": _safe(obsidian), "status": proposal.status}

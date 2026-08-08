@@ -18,6 +18,11 @@ _SERVICE_TARGETS = {
     "customer_intelligence": ("services.customer_intelligence.sprint", "build_customer_intelligence_sprint"),
     "profit_stack_advisor": ("services.profit_stack_advisor.advisor", "run_profit_stack_advisor"),
 }
+_AUDITED_INTERNAL_TARGETS = {
+    "product_research": ("backend.commercial.product_research", "run_product_research"),
+    "customer_intelligence": ("backend.commercial.customer_intelligence", "run_customer_intelligence"),
+    "profit_stack_advisor": ("backend.commercial.profit_stack_advisor", "run_profit_stack_advisor"),
+}
 _LIVE_INPUT_KEYS = {"live", "confirm_live", "live_action_requested", "execute_live", "send_message", "place_order"}
 
 
@@ -35,9 +40,10 @@ def _fallback_creative_growth(*, dry_run: bool = True, read_only: bool = True, p
 
 def default_capabilities() -> list[ServiceCapability]:
     allowed = {
-        "product_research": ["strategy", "product"], "unit_economics": ["product", "finance"],
-        "creative_growth": ["creative", "growth"], "customer_intelligence": ["strategy", "growth"],
-        "profit_stack_advisor": ["finance", "strategy"],
+        "product_research": ["strategy", "product", "executive"], "unit_economics": ["product", "finance"],
+        "creative_growth": ["creative", "growth"],
+        "customer_intelligence": ["growth", "strategy", "executive"],
+        "profit_stack_advisor": ["finance", "commerce", "executive"],
     }
     fallback = {
         "unit_economics": ("backend.organization.service_adapters", "_fallback_unit_economics"),
@@ -45,6 +51,13 @@ def default_capabilities() -> list[ServiceCapability]:
     }
     items: list[ServiceCapability] = []
     for service_name, (module_path, function_name) in _SERVICE_TARGETS.items():
+        if service_name in _AUDITED_INTERNAL_TARGETS:
+            module_path, function_name = _AUDITED_INTERNAL_TARGETS[service_name]
+            items.append(ServiceCapability(service_name=service_name, module_path=module_path, function_name=function_name,
+                                           read_only=True, dry_run_required=True, live_mutation_possible=False,
+                                           external_io_possible=False, allowed_departments=allowed[service_name],
+                                           metadata={"verified": True, "source": "audited_internal_commercial_mvp"}))
+            continue
         using_verified_fallback = False
         primary_available = False
         try:

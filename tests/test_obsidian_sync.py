@@ -21,3 +21,11 @@ def test_proposal_note_sync(tmp_path, monkeypatch):
     result = sync_proposal_note(proposal, {"allowed": True}, {"decision": "approved"}, {"status": "completed"})
     assert result["status"] == "written"
     assert (tmp_path / "MarketOS/02_Proposals/proposal-test.md").exists()
+
+
+def test_proposal_note_includes_report_summary(tmp_path, monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
+    proposal = Proposal(proposal_id="proposal-report", title="Research", workspace_id="w", department_id="product")
+    result = sync_proposal_note(proposal, {"allowed": True}, {"decision": "approved"}, {"status": "completed"}, report={"title": "Commercial report", "summary": "Evidence is not connected", "status": "completed", "findings": [], "recommendations": [], "risk_flags": []})
+    assert result["status"] == "written"
+    assert "Evidence is not connected" in (tmp_path / "MarketOS/02_Proposals/proposal-report.md").read_text(encoding="utf-8")
