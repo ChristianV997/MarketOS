@@ -29,7 +29,9 @@ class Proposal:
     updated_at: float = field(default_factory=time.time)
 
     def __post_init__(self) -> None:
-        if not self.proposal_id: self.proposal_id = f"proposal_{uuid.uuid4().hex[:16]}"
+        if not self.proposal_id:
+            seed = f"{self.workspace_id}:{self.department_id}:{self.proposed_by_agent_id}:{self.service_name}:{self.title}:{self.created_at}"
+            self.proposal_id = f"proposal_{uuid.uuid5(uuid.NAMESPACE_URL, seed).hex[:16]}"
         if self.status not in STATUSES: raise ValueError(f"unsupported proposal status: {self.status}")
 
     def _set(self, status: str, reason: str | None = None) -> None:

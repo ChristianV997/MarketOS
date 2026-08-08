@@ -40,6 +40,8 @@ def _workspace_id(workspace: Any) -> str:
 def run_planner_executor_reviewer(objective: str, workspace, department_id: str, service_name: str,
                                   inputs: dict, planner_agent_id: str = "", executor_agent_id: str = "",
                                   reviewer_agent_id: str = "", live_action_requested: bool = False) -> dict:
+    if not isinstance(inputs, dict):
+        inputs = {}
     org = get_organization_registry()
     if not org.list_departments(): org.bootstrap_defaults()
     department = org.get_department(department_id)
@@ -69,11 +71,17 @@ def run_planner_executor_reviewer(objective: str, workspace, department_id: str,
             module = importlib.import_module(module_name); fn = getattr(module, function_name)
             safe_inputs = {k: v for k, v in (inputs or {}).items() if k not in _LIVE_INPUT_KEYS and k != "dry_run"}
             safe_inputs["dry_run"] = True
-            try: result = fn(**safe_inputs)
-            except TypeError:
-                safe_inputs.pop("dry_run", None)
-                try: result = fn(objective=objective, **safe_inputs)
-                except TypeError: result = fn(**safe_inputs)
+            # A target must explicitly accept the dry-run contract. Never
+            # retry without it: that would turn a signature mismatch into a
+            # possible live-action escape hatch.
+            import inspect
+            signature = inspect.signature(fn)
+            accepts_dry_run = "dry_run" in signature.parameters or any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
+            )
+            if not accepts_dry_run:
+                raise RuntimeError("service_dry_run_contract_missing")
+            result = fn(**safe_inputs)
             execution = {"status": "completed", "dry_run": True, "result": _safe(result)}
             experiment_id = _safe(result).get("experiment_id") if isinstance(_safe(result), dict) else None
             proposal.mark_completed(); proposal.linked_experiment_id = experiment_id

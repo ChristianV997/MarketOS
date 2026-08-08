@@ -25,10 +25,15 @@ def proposal(proposal_id: str) -> dict:
 
 @router.post("/run-loop")
 def run_loop(payload: dict[str, Any] = Body(default_factory=dict)) -> dict:
-    return run_planner_executor_reviewer(
-        objective=str(payload.get("objective", "")), workspace=payload.get("workspace", payload.get("workspace_id", "default")),
-        department_id=str(payload.get("department_id", payload.get("department", "strategy"))),
-        service_name=str(payload.get("service_name", payload.get("service", ""))), inputs=payload.get("inputs") or {},
-        planner_agent_id=str(payload.get("planner_agent_id", "")), executor_agent_id=str(payload.get("executor_agent_id", "")),
-        reviewer_agent_id=str(payload.get("reviewer_agent_id", "")), live_action_requested=bool(payload.get("live_action_requested", False)),
-    )
+    try:
+        if not isinstance(payload, dict):
+            return {"status": "error", "error": "payload_must_be_object"}
+        return run_planner_executor_reviewer(
+            objective=str(payload.get("objective", "")), workspace=payload.get("workspace", payload.get("workspace_id", "default")),
+            department_id=str(payload.get("department_id", payload.get("department", "strategy"))),
+            service_name=str(payload.get("service_name", payload.get("service", ""))), inputs=payload.get("inputs") or {},
+            planner_agent_id=str(payload.get("planner_agent_id", "")), executor_agent_id=str(payload.get("executor_agent_id", "")),
+            reviewer_agent_id=str(payload.get("reviewer_agent_id", "")), live_action_requested=bool(payload.get("live_action_requested", False)),
+        )
+    except Exception as exc:
+        return {"status": "error", "error_type": type(exc).__name__, "error": "governance_loop_failed"}

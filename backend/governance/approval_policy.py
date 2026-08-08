@@ -29,7 +29,11 @@ def evaluate_proposal_approval(proposal, agent_role, workspace=None, live_action
     authority = float(getattr(agent_role, "max_budget_authority", 0.0) or 0.0)
     if budget > authority:
         reviews.extend(["finance", "risk"])
-    if policy.require_reviewer and not live_action_requested: reviews.append("reviewer")
+        blocked.extend(["finance_review_required", "risk_review_required"])
+    if policy.require_reviewer and not live_action_requested:
+        reviews.append("reviewer")
+        if getattr(agent_role, "role_type", "") not in {"manager", "executive"}:
+            blocked.append("reviewer_required")
     dry_run_safe = not live_action_requested and policy.allowed_dry_run_without_human
     return {"allowed": not blocked, "blocked_reasons": blocked, "required_reviews": list(dict.fromkeys(reviews)),
             "policy_id": policy.policy_id, "dry_run_safe": dry_run_safe}
