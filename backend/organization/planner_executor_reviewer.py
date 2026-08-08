@@ -11,6 +11,7 @@ from backend.obsidian.sync import sync_proposal_note
 from .org_registry import get_organization_registry
 from .service_adapters import execute_governed_service
 from .commercial_report import build_report_from_execution
+from .report_registry import get_report_registry
 
 
 def _safe(value: Any) -> Any:
@@ -76,7 +77,13 @@ def run_planner_executor_reviewer(objective: str, workspace, department_id: str,
                                       decision=decision_value, reason=reason)
     gov.register_proposal(proposal); gov.register_decision(decision)
     report = build_report_from_execution(proposal, execution, decision)
+    report_persistence = {"status": "registered"}
+    try:
+        get_report_registry().register(report)
+    except Exception as exc:
+        report_persistence = {"status": "warning", "error_type": type(exc).__name__, "warning": "report_persistence_failed"}
     obsidian = sync_proposal_note(proposal, approval, decision, execution, report=report)
     return {"proposal": _safe(proposal), "approval": _safe(approval), "decision": _safe(decision),
             "execution": _safe(execution), "experiment_id": proposal.linked_experiment_id,
-            "report": _safe(report), "obsidian": _safe(obsidian), "status": proposal.status}
+            "report_id": report.report_id, "report": _safe(report), "report_persistence": report_persistence,
+            "obsidian": _safe(obsidian), "status": proposal.status}
