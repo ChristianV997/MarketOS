@@ -9,9 +9,72 @@ from backend.discovery.csv_ingestion import SUPPORTED_PARSERS
 from backend.discovery.evidence_normalizer import normalize_imported_evidence
 from backend.discovery.import_registry import get_import_registry
 from backend.discovery.market_discovery_runner import run_market_discovery
+from backend.discovery.refinement_registry import get_refinement_registry
+from backend.discovery.refinement_runner import run_import_refine_compare, run_refinement_cycle
 from backend.obsidian.sync import sync_evidence_import_note
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
+
+
+@router.post("/refinement-cycle")
+def refinement_cycle(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        return run_refinement_cycle(str(payload.get("workspace_id", "default")), payload.get("discovery_id"), payload.get("hypothesis_run_id"), bool(payload.get("create_templates", True)), min(max(int(payload.get("max_recommendations", 8)), 0), 20))
+    except Exception as exc:
+        return {"status": "error", "error": "refinement_cycle_failed", "error_type": type(exc).__name__}
+
+
+@router.post("/import-refine-compare")
+def import_refine_compare(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        imports = payload.get("imports") or []
+        if not isinstance(imports, list) or len(imports) > 10: return {"status": "blocked", "blocked_reasons": ["import_count_limit_exceeded"]}
+        paths = [str(item.get("input_path", "")) for item in imports if isinstance(item, dict)]
+        parsers = {str(item.get("input_path", "")): str(item.get("parser_type", "generic_market_csv")) for item in imports if isinstance(item, dict)}
+        sources = {str(item.get("input_path", "")): str(item.get("source_name", parsers.get(str(item.get("input_path", "")), "generic_market_csv"))) for item in imports if isinstance(item, dict)}
+        return run_import_refine_compare(str(payload.get("workspace_id", "default")), paths, parsers, sources, payload.get("baseline_discovery_id"), min(max(int(payload.get("max_categories", 10)), 0), 50), min(max(int(payload.get("max_hypotheses", 20)), 0), 100))
+    except Exception as exc:
+        return {"status": "error", "error": "import_refine_compare_failed", "error_type": type(exc).__name__}
+
+
+@router.get("/gap-analyses")
+def gap_analyses(workspace_id: str | None = Query(None), limit: int = Query(50, ge=0, le=500)) -> dict[str, Any]:
+    items = get_refinement_registry().list_gap_analyses(workspace_id, limit); return {"gap_analyses": [x.to_dict() for x in items], "count": len(items)}
+
+
+@router.get("/gap-analyses/{analysis_id}")
+def gap_analysis(analysis_id: str) -> dict[str, Any]:
+    item = get_refinement_registry().get_gap_analysis(analysis_id); return {"status": "not_found", "analysis_id": analysis_id} if item is None else {"gap_analysis": item.to_dict()}
+
+
+@router.get("/import-plans")
+def import_plans(workspace_id: str | None = Query(None), limit: int = Query(50, ge=0, le=500)) -> dict[str, Any]:
+    items = get_refinement_registry().list_import_plans(workspace_id, limit); return {"import_plans": [x.to_dict() for x in items], "count": len(items)}
+
+
+@router.get("/import-plans/{plan_id}")
+def import_plan(plan_id: str) -> dict[str, Any]:
+    item = get_refinement_registry().get_import_plan(plan_id); return {"status": "not_found", "plan_id": plan_id} if item is None else {"import_plan": item.to_dict()}
+
+
+@router.get("/import-templates")
+def import_templates(parser_type: str | None = Query(None), limit: int = Query(100, ge=0, le=500)) -> dict[str, Any]:
+    items = get_refinement_registry().list_templates(parser_type, limit); return {"templates": [x.to_dict() for x in items], "count": len(items)}
+
+
+@router.get("/import-templates/{template_id}")
+def import_template(template_id: str) -> dict[str, Any]:
+    item = get_refinement_registry().get_template(template_id); return {"status": "not_found", "template_id": template_id} if item is None else {"template": item.to_dict()}
+
+
+@router.get("/comparisons")
+def comparisons(workspace_id: str | None = Query(None), limit: int = Query(50, ge=0, le=500)) -> dict[str, Any]:
+    items = get_refinement_registry().list_comparisons(workspace_id, limit); return {"comparisons": [x.to_dict() for x in items], "count": len(items)}
+
+
+@router.get("/comparisons/{comparison_id}")
+def comparison(comparison_id: str) -> dict[str, Any]:
+    item = get_refinement_registry().get_comparison(comparison_id); return {"status": "not_found", "comparison_id": comparison_id} if item is None else {"comparison": item.to_dict()}
 
 
 @router.post("/import-evidence")
