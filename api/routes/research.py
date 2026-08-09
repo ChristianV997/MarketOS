@@ -8,8 +8,13 @@ from fastapi import APIRouter, Query
 from backend.research import IngestionRunStore, TrendRecordStore
 from backend.research.credentials import load_research_credentials
 from backend.research.readiness import all_source_readiness
+from api.routes.research_swarm import router as swarm_router
 
 router = APIRouter()
+
+# Keep swarm endpoints in a separate module while exposing one router to the
+# existing API assembly path.
+router.include_router(swarm_router)
 
 
 def _store() -> TrendRecordStore:

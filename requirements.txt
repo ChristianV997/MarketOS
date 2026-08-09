@@ -57,7 +57,7 @@ tiktok-business-api-sdk-official
 evidently
 
 # ── inference kernel ──────────────────────────────────────────────────────────
-openai>=2.50.0         # OpenAI provider (cloud completions + embeddings)
+openai>=2.52.0         # OpenAI provider (cloud completions + embeddings)
 # Optional backends — install as needed for local inference:
 #   pip install airllm           # AirLLM: 70B models on 4 GB VRAM
 #   pip install litellm          # LiteLLM: unified multi-provider router
@@ -65,7 +65,7 @@ openai>=2.50.0         # OpenAI provider (cloud completions + embeddings)
 #   pip install llama-cpp-python # llama.cpp: CPU-only GGUF inference
 
 # ── vector cognition fabric ───────────────────────────────────────────────────
-qdrant-client>=1.9.0   # Qdrant vector store (in-memory fallback used without Docker)
+qdrant-client>=1.18.0   # Qdrant vector store (in-memory fallback used without Docker)
 
 # ── AWS standby (optional) ────────────────────────────────────────────────────
 # boto3: only needed if MARKETOS_HEARTBEAT_BUCKET is set (backend/aws/heartbeat.py,
@@ -76,5 +76,5 @@ boto3>=1.34.0  # AWS Secrets Manager research credentials and standby heartbeat
 pytest
 pytest-asyncio
 pytest-xdist
-PyYAML>=6.0
+PyYAML>=6.0.3
 streamlit

@@ -1,0 +1,2 @@
+entity_type,entity_name,signal_type,value,weight,confidence,category,metadata_json
+category,wellness recovery,trend_proxy,0.62,1,0.5,wellness recovery,"{\"synthetic\": true}"

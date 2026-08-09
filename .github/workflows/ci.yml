@@ -20,9 +20,9 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -39,7 +39,7 @@ jobs:
 
       - name: Upload Semgrep findings
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: marketos-semgrep-results
           path: artifacts/semgrep-results.json
@@ -52,9 +52,9 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           # Keep CI aligned with the Docker production runtime.
           python-version: '3.12'
@@ -97,7 +97,7 @@ jobs:
         run: python scripts/generate_oss_sbom.py --output artifacts/oss-sbom.json
 
       - name: Retain OSS SBOM manifest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: marketos-oss-sbom
           path: artifacts/oss-sbom.json
@@ -148,9 +148,9 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -176,7 +176,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Validate OSS Compose overlay with Docker
         env:

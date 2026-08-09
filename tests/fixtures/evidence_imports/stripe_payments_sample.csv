@@ -1,0 +1,2 @@
+product,amount,currency,status,refunded,created_at
+recovery accessory,95,MXN,succeeded,false,2026-01-01

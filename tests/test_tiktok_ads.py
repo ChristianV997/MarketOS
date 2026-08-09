@@ -7,7 +7,11 @@ import pytest
 os.environ.setdefault("TIKTOK_DRY_RUN", "true")
 
 
-def test_is_configured_false_without_env():
+def test_is_configured_false_without_env(monkeypatch):
+    # CI may provide live TikTok secrets. This test is specifically about the
+    # absent-credentials branch, so isolate it from the process environment.
+    monkeypatch.delenv("TIKTOK_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("TIKTOK_ADVERTISER_ID", raising=False)
     from backend.integrations.tiktok_ads import is_configured
     assert not is_configured()
 

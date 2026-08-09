@@ -31,9 +31,9 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -47,7 +47,7 @@ jobs:
       # Restore the previous persisted state so the model keeps learning
       - name: Restore state
         id: cache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: state/
           key: marketos-state-${{ github.run_id }}
@@ -63,7 +63,7 @@ jobs:
       # Always save state first so it's never lost even if reporting fails
       - name: Save state
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: state/
           key: marketos-state-${{ github.run_id }}
@@ -83,7 +83,7 @@ jobs:
 
       - name: Upload drift report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: drift-report-${{ github.run_id }}
           path: drift_report.json

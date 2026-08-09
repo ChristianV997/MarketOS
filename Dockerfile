@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.source="https://github.com/ChristianV997/MarketOS" \

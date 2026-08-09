@@ -22,6 +22,8 @@ from backend.research import IngestionRunStore, TrendRecordStore
 from backend.research.credentials import load_research_credentials
 from backend.research import metrics as research_metrics
 from backend.research.readiness import source_readiness
+from backend.research.swarm import register_swarm_job
+from backend.research.swarm_adapters import build_default_swarm_runtimes
 
 logger = logging.getLogger(__name__)
 
@@ -535,4 +537,10 @@ def build_research_registry(
         ingestion_store=ingestion_store,
     )
     register_research_prune_job(registry, store=store)
+    register_swarm_job(
+        registry,
+        job_store=None,
+        trend_store=store,
+        runtimes=build_default_swarm_runtimes(),
+    )
     return registry
