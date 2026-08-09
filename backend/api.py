@@ -128,6 +128,11 @@ try:
         app.include_router(_deliverables_router)
     except ImportError:
         pass
+    try:
+        from api.routes.intelligence import router as _intelligence_router
+        app.include_router(_intelligence_router)
+    except ImportError:
+        pass
 except Exception:
     # The legacy API must remain importable if an optional route dependency is
     # unavailable in a minimal deployment image.

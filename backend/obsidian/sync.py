@@ -90,3 +90,20 @@ def sync_deliverable_package_note(package) -> dict:
     relative=f"MarketOS/04_Deliverables/{package.package_type}/{package.package_id}.md"
     from .templates import render_deliverable_package_note
     result=ObsidianClient().write_note(relative,render_deliverable_package_note(package)); return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+
+def sync_knowledge_graph_snapshot_note(snapshot) -> dict:
+    relative=f"MarketOS/00_Executive/KnowledgeGraph/{snapshot.snapshot_id}.md"
+    from .templates import render_knowledge_graph_snapshot_note
+    result=ObsidianClient().write_note(relative,render_knowledge_graph_snapshot_note(snapshot));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+def sync_strategic_priority_plan_note(plan) -> dict:
+    relative=f"MarketOS/00_Executive/StrategicPriorities/{plan.plan_id}.md"
+    from .templates import render_strategic_priority_plan_note
+    result=ObsidianClient().write_note(relative,render_strategic_priority_plan_note(plan));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+def sync_research_campaign_plan_note(plan) -> dict:
+    relative=f"MarketOS/00_Executive/ResearchCampaigns/{plan.plan_id}.md"
+    from .templates import render_research_campaign_plan_note
+    result=ObsidianClient().write_note(relative,render_research_campaign_plan_note(plan));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+def sync_executive_brief_note(brief) -> dict:
+    relative=f"MarketOS/00_Executive/Briefs/{brief.brief_id}.md"
+    from .templates import render_executive_brief_note
+    result=ObsidianClient().write_note(relative,render_executive_brief_note(brief));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
