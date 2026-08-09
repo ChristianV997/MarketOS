@@ -74,7 +74,6 @@ def test_swarm_status_and_jobs_routes_are_read_only_and_safe(client, monkeypatch
     assert jobs.json()["jobs"] == []
     assert "credential" not in str(status.json()).lower()
 
-
 def test_intelligence_input_uses_ranked_deduplicated_opportunities(monkeypatch, tmp_path):
     from backend.api import _research_intelligence_keywords
 
