@@ -5,29 +5,8 @@ import pytest
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 31 — pacing, anomaly, drawdown
+# Step 31 — anomaly, drawdown
 # ─────────────────────────────────────────────────────────────────────────────
-
-class TestPacingController:
-    def test_no_pause_at_start(self):
-        from core.execution.pacing import PacingController
-        pc = PacingController(daily_budget=100)
-        assert not pc.should_pause(0)
-
-    def test_pause_when_overspent(self):
-        from core.execution.pacing import PacingController
-        pc = PacingController(daily_budget=100)
-        # At t=0 allowed spend ≈ 0, so anything > 0 triggers a pause
-        assert pc.should_pause(10)
-
-    def test_allowed_spend_increases_over_time(self, monkeypatch):
-        from core.execution import pacing as pacing_mod
-        from core.execution.pacing import PacingController
-        pc = PacingController(daily_budget=86400)
-        # Simulate 1 hour elapsed
-        monkeypatch.setattr(pacing_mod.time, "time", lambda: pc.start_time + 3600)
-        assert abs(pc.allowed_spend() - 3600) < 1
-
 
 class TestAnomalyDetector:
     def test_not_enough_history(self):
@@ -194,24 +173,6 @@ class TestPrepareAssets:
         assert all("file_path" in a and "name" in a for a in assets)
 
 
-class TestTikTokCreatives:
-    def test_fallback_no_creds(self, monkeypatch):
-        import core.connectors.tiktok_creatives as mod
-        monkeypatch.setattr(mod, "TIKTOK_ACCESS_TOKEN", None)
-        monkeypatch.setattr(mod, "TIKTOK_ADVERTISER_ID", None)
-        result = mod.upload_creative("/nonexistent.mp4")
-        assert "data" in result
-
-    def test_launch_variants_no_creds(self, monkeypatch):
-        from core.connectors.tiktok_ads_variants import launch_variants
-        import core.connectors.tiktok_creatives as mod
-        monkeypatch.setattr(mod, "TIKTOK_ACCESS_TOKEN", None)
-        monkeypatch.setattr(mod, "TIKTOK_ADVERTISER_ID", None)
-        assets = [{"name": "c0", "file_path": "/tmp/x.mp4"}]
-        result = launch_variants("camp1", assets)
-        assert len(result) == 1
-        assert result[0]["campaign_id"] == "camp1"
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 35 — video generation, prompt builder, hooks, hook performance
@@ -325,36 +286,8 @@ class TestAccountSafety:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 37 — UGC library, selector, hybrid editor, renderer
+# Step 37 — hybrid editor, renderer
 # ─────────────────────────────────────────────────────────────────────────────
-
-class TestUGCLibrary:
-    def test_empty_when_no_dir(self):
-        from core.ugc.library import load_ugc_clips
-        clips = load_ugc_clips()
-        assert isinstance(clips, list)
-
-
-class TestUGCSelector:
-    def test_select_clips(self):
-        from core.ugc.selector import select_clips
-        clips = ["a.mp4", "b.mp4", "c.mp4"]
-        selected = select_clips(clips, k=2)
-        assert len(selected) == 2
-        for c in selected:
-            assert c in clips
-
-    def test_select_fewer_than_k(self):
-        from core.ugc.selector import select_clips
-        clips = ["a.mp4"]
-        selected = select_clips(clips, k=5)
-        assert len(selected) == 1
-
-    def test_select_empty_list(self):
-        from core.ugc.selector import select_clips
-        selected = select_clips([], k=3)
-        assert selected == []
-
 
 class TestHybridEditor:
     def test_timeline_structure(self):
@@ -374,32 +307,8 @@ class TestRenderer:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 38 — clip scorer, sequence optimizer, creative memory, embedding
+# Step 38 — sequence optimizer, creative memory, embedding
 # ─────────────────────────────────────────────────────────────────────────────
-
-class TestClipScorer:
-    def test_update_and_score(self):
-        from core.ugc.clip_scorer import ClipScorer
-        cs = ClipScorer()
-        cs.update("clip1", 2.0)
-        cs.update("clip1", 4.0)
-        assert cs.get_score("clip1") == pytest.approx(3.0)
-
-    def test_unknown_clip_score_zero(self):
-        from core.ugc.clip_scorer import ClipScorer
-        cs = ClipScorer()
-        assert cs.get_score("unknown") == 0.0
-
-    def test_top_clips_sorted(self):
-        from core.ugc.clip_scorer import ClipScorer
-        cs = ClipScorer()
-        cs.update("a", 1.0)
-        cs.update("b", 3.0)
-        cs.update("c", 2.0)
-        top = cs.top_clips(2)
-        assert top[0][0] == "b"
-        assert top[1][0] == "c"
-
 
 class TestSequenceOptimizer:
     def test_best_sequences_sorted(self):

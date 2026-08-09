@@ -189,7 +189,8 @@ def test_oss_provider_metrics_are_exported_when_prometheus_is_available():
     pytest.importorskip("prometheus_client")
     clear_oss_cache()
     collect_oss_inputs(["https://supplier.example/metrics"], research=Research(), commerce=Commerce())
-    from backend.api import prometheus_metrics
+    # /metrics/prometheus lives in api.routes.observability, not backend.api directly.
+    from api.routes.observability import prometheus_metrics
     payload = prometheus_metrics().body.decode()
     assert "marketos_oss_provider_refreshes_total" in payload
     assert "marketos_oss_provider_refresh_duration_seconds" in payload

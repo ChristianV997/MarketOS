@@ -2,6 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from .contracts import ProductCandidate, SupplierOffer
+from .quality import quality_reasons
 
 @dataclass(frozen=True)
 class UnitEconomics:
@@ -25,6 +26,7 @@ def calculate_unit_economics(product: ProductCandidate, offer: SupplierOffer | N
         return UnitEconomics(product.currency, revenue, 0.0, 0.0, 0.0, None, 0.0, None, False, ("missing_supplier_offer",))
     if offer.unit_cost < 0 or offer.shipping_cost < 0:
         reasons.append("invalid_supplier_cost")
+    reasons.extend(quality_reasons(offer.quality))
     landed = round(max(offer.unit_cost, 0.0) + max(offer.shipping_cost, 0.0), 4)
     fee = round(revenue * max(payment_fee_rate, 0.0) + max(payment_fee_fixed, 0.0), 4)
     contribution = round(revenue - landed - fee, 4)
@@ -33,4 +35,5 @@ def calculate_unit_economics(product: ProductCandidate, offer: SupplierOffer | N
     if offer.inventory_units is not None and offer.inventory_units <= 0: reasons.append("out_of_stock")
     break_even = round(revenue / contribution, 4) if contribution > 0 else None
     margin = round(contribution / revenue, 4) if revenue > 0 else None
+    reasons = sorted(set(reasons))
     return UnitEconomics(product.currency, revenue, landed, fee, contribution, break_even, contribution, margin, not reasons, tuple(reasons))

@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections import OrderedDict
 from threading import Lock
 from typing import Generator
 
@@ -81,10 +82,32 @@ class InferenceRouter:
     ) -> None:
         self._providers = providers if providers is not None else _build_default_providers()
         self._policy    = policy or RoutingPolicy()
-        self._cache: dict[str, InferenceResponse] = {}
+        # Bounded replay cache. Callers that pass a stable sequence_id get
+        # replay-dedup; callers that don't (fresh uuid per call) would
+        # otherwise grow this dict without bound — the cap makes it a FIFO.
+        self._cache: "OrderedDict[str, InferenceResponse]" = OrderedDict()
+        self._cache_max  = int(os.getenv("INFERENCE_CACHE_MAX", "1000"))
         self._cache_lock = Lock()
         self._provider_failure_backoff_s = max(0.0, provider_failure_backoff_s)
         self._provider_failed_until: dict[str, float] = {}
+        self._ensure_ollama_model()
+
+    def _ensure_ollama_model(self) -> None:
+        """Best-effort: if OllamaProvider is active, make sure its configured
+        model is pulled. Never blocks or raises — router construction must
+        succeed even when Ollama is unreachable."""
+        if not any(p.name == "ollama" for p in self._providers):
+            return
+        try:
+            from ..ollama_manager import OllamaManager
+            model = os.getenv("OLLAMA_MODEL", "mistral:7b")
+            manager = OllamaManager()
+            # ensure_running() is a no-op health check unless OLLAMA_AUTO_START=true,
+            # in which case it also attempts to start the daemon when unhealthy.
+            if manager.ensure_running():
+                manager.ensure_model(model)
+        except Exception as exc:
+            _log.debug("ollama_ensure_model_startup_skipped error=%s", exc)
 
     # ── completion ────────────────────────────────────────────────────────────
 
@@ -211,6 +234,9 @@ class InferenceRouter:
     def _store(self, sequence_id: str, response: InferenceResponse) -> None:
         with self._cache_lock:
             self._cache[sequence_id] = response
+            self._cache.move_to_end(sequence_id)
+            while len(self._cache) > self._cache_max:
+                self._cache.popitem(last=False)  # evict oldest (FIFO)
 
     def cache_size(self) -> int:
         return len(self._cache)

@@ -62,13 +62,30 @@ def test_apply_scale_caps_at_max_budget():
     assert pod.budget <= 150.0
 
 
-def test_allocate_budget_even_split():
+def test_allocate_budget_equal_metrics_equal_shares():
     engine = CapitalEngine()
     pods = [Pod("a", "US", "meta", budget=50.0), Pod("b", "EU", "tiktok", budget=50.0)]
     allocation = engine.allocate_budget(pods, 1000.0)
     assert len(allocation) == 2
-    for v in allocation.values():
-        assert abs(v - 500.0) < 1e-6
+    values = list(allocation.values())
+    # equal metrics → equal shares, each within the 5–35% clamp band
+    assert abs(values[0] - values[1]) < 1e-6
+    for v in values:
+        assert 50.0 <= v <= 350.0
+
+
+def test_allocate_budget_winner_gets_more():
+    # 3 pods so the 35% cap leaves room for ranking to show through
+    engine = CapitalEngine()
+    winner = Pod("a", "US", "meta", budget=50.0)
+    mid    = Pod("b", "EU", "tiktok", budget=50.0)
+    loser  = Pod("c", "UK", "meta", budget=50.0)
+    winner.metrics.update({"roas": 3.0, "revenue": 300.0, "spend": 100.0})
+    mid.metrics.update({"roas": 1.2, "revenue": 120.0, "spend": 100.0})
+    loser.metrics.update({"roas": 0.5, "revenue": 50.0, "spend": 100.0})
+    allocation = engine.allocate_budget([winner, mid, loser], 1000.0)
+    assert allocation[winner.id] >= allocation[mid.id] >= allocation[loser.id]
+    assert allocation[winner.id] > allocation[loser.id]
 
 
 def test_allocate_budget_skips_killed():

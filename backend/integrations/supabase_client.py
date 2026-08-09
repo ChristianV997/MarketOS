@@ -1,9 +1,17 @@
 """Supabase persistent-state client (Priority 1).
 
-Provides three operations against Supabase REST API:
-  save_state(state_dict)   — upserts to ``system_state`` table
-  load_state()             — returns last saved state dict (or None)
-  append_events(rows)      — bulk inserts to ``events`` table
+The single Supabase integration surface — a second, independent client
+(connectors/supabase_connector.py) used to exist alongside this one,
+writing to a different table under a *different* env var name
+(SUPABASE_SERVICE_KEY vs this module's SUPABASE_SERVICE_ROLE_KEY, the one
+actually documented in .env.example) — an operator following .env.example
+would have left that second client permanently unconfigured. Merged here.
+
+Provides four operations against Supabase REST API:
+  save_state(state_dict)      — upserts to ``system_state`` table
+  load_state()                — returns last saved state dict (or None)
+  append_events(rows)         — bulk inserts to ``events`` table
+  save_cycle_summary(summary) — upserts to ``cycle_summaries`` table
 
 Falls back silently when credentials are absent so the system keeps running
 in offline / CI environments.
@@ -23,6 +31,16 @@ Required Supabase tables (run once in dashboard):
       data jsonb,
       created_at timestamptz default now()
   );
+  create table cycle_summaries (
+      id bigserial primary key,
+      total_cycles integer,
+      capital numeric,
+      detected_regime text,
+      avg_roas numeric,
+      macro_risk numeric,
+      bandit_arm text,
+      recorded_at timestamptz default now()
+  );
 """
 import datetime
 import os
@@ -37,6 +55,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 _STATE_TABLE = "system_state"
 _EVENTS_TABLE = "events"
+_CYCLE_SUMMARIES_TABLE = "cycle_summaries"
 _STATE_ID = "default"
 
 
@@ -128,6 +147,30 @@ def append_events(rows: list[dict]) -> bool:
             json=payload,
             headers=_headers(),
             timeout=15,
+        )
+        resp.raise_for_status()
+        return True
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        return False
+
+
+def save_cycle_summary(summary: dict) -> bool:
+    """Insert *summary* into the ``cycle_summaries`` table.
+
+    Returns True on success, False when credentials are absent or on error.
+    """
+    if not _is_configured():
+        return False
+
+    payload = {**summary, "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    try:
+        resp = _requests.post(
+            _rest_url(_CYCLE_SUMMARIES_TABLE),
+            json=payload,
+            headers=_headers(),
+            timeout=10,
         )
         resp.raise_for_status()
         return True

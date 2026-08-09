@@ -29,10 +29,13 @@ import time
 from collections import deque
 from typing import Any
 
+from backend.core.persistence import save_json_atomic, load_json, state_path
+
 _log = logging.getLogger(__name__)
 
 _MAX_RECORDS    = 2000
 _PAIR_TIMEOUT_S = 300.0   # seconds to wait for outcome before expiring prediction
+_CALIBRATION_PATH = state_path("calibration.json")
 
 
 class CalibrationRecord:
@@ -113,6 +116,10 @@ class CalibrationStore:
 
         Returns True if a pair was created.
         """
+        # Honor the actual_roas keyword — callers use it exclusively; the
+        # positional ``actual`` previously shadowed it and every pair was
+        # recorded with actual=0.0, poisoning the whole audit trail.
+        value = actual_roas if actual_roas is not None else actual
         now = time.time()
         with self._lock:
             pending = self._pending.get(product, [])
@@ -124,7 +131,7 @@ class CalibrationStore:
             # take the most recent
             p = pending.pop()
             self._pending[product] = pending
-            rec = CalibrationRecord(product, p["predicted"], float(actual), now)
+            rec = CalibrationRecord(product, p["predicted"], float(value), now)
             self._records.append(rec)
             self.total_paired += 1
         return True
@@ -196,7 +203,44 @@ class CalibrationStore:
             self._pending.clear()
             self.total_paired = 0
 
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "records": [
+                    {"product": r.product, "predicted": r.predicted,
+                     "actual": r.actual, "ts": r.ts}
+                    for r in self._records
+                ],
+                "total_paired": self.total_paired,
+            }
+
+    def restore(self, data: dict[str, Any]) -> None:
+        if not isinstance(data, dict):
+            return
+        with self._lock:
+            self._records.clear()
+            for d in data.get("records", []):
+                try:
+                    self._records.append(CalibrationRecord(
+                        d["product"], float(d["predicted"]),
+                        float(d["actual"]), float(d.get("ts", 0.0)),
+                    ))
+                except Exception:
+                    continue
+            self.total_paired = int(data.get("total_paired", len(self._records)))
+
+    def persist(self) -> bool:
+        return save_json_atomic(_CALIBRATION_PATH, self.snapshot())
+
 
 # ── module-level singleton ────────────────────────────────────────────────────
 
 calibration_store = CalibrationStore()
+
+_saved = load_json(_CALIBRATION_PATH)
+if _saved:
+    calibration_store.restore(_saved)

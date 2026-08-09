@@ -1,5 +1,8 @@
+import logging
 import os
 import requests
+
+_log = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -10,13 +13,19 @@ def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message})
+    try:
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message}, timeout=10)
+    except Exception as exc:
+        _log.warning("telegram_notify_failed error=%s", exc)
 
 
 def send_slack(message):
     if not SLACK_WEBHOOK:
         return
-    requests.post(SLACK_WEBHOOK, json={"text": message})
+    try:
+        requests.post(SLACK_WEBHOOK, json={"text": message}, timeout=10)
+    except Exception as exc:
+        _log.warning("slack_notify_failed error=%s", exc)
 
 
 def format_alert(summary):

@@ -19,7 +19,7 @@ components:
     notice: Preserve upstream MIT notice in the pinned worker image.
   - name: pydantic-ai
     license: MIT
-    reviewed_ref: v1.104.0
+    reviewed_ref: v2.20.0
     distribution: optional_library
     notice: Preserve upstream MIT notice with the optional agent profile.
   - name: postiz
@@ -47,3 +47,48 @@ components:
     reviewed_ref: 3.23.7
     distribution: benchmark
     notice: Benchmark only; do not deploy alongside Medusa.
+  - name: twenty-crm
+    license: AGPL-3.0
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Deferred by explicit user decision (consolidation pass); AGPL requires legal review before adoption.
+  - name: chatwoot
+    license: MIT
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Advanced from deferred to selected across the cost-aware stack-planner pass; ConversationProvider adapter (backend/integrations/chatwoot.py) built and tested. MIT license, no legal-review gate needed.
+  - name: cal.com
+    license: AGPL-3.0
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Deferred by explicit user decision (consolidation pass); AGPL requires legal review before adoption.
+  - name: posthog
+    license: MIT
+    reviewed_ref: posthog-js@1.x
+    distribution: optional_library
+    notice: Selected by explicit user decision, adopted after the frontend router/Services UI shipped (revisit-after-UI condition satisfied). Client SDK against PostHog Cloud, default-off via VITE_POSTHOG_KEY, no session-replay enabled. Also consumed server-side via the optional `posthog` Python SDK (backend/integrations/posthog_backend.py, AnalyticsProvider) for backend event capture + HogQL query — still PostHog Cloud only.
+  - name: temporal
+    license: MIT
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: Deferred by explicit user decision (consolidation pass); highest-cost candidate, would replace backend.orchestration.event_store's hand-rolled workflow tracking.
+  - name: crawlee
+    license: Apache-2.0
+    reviewed_ref: pending-deferred-review
+    distribution: optional_worker
+    notice: Deferred; redundant with crawl4ai + firecrawl already selected for scraping.
+  - name: woocommerce
+    license: GPL-3.0
+    reviewed_ref: pending-version-pin
+    distribution: sidecar
+    notice: Merchant-operated WordPress plugin; no MarketOS-vendored source. Adapter implements the existing CommerceProvider Protocol. GPL-3.0 is a restricted license under commercial OSS policy (same precedent as Postiz) — legal review required before commercial deployment.
+  - name: mautic
+    license: GPL-3.0-or-later
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: MarketingAutomationProvider adapter (backend/integrations/mautic.py) built and tested. GPL-3.0-or-later is copyleft — treated with the same legal-review precedent as GPL-3.0/AGPL-3.0 candidates (WooCommerce, Postiz), more conservative than scripts/check_oss_policy.py's exact-string RESTRICTED match requires.
+  - name: activepieces
+    license: MIT
+    reviewed_ref: pending-deferred-review
+    distribution: sidecar
+    notice: CustomerAutomationProvider adapter (backend/integrations/activepieces.py) built and tested — distinct from the internal-only n8n WorkflowAutomationProvider. MIT license, no legal-review gate needed.

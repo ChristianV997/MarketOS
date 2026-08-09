@@ -133,4 +133,9 @@ def fetch_reddit_signals() -> list[dict]:
 def register(engine: Any) -> None:
     """Register this adapter with a SignalEngine instance."""
     engine.register_source("reddit", fetch_reddit_signals)
+    try:
+        from backend.discovery.registry import discovery_registry
+        discovery_registry.register("reddit", credential_env_vars=[], requires_auth=False)
+    except Exception:
+        pass
     _log.info("reddit_adapter_registered subreddits=%s", _SUBREDDITS)

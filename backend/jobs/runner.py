@@ -90,10 +90,11 @@ class JobRegistry:
         retry_count = 0
         error_message = None
         status = "succeeded"
+        payload: Any = None
 
         for attempt in range(self.max_retries + 1):
             try:
-                self._handlers[name]()
+                payload = self._handlers[name]()
                 break
             except Exception as err:  # pragma: no cover - covered by tests through behavior
                 retry_count = attempt
@@ -119,6 +120,8 @@ class JobRegistry:
             result["error"] = error_message
         else:
             self._window_runs.add(key)
+            if payload is not None:
+                result["payload"] = payload
 
         self.metrics.record(status, duration_ms)
         logger.info(result)

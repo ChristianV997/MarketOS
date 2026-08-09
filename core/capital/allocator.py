@@ -41,9 +41,16 @@ def _compute_score(strategy: dict[str, Any]) -> float:
 
 
 def _softmax(scores: list[float], temperature: float) -> list[float]:
-    """Return softmax probabilities for *scores*."""
+    """Return softmax probabilities for *scores* (numerically stable)."""
     temp = max(temperature, 1e-8)
-    exps = [math.exp(s / temp) for s in scores]
+    if not scores:
+        return []
+    # Subtract the max before exponentiating — mathematically identical
+    # output, but prevents math.exp overflow when a score/temp is large
+    # (e.g. a pod with large cumulative profit).
+    scaled = [s / temp for s in scores]
+    hi = max(scaled)
+    exps = [math.exp(s - hi) for s in scaled]
     total = sum(exps) or 1.0
     return [e / total for e in exps]
 
@@ -100,20 +107,38 @@ def allocate(
     raw_scores = [_compute_score(s) for s in strategies]
     weights = _softmax(raw_scores, temperature)
 
-    allocations = [w * total_budget for w in weights]
-
     lo = _MIN_FRAC * total_budget
     hi = _MAX_FRAC * total_budget
 
-    # Iteratively clamp to [lo, hi] and redistribute excess/deficit
-    allocations = list(allocations)
-    for _ in range(10):  # iterate until stable
-        total = sum(allocations)
-        if total == 0:
+    # Waterfall clamp: pin strategies that hit a bound, redistribute the
+    # remaining budget among free strategies by weight. Preserves ranking
+    # (a clamped winner never re-inflates a loser past it) and deploys the
+    # full budget whenever n * max_frac >= 1; otherwise the surplus stays
+    # undeployed rather than violating the per-strategy cap.
+    allocations = [0.0] * n
+    fixed: dict[int, float] = {}
+    for _ in range(n):
+        free = [i for i in range(n) if i not in fixed]
+        if not free:
             break
-        # Scale to total_budget
-        allocations = [a * total_budget / total for a in allocations]
-        # Clamp each to [lo, hi]
-        allocations = [min(max(a, lo), hi) for a in allocations]
+        budget_left = max(0.0, total_budget - sum(fixed.values()))
+        weight_sum = sum(weights[i] for i in free) or 1.0
+        for i in free:
+            allocations[i] = budget_left * weights[i] / weight_sum
+        # Pin cap-violators first — they release budget that may lift the
+        # low performers above the floor. Only pin floor-violators once no
+        # cap violations remain in the pass.
+        hi_violators = [i for i in free if allocations[i] > hi]
+        if hi_violators:
+            for i in hi_violators:
+                fixed[i] = hi
+            continue
+        lo_violators = [i for i in free if allocations[i] < lo]
+        if not lo_violators:
+            break
+        for i in lo_violators:
+            fixed[i] = lo
+    for i, v in fixed.items():
+        allocations[i] = v
 
     return allocations

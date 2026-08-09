@@ -69,7 +69,12 @@ def test_lifespan_starts_and_stops_runtime_services(monkeypatch):
 
 
 def test_readiness_distinguishes_health_from_runtime_startup(monkeypatch):
+    # /ready and /health live in api.routes.health (extracted from
+    # backend/api.py during the Tier-0-style route-split refactor, which
+    # predates the codex-commerce-evaluation-layer merge that brought this
+    # test in) rather than as bare module-level functions on backend.api.
     import backend.api as api
+    from api.routes import health as health_routes
     from fastapi.testclient import TestClient
 
     monkeypatch.setattr("backend.core.serializer.load", lambda _path: None)
@@ -77,10 +82,29 @@ def test_readiness_distinguishes_health_from_runtime_startup(monkeypatch):
     monkeypatch.setattr(api, "_start_runtime_services", lambda: None)
     monkeypatch.setattr(api, "_stop_runtime_services", lambda: None)
 
+    # Unlike its sibling tests in this file, this test previously left
+    # api.threading.Thread unstubbed — `with TestClient(...)` below runs
+    # the real FastAPI lifespan, which starts real daemon background
+    # threads (_background_runner/_research_runner) that call run_cycle()
+    # for real. Those threads outlive this test (the lifespan's shutdown
+    # only flips _bg_running; the thread body doesn't necessarily notice
+    # before its next sleep interval), corrupting global learning-state
+    # singletons (bandit_memory, event_log, calibration stores, etc.) for
+    # every test that runs afterward in the same process — a real,
+    # non-deterministic cross-test pollution bug, not just theoretical.
+    class InertThread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(api.threading, "Thread", InertThread)
+
     api._bg_running = False
     api._runtime_services_ready = False
-    assert api.ready().status_code == 503
-    assert api.health() == {"ok": True}
+    assert health_routes.ready().status_code == 503
+    assert health_routes.health() == {"ok": True}
 
     with TestClient(api.app) as client:
         response = client.get("/ready")
@@ -89,7 +113,10 @@ def test_readiness_distinguishes_health_from_runtime_startup(monkeypatch):
 
 
 def test_readiness_can_require_medusa_when_explicitly_configured(monkeypatch):
+    # /ready lives in api.routes.health (see
+    # test_readiness_distinguishes_health_from_runtime_startup above).
     import backend.api as api
+    from api.routes import health as health_routes
     from backend.contracts.adapters import AdapterHealth
 
     monkeypatch.setenv("MEDUSA_REQUIRED_FOR_READY", "true")
@@ -101,13 +128,14 @@ def test_readiness_can_require_medusa_when_explicitly_configured(monkeypatch):
             return AdapterHealth("medusa", configured=True, reachable=False, detail="sidecar starting")
 
     monkeypatch.setattr("backend.integrations.medusa.commerce_provider", Provider())
-    response = api.ready()
+    response = health_routes.ready()
     assert response.status_code == 503
     assert response.body and b"required_medusa_unavailable" in response.body
 
 
 def test_signal_metrics_endpoint_exposes_cache_telemetry():
-    from backend.api import signal_metrics
+    # /metrics/signals lives in api.routes.metrics for the same reason.
+    from api.routes.metrics import signal_metrics
     result = signal_metrics()
     assert "cache_hit_rate" in result
     assert "last_refresh_duration_s" in result
@@ -190,7 +218,9 @@ def test_integration_webhook_verifies_configured_hmac_secret(monkeypatch):
 
 def test_webhook_outcome_metrics_are_exported():
     pytest.importorskip("prometheus_client")
-    from backend.api import prometheus_metrics
+    # /metrics/prometheus lives in api.routes.observability for the same
+    # reason as the other prometheus_metrics tests in this file.
+    from api.routes.observability import prometheus_metrics
     payload = prometheus_metrics().body.decode()
     assert "marketos_integration_webhook_events_total" in payload
 
@@ -206,10 +236,11 @@ def test_optional_integration_health_is_safe_when_unconfigured():
 def test_integration_health_is_exported_to_prometheus():
     pytest.importorskip("prometheus_client")
     import backend.api as api
+    from api.routes.observability import prometheus_metrics
     api._integration_health_cache.clear()
     result = api.integrations_health()
     assert "crawl4ai" in result["integrations"]
-    payload = api.prometheus_metrics().body.decode("utf-8")
+    payload = prometheus_metrics().body.decode("utf-8")
     assert "marketos_integration_configured" in payload
     assert "marketos_integration_reachable" in payload
     assert "marketos_integration_health_probe_duration_seconds" in payload
@@ -217,7 +248,8 @@ def test_integration_health_is_exported_to_prometheus():
 
 def test_prometheus_exposes_signal_cache_metric_families():
     pytest.importorskip("prometheus_client")
-    from backend.api import prometheus_metrics
+    # /metrics/prometheus lives in api.routes.observability for the same reason.
+    from api.routes.observability import prometheus_metrics
     from core.signals import SignalEngine
 
     engine = SignalEngine()
@@ -231,6 +263,51 @@ def test_prometheus_exposes_signal_cache_metric_families():
     assert "marketos_signal_cache_refresh_duration_seconds" in payload
     assert "marketos_signal_cache_last_refresh_duration_seconds" in payload
     assert "marketos_signal_source_failures_total" in payload
+
+
+def test_prometheus_exposes_commerce_economics_metric_families(monkeypatch):
+    pytest.importorskip("prometheus_client")
+    from api.routes.observability import prometheus_metrics
+    from backend.commerce.loop import CommerceLoop
+    from backend.commerce.launch import LaunchExecutor
+    from backend.commerce.feedback import FeedbackRecorder
+    from backend.commerce.scoring import OpportunityScorer
+    from evaluation.contracts import DataQuality, ProductCandidate
+
+    live = DataQuality(provenance="live", attribution="attributed")
+    monkeypatch.setattr("backend.commerce.scoring.find_similar_products", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.scoring.find_similar_campaigns", lambda query, top_k=3: [])
+    monkeypatch.setattr("backend.commerce.creative.generate_creative", lambda product, angle: f"{product}:{angle}:script")
+
+    loop = CommerceLoop(
+        scorer=OpportunityScorer(),
+        launcher=LaunchExecutor(
+            create_campaign=lambda **kwargs: {"campaign_id": "camp-metrics"},
+            create_ad_group=lambda **kwargs: {"adgroup_id": "ag-metrics"},
+            create_ad=lambda **kwargs: {"ad_id": "ad-metrics"},
+            metrics_provider=lambda campaign_ids: ({"spend": 10.0, "revenue": 25.0}, live),
+        ),
+        feedback=FeedbackRecorder(
+            campaign_memory=type("FakeCampaignMemory", (), {"index_campaign": lambda self, **kwargs: 1})(),
+            reinforcement_memory=type("FakeReinforcementMemory", (), {"record_outcome": lambda self, **kwargs: None})(),
+            signal_memory=type("FakeSignalMemory", (), {"index_keyword": lambda self, *args, **kwargs: 1})(),
+        ),
+    )
+    loop.run_cycle(
+        signals=[{"id": "s1", "product": "Gadget", "score": 0.9, "engagement": 0.9, "velocity": 0.7, "quality": live}],
+        products={"Gadget": ProductCandidate("gadget", "Gadget", selling_price=100.0, quality=live)},
+        offers={},
+        top_k=1,
+        budget=25.0,
+        dry_run=True,
+    )
+
+    payload = prometheus_metrics().body.decode("utf-8")
+    assert "marketos_commerce_cycle_ranked_total" in payload
+    assert "marketos_commerce_cycle_launchable_total" in payload
+    assert "marketos_commerce_cycle_spend_total" in payload
+    assert "marketos_commerce_cycle_revenue_total" in payload
+    assert "marketos_commerce_cycle_last_roas" in payload
 
 
 def test_api_deployment_smoke_runs_dry_commerce_cycle(monkeypatch):

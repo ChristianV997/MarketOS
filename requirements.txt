@@ -1,5 +1,6 @@
 # ── core runtime ──────────────────────────────────────────────────────────────
 numpy
+scipy
 scikit-learn
 statsmodels
 fastapi
@@ -15,12 +16,31 @@ cvxpy
 mabwiser
 dowhy
 
-# ── async task queue + message bus ────────────────────────────────────────────
-celery[redis]
+# ── message bus ───────────────────────────────────────────────────────────────
+# redis: backs core/stream.py's event stream (with an in-memory fallback when
+# unavailable). The celery[redis] task-queue dependency was removed here — its
+# only dispatcher (core/full_loop.py's FullLoop, never actually instantiated
+# anywhere) and the two tasks it queued (tasks/discovery.py, tasks/pipeline.py)
+# were a fully deployed (docker-compose worker+beat services) but never
+# actually triggered pipeline, duplicating what orchestrator/main.py's
+# synchronous tick loop already does in production.
 redis
 
 # ── signal ingestion ──────────────────────────────────────────────────────────
+# pytrends: archived upstream (no replacement, per the maintainer) — still
+# used by backend/adapters/youtube_trends.py's multi-keyword interest-over-
+# time batching, which trendspyg has no lightweight (non-Selenium)
+# equivalent for. Kept for that one caller.
 pytrends
+# trendspyg: actively maintained pytrends alternative. Its RSS-based
+# trending-topics function (no Selenium/browser needed) replaced the
+# hand-rolled scrape of Google's undocumented dailytrends endpoint in
+# backend/adapters/research/trend_source_v1.py and the pytrends proxy in
+# backend/adapters/tiktok_organic.py.
+trendspyg
+# firecrawl-py: optional, hosted browser/anti-bot handling for
+# backend/adapters/alibaba_trends.py's real (non-mock) path.
+firecrawl-py
 beautifulsoup4
 lxml
 
@@ -31,10 +51,13 @@ sentry-sdk[fastapi]
 
 # ── integrations ──────────────────────────────────────────────────────────────
 ShopifyAPI
+stripe
+facebook-business
+tiktok-business-api-sdk-official
 evidently
 
 # ── inference kernel ──────────────────────────────────────────────────────────
-openai>=1.0.0          # OpenAI provider (cloud completions + embeddings)
+openai>=2.52.0         # OpenAI provider (cloud completions + embeddings)
 # Optional backends — install as needed for local inference:
 #   pip install airllm           # AirLLM: 70B models on 4 GB VRAM
 #   pip install litellm          # LiteLLM: unified multi-provider router
@@ -42,10 +65,16 @@ openai>=1.0.0          # OpenAI provider (cloud completions + embeddings)
 #   pip install llama-cpp-python # llama.cpp: CPU-only GGUF inference
 
 # ── vector cognition fabric ───────────────────────────────────────────────────
-qdrant-client>=1.9.0   # Qdrant vector store (in-memory fallback used without Docker)
+qdrant-client>=1.18.0   # Qdrant vector store (in-memory fallback used without Docker)
+
+# ── AWS standby (optional) ────────────────────────────────────────────────────
+# boto3: only needed if MARKETOS_HEARTBEAT_BUCKET is set (backend/aws/heartbeat.py,
+# deploy/aws/main.tf) — the PC/AWS standby heartbeat fails soft without it.
+boto3>=1.34.0  # AWS Secrets Manager research credentials and standby heartbeat
 
 # ── dev / test ────────────────────────────────────────────────────────────────
 pytest
 pytest-asyncio
-PyYAML>=6.0
+pytest-xdist
+PyYAML>=6.0.3
 streamlit

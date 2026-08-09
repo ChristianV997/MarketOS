@@ -123,4 +123,9 @@ def fetch_youtube_signals() -> list[dict]:
 def register(engine: Any) -> None:
     """Register this adapter with a SignalEngine instance."""
     engine.register_source("youtube_trends", fetch_youtube_signals)
+    try:
+        from backend.discovery.registry import discovery_registry
+        discovery_registry.register("youtube_trends", credential_env_vars=[], requires_auth=False)
+    except Exception:
+        pass
     _log.info("youtube_trends_adapter_registered")

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Placeholders (__MARKETOS_...__) are rewritten to real paths by
+  scripts/install_daemon.sh — do not load this file directly with
+  launchctl until it has been.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.marketos.orchestrator</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__MARKETOS_PYTHON_BIN__</string>
+        <string>-m</string>
+        <string>orchestrator.main</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__MARKETOS_REPO_DIR__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>STATE_PATH</key>
+        <string>__MARKETOS_DATA_DIR__/state.db</string>
+        <key>MARKETOS_STATE_DIR</key>
+        <string>__MARKETOS_DATA_DIR__/state</string>
+        <key>OBSIDIAN_VAULT_PATH</key>
+        <string>__MARKETOS_DATA_DIR__/obsidian-vault</string>
+        <key>OLLAMA_AUTO_START</key>
+        <string>true</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__MARKETOS_DATA_DIR__/logs/orchestrator.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__MARKETOS_DATA_DIR__/logs/orchestrator.err.log</string>
+
+    <!-- SIGTERM is caught by orchestrator/main.py's handler; give it time
+         to finish the in-flight tick and checkpoint before launchd escalates. -->
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
+</dict>
+</plist>

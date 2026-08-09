@@ -9,10 +9,15 @@ import os
 
 # USD per output token (approximate as of 2025)
 _COST_TABLE: dict[str, float] = {
-    "openai/gpt-4o":        5e-6,
-    "openai/gpt-4o-mini":   0.15e-6,
-    "openai/gpt-4-turbo":   10e-6,
-    "openai/gpt-3.5-turbo": 0.5e-6,
+    "openai/gpt-4o":              5e-6,
+    "openai/gpt-4o-mini":         0.15e-6,
+    "openai/gpt-4-turbo":         10e-6,
+    "openai/gpt-3.5-turbo":       0.5e-6,
+    "anthropic/claude-3-opus":    15e-6,
+    "anthropic/claude-3-5-sonnet-latest": 3e-6,
+    "anthropic/claude-3-5-haiku-latest":  1e-6,
+    "anthropic/claude-3-haiku-20240307":  0.25e-6,
+    "anthropic/*":          1e-6,    # conservative default for unlisted Claude models
     "ollama/*":             0.0,
     "airllm/*":             0.0,
     "vllm/*":               0.0,

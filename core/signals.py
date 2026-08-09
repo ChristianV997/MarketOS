@@ -186,6 +186,8 @@ class SignalEngine:
             self._refresh_lock.release()
             return signals
 
+        from backend.discovery.registry import discovery_registry
+
         all_signals: list = []
 
         def fetch_source(source: dict) -> tuple[str, list[dict], float, str | None]:
@@ -196,10 +198,12 @@ class SignalEngine:
                 signals = [dict(signal) for signal in fetched]
                 for signal in signals:
                     signal.setdefault("source", source_name)
+                discovery_registry.record_fetch(source_name, len(signals))
                 return source_name, signals, time.monotonic() - started, None
             except (KeyboardInterrupt, SystemExit):
                 raise
             except Exception as exc:
+                discovery_registry.record_fetch(source_name, 0, error=str(exc))
                 return source_name, [], time.monotonic() - started, str(exc)
 
         workers = min(self._max_source_workers, max(1, len(self._sources)))
@@ -248,9 +252,24 @@ class SignalEngine:
         """Return only signals that meet the minimum score threshold."""
         return [s for s in signals if s.get("score", 0) >= min_score]
 
-    def top_opportunities(self, signals: list, n: int = 5) -> list:
-        """Return the top N signals by score."""
-        return sorted(signals, key=lambda s: s.get("score", 0), reverse=True)[:n]
+    def top_opportunities(self, signals: list, n: int = 5, use_urgency: bool = False) -> list:
+        """Return top N signals by score, optionally weighted by urgency (Phase 7).
+
+        If use_urgency=True, rank by urgency = score * velocity * (1 - saturation).
+        This prioritizes products that are trending fast with low market saturation.
+        """
+        if not use_urgency:
+            return sorted(signals, key=lambda s: s.get("score", 0), reverse=True)[:n]
+
+        ranked = []
+        for s in signals:
+            base_score = s.get("score", 0)
+            velocity = s.get("velocity", 0.5)  # default 0.5 if not provided
+            saturation = s.get("saturation", 0.5)  # default 0.5 if not provided
+            urgency = base_score * velocity * (1 - saturation)
+            ranked.append((s, urgency))
+
+        return [s for s, _ in sorted(ranked, key=lambda x: -x[1])[:n]]
 
 
 signal_engine = SignalEngine()
@@ -268,24 +287,9 @@ def _register_adapters() -> None:
         _r2(signal_engine)
     except Exception:
         pass
-    # Google Trends adapter via existing research adapter registry
     try:
-        from backend.adapters.research import GoogleTrendsAdapterV1
-        from datetime import datetime, timezone
-        def _google_trends_fetch():
-            adapter = GoogleTrendsAdapterV1()
-            raw = adapter.fetch()
-            return [
-                {
-                    "product":  adapter.to_canonical(r, fetched_at=datetime.now(timezone.utc)).keyword,
-                    "score":    getattr(adapter.to_canonical(r, fetched_at=datetime.now(timezone.utc)), "confidence", 0.6),
-                    "velocity": getattr(adapter.to_canonical(r, fetched_at=datetime.now(timezone.utc)), "velocity", 1.0),
-                    "source":   "google_trends",
-                    "platform": "google",
-                }
-                for r in raw
-            ]
-        signal_engine.register_source("google_trends", _google_trends_fetch)
+        from backend.adapters.research.trend_source_v1 import register as _r_google
+        _r_google(signal_engine)
     except Exception:
         pass
     try:
@@ -296,6 +300,16 @@ def _register_adapters() -> None:
     try:
         from backend.adapters.youtube_trends import register as _r4
         _r4(signal_engine)
+    except Exception:
+        pass
+    try:
+        from backend.adapters.mercadolibre_trends import register as _r5
+        _r5(signal_engine)
+    except Exception:
+        pass
+    try:
+        from backend.adapters.alibaba_trends import register as _r6
+        _r6(signal_engine)
     except Exception:
         pass
 

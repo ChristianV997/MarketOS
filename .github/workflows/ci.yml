@@ -20,9 +20,9 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -39,7 +39,7 @@ jobs:
 
       - name: Upload Semgrep findings
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: marketos-semgrep-results
           path: artifacts/semgrep-results.json
@@ -52,9 +52,9 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           # Keep CI aligned with the Docker production runtime.
           python-version: '3.12'
@@ -97,7 +97,7 @@ jobs:
         run: python scripts/generate_oss_sbom.py --output artifacts/oss-sbom.json
 
       - name: Retain OSS SBOM manifest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: marketos-oss-sbom
           path: artifacts/oss-sbom.json
@@ -114,7 +114,11 @@ jobs:
           pip-audit --local --strict
 
       - name: Run tests
-        run: pytest tests/ -v
+        # -n auto (pytest-xdist): parallelizes ~2,470 tests across CI's
+        # available cores. Not forced on for local `pytest -q` runs (pytest.ini
+        # is unchanged) since output-interleaving makes ad-hoc debugging
+        # harder — pass -n auto yourself locally when you want the speedup.
+        run: pytest tests/ -v -n auto
 
       - name: Enforce dry-run commerce-cycle p95 budget
         run: python scripts/benchmark_commerce_cycle.py --runs 10 --p95-limit-ms 2000
@@ -132,17 +136,54 @@ jobs:
           print(f"OK: {s.total_cycles} cycles, capital=${s.capital:.2f}, regime={s.detected_regime}")
           PY
 
+  quality-advisory:
+    # Advisory lint + coverage gate — reports only, never fails the build.
+    # First pass on a codebase with no prior lint/coverage history; make
+    # this blocking once ruff and coverage baselines are clean (see
+    # pyproject.toml's [tool.ruff] comment and requirements-dev.txt).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: ruff check (advisory)
+        run: ruff check . || true
+
+      - name: pytest --cov (advisory)
+        # Floor set slightly below the measured baseline (67.6% on 2026-07-29)
+        # so normal variance doesn't trip it while still catching real drops.
+        run: pytest tests/ --cov=. --cov-report=term-missing --cov-fail-under=65 || true
+
   container-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Validate OSS Compose overlay with Docker
         env:
           MEDUSA_IMAGE: medusajs/medusa:v2.14.2
           MEDUSA_DATABASE_URL: postgres://validation.invalid/marketos
+          BROWSER_USE_WORKER_TOKEN: validation-only-browser-use-worker-token
+          BROWSER_USE_ALLOWED_DOMAINS: validation.invalid
           N8N_ENCRYPTION_KEY: validation-only-encryption-key
           N8N_USER_MANAGEMENT_JWT_SECRET: validation-only-jwt-secret
           N8N_WEBHOOK_TOKEN: validation-only-webhook-token

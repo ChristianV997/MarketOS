@@ -35,6 +35,13 @@ class SimulationResult:
     # Feature vector used
     features: list[float] = field(default_factory=list)
 
+    # Phase 7: Monte Carlo prediction interval (bootstrap over model
+    # residuals), populated by simulation.engine when available; 0.0 when
+    # the model is cold-started or the signal wasn't scored with intervals.
+    mc_interval_width: float = 0.0
+    mc_ci_lower: float = 0.0
+    mc_ci_upper: float = 0.0
+
     # Metadata
     ts: float = field(default_factory=time.time)
 
@@ -51,6 +58,9 @@ class SimulationResult:
             "risk_score": round(self.risk_score, 4),
             "rank_score": round(self.rank_score, 4),
             "rank": self.rank,
+            "mc_interval_width": round(self.mc_interval_width, 4),
+            "mc_ci_lower": round(self.mc_ci_lower, 4),
+            "mc_ci_upper": round(self.mc_ci_upper, 4),
             "ts": self.ts,
         }
 

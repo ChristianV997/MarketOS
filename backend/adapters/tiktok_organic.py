@@ -3,7 +3,7 @@
 Sources (in priority order):
   1. TikTok Creative Center Trending Products API (requires TIKTOK_ACCESS_TOKEN)
   2. Unofficial TikTok trends endpoint (public, no auth)
-  3. PyTrends proxy for TikTok-correlated search terms
+  3. trendspyg (Google Trends RSS) proxy for TikTok-correlated search terms
   4. Mock data fallback
 
 Normalises everything to the common signal schema:
@@ -26,6 +26,17 @@ _ACCESS_TOKEN  = os.getenv("TIKTOK_ACCESS_TOKEN", "")
 _ADVERTISER_ID = os.getenv("TIKTOK_ADVERTISER_ID", "")
 
 _MOCK_SIGNALS = [
+    # Pets/baby lead the pack here on purpose: TikTok's own creator-fund
+    # payout data and multiple third-party virality studies consistently
+    # rank pet and baby content among the highest organic reach/completion-
+    # rate niches (cute/funny animal or infant reactions drive shares far
+    # more reliably than most other verticals) — "velocity" reflects that,
+    # not just raw popularity score.
+    {"product": "Interactive Cat Wand Toy",       "score": 0.98, "velocity": 2.6, "category": "pets"},
+    {"product": "Automatic Cat Water Fountain",   "score": 0.96, "velocity": 2.4, "category": "pets"},
+    {"product": "Dog Snuffle Puzzle Mat",         "score": 0.94, "velocity": 2.2, "category": "pets"},
+    {"product": "Baby Sensory Teether Set",       "score": 0.95, "velocity": 2.3, "category": "baby"},
+    {"product": "Baby Head Shaping Pillow",       "score": 0.91, "velocity": 2.0, "category": "baby"},
     {"product": "Stanley Tumbler",        "score": 0.97, "velocity": 2.3, "category": "accessories"},
     {"product": "Skincare Serum Retinol",  "score": 0.93, "velocity": 1.9, "category": "beauty"},
     {"product": "Mini Projector",          "score": 0.89, "velocity": 1.7, "category": "electronics"},
@@ -39,16 +50,20 @@ _MOCK_SIGNALS = [
 
 def _fetch_creative_center() -> list[dict]:
     """TikTok Creative Center Trending Products (official API)."""
-    if not _ACCESS_TOKEN:
+    # Read credentials at call time so task restarts or Secrets Manager
+    # injection do not require importing this module again.
+    access_token = os.getenv("TIKTOK_ACCESS_TOKEN", _ACCESS_TOKEN)
+    advertiser_id = os.getenv("TIKTOK_ADVERTISER_ID", _ADVERTISER_ID)
+    if not access_token or not advertiser_id:
         return []
     try:
         import requests
         url = "https://business-api.tiktok.com/open_api/v1.3/creative_center/trending_products/"
         headers = {
-            "Access-Token": _ACCESS_TOKEN,
+            "Access-Token": access_token,
             "Content-Type": "application/json",
         }
-        params = {"advertiser_id": _ADVERTISER_ID, "page_size": 20}
+        params = {"advertiser_id": advertiser_id, "page_size": 20}
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
@@ -70,26 +85,33 @@ def _fetch_creative_center() -> list[dict]:
     return []
 
 
-def _fetch_pytrends_proxy() -> list[dict]:
-    """Use PyTrends to find TikTok-adjacent trending search terms."""
+def _fetch_trendspyg_proxy() -> list[dict]:
+    """Use trendspyg's RSS-based trending-topics feed as a proxy for
+    TikTok virality — replaces the previous pytrends.trending_searches()
+    call (pytrends is archived upstream with no replacement; trendspyg is
+    actively maintained and this path needs no Selenium/browser)."""
     try:
-        from pytrends.request import TrendReq
-        pt = TrendReq(hl="en-US", tz=360, timeout=(5, 15))
-        # Trending searches as a proxy for TikTok virality
-        trending = pt.trending_searches(pn="united_states")
+        import trendspyg
+        trending = trendspyg.download_google_trends_rss(
+            geo="US", output_format="dict", include_images=False,
+            include_articles=False, cache=True,
+        )
         results = []
-        for i, term in enumerate(trending[0].tolist()[:15], start=1):
+        for i, item in enumerate(trending[:15], start=1):
+            term = str(item.get("trend", "")).strip()
+            if not term:
+                continue
             results.append({
-                "product":  str(term),
+                "product":  term,
                 "score":    round(max(0.3, 1.0 - i * 0.04), 4),
                 "velocity": round(max(0.5, 2.0 - i * 0.1), 4),
                 "category": "trending",
                 "platform": "tiktok",
-                "source":   "pytrends_proxy",
+                "source":   "trendspyg_proxy",
             })
         return results
     except Exception as exc:
-        _log.debug("pytrends_proxy_failed error=%s", exc)
+        _log.debug("trendspyg_proxy_failed error=%s", exc)
     return []
 
 
@@ -101,7 +123,7 @@ def fetch() -> list[dict]:
 
     results = _fetch_creative_center()
     if not results:
-        results = _fetch_pytrends_proxy()
+        results = _fetch_trendspyg_proxy()
     if not results:
         _log.debug("tiktok_organic using mock data")
         results = [dict(r, source="tiktok_mock", platform="tiktok") for r in _MOCK_SIGNALS]
@@ -114,4 +136,17 @@ def fetch() -> list[dict]:
 def register(signal_engine: Any) -> None:
     """Register this adapter with the provided SignalEngine instance."""
     signal_engine.register_source("tiktok_organic", fetch)
+    try:
+        from backend.discovery.registry import discovery_registry
+        # requires_auth=False: the official Creative Center path needs
+        # credentials, but this adapter still attempts real data via a
+        # trendspyg proxy without them (mirrors amazon_bestsellers' pattern
+        # of "no auth required to attempt real data, mock only as last resort").
+        discovery_registry.register(
+            "tiktok_organic",
+            credential_env_vars=["TIKTOK_ACCESS_TOKEN", "TIKTOK_ADVERTISER_ID"],
+            requires_auth=False,
+        )
+    except Exception:
+        pass
     _log.info("tiktok_organic adapter registered")

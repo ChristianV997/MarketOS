@@ -1,0 +1,30 @@
+[Unit]
+Description=MarketOS orchestrator (continuous tick loop)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# This is a systemd --user unit (installed under ~/.config/systemd/user/ by
+# scripts/install_daemon.sh) — no "User=" directive and no sudo needed.
+# Placeholders are rewritten to real paths by that script.
+Type=simple
+WorkingDirectory=__MARKETOS_REPO_DIR__
+EnvironmentFile=-__MARKETOS_REPO_DIR__/.env
+Environment=STATE_PATH=__MARKETOS_DATA_DIR__/state.db
+Environment=MARKETOS_STATE_DIR=__MARKETOS_DATA_DIR__/state
+Environment=OBSIDIAN_VAULT_PATH=__MARKETOS_DATA_DIR__/obsidian-vault
+Environment=OLLAMA_AUTO_START=true
+ExecStart=__MARKETOS_PYTHON_BIN__ -m orchestrator.main
+Restart=on-failure
+RestartSec=5
+# SIGTERM is caught by orchestrator/main.py's handler, which finishes the
+# in-flight tick, checkpoints state, and exits cleanly — give it real time.
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+# Keep failures visible; `journalctl --user -u marketos-orchestrator -f` to tail.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

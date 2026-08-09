@@ -1,0 +1,36 @@
+
+================================================================================
+CALIBRATED SHADOW-MODE VALIDATION RESULTS
+================================================================================
+
+✓ adaptive_risk                  (  351 events)
+    adaptive_more_permissive_pct             = 1.0
+
+✓ calibration                    ( 4789 events)
+    valid_train_holdout_split_pct            = 0.983
+    valid_holdout_uncertainty_pct            = 1.0
+
+✓ capital_policy                 ( 6232 events)
+    allocations_valid_pct                    = 1.0
+    budget_respected_pct                     = 1.0
+
+✗ decision_normalize             (24565 events)
+    normalized_in_range_pct                  = 0.98
+    variance_reduction_ratio                 = 0.043
+
+✓ geo_economics                  (   33 events)
+    margin_adjusted_lte_raw_pct              = 1.0
+
+✓ regime_confidence_confidence   (24625 events)
+    bonus_adjusted_lte_raw_pct               = 1.0
+
+✓ regime_detection               ( 4733 events)
+    changepoint_detection_rate               = 0.027
+    expected_range                           = [0.01, 0.15]
+
+✗ supplier_ranking               (  104 events)
+    supplier_changed_pct                     = 0.0
+
+================================================================================
+SUMMARY: 6/8 phases passed validation
+================================================================================

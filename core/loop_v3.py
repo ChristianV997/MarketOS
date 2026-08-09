@@ -113,7 +113,7 @@ def run_cycle_v3(signals: list | None = None, config: dict | None = None) -> lis
         logger.info("[%s] Ads launched — product=%s platform=%s", pod.id, pod.product, pod.platform)
 
         # --------------------------------------------------- collect metrics
-        # In production these come from connectors/tiktok_ads.get_metrics().
+        # In production these come from backend.integrations.tiktok_ads metrics.
         # Here we use values embedded in the signal so integration tests and
         # the live loop can both use this function without branching.
         roas = float(signal.get("roas", 0.0))

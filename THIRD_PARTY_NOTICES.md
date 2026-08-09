@@ -12,12 +12,21 @@ legal advice.
 | medusa | v2.14.2 | MIT | Commerce sidecar; retain its upstream MIT notice. |
 | crawl4ai | v0.8.6 | Apache-2.0-with-attribution | Optional research worker; retain Apache notice and required attribution. |
 | browser-use | v0.13.6 | MIT | Optional browser worker; retain upstream MIT notice. |
-| pydantic-ai | v1.104.0 | MIT | Optional typed-agent profile; retain upstream MIT notice. |
+| pydantic-ai | v2.20.0 | MIT | Optional typed-agent profile; retain upstream MIT notice. |
 | postiz | pending-legal-review | AGPL-3.0 | Independently deployed sidecar only; commercial use requires explicit legal approval. |
 | n8n | n8n@2.30.5 | Sustainable-Use | Internal operational sidecar only; do not embed or white-label without review. |
 | erpnext | pending-deferred-review | GPL-3.0 | Deferred; do not vendor into the commercial core. |
 | airbyte | pending-deferred-review | review_required | Deferred pending license and integration review. |
 | saleor | pending-benchmark-review | review_required | Benchmark only; do not deploy alongside Medusa. |
+| twenty-crm | pending-deferred-review | AGPL-3.0 | Deferred by explicit user decision; AGPL requires legal review before adoption. |
+| chatwoot | pending-deferred-review | MIT | ConversationProvider adapter built and tested (backend/integrations/chatwoot.py); MIT, no legal-review gate needed. |
+| cal.com | pending-deferred-review | AGPL-3.0 | Deferred by explicit user decision; AGPL requires legal review before adoption. |
+| posthog | posthog-js@1.x | MIT | Client SDK (posthog-js) against PostHog Cloud; retain upstream MIT notice. Default-off via VITE_POSTHOG_KEY; no session-replay enabled. Also consumed server-side via the optional `posthog` Python SDK for backend event capture + query. |
+| temporal | pending-deferred-review | MIT | Deferred by explicit user decision; would replace hand-rolled workflow tracking if adopted later. |
+| crawlee | pending-deferred-review | Apache-2.0 | Deferred; redundant with crawl4ai + firecrawl already selected. |
+| woocommerce | pending-version-pin | GPL-3.0 | Merchant-operated WordPress plugin; adapter implements the existing CommerceProvider Protocol. Restricted license (same precedent as Postiz) — legal review required before commercial deployment. |
+| mautic | pending-deferred-review | GPL-3.0-or-later | MarketingAutomationProvider adapter built and tested; copyleft license treated with the same legal-review precedent as GPL-3.0/AGPL-3.0 candidates. |
+| activepieces | pending-deferred-review | MIT | CustomerAutomationProvider adapter built and tested; MIT, no legal-review gate needed. |
 
 The generated release SBOM captures resolved Python packages actually present
 in the build environment. Before enabling or updating any listed component,

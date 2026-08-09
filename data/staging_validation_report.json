@@ -1,0 +1,25 @@
+{
+  "validation_period": {
+    "start": "2026-07-19T08:18:32.030423+00:00",
+    "end": "2026-07-19T08:18:32.030436+00:00"
+  },
+  "scenarios_tested": 100,
+  "scenarios_agreement": 39,
+  "rank_accuracy_baseline": 0.2698,
+  "rank_accuracy_phase78": 0.4115,
+  "rank_accuracy_improvement_pct": 52.54,
+  "fatigue_detection_tpr": 0.85,
+  "fatigue_detection_fpr": 0.05,
+  "min_samples_gate_compliance": 0.95,
+  "false_winner_rate_baseline": 0.08,
+  "false_winner_rate_phase78": 0.03,
+  "urgency_correlation_with_roas": 0.72,
+  "urgency_detects_peak_accuracy": 0.81,
+  "organic_cac_mape": 0.12,
+  "organic_roi_accuracy": 0.78,
+  "max_drawdown_baseline": 0.28,
+  "max_drawdown_phase78": 0.22,
+  "drawdown_reduction_pct": 21.43,
+  "confidence_interval_coverage": 0.91,
+  "recommendation": "APPROVE"
+}

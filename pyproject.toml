@@ -1,0 +1,27 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Narrow, high-value rule set for a first pass — real correctness bugs
+# (unused imports, undefined names, unused variables), not a full style
+# rewrite. Expand incrementally once this baseline is clean.
+select = ["F401", "F811", "F821", "F841"]
+# The codebase has no existing lint history — 221 findings on this rule
+# set as of 2026-07-29 (mostly F401 unused imports). This pass is advisory
+# (see .github/workflows/ci.yml) until that baseline is cleaned up.
+# Note: pytest config stays in pytest.ini (pytest.ini takes precedence
+# over pyproject.toml when both exist — don't duplicate it here).
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "*/tests/*",
+    "*/__pycache__/*",
+    "scripts/*",
+]
+
+[tool.coverage.report]
+precision = 1
+skip_empty = true

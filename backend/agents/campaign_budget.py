@@ -1,3 +1,8 @@
+"""DEPRECATED — no production call sites. Budget allocation is unified in
+backend.decision.capital_policy (mean-variance QP with adaptive risk
+parameters); this ad hoc ±10% ROAS ratchet is retained only for import
+compatibility and will be removed.
+"""
 from collections import defaultdict
 
 class CampaignBudgetAllocator:

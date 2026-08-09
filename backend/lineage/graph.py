@@ -6,10 +6,17 @@ All traversal operations are backward-only (ancestry) or forward
 """
 from __future__ import annotations
 
+import os
 import threading
+from collections import OrderedDict
 from typing import Iterator
 
 from .node import LineageNode
+
+# Cap the graph so a long-running process cannot accumulate nodes without
+# bound. Oldest nodes are evicted FIFO; stale child references to evicted
+# nodes are harmless (traversal skips missing node_ids).
+_MAX_NODES = int(os.getenv("LINEAGE_MAX_NODES", "50000"))
 
 
 class LineageGraph:
@@ -19,18 +26,23 @@ class LineageGraph:
     in a separate index for forward traversal.
     """
 
-    def __init__(self) -> None:
-        self._lock:       threading.Lock               = threading.Lock()
-        self._nodes:      dict[str, LineageNode]       = {}
-        self._children:   dict[str, list[str]]         = {}  # parent_id → [child_ids]
+    def __init__(self, max_nodes: int = _MAX_NODES) -> None:
+        self._lock:       threading.Lock                     = threading.Lock()
+        self._nodes:      "OrderedDict[str, LineageNode]"    = OrderedDict()
+        self._children:   dict[str, list[str]]               = {}  # parent_id → [child_ids]
+        self._max_nodes = max_nodes
 
     # ── writes ────────────────────────────────────────────────────────────────
 
     def add_node(self, node: LineageNode) -> None:
         with self._lock:
             self._nodes[node.node_id] = node
+            self._nodes.move_to_end(node.node_id)
             for pid in node.parent_ids:
                 self._children.setdefault(pid, []).append(node.node_id)
+            while len(self._nodes) > self._max_nodes:
+                evicted_id, _ = self._nodes.popitem(last=False)
+                self._children.pop(evicted_id, None)
 
     # ── reads ─────────────────────────────────────────────────────────────────
 
@@ -103,3 +115,27 @@ class LineageGraph:
     def all_nodes(self) -> list[LineageNode]:
         with self._lock:
             return list(self._nodes.values())
+
+    # ── persistence ─────────────────────────────────────────────────────────
+
+    def snapshot(self) -> list[dict]:
+        """Return a JSON-safe list of all nodes (insertion order)."""
+        with self._lock:
+            return [n.to_dict() for n in self._nodes.values()]
+
+    def restore(self, nodes: list[dict]) -> None:
+        """Rebuild the graph from a snapshot produced by ``snapshot()``."""
+        with self._lock:
+            self._nodes.clear()
+            self._children.clear()
+            for d in nodes or []:
+                try:
+                    node = LineageNode.from_dict(d)
+                except Exception:
+                    continue
+                self._nodes[node.node_id] = node
+                for pid in node.parent_ids:
+                    self._children.setdefault(pid, []).append(node.node_id)
+            while len(self._nodes) > self._max_nodes:
+                evicted_id, _ = self._nodes.popitem(last=False)
+                self._children.pop(evicted_id, None)

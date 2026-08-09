@@ -45,12 +45,30 @@ class CapitalEngine:
         return decision
 
     def allocate_budget(self, pods, total_budget: float) -> dict:
-        """Distribute total_budget evenly across non-killed pods."""
+        """Distribute total_budget across non-killed pods, ROAS-weighted.
+
+        Uses the softmax allocator (score = roas*0.6 + profit*0.3 - drawdown*0.1,
+        clamped to 5–35% per pod) so winners get more capital; falls back to an
+        even split only if the softmax path fails.
+        """
         active = [p for p in pods if p.status != "killed"]
         if not active:
             return {}
-        per_pod = total_budget / len(active)
-        return {p.id: round(per_pod, 4) for p in active}
+        try:
+            from core.capital.allocator import allocate
+            strategies = [
+                {
+                    "roas":     p.metrics.get("roas", 0.0),
+                    "profit":   p.metrics.get("revenue", 0.0) - p.metrics.get("spend", 0.0),
+                    "drawdown": p.metrics.get("drawdown", 0.0),
+                }
+                for p in active
+            ]
+            amounts = allocate(strategies, total_budget)
+            return {p.id: round(a, 4) for p, a in zip(active, amounts)}
+        except Exception:
+            per_pod = total_budget / len(active)
+            return {p.id: round(per_pod, 4) for p in active}
 
 
 capital_engine = CapitalEngine()

@@ -8,6 +8,10 @@ _CTR_WIN  = float(os.getenv("CONTENT_CTR_WIN",  "0.02"))
 _CVR_WIN  = float(os.getenv("CONTENT_CVR_WIN",  "0.015"))
 _ENG_WIN  = float(os.getenv("CONTENT_ENG_WIN",  "0.04"))
 
+# Minimum reach before organic engagement counts as a real signal — high
+# engagement on a handful of impressions is noise, not a winner.
+_ORGANIC_MIN_IMPRESSIONS = int(os.getenv("ORGANIC_MIN_IMPRESSIONS", "1000"))
+
 # Reference ceiling values used for 0-1 normalisation
 _ROAS_REF = 3.0
 _CTR_REF  = 0.10
@@ -25,7 +29,21 @@ def engagement_score(event: dict) -> float:
 
 
 def classify_video(event: dict) -> str:
-    """Classify a single content event as WINNER, LOSER, or NEUTRAL."""
+    """Classify a single content event as WINNER, LOSER, or NEUTRAL.
+
+    Organic events (source="organic") are classified on engagement alone:
+    they carry no ROAS/CTR by nature, and running them through the paid
+    branch would mark every organic post a LOSER (roas=0) and poison
+    PatternStore with false negative evidence. Absence of purchase signal
+    is not negative evidence — organic can only be WINNER or NEUTRAL.
+    """
+    if event.get("source") == "organic":
+        eng = float(event.get("engagement_rate", 0.0) or 0.0)
+        impressions = int(event.get("impressions", 0) or 0)
+        if eng >= _ENG_WIN and impressions >= _ORGANIC_MIN_IMPRESSIONS:
+            return "WINNER"
+        return "NEUTRAL"
+
     roas = event.get("roas", 0.0)
     ctr  = event.get("ctr",  0.0)
     cvr  = event.get("cvr",  0.0)

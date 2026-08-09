@@ -2,9 +2,59 @@ from __future__ import annotations
 
 import hashlib
 import os
+from typing import Any
 
 
 _DEFAULT_MODEL = os.getenv("CREATIVE_GENERATOR_MODEL", "default")
+
+# ── Step 65 — hook-template batch generator ───────────────────────────────────
+# Complementary to generate_creative() below: a lightweight, deterministic,
+# non-AI batch generator over a small hook-angle template pool, used by
+# core/pipeline/execution.py's end-to-end creative→ad pipeline.
+_HOOKS: dict[str, list[str]] = {
+    "satisfaction": [
+        "watch this",
+        "this is so satisfying",
+    ],
+    "problem": [
+        "this fixes...",
+        "stop doing this wrong",
+    ],
+    "convenience": [
+        "this saves so much time",
+        "the easiest way to do this",
+    ],
+    "transformation": [
+        "before vs after",
+        "this changed everything",
+    ],
+}
+
+
+def generate_creatives(product: str, angle: str) -> list[dict[str, Any]]:
+    """Return hook-based creative variants for *product* and *angle*.
+
+    Parameters
+    ----------
+    product:
+        Product name to feature in each creative.
+    angle:
+        Content angle key (e.g. ``"satisfaction"``, ``"problem"``).
+
+    Returns
+    -------
+    list[dict]
+        Each dict contains ``hook``, ``body``, and ``cta`` keys.
+    """
+    hooks = _HOOKS.get(angle, [f"{angle} hook"])
+    return [
+        {
+            "hook": h,
+            "body": f"show {product} solving problem",
+            "cta": "get it now",
+        }
+        for h in hooks
+    ]
 
 
 def _fallback_script(product: str, angle: str) -> str:

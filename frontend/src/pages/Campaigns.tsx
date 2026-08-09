@@ -99,7 +99,7 @@ export default function Campaigns() {
                       <span className={cn("text-[10px] px-2 py-0.5 rounded border", statusStyle(String(c.status ?? "")))}>
                         {String(c.status ?? "—")}
                       </span>
-                      {c.override && (
+                      {Boolean(c.override) && (
                         <span className="ml-1 text-[9px] text-amber-500">OVR</span>
                       )}
                     </td>

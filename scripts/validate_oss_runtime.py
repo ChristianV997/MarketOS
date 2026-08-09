@@ -38,15 +38,26 @@ def _health_record(provider: Any) -> dict[str, Any]:
 def build_report(inventory: Path = INVENTORY) -> dict[str, Any]:
     from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
     from backend.agents.pydantic_boundary import PydanticAIAgentProvider
+    from backend.integrations.activepieces import ActivepiecesAutomationAdapter
     from backend.integrations.browser_use_worker import BrowserUseWorker
+    from backend.integrations.chatwoot import ChatwootConversationAdapter
+    from backend.integrations.hostinger import HostingerHostingAdapter
+    from backend.integrations.mautic import MauticMarketingAutomationAdapter
     from backend.integrations.medusa import MedusaCommerceAdapter
+    from backend.integrations.mercado_pago_mx import MercadoPagoMxPaymentAdapter
     from backend.integrations.n8n import N8nAutomationAdapter
+    from backend.integrations.posthog_backend import PostHogAnalyticsAdapter
     from backend.integrations.postiz import PostizPublisherAdapter
+    from backend.integrations.stripe_mx import StripeMxPaymentAdapter
+    from backend.integrations.woocommerce import WooCommerceCommerceAdapter
     from backend.contracts.adapters import SidecarContext
 
     providers = [
         MedusaCommerceAdapter(), Crawl4AIResearchAdapter(), BrowserUseWorker(),
         PostizPublisherAdapter(), N8nAutomationAdapter(), PydanticAIAgentProvider(),
+        WooCommerceCommerceAdapter(), StripeMxPaymentAdapter(), MercadoPagoMxPaymentAdapter(),
+        ChatwootConversationAdapter(), MauticMarketingAutomationAdapter(),
+        ActivepiecesAutomationAdapter(), PostHogAnalyticsAdapter(), HostingerHostingAdapter(),
     ]
     return {
         "inventory": str(inventory),
@@ -57,6 +68,13 @@ def build_report(inventory: Path = INVENTORY) -> dict[str, Any]:
             "medusa": MedusaCommerceAdapter().create_order({}, context=SidecarContext()),
             "postiz": PostizPublisherAdapter().publish({}, context=SidecarContext()),
             "n8n": N8nAutomationAdapter().trigger("alerts", {}, context=SidecarContext()),
+            "woocommerce": WooCommerceCommerceAdapter().create_order({}, context=SidecarContext()),
+            "stripe_mx": StripeMxPaymentAdapter().handle_webhook({}, context=SidecarContext()),
+            "mercado_pago_mx": MercadoPagoMxPaymentAdapter().handle_webhook({}, context=SidecarContext()),
+            "chatwoot": ChatwootConversationAdapter().create_contact({}, context=SidecarContext()),
+            "mautic": MauticMarketingAutomationAdapter().upsert_contact({}, context=SidecarContext()),
+            "activepieces": ActivepiecesAutomationAdapter().trigger_workflow("wf1", {}, context=SidecarContext()),
+            "posthog_backend": PostHogAnalyticsAdapter().capture_event({}, context=SidecarContext()),
         },
     }
 

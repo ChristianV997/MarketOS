@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from threading import Lock
 
 from core.content.patterns import extract_patterns
+from backend.core.persistence import save_json_atomic, load_json, state_path
+
+_PLAYBOOK_PATH = state_path("playbook.json")
 
 
 @dataclass
@@ -17,6 +20,7 @@ class Playbook:
     confidence: float
     evidence_count: int
     created_at: float = field(default_factory=time.time)
+    last_launched_at: float = 0.0
 
 
 class PlaybookMemory:
@@ -48,9 +52,28 @@ class PlaybookMemory:
                     confidence=round(total / (total + 10), 4),
                     evidence_count=total,
                     created_at=existing.created_at,
+                    last_launched_at=existing.last_launched_at,
                 )
             else:
                 self._store[key] = playbook
+        self._persist()
+
+    def snapshot(self) -> list[dict]:
+        with self._lock:
+            return [asdict(pb) for pb in self._store.values()]
+
+    def restore(self, rows: list[dict]) -> None:
+        with self._lock:
+            self._store.clear()
+            for d in rows or []:
+                try:
+                    pb = Playbook(**d)
+                except Exception:
+                    continue
+                self._store[(pb.product, pb.phase)] = pb
+
+    def _persist(self) -> None:
+        save_json_atomic(_PLAYBOOK_PATH, self.snapshot())
 
     def get(self, product: str, phase: str | None = None) -> Playbook | None:
         with self._lock:
@@ -63,6 +86,18 @@ class PlaybookMemory:
     def all(self) -> list[Playbook]:
         with self._lock:
             return list(self._store.values())
+
+    def mark_launched(self, product: str, phase: str, ts: float) -> None:
+        """Stamp last_launched_at after a real campaign launch, so a
+        relaunch-cooldown check (backend/orchestration's _run_scaling) can
+        avoid minting a fresh campaign for the same playbook every tick."""
+        with self._lock:
+            key = (product, phase)
+            existing = self._store.get(key)
+            if existing is None:
+                return
+            existing.last_launched_at = ts
+        self._persist()
 
 
 def generate_playbook(
@@ -93,3 +128,8 @@ def generate_playbook(
 
 
 playbook_memory = PlaybookMemory()
+
+# Restore persisted playbooks on import (fail-silent)
+_saved = load_json(_PLAYBOOK_PATH)
+if _saved:
+    playbook_memory.restore(_saved)

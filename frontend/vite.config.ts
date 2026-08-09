@@ -12,9 +12,13 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // api/routes/services.py's router is mounted at the literal prefix
+      // /api/services (backend/api.py: APIRouter(prefix="/api/services")),
+      // so this must forward unchanged — no path rewrite. The previous
+      // strip-/api rewrite was dead configuration: nothing in the
+      // frontend called an /api/* path until services.* did.
       "/api": {
         target: "http://localhost:3000",
-        rewrite: (path) => path.replace(/^\/api/, ""),
         changeOrigin: true,
       },
       "/ws": {

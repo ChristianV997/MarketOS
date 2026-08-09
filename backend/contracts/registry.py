@@ -6,8 +6,19 @@ durable event log (ReplayArtifact events).
 """
 from __future__ import annotations
 
+import logging
+import os
 import threading
 from typing import Any, Type
+
+_log = logging.getLogger(__name__)
+
+# Default replay-hydration cap, overridable via env var. Previously fixed
+# at 5000 with no visibility when it truncated — a restart with more than
+# this many historical artifact-registration events silently lost the
+# older ones. Now configurable and the truncation case is logged (see
+# hydrate_from_replay below) instead of failing silently.
+_DEFAULT_REPLAY_LIMIT = int(os.getenv("ARTIFACT_REPLAY_LIMIT", "5000"))
 
 from .base        import BaseArtifact
 from .simulation  import SimulationArtifact
@@ -102,11 +113,29 @@ class ArtifactRegistry:
                     continue
         return restored
 
-    def hydrate_from_replay(self, limit: int = 5000) -> int:
-        """Restore retained artifacts from the configured durable replay store."""
+    def hydrate_from_replay(self, limit: int | None = None) -> int:
+        """Restore retained artifacts from the configured durable replay store.
+
+        ``limit`` defaults to ARTIFACT_REPLAY_LIMIT (env-configurable,
+        5000 unless overridden). If the replay log actually has at least
+        that many events, hydration may be truncating older artifacts —
+        this is now logged as a warning (previously silent) so an
+        operator seeing missing artifacts after restart has a concrete
+        signal to look at, rather than an artifact that simply "never
+        existed."
+        """
+        effective_limit = _DEFAULT_REPLAY_LIMIT if limit is None else limit
         try:
             from backend.events.log import tail
-            return self.hydrate(tail(limit))
+            events = tail(effective_limit)
+            if len(events) >= effective_limit:
+                _log.warning(
+                    "artifact_registry_hydration_may_be_truncated "
+                    "limit=%s returned=%s — older artifacts may be missing; "
+                    "raise ARTIFACT_REPLAY_LIMIT if this is unexpected",
+                    effective_limit, len(events),
+                )
+            return self.hydrate(events)
         except Exception:
             return 0
 
@@ -133,7 +162,19 @@ class ArtifactRegistry:
     def deserialize(self, d: dict[str, Any]) -> BaseArtifact:
         """Reconstruct a typed artifact from its dict representation."""
         atype = d.get("artifact_type", "base")
-        cls   = _TYPE_MAP.get(atype, BaseArtifact)
+        cls   = _TYPE_MAP.get(atype)
+        if cls is None and atype == "commercial_run_envelope":
+            # Lazy import (mirrors register()'s own backend.events.log
+            # import below) — backend.experiments imports backend.contracts
+            # at module scope, so importing it back here at module load
+            # time would be circular; importing lazily inside this method
+            # is safe since both packages are fully initialized by call time.
+            try:
+                from backend.experiments.envelope import CommercialRunEnvelope
+                cls = CommercialRunEnvelope
+            except Exception:
+                cls = None
+        cls = cls or BaseArtifact
         return cls.from_dict(d)
 
 

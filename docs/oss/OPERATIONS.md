@@ -33,6 +33,22 @@ digest-pinned `SALEOR_BENCHMARK_IMAGE`, and an internal
 `--teardown`. The probe reads only Saleor's public `shop` GraphQL record and
 reports startup, query latency, and container memory. Do not run Medusa and
 Saleor as production providers together.
+
+Run `python scripts/evaluate_<provider>_benchmark.py` for any of the
+cost-aware Stack Planner adapters — `woocommerce`, `stripe_mx`,
+`mercado_pago_mx`, `chatwoot`, `mautic`, `activepieces`, `hostinger`,
+`posthog_backend` (see `docs/STACK_PLANNER.md`, `docs/INTEGRATION_PORTS.md`).
+Unlike the Medusa/Saleor evaluators, these adapters are either pure SaaS
+APIs or externally operated services with nothing for MarketOS to start or
+tear down, so the shared harness in `scripts/_provider_benchmark.py`
+benchmarks reachability/latency against whatever real credentials an
+operator has already configured, reusing each adapter's own `health()`
+method plus, where one exists, a single read-only `list_*`/`get_*`/`query_*`
+method — never a mutating one. All eight default to `status="planned"`
+(no adapter constructed, no credentials read) unless `--execute` is passed,
+and degrade to `"unconfigured"`/`"unreachable"`/`"partial"` rather than
+raising when credentials are absent, the service is unreachable, or a probe
+errors.
 Run `python scripts/generate_oss_sbom.py --output artifacts/oss-sbom.json`
 during release preparation to capture the reviewed OSS inventory and installed
 Python package versions without network access.

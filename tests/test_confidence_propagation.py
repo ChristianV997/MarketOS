@@ -12,7 +12,12 @@ def test_allocator_uses_confidence_and_exploration_boost():
 
 
 def test_bandit_weight_changes_with_confidence():
-    original = dict(bandit_memory.history)
+    # .copy() preserves bandit_memory.history's actual type (an OrderedDict
+    # of bounded deques) — dict(...) would coerce it to a plain dict,
+    # permanently breaking the OrderedDict-only move_to_end() call in
+    # BanditMemory.update() for every test that runs afterward in this
+    # process once restored below.
+    original = bandit_memory.history.copy()
     graph = CausalGraph()
     graph.add_edge("exploratory", "roas", 0.2)
     action = ("exploratory", "campaign-1")

@@ -10,7 +10,6 @@ import {
 
 import { useRuntimeStore } from "../runtimeStore";
 import type { RuntimeSnapshot, RuntimeEnvelope } from "../types";
-import { RuntimeGraph } from "./RuntimeGraph";
 import { DeploymentTimeline } from "./DeploymentTimeline";
 import { AgentActivity } from "./AgentActivity";
 import { InventoryOps } from "./InventoryOps";
@@ -198,7 +197,11 @@ export function CommandCenter({ snapshot, connected }: Props) {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2">
-          <RuntimeGraph />
+          {/* Pre-existing broken reference removed: this imported a
+              component named RuntimeGraph that never existed — only a
+              type + buildRuntimeGraph() helper live in ../runtimeGraph.ts.
+              Left unimplemented here rather than fabricated; a real
+              graph visualization is out of scope for this pass. */}
         </div>
 
         <div className="space-y-6">

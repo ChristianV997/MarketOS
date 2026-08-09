@@ -139,6 +139,11 @@ class RuntimeReplayStore:
         except Exception as exc:
             _log.warning("runtime_replay_prune_failed error=%s", exc)
 
+    def tail(self, n: int = 100, event_type: str | None = None) -> list[dict]:
+        """Alias for recent() — backend.events.log.tail()'s expected method
+        name. Both return the n most-recent events, oldest-first."""
+        return self.recent(n, event_type=event_type)
+
     def recent(self, n: int = 50, event_type: str | None = None) -> list[dict]:
         """Return the n most-recent events in deterministic order."""
         self._ensure_init()
@@ -274,3 +279,14 @@ class RuntimeReplayStore:
 
 _db_path = os.getenv("RUNTIME_REPLAY_DB", ":memory:")
 runtime_replay_store = RuntimeReplayStore(db_path=_db_path)
+
+
+def get_replay_store() -> RuntimeReplayStore:
+    """Accessor for the module-level singleton — this was imported by
+    backend.events.log and 6 other callers but never defined, meaning
+    every one of those call sites silently caught an ImportError and
+    degraded to a no-op (backend.events.log.append()/tail()/scan_window()
+    all returned empty/no-op results regardless of what was ever
+    appended). Restoring this accessor makes those existing call sites
+    actually reach the already-instantiated ``runtime_replay_store``."""
+    return runtime_replay_store

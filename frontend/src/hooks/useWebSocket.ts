@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RuntimeEnvelope, WsEvent } from "../types";
 
-const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/events`;
+// Matches the backend's actual route (backend/api.py: @app.websocket("/ws"))
+// and vite.config.ts's dev proxy stanza ("/ws" -> ws:true) — this URL
+// previously pointed at /ws/events, a path the backend never registered,
+// so the dashboard's live websocket connection silently never connected
+// (it fell back to polling via react-query, which masked the bug).
+const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 const RECONNECT_MS = [1000, 2000, 4000, 8000, 16000];
 const FLUSH_MS = 50;
 const MAX_BATCH = 32;

@@ -47,6 +47,9 @@ class ScoringModel:
         self._fitted = False
         self._lock = threading.Lock()
         self._train_count = 0
+        # Phase 7: track training residuals for Monte Carlo prediction intervals
+        self._residuals: list[float] = []  # residuals from last fit
+        self._y_train: np.ndarray | None = None  # training targets for interval computation
 
     # ------------------------------------------------------------------
     # Training
@@ -93,6 +96,10 @@ class ScoringModel:
                 X_scaled = self._scaler.fit_transform(X)
                 ridge = Ridge(alpha=self._alpha)
                 ridge.fit(X_scaled, y_arr)
+                # Phase 7: store residuals for Monte Carlo prediction intervals
+                y_pred = ridge.predict(X_scaled)
+                self._residuals = [float(y - yp) for y, yp in zip(y_arr, y_pred)]
+                self._y_train = y_arr
                 self._ridge = ridge
                 self._fitted = True
                 self._train_count += 1
@@ -149,6 +156,62 @@ class ScoringModel:
                 except Exception:
                     pass
         return _heuristic_score(fv)
+
+    def predict_with_intervals(
+        self,
+        signal: dict,
+        patterns: dict | None = None,
+        playbook: Any | None = None,
+        history: list[dict] | None = None,
+        percentiles: tuple[int, ...] = (5, 25, 50, 75, 95),
+    ) -> dict:
+        """Phase 7: prediction with Monte Carlo confidence intervals.
+
+        Returns dict with:
+          point_estimate: single predicted score [0, 1]
+          percentiles: dict {5: val, 25: val, 50: val, 75: val, 95: val}
+          confidence_interval_lower: 5th percentile
+          confidence_interval_upper: 95th percentile
+          mean_interval_width: width of [5%, 95%] interval
+        """
+        # Compute point estimate
+        point_est = self.predict_one(signal, patterns=patterns, playbook=playbook, history=history)
+
+        with self._lock:
+            if not self._fitted or self._ridge is None or len(self._residuals) < 10:
+                # Cold start: no residuals to bootstrap from
+                return {
+                    "point_estimate": round(point_est, 4),
+                    "percentiles": {p: round(point_est, 4) for p in percentiles},
+                    "confidence_interval_lower": round(max(0.0, point_est - 0.1), 4),
+                    "confidence_interval_upper": round(min(1.0, point_est + 0.1), 4),
+                    "mean_interval_width": 0.2,
+                }
+
+            # Bootstrap residuals: sample residuals, add to point estimate
+            residuals_arr = np.array(self._residuals, dtype=float)
+            rng = np.random.default_rng(seed=hash(str(signal)) % (2**31))
+            bootstrap_preds = []
+
+            for _ in range(1000):  # 1000 Monte Carlo samples
+                sampled_residual = float(rng.choice(residuals_arr))
+                bootstrap_pred = np.clip(point_est + sampled_residual, 0.0, 1.0)
+                bootstrap_preds.append(bootstrap_pred)
+
+            bootstrap_arr = np.array(bootstrap_preds, dtype=float)
+            percentile_vals = {p: float(np.percentile(bootstrap_arr, p)) for p in percentiles}
+
+            lower = percentile_vals.get(5, point_est)
+            upper = percentile_vals.get(95, point_est)
+            interval_width = max(0.0, upper - lower)
+
+            return {
+                "point_estimate": round(point_est, 4),
+                "percentiles": {p: round(v, 4) for p, v in percentile_vals.items()},
+                "confidence_interval_lower": round(lower, 4),
+                "confidence_interval_upper": round(upper, 4),
+                "mean_interval_width": round(interval_width, 4),
+            }
 
     @property
     def is_fitted(self) -> bool:

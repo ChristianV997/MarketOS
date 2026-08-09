@@ -38,11 +38,18 @@ class WorldModelCalibrator:
         prior_var: float = 1.0,
         obs_var: float = 0.5,
         window: int = 200,
+        process_var: float = 0.01,
     ):
         # Bayesian Normal–Normal conjugate parameters
         self._mu: float = prior_mean       # posterior mean (bias estimate)
         self._var: float = prior_var       # posterior variance
         self._obs_var: float = obs_var     # observation noise (fixed)
+        # Process noise added to the prior before each update. Without it the
+        # posterior variance collapses monotonically toward 0 and the filter
+        # stops responding to new observations (bias estimate freezes). This
+        # is the standard Kalman "process noise" that keeps the estimator
+        # tracking a bias that may drift over the life of the run.
+        self._process_var: float = process_var
 
         # Raw error window for reporting
         self._errors: deque[float] = deque(maxlen=window)
@@ -63,11 +70,15 @@ class WorldModelCalibrator:
         self._actuals.append(actual)
         self.total_updates += 1
 
+        # Inflate the prior with process noise so the filter keeps tracking a
+        # drifting bias instead of freezing as the posterior variance collapses.
+        prior_var = self._var + self._process_var
+
         # Bayesian update: conjugate Normal–Normal
         # posterior_var = 1 / (1/prior_var + 1/obs_var)
         # posterior_mean = posterior_var * (prior_mean/prior_var + obs/obs_var)
-        new_var = 1.0 / (1.0 / self._var + 1.0 / self._obs_var)
-        new_mu = new_var * (self._mu / self._var + error / self._obs_var)
+        new_var = 1.0 / (1.0 / prior_var + 1.0 / self._obs_var)
+        new_mu = new_var * (self._mu / prior_var + error / self._obs_var)
         self._mu = new_mu
         self._var = new_var
 
