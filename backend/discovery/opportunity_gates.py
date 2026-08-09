@@ -35,6 +35,20 @@ def evaluate_opportunity_gates(opportunity: Opportunity, evidence_records=None, 
         cost_needed=bool({"margin_proxy","supplier_proxy","price_signal"}&signals)
         if cost_needed and has_unit: passed.append("unit_economics_report")
         elif cost_needed: failed.append("missing_unit_economics_report")
+        scorecard = None
+        try:
+            from .validation_sprint_registry import get_validation_sprint_registry
+            scorecards = get_validation_sprint_registry().list_scorecards(opportunity_id=opportunity.opportunity_id, limit=1)
+            scorecard = scorecards[0] if scorecards else None
+        except Exception:
+            scorecard = None
+        if scorecard is not None:
+            if _get(scorecard, "confidence", 0) < .65: failed.append("validation_scorecard_confidence_too_low")
+            if _get(scorecard, "validation_score", 0) < 75: failed.append("validation_scorecard_score_too_low")
+            if any("critical" in str(x).lower() for x in (_get(scorecard, "risk_flags", []) or [])): failed.append("validation_scorecard_critical_risk")
+            if not failed: passed.append("validation_scorecard_gate")
+        else:
+            failed.append("missing_validation_scorecard")
         if not failed and not critical and not synthetic: target="launch_candidate"; status="pass"; passed.append("planning_only_validation_gate")
     if critical and target not in {"rejected"}: status="block"; target=opportunity.stage
     allowed=[x for x in TRANSITIONS.get(opportunity.stage,set()) if x==target or x=="rejected"]

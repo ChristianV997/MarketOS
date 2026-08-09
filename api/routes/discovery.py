@@ -22,6 +22,8 @@ from backend.discovery.opportunity_registry import get_opportunity_registry
 from backend.discovery.opportunity_pipeline_builder import refresh_opportunity_pipeline
 from backend.discovery.opportunity_gates import evaluate_opportunity_gates
 from backend.discovery.opportunity_pipeline import STAGES, TRANSITIONS, OpportunityStageTransition
+from backend.discovery.validation_sprint_registry import get_validation_sprint_registry
+from backend.discovery.validation_sprint_runner import run_validation_sprint
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
 
@@ -332,3 +334,33 @@ def pipeline_snapshots(workspace_id: str | None = Query(None), limit: int = Quer
 def pipeline_snapshot(snapshot_id: str) -> dict[str, Any]:
     item = get_opportunity_registry().get_snapshot(snapshot_id)
     return {"status": "not_found", "snapshot_id": snapshot_id} if item is None else {"snapshot": item.to_dict()}
+
+@router.post("/validation-sprints")
+def validation_sprints_create(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        limit=min(max(int(payload.get("limit",10)),0),25); ids=payload.get("opportunity_ids")
+        if ids is not None and (not isinstance(ids,list) or len(ids)>25): return {"status":"blocked","blocked_reasons":["opportunity_id_limit_exceeded"]}
+        return run_validation_sprint(str(payload.get("workspace_id","default")),ids,str(payload.get("title","Opportunity Validation Sprint")),str(payload.get("objective","Validate planning-ready opportunities with dry-run governed services")),limit,bool(payload.get("apply_transitions",True)))
+    except Exception as exc: return {"status":"error","error":"validation_sprint_failed","error_type":type(exc).__name__}
+
+@router.get("/validation-sprints")
+def validation_sprints(workspace_id: str|None=Query(None), status: str|None=Query(None), limit: int=Query(50,ge=0,le=500)) -> dict[str,Any]:
+    items=get_validation_sprint_registry().list_sprints(workspace_id,status,limit); return {"sprints":[x.to_dict() for x in items],"count":len(items)}
+
+@router.get("/validation-sprints/{sprint_id}")
+def validation_sprint(sprint_id: str) -> dict[str,Any]:
+    x=get_validation_sprint_registry().get_sprint(sprint_id); return {"status":"not_found","sprint_id":sprint_id} if x is None else {"sprint":x.to_dict()}
+
+@router.get("/validation-scorecards")
+def validation_scorecards(workspace_id: str|None=Query(None), opportunity_id: str|None=Query(None), recommendation: str|None=Query(None), limit: int=Query(100,ge=0,le=1000)) -> dict[str,Any]:
+    items=get_validation_sprint_registry().list_scorecards(workspace_id,opportunity_id,recommendation,limit); return {"scorecards":[x.to_dict() for x in items],"count":len(items)}
+
+@router.get("/validation-scorecards/{scorecard_id}")
+def validation_scorecard(scorecard_id: str) -> dict[str,Any]:
+    x=get_validation_sprint_registry().get_scorecard(scorecard_id); return {"status":"not_found","scorecard_id":scorecard_id} if x is None else {"scorecard":x.to_dict()}
+
+@router.post("/opportunities/{opportunity_id}/validation-sprint")
+def opportunity_validation_sprint(opportunity_id: str, payload: dict[str,Any]=Body(default_factory=dict)) -> dict[str,Any]:
+    from backend.discovery.opportunity_registry import get_opportunity_registry
+    if get_opportunity_registry().get_opportunity(opportunity_id) is None: return {"status":"not_found","opportunity_id":opportunity_id}
+    return run_validation_sprint(str(payload.get("workspace_id","default")),[opportunity_id],apply_transitions=bool(payload.get("apply_transitions",True)))

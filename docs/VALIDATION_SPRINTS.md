@@ -1,0 +1,7 @@
+# Validation Sprints
+
+Validation sprints select `validation_ready` opportunities and run only audited deterministic services through the existing governed dry-run loop. Product research and customer-intelligence scaffolds are input-only; economics runs only when explicit product/offer inputs exist.
+
+Each target produces a persistent scorecard with bounded score/confidence, completed or unavailable services, risks, missing evidence, and a cautious transition recommendation. `launch_candidate` remains a planning label and never authorizes ads, orders, payments, messaging, publishing, or commerce mutation.
+
+Use: run discovery → refresh the opportunity pipeline → inspect `validation_ready` → POST `/api/discovery/validation-sprints` → review scorecards → refresh refinement for blockers. Sprint and scorecard artifacts are optionally written to Obsidian under `03_Experiments`.

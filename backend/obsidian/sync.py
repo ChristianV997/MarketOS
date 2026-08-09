@@ -75,3 +75,13 @@ def sync_opportunity_note(opportunity, transitions=None) -> dict:
     from .templates import render_opportunity_note
     result = ObsidianClient().write_note(relative, render_opportunity_note(opportunity, transitions))
     return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+def sync_validation_sprint_note(sprint) -> dict:
+    relative=f"MarketOS/03_Experiments/ValidationSprints/{sprint.sprint_id}.md"
+    from .templates import render_validation_sprint_note
+    result=ObsidianClient().write_note(relative, render_validation_sprint_note(sprint)); return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+
+def sync_validation_scorecard_note(scorecard) -> dict:
+    relative=f"MarketOS/03_Experiments/ValidationScorecards/{scorecard.scorecard_id}.md"
+    from .templates import render_validation_scorecard_note
+    result=ObsidianClient().write_note(relative, render_validation_scorecard_note(scorecard)); return {"status":result.get("status","skipped"),"path":relative,"detail":result}
