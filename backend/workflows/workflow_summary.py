@@ -1,0 +1,5 @@
+def build_workflow_summary(run):
+ stages=run.stages;completed=[x.stage_name for x in stages if x.status in {"completed","recovered"}];blocked=[x.stage_name for x in stages if x.status=="blocked"];failed=[x.stage_name for x in stages if x.status=="failed"];skipped=[x.stage_name for x in stages if x.status=="skipped"];actions=[]
+ if blocked or failed:actions.append("Review blocked/failed stages and resume from a recoverable checkpoint.")
+ if not completed:actions.append("Provide safe local evidence inputs and rerun the workflow.")
+ return {"summary":f"Workflow `{run.title}` is `{run.status}` with {len(completed)} completed stage(s).","status":run.status,"completed_stages":completed,"blocked_stages":blocked,"failed_stages":failed,"skipped_stages":skipped,"produced_artifacts":run.produced_object_ids,"key_outputs":run.final_output,"next_actions":actions,"operator_actions_required":run.errors+run.warnings,"safety_notes":["Synchronous dry-run workflow; no live external action is permitted."],"recovery_options":["Resume from the latest recoverable checkpoint.","Replay only a safe replayable stage."]}

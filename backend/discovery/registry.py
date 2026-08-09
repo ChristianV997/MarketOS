@@ -50,7 +50,7 @@ class SourceHealth:
             return _STATUS_NOT_REGISTERED
         if self.last_error:
             return _STATUS_ERROR
-        if self.name in _MOCK_ONLY_SOURCES:
+        if self.name in _MOCK_ONLY_SOURCES and (self.last_fetch_count or 0) > 0:
             return _STATUS_MOCK_ONLY
         if self.name in _MOCK_FALLBACK_SOURCES and not self.requires_auth:
             return _STATUS_MOCK_FALLBACK

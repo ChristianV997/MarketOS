@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+from .client import ObsidianClient
+from .templates import render_acquisition_plan_note, render_category_discovery_note, render_connector_stub_note, render_discovery_comparison_note, render_evidence_import_note, render_portfolio_report_note, render_product_hypothesis_note, render_proposal_note, render_refinement_cycle_note, render_source_calibration_note
+
+
+def sync_proposal_note(proposal, approval, decision, execution, report=None) -> dict:
+    relative = f"MarketOS/02_Proposals/{proposal.proposal_id}.md"
+    result = ObsidianClient().write_note(relative, render_proposal_note(proposal, approval, decision, execution, report=report))
+    proposal.obsidian_note_path = relative if result.get("status") == "written" else ""
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_portfolio_report_note(portfolio_report) -> dict:
+    relative = f"MarketOS/07_Dashboards/PortfolioReports/{portfolio_report.portfolio_report_id}.md"
+    result = ObsidianClient().write_note(relative, render_portfolio_report_note(portfolio_report))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_category_discovery_note(discovery_run, portfolio_report_id: str = "") -> dict:
+    relative = f"MarketOS/01_Research/CategoryDiscovery/{discovery_run.discovery_id}.md"
+    result = ObsidianClient().write_note(relative, render_category_discovery_note(discovery_run, portfolio_report_id))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_product_hypothesis_note(hypothesis_run, portfolio_report_id: str = "") -> dict:
+    relative = f"MarketOS/01_Research/ProductHypotheses/{hypothesis_run.hypothesis_run_id}.md"
+    result = ObsidianClient().write_note(relative, render_product_hypothesis_note(hypothesis_run, portfolio_report_id))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_evidence_import_note(import_job, source_quality, normalization_result=None) -> dict:
+    relative = f"MarketOS/01_Research/EvidenceImports/{import_job.import_id}.md"
+    result = ObsidianClient().write_note(relative, render_evidence_import_note(import_job, source_quality, normalization_result))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_refinement_cycle_note(gap_analysis, import_plan, templates) -> dict:
+    relative = f"MarketOS/01_Research/RefinementCycles/{gap_analysis.analysis_id}.md"
+    result = ObsidianClient().write_note(relative, render_refinement_cycle_note(gap_analysis, import_plan, templates))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_discovery_comparison_note(comparison) -> dict:
+    relative = f"MarketOS/01_Research/DiscoveryComparisons/{comparison.comparison_id}.md"
+    result = ObsidianClient().write_note(relative, render_discovery_comparison_note(comparison))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_acquisition_plan_note(plan) -> dict:
+    relative = f"MarketOS/01_Research/AcquisitionPlans/{plan.plan_id}.md"
+    result = ObsidianClient().write_note(relative, render_acquisition_plan_note(plan))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_connector_stub_note(stub) -> dict:
+    relative = f"MarketOS/01_Research/ConnectorStubs/{stub.connector_name}.md"
+    result = ObsidianClient().write_note(relative, render_connector_stub_note(stub))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_source_calibration_note(calibration_run) -> dict:
+    relative = f"MarketOS/01_Research/SourceCalibration/{calibration_run.calibration_id}.md"
+    result = ObsidianClient().write_note(relative, render_source_calibration_note(calibration_run))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+def sync_opportunity_pipeline_snapshot_note(snapshot) -> dict:
+    relative = f"MarketOS/02_Opportunities/PipelineSnapshots/{snapshot.snapshot_id}.md"
+    from .templates import render_opportunity_pipeline_snapshot_note
+    result = ObsidianClient().write_note(relative, render_opportunity_pipeline_snapshot_note(snapshot))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+def sync_opportunity_note(opportunity, transitions=None) -> dict:
+    relative = f"MarketOS/02_Opportunities/Items/{opportunity.opportunity_id}.md"
+    from .templates import render_opportunity_note
+    result = ObsidianClient().write_note(relative, render_opportunity_note(opportunity, transitions))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+def sync_validation_sprint_note(sprint) -> dict:
+    relative=f"MarketOS/03_Experiments/ValidationSprints/{sprint.sprint_id}.md"
+    from .templates import render_validation_sprint_note
+    result=ObsidianClient().write_note(relative, render_validation_sprint_note(sprint)); return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+
+def sync_validation_scorecard_note(scorecard) -> dict:
+    relative=f"MarketOS/03_Experiments/ValidationScorecards/{scorecard.scorecard_id}.md"
+    from .templates import render_validation_scorecard_note
+    result=ObsidianClient().write_note(relative, render_validation_scorecard_note(scorecard)); return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+
+def sync_deliverable_package_note(package) -> dict:
+    relative=f"MarketOS/04_Deliverables/{package.package_type}/{package.package_id}.md"
+    from .templates import render_deliverable_package_note
+    result=ObsidianClient().write_note(relative,render_deliverable_package_note(package)); return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+
+def sync_knowledge_graph_snapshot_note(snapshot) -> dict:
+    relative=f"MarketOS/00_Executive/KnowledgeGraph/{snapshot.snapshot_id}.md"
+    from .templates import render_knowledge_graph_snapshot_note
+    result=ObsidianClient().write_note(relative,render_knowledge_graph_snapshot_note(snapshot));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+def sync_strategic_priority_plan_note(plan) -> dict:
+    relative=f"MarketOS/00_Executive/StrategicPriorities/{plan.plan_id}.md"
+    from .templates import render_strategic_priority_plan_note
+    result=ObsidianClient().write_note(relative,render_strategic_priority_plan_note(plan));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+def sync_research_campaign_plan_note(plan) -> dict:
+    relative=f"MarketOS/00_Executive/ResearchCampaigns/{plan.plan_id}.md"
+    from .templates import render_research_campaign_plan_note
+    result=ObsidianClient().write_note(relative,render_research_campaign_plan_note(plan));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+def sync_executive_brief_note(brief) -> dict:
+    relative=f"MarketOS/00_Executive/Briefs/{brief.brief_id}.md"
+    from .templates import render_executive_brief_note
+    result=ObsidianClient().write_note(relative,render_executive_brief_note(brief));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+
+def sync_workflow_run_note(run) -> dict:
+    relative=f"MarketOS/00_Executive/Workflows/Runs/{run.workflow_id}.md"
+    from .templates import render_workflow_run_note
+    result=ObsidianClient().write_note(relative,render_workflow_run_note(run));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+def sync_workflow_timeline_note(run,events) -> dict:
+    relative=f"MarketOS/00_Executive/Workflows/Timelines/{run.workflow_id}_timeline.md"
+    from .templates import render_workflow_timeline_note
+    result=ObsidianClient().write_note(relative,render_workflow_timeline_note(run,events));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+def sync_workflow_runbook_note(runbook) -> dict:
+    relative=f"MarketOS/00_Executive/Workflows/Runbooks/{runbook.workflow_type}.md"
+    from .templates import render_workflow_runbook_note
+    result=ObsidianClient().write_note(relative,render_workflow_runbook_note(runbook));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+
+def sync_portfolio_optimization_note(plan) -> dict:
+    relative = f"MarketOS/00_Executive/PortfolioOptimization/{plan.optimization_id}.md"
+    from .templates import render_portfolio_optimization_note
+    result = ObsidianClient().write_note(relative, render_portfolio_optimization_note(plan))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+def sync_portfolio_action_set_note(action_set) -> dict:
+    relative = f"MarketOS/00_Executive/PortfolioActions/{action_set.action_set_id}.md"
+    from .templates import render_portfolio_action_set_note
+    result = ObsidianClient().write_note(relative, render_portfolio_action_set_note(action_set))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
