@@ -76,5 +76,5 @@ boto3>=1.34.0  # AWS Secrets Manager research credentials and standby heartbeat
 pytest
 pytest-asyncio
 pytest-xdist
-PyYAML>=6.0
+PyYAML>=6.0.3
 streamlit
