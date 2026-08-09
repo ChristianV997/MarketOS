@@ -22,6 +22,26 @@ def build_strategic_priority_plan(workspace_id="default",max_priorities=20):
  except Exception:
   optimization = None
  metadata={"dry_run_only":True}
+ try:
+  from backend.commercial_intelligence.intelligence_registry import get_commercial_intelligence_registry
+  cir=get_commercial_intelligence_registry(); metadata["commercial_market_report_count"]=len(cir.list_market_reports(workspace_id,limit=100)); metadata["commercial_product_report_count"]=len(cir.list_product_reports(workspace_id,limit=100)); metadata["commercial_intelligence_advisory_only"]=True
+ except Exception: pass
+ try:
+  from backend.creative_intelligence.creative_registry import get_creative_registry
+  creative=get_creative_registry().list_reports(workspace_id,limit=50); metadata["creative_intelligence_report_count"]=len(creative);metadata["creative_intelligence_advisory_only"]=True
+  for report in creative:
+   if report.blocked_claims or report.missing_evidence:
+    priorities.append(StrategicPriority("priority_"+uuid.uuid5(uuid.NAMESPACE_URL,f"{workspace_id}:creative:{report.report_id}").hex[:16],workspace_id,"risk_resolution",f"Resolve creative proof gaps for {report.product_name}","Collect substantiation for blocked or caution creative claims.",65,60,report.confidence_score*100,55,25,55,60,[],[report.opportunity_id] if report.opportunity_id else [],[],[],"Use manual/local evidence collection and claim review.","/api/discovery/refinement-cycle",{"workspace_id":workspace_id,"create_templates":True,"dry_run":True},"open",["Creative Intelligence identified blocked claims or missing proof.","No publishing or advertising action is implied."],metadata={"creative_intelligence_report_id":report.report_id,"dry_run":True}))
+ except Exception: pass
+ operating_plan = None
+ try:
+  from backend.operations.operations_registry import get_operations_registry
+  operating_plan = get_operations_registry().latest_plan(workspace_id)
+ except Exception: pass
+ if operating_plan:
+  metadata["operating_plan_id"] = operating_plan.plan_id
+  metadata["planned_action_ids"] = [x.related_action_id for x in operating_plan.tasks if x.related_action_id]
+  metadata["blocked_task_ids"] = list(operating_plan.blocked_task_ids)
  if optimization:
   metadata["optimization_plan_id"] = optimization.optimization_id
   metadata["optimization_summary"] = optimization.summary

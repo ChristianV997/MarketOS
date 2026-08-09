@@ -1,5 +1,9 @@
 # MARKETOS ARCHITECTURE PRINCIPLES
 
+The executable ownership and dependency rules live in
+[`ARCHITECTURE_CONTRACT.md`](ARCHITECTURE_CONTRACT.md). This file remains a
+short set of design principles, not a parallel specification.
+
 ## Deterministic First
 Replay safety overrides convenience.
 

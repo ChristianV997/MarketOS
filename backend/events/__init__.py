@@ -15,6 +15,7 @@ from backend.events.schemas import (
     TASK_INVENTORY,
     DECISION_LOGGED,
 )
+from .repository import AppendResult, EventRepository, InMemoryEventRepository, JsonlEventRepository
 
 __all__ = [
     "ORCHESTRATOR_TICK",
@@ -27,4 +28,8 @@ __all__ = [
     "RUNTIME_SNAPSHOT",
     "TASK_INVENTORY",
     "DECISION_LOGGED",
+    "AppendResult",
+    "EventRepository",
+    "InMemoryEventRepository",
+    "JsonlEventRepository",
 ]

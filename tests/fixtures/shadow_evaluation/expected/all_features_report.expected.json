@@ -1,0 +1,6 @@
+{
+  "summary_counts": {"DELETE": 0, "KEEP_SHADOW": 5, "PROMOTE": 1, "REWORK": 6},
+  "promote_candidates": ["attribution_reconciliation"],
+  "production_mutation": false,
+  "feature_flags_changed": false
+}

@@ -6,6 +6,8 @@ MarketOS portfolio optimization is a deterministic planning simulator. It ranks 
 
 Budget and cost fields are estimates only. They never allocate capital, create spending authority, call providers, place orders, publish, message customers, or mutate commerce systems. Action payloads point only to local/manual/cache-only endpoints or are advisory.
 
+Creative claim gaps may inform simulated evidence acquisition and validation priorities only; they do not authorize media spend or predict returns.
+
 ## Scenarios
 
 The default plan evaluates `$0 / 2 hours`, `$100 / 4 hours`, `$500 / 1 day`, `$1,000 / 2 days`, `$5,000 / 1 week`, `$10,000 / 2 weeks`, risk-reduction, and fastest-progress scenarios. Selection is deterministic and bounded by budget, hours, action count, blocked actions, and safe prerequisite order.
@@ -17,3 +19,7 @@ Generate actions with `POST /api/optimization/actions/generate`, build a plan wi
 ## Interpretation
 
 Information gain, confidence delta, and risk reduction are planning heuristics derived from persisted evidence gaps, opportunity stages, calibration, and validation state. They are not ROI, demand, profit, ROAS, or investment claims. Review evidence limitations before any subsequent manual action.
+
+Optimization recommendations can be converted into an operator-ready weekly plan with task packets, local calendar artifacts, review checkpoints, and progress snapshots. See [OPERATING_CADENCE.md](OPERATING_CADENCE.md). Costs remain simulated and tasks are never executed automatically.
+
+Commercial intelligence can improve action rationale and missing-evidence prioritization, but remains advisory and does not create real ROI or profit estimates.

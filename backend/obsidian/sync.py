@@ -132,3 +132,39 @@ def sync_portfolio_action_set_note(action_set) -> dict:
     from .templates import render_portfolio_action_set_note
     result = ObsidianClient().write_note(relative, render_portfolio_action_set_note(action_set))
     return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+def sync_cockpit_action_note(action):
+    return _sync_operations(f"MarketOS/00_Executive/ExecutionCockpit/Actions/{action.action_id}.md", "render_cockpit_action_note", action)
+def sync_cockpit_execution_note(execution):
+    return _sync_operations(f"MarketOS/00_Executive/ExecutionCockpit/Executions/{execution.execution_id}.md", "render_cockpit_execution_note", execution)
+def sync_cockpit_summary_note(summary):
+    return _sync_operations(f"MarketOS/00_Executive/ExecutionCockpit/Summaries/{summary.summary_id}.md", "render_cockpit_summary_note", summary)
+
+def sync_evidence_feature_set_note(feature_set):
+    return _sync_operations(f"MarketOS/02_CommercialIntelligence/EvidenceFeatures/{feature_set.feature_set_id}.md", "render_evidence_feature_set_note", feature_set)
+def sync_market_intelligence_note(report):
+    return _sync_operations(f"MarketOS/02_CommercialIntelligence/MarketReports/{report.report_id}.md", "render_market_intelligence_note", report)
+def sync_product_intelligence_note(report):
+    return _sync_operations(f"MarketOS/02_CommercialIntelligence/ProductReports/{report.report_id}.md", "render_product_intelligence_note", report)
+
+def sync_creative_intelligence_report_note(report): return _sync_operations(f"MarketOS/03_CreativeIntelligence/Reports/{report.report_id}.md","render_creative_intelligence_report_note",report)
+def sync_creative_angle_note(angle): return _sync_operations(f"MarketOS/03_CreativeIntelligence/Angles/{angle.angle_id}.md","render_creative_angle_note",angle)
+def sync_creative_test_matrix_note(matrix): return _sync_operations(f"MarketOS/03_CreativeIntelligence/TestMatrices/{matrix.matrix_id}.md","render_creative_test_matrix_note",matrix)
+def sync_landing_page_claim_map_note(claim_map): return _sync_operations(f"MarketOS/03_CreativeIntelligence/ClaimMaps/{claim_map.claim_map_id}.md","render_landing_page_claim_map_note",claim_map)
+def sync_ugc_brief_note(brief): return _sync_operations(f"MarketOS/03_CreativeIntelligence/UGCBriefs/{brief.brief_id}.md","render_ugc_brief_note",brief)
+
+def _sync_operations(relative, template_name, obj):
+    from .templates import __dict__ as templates
+    result = ObsidianClient().write_note(relative, templates[template_name](obj))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+def sync_operating_plan_note(plan):
+    return _sync_operations(f"MarketOS/00_Executive/OperatingPlans/{plan.plan_id}.md", "render_operating_plan_note", plan)
+def sync_task_packet_note(packet):
+    return _sync_operations(f"MarketOS/00_Executive/TaskPackets/{packet.packet_id}.md", "render_task_packet_note", packet)
+def sync_operating_calendar_note(calendar):
+    return _sync_operations(f"MarketOS/00_Executive/OperatingCalendars/{calendar.calendar_id}.md", "render_operating_calendar_note", calendar)
+def sync_review_cadence_note(cadence):
+    return _sync_operations(f"MarketOS/00_Executive/ReviewCadence/{cadence.cadence_id}.md", "render_review_cadence_note", cadence)
+def sync_progress_snapshot_note(snapshot):
+    return _sync_operations(f"MarketOS/00_Executive/ProgressSnapshots/{snapshot.snapshot_id}.md", "render_progress_snapshot_note", snapshot)

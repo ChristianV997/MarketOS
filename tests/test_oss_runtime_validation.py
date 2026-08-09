@@ -5,6 +5,8 @@ def test_oss_runtime_report_is_read_only_and_validates_boundaries():
     report = build_report()
     assert report["read_only"] is True
     assert report["inventory_errors"] == []
+    assert report["provider_coverage"]["coverage_gaps"] == []
+    assert "X-MarketOS-Workspace" in report["context_headers"]
     assert report["dry_run_boundaries"]["medusa"]["dry_run"] is True
     assert report["dry_run_boundaries"]["postiz"]["dry_run"] is True
     assert report["dry_run_boundaries"]["n8n"]["dry_run"] is True

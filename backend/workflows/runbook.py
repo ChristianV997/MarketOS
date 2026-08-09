@@ -34,12 +34,16 @@ class WorkflowRunbook:
 
 
 _STAGES = {
-    "full_market_cycle": ["import_evidence", "market_discovery", "refinement_cycle", "acquisition_planning", "opportunity_pipeline_refresh", "source_calibration", "validation_sprint", "deliverable_package", "executive_intelligence", "portfolio_optimization", "final_summary"],
+    "full_market_cycle": ["import_evidence", "market_discovery", "refinement_cycle", "acquisition_planning", "opportunity_pipeline_refresh", "commercial_intelligence", "creative_intelligence", "source_calibration", "validation_sprint", "deliverable_package", "executive_intelligence", "portfolio_optimization", "operating_plan", "final_summary"],
     "import_discovery_cycle": ["import_evidence", "market_discovery", "final_summary"],
     "discovery_refinement_cycle": ["market_discovery", "refinement_cycle", "acquisition_planning", "final_summary"],
     "validation_deliverable_cycle": ["opportunity_pipeline_refresh", "validation_sprint", "deliverable_package", "final_summary"],
     "executive_intelligence_cycle": ["executive_intelligence", "final_summary"],
     "portfolio_optimization_cycle": ["opportunity_pipeline_refresh", "source_calibration", "portfolio_optimization", "executive_intelligence", "final_summary"],
+    "operating_cycle": ["portfolio_optimization", "operating_plan", "executive_intelligence", "final_summary"],
+    "cockpit_preview_cycle": ["portfolio_optimization", "operating_plan", "execution_cockpit_preview", "final_summary"],
+    "commercial_intelligence_cycle": ["market_discovery", "refinement_cycle", "opportunity_pipeline_refresh", "commercial_intelligence", "executive_intelligence", "portfolio_optimization", "final_summary"],
+    "creative_intelligence_cycle": ["commercial_intelligence", "creative_intelligence", "executive_intelligence", "portfolio_optimization", "final_summary"],
 }
 
 
