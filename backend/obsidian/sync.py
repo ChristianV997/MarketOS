@@ -107,3 +107,28 @@ def sync_executive_brief_note(brief) -> dict:
     relative=f"MarketOS/00_Executive/Briefs/{brief.brief_id}.md"
     from .templates import render_executive_brief_note
     result=ObsidianClient().write_note(relative,render_executive_brief_note(brief));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+
+def sync_workflow_run_note(run) -> dict:
+    relative=f"MarketOS/00_Executive/Workflows/Runs/{run.workflow_id}.md"
+    from .templates import render_workflow_run_note
+    result=ObsidianClient().write_note(relative,render_workflow_run_note(run));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+def sync_workflow_timeline_note(run,events) -> dict:
+    relative=f"MarketOS/00_Executive/Workflows/Timelines/{run.workflow_id}_timeline.md"
+    from .templates import render_workflow_timeline_note
+    result=ObsidianClient().write_note(relative,render_workflow_timeline_note(run,events));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+def sync_workflow_runbook_note(runbook) -> dict:
+    relative=f"MarketOS/00_Executive/Workflows/Runbooks/{runbook.workflow_type}.md"
+    from .templates import render_workflow_runbook_note
+    result=ObsidianClient().write_note(relative,render_workflow_runbook_note(runbook));return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+
+def sync_portfolio_optimization_note(plan) -> dict:
+    relative = f"MarketOS/00_Executive/PortfolioOptimization/{plan.optimization_id}.md"
+    from .templates import render_portfolio_optimization_note
+    result = ObsidianClient().write_note(relative, render_portfolio_optimization_note(plan))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+def sync_portfolio_action_set_note(action_set) -> dict:
+    relative = f"MarketOS/00_Executive/PortfolioActions/{action_set.action_set_id}.md"
+    from .templates import render_portfolio_action_set_note
+    result = ObsidianClient().write_note(relative, render_portfolio_action_set_note(action_set))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}

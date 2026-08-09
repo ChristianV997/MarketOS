@@ -7,3 +7,8 @@ The knowledge graph uses exact persisted IDs and records only evidence-backed re
 Run `POST /api/intelligence/cycle` to build the graph, priorities, campaigns, and brief. Outputs are also available through the individual intelligence endpoints and optional Obsidian notes under `MarketOS/00_Executive`.
 
 No live integrations, autonomous spending, supplier orders, customer messaging, publishing, payment execution, or commerce mutation are enabled. All action payloads point to safe dry-run or manual-import workflows.
+# Workflow orchestration
+
+Executive intelligence can run inside the synchronous, checkpointed [WORKFLOW_ORCHESTRATOR.md](WORKFLOW_ORCHESTRATOR.md).
+
+Executive priorities and briefs can incorporate the latest simulated portfolio optimization plan; this does not create a budget or spending authority.

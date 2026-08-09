@@ -11,3 +11,6 @@ Typical loop: run discovery → inspect opportunities → run refinement → imp
 API endpoints are under `/api/discovery`: refresh, opportunity listing/detail, gate evaluation, manual gated transition, transition history, and pipeline snapshots.
 
 Validation-ready opportunities can be summarized into a client-ready, evidence-constrained deliverable package after a dry-run sprint; see [Product Validation Sprint Deliverables](PRODUCT_VALIDATION_SPRINT_DELIVERABLES.md).
+# Workflow orchestration
+
+Pipeline refresh and validation can run through the checkpointed [WORKFLOW_ORCHESTRATOR.md](WORKFLOW_ORCHESTRATOR.md).

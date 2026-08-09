@@ -14,4 +14,18 @@ def build_strategic_priority_plan(workspace_id="default",max_priorities=20):
  for x in opp:
   if x.stage=="validation_ready":priorities.append(StrategicPriority("priority_"+uuid.uuid5(uuid.NAMESPACE_URL,f"{workspace_id}:opp:{x.opportunity_id}").hex[:16],workspace_id,"opportunity_validation",f"Validate {x.name}","Run the governed dry-run validation sprint.",70,x.score,x.confidence*100,70,45,20,75,[],[x.opportunity_id],x.gap_ids,x.report_ids,"Run a bounded validation sprint.","/api/discovery/validation-sprints",{"workspace_id":workspace_id,"opportunity_ids":[x.opportunity_id],"apply_transitions":True},"open",["Opportunity is validation-ready.","No external action is implied."],metadata={"dry_run":True}))
  if not priorities:priorities.append(StrategicPriority("priority_"+uuid.uuid4().hex[:16],workspace_id,"refinement_cycle","Establish the evidence baseline","Run discovery and refinement using approved local evidence.",80,80,25,90,40,10,80,[],[],[],[],"Run the initial safe discovery cycle.","/api/discovery/market-discovery",{"workspace_id":workspace_id,"run_validation_services":False},"open",["No strategic state is yet sufficient for prioritization."],metadata={"dry_run":True}))
- priorities=sorted(priorities,key=lambda x:(-x.total_priority_score,x.title))[:max(0,min(int(max_priorities),50))];plan=StrategicPriorityPlan("priority_plan_"+uuid.uuid4().hex[:16],workspace_id,"Strategic Priority Plan","Reduce uncertainty and advance the highest-value research work.",priorities,{"opportunity_count":len(opp),"gap_count":len(gaps)},sorted({r for x in opp for r in x.risk_flags})[:10],sorted({g.missing_signal_type for g in gaps})[:10],[x.priority_id for x in priorities],metadata={"dry_run_only":True});return plan
+ priorities=sorted(priorities,key=lambda x:(-x.total_priority_score,x.title))[:max(0,min(int(max_priorities),50))]
+ optimization = None
+ try:
+  from backend.optimization.optimization_registry import get_optimization_registry
+  optimization = get_optimization_registry().latest_plan(workspace_id)
+ except Exception:
+  optimization = None
+ metadata={"dry_run_only":True}
+ if optimization:
+  metadata["optimization_plan_id"] = optimization.optimization_id
+  metadata["optimization_summary"] = optimization.summary
+  metadata["recommended_simulated_actions"] = [x.title for x in optimization.recommended_actions[:10]]
+  priorities.extend([StrategicPriority("priority_"+uuid.uuid5(uuid.NAMESPACE_URL,f"{workspace_id}:optimization:{x.action_id}").hex[:16],workspace_id,"portfolio_optimization",f"Simulate: {x.title}",x.description, x.urgency_score,x.leverage_score,x.confidence_score,x.expected_information_gain,max(1,x.estimated_hours),x.risk_score,x.total_action_score,[],x.related_opportunity_ids,x.related_gap_ids,[],"Follow the safe endpoint only as a simulated/manual action.",x.safe_endpoint,x.safe_payload,"open",x.rationale,metadata={"dry_run_only":True,"optimization_action_id":x.action_id}) for x in optimization.recommended_actions[:max(0,min(int(max_priorities),10))]])
+ priorities=sorted(priorities,key=lambda x:(-x.total_priority_score,x.title))[:max(0,min(int(max_priorities),50))]
+ plan=StrategicPriorityPlan("priority_plan_"+uuid.uuid4().hex[:16],workspace_id,"Strategic Priority Plan","Reduce uncertainty and advance the highest-value research work.",priorities,{"opportunity_count":len(opp),"gap_count":len(gaps),"optimization_plan_id":optimization.optimization_id if optimization else ""},sorted({r for x in opp for r in x.risk_flags})[:10],sorted({g.missing_signal_type for g in gaps})[:10],[x.priority_id for x in priorities],metadata=metadata);return plan

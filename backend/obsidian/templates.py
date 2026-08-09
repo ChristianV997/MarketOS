@@ -122,3 +122,19 @@ def render_research_campaign_plan_note(plan):
     data=_data(plan);return "---\ntype: research_campaign_plan\nplan_id: "+json.dumps(data.get("plan_id"))+"\nworkspace_id: "+json.dumps(data.get("workspace_id"))+"\n---\n\n# Research Campaigns\n\n"+"\n".join(f"- **{x.get('title')}** — `{x.get('status')}`; gain `{x.get('expected_information_gain')}`" for x in data.get("campaigns",[]))+"\n\nCampaigns contain no live execution.\n"
 def render_executive_brief_note(brief):
     data=_data(brief);return "---\ntype: executive_brief\nbrief_id: "+json.dumps(data.get("brief_id"))+"\nworkspace_id: "+json.dumps(data.get("workspace_id"))+"\nperiod: "+json.dumps(data.get("period_label"))+"\n---\n\n# "+str(data.get("title"))+"\n\n## Summary\n\n"+str(data.get("summary"))+"\n\n## Next actions\n\n"+"\n".join(f"- {x}" for x in data.get("recommended_next_actions",[]))+"\n\nNo live action was executed.\n"
+
+def render_workflow_run_note(run):
+    data=_data(run);return "---\ntype: workflow_run\nworkflow_id: "+json.dumps(data.get("workflow_id"))+"\nworkspace_id: "+json.dumps(data.get("workspace_id"))+"\nstatus: "+json.dumps(data.get("status"))+"\n---\n\n# "+str(data.get("title"))+"\n\n"+"\n".join(f"- **{x.get('stage_name')}** — `{x.get('status')}`" for x in data.get("stages",[]))+"\n\n## Checkpoints\n\n"+"\n".join(f"- `{x.get('checkpoint_id')}` — {x.get('checkpoint_type')} — recoverable `{x.get('recoverable')}`" for x in data.get("checkpoints",[]))+"\n\nNo live action is permitted.\n"
+def render_workflow_timeline_note(run,events):return "# Workflow timeline\n\n"+"\n".join(f"- `{x.get('created_at')}` **{x.get('event_type')}** — {x.get('message')}" for x in [_data(e) for e in events])+"\n\nNo live action was executed.\n"
+def render_workflow_runbook_note(runbook):return runbook.to_markdown()
+
+def render_portfolio_optimization_note(plan):
+    data = _data(plan)
+    scenarios = "\n".join(f"- **{x.get('title')}** — cost `${x.get('total_simulated_cost', 0):.2f}`, hours `{x.get('total_estimated_hours', 0):.1f}`, info gain `{x.get('total_expected_information_gain', 0):.1f}`" for x in data.get("scenarios", [])) or "- None."
+    actions = "\n".join(f"- **{x.get('title')}** — `{x.get('action_type')}` — `{x.get('safe_endpoint') or 'advisory/manual'}`" for x in data.get("recommended_actions", [])) or "- None."
+    return f"---\ntype: portfolio_optimization\noptimization_id: {json.dumps(data.get('optimization_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\ncreated_at: {json.dumps(data.get('created_at'))}\n---\n\n# {data.get('title')}\n\n{data.get('summary', '')}\n\n## Scenarios\n\n{scenarios}\n\n## Recommended scenario\n\n`{data.get('recommended_scenario_id')}`\n\n## Recommended actions\n\n{actions}\n\n## Next actions\n\n" + "\n".join(f"- {x}" for x in data.get("next_actions", [])) + "\n\n## Safety\n\nAll budgets, costs, and capital allocations are simulated planning assumptions. No live spending or external mutation occurred.\n"
+
+def render_portfolio_action_set_note(action_set):
+    data = _data(action_set)
+    rows = "\n".join(f"- **{x.get('title')}** — score `{x.get('total_action_score')}` — cost `${x.get('estimated_cost', 0):.2f}` / `{x.get('estimated_hours', 0):.1f}h`" for x in data.get("actions", [])) or "- None."
+    return f"---\ntype: portfolio_action_set\naction_set_id: {json.dumps(data.get('action_set_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\ncreated_at: {json.dumps(data.get('created_at'))}\n---\n\n# {data.get('title')}\n\n{data.get('objective', '')}\n\n## Actions\n\n{rows}\n\n## Safety\n\nActions are dry-run/manual/cache-only recommendations. No budget is committed.\n"

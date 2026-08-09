@@ -7,3 +7,6 @@ Each target produces a persistent scorecard with bounded score/confidence, compl
 Use: run discovery → refresh the opportunity pipeline → inspect `validation_ready` → POST `/api/discovery/validation-sprints` → review scorecards → refresh refinement for blockers. Sprint and scorecard artifacts are optionally written to Obsidian under `03_Experiments`.
 
 For a client-ready paid-service output, generate the persisted package through `/api/deliverables/product-validation-sprint`; see [Product Validation Sprint Deliverables](PRODUCT_VALIDATION_SPRINT_DELIVERABLES.md).
+# Workflow orchestration
+
+Validation sprints can run as a checkpointed, synchronous stage through [WORKFLOW_ORCHESTRATOR.md](WORKFLOW_ORCHESTRATOR.md).

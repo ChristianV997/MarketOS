@@ -133,10 +133,30 @@ try:
         app.include_router(_intelligence_router)
     except ImportError:
         pass
+    try:
+        from api.routes.workflows import router as _workflows_router
+        app.include_router(_workflows_router)
+    except ImportError:
+        pass
 except Exception:
     # The legacy API must remain importable if an optional route dependency is
     # unavailable in a minimal deployment image.
     logging.getLogger(__name__).exception("governance routes unavailable")
+
+# Keep the synchronous workflow API independently mountable.  A legacy
+# optional route must not prevent inspection/recovery endpoints from loading.
+if not any(getattr(route, "path", "") == "/api/workflows/run" for route in app.routes):
+    try:
+        from api.routes.workflows import router as _workflow_router_fallback
+        app.include_router(_workflow_router_fallback)
+    except Exception:
+        logging.getLogger(__name__).exception("workflow routes unavailable")
+
+try:
+    from api.routes.optimization import router as _optimization_router
+    app.include_router(_optimization_router)
+except Exception:
+    logging.getLogger(__name__).exception("optimization routes unavailable")
 
 app.add_middleware(
     CORSMiddleware,
