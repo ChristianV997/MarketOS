@@ -18,8 +18,17 @@ def build_executive_brief(workspace_id="default",period_label="current",include_
   optimization=get_optimization_registry().latest_plan(workspace_id)
  except Exception: pass
  if optimization: changes.append(f"Latest optimization plan recommends {len(optimization.recommended_actions)} simulated action(s) under scenario `{optimization.recommended_scenario_id}`.")
+ operating_plan = None
+ try:
+  from backend.operations.operations_registry import get_operations_registry
+  operating_plan = get_operations_registry().latest_plan(workspace_id)
+ except Exception: pass
+ if operating_plan:
+  changes.append(f"Latest operating plan contains {len(operating_plan.tasks)} planning task(s), including {len(operating_plan.blocked_task_ids)} blocked task(s).")
  if previous:changes.append("A previous executive brief exists; this brief is a subsequent recorded state.")
  brief=ExecutiveBrief("brief_"+uuid.uuid4().hex[:16],workspace_id,"Executive Intelligence Brief",period_label,"MarketOS has a deterministic, evidence-constrained view of current opportunities, gaps, priorities, and research work.",changes,[x.to_dict() for x in priority.priorities[:10]],[{"opportunity_id":x.opportunity_id,"name":x.name,"stage":x.stage,"score":x.score,"confidence":x.confidence} for x in opp],{"sprint_count":len(sprints),"latest_sprint_id":sprints[0].sprint_id if sprints else ""},{"graph_nodes":graph['snapshot']['node_count']},{"package_count":len(packages)},priority.top_risks,priority.top_blockers,[x.recommended_action for x in priority.priorities[:5]],priority.plan_id,campaign.plan_id,graph["snapshot"]["snapshot_id"],metadata={"include_html":include_html,"dry_run_only":True,"optimization_plan_id":optimization.optimization_id if optimization else "","optimization_summary":optimization.summary if optimization else "","recommended_scenario_id":optimization.recommended_scenario_id if optimization else "","simulated_budget_assumptions":[x.constraint.to_dict() for x in optimization.scenarios] if optimization else []})
+ if operating_plan:
+  brief.metadata.update({"operating_plan_id": operating_plan.plan_id, "operating_plan_horizon": operating_plan.horizon, "operating_plan_status": operating_plan.status, "operating_task_count": len(operating_plan.tasks), "operating_blocked_task_count": len(operating_plan.blocked_task_ids), "operating_estimated_hours": operating_plan.estimated_total_hours, "operating_simulated_cost": operating_plan.simulated_total_cost, "planning_only": True})
  reg.register_executive_brief(brief)
  try:
   root=Path("state/executive_briefs");root.mkdir(parents=True,exist_ok=True);(root/(brief.brief_id+".md")).write_text(brief.to_markdown(),encoding="utf-8")

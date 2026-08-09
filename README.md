@@ -1,5 +1,9 @@
 # MarketOS
 
+> **MVP deployment:** [MVP Island](docs/MVP_ISLAND.md) isolates a deployable,
+> advisory-only public-signal → canonical-event → dry-run-output slice. It
+> does not enable live commerce behavior.
+
 ### Autonomous commerce decision engine for dropshipping, packaged as a modular revenue operating system — discover, validate, launch, and optimize products with risk-aware capital allocation, and sell any piece of that pipeline as a standalone service.
 
 MarketOS runs a continuous **Discover → Validate → Create → Launch → Optimize** loop over real ad platforms (TikTok, Meta) and a Shopify storefront, driven by a quantitative decision core: convex-optimization budget allocation, contextual bandits, statistically calibrated ROAS prediction, regime/changepoint detection, and adaptive risk limits. Every risky change ships behind a **shadow-mode flag** — the new logic runs and journals its decisions alongside the old one, and only takes over real budget after validation.

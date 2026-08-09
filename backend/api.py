@@ -609,6 +609,22 @@ from api.routes import (
     services as _r_services,
     stack as _r_stack,
 )
+try:
+    from api.routes import operations as _r_operations
+except ImportError:
+    _r_operations = None
+try:
+    from api.routes import execution_cockpit as _r_execution_cockpit
+except ImportError:
+    _r_execution_cockpit = None
+try:
+    from api.routes import commercial_intelligence as _r_commercial_intelligence
+except ImportError:
+    _r_commercial_intelligence = None
+try:
+    from api.routes import creative_intelligence as _r_creative_intelligence
+except ImportError:
+    _r_creative_intelligence = None
 
 app.include_router(_r_health.router)
 app.include_router(_r_cycle_control.router)
@@ -624,6 +640,14 @@ app.include_router(_r_orchestration.router)
 app.include_router(_r_research.router)
 app.include_router(_r_services.router)
 app.include_router(_r_stack.router)
+if _r_operations is not None:
+    app.include_router(_r_operations.router)
+if _r_execution_cockpit is not None:
+    app.include_router(_r_execution_cockpit.router)
+if _r_commercial_intelligence is not None:
+    app.include_router(_r_commercial_intelligence.router)
+if _r_creative_intelligence is not None:
+    app.include_router(_r_creative_intelligence.router)
 
 
 # ── Prometheus scrape endpoint ────────────────────────────────────────────────

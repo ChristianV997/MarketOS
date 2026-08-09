@@ -23,6 +23,14 @@ def build_knowledge_graph_snapshot(workspace_id="default",include_evidence=True,
   if include_deliverables:
    from backend.deliverables.registry import get_deliverable_registry
    add("deliverable_package",get_deliverable_registry().list_packages(workspace_id,limit=limit_per_type),"deliverable_registry")
+  try:
+   from backend.commercial_intelligence.intelligence_registry import get_commercial_intelligence_registry
+   cir=get_commercial_intelligence_registry(); add("evidence_feature_set",cir.list_feature_sets(workspace_id,limit_per_type),"commercial_intelligence_registry"); add("market_intelligence_report",cir.list_market_reports(workspace_id,limit=limit_per_type),"commercial_intelligence_registry"); add("product_intelligence_report",cir.list_product_reports(workspace_id,limit=limit_per_type),"commercial_intelligence_registry")
+  except Exception as exc: warnings.append(f"commercial_intelligence_load_warning:{type(exc).__name__}")
+  try:
+   from backend.creative_intelligence.creative_registry import get_creative_registry
+   cr=get_creative_registry(); add("creative_intelligence_report",cr.list_reports(workspace_id,limit=limit_per_type),"creative_intelligence_registry"); add("buyer_psychology_map",cr.list_buyer_maps(workspace_id,limit=limit_per_type),"creative_intelligence_registry"); add("creative_angle",cr.list_angles(workspace_id,limit=limit_per_type),"creative_intelligence_registry"); add("creative_hook",cr.list_hooks(workspace_id,limit=limit_per_type),"creative_intelligence_registry"); add("ugc_brief",cr.list_ugc_briefs(workspace_id,limit=limit_per_type),"creative_intelligence_registry"); add("storyboard",cr.list_storyboards(workspace_id,limit=limit_per_type),"creative_intelligence_registry"); add("landing_page_claim_map",cr.list_claim_maps(workspace_id,limit=limit_per_type),"creative_intelligence_registry"); add("creative_test_matrix",cr.list_test_matrices(workspace_id,limit=limit_per_type),"creative_intelligence_registry")
+  except Exception as exc: warnings.append(f"creative_intelligence_load_warning:{type(exc).__name__}")
  except Exception as exc:warnings.append(f"registry_load_warning:{type(exc).__name__}")
  edges=[]; by_source={n.source_object_id:n for n in nodes}
  def edge(a,b,rel,reason):

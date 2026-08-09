@@ -22,6 +22,11 @@ try:
 except ModuleNotFoundError:  # direct ``python scripts/validate_oss_runtime.py``
     from validate_oss_inventory import INVENTORY, validate_inventory
 
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover - bundled in tests but keep CLI resilient
+    yaml = None
+
 def _health_record(provider: Any) -> dict[str, Any]:
     started = time.perf_counter()
     health = provider.health()
@@ -33,6 +38,20 @@ def _health_record(provider: Any) -> dict[str, Any]:
         "detail": health.detail,
         "probe_latency_ms": round((time.perf_counter() - started) * 1000, 3),
     }
+
+
+def _inventory_selected_candidates(inventory: Path) -> dict[str, dict[str, Any]]:
+    if yaml is None:
+        return {}
+    data = yaml.safe_load(inventory.read_text(encoding="utf-8")) or {}
+    candidates = data.get("candidates", [])
+    selected: dict[str, dict[str, Any]] = {}
+    for candidate in candidates:
+        if isinstance(candidate, dict) and candidate.get("status") == "selected":
+            name = str(candidate.get("name", "")).strip()
+            if name:
+                selected[name] = candidate
+    return selected
 
 
 def build_report(inventory: Path = INVENTORY) -> dict[str, Any]:
@@ -59,11 +78,26 @@ def build_report(inventory: Path = INVENTORY) -> dict[str, Any]:
         ChatwootConversationAdapter(), MauticMarketingAutomationAdapter(),
         ActivepiecesAutomationAdapter(), PostHogAnalyticsAdapter(), HostingerHostingAdapter(),
     ]
+    selected = _inventory_selected_candidates(inventory)
+    provider_health = [_health_record(provider) for provider in providers]
+    provider_names = {entry["name"] for entry in provider_health}
     return {
         "inventory": str(inventory),
         "inventory_errors": validate_inventory(inventory),
         "read_only": True,
-        "providers": [_health_record(provider) for provider in providers],
+        "providers": provider_health,
+        "provider_coverage": {
+            "selected_inventory": sorted(selected),
+            "selected_runtime_providers": sorted(provider_names & set(selected)),
+            "coverage_gaps": sorted(name for name in selected if name not in provider_names),
+        },
+        "context_headers": SidecarContext(
+            workspace_id="oss-validation",
+            run_id="read-only",
+            artifact_id="inventory",
+            parent_ids=("docs/oss/INVENTORY.yml",),
+            idempotency_key="oss-readiness",
+        ).to_headers(),
         "dry_run_boundaries": {
             "medusa": MedusaCommerceAdapter().create_order({}, context=SidecarContext()),
             "postiz": PostizPublisherAdapter().publish({}, context=SidecarContext()),

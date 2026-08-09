@@ -32,6 +32,14 @@ def generate_portfolio_actions(workspace_id: str = "default", max_actions: int =
         from backend.discovery.acquisition_registry import get_acquisition_registry
         acquisition = get_acquisition_registry().list_plans(workspace_id, limit=100)
     except Exception: pass
+    try:
+        from backend.creative_intelligence.creative_registry import get_creative_registry
+        for report in get_creative_registry().list_reports(workspace_id, limit=10):
+            if report.blocked_claims or report.missing_evidence:
+                actions.append(_safe_action(workspace_id, "acquire_evidence", f"Collect creative proof for {report.product_name}", "Close claim-substantiation gaps identified by Creative Intelligence using manual/local evidence only.", opps=[report.opportunity_id] if report.opportunity_id else [], hours=.5, info=55, confidence=report.confidence_score*100, risk=60, urgency=65, leverage=45, endpoint="/api/discovery/refinement-cycle", payload={"workspace_id":workspace_id,"create_templates":True,"dry_run":True}, required=report.missing_evidence, rationale=["Creative claims are blocked or incomplete until proof is collected.","No media spend, ad launch, or performance claim is recommended."], metadata={"creative_intelligence_report_id":report.report_id,"creative_advisory_only":True}))
+            elif report.confidence_score >= .5 and report.angle_ids:
+                actions.append(_safe_action(workspace_id, "run_validation_sprint", f"Review safe creative hypotheses for {report.product_name}", "Use the governed dry-run validation process to review evidence-constrained creative hypotheses.", opps=[report.opportunity_id] if report.opportunity_id else [], hours=.5, info=45, confidence=report.confidence_score*100, urgency=55, leverage=40, endpoint="/api/discovery/validation-sprints", payload={"workspace_id":workspace_id,"apply_transitions":False,"dry_run":True}, rationale=["Creative Intelligence is advisory and does not predict creative performance.","No ad-platform activity is authorized."], metadata={"creative_intelligence_report_id":report.report_id,"creative_advisory_only":True}))
+    except Exception: pass
     if gaps:
         for gap in sorted(gaps, key=lambda x: (-x.priority_score, x.entity_name))[:max_actions]:
             matching = [x for x in acquisition if x.parser_type in gap.recommended_parser_types]
@@ -61,6 +69,14 @@ def generate_portfolio_actions(workspace_id: str = "default", max_actions: int =
     except Exception: pass
     if opportunities:
         actions.append(_safe_action(workspace_id, "run_refinement_cycle", "Refresh research refinement", "Recompute evidence gaps and next imports for the current opportunity portfolio.", opps=[x.opportunity_id for x in opportunities], hours=0.5, info=65, confidence=45, urgency=65, leverage=min(100, len(opportunities) * 15), endpoint="/api/discovery/refinement-cycle", payload={"workspace_id": workspace_id, "create_templates": True, "dry_run": True}))
+    try:
+        from backend.commercial_intelligence.intelligence_registry import get_commercial_intelligence_registry
+        for report in get_commercial_intelligence_registry().list_product_reports(workspace_id, limit=10):
+            if report.missing_evidence or report.confidence_score < .5:
+                actions.append(_safe_action(workspace_id, "acquire_evidence", f"Improve evidence for {report.product_name}", "Acquire the missing local/manual evidence identified by product intelligence.", gaps=[], hours=.75, info=60, confidence=35, urgency=70, leverage=50, endpoint="/api/discovery/refinement-cycle", payload={"workspace_id": workspace_id, "create_templates": True, "dry_run": True}, required=report.missing_evidence, rationale=["Product intelligence reports missing evidence or low confidence.", "This is a local/manual evidence request, not a demand or profit claim."], metadata={"product_intelligence_report_id": report.report_id}))
+            elif report.viability_score >= 60 and report.confidence_score >= .5:
+                actions.append(_safe_action(workspace_id, "run_validation_sprint", f"Validate {report.product_name}", "Run a governed dry-run validation sprint for a promising but still unvalidated product hypothesis.", hours=1, info=70, confidence=report.confidence_score*100, urgency=80, leverage=60, endpoint="/api/discovery/validation-sprints", payload={"workspace_id": workspace_id, "apply_transitions": False, "dry_run": True}, rationale=["Product intelligence is advisory and confidence is sufficient for additional planning validation.", "This does not authorize launch."], metadata={"product_intelligence_report_id": report.report_id}))
+    except Exception: pass
     unique = {x.action_id: x for x in actions}; actions = sorted(unique.values(), key=lambda x: (-x.total_action_score, x.title))[:max_actions]; blocked = [x for x in unique.values() if x.status == "blocked"]
     result = PortfolioActionSet("action_set_" + uuid.uuid5(uuid.NAMESPACE_URL, f"{workspace_id}:{','.join(x.action_id for x in actions)}").hex[:16], workspace_id, "Portfolio Action Candidates", "Choose the next highest-value safe research actions under simulated constraints.", actions, sorted(blocked, key=lambda x: x.title), metadata={"simulated_only": True, "source_counts": {"opportunities": len(opportunities), "gaps": len(gaps), "comparisons": len(comparisons), "calibration_profiles": len(profiles)}})
     get_optimization_registry().register_action_set(result); return result

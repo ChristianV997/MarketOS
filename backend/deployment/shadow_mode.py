@@ -49,8 +49,13 @@ class ShadowDecision:
 class ShadowModeController:
     """Manages shadow-mode tracking and validation gates."""
 
-    def __init__(self):
+    def __init__(self, canonical_event_repository: Any | None = None, canonical_pilot_enabled: bool | None = None):
         self.shadow_decisions: dict[str, ShadowDecision] = {}
+        # Default-off migration pilot dependency injection.  The legacy JSONL
+        # journal remains authoritative whether this is None, disabled, or fails.
+        self._canonical_event_repository = canonical_event_repository
+        self._canonical_pilot_enabled = canonical_pilot_enabled
+        self.last_canonical_pilot_result: Any | None = None
         self.validation_gates = {
             "accuracy_threshold": 0.95,  # New path must be >= 95% as accurate as baseline
             "risk_threshold": 1.05,  # New path max drawdown <= 105% of baseline
@@ -109,7 +114,7 @@ class ShadowModeController:
 
         # Journal to event store (immutable, audit trail)
         try:
-            event_store.append(
+            legacy_record = event_store.append(
                 workflow_id,
                 "shadow_mode_decision",
                 workflow="shadow_mode",
@@ -132,6 +137,21 @@ class ShadowModeController:
             )
         except Exception as exc:
             _log.warning(f"Failed to journal shadow decision: {exc}")
+        else:
+            # Narrow, default-off EventRepository migration pilot.  This is
+            # intentionally after the authoritative legacy append and cannot
+            # affect the decision returned by this controller.
+            try:
+                from backend.events.migration_pilot import append_shadow_mode_decision_pilot
+                self.last_canonical_pilot_result = append_shadow_mode_decision_pilot(
+                    legacy_record,
+                    self._canonical_event_repository,
+                    enabled=self._canonical_pilot_enabled,
+                )
+                if self.last_canonical_pilot_result.error:
+                    _log.warning("canonical_shadow_mode_pilot_not_appended error=%s", self.last_canonical_pilot_result.error)
+            except Exception:
+                _log.warning("canonical_shadow_mode_pilot_unexpected_failure", exc_info=True)
 
         return shadow
 

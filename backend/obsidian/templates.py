@@ -138,3 +138,57 @@ def render_portfolio_action_set_note(action_set):
     data = _data(action_set)
     rows = "\n".join(f"- **{x.get('title')}** — score `{x.get('total_action_score')}` — cost `${x.get('estimated_cost', 0):.2f}` / `{x.get('estimated_hours', 0):.1f}h`" for x in data.get("actions", [])) or "- None."
     return f"---\ntype: portfolio_action_set\naction_set_id: {json.dumps(data.get('action_set_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\ncreated_at: {json.dumps(data.get('created_at'))}\n---\n\n# {data.get('title')}\n\n{data.get('objective', '')}\n\n## Actions\n\n{rows}\n\n## Safety\n\nActions are dry-run/manual/cache-only recommendations. No budget is committed.\n"
+
+def render_cockpit_action_note(action):
+    data = _data(action)
+    return f"---\ntype: cockpit_action\naction_id: {json.dumps(data.get('action_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\nstatus: {json.dumps(data.get('status'))}\n---\n\n# {data.get('title')}\n\n**Action:** `{data.get('action_type')}`  \n**Approval required:** `{data.get('approval_required')}`  \n**Endpoint:** `{data.get('safe_endpoint') or 'manual/advisory only'}`\n\n## Payload reference\n\n```json\n{json.dumps(data.get('safe_payload', {}), indent=2, default=str)}\n```\n\n## Blockers\n\n" + "\n".join(f"- {x}" for x in data.get('blocked_reasons', [])) + "\n\n## Safety\n\n" + "\n".join(f"- {x}" for x in data.get('safety_notes', [])) + "\n\nNo live external action was executed.\n"
+
+def render_cockpit_execution_note(execution):
+    data = _data(execution)
+    return f"---\ntype: cockpit_execution\nexecution_id: {json.dumps(data.get('execution_id'))}\naction_id: {json.dumps(data.get('action_id'))}\nstatus: {json.dumps(data.get('status'))}\n---\n\n# Cockpit Execution\n\n**Status:** `{data.get('status')}`\n\n## Checkpoints\n\n" + "\n".join(f"- `{x}`" for x in data.get('checkpoint_ids', [])) + "\n\n## Produced objects\n\n" + "\n".join(f"- `{x.get('object_type')}`: `{x.get('object_id')}`" for x in data.get('produced_object_ids', [])) + "\n\n## Warnings and errors\n\n" + "\n".join(f"- {x}" for x in data.get('warnings', []) + data.get('errors', [])) + "\n\nNo live external action was executed.\n"
+
+def render_cockpit_summary_note(summary):
+    data = _data(summary)
+    return f"---\ntype: cockpit_summary\nsummary_id: {json.dumps(data.get('summary_id'))}\nplan_id: {json.dumps(data.get('plan_id'))}\n---\n\n# Cockpit Run Summary\n\n- Completed: `{data.get('completed_count', 0)}`\n- Blocked: `{data.get('blocked_count', 0)}`\n- Failed: `{data.get('failed_count', 0)}`\n- Skipped: `{data.get('skipped_count', 0)}`\n\n## Next actions\n\n" + "\n".join(f"- {x}" for x in data.get('next_actions', [])) + "\n\nThis cockpit is limited to approved internal local actions. No live external action was executed.\n"
+
+def render_evidence_feature_set_note(feature_set):
+    data=_data(feature_set); return f"---\ntype: evidence_feature_set\nfeature_set_id: {json.dumps(data.get('feature_set_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\n---\n\n# Commercial Evidence Features\n\nFeatures: `{len(data.get('features', []))}`\n\n## Limitations\n\n"+"\n".join(f"- {x}" for x in data.get('limitation_summary', []))+"\n\nNo live market claim is made.\n"
+def render_market_intelligence_note(report):
+    data=_data(report); return f"---\ntype: market_intelligence_report\nreport_id: {json.dumps(data.get('report_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\ncategory: {json.dumps(data.get('category_name'))}\n---\n\n# {data.get('title')}\n\n**Attractiveness:** `{data.get('attractiveness_score')}`  \n**Confidence:** `{data.get('confidence_score')}`\n\n## Reads\n\n- Demand: {data.get('demand_read')}\n- Trend: {data.get('trend_read')}\n- Competition: {data.get('competition_read')}\n- Saturation: {data.get('saturation_read')}\n\n## Risks and missing evidence\n\n"+"\n".join(f"- {x}" for x in data.get('major_risks',[])+data.get('missing_evidence',[]))+"\n\nEvidence-constrained only; no market-size, demand, profit, or ROI claim.\n"
+def render_product_intelligence_note(report):
+    data=_data(report); return f"---\ntype: product_intelligence_report\nreport_id: {json.dumps(data.get('report_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\nproduct: {json.dumps(data.get('product_name'))}\n---\n\n# {data.get('title')}\n\n**Viability:** `{data.get('viability_score')}`  \n**Confidence:** `{data.get('confidence_score')}`\n\n## Failure modes\n\n"+"\n".join(f"- {x}" for x in data.get('failure_modes',[]))+"\n\n## Missing evidence\n\n"+"\n".join(f"- {x}" for x in data.get('missing_evidence',[]))+"\n\nPositioning and validation ideas are hypotheses. No profitability or launch claim is made.\n"
+
+def render_creative_intelligence_report_note(report):
+ data=_data(report);return f"---\ntype: creative_intelligence_report\nreport_id: {json.dumps(data.get('report_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\nopportunity_id: {json.dumps(data.get('opportunity_id'))}\n---\n\n# {data.get('title')}\n\n**Confidence:** `{data.get('confidence_score')}`\n\n## Top angles\n\n"+"\n".join(f"- {x.get('title',x)}" for x in data.get('top_angles',[]))+"\n\n## Risks and missing proof\n\n"+"\n".join(f"- {x}" for x in data.get('major_risks',[])+data.get('missing_evidence',[]))+"\n\nSafety: drafts only. No ad was launched and no performance is predicted.\n"
+def render_creative_angle_note(angle):
+ data=_data(angle);return f"---\ntype: creative_angle\nangle_id: {json.dumps(data.get('angle_id'))}\n---\n\n# {data.get('title')}\n\n{data.get('premise')}\n\nSafety: hypothesis only; substantiate before use.\n"
+def render_creative_test_matrix_note(matrix):
+ data=_data(matrix);return f"---\ntype: creative_test_matrix\nmatrix_id: {json.dumps(data.get('matrix_id'))}\n---\n\n# Creative Test Matrix\n\n"+"\n".join(f"- {x.get('statement',x)}" for x in data.get('hypotheses',[]))+"\n\nNo live ad testing or performance prediction.\n"
+def render_landing_page_claim_map_note(claim_map):
+ data=_data(claim_map);return f"---\ntype: landing_page_claim_map\nclaim_map_id: {json.dumps(data.get('claim_map_id'))}\n---\n\n# Landing Page Claim Map\n\n"+"\n".join(f"- {x.get('claim',x)}" for x in data.get('hero_claims',[]))+"\n\nClaims are drafts; proof must be collected before use.\n"
+def render_ugc_brief_note(brief):
+ data=_data(brief);return f"---\ntype: ugc_brief\nbrief_id: {json.dumps(data.get('brief_id'))}\n---\n\n# {data.get('title')}\n\n## Do say\n\n"+"\n".join(f"- {x}" for x in data.get('do_say',[]))+"\n\n## Do not say\n\n"+"\n".join(f"- {x}" for x in data.get('do_not_say',[]))+"\n\nNo creator experience is implied; no ad was launched.\n"
+
+def render_operating_plan_note(plan):
+    data = _data(plan)
+    rows = "\n".join(f"- **{x.get('title')}** — `{x.get('status')}` — `{x.get('due_day')}` — `{x.get('estimated_hours', 0):.1f}h`" for x in data.get('tasks', [])) or "- No tasks."
+    return f"---\ntype: operating_plan\nplan_id: {json.dumps(data.get('plan_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\nstatus: {json.dumps(data.get('status'))}\n---\n\n# {data.get('title')}\n\n**Objective:** {data.get('objective')}\n\n## Tasks\n\n{rows}\n\n## Day plan\n\n" + "\n".join(f"- **{day}:** {', '.join(ids)}" for day, ids in data.get('day_plan', {}).items()) + "\n\n## Safety\n\nTasks are operator-ready planning artifacts only. No task is automatically executed and no external calendar is written.\n"
+
+def render_task_packet_note(packet):
+    data = _data(packet)
+    bullets = lambda values: "\n".join(f"- {value}" for value in values) or "- None."
+    return f"---\ntype: task_packet\npacket_id: {json.dumps(data.get('packet_id'))}\nplan_id: {json.dumps(data.get('plan_id'))}\ntask_id: {json.dumps(data.get('task_id'))}\n---\n\n# {data.get('title')}\n\n{data.get('objective')}\n\n## Instructions\n\n{bullets(data.get('instructions', []))}\n\n## Checklist\n\n{bullets(data.get('checklist', []))}\n\n## Done definition\n\n{bullets(data.get('done_definition', []))}\n\n## Safe endpoint references\n\n```json\n{json.dumps(data.get('exact_commands_or_endpoints', []), indent=2, default=str)}\n```\n\n## Safety\n\n{bullets(data.get('safety_constraints', []))}\n\nThis packet does not execute tasks.\n"
+
+def render_operating_calendar_note(calendar):
+    data = _data(calendar)
+    rows = "\n".join(f"- **{x.get('day_label')} / {x.get('start_slot')}** — `{x.get('duration_hours', 0):.1f}h` — {x.get('title')}" for x in data.get('blocks', [])) or "- No blocks."
+    return f"---\ntype: operating_calendar\ncalendar_id: {json.dumps(data.get('calendar_id'))}\nplan_id: {json.dumps(data.get('plan_id'))}\n---\n\n# Operating Calendar\n\n{rows}\n\n## Safety\n\nThis is a local Markdown/ICS planning artifact. It does not write to Google Calendar or any external calendar.\n"
+
+def render_review_cadence_note(cadence):
+    data = _data(cadence)
+    rows = "\n".join(f"- **{x.get('checkpoint_type')}** — {x.get('title')} — {', '.join(x.get('questions', []))}" for x in data.get('checkpoints', [])) or "- None."
+    return f"---\ntype: review_cadence\ncadence_id: {json.dumps(data.get('cadence_id'))}\nplan_id: {json.dumps(data.get('plan_id'))}\n---\n\n# Review Cadence\n\n{rows}\n\nReview checkpoints are operator prompts only; no reminders or background jobs are created.\n"
+
+def render_progress_snapshot_note(snapshot):
+    data = _data(snapshot)
+    return f"---\ntype: progress_snapshot\nsnapshot_id: {json.dumps(data.get('snapshot_id'))}\nplan_id: {json.dumps(data.get('plan_id'))}\n---\n\n# Progress Snapshot\n\n{data.get('progress_summary', '')}\n\n- Completed: {', '.join(data.get('completed_task_ids', [])) or 'none'}\n- Blocked: {', '.join(data.get('blocked_task_ids', [])) or 'none'}\n- Carried over: {', '.join(data.get('carried_over_task_ids', [])) or 'none'}\n\n## Next actions\n\n" + "\n".join(f"- {x}" for x in data.get('next_actions', [])) + "\n\nThis is a local status record; no task was executed automatically.\n"
