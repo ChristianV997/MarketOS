@@ -14,7 +14,7 @@ from .refinement_registry import get_refinement_registry
 from backend.obsidian.sync import sync_acquisition_plan_note, sync_connector_stub_note, sync_discovery_comparison_note, sync_refinement_cycle_note, sync_source_calibration_note
 
 
-def run_refinement_cycle(workspace_id="default", discovery_id=None, hypothesis_run_id=None, create_templates=True, max_recommendations=8):
+def run_refinement_cycle(workspace_id="default", discovery_id=None, hypothesis_run_id=None, create_templates=True, max_recommendations=8, refresh_pipeline=True):
     registry = get_refinement_registry(); calibration = run_source_calibration(workspace_id); analysis = analyze_evidence_gaps(workspace_id, discovery_id, hypothesis_run_id); registry.register_gap_analysis(analysis)
     plan = build_import_recommendation_plan(analysis, max_recommendations); registry.register_import_plan(plan)
     templates = create_templates_for_plan(plan) if create_templates else []
@@ -35,7 +35,15 @@ def run_refinement_cycle(workspace_id="default", discovery_id=None, hypothesis_r
     obsidian = sync_refinement_cycle_note(analysis, plan, templates)
     acquisition_obsidian = [sync_acquisition_plan_note(item) for item in acquisition_plans]
     stub_obsidian = [sync_connector_stub_note(get_connector_stub(item.parser_type)) for item in acquisition_plans]
-    return {"gap_analysis": analysis.to_dict(), "import_plan": plan.to_dict(), "templates": [x.to_dict() for x in templates], "acquisition_plans": [x.to_dict() for x in acquisition_plans], "calibration": calibration.to_dict(), "calibration_profiles_used": [x.to_dict() for x in calibration.profiles], "source_usefulness_summary": calibration.summary, "adjusted_import_recommendations": [x.to_dict() for x in plan.recommendations], "obsidian": obsidian, "calibration_obsidian": sync_source_calibration_note(calibration), "acquisition_obsidian": acquisition_obsidian, "stub_obsidian": stub_obsidian, "warnings": acquisition_warnings, "status": "completed"}
+    result = {"gap_analysis": analysis.to_dict(), "import_plan": plan.to_dict(), "templates": [x.to_dict() for x in templates], "acquisition_plans": [x.to_dict() for x in acquisition_plans], "calibration": calibration.to_dict(), "calibration_profiles_used": [x.to_dict() for x in calibration.profiles], "source_usefulness_summary": calibration.summary, "adjusted_import_recommendations": [x.to_dict() for x in plan.recommendations], "obsidian": obsidian, "calibration_obsidian": sync_source_calibration_note(calibration), "acquisition_obsidian": acquisition_obsidian, "stub_obsidian": stub_obsidian, "warnings": acquisition_warnings, "status": "completed"}
+    if refresh_pipeline:
+        try:
+            from .opportunity_pipeline_builder import refresh_opportunity_pipeline
+            result["opportunity_pipeline"] = refresh_opportunity_pipeline(workspace_id, discovery_id, hypothesis_run_id)
+            result["opportunity_snapshot_id"] = result["opportunity_pipeline"].get("snapshot_id")
+        except Exception as exc:
+            result["warnings"].append(f"opportunity_pipeline_refresh_failed:{type(exc).__name__}")
+    return result
 
 
 def run_import_refine_compare(workspace_id="default", import_paths=None, parser_type_by_path=None, source_name_by_path=None, baseline_discovery_id=None, max_categories=10, max_hypotheses=20):

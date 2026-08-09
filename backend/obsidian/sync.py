@@ -63,3 +63,15 @@ def sync_source_calibration_note(calibration_run) -> dict:
     relative = f"MarketOS/01_Research/SourceCalibration/{calibration_run.calibration_id}.md"
     result = ObsidianClient().write_note(relative, render_source_calibration_note(calibration_run))
     return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+def sync_opportunity_pipeline_snapshot_note(snapshot) -> dict:
+    relative = f"MarketOS/02_Opportunities/PipelineSnapshots/{snapshot.snapshot_id}.md"
+    from .templates import render_opportunity_pipeline_snapshot_note
+    result = ObsidianClient().write_note(relative, render_opportunity_pipeline_snapshot_note(snapshot))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+def sync_opportunity_note(opportunity, transitions=None) -> dict:
+    relative = f"MarketOS/02_Opportunities/Items/{opportunity.opportunity_id}.md"
+    from .templates import render_opportunity_note
+    result = ObsidianClient().write_note(relative, render_opportunity_note(opportunity, transitions))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}

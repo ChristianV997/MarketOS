@@ -18,6 +18,10 @@ from backend.discovery.refinement_registry import get_refinement_registry
 from backend.discovery.refinement_runner import run_import_refine_compare, run_refinement_cycle
 from backend.obsidian.sync import sync_acquisition_plan_note, sync_connector_stub_note
 from backend.obsidian.sync import sync_evidence_import_note
+from backend.discovery.opportunity_registry import get_opportunity_registry
+from backend.discovery.opportunity_pipeline_builder import refresh_opportunity_pipeline
+from backend.discovery.opportunity_gates import evaluate_opportunity_gates
+from backend.discovery.opportunity_pipeline import STAGES, TRANSITIONS, OpportunityStageTransition
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
 
@@ -274,3 +278,57 @@ def hypotheses(workspace_id: str | None = Query(None), discovery_id: str | None 
 def hypothesis(hypothesis_run_id: str) -> dict[str, Any]:
     item = get_discovery_registry().get_product_hypothesis_run(hypothesis_run_id)
     return {"status": "not_found", "hypothesis_run_id": hypothesis_run_id} if item is None else {"hypotheses": item.to_dict()}
+
+@router.post("/opportunity-pipeline/refresh")
+def refresh_pipeline(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        return refresh_opportunity_pipeline(str(payload.get("workspace_id", "default")), payload.get("discovery_id"), payload.get("hypothesis_run_id"))
+    except Exception as exc:
+        return {"status": "error", "error": "opportunity_pipeline_refresh_failed", "error_type": type(exc).__name__}
+
+@router.get("/opportunities")
+def opportunities(workspace_id: str | None = Query(None), stage: str | None = Query(None), opportunity_type: str | None = Query(None), recommendation: str | None = Query(None), limit: int = Query(100, ge=0, le=1000)) -> dict[str, Any]:
+    items = get_opportunity_registry().list_opportunities(workspace_id, stage, opportunity_type, recommendation, limit)
+    return {"opportunities": [x.to_dict() for x in items], "count": len(items)}
+
+@router.get("/opportunities/{opportunity_id}")
+def opportunity(opportunity_id: str) -> dict[str, Any]:
+    item = get_opportunity_registry().get_opportunity(opportunity_id)
+    return {"status": "not_found", "opportunity_id": opportunity_id} if item is None else {"opportunity": item.to_dict()}
+
+@router.post("/opportunities/{opportunity_id}/evaluate-gates")
+def opportunity_gates(opportunity_id: str) -> dict[str, Any]:
+    item = get_opportunity_registry().get_opportunity(opportunity_id)
+    if item is None: return {"status": "not_found", "opportunity_id": opportunity_id}
+    from backend.discovery.discovery_registry import get_discovery_registry
+    from backend.discovery.refinement_registry import get_refinement_registry
+    from backend.discovery.calibration_registry import get_calibration_registry
+    gaps = [g for a in get_refinement_registry().list_gap_analyses(item.workspace_id, 500) for g in a.gaps]
+    return {"status": "completed", "gates": evaluate_opportunity_gates(item, get_discovery_registry().list_evidence(workspace_id=item.workspace_id, limit=10000), [], gaps, get_calibration_registry().list_profiles(item.workspace_id, limit=500))}
+
+@router.post("/opportunities/{opportunity_id}/transition")
+def transition_opportunity(opportunity_id: str, payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    registry = get_opportunity_registry(); item = registry.get_opportunity(opportunity_id); target = str(payload.get("to_stage", "")); reason = str(payload.get("reason", "")).strip()
+    if item is None: return {"status": "not_found", "opportunity_id": opportunity_id}
+    if target not in STAGES or target not in TRANSITIONS.get(item.stage, set()): return {"status": "blocked", "blocked_reasons": ["invalid_or_unauthorized_stage_transition"], "allowed_transitions": sorted(TRANSITIONS.get(item.stage, set()))}
+    gates = opportunity_gates(opportunity_id).get("gates", {})
+    if target == "launch_candidate" and gates.get("recommended_transition") != "launch_candidate": return {"status": "blocked", "blocked_reasons": ["launch_candidate_gate_not_passed"], "gates": gates}
+    old = item.stage; item.stage = target; item.updated_at = __import__("time").time(); registry.update_opportunity(item)
+    decision = "rejected" if target == "rejected" else "archived" if target == "archived" else "promoted"
+    tr = OpportunityStageTransition("transition_" + __import__("uuid").uuid4().hex[:16], item.opportunity_id, item.workspace_id, old, target, decision, reason or "Manual gated transition.", gates, item.evidence_ids, item.report_ids); registry.register_transition(tr)
+    return {"status": "updated", "opportunity": item.to_dict(), "transition": tr.to_dict(), "planning_only": target == "launch_candidate"}
+
+@router.get("/opportunities/{opportunity_id}/transitions")
+def opportunity_transitions(opportunity_id: str, limit: int = Query(100, ge=0, le=1000)) -> dict[str, Any]:
+    items = get_opportunity_registry().list_transitions(opportunity_id=opportunity_id, limit=limit)
+    return {"transitions": [x.to_dict() for x in items], "count": len(items)}
+
+@router.get("/opportunity-pipeline/snapshots")
+def pipeline_snapshots(workspace_id: str | None = Query(None), limit: int = Query(50, ge=0, le=500)) -> dict[str, Any]:
+    items = get_opportunity_registry().list_snapshots(workspace_id, limit)
+    return {"snapshots": [x.to_dict() for x in items], "count": len(items)}
+
+@router.get("/opportunity-pipeline/snapshots/{snapshot_id}")
+def pipeline_snapshot(snapshot_id: str) -> dict[str, Any]:
+    item = get_opportunity_registry().get_snapshot(snapshot_id)
+    return {"status": "not_found", "snapshot_id": snapshot_id} if item is None else {"snapshot": item.to_dict()}

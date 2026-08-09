@@ -42,6 +42,7 @@ def run_market_discovery(
     parser_type_by_path: dict[str, str] | None = None,
     source_name_by_path: dict[str, str] | None = None,
     import_only: bool = False,
+    refresh_pipeline: bool = True,
 ) -> dict[str, Any]:
     """Run category-first discovery using only local, provenance-bearing evidence."""
     warnings: list[str] = []
@@ -129,7 +130,7 @@ def run_market_discovery(
     }
     if not records:
         discovery.status = "blocked"
-    return {
+    result = {
         "imports": import_results,
         "import_obsidian": import_obsidian,
         "status": "completed" if records else "blocked",
@@ -140,3 +141,12 @@ def run_market_discovery(
         "portfolio_report": portfolio.to_dict(),
         "obsidian": obsidian,
     }
+    if refresh_pipeline:
+        try:
+            from .opportunity_pipeline_builder import refresh_opportunity_pipeline
+            pipeline = refresh_opportunity_pipeline(workspace_id, discovery.discovery_id, hypotheses.hypothesis_run_id)
+            result["opportunity_pipeline"] = pipeline
+            result["opportunity_snapshot_id"] = pipeline.get("snapshot_id")
+        except Exception as exc:
+            result.setdefault("warnings", []).append(f"opportunity_pipeline_refresh_failed:{type(exc).__name__}")
+    return result
