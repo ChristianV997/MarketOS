@@ -118,9 +118,11 @@ app = FastAPI(title="MarketOS v4", version="4.0.0", lifespan=_lifespan)
 # they can evolve without duplicating the legacy runtime API below.
 try:
     from api.routes.governance import router as _governance_router
+    from api.routes.discovery import router as _discovery_router
     from api.routes.organization import router as _organization_router
     app.include_router(_organization_router)
     app.include_router(_governance_router)
+    app.include_router(_discovery_router)
 except Exception:
     # The legacy API must remain importable if an optional route dependency is
     # unavailable in a minimal deployment image.

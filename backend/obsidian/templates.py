@@ -37,3 +37,19 @@ def render_portfolio_report_note(portfolio_report) -> str:
     counts = lambda values: "\n".join(f"- `{key}`: {value}" for key, value in sorted(values.items())) or "- None."
     risks = "\n".join(f"- `{item.get('flag')}`: {item.get('count')}" for item in data.get("recurring_risk_flags", [])) or "- None."
     return "---\n" + "\n".join(f"{key}: {json.dumps(value)}" for key, value in front.items()) + "\n---\n\n# " + str(data.get("title", "Portfolio report")) + "\n\n" + str(data.get("summary", "")) + "\n\n## Service counts\n\n" + counts(data.get("service_counts", {})) + "\n\n## Status counts\n\n" + counts(data.get("status_counts", {})) + "\n\n## Recurring risk flags\n\n" + risks + "\n\n## Top recommendations\n\n" + bullets(data.get("top_recommendations", [])) + "\n\n## Next actions\n\n" + bullets(data.get("next_actions", [])) + "\n\n## Linked report IDs\n\n" + bullets(data.get("report_ids", [])) + "\n"
+
+
+def render_category_discovery_note(discovery_run, portfolio_report_id: str = "") -> str:
+    data = _data(discovery_run)
+    front = {"type": "category_discovery", "discovery_id": data.get("discovery_id"), "workspace_id": data.get("workspace_id"), "evidence_count": data.get("evidence_count", 0), "created_at": data.get("created_at")}
+    rows = []
+    for item in data.get("category_opportunities", []):
+        rows.append(f"- **{item.get('rank')}. {item.get('category_name')}** — `{item.get('recommendation')}`, score `{item.get('score')}`; missing: {', '.join(item.get('missing_evidence', [])) or 'none'}")
+    return "---\n" + "\n".join(f"{key}: {json.dumps(value)}" for key, value in front.items()) + "\n---\n\n# " + str(data.get("title", "Category discovery")) + "\n\n" + str(data.get("objective", "")) + "\n\n**Sources:** " + ", ".join(data.get("source_names", [])) + "\n\n## Ranked categories\n\n" + ("\n".join(rows) or "- No categories available.") + "\n\n## Provenance warning\n\nEvidence is limited to the recorded local sources; synthetic fixtures are not real market data.\n\n## Linked portfolio report\n\n" + (portfolio_report_id or "None") + "\n"
+
+
+def render_product_hypothesis_note(hypothesis_run, portfolio_report_id: str = "") -> str:
+    data = _data(hypothesis_run)
+    front = {"type": "product_hypothesis", "hypothesis_run_id": data.get("hypothesis_run_id"), "workspace_id": data.get("workspace_id"), "discovery_id": data.get("discovery_id"), "created_at": data.get("created_at")}
+    rows = [f"- **{item.get('product_name')}** ({item.get('category_name')}) — audience: {item.get('target_audience')}; confidence: `{item.get('confidence')}`; missing: {', '.join(item.get('missing_evidence', [])) or 'none'}" for item in data.get("hypotheses", [])]
+    return "---\n" + "\n".join(f"{key}: {json.dumps(value)}" for key, value in front.items()) + "\n---\n\n# Product hypotheses\n\n" + ("\n".join(rows) or "- No hypotheses available.") + "\n\n## Validation next steps\n\n- Validate demand, competition, supplier economics, and shipping with approved evidence sources.\n- Do not treat these hypotheses as products, sales, or profit claims.\n\n## Linked portfolio report\n\n" + (portfolio_report_id or "None") + "\n"

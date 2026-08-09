@@ -1,0 +1,23 @@
+{
+  "dataset_id": "synthetic-market-evidence-seed-v1",
+  "name": "Synthetic Market Evidence Seed",
+  "source_name": "local_fixture",
+  "created_at": "2026-08-08T00:00:00Z",
+  "provenance": {"type": "synthetic_fixture", "not_real_market_data": true},
+  "records": [
+    {"entity_type": "category", "entity_name": "home fitness", "signal_type": "trend_proxy", "value": 0.72, "weight": 1.0, "confidence": 0.6},
+    {"entity_type": "category", "entity_name": "home fitness", "signal_type": "audience_proxy", "value": 0.65, "weight": 1.0, "confidence": 0.6},
+    {"entity_type": "product_theme", "entity_name": "recovery accessory", "signal_type": "product_theme", "value": "recovery accessory", "weight": 1.0, "confidence": 0.5, "metadata": {"category": "home fitness"}},
+    {"entity_type": "category", "entity_name": "pet accessories", "signal_type": "demand_proxy", "value": 0.7, "weight": 1.0, "confidence": 0.6},
+    {"entity_type": "category", "entity_name": "pet accessories", "signal_type": "competition_proxy", "value": 0.35, "weight": 1.0, "confidence": 0.5},
+    {"entity_type": "product_theme", "entity_name": "portable enrichment tool", "signal_type": "product_theme", "value": "portable enrichment tool", "weight": 1.0, "confidence": 0.5, "metadata": {"category": "pet accessories"}},
+    {"entity_type": "category", "entity_name": "sleep improvement", "signal_type": "trend_proxy", "value": 0.62, "weight": 1.0, "confidence": 0.5},
+    {"entity_type": "category", "entity_name": "portable organization", "signal_type": "margin_proxy", "value": 0.55, "weight": 1.0, "confidence": 0.5},
+    {"entity_type": "category", "entity_name": "skincare tools", "signal_type": "risk_proxy", "value": 0.3, "weight": 1.0, "confidence": 0.5},
+    {"entity_type": "category", "entity_name": "creator desk setup", "signal_type": "creative_proxy", "value": 0.65, "weight": 1.0, "confidence": 0.6},
+    {"entity_type": "category", "entity_name": "car accessories", "signal_type": "demand_proxy", "value": 0.58, "weight": 1.0, "confidence": 0.5},
+    {"entity_type": "category", "entity_name": "kitchen convenience", "signal_type": "trend_proxy", "value": 0.6, "weight": 1.0, "confidence": 0.5},
+    {"entity_type": "category", "entity_name": "wellness recovery", "signal_type": "audience_proxy", "value": 0.62, "weight": 1.0, "confidence": 0.5},
+    {"entity_type": "category", "entity_name": "travel accessories", "signal_type": "margin_proxy", "value": 0.5, "weight": 1.0, "confidence": 0.5}
+  ]
+}

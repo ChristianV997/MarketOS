@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .client import ObsidianClient
-from .templates import render_portfolio_report_note, render_proposal_note
+from .templates import render_category_discovery_note, render_portfolio_report_note, render_product_hypothesis_note, render_proposal_note
 
 
 def sync_proposal_note(proposal, approval, decision, execution, report=None) -> dict:
@@ -14,4 +14,16 @@ def sync_proposal_note(proposal, approval, decision, execution, report=None) -> 
 def sync_portfolio_report_note(portfolio_report) -> dict:
     relative = f"MarketOS/07_Dashboards/PortfolioReports/{portfolio_report.portfolio_report_id}.md"
     result = ObsidianClient().write_note(relative, render_portfolio_report_note(portfolio_report))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_category_discovery_note(discovery_run, portfolio_report_id: str = "") -> dict:
+    relative = f"MarketOS/01_Research/CategoryDiscovery/{discovery_run.discovery_id}.md"
+    result = ObsidianClient().write_note(relative, render_category_discovery_note(discovery_run, portfolio_report_id))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_product_hypothesis_note(hypothesis_run, portfolio_report_id: str = "") -> dict:
+    relative = f"MarketOS/01_Research/ProductHypotheses/{hypothesis_run.hypothesis_run_id}.md"
+    result = ObsidianClient().write_note(relative, render_product_hypothesis_note(hypothesis_run, portfolio_report_id))
     return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
