@@ -9,3 +9,5 @@ Stages are `discovered`, `evidence_requested`, `evidence_enriched`, `validation_
 Typical loop: run discovery → inspect opportunities → run refinement → import recommended local evidence → compare runs → calibrate sources → refresh the pipeline → review validation reports. Synthetic fixtures and cached evidence remain explicitly limited and cannot alone promote an opportunity to launch-candidate.
 
 API endpoints are under `/api/discovery`: refresh, opportunity listing/detail, gate evaluation, manual gated transition, transition history, and pipeline snapshots.
+
+Validation-ready opportunities can be summarized into a client-ready, evidence-constrained deliverable package after a dry-run sprint; see [Product Validation Sprint Deliverables](PRODUCT_VALIDATION_SPRINT_DELIVERABLES.md).

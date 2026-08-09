@@ -85,3 +85,8 @@ def sync_validation_scorecard_note(scorecard) -> dict:
     relative=f"MarketOS/03_Experiments/ValidationScorecards/{scorecard.scorecard_id}.md"
     from .templates import render_validation_scorecard_note
     result=ObsidianClient().write_note(relative, render_validation_scorecard_note(scorecard)); return {"status":result.get("status","skipped"),"path":relative,"detail":result}
+
+def sync_deliverable_package_note(package) -> dict:
+    relative=f"MarketOS/04_Deliverables/{package.package_type}/{package.package_id}.md"
+    from .templates import render_deliverable_package_note
+    result=ObsidianClient().write_note(relative,render_deliverable_package_note(package)); return {"status":result.get("status","skipped"),"path":relative,"detail":result}

@@ -5,3 +5,5 @@ Validation sprints select `validation_ready` opportunities and run only audited 
 Each target produces a persistent scorecard with bounded score/confidence, completed or unavailable services, risks, missing evidence, and a cautious transition recommendation. `launch_candidate` remains a planning label and never authorizes ads, orders, payments, messaging, publishing, or commerce mutation.
 
 Use: run discovery → refresh the opportunity pipeline → inspect `validation_ready` → POST `/api/discovery/validation-sprints` → review scorecards → refresh refinement for blockers. Sprint and scorecard artifacts are optionally written to Obsidian under `03_Experiments`.
+
+For a client-ready paid-service output, generate the persisted package through `/api/deliverables/product-validation-sprint`; see [Product Validation Sprint Deliverables](PRODUCT_VALIDATION_SPRINT_DELIVERABLES.md).
