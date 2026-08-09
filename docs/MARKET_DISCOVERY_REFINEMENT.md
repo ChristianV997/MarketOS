@@ -18,6 +18,8 @@ Each row retains source file, parser, row number, workspace, and provenance. Sou
 
 Refinement cycles also generate source-specific acquisition plans and disabled connector stubs. See [Evidence Acquisition Playbooks](EVIDENCE_ACQUISITION_PLAYBOOKS.md).
 
+Source usefulness can be calibrated from persisted comparisons; see [Source Calibration](SOURCE_CALIBRATION.md). Calibration is descriptive and does not establish causality.
+
 ## Safety model
 
 Import paths are restricted to approved project roots and are capped by row/file limits. Missing or unsafe imports fail closed. All reports use cautious language: a score change between runs is a descriptive change in recorded evidence, not proof of causality or market improvement. External live sources remain blocked.

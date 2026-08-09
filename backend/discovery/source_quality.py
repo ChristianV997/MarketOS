@@ -5,6 +5,20 @@ from typing import Any
 from .evidence_import import EvidenceSourceQuality
 
 
+def apply_calibration_to_source_quality(source_quality: EvidenceSourceQuality, calibration_profile) -> EvidenceSourceQuality:
+    """Return a bounded copy; calibration never changes source safety."""
+    import copy
+    result = copy.deepcopy(source_quality)
+    if result.source_type == "external_live" or "source_not_allowed_in_read_only_phase" in result.blocked_signal_types:
+        return result
+    adjustment = float(getattr(calibration_profile, "confidence_multiplier_adjustment", 1.0)) if calibration_profile else 1.0
+    if result.metadata.get("synthetic_or_cached_only") is True:
+        result.confidence_multiplier = min(result.confidence_multiplier * adjustment, 1.0)
+    else:
+        result.confidence_multiplier = min(result.confidence_multiplier * adjustment, 1.0)
+    return result
+
+
 _BASE: dict[str, dict[str, Any]] = {
     "google_trends_csv": {"score": 62, "allowed": ["trend_proxy", "audience_proxy"], "blocked": ["profit_proxy", "roas_proxy"], "strengths": ["trend direction proxy"], "weaknesses": ["not conversion or profit evidence"]},
     "tiktok_creative_center_csv": {"score": 60, "allowed": ["creative_proxy", "trend_proxy", "competition_proxy"], "blocked": ["profit_proxy", "demand_actual"], "strengths": ["creative and short-term trend signals"], "weaknesses": ["durable demand and profitability are unproven"]},

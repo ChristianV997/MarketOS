@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .evidence_gap import EvidenceGapAnalysis
+from .calibration_registry import get_calibration_registry
 
 
 _FIELDS = {
@@ -73,7 +74,16 @@ def build_import_recommendation_plan(gap_analysis: EvidenceGapAnalysis, max_reco
         required, optional = _FIELDS.get(parser, _FIELDS["generic_market_csv"])
         priority = min(100.0, sum(gap.priority_score for gap in gaps) / max(1, len(gaps)) + min(25.0, len(gaps) * 5.0))
         signals = sorted({gap.missing_signal_type for gap in gaps})
-        recommendations.append(ImportRecommendation("recommendation_" + uuid.uuid5(uuid.NAMESPACE_URL, f"{gap_analysis.workspace_id}:{parser}").hex[:16], gap_analysis.workspace_id, parser, parser.replace("_csv", ""), f"Import {parser.replace('_', ' ')} evidence", f"This local export can address: {', '.join(signals)}.", priority, signals, required, optional, sorted({gap.gap_id for gap in gaps}), f"data/import_templates/{parser}.csv", metadata={"real_market_claims": False}))
+        calibration = None
+        try:
+            calibration = get_calibration_registry().get_profile(parser.replace("_csv", ""), parser, gap_analysis.workspace_id)
+        except Exception:
+            calibration = None
+        adjustment = float(getattr(calibration, "recommended_priority_adjustment", 0.0)) if calibration else 0.0
+        adjusted_priority = max(0.0, min(100.0, priority + adjustment))
+        if any(gap.severity in {"critical", "high"} for gap in gaps): adjusted_priority = max(adjusted_priority, 70.0)
+        metadata = {"real_market_claims": False, "calibration_profile_id": getattr(calibration, "profile_id", ""), "usefulness_score": getattr(calibration, "usefulness_score", None), "priority_adjustment": adjustment, "calibration_strengths": getattr(calibration, "strengths", []), "calibration_weaknesses": getattr(calibration, "weaknesses", [])}
+        recommendations.append(ImportRecommendation("recommendation_" + uuid.uuid5(uuid.NAMESPACE_URL, f"{gap_analysis.workspace_id}:{parser}").hex[:16], gap_analysis.workspace_id, parser, parser.replace("_csv", ""), f"Import {parser.replace('_', ' ')} evidence", f"This local export can address: {', '.join(signals)}.", adjusted_priority, signals, required, optional, sorted({gap.gap_id for gap in gaps}), f"data/import_templates/{parser}.csv", metadata=metadata))
     recommendations.sort(key=lambda item: (-item.priority_score, item.parser_type))
     recommendations = recommendations[:max(1, min(int(max_recommendations), 20))]
     return ImportRecommendationPlan("import_plan_" + uuid.uuid4().hex[:16], gap_analysis.workspace_id, "Recommended Evidence Imports", recommendations, {"gap_count": len(gap_analysis.gaps), "parser_count": len(recommendations), "coverage_method": "gap_to_parser_mapping"}, metadata={"no_live_access": True})

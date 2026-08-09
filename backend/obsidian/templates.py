@@ -84,3 +84,9 @@ def render_acquisition_plan_note(plan) -> str:
 def render_connector_stub_note(stub) -> str:
     data = _data(stub)
     return f"---\ntype: evidence_connector_stub\nconnector_name: {json.dumps(data.get('connector_name'))}\nparser_type: {json.dumps(data.get('parser_type'))}\nstatus: {json.dumps(data.get('status'))}\ndefault_enabled: false\n---\n\n# {data.get('connector_name')}\n\n**Current mode:** disabled  \n**Output format:** {data.get('output_format')}  \n**Future environment variables:** {', '.join(data.get('required_env_vars', []))}\n\n## Blocked reasons\n\n" + "\n".join(f"- {x}" for x in data.get('blocked_reasons', [])) + "\n\n## Safety contract\n\n```json\n" + json.dumps(data.get('safety_contract', {}), indent=2) + "\n```\n\nNo executable connector exists in this phase.\n"
+
+
+def render_source_calibration_note(calibration_run) -> str:
+    data = _data(calibration_run)
+    rows = "\n".join(f"- **{x.get('source_name')} / {x.get('parser_type')}** — usefulness `{x.get('usefulness_score')}`, priority adjustment `{float(x.get('recommended_priority_adjustment', 0)):+.1f}`; strengths: {', '.join(x.get('strengths', [])) or 'none'}; weaknesses: {', '.join(x.get('weaknesses', [])) or 'none'}" for x in data.get('profiles', [])) or "- No profiles available."
+    return f"---\ntype: source_calibration\ncalibration_id: {json.dumps(data.get('calibration_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\nstatus: {json.dumps(data.get('status'))}\ncreated_at: {json.dumps(data.get('created_at'))}\n---\n\n# {data.get('title')}\n\n**Summary:** {data.get('summary')}\n\n## Profiles\n\n{rows}\n\n## Recommendations\n\n" + "\n".join(f"- {x}" for x in data.get('recommendations', [])) + "\n\n## Interpretation\n\nObserved changes after evidence inclusion are descriptive and non-causal. Insufficient comparisons remain inconclusive.\n"

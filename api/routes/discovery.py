@@ -9,6 +9,8 @@ from backend.discovery.acquisition_plan import build_acquisition_plan_from_recom
 from backend.discovery.acquisition_registry import get_acquisition_registry
 from backend.discovery.csv_ingestion import SUPPORTED_PARSERS
 from backend.discovery.connector_stubs import get_connector_stub, list_connector_stubs
+from backend.discovery.calibration_registry import get_calibration_registry
+from backend.discovery.source_calibration_engine import run_source_calibration
 from backend.discovery.evidence_normalizer import normalize_imported_evidence
 from backend.discovery.import_registry import get_import_registry
 from backend.discovery.market_discovery_runner import run_market_discovery
@@ -18,6 +20,35 @@ from backend.obsidian.sync import sync_acquisition_plan_note, sync_connector_stu
 from backend.obsidian.sync import sync_evidence_import_note
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
+
+
+@router.post("/source-calibration")
+def source_calibration(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        run = run_source_calibration(str(payload.get("workspace_id", "default")), payload.get("comparison_ids"), payload.get("import_ids"))
+        return {"status": run.status, "calibration": run.to_dict()}
+    except Exception as exc:
+        return {"status": "error", "error": "source_calibration_failed", "error_type": type(exc).__name__}
+
+
+@router.get("/source-calibrations")
+def source_calibrations(workspace_id: str | None = Query(None), limit: int = Query(50, ge=0, le=500)) -> dict[str, Any]:
+    items = get_calibration_registry().list_calibration_runs(workspace_id, limit); return {"calibrations": [x.to_dict() for x in items], "count": len(items)}
+
+
+@router.get("/source-calibrations/{calibration_id}")
+def source_calibration_detail(calibration_id: str) -> dict[str, Any]:
+    item = get_calibration_registry().get_calibration_run(calibration_id); return {"status": "not_found", "calibration_id": calibration_id} if item is None else {"calibration": item.to_dict()}
+
+
+@router.get("/source-calibration/profiles")
+def source_calibration_profiles(workspace_id: str | None = Query(None), parser_type: str | None = Query(None), limit: int = Query(100, ge=0, le=500)) -> dict[str, Any]:
+    items = get_calibration_registry().list_profiles(workspace_id, parser_type, limit); return {"profiles": [x.to_dict() for x in items], "count": len(items)}
+
+
+@router.get("/source-calibration/signals")
+def source_calibration_signals(workspace_id: str | None = Query(None), source_name: str | None = Query(None), parser_type: str | None = Query(None), signal_type: str | None = Query(None), limit: int = Query(100, ge=0, le=1000)) -> dict[str, Any]:
+    items = get_calibration_registry().list_signals(workspace_id, source_name, parser_type, signal_type, limit); return {"signals": [x.to_dict() for x in items], "count": len(items)}
 
 
 @router.post("/acquisition-plans/from-import-plan")
