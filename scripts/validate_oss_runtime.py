@@ -54,6 +54,11 @@ def _inventory_selected_candidates(inventory: Path) -> dict[str, dict[str, Any]]
     return selected
 
 
+# Inventory names are product-facing; adapters may use a qualified runtime
+# name. Keep this mapping explicit so coverage does not report false gaps.
+_RUNTIME_PROVIDER_ALIASES = {"posthog": "posthog_backend"}
+
+
 def build_report(inventory: Path = INVENTORY) -> dict[str, Any]:
     from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
     from backend.agents.pydantic_boundary import PydanticAIAgentProvider
@@ -81,6 +86,10 @@ def build_report(inventory: Path = INVENTORY) -> dict[str, Any]:
     selected = _inventory_selected_candidates(inventory)
     provider_health = [_health_record(provider) for provider in providers]
     provider_names = {entry["name"] for entry in provider_health}
+    covered_inventory_names = {
+        name for name in selected
+        if name in provider_names or _RUNTIME_PROVIDER_ALIASES.get(name) in provider_names
+    }
     return {
         "inventory": str(inventory),
         "inventory_errors": validate_inventory(inventory),
@@ -88,8 +97,8 @@ def build_report(inventory: Path = INVENTORY) -> dict[str, Any]:
         "providers": provider_health,
         "provider_coverage": {
             "selected_inventory": sorted(selected),
-            "selected_runtime_providers": sorted(provider_names & set(selected)),
-            "coverage_gaps": sorted(name for name in selected if name not in provider_names),
+            "selected_runtime_providers": sorted(covered_inventory_names),
+            "coverage_gaps": sorted(name for name in selected if name not in covered_inventory_names),
         },
         "context_headers": SidecarContext(
             workspace_id="oss-validation",
