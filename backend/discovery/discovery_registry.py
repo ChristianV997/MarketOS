@@ -19,8 +19,8 @@ class DiscoveryRegistry:
         for record in records: self.evidence[record.evidence_id] = record
         self.save(); return records
     def get_evidence(self, evidence_id: str) -> EvidenceRecord | None: return self.evidence.get(evidence_id)
-    def list_evidence(self, source_name: str | None = None, entity_type: str | None = None, signal_type: str | None = None, limit: int = 100) -> list[EvidenceRecord]:
-        return list([record for record in self.evidence.values() if (source_name is None or record.source_name == source_name) and (entity_type is None or record.entity_type == entity_type) and (signal_type is None or record.signal_type == signal_type)])[:max(0, min(int(limit), 1000))]
+    def list_evidence(self, source_name: str | None = None, entity_type: str | None = None, signal_type: str | None = None, limit: int = 100, source_type: str | None = None, entity_name: str | None = None, workspace_id: str | None = None) -> list[EvidenceRecord]:
+        return list([record for record in self.evidence.values() if (source_name is None or record.source_name == source_name) and (source_type is None or record.source_type == source_type) and (entity_type is None or record.entity_type == entity_type) and (signal_type is None or record.signal_type == signal_type) and (entity_name is None or record.entity_name.lower() == entity_name.lower()) and (workspace_id is None or str(record.provenance.get("workspace_id", "")) == workspace_id)])[:max(0, min(int(limit), 1000))]
     def register_category_discovery(self, run: CategoryDiscoveryRun) -> CategoryDiscoveryRun: self.categories[run.discovery_id] = run; self.save(); return run
     def get_category_discovery(self, discovery_id: str) -> CategoryDiscoveryRun | None: return self.categories.get(discovery_id)
     def list_category_discoveries(self, workspace_id: str | None = None, status: str | None = None, limit: int = 50) -> list[CategoryDiscoveryRun]: return list([run for run in self.categories.values() if (workspace_id is None or run.workspace_id == workspace_id) and (status is None or run.status == status)])[:max(0, min(int(limit), 500))]

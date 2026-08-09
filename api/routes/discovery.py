@@ -5,9 +5,60 @@ from typing import Any
 from fastapi import APIRouter, Body, Query
 
 from backend.discovery.discovery_registry import get_discovery_registry
+from backend.discovery.csv_ingestion import SUPPORTED_PARSERS
+from backend.discovery.evidence_normalizer import normalize_imported_evidence
+from backend.discovery.import_registry import get_import_registry
 from backend.discovery.market_discovery_runner import run_market_discovery
+from backend.obsidian.sync import sync_evidence_import_note
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
+
+
+@router.post("/import-evidence")
+def import_evidence(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        parser = str(payload.get("parser_type", ""))
+        if parser not in SUPPORTED_PARSERS:
+            return {"status": "blocked", "blocked_reasons": ["unsupported_parser_type"]}
+        result = normalize_imported_evidence(str(payload.get("input_path", "")), parser, str(payload.get("source_name", parser)), str(payload.get("workspace_id", "default")), payload.get("provenance"), min(max(int(payload.get("max_rows", 10000)), 1), 10000))
+        get_import_registry().register_import_job(result.import_job)
+        get_import_registry().register_source_quality(result.source_quality)
+        if result.records: get_discovery_registry().register_evidence(result.records)
+        return {**result.to_dict(), "obsidian": sync_evidence_import_note(result.import_job, result.source_quality, result)}
+    except Exception as exc:
+        return {"status": "error", "error": "evidence_import_failed", "error_type": type(exc).__name__}
+
+
+@router.post("/import-and-run")
+def import_and_run(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        imports = payload.get("imports") or []
+        if not isinstance(imports, list) or len(imports) > 10:
+            return {"status": "blocked", "blocked_reasons": ["import_count_limit_exceeded"]}
+        paths = [str(item.get("input_path", "")) for item in imports if isinstance(item, dict)]
+        parsers = {str(item.get("input_path", "")): str(item.get("parser_type", "generic_market_csv")) for item in imports if isinstance(item, dict)}
+        sources = {str(item.get("input_path", "")): str(item.get("source_name", parsers.get(str(item.get("input_path", "")), "generic_market_csv"))) for item in imports if isinstance(item, dict)}
+        return run_market_discovery(workspace_id=str(payload.get("workspace_id", "default")), title=str(payload.get("title", "Imported Market Discovery")), objective=str(payload.get("objective", "Rank categories from imported evidence")), import_paths=paths, parser_type_by_path=parsers, source_name_by_path=sources, max_categories=min(max(int(payload.get("max_categories", 10)), 0), 50), max_hypotheses=min(max(int(payload.get("max_hypotheses", 20)), 0), 100), run_validation_services=bool(payload.get("run_validation_services", True)))
+    except Exception as exc:
+        return {"status": "error", "error": "import_and_run_failed", "error_type": type(exc).__name__}
+
+
+@router.get("/imports")
+def imports(workspace_id: str | None = Query(None), source_name: str | None = Query(None), status: str | None = Query(None), limit: int = Query(50, ge=0, le=500)) -> dict[str, Any]:
+    items = get_import_registry().list_import_jobs(workspace_id, source_name, status, limit)
+    return {"imports": [item.to_dict() for item in items], "count": len(items)}
+
+
+@router.get("/source-quality")
+def source_quality(limit: int = Query(100, ge=0, le=500)) -> dict[str, Any]:
+    items = get_import_registry().list_source_quality(limit)
+    return {"source_quality": [item.to_dict() for item in items], "count": len(items)}
+
+
+@router.get("/source-quality/{source_name}")
+def source_quality_detail(source_name: str) -> dict[str, Any]:
+    item = get_import_registry().get_source_quality(source_name)
+    return {"status": "not_found", "source_name": source_name} if item is None else {"source_quality": item.to_dict()}
 
 
 @router.post("/market-discovery")
@@ -33,9 +84,9 @@ def market_discovery(payload: dict[str, Any] = Body(default_factory=dict)) -> di
 
 
 @router.get("/evidence")
-def evidence(source_name: str | None = Query(None), entity_type: str | None = Query(None), signal_type: str | None = Query(None), limit: int = Query(100, ge=0, le=1000)) -> dict[str, Any]:
+def evidence(source_name: str | None = Query(None), source_type: str | None = Query(None), entity_type: str | None = Query(None), signal_type: str | None = Query(None), entity_name: str | None = Query(None), workspace_id: str | None = Query(None), limit: int = Query(100, ge=0, le=1000)) -> dict[str, Any]:
     try:
-        items = get_discovery_registry().list_evidence(source_name, entity_type, signal_type, limit)
+        items = get_discovery_registry().list_evidence(source_name, entity_type, signal_type, limit, source_type, entity_name, workspace_id)
         return {"evidence": [item.to_dict() for item in items], "count": len(items)}
     except Exception as exc:
         return {"status": "error", "error": "evidence_listing_failed", "error_type": type(exc).__name__, "evidence": []}
