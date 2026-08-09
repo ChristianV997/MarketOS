@@ -15,11 +15,7 @@ MetricsProvider = Callable[[list[str]], dict[str, Any] | tuple[dict[str, Any], D
 
 
 def _default_launch_backend() -> tuple[LaunchProvider, LaunchProvider, LaunchProvider, MetricsProvider]:
-    """Build the canonical TikTok-backed launch providers.
-
-    The wrappers preserve LaunchExecutor's dictionary contract while keeping
-    all TikTok HTTP behavior in ``backend.integrations.tiktok_ads``.
-    """
+    """Build wrappers that preserve the LaunchExecutor dictionary contract."""
     from backend.integrations import tiktok_ads
 
     def _campaign(*, name: str, budget: float) -> dict[str, Any]:

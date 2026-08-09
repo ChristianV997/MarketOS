@@ -25,7 +25,72 @@ from .creative import CreativeComposer
 from .feedback import FeedbackRecorder
 from .launch import LaunchExecutor
 from .scoring import OpportunityScorer
-from . import metrics as commerce_metrics
+
+try:
+    from prometheus_client import Counter, Gauge
+
+    _prom_cycle_ranked_total = Counter(
+        "marketos_commerce_cycle_ranked_total",
+        "Ranked opportunities produced per commerce cycle",
+    )
+    _prom_cycle_launchable_total = Counter(
+        "marketos_commerce_cycle_launchable_total",
+        "Ranked opportunities marked launchable per commerce cycle",
+    )
+    _prom_cycle_rejection_reasons_total = Counter(
+        "marketos_commerce_cycle_rejection_reasons_total",
+        "Non-launchable ranked opportunities by rejection reason",
+        ["reason"],
+    )
+    _prom_cycle_spend = Counter(
+        "marketos_commerce_cycle_spend_total",
+        "Total spend across launched campaign outcomes per commerce cycle",
+    )
+    _prom_cycle_revenue = Counter(
+        "marketos_commerce_cycle_revenue_total",
+        "Total revenue across launched campaign outcomes per commerce cycle",
+    )
+    _prom_cycle_last_roas = Gauge(
+        "marketos_commerce_cycle_last_roas",
+        "Blended ROAS (revenue / spend) of the most recent commerce cycle",
+    )
+except ImportError:
+    _prom_cycle_ranked_total = None
+    _prom_cycle_launchable_total = None
+    _prom_cycle_rejection_reasons_total = None
+    _prom_cycle_spend = None
+    _prom_cycle_revenue = None
+    _prom_cycle_last_roas = None
+
+
+def _emit_cycle_metrics(ranked: list[RankedOpportunity], outcomes: Iterable[CampaignOutcome]) -> None:
+    """Best-effort Prometheus emission — never raises, mirrors the
+    lazy-Counter pattern already used by core/signals.py and
+    backend/commerce/feedback.py.
+    """
+    try:
+        if _prom_cycle_ranked_total is not None:
+            _prom_cycle_ranked_total.inc(len(ranked))
+        if _prom_cycle_launchable_total is not None:
+            _prom_cycle_launchable_total.inc(
+                sum(1 for item in ranked if item.readiness and item.readiness.launchable)
+            )
+        if _prom_cycle_rejection_reasons_total is not None:
+            for item in ranked:
+                if not item.readiness or item.readiness.launchable:
+                    continue
+                for reason in item.readiness.reasons:
+                    _prom_cycle_rejection_reasons_total.labels(reason=reason).inc()
+        spend = round(sum(o.spend for o in outcomes), 4)
+        revenue = round(sum(o.revenue for o in outcomes), 4)
+        if _prom_cycle_spend is not None:
+            _prom_cycle_spend.inc(spend)
+        if _prom_cycle_revenue is not None:
+            _prom_cycle_revenue.inc(revenue)
+        if _prom_cycle_last_roas is not None and spend > 0:
+            _prom_cycle_last_roas.set(round(revenue / spend, 4))
+    except Exception:
+        pass
 
 
 def _key_lookup(*keys: str):
@@ -115,12 +180,24 @@ class CommerceLoop:
     def quality_gate(self, creatives: Iterable[CreativeBundle]) -> tuple[list[CreativeBundle], list[str]]:
         """Optionally run typed campaign QA before launch, failing closed."""
         bundles = list(creatives)
-        if os.getenv("MARKETOS_AGENT_QA_ENABLED", "false").lower() != "true":
-            return bundles, []
-        from backend.agents.domain_agents import CampaignQARequest, run_campaign_qa
         failures: list[str] = []
         checked: list[CreativeBundle] = []
         for bundle in bundles:
+            if bundle.artifact is not None and not bundle.artifact.usable_for_launch():
+                checked.append(replace(
+                    bundle,
+                    reasons=tuple(sorted(set((*bundle.reasons, "creative_artifact_unusable", "not_launchable")))),
+                ))
+                failures.append(f"{bundle.creative_id}:artifact_unusable")
+            else:
+                checked.append(bundle)
+        if os.getenv("MARKETOS_AGENT_QA_ENABLED", "false").lower() != "true":
+            return checked, failures
+        from backend.agents.domain_agents import CampaignQARequest, run_campaign_qa
+        qa_checked: list[CreativeBundle] = []
+        for bundle in checked:
+            if "creative_artifact_unusable" in bundle.reasons:
+                continue
             try:
                 result = asyncio.run(run_campaign_qa(CampaignQARequest(
                     product_id=bundle.product_id,
@@ -130,14 +207,14 @@ class CommerceLoop:
                     dry_run=True,
                 )))
                 if not result.approved:
-                    checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_rejected", "not_launchable"))))))
+                    qa_checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_rejected", "not_launchable"))))))
                     failures.append(f"{bundle.creative_id}:rejected")
                 else:
-                    checked.append(bundle)
+                    qa_checked.append(bundle)
             except Exception as exc:
-                checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_unavailable", "not_launchable"))))))
+                qa_checked.append(replace(bundle, reasons=tuple(sorted(set((*bundle.reasons, "agent_qa_unavailable", "not_launchable"))))))
                 failures.append(f"{bundle.creative_id}:unavailable:{exc}")
-        return checked, failures
+        return [bundle for bundle in checked if "creative_artifact_unusable" in bundle.reasons] + qa_checked, failures
 
     def launch(
         self,
@@ -154,20 +231,16 @@ class CommerceLoop:
             try:
                 plan, outcome = self.launcher.execute(bundle, budget=budget, dry_run=dry_run)
             except Exception as exc:
-                commerce_metrics.launches_total.labels(status="failed", dry_run=str(dry_run).lower()).inc()
-                # Keep the batch alive; the caller records the bounded failure
-                # in the cycle summary without exposing product content as a
-                # metric label.
-                plans.append(LaunchPlan.from_bundle(bundle, budget=budget, dry_run=dry_run))
-                outcomes.append(CampaignOutcome.from_metrics(
-                    plans[-1],
+                # A provider failure must not discard the rest of the batch;
+                # retain a typed outcome so the cycle can record the failure.
+                plan = LaunchPlan.from_bundle(bundle, budget=budget, dry_run=dry_run)
+                outcome = CampaignOutcome.from_metrics(
+                    plan,
                     {"metadata": {"launch_error": type(exc).__name__}},
                     quality=_quality_from_dict({"provenance": "unknown", "attribution": "unknown"}),
-                ))
-                continue
+                )
             plans.append(plan)
             outcomes.append(outcome)
-            commerce_metrics.launches_total.labels(status="success", dry_run=str(dry_run).lower()).inc()
         return plans, outcomes
 
     def publish_creatives(
@@ -210,7 +283,6 @@ class CommerceLoop:
         records: list[dict[str, Any]] = []
         for outcome in outcomes:
             if (outcome.metadata or {}).get("launch_error"):
-                commerce_metrics.feedback_total.labels(status="skipped_launch_failure").inc()
                 continue
             plan = next((plan for plan in plans if plan.campaign_id == outcome.campaign_id or plan.creative_id == outcome.creative_id), None)
             if plan is None:
@@ -234,14 +306,12 @@ class CommerceLoop:
         started_at = time.time()
         timings: dict[str, float] = {}
 
-        def timed(phase: str, operation):
+        def timed(phase: str, operation: Any):
             phase_started = time.perf_counter()
             try:
                 return operation()
             finally:
-                duration = time.perf_counter() - phase_started
-                timings[phase] = round(duration, 6)
-                commerce_metrics.phase_duration_seconds.labels(phase=phase).observe(duration)
+                timings[phase] = round(time.perf_counter() - phase_started, 6)
 
         raw_signals = timed("signal_collection", lambda: self.collect_signals(signals))
         normalized_signals = timed("normalization", lambda: [CommerceSignal.from_signal(signal) for signal in raw_signals])
@@ -267,9 +337,8 @@ class CommerceLoop:
         if qa_failures:
             summary["qa_failures"] = len(qa_failures)
 
-        status = "ok" if launch_failures == 0 else "partial_failure"
-        commerce_metrics.cycles_total.labels(status=status, dry_run=str(dry_run).lower()).inc()
-        commerce_metrics.feedback_total.labels(status="recorded").inc(len(feedback))
+        _emit_cycle_metrics(ranked, outcomes)
+
         return CommerceCycleReport(
             artifact_id=f"commerce-cycle-{int(started_at * 1000)}",
             workspace="commerce",

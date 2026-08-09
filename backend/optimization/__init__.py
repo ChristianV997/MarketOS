@@ -1,1 +1,1 @@
-"""Deterministic, simulated-only portfolio optimization."""
+"""backend.optimization — budget scaling and spend optimization rules."""
