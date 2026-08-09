@@ -5,15 +5,81 @@ from typing import Any
 from fastapi import APIRouter, Body, Query
 
 from backend.discovery.discovery_registry import get_discovery_registry
+from backend.discovery.acquisition_plan import build_acquisition_plan_from_recommendation
+from backend.discovery.acquisition_registry import get_acquisition_registry
 from backend.discovery.csv_ingestion import SUPPORTED_PARSERS
+from backend.discovery.connector_stubs import get_connector_stub, list_connector_stubs
 from backend.discovery.evidence_normalizer import normalize_imported_evidence
 from backend.discovery.import_registry import get_import_registry
 from backend.discovery.market_discovery_runner import run_market_discovery
 from backend.discovery.refinement_registry import get_refinement_registry
 from backend.discovery.refinement_runner import run_import_refine_compare, run_refinement_cycle
+from backend.obsidian.sync import sync_acquisition_plan_note, sync_connector_stub_note
 from backend.obsidian.sync import sync_evidence_import_note
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
+
+
+@router.post("/acquisition-plans/from-import-plan")
+def acquisition_plans_from_import_plan(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        import_plan = get_refinement_registry().get_import_plan(str(payload.get("import_plan_id", "")))
+        if import_plan is None: return {"status": "not_found", "import_plan_id": payload.get("import_plan_id")}
+        items = []
+        for recommendation in import_plan.recommendations:
+            item = build_acquisition_plan_from_recommendation(recommendation, str(payload.get("workspace_id", import_plan.workspace_id)))
+            get_acquisition_registry().register_plan(item); stub = get_connector_stub(item.parser_type); get_acquisition_registry().register_stub(stub)
+            items.append(item)
+        return {"status": "completed", "acquisition_plans": [x.to_dict() for x in items]}
+    except Exception as exc:
+        return {"status": "error", "error": "acquisition_plan_creation_failed", "error_type": type(exc).__name__}
+
+
+@router.get("/acquisition-plans")
+def acquisition_plans(workspace_id: str | None = Query(None), parser_type: str | None = Query(None), status: str | None = Query(None), limit: int = Query(50, ge=0, le=500)) -> dict[str, Any]:
+    items = get_acquisition_registry().list_plans(workspace_id, parser_type, status, limit); return {"acquisition_plans": [x.to_dict() for x in items], "count": len(items)}
+
+
+@router.get("/acquisition-plans/{plan_id}")
+def acquisition_plan(plan_id: str) -> dict[str, Any]:
+    item = get_acquisition_registry().get_plan(plan_id); return {"status": "not_found", "plan_id": plan_id} if item is None else {"acquisition_plan": item.to_dict()}
+
+
+@router.post("/acquisition-plans/{plan_id}/status")
+def acquisition_plan_status(plan_id: str, payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    allowed = {"drafted", "ready_for_manual_export", "template_created", "imported", "superseded", "blocked"}
+    item = get_acquisition_registry().get_plan(plan_id)
+    status = str(payload.get("status", ""))
+    if item is None: return {"status": "not_found", "plan_id": plan_id}
+    if status not in allowed: return {"status": "blocked", "blocked_reasons": ["invalid_acquisition_plan_status"], "allowed_statuses": sorted(allowed)}
+    item.status = status; get_acquisition_registry().update_plan(item); return {"status": "updated", "acquisition_plan": item.to_dict()}
+
+
+@router.get("/source-playbooks")
+def source_playbooks() -> dict[str, Any]:
+    from backend.discovery.source_playbooks import _PLAYBOOKS
+    from backend.discovery.source_playbooks import get_source_playbook
+    return {"source_playbooks": [get_source_playbook(key) for key in sorted(_PLAYBOOKS)]}
+
+
+@router.get("/source-playbooks/{parser_type}")
+def source_playbook(parser_type: str) -> dict[str, Any]:
+    try:
+        from backend.discovery.source_playbooks import get_source_playbook
+        return {"source_playbook": get_source_playbook(parser_type)}
+    except ValueError:
+        return {"status": "not_found", "parser_type": parser_type}
+
+
+@router.get("/connector-stubs")
+def connector_stubs() -> dict[str, Any]:
+    return {"connector_stubs": [x.to_dict() for x in list_connector_stubs()]}
+
+
+@router.get("/connector-stubs/{connector_name}")
+def connector_stub(connector_name: str) -> dict[str, Any]:
+    item = next((x for x in list_connector_stubs() if x.connector_name == connector_name), None)
+    return {"status": "not_found", "connector_name": connector_name} if item is None else {"connector_stub": item.to_dict(), "obsidian": sync_connector_stub_note(item)}
 
 
 @router.post("/refinement-cycle")

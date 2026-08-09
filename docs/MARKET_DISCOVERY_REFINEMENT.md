@@ -16,6 +16,8 @@ Google Trends, TikTok Creative Center, Amazon bestseller snapshots, Meta Ad Libr
 
 Each row retains source file, parser, row number, workspace, and provenance. Source quality restricts which signals are allowed. Own-store exports may support first-party sales evidence, but they do not establish general market demand.
 
+Refinement cycles also generate source-specific acquisition plans and disabled connector stubs. See [Evidence Acquisition Playbooks](EVIDENCE_ACQUISITION_PLAYBOOKS.md).
+
 ## Safety model
 
 Import paths are restricted to approved project roots and are capped by row/file limits. Missing or unsafe imports fail closed. All reports use cautious language: a score change between runs is a descriptive change in recorded evidence, not proof of causality or market improvement. External live sources remain blocked.

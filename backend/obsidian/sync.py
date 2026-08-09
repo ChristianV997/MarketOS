@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .client import ObsidianClient
-from .templates import render_category_discovery_note, render_discovery_comparison_note, render_evidence_import_note, render_portfolio_report_note, render_product_hypothesis_note, render_proposal_note, render_refinement_cycle_note
+from .templates import render_acquisition_plan_note, render_category_discovery_note, render_connector_stub_note, render_discovery_comparison_note, render_evidence_import_note, render_portfolio_report_note, render_product_hypothesis_note, render_proposal_note, render_refinement_cycle_note
 
 
 def sync_proposal_note(proposal, approval, decision, execution, report=None) -> dict:
@@ -44,4 +44,16 @@ def sync_refinement_cycle_note(gap_analysis, import_plan, templates) -> dict:
 def sync_discovery_comparison_note(comparison) -> dict:
     relative = f"MarketOS/01_Research/DiscoveryComparisons/{comparison.comparison_id}.md"
     result = ObsidianClient().write_note(relative, render_discovery_comparison_note(comparison))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_acquisition_plan_note(plan) -> dict:
+    relative = f"MarketOS/01_Research/AcquisitionPlans/{plan.plan_id}.md"
+    result = ObsidianClient().write_note(relative, render_acquisition_plan_note(plan))
+    return {"status": result.get("status", "skipped"), "path": relative, "detail": result}
+
+
+def sync_connector_stub_note(stub) -> dict:
+    relative = f"MarketOS/01_Research/ConnectorStubs/{stub.connector_name}.md"
+    result = ObsidianClient().write_note(relative, render_connector_stub_note(stub))
     return {"status": result.get("status", "skipped"), "path": relative, "detail": result}

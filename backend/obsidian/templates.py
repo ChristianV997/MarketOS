@@ -73,3 +73,14 @@ def render_refinement_cycle_note(gap_analysis, import_plan, templates) -> str:
 def render_discovery_comparison_note(comparison) -> str:
     data = _data(comparison)
     return "---\ntype: discovery_comparison\ncomparison_id: " + json.dumps(data.get("comparison_id")) + "\nworkspace_id: " + json.dumps(data.get("workspace_id")) + "\ncreated_at: " + json.dumps(data.get("created_at")) + "\n---\n\n# Discovery comparison\n\n" + str(data.get("summary", "")) + "\n\n## Category movements\n\n" + "\n".join(f"- **{x.get('category_name')}**: rank {x.get('baseline_rank')} → {x.get('current_rank')}; score {x.get('baseline_score')} → {x.get('current_score')}" for x in data.get("category_movements", [])) + "\n\n## New categories\n\n" + ", ".join(data.get("new_categories", [])) + "\n\n## Dropped categories\n\n" + ", ".join(data.get("dropped_categories", [])) + "\n\n## Interpretation\n\nScore changes are descriptive outputs from different evidence sets. They do not prove causality or market improvement.\n"
+
+
+def render_acquisition_plan_note(plan) -> str:
+    data = _data(plan)
+    steps = "\n".join(f"{step.get('order')}. **{step.get('title')}** — {step.get('instruction')}\n   - Verify: {'; '.join(step.get('verification_checks', []))}" for step in data.get("steps", []))
+    return f"---\ntype: evidence_acquisition_plan\nplan_id: {json.dumps(data.get('plan_id'))}\nworkspace_id: {json.dumps(data.get('workspace_id'))}\nparser_type: {json.dumps(data.get('parser_type'))}\nstatus: {json.dumps(data.get('status'))}\ncreated_at: {json.dumps(data.get('created_at'))}\n---\n\n# {data.get('title')}\n\n**Mode:** `{data.get('current_mode')}`  \n**Connector stub:** `{data.get('connector_stub_name')}`  \n**Priority:** `{data.get('priority_score')}`\n\n{data.get('objective')}\n\n## Expected signals\n\n{', '.join(data.get('expected_signal_types', []))}\n\n## Manual export steps\n\n{steps}\n\n## Templates\n\n{', '.join(data.get('template_paths', [])) or 'None'}\n\n## Safety\n\nThis plan is manual/cache-only. No live API, scraping, credential, or mutation path is enabled.\n"
+
+
+def render_connector_stub_note(stub) -> str:
+    data = _data(stub)
+    return f"---\ntype: evidence_connector_stub\nconnector_name: {json.dumps(data.get('connector_name'))}\nparser_type: {json.dumps(data.get('parser_type'))}\nstatus: {json.dumps(data.get('status'))}\ndefault_enabled: false\n---\n\n# {data.get('connector_name')}\n\n**Current mode:** disabled  \n**Output format:** {data.get('output_format')}  \n**Future environment variables:** {', '.join(data.get('required_env_vars', []))}\n\n## Blocked reasons\n\n" + "\n".join(f"- {x}" for x in data.get('blocked_reasons', [])) + "\n\n## Safety contract\n\n```json\n" + json.dumps(data.get('safety_contract', {}), indent=2) + "\n```\n\nNo executable connector exists in this phase.\n"
