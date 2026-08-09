@@ -104,7 +104,9 @@ def risk():
     for r in rows:
         rev = float(r.get("revenue", 0))
         dp.update(rev)
-    drawdown_pct = round(dp.drawdown(capital), 4)
+    # Cast numeric-library scalars at the API boundary.  FastAPI's JSON
+    # encoder cannot serialize numpy scalar types reliably.
+    drawdown_pct = float(round(float(dp.drawdown(capital)), 4))
 
     # ROAS over last 48 h
     roas_48h_values = [float(r.get("roas", 0)) for r in recent_48h]
@@ -119,7 +121,7 @@ def risk():
     for v in all_roas[:-1]:
         ad.update(v)
     latest_roas = all_roas[-1] if all_roas else 0.0
-    is_anomaly = ad.is_anomaly(latest_roas) if all_roas else False
+    is_anomaly = bool(ad.is_anomaly(latest_roas)) if all_roas else False
 
     alerts = []
     if drawdown_pct > 0.30:
