@@ -7,16 +7,17 @@ ownership so a future session (Claude or otherwise) doesn't duplicate or collide
 
 | Owner | Paths | Current responsibility |
 |---|---|---|
-| Claude | `backend/mvp_commerce/opportunity_scoring.py`, `competition_intelligence.py`, `product_research.py`, `backend/adapters/research/competition_evidence.py`, their dashboard/API/CLI/docs surfaces | Phase 1 commerce intelligence stack — open as PR #149 (`claude/phase1-supplier-evidence` → `main`), CI green, awaiting review/merge decision |
+| Claude | `scripts/run_phase1_live_validation.py`, `docs/PHASE1_LIVE_VALIDATION_RUNBOOK.md` | Phase 1 intelligence stack (PR #149) and its live-validation harness (PR #150) are both merged to `main`. Only remaining Phase 1 work is running the harness from unrestricted network egress — see `docs/ai/SESSION_HANDOFF.md`. |
 | Codex | — | Paused; no active ownership. Prior assignments below are historical, not current. |
 | Shared | `docs/ai/SESSION_HANDOFF.md`, `AGENTS.md`, `CLAUDE.md` | Coordinate before changing; latest committed handoff is the cross-environment source of truth |
 
-## Do not start overlapping work until PR #149's status is known
+## Do not start new Phase 1 feature work until live validation is attempted
 
-PR #149 covers Supplier Evidence, Opportunity Scoring, Competition Intelligence, and Product Research
-Intelligence in one stacked branch. Before starting new work in any of the paths above, check the PR's current
-state (open/merged/closed) — a new session should not open a second PR against the same branch or re-implement
-capability this PR already provides.
+PR #149 and PR #150 are both merged. The next branch (one of `claude/phase1-live-results`,
+`claude/phase1-crawl4ai-js-extraction`, `claude/phase1-auth-readonly-supplier`, `claude/phase1-deployment-proof`)
+depends on the outcome of running `scripts/run_phase1_live_validation.py --allow-network` from an unrestricted
+environment — see `docs/ai/SESSION_HANDOFF.md`'s "Next action". Do not create any of those branches, or start
+another intelligence module, until that outcome is known.
 
 ## Historical (pre-pause Codex assignments, no longer current)
 
