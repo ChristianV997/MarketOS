@@ -93,7 +93,10 @@ class TestLiveModeChecklistJournaling:
 
         events = [e for e in event_store._iter_events() if e.get("event") == "shadow_live_mode_checklist"]
         assert events
-        assert events[-1]["data"]["allowed"] is True
+        # The journal is shared by xdist workers; another worker may append a
+        # blocked check after this test's event. Assert this invocation exists
+        # instead of relying on global file ordering.
+        assert any(event["data"]["allowed"] is True for event in events)
 
 
 class TestModeIsOrthogonalToLiveGate:
