@@ -1,5 +1,8 @@
 # Commerce MVP Vertical Slice
 
+> The Commerce MVP can optionally enrich its advisory packet with a local,
+> PII-redacted Shopify-like export. See [Shopify Read-only Import](SHOPIFY_READONLY_IMPORT.md).
+
 ## Purpose
 
 This fixture-first workflow turns attributed public/no-auth signal records into

@@ -34,7 +34,7 @@ never selected in MVP mode. `evaluate_next` means catalog/contract work only;
 | Hosting | Vercel frontend; Railway or Render API | Fly.io | bespoke platform |
 | Edge + observability | Cloudflare, PostHog, Sentry | Upstash/QStash, Resend | autonomous notifications |
 | Public research | Google News RSS | trendspyg/manual product tools | credentialed scraping/data APIs |
-| Commerce | Shopify catalog/read-only reference | Zendrop/CJ/AutoDS read-only contracts | fulfillment/order APIs |
+| Commerce | Shopify manual/PII-redacted export import | Shopify authenticated least-privilege reads; Zendrop/CJ/AutoDS read-only contracts | fulfillment/order APIs |
 | Creative + pages | Creatify/HeyGen, PageFly/GemPages manual packets | Webflow/Framer/Runway | automatic publishing |
 | Support | Tidio/Manychat playbook exports | HubSpot/Gorgias | automated customer messages |
 | AI routing | none activated | Cloudflare AI Gateway, Vercel AI Gateway, OpenRouter | global runtime router |
@@ -87,6 +87,11 @@ server-only canonical EventRepository target—not the default repository.
 The [Commerce MVP Vertical Slice](COMMERCE_MVP_VERTICAL_SLICE.md) consumes
 these router recommendations as packet metadata. It does not activate a
 connector or convert a recommendation into external authority.
+
+Shopify's current use-now route is the local manual-export contract documented
+in [Shopify Read-only Import](SHOPIFY_READONLY_IMPORT.md). It emits advisory,
+PII-redacted canonical observations only. A future authenticated Admin API
+adapter must request least-privilege read scopes and remains evaluate-next.
 
 ## Promoting a vendor
 
