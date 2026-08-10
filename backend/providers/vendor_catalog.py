@@ -71,7 +71,8 @@ _RECORDS = (
     _record("builtwith", "ecommerce_store_intelligence", mode=IntegrationMode.CATALOG_ONLY, auth=AuthMode.API_KEY, cost=CostTier.HIGH, stage=VendorStage.DEFER),
     _record("semrush", "social_content_generation", mode=IntegrationMode.MANUAL_EXPORT, cost=CostTier.HIGH, stage=VendorStage.DEFER, notes="Content research reference only; no publishing or direct API integration is selected."),
     # Commerce references: no operational write API is selected in MVP.
-    _record("shopify", "ecommerce_platform", mode=IntegrationMode.READ_ONLY_API, auth=AuthMode.APP_INSTALLATION, cost=CostTier.MEDIUM, stage=VendorStage.USE_NOW, mvp=True, notes="Catalog/read-only import reference only. Mutations remain outside this router and require existing live gates."),
+    _record("shopify", "ecommerce_platform", mode=IntegrationMode.MANUAL_EXPORT, auth=AuthMode.MANUAL, cost=CostTier.MEDIUM, stage=VendorStage.USE_NOW, mvp=True, notes="Operator-provided, PII-redacted manual export import only. Authenticated least-privilege read-only API access is evaluate-next; all mutations remain outside this router."),
+    _record("shopify", "inventory_monitoring", mode=IntegrationMode.MANUAL_EXPORT, auth=AuthMode.MANUAL, cost=CostTier.MEDIUM, stage=VendorStage.USE_NOW, mvp=True, notes="Operator-provided, PII-redacted Shopify export import only. Authenticated read-only API access is evaluate-next; inventory mutation is forbidden."),
     _record("shopify", "payment_processing", mode=IntegrationMode.CATALOG_ONLY, auth=AuthMode.APP_INSTALLATION, cost=CostTier.MEDIUM, stage=VendorStage.DEFER, notes="Payment metadata only; no payment or refund action is available through this plan."),
     _record("cj_dropshipping", "supplier_sourcing", stage=VendorStage.EVALUATE_NEXT, cost=CostTier.USAGE_BASED),
     _record("zendrop", "supplier_sourcing", stage=VendorStage.EVALUATE_NEXT, cost=CostTier.USAGE_BASED),

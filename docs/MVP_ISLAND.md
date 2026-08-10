@@ -82,6 +82,9 @@ The [Commerce MVP Vertical Slice](COMMERCE_MVP_VERTICAL_SLICE.md) composes the
 existing public-signal, event, and routing foundations into a manual-review
 packet without creating any external commerce object.
 
+Its optional [Shopify Read-only Import](SHOPIFY_READONLY_IMPORT.md) accepts a
+local export only; it is not an authenticated or write-capable Shopify path.
+
 ## Promotion gates
 
 Promote one capability at a time only after: schema/RLS review; adapter tests

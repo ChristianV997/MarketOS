@@ -50,7 +50,7 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
                            signals: list[PublicSignal] | None = None, mode: str = "fixture", max_signals: int = 10, max_candidates: int = 5,
                            assumed_price: float = 49.0, assumed_unit_cost: float = 15.0, assumed_shipping_cost: float = 6.0,
                            assumed_cac: float = 12.0, assumed_return_rate: float = .08, payment_fee_rate: float = .03,
-                           write_repository: EventRepository | None = None) -> CommerceMvpRun:
+                           write_repository: EventRepository | None = None, shopify_store_context: Any | None = None) -> CommerceMvpRun:
     rows = list(signals if signals is not None else _load_signals(signal_fixture_path) if signal_fixture_path else [])[:max(1, max_signals)]
     query = query.strip(); stable = hashlib.sha256((workspace_id + query + "|".join(item.signal_id for item in rows)).encode()).hexdigest()[:20]
     started = float(int(stable[:8], 16) % 1_000_000 + 1_700_000_000)
@@ -66,6 +66,11 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
     recommendations = _recommendations()
     approval = build_manual_approval_packet(selected, recommendations) if selected else None
     base = CommerceMvpRun(f"commerce-mvp-{stable}", workspace_id, query, started, started, mode, "completed" if selected else "blocked", tuple(item.to_dict() for item in rows), tuple(candidates), selected, economics, creative, landing, store, recommendations, approval, (), tuple(warnings), ("manual_approval_required_before_external_action",), {"network_used": False, "provider_calls": False, "supabase_default": False, "jsonl_default": False})
+    if shopify_store_context is not None:
+        # Imported context is evidence only: the existing deterministic candidate
+        # selection and economics remain untouched.
+        from backend.ecommerce.shopify_readonly.enrichment import enrich_commerce_mvp_with_shopify_context
+        base, _ = enrich_commerce_mvp_with_shopify_context(base, shopify_store_context)
     events = commerce_mvp_events(base)
     if write_repository is not None: write_repository.append_many(events)
     return replace(base, canonical_event_ids=tuple(event.event_id for event in events), completed_at=started + len(events) / 1000)
