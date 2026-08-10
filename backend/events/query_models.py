@@ -37,4 +37,44 @@ class ShopifyImportSummary:
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self); value["warnings"] = list(self.warnings); return value
 
-__all__ = ["CommerceRunSummary", "EventQuery", "EventRecordView", "EventTimeline", "ShopifyImportSummary"]
+@dataclass(frozen=True)
+class CompetitionSummary:
+    """Decoded competition_intelligence_events() output for one Commerce
+    MVP run — same rationale as OpportunityRankingSummary: the generic
+    timeline's payload_summary (key names/counts only) can't carry the
+    actual observed pricing/saturation/margin data an operator needs to
+    see why a market looks the way it does."""
+    workspace_id: str | None; run_id: str; query: str
+    observed_competitor_count: int; observed_median_price: float | None
+    market_saturation: float | None; market_maturity: str; confidence: float
+    offers: tuple[dict[str, Any], ...]; margin: dict[str, Any] | None; event_count: int
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self); value["offers"] = [dict(item) for item in self.offers]; return value
+
+@dataclass(frozen=True)
+class OpportunityRankingSummary:
+    """Decoded opportunity_scoring_events() output for one Commerce MVP run —
+    unlike EventRecordView.payload_summary (key names/counts only, for the
+    generic timeline), this carries each candidate's actual composite
+    score/confidence/dimension breakdown/reasons/risks/unknowns so an
+    operator can see *why* a candidate ranked where it did without a
+    second, opaque query engine."""
+    workspace_id: str | None; run_id: str; query: str; top_candidate_id: str | None
+    candidate_count: int; scores: tuple[dict[str, Any], ...]; event_count: int
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self); value["scores"] = [dict(item) for item in self.scores]; return value
+
+@dataclass(frozen=True)
+class ResearchPortfolioSummary:
+    """Decoded product_research_events() output for one Commerce MVP run —
+    same rationale as OpportunityRankingSummary/CompetitionSummary: an
+    operator needs the actual bucket contents, cluster membership, and
+    quality metrics, not the generic timeline's key-list-only summary."""
+    workspace_id: str | None; run_id: str; top_candidate_id: str | None
+    candidate_count: int; cluster_count: int; quality: dict[str, Any] | None
+    bucket_counts: dict[str, int]; clusters: tuple[dict[str, Any], ...]
+    movements: tuple[dict[str, Any], ...]; event_count: int
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self); value["clusters"] = [dict(item) for item in self.clusters]; value["movements"] = [dict(item) for item in self.movements]; return value
+
+__all__ = ["CommerceRunSummary", "CompetitionSummary", "EventQuery", "EventRecordView", "EventTimeline", "OpportunityRankingSummary", "ResearchPortfolioSummary", "ShopifyImportSummary"]

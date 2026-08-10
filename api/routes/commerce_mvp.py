@@ -34,6 +34,9 @@ class PublicCommerceRunRequest(BaseModel):
     operator_note: str = Field(default="", max_length=500)
     attempt_supplier_evidence: bool = False
     supplier_candidate_urls: list[str] = Field(default_factory=list, max_length=5)
+    use_opportunity_ranking: bool = False
+    attempt_competition_evidence: bool = False
+    competitor_urls: list[str] = Field(default_factory=list, max_length=5)
 
 
 def _blocked(message: str, *, request: PublicCommerceRunRequest) -> dict:
@@ -109,6 +112,7 @@ def public_run(request: PublicCommerceRunRequest, http_request: Request = None) 
     # not attempted (economics fall back to assumptions) rather than
     # blocking the whole run.
     attempt_supplier_evidence = request.attempt_supplier_evidence and os.getenv("MARKETOS_SUPPLIER_EVIDENCE_LIVE", "0") == "1"
+    attempt_competition_evidence = request.attempt_competition_evidence and os.getenv("MARKETOS_COMPETITION_EVIDENCE_LIVE", "0") == "1"
 
     result = run_commerce_mvp_from_public_rss(
         workspace_id=request.workspace_id,
@@ -121,6 +125,9 @@ def public_run(request: PublicCommerceRunRequest, http_request: Request = None) 
         operator_note=request.operator_note,
         attempt_supplier_evidence=attempt_supplier_evidence,
         supplier_candidate_urls=list(request.supplier_candidate_urls),
+        use_opportunity_ranking=request.use_opportunity_ranking,
+        attempt_competition_evidence=attempt_competition_evidence,
+        competitor_urls=list(request.competitor_urls),
     )
     events = list(result.events)
     if batch is not None:
@@ -138,6 +145,8 @@ def public_run(request: PublicCommerceRunRequest, http_request: Request = None) 
         "write_targets": written,
         "event_count": len(events),
         "supplier_evidence_attempted": attempt_supplier_evidence,
+        "opportunity_ranking_used": request.use_opportunity_ranking,
+        "competition_evidence_attempted": attempt_competition_evidence,
         "read_only": True,
         "advisory": True,
         "mutated": False,

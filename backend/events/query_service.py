@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Sequence
 from backend.contracts.events import Event
-from .query_models import CommerceRunSummary, EventQuery, EventRecordView, EventTimeline, ShopifyImportSummary
+from .query_models import CommerceRunSummary, CompetitionSummary, EventQuery, EventRecordView, EventTimeline, OpportunityRankingSummary, ResearchPortfolioSummary, ShopifyImportSummary
 
 def load_events_from_jsonl(path: str | Path) -> tuple[list[Event], list[str]]:
     events: list[Event] = []; warnings: list[str] = []
@@ -56,8 +56,66 @@ def build_shopify_import_summaries(events: Sequence[Event]) -> list[ShopifyImpor
         summaries.append(ShopifyImportSummary(workspace, batch_id, int(context.get("product_count", count("shopify_product_observed"))), int(context.get("variant_count", count("shopify_variant_observed"))), int(context.get("collection_count", count("shopify_collection_observed"))), int(context.get("order_count", count("shopify_order_observed"))), int(context.get("line_item_count", count("shopify_line_item_observed"))), int(context.get("customer_count", count("shopify_customer_observed"))), bool(context.get("pii_redacted", all(item.metadata.get("pii_redacted") for item in rows))), float(context.get("observed_revenue_total", 0.0)), float(context.get("average_order_value", 0.0)), len(rows), tuple(completed.get("warnings", ()))) )
     return summaries
 
+def build_opportunity_ranking_summaries(events: Sequence[Event]) -> list[OpportunityRankingSummary]:
+    groups: dict[str, list[Event]] = defaultdict(list)
+    for event in events:
+        if event.event_type in {"opportunity_scoring_started", "candidate_scored", "opportunity_ranked", "opportunity_scoring_completed"}:
+            groups[event.correlation_id or event.aggregate_id].append(event)
+    summaries: list[OpportunityRankingSummary] = []
+    for run_id, rows in sorted(groups.items()):
+        start = next((item for item in rows if item.event_type == "opportunity_scoring_started"), rows[0])
+        ranked = next((item for item in rows if item.event_type == "opportunity_ranked"), None)
+        scored = [item.payload for item in rows if item.event_type == "candidate_scored"]
+        order = list(ranked.payload.get("ranking", [])) if ranked else []
+        if order:
+            rank_index = {candidate_id: position for position, candidate_id in enumerate(order)}
+            scored = sorted(scored, key=lambda item: rank_index.get(item.get("candidate_id"), len(order)))
+        top_candidate_id = ranked.payload.get("top_candidate_id") if ranked else None
+        summaries.append(OpportunityRankingSummary(start.workspace_id, run_id, str(start.payload.get("query", "")), top_candidate_id, len(scored), tuple(scored), len(rows)))
+    return summaries
+
+def build_competition_summaries(events: Sequence[Event]) -> list[CompetitionSummary]:
+    groups: dict[str, list[Event]] = defaultdict(list)
+    for event in events:
+        if event.event_type in {"competition_observed", "competition_summary_created", "market_pricing_computed", "market_intelligence_completed"}:
+            groups[event.correlation_id or event.aggregate_id].append(event)
+    summaries: list[CompetitionSummary] = []
+    for run_id, rows in sorted(groups.items()):
+        summary_event = next((item for item in rows if item.event_type == "competition_summary_created"), None)
+        pricing_event = next((item for item in rows if item.event_type == "market_pricing_computed"), None)
+        offers = [item.payload for item in rows if item.event_type == "competition_observed"]
+        payload = summary_event.payload if summary_event else {}
+        workspace = rows[0].workspace_id
+        summaries.append(CompetitionSummary(
+            workspace, run_id, str(payload.get("query", "")),
+            int(payload.get("observed_competitor_count", 0)), payload.get("observed_median_price"),
+            payload.get("market_saturation"), str(payload.get("market_maturity", "unknown")),
+            float(payload.get("confidence", 0.0)), tuple(offers),
+            pricing_event.payload if pricing_event else None, len(rows),
+        ))
+    return summaries
+
+def build_research_portfolio_summaries(events: Sequence[Event]) -> list[ResearchPortfolioSummary]:
+    groups: dict[str, list[Event]] = defaultdict(list)
+    for event in events:
+        if event.event_type in {"candidate_discovered", "candidate_clustered", "research_portfolio_updated", "ranking_changed", "research_completed"}:
+            groups[event.correlation_id or event.aggregate_id].append(event)
+    summaries: list[ResearchPortfolioSummary] = []
+    for run_id, rows in sorted(groups.items()):
+        portfolio_event = next((item for item in rows if item.event_type == "research_portfolio_updated"), None)
+        clusters = [item.payload for item in rows if item.event_type == "candidate_clustered"]
+        movements = [item.payload for item in rows if item.event_type == "ranking_changed"]
+        payload = portfolio_event.payload if portfolio_event else {}
+        workspace = rows[0].workspace_id
+        summaries.append(ResearchPortfolioSummary(
+            workspace, run_id, payload.get("top_candidate_id"), int(payload.get("candidate_count", 0)),
+            int(payload.get("cluster_count", len(clusters))), payload.get("quality"),
+            dict(payload.get("bucket_counts", {})), tuple(clusters), tuple(movements), len(rows),
+        ))
+    return summaries
+
 def event_query_report(events: Sequence[Event], query: EventQuery, warnings: Sequence[str] = ()) -> dict[str, Any]:
     timeline = build_event_timeline(events, query, warnings)
-    return {"query": query.to_dict(), "timeline": timeline.to_dict(), "commerce_runs": [item.to_dict() for item in build_commerce_run_summaries(query_events(events, query))], "shopify_imports": [item.to_dict() for item in build_shopify_import_summaries(query_events(events, query))], "read_only": True, "network_calls": False, "mutated": False}
+    return {"query": query.to_dict(), "timeline": timeline.to_dict(), "commerce_runs": [item.to_dict() for item in build_commerce_run_summaries(query_events(events, query))], "shopify_imports": [item.to_dict() for item in build_shopify_import_summaries(query_events(events, query))], "opportunity_rankings": [item.to_dict() for item in build_opportunity_ranking_summaries(query_events(events, query))], "competition_summaries": [item.to_dict() for item in build_competition_summaries(query_events(events, query))], "research_portfolios": [item.to_dict() for item in build_research_portfolio_summaries(query_events(events, query))], "read_only": True, "network_calls": False, "mutated": False}
 
-__all__ = ["build_commerce_run_summaries", "build_event_timeline", "build_shopify_import_summaries", "event_query_report", "load_events_from_jsonl", "query_events", "summarize_event_record"]
+__all__ = ["build_commerce_run_summaries", "build_competition_summaries", "build_event_timeline", "build_opportunity_ranking_summaries", "build_research_portfolio_summaries", "build_shopify_import_summaries", "event_query_report", "load_events_from_jsonl", "query_events", "summarize_event_record"]

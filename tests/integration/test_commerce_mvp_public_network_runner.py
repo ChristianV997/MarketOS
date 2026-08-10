@@ -35,3 +35,23 @@ def test_public_runner_uses_stale_cache_after_network_failure(tmp_path):
     assert stale.status == "stale_cache"
     assert stale.ingestion.cache_status == "stale"
     assert len(stale.ingestion.signals) == 2
+
+
+def test_public_runner_opportunity_ranking_opt_in_emits_scoring_events(tmp_path):
+    repo = InMemoryEventRepository()
+    result = run_commerce_mvp_from_public_rss(
+        query="portable espresso maker", allow_network=True, cache_dir=tmp_path, fetcher=lambda _url, _timeout: RSS,
+        event_repository=repo, use_opportunity_ranking=True,
+    )
+    assert result.status == "succeeded"
+    types = {event.event_type for event in result.events}
+    assert {"opportunity_scoring_started", "candidate_scored", "opportunity_ranked", "opportunity_scoring_completed"} <= types
+    assert "opportunity_assessment" in result.run.metadata
+    assert len(repo.tail()) == len(result.events)
+
+
+def test_public_runner_default_has_no_opportunity_ranking_events(tmp_path):
+    result = run_commerce_mvp_from_public_rss(query="portable espresso maker", allow_network=True, cache_dir=tmp_path, fetcher=lambda _url, _timeout: RSS)
+    types = {event.event_type for event in result.events}
+    assert "opportunity_scoring_started" not in types
+    assert "opportunity_assessment" not in result.run.metadata

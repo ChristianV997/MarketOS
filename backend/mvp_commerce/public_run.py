@@ -17,9 +17,11 @@ from backend.signals.public_signal_cache import PublicSignalCache
 from backend.signals.public_signal_models import PublicSignalIngestionResult
 from backend.signals.public_sources import ingest_public_rss, public_signal_event
 
+from .competition_intelligence import build_market_opportunity_report, compute_margin_intelligence, competition_intelligence_events, gather_market_intelligence
 from .events import commerce_mvp_events
 from .models import CommerceMvpRun
 from .opportunity import build_opportunity_candidates_from_signals, select_candidate
+from .opportunity_scoring import opportunity_scoring_events, rank_opportunities
 from .runner import run_commerce_mvp_slice
 from .supplier_evidence import gather_supplier_evidence, supplier_evidence_events
 
@@ -128,6 +130,10 @@ def run_commerce_mvp_from_public_rss(
     operator_note: str = "",
     attempt_supplier_evidence: bool = False,
     supplier_candidate_urls: list[str] | None = None,
+    use_opportunity_ranking: bool = False,
+    attempt_competition_evidence: bool = False,
+    competitor_urls: list[str] | None = None,
+    research_portfolio: Any | None = None,
     **economics: float,
 ) -> PublicCommerceRunResult:
     """Run an advisory Commerce MVP packet from one public RSS query.
@@ -144,6 +150,33 @@ def run_commerce_mvp_from_public_rss(
     allow_network=False the evidence attempt is dry-run/simulated and never
     changes economics, matching every other public-network capability in
     this module.
+
+    use_opportunity_ranking=True additionally scores and ranks every
+    candidate this ingestion produced (see
+    backend.mvp_commerce.opportunity_scoring) instead of taking the single
+    highest-source-score candidate. Pure computation, no network I/O of its
+    own; the ranking result is recomputed here (deterministic, same
+    candidates/evidence as run_commerce_mvp_slice used internally) purely to
+    surface its canonical events — the ranking decision itself is made once,
+    inside run_commerce_mvp_slice.
+
+    attempt_competition_evidence=True additionally gathers public
+    competitor-listing evidence (see
+    backend.mvp_commerce.competition_intelligence) for the same peeked
+    candidate, feeding it into opportunity scoring and unit-economics margin
+    computation alongside supplier evidence — only takes effect together
+    with use_opportunity_ranking=True (competition evidence composes
+    through the ranking path only, never the single-candidate default
+    path). Same allow_network gate as supplier evidence: dry-run/simulated
+    with allow_network=False.
+
+    research_portfolio, when supplied, takes priority over both the
+    default pick and use_opportunity_ranking (see
+    backend.mvp_commerce.product_research and
+    run_commerce_mvp_slice's own docstring) — this module never builds a
+    portfolio itself (no multi-candidate evidence-gathering orchestration
+    here yet; see docs/PRODUCT_RESEARCH.md's stated limitations), it only
+    forwards an already-built one.
     """
     ingestion = load_public_signals_for_commerce_query(
         query,
@@ -154,18 +187,26 @@ def run_commerce_mvp_from_public_rss(
     )
 
     supplier_evidence_result = None
-    if attempt_supplier_evidence:
+    competition_evidence_result = None
+    if attempt_supplier_evidence or attempt_competition_evidence:
         # Peek the same deterministic candidate selection run_commerce_mvp_slice
         # will make, so evidence is gathered for the actual selected product —
         # never a second, independent candidate decision. Cheap and pure.
         peeked_candidates = build_opportunity_candidates_from_signals(ingestion.signals, workspace_id, query, max_candidates)
         peeked_selected = select_candidate(peeked_candidates)
         if peeked_selected is not None:
-            supplier_evidence_result = gather_supplier_evidence(
-                peeked_selected.product_name,
-                context=SidecarContext(workspace_id=workspace_id, dry_run=not allow_network),
-                candidate_urls=supplier_candidate_urls,
-            )
+            if attempt_supplier_evidence:
+                supplier_evidence_result = gather_supplier_evidence(
+                    peeked_selected.product_name,
+                    context=SidecarContext(workspace_id=workspace_id, dry_run=not allow_network),
+                    candidate_urls=supplier_candidate_urls,
+                )
+            if attempt_competition_evidence:
+                competition_evidence_result = gather_market_intelligence(
+                    peeked_selected.product_name,
+                    context=SidecarContext(workspace_id=workspace_id, dry_run=not allow_network),
+                    competitor_urls=competitor_urls,
+                )
 
     run = run_commerce_mvp_slice(
         workspace_id=workspace_id,
@@ -177,6 +218,9 @@ def run_commerce_mvp_from_public_rss(
         shopify_store_context=shopify_store_context,
         write_repository=None,
         supplier_evidence=supplier_evidence_result,
+        use_opportunity_ranking=use_opportunity_ranking,
+        competition_evidence=competition_evidence_result,
+        research_portfolio=research_portfolio,
         **economics,
     )
     metadata = {
@@ -202,7 +246,45 @@ def run_commerce_mvp_from_public_rss(
         supplier_evidence_events(supplier_evidence_result, workspace_id=workspace_id, run_id=run.run_id, occurred_at=run.started_at)
         if supplier_evidence_result is not None else []
     )
-    events = tuple(public_events + commerce_events + evidence_events)
+    ranking_events: list[Event] = []
+    competition_events: list[Event] = []
+    if use_opportunity_ranking and run.opportunity_candidates:
+        provisional = select_candidate(list(run.opportunity_candidates))
+        evidence_map = (
+            {provisional.candidate_id: supplier_evidence_result}
+            if provisional is not None and supplier_evidence_result is not None else {}
+        )
+        competition_map = (
+            {provisional.candidate_id: competition_evidence_result}
+            if provisional is not None and competition_evidence_result is not None else {}
+        )
+        margin_map = (
+            {provisional.candidate_id: compute_margin_intelligence(provisional.candidate_id, supplier_evidence=supplier_evidence_result, market_report=competition_evidence_result)}
+            if provisional is not None else {}
+        )
+        assessment = rank_opportunities(
+            list(run.opportunity_candidates), workspace_id=workspace_id, query=query,
+            supplier_evidence_by_candidate=evidence_map, competition_evidence_by_candidate=competition_map,
+            margin_by_candidate=margin_map, generated_at=run.started_at,
+        )
+        ranking_events = opportunity_scoring_events(assessment, run_id=run.run_id)
+        if competition_evidence_result is not None:
+            top_id = assessment.top_candidate_id
+            top_candidate = next((c for c in run.opportunity_candidates if c.candidate_id == top_id), None)
+            top_score = next((s for s in assessment.scores if s.candidate_id == top_id), None)
+            market_opportunity_report = (
+                build_market_opportunity_report(
+                    top_id, top_candidate.product_name, opportunity_score=top_score,
+                    supplier_evidence=evidence_map.get(top_id), market_report=competition_map.get(top_id),
+                    margin=margin_map.get(top_id), generated_at=run.started_at,
+                )
+                if top_candidate is not None else None
+            )
+            competition_events = competition_intelligence_events(
+                competition_evidence_result, margin_map.get(top_id), market_opportunity_report,
+                workspace_id=workspace_id, run_id=run.run_id,
+            )
+    events = tuple(public_events + commerce_events + evidence_events + ranking_events + competition_events)
     run = replace(run, canonical_event_ids=tuple(event.event_id for event in events), completed_at=run.started_at + len(events) / 1000)
     if event_repository is not None:
         event_repository.append_many(events)

@@ -11,9 +11,11 @@ This fixture-first workflow turns attributed public/no-auth signal records into
 a reviewable commerce test packet:
 
 ```text
-public signal fixture -> opportunity hypothesis -> assumption-based economics
--> safe creative draft -> landing-page export -> store-draft export
--> vendor plan -> manual approval -> canonical advisory events
+public signal fixture -> opportunity hypothesis -> [competition intelligence]
+-> [opportunity scoring/ranking] -> [product research portfolio]
+-> assumption-based economics -> safe creative draft -> landing-page
+export -> store-draft export -> vendor plan -> manual approval ->
+canonical advisory events
 ```
 
 It is the MVP Island's demoable workflow, not a live commerce pipeline. It
@@ -79,6 +81,30 @@ their existing human/live-mode gates.
   `docs/CJ_PUBLIC_SUPPLIER_EVIDENCE.md`) — `attempt_supplier_evidence` on
   `/api/commerce-mvp/public-run` and
   `backend.mvp_commerce.public_run.run_commerce_mvp_from_public_rss`.
+- Opportunity scoring/ranking: an opt-in, deterministic, explainable
+  multi-dimension score (trend strength, supplier evidence quality,
+  observed supplier cost, evidence completeness, and more) that can select
+  the candidate this slice advances instead of the single-source-score
+  default, with full observed/derived/assumed/unknown confidence
+  reporting (see `docs/OPPORTUNITY_SCORING.md`) —
+  `use_opportunity_ranking` on `/api/commerce-mvp/public-run`,
+  `run_commerce_mvp_slice`, and `run_commerce_mvp_from_public_rss`.
+- Competition Intelligence: opt-in public competitor-listing evidence
+  (observed pricing, saturation, margin-vs-market) feeding six additional
+  Opportunity Scoring dimensions and a Market Opportunity Report, only
+  active alongside opportunity ranking (see
+  `docs/COMPETITION_INTELLIGENCE.md`) — `attempt_competition_evidence`/
+  `competitor_urls` on `/api/commerce-mvp/public-run` and
+  `run_commerce_mvp_from_public_rss`, `competition_evidence` on
+  `run_commerce_mvp_slice`.
+- Product Research Intelligence: candidate aggregation, deterministic
+  identity resolution/clustering, and a bucketed research portfolio
+  (top/emerging/undervalued/high-risk/high-uncertainty/rejected) that
+  Commerce MVP can consume instead of a single isolated candidate when one
+  is supplied (see `docs/PRODUCT_RESEARCH.md`) — `research_portfolio` on
+  `run_commerce_mvp_slice` (priority over `use_opportunity_ranking`) and
+  `run_commerce_mvp_from_public_rss`; built end-to-end via
+  `scripts/run_product_research_engine.py`.
 
 ## Next integrations (not implemented)
 
@@ -91,3 +117,7 @@ their existing human/live-mode gates.
 5. Authenticated CJ API supplier evidence once `CJ_EMAIL`/`CJ_API_KEY`
    credentials are configured (`backend.validation.suppliers.CJDropshippingClient`
    already implements the client; it just has no credentials yet).
+6. Automatic competitor-listing discovery (search-results parsing for
+   Google Shopping/Amazon/Etsy/AliExpress) — today: operator-supplied
+   `competitor_urls` are the reliable path, matching the CJ-discovery
+   precedent above (see `docs/COMPETITION_INTELLIGENCE.md`).
