@@ -104,12 +104,16 @@ def test_readiness_distinguishes_health_from_runtime_startup(monkeypatch):
     api._bg_running = False
     api._runtime_services_ready = False
     assert health_routes.ready().status_code == 503
-    assert health_routes.health() == {"ok": True}
+    health_response = health_routes.health()
+    assert health_response["ok"] is True
+    assert "mvp" in health_response
 
     with TestClient(api.app) as client:
         response = client.get("/ready")
         assert response.status_code == 200
-        assert response.json() == {"ready": True}
+        readiness = response.json()
+        assert readiness["ready"] is True
+        assert "mvp" in readiness
 
 
 def test_readiness_can_require_medusa_when_explicitly_configured(monkeypatch):
