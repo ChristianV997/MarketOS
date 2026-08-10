@@ -47,3 +47,6 @@ CDN, task queue, error tracker, or email delivery service. Managed services
 lower operational load but introduce vendor, data, and usage-cost risk. Each
 integration must be enabled independently, server-side where secrets exist,
 and remain non-authoritative for commerce actions.
+
+The deterministic routing layer and source/pricing-staleness policy are in
+[SaaS Capability Router](SAAS_VENDOR_ROUTER.md).
