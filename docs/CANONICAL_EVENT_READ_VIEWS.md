@@ -47,5 +47,7 @@ updates, publishes, launches, spends, sends, fulfills, or pays.
 ## Deployment next step
 
 Deploy the FastAPI process server-side, configure one allowed JSONL artifact
-path or a server-only Supabase staging connection, then add a minimal frontend
-viewer only after its workspace authorization model is reviewed.
+path or a server-only Supabase staging connection, then use the minimal
+read-only frontend viewer at `/operator/events`.
+
+See `docs/OPERATOR_EVENT_DASHBOARD.md` for operator and deployment guidance.

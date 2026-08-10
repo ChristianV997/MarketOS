@@ -9,6 +9,7 @@ import {
   ShieldAlert,
   History,
   Wrench,
+  ListChecks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +23,7 @@ const NAV = [
   { to: "/risk",      icon: ShieldAlert,      label: "Risk"       },
   { to: "/replay",    icon: History,          label: "Replay"     },
   { to: "/services",  icon: Wrench,           label: "Services"   },
+  { to: "/operator/events", icon: ListChecks, label: "Operator Events" },
 ];
 
 export default function Sidebar() {
