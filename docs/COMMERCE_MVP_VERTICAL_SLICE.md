@@ -65,15 +65,29 @@ evidence, verify landed economics, review claims, select an approved target,
 record approval/rollback ownership, and keep all real mutation paths behind
 their existing human/live-mode gates.
 
+## Implemented since this doc was first written
+
+- Supabase staging persistence for canonical events
+  (`docs/SUPABASE_CANONICAL_EVENTS_STAGING.md`).
+- Shopify read-only import packet (`docs/SHOPIFY_READONLY_IMPORT.md`).
+- A dashboard read view — the operator dashboard is available at
+  `/operator/events`; its public-run control is acknowledgement-gated and
+  uses the fixed Google News RSS source
+  (`docs/OPERATOR_EVENT_DASHBOARD.md`).
+- Real CJ public-page supplier evidence, grounding this slice's unit
+  economics in an observed supplier cost when one is found (see
+  `docs/CJ_PUBLIC_SUPPLIER_EVIDENCE.md`) — `attempt_supplier_evidence` on
+  `/api/commerce-mvp/public-run` and
+  `backend.mvp_commerce.public_run.run_commerce_mvp_from_public_rss`.
+
 ## Next integrations (not implemented)
 
-1. Supabase staging persistence for canonical events.
-2. Shopify read-only import packet.
-3. Zendrop MCP read-only catalog/search packet.
-4. Creatify/HeyGen export/import results.
-5. PageFly/GemPages export refinement.
-6. Upstash-scheduled public signal collection with human review.
-7. A dashboard read view.
-
-The operator dashboard is available at `/operator/events`; its public-run
-control is acknowledgement-gated and uses the fixed Google News RSS source.
+1. Automatic CJ product discovery from a query (today: operator-supplied
+   candidate URLs are the reliable path; discovery is best-effort/unverified
+   — see `docs/CJ_PUBLIC_SUPPLIER_EVIDENCE.md`).
+2. Creatify/HeyGen export/import results.
+3. PageFly/GemPages export refinement.
+4. Upstash-scheduled public signal collection with human review.
+5. Authenticated CJ API supplier evidence once `CJ_EMAIL`/`CJ_API_KEY`
+   credentials are configured (`backend.validation.suppliers.CJDropshippingClient`
+   already implements the client; it just has no credentials yet).

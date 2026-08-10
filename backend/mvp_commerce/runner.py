@@ -30,6 +30,28 @@ def _economics(candidate: OpportunityCandidate, price: float, unit_cost: float, 
         (f"Assumed price={price}", f"Assumed unit cost={unit_cost}", f"Assumed shipping={shipping}", f"Assumed CAC={cac}", f"Assumed return rate={returns}"), "dry_run_assumption")
 
 
+def _economics_with_evidence(candidate: OpportunityCandidate, price: float, assumed_unit_cost: float, assumed_shipping_cost: float,
+                              cac: float, returns: float, payment_rate: float, *, evidence: Any) -> UnitEconomicsSummary:
+    """Same math as _economics(), but prefers an observed supplier cost/
+    shipping over the assumed defaults when supplier_evidence.py found one,
+    and records which component was observed vs assumed. Additive only:
+    _economics() itself is unchanged and remains what every existing caller
+    (with evidence=None) gets."""
+    has_cost = evidence is not None and evidence.unit_cost is not None
+    has_shipping = evidence is not None and evidence.shipping_cost is not None
+    unit_cost = evidence.unit_cost if has_cost else assumed_unit_cost
+    shipping = evidence.shipping_cost if has_shipping else assumed_shipping_cost
+    fee = round(price * payment_rate, 2); retained = price * (1 - returns)
+    gross = round(retained - unit_cost - shipping - fee, 2); contribution = round(gross - cac, 2)
+    cost_note = f"Observed CJ supplier cost={unit_cost} (source={evidence.source_url})" if has_cost else f"Assumed unit cost={unit_cost}"
+    shipping_note = f"Observed CJ shipping={shipping} (source={evidence.source_url})" if has_shipping else f"Assumed shipping={shipping}"
+    source = "partial_observed_supplier_evidence" if (has_cost or has_shipping) else "dry_run_assumption"
+    warnings = ("Price, CAC, and return-rate inputs remain dry-run assumptions unless explicitly marked 'Observed' below; "
+                "no actual margin, CAC, profitability, or ROAS conclusion is supported.",)
+    return UnitEconomicsSummary(candidate.candidate_id, price, unit_cost, shipping, fee, returns, cac, gross, contribution, gross,
+        warnings, (f"Assumed price={price}", cost_note, shipping_note, f"Assumed CAC={cac}", f"Assumed return rate={returns}"), source)
+
+
 def _creative(candidate: OpportunityCandidate) -> CreativePacket:
     draft = f"Draft use-case angle: explore how {candidate.product_name} may fit a practical routine."
     safe = sanitize_creative_claim(draft, [{"signal_ids": candidate.evidence_signal_ids}])
@@ -50,7 +72,8 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
                            signals: list[PublicSignal] | None = None, mode: str = "fixture", max_signals: int = 10, max_candidates: int = 5,
                            assumed_price: float = 49.0, assumed_unit_cost: float = 15.0, assumed_shipping_cost: float = 6.0,
                            assumed_cac: float = 12.0, assumed_return_rate: float = .08, payment_fee_rate: float = .03,
-                           write_repository: EventRepository | None = None, shopify_store_context: Any | None = None) -> CommerceMvpRun:
+                           write_repository: EventRepository | None = None, shopify_store_context: Any | None = None,
+                           supplier_evidence: Any | None = None) -> CommerceMvpRun:
     rows = list(signals if signals is not None else _load_signals(signal_fixture_path) if signal_fixture_path else [])[:max(1, max_signals)]
     query = query.strip(); stable = hashlib.sha256((workspace_id + query + "|".join(item.signal_id for item in rows)).encode()).hexdigest()[:20]
     started = float(int(stable[:8], 16) % 1_000_000 + 1_700_000_000)
@@ -59,7 +82,13 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
     warnings: list[str] = []
     if len(rows) < 2: warnings.append("thin_evidence: fewer than two public signals; do not advance without corroboration")
     if not selected: warnings.append("no_candidate_created: add attributed public-signal fixture data")
-    economics = _economics(selected, assumed_price, assumed_unit_cost, assumed_shipping_cost, assumed_cac, assumed_return_rate, payment_fee_rate) if selected else None
+    # supplier_evidence defaults to None, so every existing caller gets the
+    # exact same _economics() output as before this parameter existed.
+    economics = (
+        _economics_with_evidence(selected, assumed_price, assumed_unit_cost, assumed_shipping_cost, assumed_cac, assumed_return_rate, payment_fee_rate, evidence=supplier_evidence)
+        if supplier_evidence is not None
+        else _economics(selected, assumed_price, assumed_unit_cost, assumed_shipping_cost, assumed_cac, assumed_return_rate, payment_fee_rate)
+    ) if selected else None
     creative = _creative(selected) if selected else None
     landing = build_landing_page_packet(selected) if selected else None
     store = build_store_draft_packet(selected) if selected else None
