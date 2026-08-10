@@ -1,0 +1,2 @@
+{"event_id":"valid","workspace_id":"demo","aggregate_type":"signal","aggregate_id":"signal-1","event_type":"public_signal_observed","schema_version":1,"occurred_at":1700000000.0,"causation_id":null,"correlation_id":"signal-1","experiment_id":null,"actor":null,"source":"backend.signals","payload":{},"metadata":{"dry_run":true,"advisory":true}}
+not-json

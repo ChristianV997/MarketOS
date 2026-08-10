@@ -52,6 +52,10 @@ staging project after review. The readiness command is local-only; mocked tests
 cover PostgREST-style insert rows without a project. Keep JSONL as the local
 default and use an operator-controlled staging environment for any smoke test.
 
+[Canonical Event Read Views](CANONICAL_EVENT_READ_VIEWS.md) can inspect this
+same staging table server-side; its read path does not enable or require the
+staging write gate.
+
 Rollback means unset `MARKETOS_SUPABASE_CANONICAL_EVENTS` or stop passing the
 Supabase flags. No legacy writer is migrated and no remote commerce state is
 created by these events.

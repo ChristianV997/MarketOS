@@ -46,6 +46,9 @@ changing candidate selection or turning any packet into a launch recommendation.
 When `--write-jsonl` is supplied, Shopify advisory events are appended first,
 then Commerce MVP advisory events.
 
+Inspect an explicit JSONL import artifact with
+`python scripts/query_canonical_events.py --jsonl <artifact> --shopify-imports --markdown`.
+
 ## Router contract and future API
 
 The SaaS router selects Shopify manual-file import as a use-now path for
