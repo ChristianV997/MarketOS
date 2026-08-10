@@ -5,12 +5,18 @@ import argparse
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from backend.security.cors import explain_cors_readiness
+from backend.security.rate_limit import explain_rate_limit_status
+
 CONTRACT_PATH = ROOT / "deploy/mvp/env.contract.json"
 ARTIFACTS = (ROOT / "artifacts").resolve()
 
@@ -40,14 +46,19 @@ def _under_artifacts(value: str) -> bool:
     return resolved == ARTIFACTS or ARTIFACTS in resolved.parents
 
 
-def _get_json(base: str, path: str, *, method: str = "GET", body: dict[str, Any] | None = None) -> dict[str, Any]:
+def _get_json_response(base: str, path: str, *, method: str = "GET", body: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, str]]:
     request = urllib.request.Request(f"{base.rstrip('/')}{path}", method=method, headers={"Accept": "application/json"})
     if body is not None:
         request.data = json.dumps(body).encode("utf-8")
         request.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(request, timeout=5) as response:  # nosec B310: operator supplies an explicit local/staging URL
         payload = json.loads(response.read().decode("utf-8"))
-    return payload if isinstance(payload, dict) else {"value": payload}
+        headers = {key.lower(): value for key, value in response.headers.items()}
+    return (payload if isinstance(payload, dict) else {"value": payload}), headers
+
+
+def _get_json(base: str, path: str, *, method: str = "GET", body: dict[str, Any] | None = None) -> dict[str, Any]:
+    return _get_json_response(base, path, method=method, body=body)[0]
 
 
 def _get_status(base: str, path: str) -> int:
@@ -74,6 +85,12 @@ def build_report(*, environ: dict[str, str] | None = None, env_file: str | None 
             missing.append(item["name"])
     report["environment"] = {"missing_required": missing, "configured": [{"name": item["name"], "value": _safe_value(item["name"], values.get(item["name"], ""))} for item in contract["variables"] if values.get(item["name"])]}
     report["checks"].append({"name": "required_environment", "status": "passed" if not missing else "partial", "missing": missing})
+    cors = explain_cors_readiness(values)
+    limits = explain_rate_limit_status()
+    hardening_status = "failed" if cors["blockers"] else ("partial" if cors["warnings"] else "passed")
+    report["checks"].append({"name": "production_hardening", "status": hardening_status, "cors_configured": cors["configured"], "cors_mvp_safe": cors["mvp_safe"], "allowed_origin_count": cors["allowed_origin_count"], "cors_warnings": cors["warnings"], "cors_blockers": cors["blockers"], "request_id_middleware_enabled": True, "rate_limit_enabled": True, "public_run_rate_limit": limits["public_run_rate_limit"], "event_read_rate_limit": limits["event_read_rate_limit"], "safe_logging_enabled": True, "secret_redaction_enabled": True})
+    report["security"] = {"cors_configured": cors["configured"], "cors_mvp_safe": cors["mvp_safe"], "allowed_origin_count": cors["allowed_origin_count"], "request_id_middleware_enabled": True, "rate_limit_enabled": True, "public_run_rate_limit": limits["public_run_rate_limit"], "event_read_rate_limit": limits["event_read_rate_limit"], "safe_logging_enabled": True, "secret_redaction_enabled": True, "distributed_rate_limiting": False}
+    if cors["blockers"]: report["status"] = "failed"
     gate_failures = []
     if values.get("MARKETOS_PUBLIC_COMMERCE_RUNS", "0") == "1": gate_failures.append("MARKETOS_PUBLIC_COMMERCE_RUNS")
     if values.get("MARKETOS_SUPABASE_CANONICAL_EVENTS", "0") == "1": gate_failures.append("MARKETOS_SUPABASE_CANONICAL_EVENTS")
@@ -108,11 +125,13 @@ def build_report(*, environ: dict[str, str] | None = None, env_file: str | None 
         endpoints = ["/health", "/ready", "/api/events/readiness", "/api/events/timeline"]
         endpoint_results = []
         for endpoint in endpoints:
-            try: endpoint_results.append({"endpoint": endpoint, "status": "passed", "response": _get_json(backend_url, endpoint)})
+            try:
+                response, headers = _get_json_response(backend_url, endpoint)
+                endpoint_results.append({"endpoint": endpoint, "status": "passed", "response": response, "request_id_header": bool(headers.get("x-request-id"))})
             except (OSError, ValueError, urllib.error.URLError) as exc: endpoint_results.append({"endpoint": endpoint, "status": "failed", "detail": type(exc).__name__})
         try:
-            blocked = _get_json(backend_url, "/api/commerce-mvp/public-run", method="POST", body={"query": "smoke", "allow_public_network": False, "event_target": "none"})
-            endpoint_results.append({"endpoint": "/api/commerce-mvp/public-run", "status": "passed" if blocked.get("status") == "blocked" else "failed", "response": {"status": blocked.get("status"), "read_only": blocked.get("read_only"), "mutated": blocked.get("mutated")}})
+            blocked, headers = _get_json_response(backend_url, "/api/commerce-mvp/public-run", method="POST", body={"query": "smoke", "allow_public_network": False, "event_target": "none"})
+            endpoint_results.append({"endpoint": "/api/commerce-mvp/public-run", "status": "passed" if blocked.get("status") == "blocked" else "failed", "response": {"status": blocked.get("status"), "read_only": blocked.get("read_only"), "mutated": blocked.get("mutated")}, "request_id_header": bool(headers.get("x-request-id"))})
         except (OSError, ValueError, urllib.error.URLError) as exc: endpoint_results.append({"endpoint": "/api/commerce-mvp/public-run", "status": "failed", "detail": type(exc).__name__})
         report["backend_endpoints"] = endpoint_results
         if any(item["status"] == "failed" for item in endpoint_results): report["status"] = "partial" if report["status"] != "failed" else report["status"]

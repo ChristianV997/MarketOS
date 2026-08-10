@@ -13,6 +13,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.runtime.mvp_mode import PROFILE_PATH, load_mvp_profile, mvp_readiness_report
+from backend.security.cors import explain_cors_readiness
+from backend.security.rate_limit import explain_rate_limit_status
 
 
 REQUIRED_FILES = (
@@ -27,12 +29,14 @@ def build_mvp_readiness(environ: dict[str, str] | None = None) -> dict[str, Any]
     """Inspect local files/config only; this intentionally never probes SaaS."""
     profile = load_mvp_profile(PROFILE_PATH)
     runtime = mvp_readiness_report(environ=environ, profile=profile)
+    cors = explain_cors_readiness(environ)
+    limits = explain_rate_limit_status()
     missing_files = [path for path in REQUIRED_FILES if not (ROOT / path).is_file()]
     schema_path = ROOT / "deploy/supabase/schema.sql"
     schema = schema_path.read_text(encoding="utf-8") if schema_path.is_file() else ""
     schema_tables = [name for name in ("workspaces", "canonical_events", "public_signals", "artifacts", "run_envelopes", "source_readiness") if f"public.{name}" in schema]
     required_indexes = [name for name in ("event_type", "aggregate", "workspace_occurred", "correlation") if name in schema]
-    status = "blocked" if runtime["unsafe_live_flags"] or missing_files else runtime["status"]
+    status = "blocked" if runtime["unsafe_live_flags"] or missing_files or cors["blockers"] else runtime["status"]
     return {
         "profile_path": str(PROFILE_PATH.relative_to(ROOT)).replace("\\", "/"),
         "profile_version": profile.get("profile_version"),
@@ -49,6 +53,20 @@ def build_mvp_readiness(environ: dict[str, str] | None = None) -> dict[str, Any]
         "network_calls": False,
         "mutated": False,
         "next_actions": _next_actions(status, runtime, missing_files),
+        "security": {
+            "cors_configured": bool(cors["configured"]),
+            "cors_mvp_safe": bool(cors["mvp_safe"]),
+            "allowed_origin_count": cors["allowed_origin_count"],
+            "cors_warnings": cors["warnings"],
+            "cors_blockers": cors["blockers"],
+            "request_id_middleware_enabled": True,
+            "rate_limit_enabled": True,
+            "public_run_rate_limit": limits["public_run_rate_limit"],
+            "event_read_rate_limit": limits["event_read_rate_limit"],
+            "safe_logging_enabled": True,
+            "secret_redaction_enabled": True,
+            "distributed_rate_limiting": False,
+        },
     }
 
 

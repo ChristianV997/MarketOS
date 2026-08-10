@@ -5,7 +5,8 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.ecommerce.shopify_readonly.events import shopify_batch_events
@@ -14,6 +15,7 @@ from backend.events.adapters.supabase_staging import build_supabase_staging_repo
 from backend.events.repository import JsonlEventRepository
 from backend.events.supabase_event_validation import validate_events_for_supabase
 from backend.mvp_commerce.public_run import run_commerce_mvp_from_public_rss
+from backend.security.rate_limit import check_rate_limit, public_run_policy
 
 router = APIRouter(prefix="/api/commerce-mvp", tags=["commerce-mvp"])
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +49,14 @@ def _blocked(message: str, *, request: PublicCommerceRunRequest) -> dict:
     }
 
 
+def _client_key(http_request: Request | None) -> str:
+    return getattr(getattr(http_request, "client", None), "host", None) or "direct"
+
+
+def _request_id(http_request: Request | None) -> str | None:
+    return getattr(getattr(http_request, "state", None), "marketos_request_id", None)
+
+
 def _server_jsonl_path() -> Path | None:
     configured = os.getenv("MARKETOS_EVENT_WRITE_JSONL_PATH", "")
     if not configured:
@@ -56,12 +66,27 @@ def _server_jsonl_path() -> Path | None:
 
 
 @router.post("/public-run")
-def public_run(request: PublicCommerceRunRequest) -> dict:
+def public_run(request: PublicCommerceRunRequest, http_request: Request = None) -> dict:
     """Run one bounded public RSS query after explicit server/operator gates."""
     if os.getenv("MARKETOS_PUBLIC_COMMERCE_RUNS", "0") != "1":
         return _blocked("MARKETOS_PUBLIC_COMMERCE_RUNS=1 is required on the server", request=request)
     if not request.allow_public_network:
         return _blocked("allow_public_network must be true for a public-network run", request=request)
+    decision = check_rate_limit(public_run_policy(), _client_key(http_request))
+    if not decision.allowed:
+        return JSONResponse(
+            {
+                "status": "rate_limited",
+                "blockers": ["public_commerce_run_rate_limit_exceeded"],
+                "retry_after_seconds": decision.retry_after_seconds,
+                "request_id": _request_id(http_request),
+                "read_only": True,
+                "advisory": True,
+                "mutated": False,
+            },
+            status_code=429,
+            headers={"Retry-After": str(decision.retry_after_seconds)},
+        )
 
     target = request.event_target
     jsonl_path = _server_jsonl_path() if target in {"jsonl", "both"} else None

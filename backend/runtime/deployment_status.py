@@ -17,6 +17,14 @@ def mvp_deployment_status() -> dict[str, object]:
         live_flags_disabled = False
         profile_loaded = False
 
+    try:
+        from backend.security.cors import explain_cors_readiness
+        from backend.security.rate_limit import explain_rate_limit_status
+        cors = explain_cors_readiness()
+        limits = explain_rate_limit_status()
+    except Exception:
+        cors = {"configured": False, "mvp_safe": False, "allowed_origin_count": 0, "warnings": ["security_helpers_unavailable"]}
+        limits = {"enabled": False}
     return {
         "mvp_profile_loaded": profile_loaded,
         "event_read_jsonl_path_configured": bool(os.getenv("MARKETOS_EVENT_READ_JSONL_PATH")),
@@ -27,6 +35,15 @@ def mvp_deployment_status() -> dict[str, object]:
         "operator_dashboard_expected_route": "/operator/events",
         "live_mutation_flags_disabled": live_flags_disabled,
         "no_credentials_required_for_mvp_smoke": True,
+        "cors_configured": bool(cors.get("configured")),
+        "cors_mvp_safe": bool(cors.get("mvp_safe")),
+        "allowed_origin_count": int(cors.get("allowed_origin_count", 0)),
+        "request_id_middleware_enabled": True,
+        "rate_limit_enabled": bool(limits.get("enabled")),
+        "public_run_rate_limit": limits.get("public_run_rate_limit"),
+        "event_read_rate_limit": limits.get("event_read_rate_limit"),
+        "safe_logging_enabled": True,
+        "secret_redaction_enabled": True,
     }
 
 

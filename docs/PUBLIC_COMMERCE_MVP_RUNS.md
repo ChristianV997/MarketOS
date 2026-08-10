@@ -76,3 +76,6 @@ Before enabling API network mode, review query sensitivity, source attribution,
 cache retention, artifact access, and the manual approval path. The next step
 toward money-generating deployment is independently verified product and
 landed-cost evidence, not automatic promotion from news coverage.
+
+Public-run requests also carry a correlation ID and use the bounded MVP rate
+limit described in [Phase 1 production hardening](PHASE1_PRODUCTION_HARDENING.md).
