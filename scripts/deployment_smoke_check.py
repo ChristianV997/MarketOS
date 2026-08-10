@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from backend.security.cors import explain_cors_readiness
 from backend.security.rate_limit import explain_rate_limit_status
+from backend.observability.phase1_telemetry import telemetry_readiness
 
 CONTRACT_PATH = ROOT / "deploy/mvp/env.contract.json"
 ARTIFACTS = (ROOT / "artifacts").resolve()
@@ -87,9 +88,11 @@ def build_report(*, environ: dict[str, str] | None = None, env_file: str | None 
     report["checks"].append({"name": "required_environment", "status": "passed" if not missing else "partial", "missing": missing})
     cors = explain_cors_readiness(values)
     limits = explain_rate_limit_status()
+    telemetry = telemetry_readiness(values)
     hardening_status = "failed" if cors["blockers"] else ("partial" if cors["warnings"] else "passed")
     report["checks"].append({"name": "production_hardening", "status": hardening_status, "cors_configured": cors["configured"], "cors_mvp_safe": cors["mvp_safe"], "allowed_origin_count": cors["allowed_origin_count"], "cors_warnings": cors["warnings"], "cors_blockers": cors["blockers"], "request_id_middleware_enabled": True, "rate_limit_enabled": True, "public_run_rate_limit": limits["public_run_rate_limit"], "event_read_rate_limit": limits["event_read_rate_limit"], "safe_logging_enabled": True, "secret_redaction_enabled": True})
     report["security"] = {"cors_configured": cors["configured"], "cors_mvp_safe": cors["mvp_safe"], "allowed_origin_count": cors["allowed_origin_count"], "request_id_middleware_enabled": True, "rate_limit_enabled": True, "public_run_rate_limit": limits["public_run_rate_limit"], "event_read_rate_limit": limits["event_read_rate_limit"], "safe_logging_enabled": True, "secret_redaction_enabled": True, "distributed_rate_limiting": False}
+    report["telemetry"] = telemetry
     if cors["blockers"]: report["status"] = "failed"
     gate_failures = []
     if values.get("MARKETOS_PUBLIC_COMMERCE_RUNS", "0") == "1": gate_failures.append("MARKETOS_PUBLIC_COMMERCE_RUNS")

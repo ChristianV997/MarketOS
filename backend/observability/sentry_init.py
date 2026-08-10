@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 import os
 
+from backend.observability.telemetry_sanitization import sanitize_sentry_event
+
 _log = logging.getLogger(__name__)
 
 _initialized = False
@@ -49,7 +51,11 @@ def init_sentry(component: str = "marketos") -> bool:
         sentry_sdk.init(
             dsn=dsn,
             environment=os.getenv("SENTRY_ENVIRONMENT", "development"),
-            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
+            release=os.getenv("SENTRY_RELEASE") or None,
+            traces_sample_rate=min(max(float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.0")), 0.0), 1.0),
+            send_default_pii=False,
+            before_send=sanitize_sentry_event,
+            before_send_transaction=sanitize_sentry_event,
             integrations=integrations,
         )
         sentry_sdk.set_tag("component", component)

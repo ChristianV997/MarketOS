@@ -20,11 +20,14 @@ def mvp_deployment_status() -> dict[str, object]:
     try:
         from backend.security.cors import explain_cors_readiness
         from backend.security.rate_limit import explain_rate_limit_status
+        from backend.observability.phase1_telemetry import telemetry_readiness
         cors = explain_cors_readiness()
         limits = explain_rate_limit_status()
+        telemetry = telemetry_readiness()
     except Exception:
         cors = {"configured": False, "mvp_safe": False, "allowed_origin_count": 0, "warnings": ["security_helpers_unavailable"]}
         limits = {"enabled": False}
+        telemetry = {"sentry_configured": False, "sentry_enabled": False, "safe_mode": True, "sentry_pii_disabled": True, "telemetry_fail_open": True, "telemetry_secret_redaction": True}
     return {
         "mvp_profile_loaded": profile_loaded,
         "event_read_jsonl_path_configured": bool(os.getenv("MARKETOS_EVENT_READ_JSONL_PATH")),
@@ -44,6 +47,14 @@ def mvp_deployment_status() -> dict[str, object]:
         "event_read_rate_limit": limits.get("event_read_rate_limit"),
         "safe_logging_enabled": True,
         "secret_redaction_enabled": True,
+        "sentry_configured": bool(telemetry.get("sentry_configured")),
+        "sentry_enabled": bool(telemetry.get("sentry_enabled")),
+        "sentry_safe_mode": bool(telemetry.get("sentry_safe_mode", True)),
+        "sentry_pii_disabled": bool(telemetry.get("sentry_pii_disabled", True)),
+        "posthog_frontend_configured": bool(telemetry.get("posthog_frontend_configured")),
+        "posthog_explicit_events_only": True,
+        "telemetry_fail_open": True,
+        "telemetry_secret_redaction": True,
     }
 
 

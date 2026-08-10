@@ -1,0 +1,1 @@
+{"sentry_safe_mode": true, "sentry_pii_disabled": true, "posthog_explicit_events_only": true, "telemetry_fail_open": true, "telemetry_secret_redaction": true}

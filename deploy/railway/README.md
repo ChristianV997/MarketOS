@@ -14,3 +14,7 @@ deploying; it does not create a project or provide credentials.
 Set an exact `ALLOWED_ORIGINS` value and keep the public-run and Supabase gates
 at `0` during the first deployment. Review the hardening runbook before making
 the public-run gate available.
+
+Optional Sentry variables belong here, server-side only. Run
+`python scripts/telemetry_readiness.py --env-file deploy/mvp/.env.mvp.example --json`
+before adding a real DSN.

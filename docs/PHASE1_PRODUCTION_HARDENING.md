@@ -74,3 +74,6 @@ authentication or tenancy, payment/commerce security, or long-term telemetry.
 Future hardening can evaluate Cloudflare WAF, Redis/Upstash distributed limits,
 Supabase Auth/RLS, Sentry/PostHog production configuration, and authenticated
 operator actions.
+
+For the selected Sentry/PostHog configuration and privacy contract, see
+[Phase 1 observability](PHASE1_OBSERVABILITY.md).

@@ -103,3 +103,7 @@ publishing, schedulers, or autonomous execution.
 
 See [Phase 1 production hardening](PHASE1_PRODUCTION_HARDENING.md) for exact
 CORS validation, request IDs, redacted logs, and in-memory rate-limit checks.
+
+Optional Sentry/PostHog readiness is documented in
+[Phase 1 observability](PHASE1_OBSERVABILITY.md); missing telemetry never blocks
+the MVP smoke.

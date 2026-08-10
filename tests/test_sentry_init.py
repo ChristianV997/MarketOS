@@ -7,6 +7,9 @@ init_sentry()'s own gating/idempotency logic is verified without ever
 touching the network.
 """
 import backend.observability.sentry_init as sentry_init
+import pytest
+
+sentry_sdk = pytest.importorskip("sentry_sdk")
 
 
 def test_noop_without_dsn(monkeypatch):
@@ -20,7 +23,6 @@ def test_noop_without_dsn(monkeypatch):
 
 
 def test_initializes_when_dsn_set(monkeypatch):
-    import sentry_sdk
     calls = []
     monkeypatch.setattr(sentry_sdk, "init", lambda **kw: calls.append(kw))
     monkeypatch.setattr(sentry_sdk, "set_tag", lambda k, v: None)
@@ -38,7 +40,6 @@ def test_initializes_when_dsn_set(monkeypatch):
 
 
 def test_idempotent(monkeypatch):
-    import sentry_sdk
     calls = []
     monkeypatch.setattr(sentry_sdk, "init", lambda **kw: calls.append(kw))
     monkeypatch.setattr(sentry_sdk, "set_tag", lambda k, v: None)
@@ -54,8 +55,6 @@ def test_idempotent(monkeypatch):
 
 
 def test_never_raises_when_init_fails(monkeypatch):
-    import sentry_sdk
-
     def _boom(**kw):
         raise RuntimeError("bad dsn")
 

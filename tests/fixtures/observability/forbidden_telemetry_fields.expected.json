@@ -1,0 +1,1 @@
+{"forbidden": ["authorization", "cookie", "request.data", "request.headers", "service_role", "shopify_token", "email", "phone", "address"]}

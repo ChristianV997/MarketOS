@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from backend.runtime.mvp_mode import PROFILE_PATH, load_mvp_profile, mvp_readiness_report
 from backend.security.cors import explain_cors_readiness
 from backend.security.rate_limit import explain_rate_limit_status
+from backend.observability.phase1_telemetry import telemetry_readiness
 
 
 REQUIRED_FILES = (
@@ -31,6 +32,7 @@ def build_mvp_readiness(environ: dict[str, str] | None = None) -> dict[str, Any]
     runtime = mvp_readiness_report(environ=environ, profile=profile)
     cors = explain_cors_readiness(environ)
     limits = explain_rate_limit_status()
+    telemetry = telemetry_readiness(environ)
     missing_files = [path for path in REQUIRED_FILES if not (ROOT / path).is_file()]
     schema_path = ROOT / "deploy/supabase/schema.sql"
     schema = schema_path.read_text(encoding="utf-8") if schema_path.is_file() else ""
@@ -66,6 +68,14 @@ def build_mvp_readiness(environ: dict[str, str] | None = None) -> dict[str, Any]
             "safe_logging_enabled": True,
             "secret_redaction_enabled": True,
             "distributed_rate_limiting": False,
+            "sentry_configured": telemetry["sentry_configured"],
+            "sentry_enabled": telemetry["sentry_enabled"],
+            "sentry_safe_mode": telemetry["sentry_safe_mode"],
+            "sentry_pii_disabled": telemetry["sentry_pii_disabled"],
+            "posthog_frontend_configured": telemetry["posthog_frontend_configured"],
+            "posthog_explicit_events_only": telemetry["posthog_explicit_events_only"],
+            "telemetry_fail_open": telemetry["telemetry_fail_open"],
+            "telemetry_secret_redaction": telemetry["telemetry_secret_redaction"],
         },
     }
 
