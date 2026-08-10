@@ -1,0 +1,10 @@
+{
+  "query": "portable espresso maker",
+  "mode": "fixture",
+  "status": "completed",
+  "selected_product_hypothesis": "Portable Espresso Maker",
+  "economics_source": "dry_run_assumption",
+  "provider_calls": false,
+  "manual_approval_required": true,
+  "external_authority": false
+}

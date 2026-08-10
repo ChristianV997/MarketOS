@@ -84,6 +84,10 @@ canonical events stay advisory and cannot prove demand, profitability,
 launch-readiness, or spend authorization. Supabase remains an optional,
 server-only canonical EventRepository target—not the default repository.
 
+The [Commerce MVP Vertical Slice](COMMERCE_MVP_VERTICAL_SLICE.md) consumes
+these router recommendations as packet metadata. It does not activate a
+connector or convert a recommendation into external authority.
+
 ## Promoting a vendor
 
 Before moving a catalog/manual/export route to API or MCP use: add a connector
