@@ -1,0 +1,1 @@
+{"table":"canonical_events","event_prefix":"shopify_","required_metadata":["dry_run","advisory","read_only","pii_redacted","no_mutation"]}

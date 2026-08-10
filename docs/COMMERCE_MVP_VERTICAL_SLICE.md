@@ -2,6 +2,8 @@
 
 > The Commerce MVP can optionally enrich its advisory packet with a local,
 > PII-redacted Shopify-like export. See [Shopify Read-only Import](SHOPIFY_READONLY_IMPORT.md).
+> Optional canonical-event staging is documented in
+> [Supabase Canonical Events Staging](SUPABASE_CANONICAL_EVENTS_STAGING.md).
 
 ## Purpose
 

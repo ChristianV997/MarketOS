@@ -13,6 +13,9 @@ New event code should use `backend.contracts.events.Event`: stable ID, workspace
 The optional Supabase adapter and the metadata-only vendor selection policy are
 documented in [MVP Island](MVP_ISLAND.md) and [SaaS Capability Router](SAAS_VENDOR_ROUTER.md); neither changes the default JSONL repository.
 
+The explicit staging-only validation and CLI path is documented in
+[Supabase Canonical Events Staging](SUPABASE_CANONICAL_EVENTS_STAGING.md).
+
 `LegacyWorkflowEventStoreAdapter` and `LegacyRuntimeReplayAdapter` normalize existing records read-only. They do not alter legacy writers, broker ownership, workflow JSONL, DuckDB/replay persistence, or external services.
 
 ## Narrow dual-write pilot
