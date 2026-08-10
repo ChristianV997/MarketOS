@@ -350,7 +350,9 @@ def test_api_deployment_smoke_runs_dry_commerce_cycle(monkeypatch):
         response = client.post("/commerce/cycle", json=payload)
 
     assert health.status_code == 200
-    assert health.json() == {"ok": True}
+    health_payload = health.json()
+    assert health_payload["ok"] is True
+    assert "mvp" in health_payload
     assert response.status_code == 200
     result = response.json()
     assert result["dry_run"] is True
