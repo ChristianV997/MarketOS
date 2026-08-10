@@ -76,21 +76,36 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
                            assumed_cac: float = 12.0, assumed_return_rate: float = .08, payment_fee_rate: float = .03,
                            write_repository: EventRepository | None = None, shopify_store_context: Any | None = None,
                            supplier_evidence: Any | None = None, use_opportunity_ranking: bool = False,
-                           competition_evidence: Any | None = None) -> CommerceMvpRun:
+                           competition_evidence: Any | None = None, research_portfolio: Any | None = None) -> CommerceMvpRun:
     rows = list(signals if signals is not None else _load_signals(signal_fixture_path) if signal_fixture_path else [])[:max(1, max_signals)]
     query = query.strip(); stable = hashlib.sha256((workspace_id + query + "|".join(item.signal_id for item in rows)).encode()).hexdigest()[:20]
     started = float(int(stable[:8], 16) % 1_000_000 + 1_700_000_000)
     candidates = build_opportunity_candidates_from_signals(rows, workspace_id, query, max_candidates)
-    # use_opportunity_ranking defaults to False, so every existing caller
-    # keeps the exact same select_candidate()-driven pick as before this
-    # parameter existed. competition_evidence composes only through that
-    # same opt-in flag, never on the default path.
+    # use_opportunity_ranking/research_portfolio default to False/None, so
+    # every existing caller keeps the exact same select_candidate()-driven
+    # pick as before either parameter existed. competition_evidence
+    # composes only through use_opportunity_ranking, never on the default
+    # path.
     opportunity_assessment: OpportunityAssessment | None = None
     market_opportunity_report: Any | None = None
     resolved_evidence = supplier_evidence
     resolved_competition: Any | None = None
     resolved_margin: Any | None = None
-    if use_opportunity_ranking and candidates:
+    # research_portfolio, when supplied, takes priority over both the
+    # default single-candidate pick and use_opportunity_ranking: "Commerce
+    # MVP should consume the Research Portfolio instead of isolated
+    # candidates when available" (docs/PRODUCT_RESEARCH.md). The portfolio
+    # only carries score *summaries*, not raw supplier/competition evidence
+    # objects, so economics grounding still comes from the existing
+    # supplier_evidence/competition_evidence params — the caller who built
+    # the portfolio is expected to pass the same evidence it used for that
+    # top candidate here too.
+    portfolio_selected = None
+    if research_portfolio is not None and candidates:
+        portfolio_selected = next((item for item in candidates if item.candidate_id == research_portfolio.top_candidate_id), None)
+    if portfolio_selected is not None:
+        selected = portfolio_selected
+    elif use_opportunity_ranking and candidates:
         provisional = select_candidate(candidates)
         evidence_map = {provisional.candidate_id: supplier_evidence} if provisional is not None and supplier_evidence is not None else {}
         competition_map = {provisional.candidate_id: competition_evidence} if provisional is not None and competition_evidence is not None else {}
@@ -130,6 +145,7 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
     metadata = {"network_used": False, "provider_calls": False, "supabase_default": False, "jsonl_default": False}
     if opportunity_assessment is not None: metadata["opportunity_assessment"] = opportunity_assessment.to_dict()
     if market_opportunity_report is not None: metadata["market_opportunity_report"] = market_opportunity_report.to_dict()
+    if research_portfolio is not None: metadata["research_portfolio"] = research_portfolio.to_dict()
     base = CommerceMvpRun(f"commerce-mvp-{stable}", workspace_id, query, started, started, mode, "completed" if selected else "blocked", tuple(item.to_dict() for item in rows), tuple(candidates), selected, economics, creative, landing, store, recommendations, approval, (), tuple(warnings), ("manual_approval_required_before_external_action",), metadata)
     if shopify_store_context is not None:
         # Imported context is evidence only: the existing deterministic candidate

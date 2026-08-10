@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CompetitionSummaryView, EventQueryParams, EventSource, OpportunityScoreView } from "@/lib/canonicalEventsApi";
-import { useCommerceRuns, useCompetitionSummaries, useEventTimeline, useEventsReadiness, useOpportunityRankings, usePublicCommerceMvpRun, useShopifyImports } from "@/hooks/useCanonicalEvents";
+import type { CompetitionSummaryView, EventQueryParams, EventSource, OpportunityScoreView, ResearchPortfolioSummaryView } from "@/lib/canonicalEventsApi";
+import { useCommerceRuns, useCompetitionSummaries, useEventTimeline, useEventsReadiness, useOpportunityRankings, usePublicCommerceMvpRun, useResearchPortfolios, useShopifyImports } from "@/hooks/useCanonicalEvents";
 import { trackSafeEvent } from "@/lib/analytics";
 
-type Tab = "timeline" | "commerce" | "shopify" | "opportunity" | "competition";
+type Tab = "timeline" | "commerce" | "shopify" | "opportunity" | "competition" | "research";
 const badge = "inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium";
 const provenanceStyle: Record<string, string> = {
   observed: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
@@ -80,6 +80,45 @@ function CompetitionSummaryCard({ summary }: { summary: CompetitionSummaryView }
   </article>;
 }
 
+const bucketLabels: Record<string, string> = {
+  top_opportunities: "Top", emerging_opportunities: "Emerging", undervalued_opportunities: "Undervalued",
+  high_risk_opportunities: "High risk", high_uncertainty_opportunities: "High uncertainty", rejected_candidates: "Rejected",
+};
+const changeKindStyle: Record<string, string> = {
+  new: "border-sky-500/30 bg-sky-500/10 text-sky-300", improved: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+  declined: "border-red-500/30 bg-red-500/10 text-red-300", removed: "border-zinc-600/30 bg-zinc-700/20 text-zinc-400",
+  unchanged: "border-zinc-700/30 bg-zinc-800/40 text-zinc-500",
+};
+
+function ResearchPortfolioCard({ summary }: { summary: ResearchPortfolioSummaryView }) {
+  const [showClusters, setShowClusters] = useState(false);
+  const quality = summary.quality;
+  const movers = summary.movements.filter((movement) => movement.change_kind !== "unchanged");
+  return <article className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div><h2 className="font-medium text-zinc-100">Research portfolio</h2><p className="mt-1 text-xs text-zinc-500">{summary.run_id} · {summary.candidate_count} candidate(s) · {summary.cluster_count} cluster(s)</p></div>
+      {summary.top_candidate_id && <span className={`${badge} border-indigo-500/30 text-indigo-300`}>Top: {summary.top_candidate_id}</span>}
+    </div>
+    <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-300">{Object.entries(summary.bucket_counts).map(([bucket, count]) => <span key={bucket} className="rounded bg-zinc-800 px-2 py-1">{bucketLabels[bucket] ?? bucket}: {count}</span>)}</div>
+    {quality && <div className="mt-3 rounded border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-300">
+      <p className="font-medium text-zinc-200">Research quality</p>
+      <div className="mt-1 grid grid-cols-2 gap-2 md:grid-cols-4">
+        <span>Evidence coverage: {(quality.evidence_coverage * 100).toFixed(0)}%</span>
+        <span>Supplier coverage: {(quality.supplier_coverage * 100).toFixed(0)}%</span>
+        <span>Competition coverage: {(quality.competition_coverage * 100).toFixed(0)}%</span>
+        <span>Pricing coverage: {(quality.observed_pricing_coverage * 100).toFixed(0)}%</span>
+        <span>Completeness: {(quality.research_completeness * 100).toFixed(0)}%</span>
+        <span>Unknown ratio: {(quality.unknown_ratio * 100).toFixed(0)}%</span>
+        <span>Freshness: {(quality.research_freshness * 100).toFixed(0)}%</span>
+        <span>Market confidence: {(quality.market_confidence * 100).toFixed(0)}%</span>
+      </div>
+    </div>}
+    {movers.length > 0 && <div className="mt-3"><p className="text-xs font-medium text-zinc-200">Top movers</p><div className="mt-1 flex flex-wrap gap-2">{movers.map((movement) => <span key={movement.candidate_id} className={`${badge} ${changeKindStyle[movement.change_kind]}`}>{movement.candidate_id}: {movement.change_kind}{movement.score_delta !== null && ` (${movement.score_delta > 0 ? "+" : ""}${movement.score_delta})`}</span>)}</div></div>}
+    <button type="button" onClick={() => setShowClusters((value) => !value)} className="mt-3 text-xs text-indigo-300 hover:text-indigo-200">{showClusters ? "Hide" : "Show"} opportunity clusters ({summary.clusters.length})</button>
+    {showClusters && (summary.clusters.length ? <div className="mt-2 space-y-2">{summary.clusters.map((cluster) => <div key={cluster.cluster_id} className="rounded border border-zinc-800 bg-zinc-950/40 p-2 text-xs text-zinc-300"><p className="font-medium text-zinc-200">{cluster.name} <span className={`${badge} ml-1 border-zinc-700 text-zinc-400`}>{cluster.member_ids.length} member(s)</span></p><p className="mt-1 text-zinc-500">Confidence {(cluster.confidence * 100).toFixed(0)}% · Price range {cluster.price_range.min ?? "—"}–{cluster.price_range.max ?? "—"} · Suppliers {cluster.supplier_diversity} · Competitors {cluster.competition_diversity}</p></div>)}</div> : <EmptyState message="No clusters were formed for this run." />)}
+  </article>;
+}
+
 function SafetyBadges() {
   const values = [
     ["Read-only", "border-sky-500/30 bg-sky-500/10 text-sky-300"],
@@ -108,10 +147,11 @@ export default function OperatorEventDashboard() {
   const shopify = useShopifyImports(params);
   const opportunity = useOpportunityRankings(params);
   const competition = useCompetitionSummaries(params);
+  const research = useResearchPortfolios(params);
   const readiness = useEventsReadiness();
   const publicRun = usePublicCommerceMvpRun();
-  const loading = timeline.isLoading || commerce.isLoading || shopify.isLoading || opportunity.isLoading || competition.isLoading || readiness.isLoading;
-  const error = timeline.error || commerce.error || shopify.error || opportunity.error || competition.error || readiness.error;
+  const loading = timeline.isLoading || commerce.isLoading || shopify.isLoading || opportunity.isLoading || competition.isLoading || research.isLoading || readiness.isLoading;
+  const error = timeline.error || commerce.error || shopify.error || opportunity.error || competition.error || research.error || readiness.error;
   const eventTypes = useMemo(() => Object.entries(timeline.data?.event_type_counts ?? {}), [timeline.data]);
   useEffect(() => { trackSafeEvent("operator_event_dashboard_viewed", { source: params.source ?? "jsonl", read_only: true, advisory: true }); }, []);
   const update = (key: keyof EventQueryParams, value: string | number) => {
@@ -122,7 +162,7 @@ export default function OperatorEventDashboard() {
     trackSafeEvent("operator_event_filters_applied", { source: draft.source ?? "jsonl", limit: draft.limit ?? 50, read_only: true, advisory: true });
     trackSafeEvent("operator_event_refresh_clicked", { source: draft.source ?? "jsonl", read_only: true, advisory: true });
     setParams({ ...draft, offset: 0 });
-    void Promise.all([timeline.refetch(), commerce.refetch(), shopify.refetch(), opportunity.refetch(), competition.refetch(), readiness.refetch()]);
+    void Promise.all([timeline.refetch(), commerce.refetch(), shopify.refetch(), opportunity.refetch(), competition.refetch(), research.refetch(), readiness.refetch()]);
   };
   const runPublicTest = () => {
     const parsedCompetitorUrls = competitorUrls.split(",").map((value) => value.trim()).filter(Boolean).slice(0, 5);
@@ -179,11 +219,12 @@ export default function OperatorEventDashboard() {
     {loading && <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-6 text-sm text-zinc-400">Loading read-only event data…</div>}
     {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{error.message} Check the configured server-side event source and try again.</div>}
     {!loading && !error && <>
-      <div className="flex gap-2 border-b border-zinc-800">{(["timeline", "commerce", "opportunity", "competition", "shopify"] as Tab[]).map((item) => <button key={item} type="button" onClick={() => setTab(item)} className={`px-3 py-2 text-sm ${tab === item ? "border-b-2 border-indigo-400 text-indigo-300" : "text-zinc-500 hover:text-zinc-200"}`}>{item === "commerce" ? "Commerce MVP" : item === "shopify" ? "Shopify imports" : item === "opportunity" ? "Opportunity ranking" : item === "competition" ? "Competition & pricing" : "Timeline"}</button>)}</div>
+      <div className="flex gap-2 border-b border-zinc-800">{(["timeline", "commerce", "opportunity", "competition", "research", "shopify"] as Tab[]).map((item) => <button key={item} type="button" onClick={() => setTab(item)} className={`px-3 py-2 text-sm ${tab === item ? "border-b-2 border-indigo-400 text-indigo-300" : "text-zinc-500 hover:text-zinc-200"}`}>{item === "commerce" ? "Commerce MVP" : item === "shopify" ? "Shopify imports" : item === "opportunity" ? "Opportunity ranking" : item === "competition" ? "Competition & pricing" : item === "research" ? "Research portfolio" : "Timeline"}</button>)}</div>
       {tab === "timeline" && <section className="space-y-3"><div className="flex flex-wrap gap-2 text-xs text-zinc-400"><span>{timeline.data?.events.length ?? 0} events</span>{eventTypes.map(([type, count]) => <span key={type} className="rounded bg-zinc-800 px-2 py-1">{type}: {count}</span>)}</div><Warnings values={timeline.data?.warnings} />{timeline.data?.events.length ? <div className="overflow-x-auto rounded-lg border border-zinc-800"><table className="min-w-full text-left text-xs"><thead className="bg-zinc-900 text-zinc-500"><tr>{["Occurred", "Event", "Aggregate", "Source", "Replay hash", "Safety"].map((heading) => <th key={heading} className="px-3 py-2 font-medium">{heading}</th>)}</tr></thead><tbody>{timeline.data.events.map((event) => <tr key={event.event_id} className="border-t border-zinc-800 text-zinc-300"><td className="whitespace-nowrap px-3 py-3">{new Date(event.occurred_at * 1000).toLocaleString()}</td><td className="px-3 py-3 font-mono">{event.event_type}</td><td className="px-3 py-3">{event.aggregate_type}<br /><span className="text-zinc-500">{event.aggregate_id}</span></td><td className="px-3 py-3">{event.source}</td><td className="px-3 py-3 font-mono text-zinc-500">{event.replay_hash.slice(0, 12)}</td><td className="px-3 py-3"><div className="flex flex-wrap gap-1">{event.dry_run && <span className={`${badge} border-sky-500/30 text-sky-300`}>dry run</span>}{event.advisory && <span className={`${badge} border-violet-500/30 text-violet-300`}>advisory</span>}{event.read_only && <span className={`${badge} border-emerald-500/30 text-emerald-300`}>read-only</span>}{event.pii_redacted && <span className={`${badge} border-amber-500/30 text-amber-300`}>PII redacted</span>}</div>{event.authority_flags.length > 0 && <p className="mt-1 max-w-48 truncate text-[10px] text-zinc-500" title={event.authority_flags.join(", ")}>{event.authority_flags.join(", ")}</p>}</td></tr>)}</tbody></table></div> : <EmptyState message="No canonical events matched the current filters." />}</section>}
       {tab === "commerce" && <section className="space-y-3">{commerce.data?.runs.length ? commerce.data.runs.map((run) => <article key={run.run_id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="font-medium text-zinc-100">{run.query || "Commerce MVP run"}</h2><p className="mt-1 text-xs text-zinc-500">{run.run_id} · {run.event_count} events · {run.candidate_count} candidates</p></div><span className={`${badge} border-indigo-500/30 text-indigo-300`}>{run.status}</span></div><p className="mt-3 text-sm text-zinc-300">Selected candidate: {run.selected_candidate ?? "not recorded"}</p><div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-400">{[{ label: "Economics", present: run.economics_present }, { label: "Creative", present: run.creative_packet_present }, { label: "Landing page", present: run.landing_page_packet_present }, { label: "Store draft", present: run.store_draft_packet_present }, { label: "Approval", present: run.approval_packet_present }].map((item) => <span key={item.label} className="rounded bg-zinc-800 px-2 py-1">{item.label}: {item.present ? "present" : "missing"}</span>)}</div><Warnings values={[...run.warnings, ...run.blockers]} /></article>) : <EmptyState message="No Commerce MVP run summaries are available for this source." />}</section>}
       {tab === "opportunity" && <section className="space-y-4">{opportunity.data?.rankings.length ? opportunity.data.rankings.map((run) => <div key={run.run_id} className="space-y-3"><div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-800 pb-2"><h2 className="font-medium text-zinc-100">{run.query || "Opportunity ranking"}</h2><p className="text-xs text-zinc-500">{run.run_id} · {run.candidate_count} candidates scored</p></div>{run.scores.map((score) => <OpportunityScoreCard key={score.candidate_id} score={score} isTop={score.candidate_id === run.top_candidate_id} />)}</div>) : <EmptyState message="No opportunity-ranking runs are available for this source. Run a public test with 'Rank candidates with opportunity scoring' checked, or pass use_opportunity_ranking=True to run_commerce_mvp_slice()." />}</section>}
       {tab === "competition" && <section className="space-y-4">{competition.data?.summaries.length ? competition.data.summaries.map((summary) => <CompetitionSummaryCard key={summary.run_id} summary={summary} />) : <EmptyState message="No competition-intelligence runs are available for this source. Run a public test with 'Gather public competitor pricing' checked (requires opportunity ranking and the server MARKETOS_COMPETITION_EVIDENCE_LIVE gate), or pass competition_evidence to run_commerce_mvp_slice()." />}</section>}
+      {tab === "research" && <section className="space-y-4">{research.data?.portfolios.length ? research.data.portfolios.map((summary) => <ResearchPortfolioCard key={summary.run_id} summary={summary} />) : <EmptyState message="No research-portfolio runs are available for this source. Build a ResearchPortfolio via backend.mvp_commerce.product_research and pass it to run_commerce_mvp_slice(research_portfolio=...), or use scripts/run_product_research_engine.py." />}</section>}
       {tab === "shopify" && <section className="space-y-3">{shopify.data?.imports.length ? shopify.data.imports.map((item) => <article key={item.batch_id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="font-medium text-zinc-100">Shopify import {item.batch_id}</h2><p className="mt-1 text-xs text-zinc-500">{item.event_count} advisory events · workspace {item.workspace_id ?? "unknown"}</p></div><span className={`${badge} border-emerald-500/30 text-emerald-300`}>{item.pii_redacted ? "PII redacted" : "No PII flag"}</span></div><div className="mt-3 grid grid-cols-2 gap-2 text-sm text-zinc-300 md:grid-cols-4"><span>Products: {item.product_count}</span><span>Orders: {item.order_count}</span><span>Customers: {item.customer_count}</span><span>AOV: {item.average_order_value.toFixed(2)}</span></div><p className="mt-3 text-xs text-zinc-500">Observed revenue: {item.observed_revenue_total.toFixed(2)}. This is read-only historical context, not a forecast.</p><Warnings values={item.warnings} /></article>) : <EmptyState message="No Shopify read-only import summaries are available for this source." />}</section>}
     </>}
   </div>;

@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Sequence
 from backend.contracts.events import Event
-from .query_models import CommerceRunSummary, CompetitionSummary, EventQuery, EventRecordView, EventTimeline, OpportunityRankingSummary, ShopifyImportSummary
+from .query_models import CommerceRunSummary, CompetitionSummary, EventQuery, EventRecordView, EventTimeline, OpportunityRankingSummary, ResearchPortfolioSummary, ShopifyImportSummary
 
 def load_events_from_jsonl(path: str | Path) -> tuple[list[Event], list[str]]:
     events: list[Event] = []; warnings: list[str] = []
@@ -95,8 +95,27 @@ def build_competition_summaries(events: Sequence[Event]) -> list[CompetitionSumm
         ))
     return summaries
 
+def build_research_portfolio_summaries(events: Sequence[Event]) -> list[ResearchPortfolioSummary]:
+    groups: dict[str, list[Event]] = defaultdict(list)
+    for event in events:
+        if event.event_type in {"candidate_discovered", "candidate_clustered", "research_portfolio_updated", "ranking_changed", "research_completed"}:
+            groups[event.correlation_id or event.aggregate_id].append(event)
+    summaries: list[ResearchPortfolioSummary] = []
+    for run_id, rows in sorted(groups.items()):
+        portfolio_event = next((item for item in rows if item.event_type == "research_portfolio_updated"), None)
+        clusters = [item.payload for item in rows if item.event_type == "candidate_clustered"]
+        movements = [item.payload for item in rows if item.event_type == "ranking_changed"]
+        payload = portfolio_event.payload if portfolio_event else {}
+        workspace = rows[0].workspace_id
+        summaries.append(ResearchPortfolioSummary(
+            workspace, run_id, payload.get("top_candidate_id"), int(payload.get("candidate_count", 0)),
+            int(payload.get("cluster_count", len(clusters))), payload.get("quality"),
+            dict(payload.get("bucket_counts", {})), tuple(clusters), tuple(movements), len(rows),
+        ))
+    return summaries
+
 def event_query_report(events: Sequence[Event], query: EventQuery, warnings: Sequence[str] = ()) -> dict[str, Any]:
     timeline = build_event_timeline(events, query, warnings)
-    return {"query": query.to_dict(), "timeline": timeline.to_dict(), "commerce_runs": [item.to_dict() for item in build_commerce_run_summaries(query_events(events, query))], "shopify_imports": [item.to_dict() for item in build_shopify_import_summaries(query_events(events, query))], "opportunity_rankings": [item.to_dict() for item in build_opportunity_ranking_summaries(query_events(events, query))], "competition_summaries": [item.to_dict() for item in build_competition_summaries(query_events(events, query))], "read_only": True, "network_calls": False, "mutated": False}
+    return {"query": query.to_dict(), "timeline": timeline.to_dict(), "commerce_runs": [item.to_dict() for item in build_commerce_run_summaries(query_events(events, query))], "shopify_imports": [item.to_dict() for item in build_shopify_import_summaries(query_events(events, query))], "opportunity_rankings": [item.to_dict() for item in build_opportunity_ranking_summaries(query_events(events, query))], "competition_summaries": [item.to_dict() for item in build_competition_summaries(query_events(events, query))], "research_portfolios": [item.to_dict() for item in build_research_portfolio_summaries(query_events(events, query))], "read_only": True, "network_calls": False, "mutated": False}
 
-__all__ = ["build_commerce_run_summaries", "build_competition_summaries", "build_event_timeline", "build_opportunity_ranking_summaries", "build_shopify_import_summaries", "event_query_report", "load_events_from_jsonl", "query_events", "summarize_event_record"]
+__all__ = ["build_commerce_run_summaries", "build_competition_summaries", "build_event_timeline", "build_opportunity_ranking_summaries", "build_research_portfolio_summaries", "build_shopify_import_summaries", "event_query_report", "load_events_from_jsonl", "query_events", "summarize_event_record"]

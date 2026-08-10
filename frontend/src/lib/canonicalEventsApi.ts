@@ -181,6 +181,50 @@ export interface MarketOpportunityReportView {
   recommended_next_step: string;
 }
 
+export interface ProductClusterView {
+  cluster_id: string;
+  name: string;
+  member_ids: string[];
+  representative_id: string;
+  confidence: number;
+  common_attributes: Record<string, unknown>;
+  price_range: { min: number | null; max: number | null; median: number | null };
+  supplier_diversity: number;
+  competition_diversity: number;
+}
+
+export interface PortfolioMovementView {
+  candidate_id: string;
+  score_delta: number | null;
+  confidence_delta: number | null;
+  rank_delta: number | null;
+  change_kind: "new" | "removed" | "improved" | "declined" | "unchanged";
+}
+
+export interface ResearchQualityView {
+  evidence_coverage: number;
+  supplier_coverage: number;
+  competition_coverage: number;
+  observed_pricing_coverage: number;
+  market_confidence: number;
+  research_completeness: number;
+  unknown_ratio: number;
+  research_freshness: number;
+}
+
+export interface ResearchPortfolioSummaryView {
+  workspace_id: string | null;
+  run_id: string;
+  top_candidate_id: string | null;
+  candidate_count: number;
+  cluster_count: number;
+  quality: ResearchQualityView | null;
+  bucket_counts: Record<string, number>;
+  clusters: ProductClusterView[];
+  movements: PortfolioMovementView[];
+  event_count: number;
+}
+
 export interface EventsReadiness {
   jsonl_path_configured: boolean;
   supabase_staging: { configured: boolean; missing_env?: string[]; read_only: boolean; server_side_only: boolean; write_gate_enabled?: boolean };
@@ -260,4 +304,5 @@ export const fetchEventsReadiness = () => get<EventsReadiness>("/api/events/read
 export const fetchSupplierEvidenceEvents = (params: EventQueryParams) => get<{ events: EventRecordView[]; read_only: boolean }>("/api/events/supplier-evidence", params);
 export const fetchOpportunityRankings = (params: EventQueryParams) => get<{ rankings: OpportunityRankingSummary[]; read_only: boolean }>("/api/events/opportunity-rankings", params);
 export const fetchCompetitionSummaries = (params: EventQueryParams) => get<{ summaries: CompetitionSummaryView[]; read_only: boolean }>("/api/events/competition-summaries", params);
+export const fetchResearchPortfolios = (params: EventQueryParams) => get<{ portfolios: ResearchPortfolioSummaryView[]; read_only: boolean }>("/api/events/research-portfolio", params);
 export const runPublicCommerceMvp = (request: PublicCommerceRunRequest) => post<PublicCommerceRunReport>("/api/commerce-mvp/public-run", request);

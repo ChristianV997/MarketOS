@@ -2,10 +2,10 @@
 
 The frontend route `/operator/events` is a read-only operator surface for
 canonical event timelines, Commerce MVP runs, Shopify import summaries,
-opportunity-ranking scores, competition/pricing intelligence, and
-event-source readiness. It uses the existing GET-only `/api/events` routes;
-it has no action controls, credential inputs, browser Supabase client, or
-local-file-path field.
+opportunity-ranking scores, competition/pricing intelligence, research
+portfolios, and event-source readiness. It uses the existing GET-only
+`/api/events` routes; it has no action controls, credential inputs,
+browser Supabase client, or local-file-path field.
 
 The **Opportunity ranking** tab shows every scored candidate for a run: its
 composite score, confidence, observed/derived/assumed/unknown percentage
@@ -33,6 +33,19 @@ competitor-URL input) that passes `attempt_competition_evidence`/
 `competitor_urls` through — it only takes effect together with the
 opportunity-ranking checkbox and requires the server-side
 `MARKETOS_COMPETITION_EVIDENCE_LIVE` gate.
+
+The **Research portfolio** tab shows, per run: bucket counts (top/
+emerging/undervalued/high-risk/high-uncertainty/rejected), research
+quality metrics (evidence/supplier/competition/pricing coverage,
+completeness, unknown ratio, freshness, market confidence), top movers
+(from the most recent ranking comparison), and an expandable cluster list
+(name, member count, confidence, price range, supplier/competition
+diversity). It reads `/api/events/research-portfolio` — see
+[Product Research](PRODUCT_RESEARCH.md#read-api-and-dashboard-view). This
+tab has no run-form control of its own — a portfolio is built via
+`scripts/run_product_research_engine.py` (or programmatically) and its
+events written to the configured JSONL/Supabase source, same as any other
+canonical-event read view.
 
 ## Run locally
 

@@ -64,4 +64,17 @@ class OpportunityRankingSummary:
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self); value["scores"] = [dict(item) for item in self.scores]; return value
 
-__all__ = ["CommerceRunSummary", "CompetitionSummary", "EventQuery", "EventRecordView", "EventTimeline", "OpportunityRankingSummary", "ShopifyImportSummary"]
+@dataclass(frozen=True)
+class ResearchPortfolioSummary:
+    """Decoded product_research_events() output for one Commerce MVP run —
+    same rationale as OpportunityRankingSummary/CompetitionSummary: an
+    operator needs the actual bucket contents, cluster membership, and
+    quality metrics, not the generic timeline's key-list-only summary."""
+    workspace_id: str | None; run_id: str; top_candidate_id: str | None
+    candidate_count: int; cluster_count: int; quality: dict[str, Any] | None
+    bucket_counts: dict[str, int]; clusters: tuple[dict[str, Any], ...]
+    movements: tuple[dict[str, Any], ...]; event_count: int
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self); value["clusters"] = [dict(item) for item in self.clusters]; value["movements"] = [dict(item) for item in self.movements]; return value
+
+__all__ = ["CommerceRunSummary", "CompetitionSummary", "EventQuery", "EventRecordView", "EventTimeline", "OpportunityRankingSummary", "ResearchPortfolioSummary", "ShopifyImportSummary"]

@@ -133,6 +133,7 @@ def run_commerce_mvp_from_public_rss(
     use_opportunity_ranking: bool = False,
     attempt_competition_evidence: bool = False,
     competitor_urls: list[str] | None = None,
+    research_portfolio: Any | None = None,
     **economics: float,
 ) -> PublicCommerceRunResult:
     """Run an advisory Commerce MVP packet from one public RSS query.
@@ -168,6 +169,14 @@ def run_commerce_mvp_from_public_rss(
     through the ranking path only, never the single-candidate default
     path). Same allow_network gate as supplier evidence: dry-run/simulated
     with allow_network=False.
+
+    research_portfolio, when supplied, takes priority over both the
+    default pick and use_opportunity_ranking (see
+    backend.mvp_commerce.product_research and
+    run_commerce_mvp_slice's own docstring) — this module never builds a
+    portfolio itself (no multi-candidate evidence-gathering orchestration
+    here yet; see docs/PRODUCT_RESEARCH.md's stated limitations), it only
+    forwards an already-built one.
     """
     ingestion = load_public_signals_for_commerce_query(
         query,
@@ -211,6 +220,7 @@ def run_commerce_mvp_from_public_rss(
         supplier_evidence=supplier_evidence_result,
         use_opportunity_ranking=use_opportunity_ranking,
         competition_evidence=competition_evidence_result,
+        research_portfolio=research_portfolio,
         **economics,
     )
     metadata = {

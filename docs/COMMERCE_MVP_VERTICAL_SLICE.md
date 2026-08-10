@@ -12,9 +12,10 @@ a reviewable commerce test packet:
 
 ```text
 public signal fixture -> opportunity hypothesis -> [competition intelligence]
--> [opportunity scoring/ranking] -> assumption-based economics -> safe
-creative draft -> landing-page export -> store-draft export -> vendor plan
--> manual approval -> canonical advisory events
+-> [opportunity scoring/ranking] -> [product research portfolio]
+-> assumption-based economics -> safe creative draft -> landing-page
+export -> store-draft export -> vendor plan -> manual approval ->
+canonical advisory events
 ```
 
 It is the MVP Island's demoable workflow, not a live commerce pipeline. It
@@ -96,6 +97,14 @@ their existing human/live-mode gates.
   `competitor_urls` on `/api/commerce-mvp/public-run` and
   `run_commerce_mvp_from_public_rss`, `competition_evidence` on
   `run_commerce_mvp_slice`.
+- Product Research Intelligence: candidate aggregation, deterministic
+  identity resolution/clustering, and a bucketed research portfolio
+  (top/emerging/undervalued/high-risk/high-uncertainty/rejected) that
+  Commerce MVP can consume instead of a single isolated candidate when one
+  is supplied (see `docs/PRODUCT_RESEARCH.md`) — `research_portfolio` on
+  `run_commerce_mvp_slice` (priority over `use_opportunity_ranking`) and
+  `run_commerce_mvp_from_public_rss`; built end-to-end via
+  `scripts/run_product_research_engine.py`.
 
 ## Next integrations (not implemented)
 
