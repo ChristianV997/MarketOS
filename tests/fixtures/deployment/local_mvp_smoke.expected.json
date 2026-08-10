@@ -1,0 +1,6 @@
+{
+  "dashboard_route": "/operator/events",
+  "mutated": false,
+  "network_used": false,
+  "read_only": true
+}

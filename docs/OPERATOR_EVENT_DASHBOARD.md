@@ -42,4 +42,7 @@ cookies, or file paths. The source is fixed to Google News RSS.
 
 For Vercel/Railway deployments, keep the browser on the Vercel frontend and
 configure the API's event-source environment variables only on the server
-host. See `docs/CANONICAL_EVENT_READ_VIEWS.md` for the backend contract.
+host. Run `python scripts/deployment_smoke_check.py --backend-url <api-url>
+--json` before opening the dashboard. See
+`docs/MVP_DEPLOYMENT_SMOKE_CHECKS.md` and
+`docs/CANONICAL_EVENT_READ_VIEWS.md` for the deployment/backend contracts.
