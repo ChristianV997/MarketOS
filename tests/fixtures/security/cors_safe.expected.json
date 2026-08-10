@@ -1,0 +1,1 @@
+{"configured": true, "origins": ["https://mvp.example.test", "http://localhost:5173"], "allowed_origin_count": 2, "mvp_safe": true, "warnings": [], "blockers": [], "credentials_enabled": false}

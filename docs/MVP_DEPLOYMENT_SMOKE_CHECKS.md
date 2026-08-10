@@ -100,3 +100,6 @@ variables.
 This smoke layer does not enable payments, Shopify mutation, supplier orders,
 inventory changes, fulfillment, refunds, customer messaging, ad spend,
 publishing, schedulers, or autonomous execution.
+
+See [Phase 1 production hardening](PHASE1_PRODUCTION_HARDENING.md) for exact
+CORS validation, request IDs, redacted logs, and in-memory rate-limit checks.

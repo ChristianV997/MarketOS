@@ -1,0 +1,1 @@
+{"cors_mvp_safe": true, "request_id_middleware_enabled": true, "rate_limit_enabled": true, "safe_logging_enabled": true, "secret_redaction_enabled": true, "distributed_rate_limiting": false}

@@ -46,3 +46,6 @@ host. Run `python scripts/deployment_smoke_check.py --backend-url <api-url>
 --json` before opening the dashboard. See
 `docs/MVP_DEPLOYMENT_SMOKE_CHECKS.md` and
 `docs/CANONICAL_EVENT_READ_VIEWS.md` for the deployment/backend contracts.
+
+The event-read API returns correlation headers and applies the Phase 1
+single-process read limit; see [production hardening](PHASE1_PRODUCTION_HARDENING.md).

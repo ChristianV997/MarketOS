@@ -9,3 +9,7 @@ or team-operation model is a better fit; do not run both for the initial MVP.
 `render.yaml` is an editable starting point with safe public-run and Supabase
 write defaults. Review `ALLOWED_ORIGINS` and persistent artifact storage in the
 Render console before deploying.
+
+Set an exact `ALLOWED_ORIGINS` value and keep the public-run and Supabase gates
+at `0` during the first deployment. Render uses the same single-process MVP
+rate limits as Railway.

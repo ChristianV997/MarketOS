@@ -33,6 +33,8 @@ import numpy as np
 from fastapi import Body, FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from backend.security.cors import parse_allowed_origins
+from backend.security.request_context import RequestContextMiddleware
 
 # ── structured logging ────────────────────────────────────────────────────────
 try:
@@ -179,11 +181,12 @@ except Exception:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("ALLOWED_ORIGINS", "*").split(","),
-    allow_credentials=True,
+    allow_origins=parse_allowed_origins(os.getenv("ALLOWED_ORIGINS")),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestContextMiddleware)
 
 # ── shared state ──────────────────────────────────────────────────────────────
 

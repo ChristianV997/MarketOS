@@ -1,0 +1,1 @@
+{"configured": true, "origins": ["*"], "allowed_origin_count": 1, "mvp_safe": false, "warnings": ["wildcard_origin_allows_any_browser_origin"], "blockers": ["wildcard_origin_not_allowed_in_mvp_mode"], "credentials_enabled": false}
