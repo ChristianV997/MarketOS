@@ -21,6 +21,12 @@ selector supports JSONL and optional Supabase staging. Supabase reads happen
 only in the server process and require server-side `SUPABASE_URL` and
 `SUPABASE_SERVICE_ROLE_KEY`; neither value is sent to the browser.
 
+The page also includes an acknowledgement-gated **Run public Commerce MVP
+test** form. It accepts only a query, workspace label, bounded signal count,
+and explicit event target. The backend must have
+`MARKETOS_PUBLIC_COMMERCE_RUNS=1`; the form cannot provide credentials, URLs,
+cookies, or file paths. The source is fixed to Google News RSS.
+
 ## Safety and troubleshooting
 
 - The page sends GET requests only and never creates, updates, publishes,
@@ -31,6 +37,8 @@ only in the server process and require server-side `SUPABASE_URL` and
   in the API process or the referenced artifact has not been generated.
 - Supabase staging is optional. Its unconfigured state is surfaced as a
   readiness/error state and does not fall back to writing anything.
+- Public runs are manually invoked and report `blocked`, `degraded`,
+  `stale_cache`, or `succeeded`; they never authorize a launch or spend.
 
 For Vercel/Railway deployments, keep the browser on the Vercel frontend and
 configure the API's event-source environment variables only on the server

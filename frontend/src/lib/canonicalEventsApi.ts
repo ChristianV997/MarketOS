@@ -84,6 +84,34 @@ export interface EventsReadiness {
   mutated: boolean;
 }
 
+export interface PublicCommerceRunRequest {
+  query: string;
+  workspace_id: string;
+  max_signals: number;
+  max_candidates: number;
+  allow_public_network: boolean;
+  include_shopify_fixture_context: boolean;
+  source: "google_news_rss";
+  event_target: "none" | "jsonl" | "supabase_staging" | "both";
+  operator_note?: string;
+}
+
+export interface PublicCommerceRunReport {
+  status: string;
+  public_source_status: string;
+  signal_count: number;
+  candidate_count: number;
+  selected_candidate: string | null;
+  event_count: number;
+  event_type_counts: Record<string, number>;
+  write_targets: string[];
+  warnings: string[];
+  blockers: string[];
+  read_only: boolean;
+  advisory: boolean;
+  mutated: boolean;
+}
+
 const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? (import.meta.env.VITE_API_URL as string | undefined) ?? "";
 
 function queryString(params: EventQueryParams = {}): string {
@@ -102,8 +130,19 @@ async function get<T>(path: string, params?: EventQueryParams): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`Unable to run public Commerce MVP test (${response.status}).`);
+  return response.json() as Promise<T>;
+}
+
 export const fetchEventTimeline = (params: EventQueryParams) => get<EventTimeline>("/api/events/timeline", params);
 export const fetchEvents = (params: EventQueryParams) => get<{ timeline: EventTimeline }>("/api/events", params);
 export const fetchCommerceRuns = (params: EventQueryParams) => get<{ runs: CommerceRunSummary[]; read_only: boolean }>("/api/events/commerce-runs", params);
 export const fetchShopifyImports = (params: EventQueryParams) => get<{ imports: ShopifyImportSummary[]; read_only: boolean }>("/api/events/shopify-imports", params);
 export const fetchEventsReadiness = () => get<EventsReadiness>("/api/events/readiness");
+export const runPublicCommerceMvp = (request: PublicCommerceRunRequest) => post<PublicCommerceRunReport>("/api/commerce-mvp/public-run", request);
