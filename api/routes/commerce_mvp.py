@@ -32,6 +32,8 @@ class PublicCommerceRunRequest(BaseModel):
     source: Literal["google_news_rss"] = "google_news_rss"
     event_target: Literal["none", "jsonl", "supabase_staging", "both"] = "none"
     operator_note: str = Field(default="", max_length=500)
+    attempt_supplier_evidence: bool = False
+    supplier_candidate_urls: list[str] = Field(default_factory=list, max_length=5)
 
 
 def _blocked(message: str, *, request: PublicCommerceRunRequest) -> dict:
@@ -101,6 +103,13 @@ def public_run(request: PublicCommerceRunRequest, http_request: Request = None) 
     if request.include_shopify_fixture_context:
         batch, context = import_shopify_readonly(ROOT / "tests/fixtures/shopify_readonly/shopify_sample.json", request.workspace_id)
 
+    # Supplier evidence is an enhancement on top of the gated public-commerce
+    # run, not a second capability with its own blocking gate: if the
+    # operator asks for it but the server hasn't opted in, it's silently
+    # not attempted (economics fall back to assumptions) rather than
+    # blocking the whole run.
+    attempt_supplier_evidence = request.attempt_supplier_evidence and os.getenv("MARKETOS_SUPPLIER_EVIDENCE_LIVE", "0") == "1"
+
     result = run_commerce_mvp_from_public_rss(
         workspace_id=request.workspace_id,
         query=request.query,
@@ -110,6 +119,8 @@ def public_run(request: PublicCommerceRunRequest, http_request: Request = None) 
         cache_dir=os.getenv("MARKETOS_PUBLIC_SIGNAL_CACHE_DIR", str(ROOT / "artifacts/public-signal-cache")),
         shopify_store_context=context,
         operator_note=request.operator_note,
+        attempt_supplier_evidence=attempt_supplier_evidence,
+        supplier_candidate_urls=list(request.supplier_candidate_urls),
     )
     events = list(result.events)
     if batch is not None:
@@ -126,6 +137,7 @@ def public_run(request: PublicCommerceRunRequest, http_request: Request = None) 
         "status": result.status,
         "write_targets": written,
         "event_count": len(events),
+        "supplier_evidence_attempted": attempt_supplier_evidence,
         "read_only": True,
         "advisory": True,
         "mutated": False,

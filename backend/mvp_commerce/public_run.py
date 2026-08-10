@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
+from backend.contracts.adapters import SidecarContext
 from backend.contracts.events import Event
 from backend.events.repository import EventRepository
 from backend.signals.public_signal_cache import PublicSignalCache
@@ -18,7 +19,9 @@ from backend.signals.public_sources import ingest_public_rss, public_signal_even
 
 from .events import commerce_mvp_events
 from .models import CommerceMvpRun
+from .opportunity import build_opportunity_candidates_from_signals, select_candidate
 from .runner import run_commerce_mvp_slice
+from .supplier_evidence import gather_supplier_evidence, supplier_evidence_events
 
 
 @dataclass(frozen=True)
@@ -123,12 +126,24 @@ def run_commerce_mvp_from_public_rss(
     event_repository: EventRepository | None = None,
     fetcher: Callable[[str, int], str] | None = None,
     operator_note: str = "",
+    attempt_supplier_evidence: bool = False,
+    supplier_candidate_urls: list[str] | None = None,
     **economics: float,
 ) -> PublicCommerceRunResult:
     """Run an advisory Commerce MVP packet from one public RSS query.
 
     The public fetch is the only network-capable operation. Event persistence
     occurs only through the explicitly injected repository.
+
+    attempt_supplier_evidence=True additionally tries to ground unit
+    economics in a real, observed CJ public-page supplier cost (see
+    backend.mvp_commerce.supplier_evidence) for whichever candidate the
+    existing selection logic picks — never a second, independent candidate
+    decision. It never performs live network I/O unless allow_network is
+    also True (the same gate the RSS fetch itself uses); with
+    allow_network=False the evidence attempt is dry-run/simulated and never
+    changes economics, matching every other public-network capability in
+    this module.
     """
     ingestion = load_public_signals_for_commerce_query(
         query,
@@ -137,6 +152,21 @@ def run_commerce_mvp_from_public_rss(
         cache_dir=cache_dir,
         fetcher=fetcher,
     )
+
+    supplier_evidence_result = None
+    if attempt_supplier_evidence:
+        # Peek the same deterministic candidate selection run_commerce_mvp_slice
+        # will make, so evidence is gathered for the actual selected product —
+        # never a second, independent candidate decision. Cheap and pure.
+        peeked_candidates = build_opportunity_candidates_from_signals(ingestion.signals, workspace_id, query, max_candidates)
+        peeked_selected = select_candidate(peeked_candidates)
+        if peeked_selected is not None:
+            supplier_evidence_result = gather_supplier_evidence(
+                peeked_selected.product_name,
+                context=SidecarContext(workspace_id=workspace_id, dry_run=not allow_network),
+                candidate_urls=supplier_candidate_urls,
+            )
+
     run = run_commerce_mvp_slice(
         workspace_id=workspace_id,
         query=query,
@@ -146,6 +176,7 @@ def run_commerce_mvp_from_public_rss(
         max_candidates=max_candidates,
         shopify_store_context=shopify_store_context,
         write_repository=None,
+        supplier_evidence=supplier_evidence_result,
         **economics,
     )
     metadata = {
@@ -167,7 +198,11 @@ def run_commerce_mvp_from_public_rss(
     run = replace(run, metadata=metadata, warnings=warnings, blockers=blockers)
     public_events = [public_signal_event(signal, workspace_id, cache_status=ingestion.cache_status) for signal in ingestion.signals]
     commerce_events = commerce_mvp_events(run)
-    events = tuple(public_events + commerce_events)
+    evidence_events = (
+        supplier_evidence_events(supplier_evidence_result, workspace_id=workspace_id, run_id=run.run_id, occurred_at=run.started_at)
+        if supplier_evidence_result is not None else []
+    )
+    events = tuple(public_events + commerce_events + evidence_events)
     run = replace(run, canonical_event_ids=tuple(event.event_id for event in events), completed_at=run.started_at + len(events) / 1000)
     if event_repository is not None:
         event_repository.append_many(events)

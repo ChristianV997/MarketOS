@@ -20,3 +20,39 @@ def test_public_api_accepts_only_fixed_source_and_returns_advisory_report(monkey
     assert report["read_only"] is True
     assert report["mutated"] is False
     assert "source_url" not in commerce_mvp.PublicCommerceRunRequest.model_fields
+
+
+def test_supplier_evidence_flag_ignored_without_server_gate(monkeypatch):
+    monkeypatch.setenv("MARKETOS_PUBLIC_COMMERCE_RUNS", "1")
+    monkeypatch.delenv("MARKETOS_SUPPLIER_EVIDENCE_LIVE", raising=False)
+    captured = {}
+
+    def _fake(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(status="succeeded", events=(), to_dict=lambda: {"public_source_status": "succeeded", "event_count": 0, "warnings": [], "blockers": []})
+
+    monkeypatch.setattr(commerce_mvp, "run_commerce_mvp_from_public_rss", _fake)
+    request = commerce_mvp.PublicCommerceRunRequest(query="portable espresso maker", allow_public_network=True, attempt_supplier_evidence=True)
+    report = commerce_mvp.public_run(request)
+    assert captured["attempt_supplier_evidence"] is False
+    assert report["supplier_evidence_attempted"] is False
+
+
+def test_supplier_evidence_flag_propagates_when_server_gate_and_request_both_set(monkeypatch):
+    monkeypatch.setenv("MARKETOS_PUBLIC_COMMERCE_RUNS", "1")
+    monkeypatch.setenv("MARKETOS_SUPPLIER_EVIDENCE_LIVE", "1")
+    captured = {}
+
+    def _fake(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(status="succeeded", events=(), to_dict=lambda: {"public_source_status": "succeeded", "event_count": 0, "warnings": [], "blockers": []})
+
+    monkeypatch.setattr(commerce_mvp, "run_commerce_mvp_from_public_rss", _fake)
+    request = commerce_mvp.PublicCommerceRunRequest(
+        query="portable espresso maker", allow_public_network=True, attempt_supplier_evidence=True,
+        supplier_candidate_urls=["https://www.cjdropshipping.com/product/x.html"],
+    )
+    report = commerce_mvp.public_run(request)
+    assert captured["attempt_supplier_evidence"] is True
+    assert captured["supplier_candidate_urls"] == ["https://www.cjdropshipping.com/product/x.html"]
+    assert report["supplier_evidence_attempted"] is True

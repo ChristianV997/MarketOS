@@ -53,5 +53,16 @@ def commerce_runs(workspace_id: str | None = None, limit: int = Query(100, ge=0,
 def shopify_imports(workspace_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None):
     if limited := _read_limit_response(request): return limited
     return {"imports": _report(source, _query(workspace_id, None, None, None, limit, offset))["shopify_imports"], "read_only": True}
+@router.get("/supplier-evidence")
+def supplier_evidence(workspace_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None):
+    """Supplier-evidence events for one workspace: requested/observed/
+    degraded attempts plus the resulting economics-enrichment record, newest
+    first. A thin filter over the existing timeline (same events the
+    generic /api/events?event_type=... already exposes) — no second query
+    engine."""
+    if limited := _read_limit_response(request): return limited
+    events = _report(source, _query(workspace_id, None, None, None, limit, offset))["timeline"]["events"]
+    supplier_event_types = {"supplier_evidence_requested", "supplier_product_observed", "supplier_evidence_degraded", "commerce_economics_enriched"}
+    return {"events": [event for event in events if event.get("event_type") in supplier_event_types], "read_only": True}
 @router.get("/readiness")
 def readiness(): return {"jsonl_path_configured": bool(os.getenv("MARKETOS_EVENT_READ_JSONL_PATH")), "supabase_staging": explain_supabase_readiness(), "read_only": True, "mutated": False}
