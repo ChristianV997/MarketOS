@@ -78,6 +78,10 @@ The [SaaS Capability Router](SAAS_VENDOR_ROUTER.md) is the metadata-only
 companion that assigns MVP capabilities to managed vendors and human-owned
 departments. It never activates a vendor integration or changes dry-run policy.
 
+The [Commerce MVP Vertical Slice](COMMERCE_MVP_VERTICAL_SLICE.md) composes the
+existing public-signal, event, and routing foundations into a manual-review
+packet without creating any external commerce object.
+
 ## Promotion gates
 
 Promote one capability at a time only after: schema/RLS review; adapter tests
