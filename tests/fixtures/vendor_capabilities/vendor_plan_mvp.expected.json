@@ -1,0 +1,12 @@
+{
+  "stage": "mvp",
+  "routing_is_metadata_only": true,
+  "network_calls": false,
+  "mutated": false,
+  "selected_examples": {
+    "database_auth_storage": "supabase",
+    "public_signal_ingestion": "google_news_rss",
+    "landing_page_builder": "gempages",
+    "video_ad_generation": "creatify"
+  }
+}

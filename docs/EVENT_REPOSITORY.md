@@ -10,6 +10,9 @@ New event code should use `backend.contracts.events.Event`: stable ID, workspace
 
 `backend.events.repository.EventRepository` defines append, append_many, get, stream, replay, and tail. `InMemoryEventRepository` is deterministic and idempotent by event ID for tests. `JsonlEventRepository` is a local JSONL adapter that preserves append order and skips malformed/torn lines. It is not a distributed or Postgres store.
 
+The optional Supabase adapter and the metadata-only vendor selection policy are
+documented in [MVP Island](MVP_ISLAND.md) and [SaaS Capability Router](SAAS_VENDOR_ROUTER.md); neither changes the default JSONL repository.
+
 `LegacyWorkflowEventStoreAdapter` and `LegacyRuntimeReplayAdapter` normalize existing records read-only. They do not alter legacy writers, broker ownership, workflow JSONL, DuckDB/replay persistence, or external services.
 
 ## Narrow dual-write pilot

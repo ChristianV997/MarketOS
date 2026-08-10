@@ -11,7 +11,8 @@
     "advisory_reports",
     "api_read_views",
     "manual_export",
-    "manual_approval"
+    "manual_approval",
+    "saas_capability_router_metadata"
   ],
   "disabled_modules": [
     "live_ads",

@@ -74,6 +74,10 @@ preview or manually ingest public signals. If Supabase is configured, its
 canonical-event adapter can be explicitly constructed by a future wiring PR;
 the JSONL repository remains the default today.
 
+The [SaaS Capability Router](SAAS_VENDOR_ROUTER.md) is the metadata-only
+companion that assigns MVP capabilities to managed vendors and human-owned
+departments. It never activates a vendor integration or changes dry-run policy.
+
 ## Promotion gates
 
 Promote one capability at a time only after: schema/RLS review; adapter tests

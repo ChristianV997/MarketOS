@@ -15,6 +15,7 @@ from .schemas import (
     ProviderRecommendation,
     ProviderRisk,
 )
+from .vendor_router import build_workspace_vendor_plan, recommend_vendor_for_capability
 
 __all__ = [
     "ProviderRegistry",
@@ -26,4 +27,6 @@ __all__ = [
     "ProviderRisk",
     "ProviderIntegrationStatus",
     "ProviderRecommendation",
+    "build_workspace_vendor_plan",
+    "recommend_vendor_for_capability",
 ]
