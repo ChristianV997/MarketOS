@@ -68,6 +68,10 @@ MARKETOS_PUBLIC_SIGNAL_CACHE_DIR=artifacts/public-signal-cache
 MARKETOS_EVENT_WRITE_JSONL_PATH=artifacts/commerce-mvp-live-events.jsonl
 ```
 
+Before deploying, run `python scripts/deployment_smoke_check.py --local
+--json` and `python scripts/local_mvp_smoke.py --include-shopify-fixture
+--write-jsonl artifacts/local-mvp-smoke-events.jsonl --json`.
+
 Before enabling API network mode, review query sensitivity, source attribution,
 cache retention, artifact access, and the manual approval path. The next step
 toward money-generating deployment is independently verified product and

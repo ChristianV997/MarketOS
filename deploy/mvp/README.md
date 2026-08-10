@@ -17,6 +17,8 @@ the repository but outside the recommended process topology.
    the deterministic evidence path. A real public read remains an intentional
    manual command with `--allow-network`.
 6. Run `python scripts/mvp_readiness.py --json` in the deployment environment.
+7. Run `python scripts/deployment_smoke_check.py --backend-url <api-url> --json`
+   and verify the operator dashboard at `/operator/events`.
 
 ## What goes where
 
@@ -37,6 +39,10 @@ unsafe live flags, the API responds to its two probes, the frontend builds, and
 the fixture public-signal flow produces only advisory canonical events. A
 missing Supabase configuration is not a failure: JSONL remains the default
 local repository until an explicit wiring decision is tested.
+
+Use `docs/MVP_DEPLOYMENT_SMOKE_CHECKS.md` for the complete local, Railway,
+Render, and Vercel verification sequence. The machine-readable environment
+contract is `deploy/mvp/env.contract.json`.
 
 ## Out of scope
 

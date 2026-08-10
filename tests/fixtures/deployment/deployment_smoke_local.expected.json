@@ -1,0 +1,6 @@
+{
+  "artifact_paths_under_artifacts": true,
+  "default_off_gates": true,
+  "mutated": false,
+  "network_calls": false
+}

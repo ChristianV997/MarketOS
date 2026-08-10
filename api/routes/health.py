@@ -9,14 +9,20 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from backend import api as _core
+from backend.runtime.deployment_status import mvp_deployment_status
 
 router = APIRouter()
+
+
+def _mvp_deployment_status() -> dict[str, object]:
+    """Expose safe deployment booleans without returning configuration values."""
+    return mvp_deployment_status()
 
 
 @router.get("/health")
 def health():
     """Replit uptime monitor / health check."""
-    return {"ok": True}
+    return {"ok": True, "mvp": _mvp_deployment_status()}
 
 
 @router.get("/ready")
@@ -24,7 +30,7 @@ def ready():
     """Readiness probe that waits for the application lifespan to initialize."""
     if not _core._bg_running or not _core._runtime_services_ready:
         return JSONResponse(
-            {"ready": False, "reason": "runtime_services_initializing"},
+            {"ready": False, "reason": "runtime_services_initializing", "mvp": _mvp_deployment_status()},
             status_code=503,
         )
     if os.getenv("MEDUSA_REQUIRED_FOR_READY", "false").lower() == "true":
@@ -32,10 +38,10 @@ def ready():
         medusa_health = commerce_provider.health()
         if not medusa_health.reachable:
             return JSONResponse(
-                {"ready": False, "reason": "required_medusa_unavailable", "detail": medusa_health.detail},
+                {"ready": False, "reason": "required_medusa_unavailable", "detail": medusa_health.detail, "mvp": _mvp_deployment_status()},
                 status_code=503,
             )
-    return {"ready": True}
+    return {"ready": True, "mvp": _mvp_deployment_status()}
 
 
 @router.get("/status")

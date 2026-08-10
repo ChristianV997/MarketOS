@@ -1,0 +1,7 @@
+{
+  "artifact_root": "artifacts",
+  "default_off_gates": ["MARKETOS_PUBLIC_COMMERCE_RUNS", "MARKETOS_SUPABASE_CANONICAL_EVENTS"],
+  "forbidden_frontend_secret_names_present": true,
+  "profile": "marketos-mvp-island",
+  "version": 1
+}

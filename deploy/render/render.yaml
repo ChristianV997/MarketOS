@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: marketos-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: MARKETOS_MVP_MODE
+        value: "1"
+      - key: MARKETOS_PUBLIC_COMMERCE_RUNS
+        value: "0"
+      - key: MARKETOS_SUPABASE_CANONICAL_EVENTS
+        value: "0"
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: MARKETOS_EVENT_READ_JSONL_PATH
+        value: artifacts/commerce-mvp-live-events.jsonl
+      - key: MARKETOS_EVENT_WRITE_JSONL_PATH
+        value: artifacts/commerce-mvp-live-events.jsonl
+      - key: MARKETOS_PUBLIC_SIGNAL_CACHE_DIR
+        value: artifacts/public-signal-cache
