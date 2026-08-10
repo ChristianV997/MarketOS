@@ -92,6 +92,8 @@ also opt-in and server-only; it keeps JSONL as the default output.
 read-only operator surface over local JSONL or explicit server-side staging.
 The existing frontend exposes that surface at `/operator/events`; see
 [Operator Event Dashboard](OPERATOR_EVENT_DASHBOARD.md).
+The dashboard can invoke a server-gated public Google News RSS Commerce MVP
+test; see [Public Commerce MVP Runs](PUBLIC_COMMERCE_MVP_RUNS.md).
 
 ## Promotion gates
 

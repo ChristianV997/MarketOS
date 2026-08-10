@@ -1,0 +1,8 @@
+{
+  "cache_status": "fresh",
+  "event_families": ["commerce_mvp", "public_signal"],
+  "network_used": true,
+  "public_source_status": "succeeded",
+  "signal_count": 2,
+  "status": "succeeded"
+}

@@ -1,0 +1,7 @@
+{
+  "advisory": true,
+  "mutated": false,
+  "read_only": true,
+  "status": "succeeded",
+  "write_targets": []
+}

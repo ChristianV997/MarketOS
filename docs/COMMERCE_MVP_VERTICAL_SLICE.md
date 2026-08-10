@@ -45,9 +45,8 @@ python scripts/run_commerce_mvp_slice.py --fixture tests/fixtures/commerce_mvp/p
 python scripts/run_commerce_mvp_slice.py --fixture tests/fixtures/commerce_mvp/public_signals.json --query "portable espresso maker" --write-jsonl artifacts/commerce-mvp-events.jsonl --json
 ```
 
-The command has no public-network mode. Use the separate, explicitly gated
-public-signal CLI for real public RSS collection, then save/review a local
-fixture or call the runner with its normalized `PublicSignal` records.
+The runner also supports a manually gated public Google News RSS path. See
+`docs/PUBLIC_COMMERCE_MVP_RUNS.md`; fixture mode remains the default.
 
 ## Event behavior
 
@@ -75,3 +74,6 @@ their existing human/live-mode gates.
 5. PageFly/GemPages export refinement.
 6. Upstash-scheduled public signal collection with human review.
 7. A dashboard read view.
+
+The operator dashboard is available at `/operator/events`; its public-run
+control is acknowledgement-gated and uses the fixed Google News RSS source.

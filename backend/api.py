@@ -152,6 +152,11 @@ try:
         app.include_router(_canonical_events_router)
     except ImportError:
         pass
+    try:
+        from api.routes.commerce_mvp import router as _commerce_mvp_router
+        app.include_router(_commerce_mvp_router)
+    except ImportError:
+        pass
 except Exception:
     # The legacy API must remain importable if an optional route dependency is
     # unavailable in a minimal deployment image.

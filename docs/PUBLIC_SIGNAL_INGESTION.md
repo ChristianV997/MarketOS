@@ -68,6 +68,10 @@ An audit failure is a data/provenance blocker, not an execution failure that tri
 
 ## Adding another public source
 
+The existing Google News RSS adapter is also composed by the Commerce MVP
+public-run mode. That path keeps the same explicit network gate, cache/stale
+fallback, record limit, and advisory canonical event metadata.
+
 Add one source at a time with an allowlisted endpoint, explicit operator network gate, bounded timeout/size/record limits, fixtures, deterministic normalization, cache/stale behavior, source attribution, canonical event mapping, replay certification, and no-authority metadata. Do not add credentialed, browser-driven, paid, access-controlled, or mutation-capable sources to this pilot package.
 
 ## Deferred work

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { EventQueryParams, EventSource } from "@/lib/canonicalEventsApi";
-import { useCommerceRuns, useEventTimeline, useEventsReadiness, useShopifyImports } from "@/hooks/useCanonicalEvents";
+import { useCommerceRuns, useEventTimeline, useEventsReadiness, usePublicCommerceMvpRun, useShopifyImports } from "@/hooks/useCanonicalEvents";
 
 type Tab = "timeline" | "commerce" | "shopify";
 const badge = "inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium";
@@ -34,10 +34,17 @@ export default function OperatorEventDashboard() {
   const [draft, setDraft] = useState<EventQueryParams>({ source: "jsonl", limit: 50 });
   const [params, setParams] = useState<EventQueryParams>(draft);
   const [tab, setTab] = useState<Tab>("timeline");
+  const [publicQuery, setPublicQuery] = useState("");
+  const [publicWorkspace, setPublicWorkspace] = useState("demo");
+  const [publicLimit, setPublicLimit] = useState(10);
+  const [publicTarget, setPublicTarget] = useState<"none" | "jsonl" | "supabase_staging" | "both">("none");
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [publicResult, setPublicResult] = useState<{ status: string; event_count: number; blockers: string[]; warnings: string[] } | null>(null);
   const timeline = useEventTimeline(params);
   const commerce = useCommerceRuns(params);
   const shopify = useShopifyImports(params);
   const readiness = useEventsReadiness();
+  const publicRun = usePublicCommerceMvpRun();
   const loading = timeline.isLoading || commerce.isLoading || shopify.isLoading || readiness.isLoading;
   const error = timeline.error || commerce.error || shopify.error || readiness.error;
   const eventTypes = useMemo(() => Object.entries(timeline.data?.event_type_counts ?? {}), [timeline.data]);
@@ -45,6 +52,9 @@ export default function OperatorEventDashboard() {
   const refresh = () => {
     setParams({ ...draft, offset: 0 });
     void Promise.all([timeline.refetch(), commerce.refetch(), shopify.refetch(), readiness.refetch()]);
+  };
+  const runPublicTest = () => {
+    publicRun.mutate({ query: publicQuery.trim(), workspace_id: publicWorkspace.trim() || "demo", max_signals: publicLimit, max_candidates: 5, allow_public_network: true, include_shopify_fixture_context: false, source: "google_news_rss", event_target: publicTarget }, { onSuccess: setPublicResult });
   };
 
   return <div className="mx-auto max-w-7xl space-y-5 p-6">
@@ -68,6 +78,19 @@ export default function OperatorEventDashboard() {
         <label className="text-xs text-zinc-500">Limit<select aria-label="Event limit" value={draft.limit ?? 50} onChange={(event) => update("limit", Number(event.target.value))} className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-200">{[25, 50, 100, 250].map((value) => <option key={value}>{value}</option>)}</select></label>
         <button type="button" onClick={refresh} className="mt-5 h-9 rounded bg-indigo-500 px-4 text-sm font-medium text-white hover:bg-indigo-400">Refresh read view</button>
       </div>
+    </section>
+
+    <section className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4">
+      <div><h2 className="text-sm font-medium text-zinc-100">Run public Commerce MVP test</h2><p className="mt-1 text-xs text-amber-200">This performs one manually acknowledged public/no-auth Google News RSS GET only. It is advisory, has no spend or store authority, and never accepts credentials or source URLs.</p></div>
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <label className="text-xs text-zinc-500">Query<input value={publicQuery} onChange={(event) => setPublicQuery(event.target.value)} placeholder="portable espresso maker" className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-200" /></label>
+        <label className="text-xs text-zinc-500">Workspace<input value={publicWorkspace} onChange={(event) => setPublicWorkspace(event.target.value)} className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-200" /></label>
+        <label className="text-xs text-zinc-500">Max signals<select value={publicLimit} onChange={(event) => setPublicLimit(Number(event.target.value))} className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-200">{[5, 10, 15].map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label className="text-xs text-zinc-500">Event target<select value={publicTarget} onChange={(event) => setPublicTarget(event.target.value as typeof publicTarget)} className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-200"><option value="none">No write</option><option value="jsonl">JSONL</option><option value="supabase_staging">Supabase staging</option><option value="both">Both</option></select></label>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 text-xs text-zinc-400"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />I understand this performs a public no-auth Google News RSS GET only.</label><button type="button" disabled={!acknowledged || !publicQuery.trim() || publicRun.isPending} onClick={runPublicTest} className="rounded bg-amber-500 px-4 py-2 text-sm font-medium text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40">{publicRun.isPending ? "Running…" : "Run public test"}</button></div>
+      {publicRun.error && <p className="mt-3 text-xs text-red-300">{publicRun.error.message}</p>}
+      {publicResult && <div className="mt-3 rounded border border-zinc-700 bg-zinc-950/50 p-3 text-xs text-zinc-300"><p>Status: <span className="font-medium text-amber-200">{publicResult.status}</span> · {publicResult.event_count} events</p>{publicResult.blockers.length > 0 && <p className="mt-1 text-red-300">{publicResult.blockers.join(" · ")}</p>}{publicResult.warnings.length > 0 && <p className="mt-1 text-amber-200">{publicResult.warnings.join(" · ")}</p>}</div>}
     </section>
 
     {loading && <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-6 text-sm text-zinc-400">Loading read-only event data…</div>}
