@@ -30,6 +30,8 @@ The importer emits `shopify_import_batch_started`, product/variant/collection/
 order/line-item/customer observed events, `shopify_store_context_built`, and
 `shopify_import_batch_completed`. JSONL persistence is optional and uses the
 existing `JsonlEventRepository`; Supabase is not selected by default.
+The gated staging path is documented in
+[Supabase Canonical Events Staging](SUPABASE_CANONICAL_EVENTS_STAGING.md).
 
 ## Usage
 

@@ -85,6 +85,9 @@ packet without creating any external commerce object.
 Its optional [Shopify Read-only Import](SHOPIFY_READONLY_IMPORT.md) accepts a
 local export only; it is not an authenticated or write-capable Shopify path.
 
+[Supabase canonical-events staging](SUPABASE_CANONICAL_EVENTS_STAGING.md) is
+also opt-in and server-only; it keeps JSONL as the default output.
+
 ## Promotion gates
 
 Promote one capability at a time only after: schema/RLS review; adapter tests
