@@ -44,8 +44,8 @@ pipeline only, under its own name (`opportunity_scoring`), and never touches
 
 ## Scoring model
 
-`score_opportunity(candidate, *, supplier_evidence=None, operator_override=None)`
-computes 14 dimensions, each backed by a real data source or explicitly
+`score_opportunity(candidate, *, supplier_evidence=None, competition_evidence=None, margin=None, operator_override=None)`
+computes 19 dimensions, each backed by a real data source or explicitly
 marked unavailable — never fabricated:
 
 | Dimension | Source | Provenance when unavailable |
@@ -59,7 +59,12 @@ marked unavailable — never fabricated:
 | `assumption_count` | `candidate.assumptions` | never |
 | `missing_data_penalty` | `candidate.unknowns` | never |
 | `category_stability` | none exists in this repository | always `unavailable` |
-| `competition_estimate` | none exists in this repository | always `unavailable` |
+| `market_saturation` | `MarketIntelligenceReport.market_saturation` | `unavailable` — no competition evidence gathered |
+| `price_competitiveness` | observed competitor price dispersion | `unavailable` — no observed pricing dispersion |
+| `supplier_advantage` | `MarginIntelligence.observed_supplier_advantage` | `unavailable` — no observed margin comparison |
+| `market_confidence` | `MarketIntelligenceReport.confidence` | `unavailable` — no competition evidence gathered |
+| `review_strength` | observed competitor rating/review density | `unavailable` — no observed rating/review data |
+| `offer_diversity` | observed brand/seller diversity | `unavailable` — no observed diversity data |
 | `product_simplicity` | observed CJ variant count | `unavailable` — variants not observed |
 | `shipping_complexity` | observed CJ shipping cost/delivery days | `unavailable` — neither observed |
 | `weight_volume` | observed CJ weight | `unavailable` — weight not observed |
@@ -75,10 +80,15 @@ the module) are renormalized across whichever dimensions were actually
 computed for a given candidate, so a candidate with no supplier evidence is
 never penalized or boosted by dimensions that simply don't exist for it yet.
 
-`category_stability` and `competition_estimate` are always `unavailable`:
-no market-saturation or category-stability data source exists anywhere in
-this repository. They are reported (never hidden) so an operator can see
-exactly what evidence this score does *not* include.
+`category_stability` is always `unavailable`: no category-stability data
+source exists anywhere in this repository. The six market-evidence
+dimensions (`market_saturation` through `offer_diversity`) were added by
+the Competition Intelligence follow-on — see
+[Competition Intelligence](COMPETITION_INTELLIGENCE.md#opportunity-scoring-integration)
+for their exact computation; they replace what was previously a single,
+permanently-`unavailable` `competition_estimate` placeholder. All
+unavailable dimensions are reported (never hidden) so an operator can see
+exactly what evidence a score does *not* include.
 
 ## Confidence model
 
@@ -87,7 +97,7 @@ this is how the module satisfies "unknown information should reduce
 confidence instead of producing fake certainty":
 
 ```text
-confidence = mean(provenance_weight[dimension.provenance] for dimension in all_14_dimensions)
+confidence = mean(provenance_weight[dimension.provenance] for dimension in all_19_dimensions)
 provenance_weight = {"observed": 1.0, "derived": 0.7, "assumed": 0.35, "unavailable": 0.0}
 ```
 
@@ -96,11 +106,17 @@ report the same breakdown as percentages, so an operator can see exactly how
 much of a score rests on observation versus assumption versus nothing at
 all.
 
-Without any supplier evidence, six candidate-only dimensions are always
-available (one `observed`, five `derived`), which floors confidence at
-`(1.0 + 5*0.7) / 14 ≈ 0.32` for any candidate — gathering supplier evidence
-is the only way to raise it further, and gathering evidence with only
-`assumed`-tier data (e.g. dry-run/degraded fetches) raises it only slightly.
+Without any supplier or competition evidence, six candidate-only
+dimensions are always available (one `observed`, five `derived`), which
+floors confidence at `(1.0 + 5*0.7) / 19 ≈ 0.24` for any candidate —
+gathering supplier and/or competition evidence is the only way to raise it
+further, and gathering evidence with only `assumed`-tier data (e.g.
+dry-run/degraded fetches) raises it only slightly. This floor dropped from
+~0.32 (over 14 dimensions) to ~0.24 (over 19) when the Competition
+Intelligence dimensions were added — more of the picture is now honestly
+represented as unknown by default, which correspondingly made the `< 0.3`
+"gather more evidence" recommended-action threshold reachable without any
+evidence at all (previously unreachable; see `docs/COMPETITION_INTELLIGENCE.md`).
 
 ## Ranking algorithm
 
@@ -231,15 +247,21 @@ per-dimension breakdown table. The top-ranked candidate is visually marked
   order, JSON-safety, unrelated-event exclusion, `event_query_report()`
   wiring.
 
-No existing test was modified to make room for these; all pre-existing
-Commerce MVP, supplier-evidence, and canonical-event tests pass unchanged.
+No existing test was modified to make room for these; the Competition
+Intelligence follow-on later updated three of these tests' hardcoded
+dimension counts/confidence thresholds to reflect the new 19-dimension
+total (see `docs/COMPETITION_INTELLIGENCE.md`) — a reflection of real,
+intentional behavior change, not a workaround. All pre-existing Commerce
+MVP, supplier-evidence, and canonical-event tests still pass unchanged.
 
 ## Future extensions
 
-- `category_stability` and `competition_estimate` remain permanently
-  `unavailable` until a real data source for either exists in this
-  repository — do not fill them with a heuristic; that would fabricate
-  certainty this module is explicitly designed never to produce.
+- `category_stability` remains permanently `unavailable` until a real
+  category-stability data source exists in this repository — do not fill
+  it with a heuristic; that would fabricate certainty this module is
+  explicitly designed never to produce. (`competition_estimate` was
+  replaced by six real dimensions fed from Competition Intelligence — see
+  `docs/COMPETITION_INTELLIGENCE.md`.)
 - Score visualization (trend lines across repeated runs of the same query)
   and evidence drill-down (linking a `candidate_scored` event directly to
   its underlying `supplier_product_observed` event) are natural follow-ons

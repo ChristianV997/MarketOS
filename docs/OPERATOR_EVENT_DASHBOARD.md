@@ -2,9 +2,10 @@
 
 The frontend route `/operator/events` is a read-only operator surface for
 canonical event timelines, Commerce MVP runs, Shopify import summaries,
-opportunity-ranking scores, and event-source readiness. It uses the existing
-GET-only `/api/events` routes; it has no action controls, credential inputs,
-browser Supabase client, or local-file-path field.
+opportunity-ranking scores, competition/pricing intelligence, and
+event-source readiness. It uses the existing GET-only `/api/events` routes;
+it has no action controls, credential inputs, browser Supabase client, or
+local-file-path field.
 
 The **Opportunity ranking** tab shows every scored candidate for a run: its
 composite score, confidence, observed/derived/assumed/unknown percentage
@@ -18,6 +19,20 @@ key-list-only summary — see
 public Commerce MVP test** form has a **Rank candidates with opportunity
 scoring** checkbox that passes `use_opportunity_ranking=true` through to
 `/api/commerce-mvp/public-run`.
+
+The **Competition & pricing** tab shows, per run: observed competitor
+count, median/min/max price, market saturation and maturity, confidence,
+a supplier-vs-market margin card (observed gross margin, margin range,
+supplier advantage), and an expandable observed-price-distribution table
+(title, source, price, brand, seller, rating, reviews, per-offer
+confidence) — the evidence drill-down behind the Competition Intelligence
+scoring dimensions. It reads `/api/events/competition-summaries` — see
+[Competition Intelligence](COMPETITION_INTELLIGENCE.md#read-api-and-dashboard-view).
+The run form has a **Gather public competitor pricing** checkbox (with a
+competitor-URL input) that passes `attempt_competition_evidence`/
+`competitor_urls` through — it only takes effect together with the
+opportunity-ranking checkbox and requires the server-side
+`MARKETOS_COMPETITION_EVIDENCE_LIVE` gate.
 
 ## Run locally
 

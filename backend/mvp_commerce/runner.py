@@ -12,6 +12,7 @@ from .approval_packet import build_manual_approval_packet
 from .events import commerce_mvp_events
 from .landing_page_packet import build_landing_page_packet
 from .models import CommerceMvpRun, CreativePacket, OpportunityCandidate, UnitEconomicsSummary
+from .competition_intelligence import build_market_opportunity_report, compute_margin_intelligence, competition_intelligence_events
 from .opportunity import build_opportunity_candidates_from_signals, select_candidate
 from .opportunity_scoring import OpportunityAssessment, opportunity_scoring_events, rank_opportunities
 from .store_draft_packet import build_store_draft_packet
@@ -74,22 +75,41 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
                            assumed_price: float = 49.0, assumed_unit_cost: float = 15.0, assumed_shipping_cost: float = 6.0,
                            assumed_cac: float = 12.0, assumed_return_rate: float = .08, payment_fee_rate: float = .03,
                            write_repository: EventRepository | None = None, shopify_store_context: Any | None = None,
-                           supplier_evidence: Any | None = None, use_opportunity_ranking: bool = False) -> CommerceMvpRun:
+                           supplier_evidence: Any | None = None, use_opportunity_ranking: bool = False,
+                           competition_evidence: Any | None = None) -> CommerceMvpRun:
     rows = list(signals if signals is not None else _load_signals(signal_fixture_path) if signal_fixture_path else [])[:max(1, max_signals)]
     query = query.strip(); stable = hashlib.sha256((workspace_id + query + "|".join(item.signal_id for item in rows)).encode()).hexdigest()[:20]
     started = float(int(stable[:8], 16) % 1_000_000 + 1_700_000_000)
     candidates = build_opportunity_candidates_from_signals(rows, workspace_id, query, max_candidates)
     # use_opportunity_ranking defaults to False, so every existing caller
     # keeps the exact same select_candidate()-driven pick as before this
-    # parameter existed.
+    # parameter existed. competition_evidence composes only through that
+    # same opt-in flag, never on the default path.
     opportunity_assessment: OpportunityAssessment | None = None
+    market_opportunity_report: Any | None = None
     resolved_evidence = supplier_evidence
+    resolved_competition: Any | None = None
+    resolved_margin: Any | None = None
     if use_opportunity_ranking and candidates:
         provisional = select_candidate(candidates)
         evidence_map = {provisional.candidate_id: supplier_evidence} if provisional is not None and supplier_evidence is not None else {}
-        opportunity_assessment = rank_opportunities(candidates, workspace_id=workspace_id, query=query, supplier_evidence_by_candidate=evidence_map, generated_at=started)
+        competition_map = {provisional.candidate_id: competition_evidence} if provisional is not None and competition_evidence is not None else {}
+        margin = compute_margin_intelligence(provisional.candidate_id, supplier_evidence=supplier_evidence, market_report=competition_evidence) if provisional is not None else None
+        margin_map = {provisional.candidate_id: margin} if provisional is not None and margin is not None else {}
+        opportunity_assessment = rank_opportunities(
+            candidates, workspace_id=workspace_id, query=query, supplier_evidence_by_candidate=evidence_map,
+            competition_evidence_by_candidate=competition_map, margin_by_candidate=margin_map, generated_at=started,
+        )
         selected = next((item for item in candidates if item.candidate_id == opportunity_assessment.top_candidate_id), None) or provisional
         resolved_evidence = evidence_map.get(selected.candidate_id)
+        resolved_competition = competition_map.get(selected.candidate_id)
+        resolved_margin = margin_map.get(selected.candidate_id)
+        if resolved_competition is not None or resolved_margin is not None:
+            selected_score = next((score for score in opportunity_assessment.scores if score.candidate_id == selected.candidate_id), None)
+            market_opportunity_report = build_market_opportunity_report(
+                selected.candidate_id, selected.product_name, opportunity_score=selected_score,
+                supplier_evidence=resolved_evidence, market_report=resolved_competition, margin=resolved_margin, generated_at=started,
+            )
     else:
         selected = select_candidate(candidates)
     warnings: list[str] = []
@@ -109,6 +129,7 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
     approval = build_manual_approval_packet(selected, recommendations) if selected else None
     metadata = {"network_used": False, "provider_calls": False, "supabase_default": False, "jsonl_default": False}
     if opportunity_assessment is not None: metadata["opportunity_assessment"] = opportunity_assessment.to_dict()
+    if market_opportunity_report is not None: metadata["market_opportunity_report"] = market_opportunity_report.to_dict()
     base = CommerceMvpRun(f"commerce-mvp-{stable}", workspace_id, query, started, started, mode, "completed" if selected else "blocked", tuple(item.to_dict() for item in rows), tuple(candidates), selected, economics, creative, landing, store, recommendations, approval, (), tuple(warnings), ("manual_approval_required_before_external_action",), metadata)
     if shopify_store_context is not None:
         # Imported context is evidence only: the existing deterministic candidate
@@ -117,6 +138,8 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
         base, _ = enrich_commerce_mvp_with_shopify_context(base, shopify_store_context)
     events = list(commerce_mvp_events(base))
     if opportunity_assessment is not None: events.extend(opportunity_scoring_events(opportunity_assessment, run_id=base.run_id))
+    if resolved_competition is not None:
+        events.extend(competition_intelligence_events(resolved_competition, resolved_margin, market_opportunity_report, workspace_id=workspace_id, run_id=base.run_id))
     if write_repository is not None: write_repository.append_many(events)
     return replace(base, canonical_event_ids=tuple(event.event_id for event in events), completed_at=started + len(events) / 1000)
 

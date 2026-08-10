@@ -116,6 +116,71 @@ export interface OpportunityRankingSummary {
   event_count: number;
 }
 
+export interface CompetitorOfferView {
+  source: string;
+  source_url: string;
+  crawl_timestamp: number;
+  external_listing_id: string;
+  title: string;
+  field_status: Record<string, string>;
+  price: number | null;
+  currency: string;
+  availability: string;
+  shipping_cost: number | null;
+  brand: string;
+  seller: string;
+  rating: number | null;
+  review_count: number | null;
+  variant_count: number | null;
+  image: string;
+  confidence: number;
+  warnings: string[];
+}
+
+export interface MarginView {
+  candidate_id: string;
+  observed_gross_margin: number | null;
+  observed_margin_low: number | null;
+  observed_margin_high: number | null;
+  observed_supplier_advantage: number | null;
+  observed_pricing_confidence: number;
+  observed_margin_confidence: number;
+  provenance: Record<string, string>;
+  warnings: string[];
+}
+
+export interface CompetitionSummaryView {
+  workspace_id: string | null;
+  run_id: string;
+  query: string;
+  observed_competitor_count: number;
+  observed_median_price: number | null;
+  market_saturation: number | null;
+  market_maturity: string;
+  confidence: number;
+  offers: CompetitorOfferView[];
+  margin: MarginView | null;
+  event_count: number;
+}
+
+export interface MarketOpportunityReportView {
+  candidate_id: string;
+  product_name: string;
+  opportunity_score: number | null;
+  opportunity_confidence: number | null;
+  supplier_summary: { attempted: boolean; unit_cost: number | null; shipping_cost: number | null; supplier: string | null; source_url: string };
+  competition_summary: { observed_competitor_count: number; market_saturation: number | null; market_maturity: string; confidence: number };
+  observed_pricing: { median: number | null; mean: number | null; min: number | null; max: number | null };
+  observed_supplier_cost: number | null;
+  observed_margin: Partial<MarginView>;
+  market_risks: string[];
+  strengths: string[];
+  weaknesses: string[];
+  missing_evidence: string[];
+  operator_actions: string[];
+  recommended_next_step: string;
+}
+
 export interface EventsReadiness {
   jsonl_path_configured: boolean;
   supabase_staging: { configured: boolean; missing_env?: string[]; read_only: boolean; server_side_only: boolean; write_gate_enabled?: boolean };
@@ -136,6 +201,8 @@ export interface PublicCommerceRunRequest {
   attempt_supplier_evidence?: boolean;
   supplier_candidate_urls?: string[];
   use_opportunity_ranking?: boolean;
+  attempt_competition_evidence?: boolean;
+  competitor_urls?: string[];
 }
 
 export interface PublicCommerceRunReport {
@@ -154,6 +221,7 @@ export interface PublicCommerceRunReport {
   mutated: boolean;
   supplier_evidence_attempted?: boolean;
   opportunity_ranking_used?: boolean;
+  competition_evidence_attempted?: boolean;
 }
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? (import.meta.env.VITE_API_URL as string | undefined) ?? "";
@@ -191,4 +259,5 @@ export const fetchShopifyImports = (params: EventQueryParams) => get<{ imports: 
 export const fetchEventsReadiness = () => get<EventsReadiness>("/api/events/readiness");
 export const fetchSupplierEvidenceEvents = (params: EventQueryParams) => get<{ events: EventRecordView[]; read_only: boolean }>("/api/events/supplier-evidence", params);
 export const fetchOpportunityRankings = (params: EventQueryParams) => get<{ rankings: OpportunityRankingSummary[]; read_only: boolean }>("/api/events/opportunity-rankings", params);
+export const fetchCompetitionSummaries = (params: EventQueryParams) => get<{ summaries: CompetitionSummaryView[]; read_only: boolean }>("/api/events/competition-summaries", params);
 export const runPublicCommerceMvp = (request: PublicCommerceRunRequest) => post<PublicCommerceRunReport>("/api/commerce-mvp/public-run", request);

@@ -11,9 +11,10 @@ This fixture-first workflow turns attributed public/no-auth signal records into
 a reviewable commerce test packet:
 
 ```text
-public signal fixture -> opportunity hypothesis -> [opportunity scoring/ranking]
--> assumption-based economics -> safe creative draft -> landing-page export
--> store-draft export -> vendor plan -> manual approval -> canonical advisory events
+public signal fixture -> opportunity hypothesis -> [competition intelligence]
+-> [opportunity scoring/ranking] -> assumption-based economics -> safe
+creative draft -> landing-page export -> store-draft export -> vendor plan
+-> manual approval -> canonical advisory events
 ```
 
 It is the MVP Island's demoable workflow, not a live commerce pipeline. It
@@ -87,6 +88,14 @@ their existing human/live-mode gates.
   reporting (see `docs/OPPORTUNITY_SCORING.md`) —
   `use_opportunity_ranking` on `/api/commerce-mvp/public-run`,
   `run_commerce_mvp_slice`, and `run_commerce_mvp_from_public_rss`.
+- Competition Intelligence: opt-in public competitor-listing evidence
+  (observed pricing, saturation, margin-vs-market) feeding six additional
+  Opportunity Scoring dimensions and a Market Opportunity Report, only
+  active alongside opportunity ranking (see
+  `docs/COMPETITION_INTELLIGENCE.md`) — `attempt_competition_evidence`/
+  `competitor_urls` on `/api/commerce-mvp/public-run` and
+  `run_commerce_mvp_from_public_rss`, `competition_evidence` on
+  `run_commerce_mvp_slice`.
 
 ## Next integrations (not implemented)
 
@@ -99,3 +108,7 @@ their existing human/live-mode gates.
 5. Authenticated CJ API supplier evidence once `CJ_EMAIL`/`CJ_API_KEY`
    credentials are configured (`backend.validation.suppliers.CJDropshippingClient`
    already implements the client; it just has no credentials yet).
+6. Automatic competitor-listing discovery (search-results parsing for
+   Google Shopping/Amazon/Etsy/AliExpress) — today: operator-supplied
+   `competitor_urls` are the reliable path, matching the CJ-discovery
+   precedent above (see `docs/COMPETITION_INTELLIGENCE.md`).

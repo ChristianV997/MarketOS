@@ -84,5 +84,25 @@ def opportunity_scoring(workspace_id: str | None = None, limit: int = Query(100,
     events = _report(source, _query(workspace_id, None, None, None, limit, offset))["timeline"]["events"]
     scoring_event_types = {"opportunity_scoring_started", "candidate_scored", "opportunity_ranked", "opportunity_scoring_completed"}
     return {"events": [event for event in events if event.get("event_type") in scoring_event_types], "read_only": True}
+@router.get("/competition-evidence")
+def competition_evidence(workspace_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None):
+    """Competition-intelligence events for one workspace: observed listings/
+    summary/pricing/completed, newest first. A thin filter over the
+    existing timeline (same pattern as /api/events/supplier-evidence and
+    /api/events/opportunity-scoring) — no second query engine."""
+    if limited := _read_limit_response(request): return limited
+    events = _report(source, _query(workspace_id, None, None, None, limit, offset))["timeline"]["events"]
+    competition_event_types = {"competition_observed", "competition_summary_created", "market_pricing_computed", "market_intelligence_completed"}
+    return {"events": [event for event in events if event.get("event_type") in competition_event_types], "read_only": True}
+@router.get("/competition-summaries")
+def competition_summaries(workspace_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None):
+    """Decoded competition-summary reports: observed competitor count,
+    median price, saturation, maturity, confidence, observed offers, and
+    margin — the explainable view an operator reads to see why a market
+    looks the way it does. Same query_service.py::build_*_summaries
+    pattern as /commerce-runs and /opportunity-rankings; not a second query
+    engine."""
+    if limited := _read_limit_response(request): return limited
+    return {"summaries": _report(source, _query(workspace_id, None, None, None, limit, offset))["competition_summaries"], "read_only": True}
 @router.get("/readiness")
 def readiness(): return {"jsonl_path_configured": bool(os.getenv("MARKETOS_EVENT_READ_JSONL_PATH")), "supabase_staging": explain_supabase_readiness(), "read_only": True, "mutated": False}

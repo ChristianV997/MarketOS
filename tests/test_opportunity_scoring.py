@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from backend.adapters.research.cj_public_evidence import CJProductEvidence
+from backend.adapters.research.competition_evidence import CompetitorOffer
 from backend.contracts.events import Event
 from backend.mvp_commerce import opportunity_scoring as mod
+from backend.mvp_commerce.competition_intelligence import MarginIntelligence, MarketIntelligenceReport
 from backend.mvp_commerce.models import OpportunityCandidate
 from backend.mvp_commerce.supplier_evidence import SupplierEvidenceResult
 
@@ -64,8 +66,9 @@ class TestDimensionsWithoutEvidence:
         score = mod.score_opportunity(_candidate())
         by_name = {d.name: d for d in score.dimensions}
         for name in ("supplier_evidence_quality", "observed_supplier_cost", "product_simplicity",
-                     "shipping_complexity", "weight_volume", "variant_complexity",
-                     "category_stability", "competition_estimate"):
+                     "shipping_complexity", "weight_volume", "variant_complexity", "category_stability",
+                     "market_saturation", "price_competitiveness", "supplier_advantage",
+                     "market_confidence", "review_strength", "offer_diversity"):
             assert by_name[name].is_unknown is True
             assert by_name[name].provenance == "unavailable"
             assert by_name[name].raw_value is None
@@ -82,7 +85,7 @@ class TestDimensionsWithoutEvidence:
 
     def test_unknowns_listed_and_confidence_reduced(self):
         score = mod.score_opportunity(_candidate())
-        assert len(score.unknowns) == 8
+        assert len(score.unknowns) == 13
         assert score.confidence < 1.0
         assert score.unknown_pct > 0.0
 
@@ -128,27 +131,143 @@ class TestDimensionsWithEvidence:
         assert with_evidence_score.observed_pct > no_evidence_score.observed_pct
 
 
-class TestRecommendedAction:
-    def test_low_score_without_supplier_evidence_recommends_corroboration(self):
-        # Without any supplier evidence, six candidate-only dimensions are
-        # always available (never "unavailable"), which floors confidence
-        # at ~0.32 -- never full certainty, but also never low enough to
-        # trip the <0.3 "gather more evidence" branch on its own. A weak
-        # candidate with a low composite therefore lands in the middle
-        # "corroborate" bucket, not the advance bucket.
-        score = mod.score_opportunity(_candidate(source_count=1, local_score=5.0, recency=50.0))
-        assert score.confidence < 0.6
-        assert score.composite_score < 60.0
-        assert score.recommended_action == "corroborate_before_advancing"
+def _competitor_offer(listing_id: str, *, price: float, brand: str = "BrandA", seller: str = "SellerA",
+                       rating: float | None = 4.0, review_count: int | None = 50) -> CompetitorOffer:
+    return CompetitorOffer(
+        source="public_storefront", source_url=f"https://example.com/{listing_id}", crawl_timestamp=1_700_000_000.0,
+        external_listing_id=listing_id, title="Portable Espresso Maker",
+        field_status={"title": "observed", "price": "observed", "brand": "observed", "seller": "observed",
+                      "rating": "observed" if rating is not None else "missing",
+                      "review_count": "observed" if review_count is not None else "missing"},
+        price=price, currency="USD", availability="InStock", brand=brand, seller=seller,
+        rating=rating, review_count=review_count,
+    )
 
-    def test_confidence_formula_would_recommend_gathering_evidence_below_threshold(self):
-        # score_opportunity() always computes six candidate-only dimensions
-        # (never "unavailable"), which floors reachable confidence at
-        # ~0.32 for any real candidate -- so the <0.3 "gather more
-        # evidence" branch is unreachable end-to-end today. Assert the
-        # threshold logic itself directly against _confidence()'s output
-        # so a future change to that floor (e.g. more optional dimensions)
-        # is still guarded by a real test of the decision boundary.
+
+def _market_report(*, offers=None, median_price=30.0, mean_price=30.0, min_price=25.0, max_price=35.0,
+                    variance=5.0, review_density=50.0, rating_mean=4.0, brand_diversity=0.5, seller_diversity=0.5,
+                    saturation=0.3, maturity="emerging", confidence=0.8, competitor_count=3) -> MarketIntelligenceReport:
+    return MarketIntelligenceReport(
+        query="portable espresso maker", generated_at=1_700_000_000.0,
+        offers=tuple(offers or (_competitor_offer("l1", price=25.0), _competitor_offer("l2", price=35.0))),
+        observed_competitor_count=competitor_count, observed_median_price=median_price, observed_mean_price=mean_price,
+        observed_min_price=min_price, observed_max_price=max_price, observed_pricing_variance=variance,
+        observed_shipping_min=2.0, observed_shipping_max=6.0, observed_review_density=review_density,
+        observed_rating_mean=rating_mean, observed_brand_diversity=brand_diversity, observed_seller_diversity=seller_diversity,
+        observed_availability_ratio=1.0, market_maturity=maturity, market_saturation=saturation, confidence=confidence,
+    )
+
+
+def _margin(*, supplier_advantage=0.3, gross_margin=0.5) -> MarginIntelligence:
+    return MarginIntelligence(
+        candidate_id="commerce-candidate-abc123", observed_gross_margin=gross_margin, observed_margin_low=0.2,
+        observed_margin_high=0.6, observed_supplier_advantage=supplier_advantage, observed_pricing_confidence=0.8,
+        observed_margin_confidence=0.85, provenance={"supplier_cost": "observed", "market_price": "observed"},
+    )
+
+
+class TestCompetitionDimensions:
+    def test_all_six_unavailable_without_competition_or_margin(self):
+        score = mod.score_opportunity(_candidate())
+        by_name = {d.name: d for d in score.dimensions}
+        for name in ("market_saturation", "price_competitiveness", "supplier_advantage",
+                     "market_confidence", "review_strength", "offer_diversity"):
+            assert by_name[name].is_unknown is True
+
+    def test_market_saturation_observed_with_competition_evidence(self):
+        score = mod.score_opportunity(_candidate(), competition_evidence=_market_report(saturation=0.2))
+        dim = {d.name: d for d in score.dimensions}["market_saturation"]
+        assert dim.provenance == "observed"
+        assert dim.raw_value == 0.2
+        assert dim.normalized_value == 80.0  # low saturation -> high score
+
+    def test_low_saturation_scores_higher_than_high_saturation(self):
+        low = mod.score_opportunity(_candidate(), competition_evidence=_market_report(saturation=0.1))
+        high = mod.score_opportunity(_candidate(), competition_evidence=_market_report(saturation=0.9))
+        low_dim = {d.name: d for d in low.dimensions}["market_saturation"]
+        high_dim = {d.name: d for d in high.dimensions}["market_saturation"]
+        assert low_dim.normalized_value > high_dim.normalized_value
+
+    def test_price_competitiveness_observed_from_dispersion(self):
+        score = mod.score_opportunity(_candidate(), competition_evidence=_market_report(median_price=30.0, variance=9.0))
+        dim = {d.name: d for d in score.dimensions}["price_competitiveness"]
+        assert dim.provenance == "observed"
+        assert dim.raw_value == 0.3  # 9.0 / 30.0
+
+    def test_price_competitiveness_unavailable_without_median_price(self):
+        report = _market_report(median_price=None, variance=None)
+        score = mod.score_opportunity(_candidate(), competition_evidence=report)
+        assert {d.name: d for d in score.dimensions}["price_competitiveness"].is_unknown is True
+
+    def test_supplier_advantage_requires_margin_not_just_competition(self):
+        score = mod.score_opportunity(_candidate(), competition_evidence=_market_report())
+        assert {d.name: d for d in score.dimensions}["supplier_advantage"].is_unknown is True
+        with_margin = mod.score_opportunity(_candidate(), competition_evidence=_market_report(), margin=_margin(supplier_advantage=0.4))
+        dim = {d.name: d for d in with_margin.dimensions}["supplier_advantage"]
+        assert dim.is_unknown is False
+        assert dim.raw_value == 0.4
+        assert dim.normalized_value == 40.0
+
+    def test_market_confidence_reflects_report_confidence(self):
+        score = mod.score_opportunity(_candidate(), competition_evidence=_market_report(confidence=0.65))
+        dim = {d.name: d for d in score.dimensions}["market_confidence"]
+        assert dim.raw_value == 0.65
+        assert dim.normalized_value == 65.0
+
+    def test_review_strength_combines_rating_and_density(self):
+        strong = mod.score_opportunity(_candidate(), competition_evidence=_market_report(rating_mean=4.8, review_density=200.0))
+        weak = mod.score_opportunity(_candidate(), competition_evidence=_market_report(rating_mean=2.0, review_density=5.0))
+        strong_dim = {d.name: d for d in strong.dimensions}["review_strength"]
+        weak_dim = {d.name: d for d in weak.dimensions}["review_strength"]
+        assert strong_dim.normalized_value > weak_dim.normalized_value
+
+    def test_offer_diversity_averages_brand_and_seller(self):
+        score = mod.score_opportunity(_candidate(), competition_evidence=_market_report(brand_diversity=0.4, seller_diversity=0.6))
+        dim = {d.name: d for d in score.dimensions}["offer_diversity"]
+        assert dim.raw_value == 0.5
+        assert dim.normalized_value == 50.0
+
+    def test_full_competition_evidence_raises_confidence_above_supplier_only(self):
+        supplier_only = mod.score_opportunity(_candidate(), supplier_evidence=_evidence_result(_evidence()))
+        full = mod.score_opportunity(
+            _candidate(), supplier_evidence=_evidence_result(_evidence()),
+            competition_evidence=_market_report(), margin=_margin(),
+        )
+        assert full.confidence > supplier_only.confidence
+        assert full.observed_pct > supplier_only.observed_pct
+
+    def test_rank_opportunities_keys_competition_and_margin_per_candidate(self):
+        strong = _candidate("commerce-candidate-strong", source_count=3, local_score=60.0, recency=100.0)
+        weak = _candidate("commerce-candidate-weak", source_count=1, local_score=5.0, recency=50.0)
+        competition_map = {weak.candidate_id: _market_report()}
+        margin_map = {weak.candidate_id: _margin()}
+        assessment = mod.rank_opportunities(
+            [strong, weak], workspace_id="workspace-1", query="x",
+            competition_evidence_by_candidate=competition_map, margin_by_candidate=margin_map, generated_at=1.0,
+        )
+        by_id = {s.candidate_id: s for s in assessment.scores}
+        assert {d.name: d for d in by_id[strong.candidate_id].dimensions}["market_saturation"].is_unknown is True
+        assert {d.name: d for d in by_id[weak.candidate_id].dimensions}["market_saturation"].is_unknown is False
+
+
+class TestRecommendedAction:
+    def test_low_confidence_without_any_evidence_recommends_gathering_evidence(self):
+        # Without supplier or competition evidence, six candidate-only
+        # dimensions are always available (never "unavailable") out of 19
+        # total, which floors confidence at ~0.237 -- below the <0.3
+        # "gather more evidence" threshold. Adding the six Competition
+        # Intelligence dimensions (all unavailable by default) lowered this
+        # floor from the pre-Competition-Intelligence ~0.32, making this
+        # branch reachable end-to-end.
+        score = mod.score_opportunity(_candidate(source_count=1, local_score=5.0, recency=50.0))
+        assert score.confidence < 0.3
+        assert score.recommended_action == "gather_more_evidence_before_any_decision"
+
+    def test_confidence_formula_threshold_boundary(self):
+        # Directly assert the threshold logic against _confidence()'s
+        # output so a future change to the dimension count is still guarded
+        # by a real test of the decision boundary, independent of any one
+        # candidate fixture.
         all_unavailable = tuple(
             mod.ScoreDimension(name, None, None, 0.0, 0.0, "no data", "unavailable", True)
             for name in mod._WEIGHTS
@@ -262,7 +381,7 @@ class TestToDict:
         score = mod.score_opportunity(_candidate())
         payload = score.to_dict()
         assert payload["candidate_id"] == score.candidate_id
-        assert len(payload["dimensions"]) == 14
+        assert len(payload["dimensions"]) == 19
         assert payload["confidence"] == score.confidence
 
     def test_assessment_to_dict_contains_all_scores(self):

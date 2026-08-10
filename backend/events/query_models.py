@@ -38,6 +38,20 @@ class ShopifyImportSummary:
         value = asdict(self); value["warnings"] = list(self.warnings); return value
 
 @dataclass(frozen=True)
+class CompetitionSummary:
+    """Decoded competition_intelligence_events() output for one Commerce
+    MVP run — same rationale as OpportunityRankingSummary: the generic
+    timeline's payload_summary (key names/counts only) can't carry the
+    actual observed pricing/saturation/margin data an operator needs to
+    see why a market looks the way it does."""
+    workspace_id: str | None; run_id: str; query: str
+    observed_competitor_count: int; observed_median_price: float | None
+    market_saturation: float | None; market_maturity: str; confidence: float
+    offers: tuple[dict[str, Any], ...]; margin: dict[str, Any] | None; event_count: int
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self); value["offers"] = [dict(item) for item in self.offers]; return value
+
+@dataclass(frozen=True)
 class OpportunityRankingSummary:
     """Decoded opportunity_scoring_events() output for one Commerce MVP run —
     unlike EventRecordView.payload_summary (key names/counts only, for the
@@ -50,4 +64,4 @@ class OpportunityRankingSummary:
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self); value["scores"] = [dict(item) for item in self.scores]; return value
 
-__all__ = ["CommerceRunSummary", "EventQuery", "EventRecordView", "EventTimeline", "OpportunityRankingSummary", "ShopifyImportSummary"]
+__all__ = ["CommerceRunSummary", "CompetitionSummary", "EventQuery", "EventRecordView", "EventTimeline", "OpportunityRankingSummary", "ShopifyImportSummary"]

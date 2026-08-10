@@ -41,6 +41,22 @@ data source backs it. A dimension with no backing data is still reported
 *confidence*, never fabricates a score. This mirrors exactly the
 field-level provenance discipline already established in
 `backend.adapters.research.cj_public_evidence.CJProductEvidence`.
+
+Competition Intelligence integration (Phase 1 follow-on): `competition`/
+`margin` are additive, `None`-default parameters on `score_opportunity()`/
+`rank_opportunities()`, following the exact same pattern already
+established for `supplier_evidence` — six market-evidence dimensions
+(`market_saturation`, `price_competitiveness`, `supplier_advantage`,
+`market_confidence`, `review_strength`, `offer_diversity`) are always
+present in `_all_dimensions()`, resolving to `provenance="unavailable"`
+when no `MarketIntelligenceReport`/`MarginIntelligence` is supplied — the
+same "always computed, resolves to unavailable" pattern the supplier-
+evidence dimensions (`supplier_evidence_quality`, `product_simplicity`,
+etc.) already use. This replaces the old permanently-unavailable
+`competition_estimate` placeholder (see `docs/OPPORTUNITY_SCORING.md` for
+the full before/after). `category_stability` remains permanently
+unavailable — Competition Intelligence observes pricing/saturation, not
+category-level stability, and no data source for that exists.
 """
 from __future__ import annotations
 
@@ -50,6 +66,7 @@ from typing import Any
 
 from backend.contracts.events import Event
 
+from .competition_intelligence import MarginIntelligence, MarketIntelligenceReport
 from .opportunity import OpportunityCandidate
 from .supplier_evidence import SupplierEvidenceResult
 
@@ -66,7 +83,12 @@ _WEIGHTS: dict[str, float] = {
     "assumption_count": 5.0,
     "missing_data_penalty": 5.0,
     "category_stability": 10.0,
-    "competition_estimate": 10.0,
+    "market_saturation": 10.0,
+    "price_competitiveness": 10.0,
+    "supplier_advantage": 10.0,
+    "market_confidence": 5.0,
+    "review_strength": 5.0,
+    "offer_diversity": 5.0,
     "product_simplicity": 5.0,
     "shipping_complexity": 5.0,
     "weight_volume": 5.0,
@@ -272,7 +294,74 @@ def _variant_complexity(evidence: SupplierEvidenceResult | None) -> ScoreDimensi
     return _dim("variant_complexity", float(count), normalized, f"{count} observed variant option(s)", "observed")
 
 
-def _all_dimensions(candidate: OpportunityCandidate, evidence: SupplierEvidenceResult | None) -> tuple[ScoreDimension, ...]:
+def _market_saturation(competition: MarketIntelligenceReport | None) -> ScoreDimension:
+    if competition is None or competition.market_saturation is None:
+        return _unavailable("market_saturation", "no competition evidence gathered for this candidate")
+    normalized = round(max(0.0, 100.0 - competition.market_saturation * 100.0), 2)
+    provenance = "observed" if competition.observed_competitor_count > 0 else "derived"
+    return _dim("market_saturation", competition.market_saturation, normalized,
+                f"{competition.observed_competitor_count} observed competitor listing(s), saturation {competition.market_saturation}", provenance)
+
+
+def _price_competitiveness(competition: MarketIntelligenceReport | None) -> ScoreDimension:
+    # Room to price competitively, inferred from observed price dispersion
+    # across competitors — not a judgment on any specific assumed price
+    # (score_opportunity doesn't receive one), so this measures market
+    # headroom, not "our price is good."
+    if competition is None or not competition.observed_median_price or competition.observed_pricing_variance is None:
+        return _unavailable("price_competitiveness", "no observed competitor pricing dispersion for this candidate")
+    variance_ratio = competition.observed_pricing_variance / competition.observed_median_price
+    normalized = round(min(100.0, variance_ratio * 200.0), 2)
+    return _dim("price_competitiveness", round(variance_ratio, 4), normalized,
+                f"observed price dispersion across {competition.observed_competitor_count} competitor(s): "
+                f"variance={competition.observed_pricing_variance}, median={competition.observed_median_price}", "observed")
+
+
+def _supplier_advantage(margin: MarginIntelligence | None) -> ScoreDimension:
+    if margin is None or margin.observed_supplier_advantage is None:
+        return _unavailable("supplier_advantage", "no observed margin/supplier-cost comparison for this candidate")
+    normalized = round(max(0.0, min(100.0, margin.observed_supplier_advantage * 100.0)), 2)
+    return _dim("supplier_advantage", margin.observed_supplier_advantage, normalized,
+                f"observed supplier cost advantage vs cheapest observed competitor: {margin.observed_supplier_advantage}", "observed")
+
+
+def _market_confidence(competition: MarketIntelligenceReport | None) -> ScoreDimension:
+    if competition is None:
+        return _unavailable("market_confidence", "no competition evidence gathered for this candidate")
+    normalized = round(competition.confidence * 100.0, 2)
+    return _dim("market_confidence", competition.confidence, normalized,
+                f"market intelligence confidence {competition.confidence} from {len(competition.offers)} observed listing(s)", "derived")
+
+
+def _review_strength(competition: MarketIntelligenceReport | None) -> ScoreDimension:
+    if competition is None or (competition.observed_review_density is None and competition.observed_rating_mean is None):
+        return _unavailable("review_strength", "no observed competitor rating/review data for this candidate")
+    rating_component = (competition.observed_rating_mean / 5.0 * 100.0) if competition.observed_rating_mean is not None else 50.0
+    density_component = min(100.0, (competition.observed_review_density or 0.0) / 2.0)
+    normalized = round((rating_component + density_component) / 2, 2)
+    return _dim("review_strength", competition.observed_rating_mean, normalized,
+                f"observed competitor rating mean {competition.observed_rating_mean}, review density {competition.observed_review_density}", "observed")
+
+
+def _offer_diversity(competition: MarketIntelligenceReport | None) -> ScoreDimension:
+    # Consolidates the brief's separate "Offer Diversity"/"Brand
+    # Concentration"/"Seller Concentration" dimensions into one — the
+    # underlying brand/seller diversity ratios remain individually visible
+    # on MarketIntelligenceReport for drill-down, avoiding near-duplicate
+    # dimensions here.
+    if competition is None or (competition.observed_brand_diversity is None and competition.observed_seller_diversity is None):
+        return _unavailable("offer_diversity", "no observed brand/seller diversity data for this candidate")
+    brand = competition.observed_brand_diversity or 0.0
+    seller = competition.observed_seller_diversity or 0.0
+    normalized = round(((brand + seller) / 2) * 100.0, 2)
+    return _dim("offer_diversity", round((brand + seller) / 2, 4), normalized,
+                f"observed brand diversity {competition.observed_brand_diversity}, seller diversity {competition.observed_seller_diversity}", "observed")
+
+
+def _all_dimensions(
+    candidate: OpportunityCandidate, evidence: SupplierEvidenceResult | None,
+    competition: MarketIntelligenceReport | None = None, margin: MarginIntelligence | None = None,
+) -> tuple[ScoreDimension, ...]:
     return (
         _trend_strength(candidate),
         _freshness(candidate),
@@ -283,7 +372,12 @@ def _all_dimensions(candidate: OpportunityCandidate, evidence: SupplierEvidenceR
         _assumption_count(candidate),
         _missing_data_penalty(candidate),
         _unavailable("category_stability", "no category-stability data source exists in this repository"),
-        _unavailable("competition_estimate", "no competitor/market-saturation data source exists in this repository"),
+        _market_saturation(competition),
+        _price_competitiveness(competition),
+        _supplier_advantage(margin),
+        _market_confidence(competition),
+        _review_strength(competition),
+        _offer_diversity(competition),
         _product_simplicity(evidence),
         _shipping_complexity(evidence),
         _weight_volume(evidence),
@@ -328,10 +422,11 @@ def _confidence(dimensions: tuple[ScoreDimension, ...]) -> tuple[float, float, f
 
 def score_opportunity(
     candidate: OpportunityCandidate, *, supplier_evidence: SupplierEvidenceResult | None = None,
+    competition_evidence: MarketIntelligenceReport | None = None, margin: MarginIntelligence | None = None,
     operator_override: dict[str, Any] | None = None,
 ) -> OpportunityScore:
     """Never raises. Deterministic given identical inputs."""
-    dimensions = _composite(_all_dimensions(candidate, supplier_evidence))
+    dimensions = _composite(_all_dimensions(candidate, supplier_evidence, competition_evidence, margin))
     composite = round(sum(d.contribution for d in dimensions), 2)
     confidence, observed_pct, derived_pct, assumed_pct, unknown_pct = _confidence(dimensions)
 
@@ -359,16 +454,23 @@ def score_opportunity(
 def rank_opportunities(
     candidates: list[OpportunityCandidate], *, workspace_id: str, query: str,
     supplier_evidence_by_candidate: dict[str, SupplierEvidenceResult] | None = None,
+    competition_evidence_by_candidate: dict[str, MarketIntelligenceReport] | None = None,
+    margin_by_candidate: dict[str, MarginIntelligence] | None = None,
     operator_overrides: dict[str, dict[str, Any]] | None = None, generated_at: float | None = None,
 ) -> OpportunityAssessment:
     """Never raises. Deterministic given identical inputs: ties in
     effective_score break on candidate_id ascending, matching the existing
     tie-break convention in backend.mvp_commerce.opportunity.select_candidate."""
     evidence_map = supplier_evidence_by_candidate or {}
+    competition_map = competition_evidence_by_candidate or {}
+    margin_map = margin_by_candidate or {}
     override_map = operator_overrides or {}
     scores = [
-        score_opportunity(candidate, supplier_evidence=evidence_map.get(candidate.candidate_id),
-                           operator_override=override_map.get(candidate.candidate_id))
+        score_opportunity(
+            candidate, supplier_evidence=evidence_map.get(candidate.candidate_id),
+            competition_evidence=competition_map.get(candidate.candidate_id), margin=margin_map.get(candidate.candidate_id),
+            operator_override=override_map.get(candidate.candidate_id),
+        )
         for candidate in candidates
     ]
     scores.sort(key=lambda score: (-score.effective_score, score.candidate_id))

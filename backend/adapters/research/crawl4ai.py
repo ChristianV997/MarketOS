@@ -110,6 +110,35 @@ class Crawl4AIResearchAdapter:
             }
             if product_id:
                 record["product_id"] = product_id
+            # Additive fields for competitor-listing comparison (Competition
+            # Intelligence Engine) — never read by the pre-existing supplier/
+            # candidate normalizers above, so this cannot change their output.
+            rating = product.get("aggregateRating")
+            if isinstance(rating, Mapping):
+                try:
+                    record["rating"] = float(rating.get("ratingValue"))
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    record["review_count"] = int(rating.get("reviewCount") or rating.get("ratingCount"))
+                except (TypeError, ValueError):
+                    pass
+            seller = offer.get("seller") if isinstance(offer, Mapping) else None
+            seller_name = str(seller.get("name") or "").strip() if isinstance(seller, Mapping) else str(seller or "").strip()
+            if seller_name:
+                record["seller"] = seller_name
+            image = product.get("image")
+            if isinstance(image, list) and image:
+                record["image"] = str(image[0])
+            elif isinstance(image, str) and image:
+                record["image"] = image
+            shipping_details = offer.get("shippingDetails") if isinstance(offer, Mapping) else None
+            shipping_rate = shipping_details.get("shippingRate") if isinstance(shipping_details, Mapping) else None
+            if isinstance(shipping_rate, Mapping):
+                try:
+                    record["shipping_cost"] = max(0.0, float(shipping_rate.get("value")))
+                except (TypeError, ValueError):
+                    pass
             records.append(record)
         return records
 
