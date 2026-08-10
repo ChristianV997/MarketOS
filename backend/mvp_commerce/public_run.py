@@ -20,6 +20,7 @@ from backend.signals.public_sources import ingest_public_rss, public_signal_even
 from .events import commerce_mvp_events
 from .models import CommerceMvpRun
 from .opportunity import build_opportunity_candidates_from_signals, select_candidate
+from .opportunity_scoring import opportunity_scoring_events, rank_opportunities
 from .runner import run_commerce_mvp_slice
 from .supplier_evidence import gather_supplier_evidence, supplier_evidence_events
 
@@ -128,6 +129,7 @@ def run_commerce_mvp_from_public_rss(
     operator_note: str = "",
     attempt_supplier_evidence: bool = False,
     supplier_candidate_urls: list[str] | None = None,
+    use_opportunity_ranking: bool = False,
     **economics: float,
 ) -> PublicCommerceRunResult:
     """Run an advisory Commerce MVP packet from one public RSS query.
@@ -144,6 +146,15 @@ def run_commerce_mvp_from_public_rss(
     allow_network=False the evidence attempt is dry-run/simulated and never
     changes economics, matching every other public-network capability in
     this module.
+
+    use_opportunity_ranking=True additionally scores and ranks every
+    candidate this ingestion produced (see
+    backend.mvp_commerce.opportunity_scoring) instead of taking the single
+    highest-source-score candidate. Pure computation, no network I/O of its
+    own; the ranking result is recomputed here (deterministic, same
+    candidates/evidence as run_commerce_mvp_slice used internally) purely to
+    surface its canonical events — the ranking decision itself is made once,
+    inside run_commerce_mvp_slice.
     """
     ingestion = load_public_signals_for_commerce_query(
         query,
@@ -177,6 +188,7 @@ def run_commerce_mvp_from_public_rss(
         shopify_store_context=shopify_store_context,
         write_repository=None,
         supplier_evidence=supplier_evidence_result,
+        use_opportunity_ranking=use_opportunity_ranking,
         **economics,
     )
     metadata = {
@@ -202,7 +214,19 @@ def run_commerce_mvp_from_public_rss(
         supplier_evidence_events(supplier_evidence_result, workspace_id=workspace_id, run_id=run.run_id, occurred_at=run.started_at)
         if supplier_evidence_result is not None else []
     )
-    events = tuple(public_events + commerce_events + evidence_events)
+    ranking_events: list[Event] = []
+    if use_opportunity_ranking and run.opportunity_candidates:
+        provisional = select_candidate(list(run.opportunity_candidates))
+        evidence_map = (
+            {provisional.candidate_id: supplier_evidence_result}
+            if provisional is not None and supplier_evidence_result is not None else {}
+        )
+        assessment = rank_opportunities(
+            list(run.opportunity_candidates), workspace_id=workspace_id, query=query,
+            supplier_evidence_by_candidate=evidence_map, generated_at=run.started_at,
+        )
+        ranking_events = opportunity_scoring_events(assessment, run_id=run.run_id)
+    events = tuple(public_events + commerce_events + evidence_events + ranking_events)
     run = replace(run, canonical_event_ids=tuple(event.event_id for event in events), completed_at=run.started_at + len(events) / 1000)
     if event_repository is not None:
         event_repository.append_many(events)

@@ -1,10 +1,23 @@
 # Operator Event Dashboard
 
 The frontend route `/operator/events` is a read-only operator surface for
-canonical event timelines, Commerce MVP runs, Shopify import summaries, and
-event-source readiness. It uses the existing GET-only `/api/events` routes;
-it has no action controls, credential inputs, browser Supabase client, or
-local-file-path field.
+canonical event timelines, Commerce MVP runs, Shopify import summaries,
+opportunity-ranking scores, and event-source readiness. It uses the existing
+GET-only `/api/events` routes; it has no action controls, credential inputs,
+browser Supabase client, or local-file-path field.
+
+The **Opportunity ranking** tab shows every scored candidate for a run: its
+composite score, confidence, observed/derived/assumed/unknown percentage
+split, top reasons, risks, unknowns, recommended action, and an expandable
+per-dimension breakdown table (raw value, normalized value, weight,
+contribution, provenance, reason). It reads
+`/api/events/opportunity-rankings`, which decodes real
+`opportunity_scoring_events()` payloads instead of the generic timeline's
+key-list-only summary — see
+[Opportunity Scoring](OPPORTUNITY_SCORING.md#dashboard-view). The **Run
+public Commerce MVP test** form has a **Rank candidates with opportunity
+scoring** checkbox that passes `use_opportunity_ranking=true` through to
+`/api/commerce-mvp/public-run`.
 
 ## Run locally
 

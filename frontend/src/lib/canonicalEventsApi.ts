@@ -77,6 +77,45 @@ export interface ShopifyImportSummary {
   warnings: string[];
 }
 
+export interface ScoreDimensionView {
+  name: string;
+  raw_value: number | null;
+  normalized_value: number | null;
+  weight: number;
+  contribution: number;
+  reason: string;
+  provenance: "observed" | "derived" | "assumed" | "unavailable";
+  is_unknown: boolean;
+}
+
+export interface OpportunityScoreView {
+  candidate_id: string;
+  product_name: string;
+  dimensions: ScoreDimensionView[];
+  composite_score: number;
+  confidence: number;
+  observed_pct: number;
+  derived_pct: number;
+  assumed_pct: number;
+  unknown_pct: number;
+  reasons: string[];
+  risks: string[];
+  unknowns: string[];
+  blockers: string[];
+  recommended_action: string;
+  operator_override: { score: number; reason?: string } | null;
+}
+
+export interface OpportunityRankingSummary {
+  workspace_id: string | null;
+  run_id: string;
+  query: string;
+  top_candidate_id: string | null;
+  candidate_count: number;
+  scores: OpportunityScoreView[];
+  event_count: number;
+}
+
 export interface EventsReadiness {
   jsonl_path_configured: boolean;
   supabase_staging: { configured: boolean; missing_env?: string[]; read_only: boolean; server_side_only: boolean; write_gate_enabled?: boolean };
@@ -94,6 +133,9 @@ export interface PublicCommerceRunRequest {
   source: "google_news_rss";
   event_target: "none" | "jsonl" | "supabase_staging" | "both";
   operator_note?: string;
+  attempt_supplier_evidence?: boolean;
+  supplier_candidate_urls?: string[];
+  use_opportunity_ranking?: boolean;
 }
 
 export interface PublicCommerceRunReport {
@@ -110,6 +152,8 @@ export interface PublicCommerceRunReport {
   read_only: boolean;
   advisory: boolean;
   mutated: boolean;
+  supplier_evidence_attempted?: boolean;
+  opportunity_ranking_used?: boolean;
 }
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? (import.meta.env.VITE_API_URL as string | undefined) ?? "";
@@ -145,4 +189,6 @@ export const fetchEvents = (params: EventQueryParams) => get<{ timeline: EventTi
 export const fetchCommerceRuns = (params: EventQueryParams) => get<{ runs: CommerceRunSummary[]; read_only: boolean }>("/api/events/commerce-runs", params);
 export const fetchShopifyImports = (params: EventQueryParams) => get<{ imports: ShopifyImportSummary[]; read_only: boolean }>("/api/events/shopify-imports", params);
 export const fetchEventsReadiness = () => get<EventsReadiness>("/api/events/readiness");
+export const fetchSupplierEvidenceEvents = (params: EventQueryParams) => get<{ events: EventRecordView[]; read_only: boolean }>("/api/events/supplier-evidence", params);
+export const fetchOpportunityRankings = (params: EventQueryParams) => get<{ rankings: OpportunityRankingSummary[]; read_only: boolean }>("/api/events/opportunity-rankings", params);
 export const runPublicCommerceMvp = (request: PublicCommerceRunRequest) => post<PublicCommerceRunReport>("/api/commerce-mvp/public-run", request);

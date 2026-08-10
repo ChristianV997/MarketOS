@@ -13,6 +13,7 @@ from .events import commerce_mvp_events
 from .landing_page_packet import build_landing_page_packet
 from .models import CommerceMvpRun, CreativePacket, OpportunityCandidate, UnitEconomicsSummary
 from .opportunity import build_opportunity_candidates_from_signals, select_candidate
+from .opportunity_scoring import OpportunityAssessment, opportunity_scoring_events, rank_opportunities
 from .store_draft_packet import build_store_draft_packet
 
 
@@ -73,20 +74,32 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
                            assumed_price: float = 49.0, assumed_unit_cost: float = 15.0, assumed_shipping_cost: float = 6.0,
                            assumed_cac: float = 12.0, assumed_return_rate: float = .08, payment_fee_rate: float = .03,
                            write_repository: EventRepository | None = None, shopify_store_context: Any | None = None,
-                           supplier_evidence: Any | None = None) -> CommerceMvpRun:
+                           supplier_evidence: Any | None = None, use_opportunity_ranking: bool = False) -> CommerceMvpRun:
     rows = list(signals if signals is not None else _load_signals(signal_fixture_path) if signal_fixture_path else [])[:max(1, max_signals)]
     query = query.strip(); stable = hashlib.sha256((workspace_id + query + "|".join(item.signal_id for item in rows)).encode()).hexdigest()[:20]
     started = float(int(stable[:8], 16) % 1_000_000 + 1_700_000_000)
     candidates = build_opportunity_candidates_from_signals(rows, workspace_id, query, max_candidates)
-    selected = select_candidate(candidates)
+    # use_opportunity_ranking defaults to False, so every existing caller
+    # keeps the exact same select_candidate()-driven pick as before this
+    # parameter existed.
+    opportunity_assessment: OpportunityAssessment | None = None
+    resolved_evidence = supplier_evidence
+    if use_opportunity_ranking and candidates:
+        provisional = select_candidate(candidates)
+        evidence_map = {provisional.candidate_id: supplier_evidence} if provisional is not None and supplier_evidence is not None else {}
+        opportunity_assessment = rank_opportunities(candidates, workspace_id=workspace_id, query=query, supplier_evidence_by_candidate=evidence_map, generated_at=started)
+        selected = next((item for item in candidates if item.candidate_id == opportunity_assessment.top_candidate_id), None) or provisional
+        resolved_evidence = evidence_map.get(selected.candidate_id)
+    else:
+        selected = select_candidate(candidates)
     warnings: list[str] = []
     if len(rows) < 2: warnings.append("thin_evidence: fewer than two public signals; do not advance without corroboration")
     if not selected: warnings.append("no_candidate_created: add attributed public-signal fixture data")
     # supplier_evidence defaults to None, so every existing caller gets the
     # exact same _economics() output as before this parameter existed.
     economics = (
-        _economics_with_evidence(selected, assumed_price, assumed_unit_cost, assumed_shipping_cost, assumed_cac, assumed_return_rate, payment_fee_rate, evidence=supplier_evidence)
-        if supplier_evidence is not None
+        _economics_with_evidence(selected, assumed_price, assumed_unit_cost, assumed_shipping_cost, assumed_cac, assumed_return_rate, payment_fee_rate, evidence=resolved_evidence)
+        if resolved_evidence is not None
         else _economics(selected, assumed_price, assumed_unit_cost, assumed_shipping_cost, assumed_cac, assumed_return_rate, payment_fee_rate)
     ) if selected else None
     creative = _creative(selected) if selected else None
@@ -94,13 +107,16 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
     store = build_store_draft_packet(selected) if selected else None
     recommendations = _recommendations()
     approval = build_manual_approval_packet(selected, recommendations) if selected else None
-    base = CommerceMvpRun(f"commerce-mvp-{stable}", workspace_id, query, started, started, mode, "completed" if selected else "blocked", tuple(item.to_dict() for item in rows), tuple(candidates), selected, economics, creative, landing, store, recommendations, approval, (), tuple(warnings), ("manual_approval_required_before_external_action",), {"network_used": False, "provider_calls": False, "supabase_default": False, "jsonl_default": False})
+    metadata = {"network_used": False, "provider_calls": False, "supabase_default": False, "jsonl_default": False}
+    if opportunity_assessment is not None: metadata["opportunity_assessment"] = opportunity_assessment.to_dict()
+    base = CommerceMvpRun(f"commerce-mvp-{stable}", workspace_id, query, started, started, mode, "completed" if selected else "blocked", tuple(item.to_dict() for item in rows), tuple(candidates), selected, economics, creative, landing, store, recommendations, approval, (), tuple(warnings), ("manual_approval_required_before_external_action",), metadata)
     if shopify_store_context is not None:
         # Imported context is evidence only: the existing deterministic candidate
         # selection and economics remain untouched.
         from backend.ecommerce.shopify_readonly.enrichment import enrich_commerce_mvp_with_shopify_context
         base, _ = enrich_commerce_mvp_with_shopify_context(base, shopify_store_context)
-    events = commerce_mvp_events(base)
+    events = list(commerce_mvp_events(base))
+    if opportunity_assessment is not None: events.extend(opportunity_scoring_events(opportunity_assessment, run_id=base.run_id))
     if write_repository is not None: write_repository.append_many(events)
     return replace(base, canonical_event_ids=tuple(event.event_id for event in events), completed_at=started + len(events) / 1000)
 

@@ -37,4 +37,17 @@ class ShopifyImportSummary:
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self); value["warnings"] = list(self.warnings); return value
 
-__all__ = ["CommerceRunSummary", "EventQuery", "EventRecordView", "EventTimeline", "ShopifyImportSummary"]
+@dataclass(frozen=True)
+class OpportunityRankingSummary:
+    """Decoded opportunity_scoring_events() output for one Commerce MVP run —
+    unlike EventRecordView.payload_summary (key names/counts only, for the
+    generic timeline), this carries each candidate's actual composite
+    score/confidence/dimension breakdown/reasons/risks/unknowns so an
+    operator can see *why* a candidate ranked where it did without a
+    second, opaque query engine."""
+    workspace_id: str | None; run_id: str; query: str; top_candidate_id: str | None
+    candidate_count: int; scores: tuple[dict[str, Any], ...]; event_count: int
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self); value["scores"] = [dict(item) for item in self.scores]; return value
+
+__all__ = ["CommerceRunSummary", "EventQuery", "EventRecordView", "EventTimeline", "OpportunityRankingSummary", "ShopifyImportSummary"]

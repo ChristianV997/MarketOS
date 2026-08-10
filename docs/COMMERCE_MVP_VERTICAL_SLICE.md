@@ -11,9 +11,9 @@ This fixture-first workflow turns attributed public/no-auth signal records into
 a reviewable commerce test packet:
 
 ```text
-public signal fixture -> opportunity hypothesis -> assumption-based economics
--> safe creative draft -> landing-page export -> store-draft export
--> vendor plan -> manual approval -> canonical advisory events
+public signal fixture -> opportunity hypothesis -> [opportunity scoring/ranking]
+-> assumption-based economics -> safe creative draft -> landing-page export
+-> store-draft export -> vendor plan -> manual approval -> canonical advisory events
 ```
 
 It is the MVP Island's demoable workflow, not a live commerce pipeline. It
@@ -79,6 +79,14 @@ their existing human/live-mode gates.
   `docs/CJ_PUBLIC_SUPPLIER_EVIDENCE.md`) — `attempt_supplier_evidence` on
   `/api/commerce-mvp/public-run` and
   `backend.mvp_commerce.public_run.run_commerce_mvp_from_public_rss`.
+- Opportunity scoring/ranking: an opt-in, deterministic, explainable
+  multi-dimension score (trend strength, supplier evidence quality,
+  observed supplier cost, evidence completeness, and more) that can select
+  the candidate this slice advances instead of the single-source-score
+  default, with full observed/derived/assumed/unknown confidence
+  reporting (see `docs/OPPORTUNITY_SCORING.md`) —
+  `use_opportunity_ranking` on `/api/commerce-mvp/public-run`,
+  `run_commerce_mvp_slice`, and `run_commerce_mvp_from_public_rss`.
 
 ## Next integrations (not implemented)
 
