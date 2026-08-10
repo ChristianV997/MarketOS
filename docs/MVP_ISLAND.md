@@ -88,6 +88,9 @@ local export only; it is not an authenticated or write-capable Shopify path.
 [Supabase canonical-events staging](SUPABASE_CANONICAL_EVENTS_STAGING.md) is
 also opt-in and server-only; it keeps JSONL as the default output.
 
+[Canonical Event Read Views](CANONICAL_EVENT_READ_VIEWS.md) provide a
+read-only operator surface over local JSONL or explicit server-side staging.
+
 ## Promotion gates
 
 Promote one capability at a time only after: schema/RLS review; adapter tests

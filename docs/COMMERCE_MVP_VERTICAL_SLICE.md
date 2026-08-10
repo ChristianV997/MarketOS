@@ -56,6 +56,9 @@ non-authoritative, manual-approval-required, and no launch/spend/publish/store
 mutation/payment/fulfillment authority metadata. JSONL remains the explicit
 local output option; Supabase is a future, optional EventRepository target.
 
+After generating an explicit JSONL event artifact, inspect it with
+`python scripts/query_canonical_events.py --jsonl <artifact> --commerce-runs --json`.
+
 ## Manual approval policy
 
 Before creating any external draft or action, an operator must corroborate

@@ -147,6 +147,11 @@ try:
         app.include_router(_workflows_router)
     except ImportError:
         pass
+    try:
+        from api.routes.canonical_events import router as _canonical_events_router
+        app.include_router(_canonical_events_router)
+    except ImportError:
+        pass
 except Exception:
     # The legacy API must remain importable if an optional route dependency is
     # unavailable in a minimal deployment image.
