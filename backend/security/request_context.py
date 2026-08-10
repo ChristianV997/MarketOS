@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import re
+import os
 import time
 import uuid
 from typing import Any
 
 from backend.security.safe_logging import log_request_end, log_request_start
+from backend.observability.phase1_telemetry import set_request_sentry_context
 
 
 _SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
@@ -46,6 +48,13 @@ class RequestContextMiddleware:
         started = time.perf_counter()
         scope["marketos_request_id"] = request_id
         status_code = 500
+        set_request_sentry_context(
+            request_id=request_id,
+            method=method,
+            path=path,
+            mvp_mode=os.getenv("MARKETOS_MVP_MODE", "0") == "1",
+            read_only=family in {"event_read", "public_commerce_run"},
+        )
         log_request_start(request_id=request_id, method=method, path=path, route_family=family)
 
         async def send_with_headers(message: dict[str, Any]) -> None:

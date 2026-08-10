@@ -49,3 +49,6 @@ host. Run `python scripts/deployment_smoke_check.py --backend-url <api-url>
 
 The event-read API returns correlation headers and applies the Phase 1
 single-process read limit; see [production hardening](PHASE1_PRODUCTION_HARDENING.md).
+
+Dashboard interactions use explicit, sanitized PostHog events only when
+`VITE_POSTHOG_KEY` is configured; see [Phase 1 observability](PHASE1_OBSERVABILITY.md).

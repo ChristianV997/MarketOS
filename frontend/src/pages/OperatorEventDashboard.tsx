@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { EventQueryParams, EventSource } from "@/lib/canonicalEventsApi";
 import { useCommerceRuns, useEventTimeline, useEventsReadiness, usePublicCommerceMvpRun, useShopifyImports } from "@/hooks/useCanonicalEvents";
+import { trackSafeEvent } from "@/lib/analytics";
 
 type Tab = "timeline" | "commerce" | "shopify";
 const badge = "inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium";
@@ -48,13 +49,24 @@ export default function OperatorEventDashboard() {
   const loading = timeline.isLoading || commerce.isLoading || shopify.isLoading || readiness.isLoading;
   const error = timeline.error || commerce.error || shopify.error || readiness.error;
   const eventTypes = useMemo(() => Object.entries(timeline.data?.event_type_counts ?? {}), [timeline.data]);
-  const update = (key: keyof EventQueryParams, value: string | number) => setDraft((current) => ({ ...current, [key]: value || undefined }));
+  useEffect(() => { trackSafeEvent("operator_event_dashboard_viewed", { source: params.source ?? "jsonl", read_only: true, advisory: true }); }, []);
+  const update = (key: keyof EventQueryParams, value: string | number) => {
+    setDraft((current) => ({ ...current, [key]: value || undefined }));
+    if (key === "source") trackSafeEvent("operator_event_source_changed", { source: value, read_only: true, advisory: true });
+  };
   const refresh = () => {
+    trackSafeEvent("operator_event_filters_applied", { source: draft.source ?? "jsonl", limit: draft.limit ?? 50, read_only: true, advisory: true });
+    trackSafeEvent("operator_event_refresh_clicked", { source: draft.source ?? "jsonl", read_only: true, advisory: true });
     setParams({ ...draft, offset: 0 });
     void Promise.all([timeline.refetch(), commerce.refetch(), shopify.refetch(), readiness.refetch()]);
   };
   const runPublicTest = () => {
-    publicRun.mutate({ query: publicQuery.trim(), workspace_id: publicWorkspace.trim() || "demo", max_signals: publicLimit, max_candidates: 5, allow_public_network: true, include_shopify_fixture_context: false, source: "google_news_rss", event_target: publicTarget }, { onSuccess: setPublicResult });
+    trackSafeEvent("public_commerce_run_started", { source: "google_news_rss", max_signals: publicLimit, max_candidates: 5, event_target: publicTarget, query_length: publicQuery.trim().length, read_only: true, advisory: true });
+    publicRun.mutate({ query: publicQuery.trim(), workspace_id: publicWorkspace.trim() || "demo", max_signals: publicLimit, max_candidates: 5, allow_public_network: true, include_shopify_fixture_context: false, source: "google_news_rss", event_target: publicTarget }, { onSuccess: (result) => {
+      setPublicResult(result);
+      const eventName = result.status === "succeeded" ? "public_commerce_run_succeeded" : result.status === "stale_cache" ? "public_commerce_run_stale_cache" : result.status === "degraded" ? "public_commerce_run_degraded" : "public_commerce_run_blocked";
+      trackSafeEvent(eventName, { source: "google_news_rss", status: result.status, event_count: result.event_count, signal_count: result.signal_count, candidate_count: result.candidate_count, event_target: publicTarget, read_only: true, advisory: true });
+    } });
   };
 
   return <div className="mx-auto max-w-7xl space-y-5 p-6">

@@ -86,7 +86,7 @@ def _write_reports(args: argparse.Namespace, report: dict[str, Any]) -> None:
         print(f"- Candidate: `{report.get('selected_candidate') or run.get('selected_candidate', {}).get('product_name', 'none')}`")
         print(f"- Events: {report.get('event_count', len(run.get('canonical_event_ids', [])))}")
         print()
-        print("- Advisory only; no provider, store, ad, payment, fulfillment, or publishing action was executed.")
+        print("- Advisory only; No provider, store, ad, payment, fulfillment, or publishing action was executed.")
         for warning in report.get("warnings", []):
             print(f"- Warning: {warning}")
         return

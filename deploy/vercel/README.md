@@ -9,3 +9,6 @@ receive a Supabase service-role key or gain authority to execute commerce work.
 `frontend/vercel.json` records the Vite build convention. Set the Vercel project
 root to `frontend/` and provide only `VITE_API_BASE_URL` as the initial runtime
 variable.
+
+If browser analytics are approved, add only `VITE_POSTHOG_KEY` and
+`VITE_POSTHOG_HOST`; never add `SENTRY_DSN` or server-side PostHog credentials.

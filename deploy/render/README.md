@@ -13,3 +13,6 @@ Render console before deploying.
 Set an exact `ALLOWED_ORIGINS` value and keep the public-run and Supabase gates
 at `0` during the first deployment. Render uses the same single-process MVP
 rate limits as Railway.
+
+Optional Sentry variables belong here, server-side only. Run the telemetry
+readiness script before adding a real DSN.

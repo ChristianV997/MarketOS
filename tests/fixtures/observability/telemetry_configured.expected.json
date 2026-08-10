@@ -1,0 +1,1 @@
+{"sentry_configured": true, "sentry_enabled": true, "sentry_environment": "staging", "sentry_release_present": true, "sentry_traces_sample_rate": 0.05, "posthog_frontend_configured": true, "posthog_server_enabled": false, "safe_mode": true, "sentry_pii_disabled": true, "telemetry_fail_open": true}
