@@ -8,6 +8,7 @@ from .service import (
     evaluation_events,
     load_evaluation_input,
 )
+from .readiness import Phase1ReadinessReport, build_from_paths, build_phase1_readiness
 
 __all__ = [
     "ComparisonReport",
@@ -19,4 +20,7 @@ __all__ = [
     "evaluate_input",
     "evaluation_events",
     "load_evaluation_input",
+    "Phase1ReadinessReport",
+    "build_from_paths",
+    "build_phase1_readiness",
 ]

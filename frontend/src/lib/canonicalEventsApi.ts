@@ -232,6 +232,25 @@ export interface EventsReadiness {
   mutated: boolean;
 }
 
+export interface Phase1Readiness {
+  overall_status: "ready" | "partially_ready" | "blocked" | "not_configured" | "fixture_only" | "live_observed" | "degraded" | "unknown";
+  overall_score: number;
+  blocking_gates: string[];
+  advisory_warnings: string[];
+  next_best_action: string;
+  next_best_prompt_hint: string;
+  supplier_readiness: { status: string; observed_field_count: number; coverage: number; price_observed: boolean; inventory_observed: boolean; shipping_observed: boolean };
+  competition_readiness: { status: string; observed_offer_count: number; pricing_coverage: number };
+  commerce_run_readiness: { status: string; run_quality: string; overall_confidence: number; evidence_completeness: number; assumption_percentage: number | null };
+  credential_readiness: { status: string; provider: string; credentials_present: boolean; live_flag_enabled: boolean };
+  validation_pack_readiness: { status: string; report_present: boolean; live_probe_status: string };
+  safety_readiness: { status: string; read_only: boolean; no_mutation_authority: boolean };
+  forbidden_next_phases: string[];
+  read_only: boolean;
+  mutated: boolean;
+  network_calls: boolean;
+}
+
 export interface PublicCommerceRunRequest {
   query: string;
   workspace_id: string;
@@ -301,6 +320,7 @@ export const fetchEvents = (params: EventQueryParams) => get<{ timeline: EventTi
 export const fetchCommerceRuns = (params: EventQueryParams) => get<{ runs: CommerceRunSummary[]; read_only: boolean }>("/api/events/commerce-runs", params);
 export const fetchShopifyImports = (params: EventQueryParams) => get<{ imports: ShopifyImportSummary[]; read_only: boolean }>("/api/events/shopify-imports", params);
 export const fetchEventsReadiness = () => get<EventsReadiness>("/api/events/readiness");
+export const fetchPhase1Readiness = () => get<Phase1Readiness>("/api/phase1/readiness");
 export const fetchSupplierEvidenceEvents = (params: EventQueryParams) => get<{ events: EventRecordView[]; read_only: boolean }>("/api/events/supplier-evidence", params);
 export const fetchOpportunityRankings = (params: EventQueryParams) => get<{ rankings: OpportunityRankingSummary[]; read_only: boolean }>("/api/events/opportunity-rankings", params);
 export const fetchCompetitionSummaries = (params: EventQueryParams) => get<{ summaries: CompetitionSummaryView[]; read_only: boolean }>("/api/events/competition-summaries", params);

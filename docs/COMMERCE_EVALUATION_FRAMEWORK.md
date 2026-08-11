@@ -147,6 +147,13 @@ evaluation routes. API path configuration is server-side; browser requests
 cannot select arbitrary local files and no Supabase service-role credential is
 exposed.
 
+## Phase 1 readiness cockpit
+
+`scripts/phase1_readiness_report.py` aggregates evaluation results with the
+existing supplier validation-pack, credential, canonical-event, deployment,
+and safety gates. It consumes only explicit sanitized artifacts and defaults
+to a structural/no-artifact report. See [Phase 1 Readiness Cockpit](PHASE1_READINESS_COCKPIT.md).
+
 ## Interpretation and limitations
 
 Evaluation quality is bounded by the evidence supplied to the engines. A high

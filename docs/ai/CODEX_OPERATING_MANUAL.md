@@ -15,11 +15,12 @@ the canonical event spine and existing Commerce MVP/evaluation paths.
 ## Fast loop
 
 1. `python scripts/ai/session_start.py --json`
-2. `python scripts/ai/phase_gate.py --from-git --json`
-3. `python scripts/ai/run_local_quality_gate.py --from-git --json`
-4. Make the smallest outcome-driven change.
-5. Run selected tests, then `session_finish.py --dry-run` and `git diff --check`.
-6. Run `pr_readiness_report.py --json`; stage explicit files; open a draft PR.
+2. `python scripts/phase1_readiness_report.py --json`
+3. `python scripts/ai/phase_gate.py --from-git --json`
+4. `python scripts/ai/run_local_quality_gate.py --from-git --json`
+5. Make the smallest outcome-driven change that clears the readiness report's single next action.
+6. Run selected tests, then `session_finish.py --dry-run` and `git diff --check`.
+7. Run `pr_readiness_report.py --json`; stage explicit files; open a draft PR.
 
 `run_local_quality_gate.py` composes the planner, PR readiness, focused-test,
 phase-gate, and CI-lane tools without network or GitHub API calls. `clear`

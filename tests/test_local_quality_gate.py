@@ -8,6 +8,8 @@ def test_no_changes_is_clear_and_offline():
     assert report["status"] == "clear"
     assert report["network_calls"] is False
     assert report["mutated"] is False
+    assert report["phase1_readiness"]["next_best_action"]
+    assert report["impact_top_task"] == "run_cj_credentialed_readonly_validation"
 
 
 def test_docs_only_is_advisory_with_docs_lane():
@@ -70,3 +72,10 @@ diff --git a/scripts/ai/tool.py b/scripts/ai/tool.py
     report = gate.run(["docs/guide.md", "scripts/ai/tool.py"], diff_text=diff)
     assert report["status"] == "advisory"
     assert report["mutation_flags"]["provider_mutation_like_detected"] is False
+
+
+def test_diff_reader_recovers_when_subprocess_returns_no_stdout(monkeypatch):
+    class Result:
+        stdout = None
+    monkeypatch.setattr(gate.subprocess, "run", lambda *args, **kwargs: Result())
+    assert gate._diff_text(None) == ""

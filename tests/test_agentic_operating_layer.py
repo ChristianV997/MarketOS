@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.ai import ci_matrix_plan, impact_planner, phase_gate, pr_readiness_report, select_tests
+from scripts.ai import ci_matrix_plan, impact_planner, operating_layer, phase_gate, pr_readiness_report, select_tests
 
 
 def test_impact_planner_ranks_by_score_deterministically():
@@ -113,3 +113,31 @@ def test_markdown_renderer_is_stable_for_new_tool_reports():
     first = select_tests.render_json_or_markdown(value, markdown=True, title="Test")
     assert first == select_tests.render_json_or_markdown(value, markdown=True, title="Test")
     assert "# Test" in first
+
+
+def test_pr_readiness_diff_reader_recovers_from_missing_stdout(monkeypatch):
+    class Result:
+        stdout = None
+    monkeypatch.setattr(pr_readiness_report.subprocess, "run", lambda *args, **kwargs: Result())
+    assert pr_readiness_report._diff_text(None) == ""
+
+
+def test_pr_readiness_staged_mode_uses_cached_diff(monkeypatch):
+    calls = []
+    class Result:
+        stdout = "safe"
+    monkeypatch.setattr(pr_readiness_report.subprocess, "run", lambda command, **kwargs: calls.append(command) or Result())
+    assert pr_readiness_report._diff_text(None, staged=True) == "safe"
+    assert calls[0][-1] == "--cached"
+
+
+def test_staged_paths_use_only_index_diff(monkeypatch):
+    calls = []
+    monkeypatch.setattr(operating_layer, "git_lines", lambda *args, **kwargs: calls.append(args) or ["evaluation/commerce/readiness.py"])
+    assert operating_layer.staged_from_git() == ["evaluation/commerce/readiness.py"]
+    assert calls[0] == ("diff", "--cached", "--name-only")
+
+
+def test_pr_readiness_policy_labels_do_not_count_as_mutation_code():
+    report = pr_readiness_report.report(["evaluation/commerce/readiness.py"], '+("supplier_mutation", "orders_payments_or_fulfillment")', branch="codex/test", mutation_diff="")
+    assert report["detections"]["provider_mutation_like_detected"] is False

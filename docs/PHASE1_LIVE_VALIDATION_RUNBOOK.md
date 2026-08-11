@@ -209,6 +209,20 @@ installed; it does not alter the allowlist, robots policy, or default runtime.
 On Windows PowerShell, set `PYTHONIOENCODING=utf-8` for the optional worker so
 third-party Rich console output cannot terminate the render before navigation.
 
+## Readiness cockpit
+
+Before selecting another Phase 1 implementation task, generate the local,
+read-only readiness report:
+
+```powershell
+python scripts/phase1_readiness_report.py --json
+```
+
+It consumes only explicitly supplied sanitized reports, never triggers a
+probe, and identifies the single next safe operator action. See
+[Phase 1 Readiness Cockpit](PHASE1_READINESS_COCKPIT.md) for inputs, scoring,
+and the API/dashboard view.
+
 ## If a fetch still fails from an unrestricted environment
 
 That's real, useful information — capture it exactly as reported, don't

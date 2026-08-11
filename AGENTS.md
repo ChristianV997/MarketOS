@@ -14,6 +14,7 @@
 - Use `scripts/ai/check_dev_stack.py` for capability checks and `scripts/ai/generate_session_handoff.py` at session boundaries.
 - Run `scripts/ai/session_start.py --json` before editing and consult `docs/ai/PARALLEL_WORK_MATRIX.md` to avoid overlapping Claude-owned work.
 - Run `scripts/ai/session_finish.py --dry-run` before committing; run the deterministic inference and commerce benchmarks when changing performance-sensitive paths.
+- Before selecting a new Phase 1 feature, run `python scripts/phase1_readiness_report.py --json`; follow its single `next_best_action` unless the operator explicitly changes phase.
 - Filter large test and Semgrep logs with `scripts/ai/filter_test_output.py` and `scripts/ai/filter_semgrep_output.py`.
 - Use architecture/dependency tooling only for architecture work; use current external documentation only for version-sensitive APIs.
 - Do not install or enable third-party MCP servers, skills, models, or plugins without review.

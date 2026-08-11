@@ -28,20 +28,27 @@ def score(item: dict[str, Any]) -> float:
     return round((benefit - cost) / 10, 2)
 
 
-def plan(items: list[dict[str, Any]]) -> dict[str, Any]:
+def plan(items: list[dict[str, Any]], readiness: dict[str, Any] | None = None) -> dict[str, Any]:
     ranked = [{**item, "impact_score": score(item)} for item in items]
+    next_action = (readiness or {}).get("next_best_action")
+    if next_action:
+        for item in ranked:
+            if item["task"] in next_action or ("credential" in next_action and "credentialed" in item["task"]):
+                item["impact_score"] = round(item["impact_score"] + 100, 2)
     ranked.sort(key=lambda item: (-item["impact_score"], item["task"]))
-    return {"planner": "marketos-impact-v1", "task_count": len(ranked), "ranked_backlog": ranked, "principle": "execute one unblocked, high-impact task at a time"}
+    return {"planner": "marketos-impact-v1", "task_count": len(ranked), "ranked_backlog": ranked, "readiness_next_action": next_action, "principle": "execute one unblocked, high-impact task at a time"}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", help="optional JSON list of scored task objects")
+    parser.add_argument("--readiness-report", help="optional sanitized Phase 1 readiness JSON")
     parser.add_argument("--json", action="store_true"); parser.add_argument("--markdown", action="store_true"); parser.add_argument("--output")
     args = parser.parse_args(argv)
     if args.json and args.markdown: parser.error("choose --json or --markdown")
     items = json.loads(open(args.input, encoding="utf-8").read()) if args.input else DEFAULT_BACKLOG
-    report = plan(items)
+    readiness = json.loads(open(args.readiness_report, encoding="utf-8").read()) if args.readiness_report else None
+    report = plan(items, readiness)
     content = render_json_or_markdown(report, markdown=args.markdown, title="MarketOS impact backlog")
     write_optional_output(content, args.output); print(content, end="")
     return 0

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CompetitionSummaryView, EventQueryParams, EventSource, OpportunityScoreView, ResearchPortfolioSummaryView } from "@/lib/canonicalEventsApi";
-import { useCommerceRuns, useCompetitionSummaries, useEventTimeline, useEventsReadiness, useOpportunityRankings, usePublicCommerceMvpRun, useResearchPortfolios, useShopifyImports } from "@/hooks/useCanonicalEvents";
+import { useCommerceRuns, useCompetitionSummaries, useEventTimeline, useEventsReadiness, usePhase1Readiness, useOpportunityRankings, usePublicCommerceMvpRun, useResearchPortfolios, useShopifyImports } from "@/hooks/useCanonicalEvents";
 import { trackSafeEvent } from "@/lib/analytics";
 
 type Tab = "timeline" | "commerce" | "shopify" | "opportunity" | "competition" | "research";
@@ -149,6 +149,7 @@ export default function OperatorEventDashboard() {
   const competition = useCompetitionSummaries(params);
   const research = useResearchPortfolios(params);
   const readiness = useEventsReadiness();
+  const phase1Readiness = usePhase1Readiness();
   const publicRun = usePublicCommerceMvpRun();
   const loading = timeline.isLoading || commerce.isLoading || shopify.isLoading || opportunity.isLoading || competition.isLoading || research.isLoading || readiness.isLoading;
   const error = timeline.error || commerce.error || shopify.error || opportunity.error || competition.error || research.error || readiness.error;
@@ -179,6 +180,13 @@ export default function OperatorEventDashboard() {
       <div><h1 className="text-xl font-semibold text-zinc-100">Operator Event Dashboard</h1><p className="mt-1 text-sm text-zinc-500">Read-only canonical events, Commerce MVP runs, and Shopify import summaries.</p></div>
       <SafetyBadges />
     </header>
+
+    <section className="rounded-lg border border-indigo-500/25 bg-indigo-500/5 p-4" aria-label="Phase 1 readiness cockpit">
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-sm font-medium text-zinc-100">Phase 1 readiness cockpit</h2><p className="mt-1 text-xs text-zinc-400">A deterministic, read-only summary of evidence quality, operator gates, and the single next action.</p></div><span className={`${badge} border-indigo-500/40 bg-indigo-500/10 text-indigo-200`}>{phase1Readiness.data?.overall_status ?? "loading"}</span></div>
+      {phase1Readiness.isLoading && <p className="mt-3 text-xs text-zinc-500">Loading readiness summaryâ€¦</p>}
+      {phase1Readiness.error && <p className="mt-3 text-xs text-amber-200">Readiness endpoint unavailable; event views remain read-only.</p>}
+      {phase1Readiness.data && <><div className="mt-3 grid gap-2 text-xs text-zinc-300 md:grid-cols-4"><span className="rounded bg-zinc-950/50 p-2">Score: <b>{phase1Readiness.data.overall_score}/100</b></span><span className="rounded bg-zinc-950/50 p-2">Supplier: <b>{phase1Readiness.data.supplier_readiness.status}</b> ({phase1Readiness.data.supplier_readiness.observed_field_count} fields)</span><span className="rounded bg-zinc-950/50 p-2">Competition: <b>{phase1Readiness.data.competition_readiness.status}</b> ({phase1Readiness.data.competition_readiness.observed_offer_count} offers)</span><span className="rounded bg-zinc-950/50 p-2">Economics: <b>{phase1Readiness.data.commerce_run_readiness.run_quality}</b></span></div><p className="mt-3 text-xs text-indigo-200">Next action: <span className="font-medium">{phase1Readiness.data.next_best_action.replace(/_/g, " ")}</span></p>{phase1Readiness.data.blocking_gates.length > 0 && <Warnings values={phase1Readiness.data.blocking_gates} />}{phase1Readiness.data.forbidden_next_phases.length > 0 && <p className="mt-2 text-[11px] text-zinc-500">Still forbidden: {phase1Readiness.data.forbidden_next_phases.join(", ").replace(/_/g, " ")}</p>}</>}
+    </section>
 
     <section className="grid gap-3 md:grid-cols-3">
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4"><p className="text-xs text-zinc-500">JSONL event source</p><p className="mt-1 text-sm text-zinc-200">{readiness.data?.jsonl_path_configured ? "Configured server-side" : "Not configured"}</p></div>

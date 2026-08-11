@@ -26,6 +26,11 @@ def changed_from_git(root: Path = ROOT) -> list[str]:
     return sorted(paths)
 
 
+def staged_from_git(root: Path = ROOT) -> list[str]:
+    """Return only the intentional index, excluding unrelated worktree files."""
+    return normal_paths(git_lines("diff", "--cached", "--name-only", root=root))
+
+
 def normal_paths(paths: Iterable[str]) -> list[str]:
     normalized = []
     for path in paths:
