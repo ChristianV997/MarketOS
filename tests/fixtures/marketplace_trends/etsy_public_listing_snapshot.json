@@ -1,0 +1,16 @@
+[
+  {
+    "candidate_id": "led-therapy-mask",
+    "query": "LED therapy mask",
+    "marketplace": "etsy",
+    "source_type": "etsy_public_listing_snapshot",
+    "best_seller_badge": false,
+    "price": 74,
+    "currency": "USD",
+    "review_count": 96,
+    "rating": 4.8,
+    "availability": "in_stock",
+    "seller_count": 12,
+    "source_confidence": 0.49
+  }
+]

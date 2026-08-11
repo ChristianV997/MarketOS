@@ -1,0 +1,19 @@
+[
+  {
+    "candidate_id": "portable-blender",
+    "query": "portable blender",
+    "marketplace": "mercadolibre",
+    "source_type": "mercadolibre_highlights_snapshot",
+    "site_id": "MLM",
+    "category_id": "MLM1055",
+    "best_seller_badge": true,
+    "rank_position": 14,
+    "price": 549,
+    "currency": "MXN",
+    "review_count": 510,
+    "rating": 4.2,
+    "availability": "in_stock",
+    "seller_count": 38,
+    "source_confidence": 0.58
+  }
+]

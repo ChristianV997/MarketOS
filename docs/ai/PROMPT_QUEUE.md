@@ -15,6 +15,12 @@ is true.
 Every prompt must require: no mutation authority, no committed secrets or
 artifacts, targeted tests, a draft PR, and an evidence-based final report.
 
+When credentials are unavailable, the allowed commercial prompt is: “Run the
+offline marketplace trend intelligence slice against sanitized fixtures or a
+manual import, enrich the existing Product Validation Report, and identify one
+candidate for later supplier validation. Do not add a provider, scrape paid
+dashboards, or claim supplier proof.”
+
 Before a new prompt starts implementation, run the local quality gate against
 the proposed paths. Do not use it to override an active supplier/live
 validation PR; its role is to expose overlap and phase risk early.

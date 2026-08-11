@@ -1,0 +1,15 @@
+[
+  {
+    "candidate_id": "electric-lunch-box",
+    "query": "electric lunch box",
+    "marketplace": "alibaba",
+    "source_type": "alibaba_high_profit_snapshot",
+    "trend_label": "editorial_selection",
+    "price_band_min": 9,
+    "price_band_max": 18,
+    "currency": "USD",
+    "seller_count": 29,
+    "source_confidence": 0.48,
+    "warnings": ["editorial_signal_not_sales_proof"]
+  }
+]

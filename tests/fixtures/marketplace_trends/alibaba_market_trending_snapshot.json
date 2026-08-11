@@ -1,0 +1,17 @@
+[
+  {
+    "candidate_id": "portable-projector",
+    "query": "portable projector",
+    "marketplace": "alibaba",
+    "source_type": "alibaba_market_trending_snapshot",
+    "best_seller_badge": false,
+    "trend_label": "steady",
+    "price_band_min": 28,
+    "price_band_max": 65,
+    "currency": "USD",
+    "offer_count": 45,
+    "seller_count": 19,
+    "shipping_signal": "quote_required",
+    "source_confidence": 0.55
+  }
+]

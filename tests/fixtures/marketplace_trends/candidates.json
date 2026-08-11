@@ -1,0 +1,12 @@
+[
+  {"candidate_id": "mini-thermal-printer", "query": "mini thermal printer", "category": "electronics"},
+  {"candidate_id": "portable-blender", "query": "portable blender", "category": "kitchen"},
+  {"candidate_id": "led-therapy-mask", "query": "LED therapy mask", "category": "beauty"},
+  {"candidate_id": "resistance-band-kit", "query": "resistance band kit", "category": "fitness"},
+  {"candidate_id": "portable-espresso-maker", "query": "portable espresso maker", "category": "kitchen"},
+  {"candidate_id": "neck-massager", "query": "neck massager", "category": "wellness"},
+  {"candidate_id": "pet-grooming-vacuum", "query": "pet grooming vacuum", "category": "pets"},
+  {"candidate_id": "portable-projector", "query": "portable projector", "category": "electronics"},
+  {"candidate_id": "electric-lunch-box", "query": "electric lunch box", "category": "kitchen"},
+  {"candidate_id": "travel-coffee-grinder", "query": "travel coffee grinder", "category": "kitchen"}
+]

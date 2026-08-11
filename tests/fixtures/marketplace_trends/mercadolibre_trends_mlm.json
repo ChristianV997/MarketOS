@@ -1,0 +1,19 @@
+[
+  {
+    "candidate_id": "mini-thermal-printer",
+    "query": "mini thermal printer",
+    "marketplace": "mercadolibre",
+    "source_type": "mercadolibre_trends_snapshot",
+    "site_id": "MLM",
+    "category_id": "MLM1055",
+    "rank_position": 8,
+    "trend_label": "rising",
+    "search_growth_signal": 0.68,
+    "price_band_min": 399,
+    "price_band_max": 899,
+    "currency": "MXN",
+    "offer_count": 31,
+    "seller_count": 22,
+    "source_confidence": 0.62
+  }
+]
