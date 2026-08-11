@@ -45,3 +45,5 @@ parallel ranking or promise launch readiness from fixture/manual evidence.
 For internal operating work, run `python scripts/run_companyos_department_layer.py --markdown`. Treat Finance as scenario planning, Accounting as ledger-ready seed data, and Sales as consent-aware drafts. Keep the approval queue and risk register in the final report.
 
 For agent architecture work, run `python scripts/run_companyos_registry_layer.py --markdown`. Treat registries as contracts and decisions, not installed integrations. Check tool risk, model budgets, trace/eval requirements, knowledge privacy, and workflow interrupts before proposing live adapters.
+
+For external-action planning, run `python scripts/run_companyos_approval_ledger.py --markdown`. Treat scopes, conditions, budget caps, simulations, and audit events as control records; never treat a draft or simulated approval as execution authority.

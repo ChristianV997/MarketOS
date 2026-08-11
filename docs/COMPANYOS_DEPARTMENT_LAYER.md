@@ -32,3 +32,5 @@ Every output is read-only, offline, advisory, and non-authoritative. Approval re
 This prepares Management v2, Finance v2, Accounting v2, and Sales v2 without committing to external SaaS integrations.
 
 The Agent / Skill / Tool / Workflow Registry is the next control-plane layer. It defines the contracts and safety gates those future department modules must use before any external integration is considered.
+
+The Approval Ledger is the next gate after the registry: department plans, sales drafts, budgets, and ledger seeds may be produced locally, while messaging, payments, accounting sync, publishing, orders, and external calls remain blocked or simulation-only.

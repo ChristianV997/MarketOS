@@ -1,0 +1,4 @@
+[
+  {"approval_id": "seed-manual-import", "request_type": "web_data_acquisition", "request_title": "Review sanitized import", "status": "draft", "requested_mode": "draft_only"},
+  {"approval_id": "seed-publish", "request_type": "site_publish", "request_title": "Publish launch draft", "status": "blocked_by_policy", "requested_mode": "approval_required"}
+]

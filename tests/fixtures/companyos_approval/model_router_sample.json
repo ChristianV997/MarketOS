@@ -1,0 +1,1 @@
+{"policy": {"routes": [{"task_type": "report_synthesis", "recommended_tier": "frontier_reasoning", "max_cost_per_run": 1.5}]}}
