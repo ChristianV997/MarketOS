@@ -66,6 +66,8 @@ Mutation phases remain forbidden until a separately approved approval ledger exi
 
 Run `python scripts/ai/run_local_quality_gate.py --json` before a PR. It now includes a compact readiness summary. `impact_planner.py --readiness-report <sanitized-report>` prioritizes the reported next action. The plan remains local and deterministic when no artifacts exist.
 
+The [Evidence Benchmark Matrix](PHASE1_BENCHMARK_MATRIX.md) can optionally supply a best candidate and highest validation priority to the readiness evidence summary. Readiness remains fully functional without a benchmark artifact.
+
 ## Limitations
 
 The cockpit does not validate current source truth, authenticate to CJ, launch the validation pack, or infer profitability. A missing artifact is intentionally reported as missing rather than silently treated as a successful run.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CompetitionSummaryView, EventQueryParams, EventSource, OpportunityScoreView, ResearchPortfolioSummaryView } from "@/lib/canonicalEventsApi";
-import { useCommerceRuns, useCompetitionSummaries, useEventTimeline, useEventsReadiness, usePhase1Readiness, useOpportunityRankings, usePublicCommerceMvpRun, useResearchPortfolios, useShopifyImports } from "@/hooks/useCanonicalEvents";
+import { useBenchmarkMatrix, useCommerceRuns, useCompetitionSummaries, useEventTimeline, useEventsReadiness, usePhase1Readiness, useOpportunityRankings, usePublicCommerceMvpRun, useResearchPortfolios, useShopifyImports } from "@/hooks/useCanonicalEvents";
 import { trackSafeEvent } from "@/lib/analytics";
 
 type Tab = "timeline" | "commerce" | "shopify" | "opportunity" | "competition" | "research";
@@ -150,6 +150,7 @@ export default function OperatorEventDashboard() {
   const research = useResearchPortfolios(params);
   const readiness = useEventsReadiness();
   const phase1Readiness = usePhase1Readiness();
+  const benchmark = useBenchmarkMatrix();
   const publicRun = usePublicCommerceMvpRun();
   const loading = timeline.isLoading || commerce.isLoading || shopify.isLoading || opportunity.isLoading || competition.isLoading || research.isLoading || readiness.isLoading;
   const error = timeline.error || commerce.error || shopify.error || opportunity.error || competition.error || research.error || readiness.error;
@@ -186,6 +187,12 @@ export default function OperatorEventDashboard() {
       {phase1Readiness.isLoading && <p className="mt-3 text-xs text-zinc-500">Loading readiness summaryâ€¦</p>}
       {phase1Readiness.error && <p className="mt-3 text-xs text-amber-200">Readiness endpoint unavailable; event views remain read-only.</p>}
       {phase1Readiness.data && <><div className="mt-3 grid gap-2 text-xs text-zinc-300 md:grid-cols-4"><span className="rounded bg-zinc-950/50 p-2">Score: <b>{phase1Readiness.data.overall_score}/100</b></span><span className="rounded bg-zinc-950/50 p-2">Supplier: <b>{phase1Readiness.data.supplier_readiness.status}</b> ({phase1Readiness.data.supplier_readiness.observed_field_count} fields)</span><span className="rounded bg-zinc-950/50 p-2">Competition: <b>{phase1Readiness.data.competition_readiness.status}</b> ({phase1Readiness.data.competition_readiness.observed_offer_count} offers)</span><span className="rounded bg-zinc-950/50 p-2">Economics: <b>{phase1Readiness.data.commerce_run_readiness.run_quality}</b></span></div><p className="mt-3 text-xs text-indigo-200">Next action: <span className="font-medium">{phase1Readiness.data.next_best_action.replace(/_/g, " ")}</span></p>{phase1Readiness.data.blocking_gates.length > 0 && <Warnings values={phase1Readiness.data.blocking_gates} />}{phase1Readiness.data.forbidden_next_phases.length > 0 && <p className="mt-2 text-[11px] text-zinc-500">Still forbidden: {phase1Readiness.data.forbidden_next_phases.join(", ").replace(/_/g, " ")}</p>}</>}
+    </section>
+
+    <section className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4" aria-label="Commercial decision workbench">
+      <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-medium text-zinc-100">Commercial decision workbench</h2><p className="mt-1 text-xs text-zinc-400">Offline evidence comparison only. Fixture/demo evidence is never live supplier proof.</p></div><span className={`${badge} border-emerald-500/30 text-emerald-300`}>{benchmark.data?.evidence_mode ?? "loading"}</span></div>
+      {benchmark.data && <><p className="mt-3 text-xs text-emerald-200">Top candidate: <b>{benchmark.data.top_candidate_id ?? "none"}</b> · Next: <b>{benchmark.data.next_best_action.replace(/_/g, " ")}</b></p><div className="mt-3 overflow-x-auto"><table className="min-w-full text-left text-xs"><thead className="text-zinc-500"><tr>{["Candidate", "Evidence", "Supplier", "Competition", "Economics", "Decision", "Validation"].map((heading) => <th key={heading} className="px-2 py-1">{heading}</th>)}</tr></thead><tbody>{benchmark.data.candidates.slice(0, 4).map((item) => <tr key={item.candidate.candidate_id} className="border-t border-zinc-800 text-zinc-300"><td className="px-2 py-2">{item.candidate.title}</td><td className="px-2 py-2">{(item.evidence_completeness * 100).toFixed(0)}%</td><td className="px-2 py-2">{(item.supplier_evidence.score * 100).toFixed(0)}%</td><td className="px-2 py-2">{(item.competition_evidence.score * 100).toFixed(0)}%</td><td className="px-2 py-2">{item.economics.margin_quality}</td><td className="px-2 py-2">{item.commercial_decision.replace(/_/g, " ")}</td><td className="px-2 py-2">{item.validation_priority.priority} · {item.validation_priority.target}</td></tr>)}</tbody></table></div></>}
+      {benchmark.error && <p className="mt-3 text-xs text-amber-200">Benchmark workbench unavailable; readiness and event views remain available.</p>}
     </section>
 
     <section className="grid gap-3 md:grid-cols-3">

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchCommerceRuns, fetchCompetitionSummaries, fetchEventTimeline, fetchEvents, fetchEventsReadiness, fetchPhase1Readiness, fetchOpportunityRankings, fetchResearchPortfolios, fetchShopifyImports, fetchSupplierEvidenceEvents, runPublicCommerceMvp, type EventQueryParams, type PublicCommerceRunRequest } from "@/lib/canonicalEventsApi";
+import { fetchBenchmarkMatrix, fetchCommerceRuns, fetchCompetitionSummaries, fetchEventTimeline, fetchEvents, fetchEventsReadiness, fetchPhase1Readiness, fetchOpportunityRankings, fetchResearchPortfolios, fetchShopifyImports, fetchSupplierEvidenceEvents, runPublicCommerceMvp, type EventQueryParams, type PublicCommerceRunRequest } from "@/lib/canonicalEventsApi";
 
 const key = (name: string, params?: EventQueryParams) => ["canonical-events", name, params ?? {}] as const;
 const options = { staleTime: 30_000 };
@@ -14,6 +14,7 @@ export const useCompetitionSummaries = (params: EventQueryParams) => useQuery({ 
 export const useResearchPortfolios = (params: EventQueryParams) => useQuery({ queryKey: key("research-portfolios", params), queryFn: () => fetchResearchPortfolios(params), ...options });
 export const useEventsReadiness = () => useQuery({ queryKey: key("readiness"), queryFn: fetchEventsReadiness, ...options });
 export const usePhase1Readiness = () => useQuery({ queryKey: key("phase1-readiness"), queryFn: fetchPhase1Readiness, ...options });
+export const useBenchmarkMatrix = () => useQuery({ queryKey: key("benchmark-matrix"), queryFn: fetchBenchmarkMatrix, ...options });
 
 export function usePublicCommerceMvpRun() {
   const queryClient = useQueryClient();

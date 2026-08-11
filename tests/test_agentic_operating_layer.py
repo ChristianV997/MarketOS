@@ -14,6 +14,7 @@ def test_impact_planner_ranks_by_score_deterministically():
 def test_default_backlog_contains_current_cj_gate():
     assert impact_planner.plan(impact_planner.DEFAULT_BACKLOG)["ranked_backlog"]
     assert any(item["task"] == "run_cj_credentialed_readonly_validation" for item in impact_planner.DEFAULT_BACKLOG)
+    assert any(item["task"] == "run_phase1_evidence_benchmark_matrix" for item in impact_planner.DEFAULT_BACKLOG)
 
 
 def test_docs_only_selector_is_fast_and_safe():

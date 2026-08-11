@@ -9,6 +9,7 @@ from .service import (
     load_evaluation_input,
 )
 from .readiness import Phase1ReadinessReport, build_from_paths, build_phase1_readiness
+from .benchmark_matrix import BenchmarkMatrixReport, build_benchmark_from_paths, build_benchmark_matrix
 
 __all__ = [
     "ComparisonReport",
@@ -23,4 +24,7 @@ __all__ = [
     "Phase1ReadinessReport",
     "build_from_paths",
     "build_phase1_readiness",
+    "BenchmarkMatrixReport",
+    "build_benchmark_from_paths",
+    "build_benchmark_matrix",
 ]

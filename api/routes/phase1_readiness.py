@@ -36,6 +36,7 @@ def readiness(request: Request = None):
         evaluation_report=_safe_artifact_path("MARKETOS_PHASE1_EVALUATION_REPORT"),
         comparison_report=_safe_artifact_path("MARKETOS_PHASE1_COMPARISON_REPORT"),
         validation_pack_report=_safe_artifact_path("MARKETOS_PHASE1_VALIDATION_PACK_REPORT"),
+        benchmark_report=_safe_artifact_path("MARKETOS_PHASE1_BENCHMARK_REPORT"),
     ).to_dict()
 
 

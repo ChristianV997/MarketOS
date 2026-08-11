@@ -12,6 +12,7 @@ except ImportError:  # pragma: no cover - direct script execution
 
 
 DEFAULT_BACKLOG = [
+    {"task": "run_phase1_evidence_benchmark_matrix", "commercial": 4, "evidence": 5, "risk_reduction": 4, "unblocking": 4, "ci": 2, "operator": 5, "effort": 2, "scope_risk": 1, "safety_risk": 1, "gate": "safe_now"},
     {"task": "finish_cj_live_validation_pack", "commercial": 4, "evidence": 5, "risk_reduction": 5, "unblocking": 5, "ci": 2, "operator": 5, "effort": 2, "scope_risk": 1, "safety_risk": 1, "gate": "active_pr_review"},
     {"task": "run_cj_credentialed_readonly_validation", "commercial": 5, "evidence": 5, "risk_reduction": 5, "unblocking": 5, "ci": 1, "operator": 5, "effort": 2, "scope_risk": 2, "safety_risk": 2, "gate": "credentials_and_operator_approval"},
     {"task": "optimize_ci_test_lanes", "commercial": 2, "evidence": 3, "risk_reduction": 4, "unblocking": 4, "ci": 5, "operator": 2, "effort": 3, "scope_risk": 2, "safety_risk": 1, "gate": "safe_now"},

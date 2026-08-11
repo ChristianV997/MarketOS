@@ -165,6 +165,7 @@ def build_phase1_readiness(
     evaluation_report: Mapping[str, Any] | None = None,
     comparison_report: Mapping[str, Any] | None = None,
     validation_pack_report: Mapping[str, Any] | None = None,
+    benchmark_report: Mapping[str, Any] | None = None,
     environ: Mapping[str, str] | None = None,
     generated_at: str = "deterministic",
     source_artifacts: Mapping[str, str] | None = None,
@@ -174,6 +175,7 @@ def build_phase1_readiness(
     evaluation = dict(evaluation_report or {})
     comparison = dict(comparison_report or {})
     pack = dict(validation_pack_report or {})
+    benchmark = dict(benchmark_report or {})
     env = os.environ if environ is None else environ
     credential_raw = explain_cj_read_only_readiness(env)
     credential = {
@@ -232,18 +234,19 @@ def build_phase1_readiness(
     if not deployment["event_read_path_configured"]: warnings.append("event_read_jsonl_path_not_configured")
     overall_status = "ready" if not blockers and score >= 75 else "blocked" if credential_raw.get("status") == "credential_missing" else "partially_ready"
     artifacts = dict(source_artifacts or {})
-    return Phase1ReadinessReport(REPORT_VERSION, generated_at, overall_status, score, contributions, "phase1", tuple(sorted(set(blockers))), tuple(sorted(set(warnings))), {"live_observed_supplier_fields": supplier["observed_field_count"], "live_observed_competitor_offers": competition["observed_offer_count"], "overall_evidence_completeness": commerce["evidence_completeness"], "overall_confidence": commerce["overall_confidence"], "assumption_percentage": commerce["assumption_percentage"]}, supplier, competition, opportunity, research, commerce, eval_ready, event_ready, credential, pack_ready, deployment, safety, action, hint, required_inputs, ("read_only_deployment", "bounded_competitor_benchmark"), ("supplier_mutation", "shopify_mutation", "ads_or_spend", "orders_payments_or_fulfillment", "broad_phase2_without_live_readiness"), artifacts, {"supplier": "authenticated_CJ_readonly_adapter_and_sanitized_reports", "competition": "evaluation_framework_and_sanitized_validation_reports", "safety": "static_phase1_policy"})
+    evidence_summary = {"live_observed_supplier_fields": supplier["observed_field_count"], "live_observed_competitor_offers": competition["observed_offer_count"], "overall_evidence_completeness": commerce["evidence_completeness"], "overall_confidence": commerce["overall_confidence"], "assumption_percentage": commerce["assumption_percentage"], "benchmark_matrix_status": benchmark.get("status", "not_configured"), "best_candidate_id": benchmark.get("top_candidate_id"), "highest_validation_priority": benchmark.get("highest_validation_priority", {})}
+    return Phase1ReadinessReport(REPORT_VERSION, generated_at, overall_status, score, contributions, "phase1", tuple(sorted(set(blockers))), tuple(sorted(set(warnings))), evidence_summary, supplier, competition, opportunity, research, commerce, eval_ready, event_ready, credential, pack_ready, deployment, safety, action, hint, required_inputs, ("read_only_deployment", "bounded_competitor_benchmark"), ("supplier_mutation", "shopify_mutation", "ads_or_spend", "orders_payments_or_fulfillment", "broad_phase2_without_live_readiness"), artifacts, {"supplier": "authenticated_CJ_readonly_adapter_and_sanitized_reports", "competition": "evaluation_framework_and_sanitized_validation_reports", "safety": "static_phase1_policy"})
 
 
-def build_from_paths(*, validation_artifact: str | Path | None = None, evaluation_report: str | Path | None = None, comparison_report: str | Path | None = None, validation_pack_report: str | Path | None = None, environ: Mapping[str, str] | None = None) -> Phase1ReadinessReport:
+def build_from_paths(*, validation_artifact: str | Path | None = None, evaluation_report: str | Path | None = None, comparison_report: str | Path | None = None, validation_pack_report: str | Path | None = None, benchmark_report: str | Path | None = None, environ: Mapping[str, str] | None = None) -> Phase1ReadinessReport:
     sources: dict[str, str] = {}
     warnings: list[str] = []
     loaded: list[dict[str, Any]] = []
-    for name, path in (("validation_artifact", validation_artifact), ("evaluation_report", evaluation_report), ("comparison_report", comparison_report), ("validation_pack_report", validation_pack_report)):
+    for name, path in (("validation_artifact", validation_artifact), ("evaluation_report", evaluation_report), ("comparison_report", comparison_report), ("validation_pack_report", validation_pack_report), ("benchmark_report", benchmark_report)):
         value, issues, source = load_sanitized_artifact(path)
         loaded.append(value); warnings.extend(issues)
         if source: sources[name] = source
-    report = build_phase1_readiness(validation_artifact=loaded[0], evaluation_report=loaded[1], comparison_report=loaded[2], validation_pack_report=loaded[3], environ=environ, source_artifacts=sources)
+    report = build_phase1_readiness(validation_artifact=loaded[0], evaluation_report=loaded[1], comparison_report=loaded[2], validation_pack_report=loaded[3], benchmark_report=loaded[4], environ=environ, source_artifacts=sources)
     if warnings:
         value = report.to_dict(); value["advisory_warnings"] = sorted(set(value["advisory_warnings"] + warnings))
         return Phase1ReadinessReport(**{key: tuple(item) if key in {"blocking_gates", "advisory_warnings", "required_operator_inputs", "allowed_next_phases", "forbidden_next_phases"} else item for key, item in value.items()})

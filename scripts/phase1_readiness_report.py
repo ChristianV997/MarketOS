@@ -49,13 +49,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evaluation-report")
     parser.add_argument("--comparison-report")
     parser.add_argument("--validation-pack-report")
+    parser.add_argument("--benchmark-report")
     parser.add_argument("--output", help="explicit sanitized report destination; no output is written by default")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--markdown", action="store_true")
     args = parser.parse_args(argv)
     if args.json and args.markdown:
         parser.error("choose --json or --markdown")
-    report = build_from_paths(validation_artifact=args.validation_artifact, evaluation_report=args.evaluation_report, comparison_report=args.comparison_report, validation_pack_report=args.validation_pack_report).to_dict()
+    report = build_from_paths(validation_artifact=args.validation_artifact, evaluation_report=args.evaluation_report, comparison_report=args.comparison_report, validation_pack_report=args.validation_pack_report, benchmark_report=args.benchmark_report).to_dict()
     markdown = _markdown(report)
     if args.output:
         _write(args.output, report, markdown)
