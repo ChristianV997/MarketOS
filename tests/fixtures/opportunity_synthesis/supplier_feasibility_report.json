@@ -1,0 +1,13 @@
+{
+  "report_version": "supplier-feasibility-v1",
+  "evidence_mode": "fixture_demo",
+  "suppliers_observed": ["cj", "alibaba"],
+  "top_candidate_id": "mini-thermal-printer",
+  "candidates": [
+    {"candidate_id":"mini-thermal-printer","query":"mini thermal printer","offers":[{"supplier":"cj","unit_cost":8.5,"shipping_cost":3.25,"estimated_landed_cost":11.75,"delivery_max_days":12,"evidence_mode":"fixture"}],"score":{"overall_supplier_feasibility":0.7,"supplier_cost_confidence":0.55,"margin_feasibility_proxy":0.7,"recommendation":"expand_supplier_research","risk_flags":[],"economics":{"target_sell_price":29.99,"estimated_landed_cost":11.75,"gross_margin_percent":0.56,"profit_per_order_before_ad_spend":11.25,"break_even_cpa":11.25,"break_even_roas":2.67,"assumptions":[]}}},
+    {"candidate_id":"portable-projector","query":"portable projector","offers":[{"supplier":"alibaba","unit_cost":42,"shipping_cost":12,"estimated_landed_cost":54,"delivery_max_days":45,"evidence_mode":"fixture"}],"score":{"overall_supplier_feasibility":0.22,"supplier_cost_confidence":0.5,"recommendation":"reject_poor_margin","risk_flags":[{"code":"low_margin_proxy","severity":"blocker"}],"economics":{"target_sell_price":49.99,"estimated_landed_cost":54,"gross_margin_percent":-0.2,"profit_per_order_before_ad_spend":-7,"break_even_cpa":0,"break_even_roas":null,"assumptions":[]}}}
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

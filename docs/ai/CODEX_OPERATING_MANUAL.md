@@ -34,3 +34,7 @@ For consulting evidence, treat marketplace, supplier, and consumer-attention
 reports as separate inputs. Consumer attention can produce deterministic hooks,
 pain points, objections, and creative hypotheses, but it is never supplier
 proof and never grants permission to post or buy ads.
+
+The synthesis/report-v2 layer is the preferred commercial deliverable after
+the three offline evidence pillars. Reuse its existing scores; do not create a
+parallel ranking or promise launch readiness from fixture/manual evidence.

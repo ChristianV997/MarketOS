@@ -91,3 +91,7 @@ dashboards, bypasses CAPTCHA/robots controls, stores raw HTML or raw social/ad
 payloads, posts content, launches ads, sends messages, mutates Shopify, places
 orders, or changes provider state. No credentials belong in fixtures,
 Markdown, JSON, or Git.
+
+Product Opportunity Synthesis uses this layer for hooks, pain points,
+objections, attention confidence, and creative-test prioritization. It does not
+turn consumer interest into supplier proof or launch authorization.
