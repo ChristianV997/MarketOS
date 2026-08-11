@@ -12,6 +12,8 @@ Launch Draft Pack is the first consulting upsell after Product Opportunity Synth
 
 It is a presentation layer, not a fourth evidence engine. It never publishes, spends, posts, creates orders, collects payments, sends customer messages, or calls Shopify/Medusa.
 
+The next optional upsell is `scripts/generate_site_draft_pack.py`, which consumes this pack and produces a platform-neutral route/CMS/SEO/analytics blueprint for ecommerce, service, catalog, and funnel clients.
+
 ## Generate it
 
 Default mode uses the repository's sanitized fixture reports and performs no network I/O:

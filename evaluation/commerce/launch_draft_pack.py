@@ -478,7 +478,7 @@ def build_launch_draft_pack(*, synthesis: Mapping[str, Any], product_validation:
     checklist = _checklist(synthesis, supplier_present)
     risks = _risks(synthesis, candidate, objections)
     mode = _text(synthesis.get("evidence_mode") or "fixture_demo", 40)
-    return LaunchDraftPack(VERSION, "deterministic", candidate_id, title, mode, "opportunity_synthesis", recommendation, "draft_only_pending_human_approval", offer, listing, landing, ads, ugc, matrix, faq, shopify, medusa, checklist, risks, ("No live calls were made.", "Draft payloads are not connected to Shopify or Medusa.", "Replace TBD fields with verified evidence before publishing.",), f"{title} has a draft launch package based on {mode} evidence. It is a consulting work product for review, not a launch authorization or profit claim.")
+    return LaunchDraftPack(VERSION, "deterministic", candidate_id, title, mode, "opportunity_synthesis", recommendation, "draft_only_pending_human_approval", offer, listing, landing, ads, ugc, matrix, faq, shopify, medusa, checklist, risks, ("No live calls were made.", "Draft payloads are not connected to Shopify or Medusa.", "Replace TBD fields with verified evidence before publishing.", "Next consulting upsell: generate a platform-agnostic website/store/funnel draft."), f"{title} has a draft launch package based on {mode} evidence. It is a consulting work product for review, not a launch authorization or profit claim.")
 
 
 def markdown(pack: Mapping[str, Any]) -> str:
