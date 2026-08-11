@@ -27,7 +27,10 @@ def _read(path: str | None) -> dict[str, Any] | None:
     if not path:
         return None
     target = Path(path)
-    if ".." in target.parts or target.suffix.lower() != ".json":
+    # Normalize both separator styles so Windows-form paths are rejected when
+    # the CLI is exercised on Linux CI (and vice versa).
+    path_parts = path.replace("\\", "/").split("/")
+    if ".." in target.parts or ".." in path_parts or target.suffix.lower() != ".json":
         raise ValueError("only local JSON report paths without traversal are supported")
     if not target.is_file():
         raise ValueError(f"synthesis input does not exist: {target}")
