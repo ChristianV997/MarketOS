@@ -13,3 +13,8 @@ authenticated CJ evidence awaits an operator-owned credentialed proof.
 `impact_planner.py` ranks this static backlog without GitHub/network access and can accept a sanitized readiness report with `--readiness-report`.
 
 Use `scripts/phase1_benchmark_matrix.py --json` to choose which candidate has the highest evidence-backed validation value; fixture ranking is not live proof.
+
+The offline marketplace trend slice is now a commercial-enablement task, not a
+replacement for supplier proof. Use it to strengthen a paid report while the
+readiness gate remains `credential_missing`; then let the trend report identify
+the highest-value candidate for the one bounded CJ validation run.

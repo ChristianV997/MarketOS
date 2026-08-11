@@ -1,0 +1,3 @@
+candidate_id,query,marketplace,source_type,sold_count_text,review_count,price,currency,seller_count,source_confidence
+mini-thermal-printer,mini thermal printer,ebay,ebay_terapeak_manual_import,120 sold,35,31.50,USD,8,0.7
+portable-blender,portable blender,ebay,ebay_terapeak_manual_import,80 sold,18,36.00,USD,12,0.62

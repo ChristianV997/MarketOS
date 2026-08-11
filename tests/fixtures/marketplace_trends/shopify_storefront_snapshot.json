@@ -1,0 +1,13 @@
+[
+  {
+    "candidate_id": "neck-massager",
+    "query": "neck massager",
+    "marketplace": "shopify",
+    "source_type": "shopify_storefront_snapshot",
+    "price": 49.99,
+    "currency": "USD",
+    "availability": "in_stock",
+    "source_confidence": 0.44,
+    "warnings": ["single_storefront_signal"]
+  }
+]

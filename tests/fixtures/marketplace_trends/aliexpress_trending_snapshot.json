@@ -1,0 +1,17 @@
+[
+  {
+    "candidate_id": "pet-grooming-vacuum",
+    "query": "pet grooming vacuum",
+    "marketplace": "aliexpress",
+    "source_type": "aliexpress_trending_snapshot",
+    "trend_label": "rising",
+    "search_growth_signal": 0.57,
+    "sold_count_text": "1.2K sold",
+    "price": 36.5,
+    "currency": "USD",
+    "review_count": 1800,
+    "rating": 4.4,
+    "shipping_signal": "standard_available",
+    "source_confidence": 0.52
+  }
+]

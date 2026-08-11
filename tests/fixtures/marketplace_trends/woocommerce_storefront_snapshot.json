@@ -1,0 +1,13 @@
+[
+  {
+    "candidate_id": "portable-blender",
+    "query": "portable blender",
+    "marketplace": "woocommerce",
+    "source_type": "woocommerce_storefront_snapshot",
+    "price": 42,
+    "currency": "USD",
+    "availability": "in_stock",
+    "source_confidence": 0.43,
+    "warnings": ["single_storefront_signal"]
+  }
+]

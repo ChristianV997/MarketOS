@@ -1,0 +1,17 @@
+[
+  {
+    "candidate_id": "resistance-band-kit",
+    "query": "resistance band kit",
+    "marketplace": "mercadolibre",
+    "source_type": "mercadolibre_best_sellers_snapshot",
+    "site_id": "MLM",
+    "rank_position": 4,
+    "best_seller_badge": true,
+    "price": 299,
+    "currency": "MXN",
+    "review_count": 2200,
+    "rating": 4.7,
+    "seller_count": 64,
+    "source_confidence": 0.63
+  }
+]

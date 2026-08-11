@@ -1,0 +1,17 @@
+[
+  {
+    "candidate_id": "mini-thermal-printer",
+    "query": "mini thermal printer",
+    "marketplace": "amazon",
+    "source_type": "amazon_product_snapshot",
+    "source_url": "https://example.invalid/synthetic/amazon/thermal-printer",
+    "price": 29.99,
+    "currency": "USD",
+    "review_count": 8450,
+    "rating": 4.5,
+    "availability": "in_stock",
+    "shipping_signal": "free_standard",
+    "fulfillment_signal": "marketplace_fulfilled",
+    "source_confidence": 0.76
+  }
+]

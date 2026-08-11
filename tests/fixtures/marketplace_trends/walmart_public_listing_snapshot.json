@@ -1,0 +1,15 @@
+[
+  {
+    "candidate_id": "travel-coffee-grinder",
+    "query": "travel coffee grinder",
+    "marketplace": "walmart",
+    "source_type": "walmart_public_listing_snapshot",
+    "price": 39.98,
+    "currency": "USD",
+    "review_count": 1200,
+    "rating": 4.3,
+    "availability": "in_stock",
+    "fulfillment_signal": "marketplace_fulfilled",
+    "source_confidence": 0.57
+  }
+]
