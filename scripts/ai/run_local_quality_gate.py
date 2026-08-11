@@ -14,13 +14,35 @@ if str(REPOSITORY_ROOT) not in sys.path:
 try:
     from . import ci_matrix_plan, impact_planner, phase_gate, pr_readiness_report, select_tests
     from .operating_layer import ROOT, changed_from_git, normal_paths, render_json_or_markdown, write_optional_output
-    from evaluation.commerce.readiness import build_phase1_readiness
-    from evaluation.commerce.benchmark_matrix import build_benchmark_matrix
 except ImportError:  # pragma: no cover - direct script execution
     import ci_matrix_plan, impact_planner, phase_gate, pr_readiness_report, select_tests
     from operating_layer import ROOT, changed_from_git, normal_paths, render_json_or_markdown, write_optional_output
-    from evaluation.commerce.readiness import build_phase1_readiness
-    from evaluation.commerce.benchmark_matrix import build_benchmark_matrix
+
+
+def _optional_phase1_summary() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return Phase 1 context without making the local gate depend on optional ML deps.
+
+    ``evaluation`` also exposes experimental statistical helpers whose optional SciPy
+    dependency is intentionally absent from the lightweight PR workflow.  The
+    quality gate remains useful without that context and must not make a PR fail
+    solely because an optional evaluation dependency is unavailable.
+    """
+    try:
+        from evaluation.commerce.benchmark_matrix import build_benchmark_matrix
+        from evaluation.commerce.readiness import build_phase1_readiness
+
+        readiness = build_phase1_readiness().to_dict()
+        benchmark = build_benchmark_matrix().to_dict()
+        return readiness, benchmark
+    except (ImportError, ModuleNotFoundError) as exc:
+        unavailable = {
+            "overall_status": "unavailable",
+            "overall_score": None,
+            "next_best_action": "install the optional evaluation profile to include Phase 1 context",
+            "blocking_gates": [],
+            "warning": f"Phase 1 context unavailable: {exc.__class__.__name__}",
+        }
+        return unavailable, {"status": "unavailable", "warning": unavailable["warning"]}
 
 
 def _diff_text(path: str | None) -> str:
@@ -58,8 +80,7 @@ def run(paths: list[str], *, diff_text: str = "", branch: str = "local") -> dict
     phase = phase_gate.check(paths, implementation_diff)
     selected = select_tests.select(paths)
     ci_plan = ci_matrix_plan.plan(paths)
-    phase1_readiness = build_phase1_readiness().to_dict()
-    benchmark = build_benchmark_matrix().to_dict()
+    phase1_readiness, benchmark = _optional_phase1_summary()
     impact = impact_planner.plan(impact_planner.DEFAULT_BACKLOG, phase1_readiness)
     blocked = phase["status"] == "blocked" or readiness["risk_category"] == "blocked"
     status = "blocked" if blocked else "clear" if not paths else "advisory"
