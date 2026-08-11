@@ -1,0 +1,34 @@
+"""Client-ready presentation layer over existing Phase 1 evidence reports."""
+from __future__ import annotations
+import json, re
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Mapping
+from .benchmark_matrix import build_benchmark_from_paths
+from .readiness import build_from_paths, load_sanitized_artifact
+from .public_market_benchmark import build_public_market_benchmark, load_public_market_seed
+from backend.deployment.readiness import build_readiness
+
+VERSION="product-validation-report-v1"
+def clean(v: Any, limit=120)->str:return re.sub(r"[\r\n]+"," ",str(v or ""))[:limit]
+@dataclass(frozen=True)
+class ProductValidationReport:
+ report_version:str; report_id:str; generated_at:str; client_name_optional:str; prepared_by:str; evidence_mode:str; overall_recommendation:str; executive_summary:Mapping[str,Any]; top_candidates:tuple[Mapping[str,Any],...]; candidate_rankings:tuple[Mapping[str,Any],...]; supplier_evidence:Mapping[str,Any]; competition_evidence:Mapping[str,Any]; economics:Mapping[str,Any]; risk_flags:tuple[str,...]; launch_readiness:Mapping[str,Any]; recommended_next_actions:tuple[str,...]; pricing_guidance:Mapping[str,Any]; ad_angle_hints:tuple[str,...]; landing_page_hints:tuple[str,...]; open_questions:tuple[str,...]; operator_disclaimer:str; appendix:Mapping[str,Any]; source_reports:Mapping[str,str]; read_only:bool=True; network_calls:bool=False; mutated:bool=False
+ def to_dict(self):
+  d=asdict(self)
+  for k in ("top_candidates","candidate_rankings","risk_flags","recommended_next_actions","ad_angle_hints","landing_page_hints","open_questions"):d[k]=list(d[k])
+  return d
+
+def generate(*, client_name="", benchmark:Mapping[str,Any]|None=None, public_market:Mapping[str,Any]|None=None, readiness:Mapping[str,Any]|None=None, deployment:Mapping[str,Any]|None=None)->ProductValidationReport:
+ b=dict(benchmark or build_benchmark_from_paths().to_dict()); p=dict(public_market or {}); r=dict(readiness or build_from_paths().to_dict()); d=dict(deployment or build_readiness().to_dict())
+ candidates=list(b.get("candidates",[])); top=candidates[:3]; leader=top[0] if top else {}; title=clean((leader.get("candidate") or {}).get("title","No candidate")); decision=leader.get("commercial_decision","hold_for_more_evidence")
+ recommendation="validate_supplier_first" if r.get("supplier_readiness",{}).get("status")!="live_observed" else "advance_to_launch_draft" if decision=="ready_for_readonly_deployment" else "client_review_required"
+ mode="fixture_demo" if b.get("evidence_mode","fixture_demo")=="fixture_demo" else "sanitized_report"
+ supplier=r.get("supplier_readiness",{}); comp=r.get("competition_readiness",{}); risks=tuple(sorted(set([*r.get("blocking_gates",[]),*(leader.get("candidate",{}).get("assumptions",[]) if leader else [])])))
+ return ProductValidationReport(VERSION,"deterministic-product-validation", "deterministic",clean(client_name),"MarketOS",mode,recommendation,{"headline":f"{title}: validate supplier proof before launch decisions.","evidence_note":"Fixture/demo evidence is not live proof." if mode=="fixture_demo" else "Based on sanitized supplied evidence."},tuple(top),tuple(candidates),{"status":supplier.get("status","unknown"),"observed_fields":supplier.get("observed_fields",[]),"proof_present":supplier.get("status")=="live_observed"},{"pricing_coverage":p.get("pricing_coverage",comp.get("pricing_coverage",0)),"offers_observed":p.get("competitor_offers_observed",comp.get("observed_offer_count",0))},{"margin_quality":(leader.get("economics") or {}).get("margin_quality","unknown"),"assumption_ratio":leader.get("assumption_ratio")},risks,{"status":r.get("overall_status","blocked"),"deployment":d.get("overall_status","blocked")},(r.get("next_best_action","set_cj_credentials_and_run_validation_pack"),),{"suggested_report_range_usd":"$250-$750","upsell":"credential-safe live supplier validation and launch-draft pack"},("Lead with observed competitor price positioning, not profit claims.",), ("Show evidence provenance and clarify remaining assumptions.",), ("Observed supplier price, inventory, shipping, and delivery remain required.",),"This report is validation guidance, not a profit guarantee, launch authorization, or provider instruction.",{"public_market_status":p.get("evidence_mode","not_supplied"),"deployment_status":d.get("overall_status")},{"benchmark":"supplied" if benchmark else "structural_fixture","readiness":"supplied" if readiness else "structural_fixture"})
+
+def markdown(report:Mapping[str,Any])->str:
+ lines=["# Product Validation Report","",f"**Prepared for:** {report.get('client_name_optional') or 'Prospective client'}  ",f"**Recommendation:** `{report['overall_recommendation']}`","","## Executive Summary","",report['executive_summary']['headline'],"", "## Top Recommendation","",f"Validate supplier proof before committing spend or launch work for **{((report.get('top_candidates') or [{}])[0].get('candidate') or {}).get('title','the leading candidate')}**.","","## Candidate Ranking",""]
+ for x in report.get('candidate_rankings',[]):lines.append(f"- **{x['candidate']['title']}** — `{x['commercial_decision']}`; evidence {x['evidence_completeness']:.0%}.")
+ lines += ["","## Evidence Quality","",f"Mode: `{report['evidence_mode']}`. Supplier proof: `{report['supplier_evidence']['status']}`. Pricing coverage: {float(report['competition_evidence']['pricing_coverage'] or 0):.0%}.","","## Supplier Readiness","",str(report['supplier_evidence']),"","## Competition and Pricing Evidence","",str(report['competition_evidence']),"","## Economics and Margin Outlook","",str(report['economics']),"","## Risk Flags",""]+[f"- {x}" for x in report['risk_flags']]+["","## Launch Readiness","",str(report['launch_readiness']),"","## Recommended Next Actions",""]+[f"- {x}" for x in report['recommended_next_actions']]+["","## Ad Angle Hints",""]+[f"- {x}" for x in report['ad_angle_hints']]+["","## Landing Page Hints",""]+[f"- {x}" for x in report['landing_page_hints']]+["","## What We Still Need To Validate",""]+[f"- {x}" for x in report['open_questions']]+["","## Appendix: Evidence Sources and Assumptions","",str(report['appendix']),"","## Disclaimer","",report['operator_disclaimer']]
+ return "\n".join(lines)+"\n"
