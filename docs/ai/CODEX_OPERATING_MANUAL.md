@@ -47,3 +47,5 @@ For internal operating work, run `python scripts/run_companyos_department_layer.
 For agent architecture work, run `python scripts/run_companyos_registry_layer.py --markdown`. Treat registries as contracts and decisions, not installed integrations. Check tool risk, model budgets, trace/eval requirements, knowledge privacy, and workflow interrupts before proposing live adapters.
 
 For external-action planning, run `python scripts/run_companyos_approval_ledger.py --markdown`. Treat scopes, conditions, budget caps, simulations, and audit events as control records; never treat a draft or simulated approval as execution authority.
+
+For provider planning, run `python scripts/run_companyos_provider_registry.py --markdown`. Store references and placeholders only; never read, print, validate, or write credential values.

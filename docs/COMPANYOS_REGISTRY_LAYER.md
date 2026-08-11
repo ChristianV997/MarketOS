@@ -37,3 +37,5 @@ All real-world tools default to `blocked` or approval-required. Sales skills dra
 The next architecture milestone is Approval Ledger v1, followed by bounded Sales v2 and only then carefully scoped external adapters.
 
 Approval Ledger v1 is now the canonical action gate over this registry. It reuses tool risk, workflow interrupts, agent boundaries, skill approval requirements, model caps, evaluation gates, and knowledge privacy policies without installing any of the referenced systems.
+
+The next metadata layer is the [Credential / Provider / Subscription Registry](COMPANYOS_PROVIDER_CREDENTIAL_REGISTRY.md), which attaches owners, scopes, budgets, health placeholders, costs, and activation gates to provider candidates without storing secrets or creating clients.

@@ -1,0 +1,1 @@
+{"provider_id": "litellm", "route_ids": ["local_low_cost", "cheap_api", "frontier_reasoning"], "mode": "read_only_requires_approval"}

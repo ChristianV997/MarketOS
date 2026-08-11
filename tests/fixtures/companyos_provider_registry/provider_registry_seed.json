@@ -1,0 +1,1 @@
+{"providers": [{"provider_id": "apify", "integration_stage": "integrate_soon", "default_action_mode": "read_only_requires_approval"}, {"provider_id": "bright-data", "integration_stage": "avoid_for_now"}]}

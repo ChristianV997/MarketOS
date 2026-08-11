@@ -61,4 +61,6 @@ With `--output`, only sanitized ledger, queue, policy, audit, simulation, blocke
 
 The ledger is the prerequisite for a future credential registry, bounded LiteLLM gateway, Langfuse/Phoenix trace sink, and Sales Department v2. Those integrations require a new review of secrets, ownership, budgets, privacy, provider terms, and live-action tests.
 
+The [Credential / Provider / Subscription Registry](COMPANYOS_PROVIDER_CREDENTIAL_REGISTRY.md) is the metadata layer that follows this gate. It may describe a secret-manager reference or provider plan, but it cannot activate or validate it.
+
 No credentials, API keys, model credentials, private recipients, client data, raw payloads, live network calls, provider calls, model calls, vector indexing, CRM mutations, accounting sync, email, WhatsApp/SMS, voice calls, payments, ads, publishing, orders, or customer messages are performed by Approval Ledger v1.

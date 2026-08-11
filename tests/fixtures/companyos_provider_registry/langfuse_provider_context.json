@@ -1,0 +1,1 @@
+{"provider_id": "langfuse", "mapping": ["trace_collection", "prompt_version_management", "eval_datasets"], "mode": "reference_only"}
