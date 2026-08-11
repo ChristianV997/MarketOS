@@ -92,3 +92,14 @@ credentials, and an explicit network gate. `scripts/check_phase1_supplier_readon
 is the no-network-by-default preflight. The adapter is fixture-tested but has
 not been live credential-validated; do not claim observed authenticated fields
 until an operator-owned account performs the explicit probe.
+
+## Credential-safe CJ live validation pack
+
+The first credentialed probe should use
+`scripts/run_phase1_cj_readonly_validation_pack.py`, documented in
+`docs/PHASE1_CJ_LIVE_VALIDATION_PACK.md`. Its default mode is offline
+configuration preflight. Its explicit `--allow-network` mode delegates one
+bounded authenticated CJ candidate search to the established harness, then
+sanitizes normalized validation/evaluation artifacts and can compare them
+against a public/JS baseline. Generated artifacts remain ignored; credentials,
+raw provider payloads, headers, and URL query strings must never be committed.
