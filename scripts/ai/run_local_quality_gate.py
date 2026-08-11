@@ -99,7 +99,7 @@ def run(paths: list[str], *, diff_text: str = "", branch: str = "local") -> dict
         "pr_merge_readiness": readiness["merge_readiness"],
         "impact_top_task": impact["ranked_backlog"][0]["task"], "recommended_next_action": next_action,
         "phase1_readiness": {"overall_status": phase1_readiness["overall_status"], "overall_score": phase1_readiness["overall_score"], "next_best_action": phase1_readiness["next_best_action"], "blocking_gates": phase1_readiness["blocking_gates"]},
-        "benchmark_matrix": {"status": benchmark["status"], "evidence_mode": benchmark["evidence_mode"], "top_candidate_id": benchmark["top_candidate_id"], "next_best_action": benchmark["next_best_action"]},
+        "benchmark_matrix": {"status": benchmark.get("status", "unavailable"), "evidence_mode": benchmark.get("evidence_mode", "unavailable"), "top_candidate_id": benchmark.get("top_candidate_id"), "next_best_action": benchmark.get("next_best_action", "install the optional evaluation profile to include benchmark context")},
         "network_calls": False, "mutated": False,
     }
 
