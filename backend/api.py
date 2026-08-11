@@ -159,6 +159,11 @@ try:
         app.include_router(_commerce_mvp_router)
     except ImportError:
         pass
+    try:
+        from api.routes.commerce_evaluations import router as _commerce_evaluations_router
+        app.include_router(_commerce_evaluations_router)
+    except ImportError:
+        pass
 except Exception:
     # The legacy API must remain importable if an optional route dependency is
     # unavailable in a minimal deployment image.
