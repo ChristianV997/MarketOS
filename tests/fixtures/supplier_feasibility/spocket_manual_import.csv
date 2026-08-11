@@ -1,0 +1,2 @@
+candidate_id,query,supplier,source_type,supplier_product_id,unit_cost,shipping_cost,delivery_window,inventory_status,warehouse_region,destination_region,source_confidence
+travel-coffee-grinder,travel coffee grinder,spocket,spocket_manual_import,SP-SYN-GRIND-01,19,5,4-9 days,in_stock,US,US,0.68

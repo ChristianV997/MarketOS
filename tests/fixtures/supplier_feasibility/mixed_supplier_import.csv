@@ -1,0 +1,4 @@
+candidate_id,query,supplier,source_type,unit_cost,shipping_cost,delivery_window,inventory_status,source_confidence
+mini-thermal-printer,mini thermal printer,cj,cj_manual_import,9,3,8-15 days,in_stock,0.7
+mini-thermal-printer,mini thermal printer,alibaba,alibaba_supplier_snapshot,7,5,14-25 days,available,0.62
+portable-espresso-maker,portable espresso maker,aliexpress,aliexpress_supplier_snapshot,11,4,15-30 days,unknown,0.5

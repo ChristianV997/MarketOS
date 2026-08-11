@@ -1,0 +1,30 @@
+[
+  {
+    "candidate_id": "mini-thermal-printer",
+    "query": "mini thermal printer",
+    "supplier": "cj",
+    "source_type": "cj_validation_pack_report",
+    "supplier_product_id": "CJ-SYN-THERMAL-001",
+    "supplier_title": "Mini Bluetooth Thermal Printer",
+    "supplier_brand": "Synthetic Supplier",
+    "supplier_sku": "THERMAL-001",
+    "variant_count": 3,
+    "moq": 1,
+    "unit_cost": 8.5,
+    "currency": "USD",
+    "shipping_cost": 3.25,
+    "delivery_window": "7-12 days",
+    "inventory_status": "in_stock",
+    "inventory_quantity": 420,
+    "warehouse_region": "CN",
+    "destination_region": "US",
+    "fulfillment_method": "supplier_direct",
+    "supplier_rating": 4.7,
+    "supplier_review_count": 1800,
+    "order_count_text": "3.4K orders",
+    "return_policy_signal": "documented",
+    "refund_policy_signal": "documented",
+    "source_confidence": 0.84,
+    "field_provenance": {"unit_cost": "fixture", "shipping_cost": "fixture", "inventory_quantity": "fixture"}
+  }
+]

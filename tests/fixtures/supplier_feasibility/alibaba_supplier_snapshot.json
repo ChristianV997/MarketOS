@@ -1,0 +1,22 @@
+[
+  {
+    "candidate_id": "portable-projector",
+    "query": "portable projector",
+    "supplier": "alibaba",
+    "source_type": "alibaba_supplier_snapshot",
+    "supplier_product_id": "ALI-SYN-PROJECTOR-01",
+    "supplier_title": "Compact LED Projector",
+    "unit_cost": 18,
+    "shipping_cost": 6,
+    "delivery_window": "12-22 days",
+    "inventory_status": "available",
+    "inventory_quantity": 1000,
+    "warehouse_region": "CN",
+    "destination_region": "US",
+    "fulfillment_method": "supplier_direct",
+    "supplier_rating": 4.5,
+    "supplier_review_count": 650,
+    "moq": 5,
+    "source_confidence": 0.62
+  }
+]

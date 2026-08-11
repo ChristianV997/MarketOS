@@ -29,3 +29,21 @@ The report adds Marketplace Demand Signals and labels the evidence mode. These
 signals improve demand/competition context but never become supplier proof.
 Price, inventory, shipping, and margin claims remain blocked or provisional
 until a read-only supplier source observes them.
+
+## Optional supplier feasibility enrichment
+
+Supplier feasibility can be added independently of authenticated CJ access:
+
+```powershell
+python scripts/run_supplier_feasibility_intelligence.py `
+  --output artifacts/supplier_feasibility/latest `
+  --target-sell-price 29.99 `
+  --markdown
+python scripts/generate_product_validation_report.py `
+  --supplier-feasibility-report artifacts/supplier_feasibility/latest/supplier_feasibility_report.json `
+  --markdown
+```
+
+The report distinguishes supplier cost, landed cost, delivery, inventory, and
+margin scenarios from marketplace selling prices. Fixture/manual evidence is
+clearly labeled and does not replace live read-only supplier proof.

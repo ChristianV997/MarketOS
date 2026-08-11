@@ -1,0 +1,15 @@
+[
+  {
+    "candidate_id": "neck-massager",
+    "query": "neck massager",
+    "supplier": "alibaba",
+    "source_type": "alibaba_high_profit_snapshot",
+    "unit_cost": 14,
+    "shipping_cost": 8,
+    "delivery_window": "30-45 days",
+    "moq": 50,
+    "inventory_status": "unknown",
+    "source_confidence": 0.44,
+    "warnings": ["editorial_profit_label_not_margin_proof"]
+  }
+]
