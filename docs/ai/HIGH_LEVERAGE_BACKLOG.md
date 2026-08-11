@@ -11,3 +11,5 @@ authenticated CJ evidence awaits an operator-owned credentialed proof.
 6. Prove the read-only deployment stack before discussing mutation authority.
 
 `impact_planner.py` ranks this static backlog without GitHub/network access and can accept a sanitized readiness report with `--readiness-report`.
+
+Use `scripts/phase1_benchmark_matrix.py --json` to choose which candidate has the highest evidence-backed validation value; fixture ranking is not live proof.

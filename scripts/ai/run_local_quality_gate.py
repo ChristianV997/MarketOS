@@ -15,10 +15,12 @@ try:
     from . import ci_matrix_plan, impact_planner, phase_gate, pr_readiness_report, select_tests
     from .operating_layer import ROOT, changed_from_git, normal_paths, render_json_or_markdown, write_optional_output
     from evaluation.commerce.readiness import build_phase1_readiness
+    from evaluation.commerce.benchmark_matrix import build_benchmark_matrix
 except ImportError:  # pragma: no cover - direct script execution
     import ci_matrix_plan, impact_planner, phase_gate, pr_readiness_report, select_tests
     from operating_layer import ROOT, changed_from_git, normal_paths, render_json_or_markdown, write_optional_output
     from evaluation.commerce.readiness import build_phase1_readiness
+    from evaluation.commerce.benchmark_matrix import build_benchmark_matrix
 
 
 def _diff_text(path: str | None) -> str:
@@ -57,6 +59,7 @@ def run(paths: list[str], *, diff_text: str = "", branch: str = "local") -> dict
     selected = select_tests.select(paths)
     ci_plan = ci_matrix_plan.plan(paths)
     phase1_readiness = build_phase1_readiness().to_dict()
+    benchmark = build_benchmark_matrix().to_dict()
     impact = impact_planner.plan(impact_planner.DEFAULT_BACKLOG, phase1_readiness)
     blocked = phase["status"] == "blocked" or readiness["risk_category"] == "blocked"
     status = "blocked" if blocked else "clear" if not paths else "advisory"
@@ -75,6 +78,7 @@ def run(paths: list[str], *, diff_text: str = "", branch: str = "local") -> dict
         "pr_merge_readiness": readiness["merge_readiness"],
         "impact_top_task": impact["ranked_backlog"][0]["task"], "recommended_next_action": next_action,
         "phase1_readiness": {"overall_status": phase1_readiness["overall_status"], "overall_score": phase1_readiness["overall_score"], "next_best_action": phase1_readiness["next_best_action"], "blocking_gates": phase1_readiness["blocking_gates"]},
+        "benchmark_matrix": {"status": benchmark["status"], "evidence_mode": benchmark["evidence_mode"], "top_candidate_id": benchmark["top_candidate_id"], "next_best_action": benchmark["next_best_action"]},
         "network_calls": False, "mutated": False,
     }
 
