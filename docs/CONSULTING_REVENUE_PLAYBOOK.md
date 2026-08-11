@@ -40,3 +40,9 @@ python scripts/generate_product_validation_report.py `
 
 Review the Markdown manually before sharing. Remove client-identifying context
 from fixtures and never commit generated artifacts or raw exports.
+
+Supplier feasibility is the natural add-on to the evidence scan: it turns a
+marketplace demand hypothesis into a sourcing-risk conversation. Keep the
+landed-cost scenario and break-even CPA/ROAS visibly labeled as assumptions
+unless the underlying supplier fields are observed through an approved
+read-only source.

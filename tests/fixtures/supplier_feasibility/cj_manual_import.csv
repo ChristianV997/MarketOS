@@ -1,0 +1,3 @@
+candidate_id,query,supplier,source_type,supplier_product_id,unit_cost,currency,shipping_cost,delivery_window,inventory_quantity,warehouse_region,destination_region,fulfillment_method,supplier_rating,supplier_review_count,moq,source_confidence
+mini-thermal-printer,mini thermal printer,cj,cj_manual_import,CJ-MAN-001,9.25,USD,3.50,8-15 days,300,CN,US,supplier_direct,4.6,1200,1,0.75
+portable-blender,portable blender,cj,cj_manual_import,CJ-MAN-002,12.00,USD,5.00,18-28 days,90,CN,US,supplier_direct,4.2,440,2,0.66

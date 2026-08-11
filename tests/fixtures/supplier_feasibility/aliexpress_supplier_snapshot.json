@@ -1,0 +1,18 @@
+[
+  {
+    "candidate_id": "pet-grooming-vacuum",
+    "query": "pet grooming vacuum",
+    "supplier": "aliexpress",
+    "source_type": "aliexpress_supplier_snapshot",
+    "supplier_product_id": "AE-SYN-PET-01",
+    "unit_cost": 17.5,
+    "shipping_cost": 4.25,
+    "delivery_window": "10-20 days",
+    "inventory_status": "in_stock",
+    "inventory_quantity": 220,
+    "fulfillment_method": "standard_shipping",
+    "supplier_rating": 4.4,
+    "supplier_review_count": 900,
+    "source_confidence": 0.61
+  }
+]

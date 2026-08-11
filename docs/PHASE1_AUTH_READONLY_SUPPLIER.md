@@ -96,6 +96,13 @@ artifacts, and evaluates the result against an optional public/JS baseline.
 
 ## Evaluation and operations
 
+While credentials are unavailable, the offline Supplier Feasibility Intelligence
+slice can consume sanitized CJ-style or manual supplier snapshots. It provides
+cost, landed-cost, logistics, inventory, MOQ, and break-even scenarios without
+claiming authenticated supplier proof. Run
+`python scripts/run_supplier_feasibility_intelligence.py --markdown` before
+requesting the one bounded credentialed validation.
+
 Evaluation reports now separate `public_page_static`, `public_page_js`,
 `authenticated_readonly_api`, `fixture`, and `unavailable` supplier sources.
 They expose authenticated attempt/success counts, source distribution,

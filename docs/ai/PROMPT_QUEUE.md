@@ -21,6 +21,11 @@ manual import, enrich the existing Product Validation Report, and identify one
 candidate for later supplier validation. Do not add a provider, scrape paid
 dashboards, or claim supplier proof.”
 
+After marketplace evidence exists, the next offline prompt is: “Run supplier
+feasibility intelligence from sanitized CJ/Alibaba/AliExpress/manual imports,
+add landed-cost and break-even scenarios to the existing Product Validation
+Report, and preserve the credential-missing gate.”
+
 Before a new prompt starts implementation, run the local quality gate against
 the proposed paths. Do not use it to override an active supplier/live
 validation PR; its role is to expose overlap and phase risk early.

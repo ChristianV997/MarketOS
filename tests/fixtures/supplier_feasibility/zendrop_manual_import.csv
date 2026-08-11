@@ -1,0 +1,2 @@
+candidate_id,query,supplier,source_type,supplier_product_id,unit_cost,shipping_cost,delivery_window,inventory_status,warehouse_region,destination_region,fulfillment_method,source_confidence
+portable-blender,portable blender,zendrop,zendrop_manual_import,ZD-SYN-BLENDER-01,15.00,4.00,5-10 days,in_stock,US,US,domestic_fulfillment,0.72

@@ -18,3 +18,8 @@ The offline marketplace trend slice is now a commercial-enablement task, not a
 replacement for supplier proof. Use it to strengthen a paid report while the
 readiness gate remains `credential_missing`; then let the trend report identify
 the highest-value candidate for the one bounded CJ validation run.
+
+Supplier feasibility is the next report layer: run the offline importer first,
+then use its single top candidate and risk flags to make the eventual CJ
+read-only probe more valuable. Do not treat its fixture/manual score as live
+supplier proof.

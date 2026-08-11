@@ -1,0 +1,3 @@
+candidate_id,query,supplier,unit_cost,shipping_cost,delivery_window,inventory_status
+,missing id,cj,not-a-cost,not-a-shipping,unknown,unknown
+safe-product,safe product,not-a-supplier,5,2,7-10 days,in_stock

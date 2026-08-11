@@ -1,0 +1,2 @@
+candidate_id,query,supplier,source_type,supplier_product_id,unit_cost,shipping_cost,delivery_window,inventory_status,source_confidence
+resistance-band-kit,resistance band kit,dsers,dsers_manual_import,DS-SYN-BAND-01,6.5,3.5,12-20 days,in_stock,0.59
