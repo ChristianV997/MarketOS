@@ -47,3 +47,25 @@ python scripts/generate_product_validation_report.py `
 The report distinguishes supplier cost, landed cost, delivery, inventory, and
 margin scenarios from marketplace selling prices. Fixture/manual evidence is
 clearly labeled and does not replace live read-only supplier proof.
+
+## Optional consumer attention enrichment
+
+Consumer attention evidence adds a third consulting signal: whether a product
+has understandable hooks, pain points, objections, and demonstrable creative
+angles. It is offline/manual by default and does not authorize ad spend or
+content publishing.
+
+```powershell
+python scripts/run_consumer_attention_intelligence.py --output artifacts/consumer_attention/latest --markdown
+python scripts/generate_product_validation_report.py `
+  --marketplace-trend-report artifacts/marketplace_trends/latest/marketplace_trend_report.json `
+  --supplier-feasibility-report artifacts/supplier_feasibility/latest/supplier_feasibility_report.json `
+  --consumer-attention-report artifacts/consumer_attention/latest/consumer_attention_report.json `
+  --markdown
+```
+
+The report adds Consumer Attention Signals, Search and Trend Signals, Ad and
+Creative Evidence, Voice of Customer / Pain Points, Objections and Risk
+Signals, Recommended Hooks and UGC Angles, Creative-Market Fit, and Consumer
+Source Confidence. Missing input is reported as
+`consumer_attention_not_supplied`.

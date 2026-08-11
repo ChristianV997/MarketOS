@@ -1,0 +1,3 @@
+candidate_id,query,source,source_type,platform,hook,pain_point,desired_outcome,search_growth_signal,source_confidence
+mini-thermal-printer,mini thermal printer,manual trend import,manual_csv_import,manual,Print labels anywhere,printing is inconvenient,quick labels,0.7,0.65
+portable-blender,portable blender,manual review import,manual_csv_import,manual,Blend before work,no time for breakfast,fast smoothies,0.5,0.6

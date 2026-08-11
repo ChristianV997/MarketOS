@@ -1,0 +1,4 @@
+[
+  {"candidate_id":"mini-thermal-printer","query":"mini thermal printer","source":"Google Trends","source_type":"google_trends_fixture","platform":"google_trends","keyword":"mini thermal printer","search_growth_signal":0.78,"trend_label":"rising","keyword_intent":"commercial_research","source_confidence":0.72},
+  {"candidate_id":"portable-blender","query":"portable blender","source":"Google Trends","source_type":"google_trends_fixture","platform":"google_trends","keyword":"portable blender","search_growth_signal":0.54,"trend_label":"steady","keyword_intent":"transactional","source_confidence":0.68}
+]

@@ -29,3 +29,8 @@ means no changed files; `advisory` means run the recommended focused checks;
 
 Do not use this loop to bypass a phase gate. Credentials, artifacts, raw
 payloads, provider writes, and mutation authority remain outside normal runs.
+
+For consulting evidence, treat marketplace, supplier, and consumer-attention
+reports as separate inputs. Consumer attention can produce deterministic hooks,
+pain points, objections, and creative hypotheses, but it is never supplier
+proof and never grants permission to post or buy ads.

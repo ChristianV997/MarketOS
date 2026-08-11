@@ -29,3 +29,9 @@ Report, and preserve the credential-missing gate.”
 Before a new prompt starts implementation, run the local quality gate against
 the proposed paths. Do not use it to override an active supplier/live
 validation PR; its role is to expose overlap and phase risk early.
+
+When supplier and marketplace inputs exist but creative evidence is missing,
+the next offline prompt is: “Run the consumer attention intelligence slice
+from sanitized search, review, comment, and creative imports; enrich the
+existing Product Validation Report with hooks and objections; do not call
+platforms, launch ads, or publish content.”

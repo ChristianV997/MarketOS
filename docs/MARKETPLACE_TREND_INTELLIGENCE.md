@@ -85,6 +85,11 @@ It cannot answer without supplier evidence:
 - shipping cost or delivery time;
 - authorization, compliance, or fulfillment feasibility.
 
+Consumer attention is the complementary marketing-evidence layer. It can be
+run from sanitized review, search, comment, and creative imports and passed to
+the same Product Validation Report. It does not replace marketplace evidence
+or supplier feasibility and cannot authorize a launch.
+
 Recommendations are therefore validation guidance, not profit forecasts or
 launch authorization. A strong public signal with no supplier proof should
 normally produce `validate_supplier_first`.

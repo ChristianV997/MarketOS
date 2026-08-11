@@ -46,3 +46,10 @@ marketplace demand hypothesis into a sourcing-risk conversation. Keep the
 landed-cost scenario and break-even CPA/ROAS visibly labeled as assumptions
 unless the underlying supplier fields are observed through an approved
 read-only source.
+
+Consumer attention is the next report module. Use sanitized review, search,
+comment, and creative snapshots to show a client the language customers use,
+the strongest product hooks, likely objections, and a bounded set of UGC
+formats to test. Sell this as creative-research evidence, not as a promise of
+ad performance. The recommended delivery sequence is marketplace demand,
+supplier feasibility, consumer attention, then a human-reviewed launch draft.

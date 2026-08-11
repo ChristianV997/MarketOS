@@ -1,0 +1,2 @@
+candidate_id,query,source,source_type,platform,content_text_excerpt,pain_point,desired_outcome,objection,sentiment_label,intent_label,comment_count,source_confidence
+portable-espresso-maker,portable espresso maker,YouTube comments,youtube_comments_manual_import,youtube,"Does it leak in a backpack?",leaks while traveling,clean coffee anywhere,concern about leakage,mixed,commercial_research,380,0.66
