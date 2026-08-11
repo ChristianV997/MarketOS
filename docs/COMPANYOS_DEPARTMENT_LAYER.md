@@ -30,3 +30,5 @@ The service catalog is shared by Finance and Sales. Price bands and margins are 
 Every output is read-only, offline, advisory, and non-authoritative. Approval requests explicitly list forbidden actions. Sales messages remain drafts with consent and do-not-contact fields. Ledger rows are not posted. Budgets are caps for review, not spend authority. Publishing, ads, orders, payments, customer messages, platform mutations, and external calls are disabled.
 
 This prepares Management v2, Finance v2, Accounting v2, and Sales v2 without committing to external SaaS integrations.
+
+The Agent / Skill / Tool / Workflow Registry is the next control-plane layer. It defines the contracts and safety gates those future department modules must use before any external integration is considered.
