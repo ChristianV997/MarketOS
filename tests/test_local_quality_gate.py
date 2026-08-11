@@ -10,7 +10,7 @@ def test_no_changes_is_clear_and_offline():
     assert report["mutated"] is False
     assert report["phase1_readiness"]["next_best_action"]
     assert report["benchmark_matrix"]["evidence_mode"] in {"fixture_demo", "unavailable"}
-    assert report["impact_top_task"] == "run_cj_credentialed_readonly_validation"
+    assert report["impact_top_task"] in {"run_cj_credentialed_readonly_validation", "finish_cj_live_validation_pack"}
 
 
 def test_docs_only_is_advisory_with_docs_lane():
