@@ -21,6 +21,7 @@ from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
 
 
 PHASE1_JS_RENDER_ENV = "MARKETOS_PHASE1_JS_RENDER"
+CRAWL4AI_BROWSER_CHANNEL_ENV = "MARKETOS_CRAWL4AI_BROWSER_CHANNEL"
 
 
 def phase1_js_render_enabled() -> bool:
@@ -33,6 +34,19 @@ def phase1_js_render_enabled() -> bool:
     adapter continues to enforce robots.txt.
     """
     return os.getenv(PHASE1_JS_RENDER_ENV, "0").strip() == "1"
+
+
+def crawl4ai_browser_channel() -> str | None:
+    """Return an explicitly selected local Playwright browser channel.
+
+    Crawl4AI normally uses Playwright's bundled Chromium. Some operator
+    images have a usable Chrome channel but not the optional
+    ``chromium-headless-shell`` payload. Selecting that channel remains a
+    local-runtime-only override; it neither broadens the URL allowlist nor
+    changes the default optional-worker behavior.
+    """
+    value = os.getenv(CRAWL4AI_BROWSER_CHANNEL_ENV, "").strip()
+    return value or None
 
 
 class Crawl4AIResearchAdapter:
@@ -232,7 +246,7 @@ class Crawl4AIResearchAdapter:
         if context.dry_run:
             return [{"url": url, "source": self.name, "dry_run": True, "quality": {"provenance": "simulated"}}]
         try:
-            from crawl4ai import AsyncWebCrawler
+            from crawl4ai import AsyncWebCrawler, BrowserConfig
         except ImportError as exc:
             raise RuntimeError("Crawl4AI is not installed; install the reviewed optional OSS profile") from exc
 
@@ -240,7 +254,17 @@ class Crawl4AIResearchAdapter:
         if cached_raw is not None:
             return self._records_from_raw(cached_raw, url)
 
-        async with AsyncWebCrawler() as crawler:
+        channel = crawl4ai_browser_channel()
+        # Crawl4AI's Rich console logger emits Unicode arrows that can fail on
+        # Windows CP1252 consoles before a browser navigation starts. This
+        # optional worker already reports outcomes through canonical evidence,
+        # so keep its third-party console output quiet and deterministic.
+        browser_config = BrowserConfig(
+            chrome_channel=channel or "chromium",
+            channel=channel or "chromium",
+            verbose=False,
+        )
+        async with AsyncWebCrawler(config=browser_config) as crawler:
             result = await crawler.arun(url=url)
         raw = {
             "extracted_content": getattr(result, "extracted_content", None),

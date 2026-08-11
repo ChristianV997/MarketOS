@@ -153,6 +153,11 @@ python scripts\check_phase1_crawl4ai_runtime.py --json
 pip install -r requirements-oss.txt
 $env:MARKETOS_PHASE1_JS_RENDER = "1"
 $env:CRAWL4AI_ALLOWED_DOMAINS = "www.cjdropshipping.com,wacaco.com,aeropress.com"
+# Windows PowerShell only: Crawl4AI/Rich console output needs UTF-8.
+$env:PYTHONIOENCODING = "utf-8"
+# Optional local-runtime override only: use an installed Chrome channel when
+# Playwright's chromium-headless-shell payload is unavailable.
+$env:MARKETOS_CRAWL4AI_BROWSER_CHANNEL = "chrome"
 python scripts\run_phase1_live_validation.py `
   --supplier-url "https://www.cjdropshipping.com/product/<real-slug>.html" `
   --competitor-urls "https://www.wacaco.com/products/<real-slug>,https://aeropress.com/products/<real-slug>" `
@@ -172,6 +177,12 @@ build without compatible libxml2 headers. The preflight above reports that
 runtime blocker before attempting installation; use a CPython 3.12 or 3.13
 operator environment rather than changing default dependencies or bypassing
 the browser/runtime boundary.
+
+`MARKETOS_CRAWL4AI_BROWSER_CHANNEL` is deliberately unset by default. Set it
+only after a local Playwright launch probe confirms the requested channel is
+installed; it does not alter the allowlist, robots policy, or default runtime.
+On Windows PowerShell, set `PYTHONIOENCODING=utf-8` for the optional worker so
+third-party Rich console output cannot terminate the render before navigation.
 
 ## If a fetch still fails from an unrestricted environment
 
