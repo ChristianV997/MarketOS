@@ -30,3 +30,9 @@ signals to the existing client report. It should improve the paid deliverable
 while credentials remain blocked, but it must not become ad-buying or posting
 authority. After all three offline layers are present, prioritize one bounded
 client-ready report and then the operator-approved live CJ proof.
+
+With marketplace, supplier, and consumer layers available, the next commercial
+milestone is Product Opportunity Synthesis and Consulting Report v2. Run the
+offline synthesis first, deliver one human-reviewed premium report, then use
+its single next action to prioritize live supplier proof or a future Launch
+Draft Pack.

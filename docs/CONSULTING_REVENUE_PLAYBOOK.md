@@ -53,3 +53,15 @@ the strongest product hooks, likely objections, and a bounded set of UGC
 formats to test. Sell this as creative-research evidence, not as a promise of
 ad performance. The recommended delivery sequence is marketplace demand,
 supplier feasibility, consumer attention, then a human-reviewed launch draft.
+
+## Premium report offer
+
+Product Opportunity Synthesis v1 is the premium decision layer for a
+$500–$1,000 consulting report. It fuses the three evidence pillars, shows a
+confidence grade and risk profile, provides price and break-even scenarios, and
+ends with one next action plus a fourteen-day validation plan. The client buys
+clarity and prioritization, not a profit guarantee.
+
+Run the synthesis before generating the client report. Review all fixture and
+manual labels and assumptions manually; never present a fixture supplier cost
+or planning CPA threshold as live proof.

@@ -69,3 +69,25 @@ Creative Evidence, Voice of Customer / Pain Points, Objections and Risk
 Signals, Recommended Hooks and UGC Angles, Creative-Market Fit, and Consumer
 Source Confidence. Missing input is reported as
 `consumer_attention_not_supplied`.
+
+## Consulting Report v2: Product Opportunity Synthesis
+
+Fuse the three sanitized reports into the premium decision layer:
+
+```powershell
+python scripts/run_product_opportunity_synthesis.py `
+  --marketplace-trend-report artifacts/marketplace_trends/latest/marketplace_trend_report.json `
+  --supplier-feasibility-report artifacts/supplier_feasibility/latest/supplier_feasibility_report.json `
+  --consumer-attention-report artifacts/consumer_attention/latest/consumer_attention_report.json `
+  --output artifacts/opportunity_synthesis/latest `
+  --markdown
+python scripts/generate_product_validation_report.py `
+  --opportunity-synthesis-report artifacts/opportunity_synthesis/latest/opportunity_synthesis_report.json `
+  --markdown
+```
+
+Report v2 adds Executive Decision, Opportunity Scorecard, Evidence Confidence
+Matrix, Unit Economics and Break-Even Thresholds, Recommended Price Band,
+Creative Hooks and Ad Angles, Top Risks and Blockers, Kill / Scale Rules,
+Fourteen-Day Validation Plan, and Client Action Checklist. Thresholds are
+planning assumptions, not observed ad performance or launch permission.

@@ -108,3 +108,8 @@ hypotheses to the same client report. It answers whether a product may be
 marketable; this supplier layer answers whether it may be sourceable. Keep the
 two scores separate. Neither fixture/manual score is live supplier proof, and
 consumer evidence never authorizes ad spend or publishing.
+
+Product Opportunity Synthesis uses this layer for landed cost, margin,
+delivery, inventory, and supplier-risk decisions. Missing or fixture-only
+supplier fields keep `supplier_validation_required=true` and prevent a claim
+of live sourcing proof.

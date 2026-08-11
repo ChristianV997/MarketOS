@@ -1,0 +1,14 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "candidate_count": 2,
+  "marketplaces_observed": ["amazon", "shopify"],
+  "top_candidate_id": "mini-thermal-printer",
+  "candidates": [
+    {"candidate_id":"mini-thermal-printer","query":"mini thermal printer","evidence":[{"marketplace":"amazon","price":29.99,"review_count":2400,"source_confidence":0.78,"evidence_mode":"fixture"}],"score":{"overall_marketplace_opportunity":0.72,"demand_proxy_score":0.8,"saturation_score":0.22,"price_confidence":0.78,"recommendation":"validate_supplier_first"}},
+    {"candidate_id":"portable-projector","query":"portable projector","evidence":[{"marketplace":"shopify","price":49.99,"source_confidence":0.6,"evidence_mode":"fixture"}],"score":{"overall_marketplace_opportunity":0.58,"demand_proxy_score":0.62,"saturation_score":0.78,"price_confidence":0.6,"recommendation":"reject_oversaturated"}}
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

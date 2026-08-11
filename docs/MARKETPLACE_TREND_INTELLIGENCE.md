@@ -94,6 +94,11 @@ Recommendations are therefore validation guidance, not profit forecasts or
 launch authorization. A strong public signal with no supplier proof should
 normally produce `validate_supplier_first`.
 
+Product Opportunity Synthesis consumes this report as its marketplace pillar.
+A strong marketplace score increases prioritization, but saturation, missing
+price coverage, and fixture provenance remain visible in the final confidence
+matrix.
+
 ## Safety boundaries
 
 This layer does not log in, scrape paid dashboards, bypass CAPTCHAs, call

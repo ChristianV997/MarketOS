@@ -30,6 +30,11 @@ Before a new prompt starts implementation, run the local quality gate against
 the proposed paths. Do not use it to override an active supplier/live
 validation PR; its role is to expose overlap and phase risk early.
 
+When all three offline pillars are available, run: “Generate Product
+Opportunity Synthesis v1 and Consulting Report v2 from the existing reports;
+preserve provenance, add price/break-even thresholds and a fourteen-day plan,
+and do not add live actions.”
+
 When supplier and marketplace inputs exist but creative evidence is missing,
 the next offline prompt is: “Run the consumer attention intelligence slice
 from sanitized search, review, comment, and creative imports; enrich the
