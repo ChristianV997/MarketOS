@@ -126,6 +126,47 @@ class TestJsonLdExtraction:
         assert offer.field_status["variant_count"] == "missing"
 
 
+class TestOptionalJsRendering:
+    def test_js_render_fallback_is_disabled_by_default(self, monkeypatch):
+        monkeypatch.delenv("MARKETOS_PHASE1_JS_RENDER", raising=False)
+        with patch.object(mod, "_bounded_get", return_value=NO_PRODUCT_HTML):
+            with patch.object(mod.Crawl4AIResearchAdapter, "discover_sync") as render:
+                offer = mod.fetch_competitor_offer(
+                    "https://example.com/product/static.html",
+                    context=SidecarContext(dry_run=False),
+                )
+        render.assert_not_called()
+        assert offer.warnings == ("no_structured_product_data_found",)
+
+    def test_allowlisted_js_render_fallback_maps_competitor_fields(self, monkeypatch):
+        monkeypatch.setenv("MARKETOS_PHASE1_JS_RENDER", "1")
+        monkeypatch.setenv("CRAWL4AI_ALLOWED_DOMAINS", "example.com")
+        records = [{
+            "name": "Rendered Competitor Espresso Maker",
+            "product_id": "COMP-RENDERED-001",
+            "selling_price": 32.50,
+            "currency": "USD",
+            "availability": "InStock",
+            "brand": "RenderedBrand",
+            "seller": "Rendered Store",
+            "rating": 4.6,
+            "review_count": 42,
+            "shipping_cost": 5.0,
+        }]
+        with patch.object(mod, "_bounded_get", return_value=NO_PRODUCT_HTML):
+            with patch.object(mod.Crawl4AIResearchAdapter, "discover_sync", return_value=records):
+                offer = mod.fetch_competitor_offer(
+                    "https://example.com/product/rendered.html",
+                    context=SidecarContext(dry_run=False),
+                )
+        assert offer.title == "Rendered Competitor Espresso Maker"
+        assert offer.price == 32.50
+        assert offer.brand == "RenderedBrand"
+        assert offer.rating == 4.6
+        assert offer.field_status["shipping_cost"] == "observed"
+        assert offer.extraction_method == "crawl4ai_js_rendered_structured_product"
+
+
 class TestSourceLabeling:
     def test_explicit_source_hint_is_used(self):
         with patch.object(mod, "_bounded_get", return_value=NO_PRODUCT_HTML):

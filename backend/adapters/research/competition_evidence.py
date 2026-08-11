@@ -39,7 +39,7 @@ from typing import Any
 from urllib import robotparser
 from urllib.parse import urlparse
 
-from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
+from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter, phase1_js_render_enabled
 from backend.contracts.adapters import AdapterHealth, SidecarContext
 
 _log = logging.getLogger(__name__)
@@ -212,15 +212,8 @@ def _label_source(hostname: str, source_hint: str) -> str:
     return "public_storefront"
 
 
-def _extract_from_jsonld(html: str, url: str, *, source: str) -> CompetitorOffer | None:
-    """Reuses Crawl4AIResearchAdapter's JSON-LD Product parser (extended
-    additively with rating/review_count/seller/image/shipping_cost — see
-    crawl4ai.py) rather than a second parser. A page without a valid
-    schema.org Product object yields no evidence, never a guess."""
-    records = Crawl4AIResearchAdapter._product_records_from_jsonld(html, url)
-    if not records:
-        return None
-    record = records[0]
+def _offer_from_record(record: dict[str, Any], url: str, *, source: str, extraction_method: str) -> CompetitorOffer:
+    """Map one shared normalized Product record into competitor evidence."""
     field_status = {name: "missing" for name in _EVIDENCE_FIELDS}
     if record.get("name"):
         field_status["title"] = "observed"
@@ -241,8 +234,6 @@ def _extract_from_jsonld(html: str, url: str, *, source: str) -> CompetitorOffer
         field_status["image"] = "observed"
     if record.get("shipping_cost") is not None:
         field_status["shipping_cost"] = "observed"
-    # No general schema.org Product signal reliably exposes variant count
-    # for a single listing page; never guessed.
     confidence = round(sum(1 for status in field_status.values() if status == "observed") / len(field_status), 3)
     warnings = () if field_status["price"] == "observed" else ("price_not_found_in_structured_data",)
     return CompetitorOffer(
@@ -253,8 +244,33 @@ def _extract_from_jsonld(html: str, url: str, *, source: str) -> CompetitorOffer
         availability=str(record.get("availability", "")), shipping_cost=record.get("shipping_cost"),
         brand=str(record.get("brand", "")), seller=str(record.get("seller", "")),
         rating=record.get("rating"), review_count=record.get("review_count"), image=str(record.get("image", "")),
-        extraction_method="jsonld_schema_org_product", confidence=confidence, warnings=warnings,
+        extraction_method=extraction_method, confidence=confidence, warnings=warnings,
     )
+
+
+def _extract_from_jsonld(html: str, url: str, *, source: str) -> CompetitorOffer | None:
+    """Reuses Crawl4AIResearchAdapter's JSON-LD Product parser (extended
+    additively with rating/review_count/seller/image/shipping_cost — see
+    crawl4ai.py) rather than a second parser. A page without a valid
+    schema.org Product object yields no evidence, never a guess."""
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(html, url)
+    if not records:
+        return None
+    return _offer_from_record(records[0], url, source=source, extraction_method="jsonld_schema_org_product")
+
+
+def _extract_with_optional_js_render(url: str, *, source: str, context: SidecarContext) -> CompetitorOffer | None:
+    """Try the explicitly enabled, allowlisted Crawl4AI fallback."""
+    if context.dry_run or not phase1_js_render_enabled():
+        return None
+    try:
+        records = Crawl4AIResearchAdapter().discover_sync(url, context=context)
+    except Exception as exc:  # noqa: BLE001 - optional boundary must degrade
+        _log.warning("competition_evidence_js_render_failed error=%s", type(exc).__name__)
+        return None
+    if not records:
+        return None
+    return _offer_from_record(records[0], url, source=source, extraction_method="crawl4ai_js_rendered_structured_product")
 
 
 def fetch_competitor_offer(url: str, *, source: str = "", context: SidecarContext) -> CompetitorOffer:
@@ -272,16 +288,21 @@ def fetch_competitor_offer(url: str, *, source: str = "", context: SidecarContex
     except PermissionError as exc:
         return _degraded(url, source=resolved_source, reason=f"robots_blocked:{exc}")
     html = _cache_get(url)
+    fetch_failure: str | None = None
     if html is None:
         try:
             html = _bounded_get(url)
         except Exception as exc:  # noqa: BLE001 - network boundary must degrade, never raise
             _log.warning("competition_evidence_fetch_failed url=%s error=%s", url, type(exc).__name__)
-            return _degraded(url, source=resolved_source, reason=f"fetch_failed:{type(exc).__name__}")
-        _cache_put(url, html)
-    offer = _extract_from_jsonld(html, url, source=resolved_source)
+            fetch_failure = f"fetch_failed:{type(exc).__name__}"
+        else:
+            _cache_put(url, html)
+    offer = _extract_from_jsonld(html, url, source=resolved_source) if html is not None else None
     if offer is None:
-        return _degraded(url, source=resolved_source, reason="no_structured_product_data_found")
+        rendered = _extract_with_optional_js_render(url, source=resolved_source, context=context)
+        if rendered is not None:
+            return rendered
+        return _degraded(url, source=resolved_source, reason=fetch_failure or "no_structured_product_data_found")
     return offer
 
 

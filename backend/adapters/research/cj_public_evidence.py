@@ -42,7 +42,7 @@ from typing import Any
 from urllib import robotparser
 from urllib.parse import quote_plus, urlparse
 
-from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
+from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter, phase1_js_render_enabled
 from backend.contracts.adapters import AdapterHealth, SidecarContext
 from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
 
@@ -204,14 +204,8 @@ def _bounded_get(url: str, *, timeout: int = DEFAULT_TIMEOUT_S) -> str:
     return b"".join(chunks).decode("utf-8", errors="replace")
 
 
-def _extract_from_jsonld(html: str, url: str) -> CJProductEvidence | None:
-    """Reuses Crawl4AIResearchAdapter's JSON-LD Product parser rather than
-    duplicating it — the same conservative rule applies: a page without a
-    valid schema.org Product object yields no evidence, never a guess."""
-    records = Crawl4AIResearchAdapter._product_records_from_jsonld(html, url)
-    if not records:
-        return None
-    record = records[0]
+def _evidence_from_record(record: dict[str, Any], url: str, *, extraction_method: str) -> CJProductEvidence:
+    """Map one shared normalized Product record into supplier evidence."""
     field_status = {name: "unavailable" for name in _EVIDENCE_FIELDS}
     if record.get("name"):
         field_status["title"] = "observed"
@@ -223,17 +217,54 @@ def _extract_from_jsonld(html: str, url: str) -> CJProductEvidence | None:
         field_status["inventory_status"] = "observed"
     if record.get("description"):
         field_status["description"] = "observed"
+    if record.get("rating") is not None:
+        field_status["rating"] = "observed"
+    if record.get("review_count") is not None:
+        field_status["reviews_count"] = "observed"
+    if record.get("image"):
+        field_status["images"] = "observed"
+    if record.get("shipping_cost") is not None:
+        field_status["shipping_cost"] = "observed"
     confidence = round(sum(1 for status in field_status.values() if status == "observed") / len(field_status), 3)
     warnings = () if field_status["price"] == "observed" else ("price_not_found_in_structured_data",)
+    image = record.get("image")
+    images = (str(image),) if image else ()
     return CJProductEvidence(
         source=SOURCE, source_url=url, observed_at=time.time(),
         external_product_id=str(record.get("product_id") or hashlib.sha256(url.encode()).hexdigest()[:16]),
         title=str(record.get("name", "")), field_status=field_status,
+        sku=str(record.get("product_id", "")),
         price=record.get("selling_price") or None, currency=str(record.get("currency", "USD")),
         inventory_status=str(record.get("availability") or "unavailable_publicly"),
-        description=str(record.get("description", "")),
-        extraction_method="jsonld_schema_org_product", confidence=confidence, warnings=warnings,
+        shipping_cost=record.get("shipping_cost"),
+        rating=record.get("rating"), reviews_count=record.get("review_count"),
+        images=images, description=str(record.get("description", "")),
+        extraction_method=extraction_method, confidence=confidence, warnings=warnings,
     )
+
+
+def _extract_from_jsonld(html: str, url: str) -> CJProductEvidence | None:
+    """Reuses Crawl4AIResearchAdapter's JSON-LD Product parser rather than
+    duplicating it — the same conservative rule applies: a page without a
+    valid schema.org Product object yields no evidence, never a guess."""
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(html, url)
+    if not records:
+        return None
+    return _evidence_from_record(records[0], url, extraction_method="jsonld_schema_org_product")
+
+
+def _extract_with_optional_js_render(url: str, *, context: SidecarContext) -> CJProductEvidence | None:
+    """Try the explicitly enabled, allowlisted Crawl4AI fallback."""
+    if context.dry_run or not phase1_js_render_enabled():
+        return None
+    try:
+        records = Crawl4AIResearchAdapter().discover_sync(url, context=context)
+    except Exception as exc:  # noqa: BLE001 - optional boundary must degrade
+        _log.warning("cj_evidence_js_render_failed error=%s", type(exc).__name__)
+        return None
+    if not records:
+        return None
+    return _evidence_from_record(records[0], url, extraction_method="crawl4ai_js_rendered_structured_product")
 
 
 def fetch_product_evidence(url: str, *, context: SidecarContext) -> CJProductEvidence:
@@ -251,16 +282,21 @@ def fetch_product_evidence(url: str, *, context: SidecarContext) -> CJProductEvi
     except PermissionError as exc:
         return _degraded(url, reason=f"robots_blocked:{exc}")
     html = _cache_get(url)
+    fetch_failure: str | None = None
     if html is None:
         try:
             html = _bounded_get(url)
         except Exception as exc:  # noqa: BLE001 - network boundary must degrade, never raise
             _log.warning("cj_evidence_fetch_failed url=%s error=%s", url, type(exc).__name__)
-            return _degraded(url, reason=f"fetch_failed:{type(exc).__name__}")
-        _cache_put(url, html)
-    evidence = _extract_from_jsonld(html, url)
+            fetch_failure = f"fetch_failed:{type(exc).__name__}"
+        else:
+            _cache_put(url, html)
+    evidence = _extract_from_jsonld(html, url) if html is not None else None
     if evidence is None:
-        return _degraded(url, reason="no_structured_product_data_found")
+        rendered = _extract_with_optional_js_render(url, context=context)
+        if rendered is not None:
+            return rendered
+        return _degraded(url, reason=fetch_failure or "no_structured_product_data_found")
     return evidence
 
 

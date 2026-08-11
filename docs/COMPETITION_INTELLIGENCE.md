@@ -74,9 +74,13 @@ Findings that shaped this design:
   JS-heavy storefronts (plain `requests`/`bs4` scraping is infeasible
   against Cloudflare/JS-challenge pages; the repo's answer there is
   optional Firecrawl, with a mock fallback) applies here too: this module
-  makes no claim to defeat JS-rendered storefronts. A page that doesn't
-  expose schema.org JSON-LD yields an honest, fully-`"missing"` degraded
-  result — never a guess, never a headless-browser workaround.
+  makes no claim to defeat JS-rendered storefronts by default. After the
+  Phase 1 live harness reached public storefronts but static extraction
+  returned no Product records, this adapter gained the same explicit,
+  bounded Crawl4AI fallback as supplier evidence. It requires
+  `MARKETOS_PHASE1_JS_RENDER=1` plus `CRAWL4AI_ALLOWED_DOMAINS`, preserves
+  robots enforcement, and yields an honest, fully-`"missing"` degraded
+  result if the optional dependency or structured output is unavailable.
 
 ## Competition Evidence
 
