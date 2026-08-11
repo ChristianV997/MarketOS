@@ -35,3 +35,5 @@ The registry currently emulates contracts. LiteLLM and Langfuse are the highest-
 All real-world tools default to `blocked` or approval-required. Sales skills draft messages but cannot send them. Finance skills plan budgets but cannot spend. Accounting skills produce ledger seeds but cannot post them. Workflows pause before external action, spend, message send, publish, payment, and order. Model routes stop when a budget or safety gate fails. Knowledge sources are not indexed and private/secret fields are excluded.
 
 The next architecture milestone is Approval Ledger v1, followed by bounded Sales v2 and only then carefully scoped external adapters.
+
+Approval Ledger v1 is now the canonical action gate over this registry. It reuses tool risk, workflow interrupts, agent boundaries, skill approval requirements, model caps, evaluation gates, and knowledge privacy policies without installing any of the referenced systems.

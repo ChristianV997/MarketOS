@@ -50,3 +50,5 @@ platforms, launch ads, or publish content.”
 4. Review sales consent and do-not-contact status before any human-approved outreach.
 
 5. Review the registry roadmap and choose one bounded, approval-gated integration only after Approval Ledger v1 is specified.
+
+6. Run `python scripts/run_companyos_approval_ledger.py --markdown`; keep blocked actions blocked and add no live integration without a new ledger policy, evidence contract, and safety test.

@@ -1,0 +1,1 @@
+{"workflows": [{"workflow_id": "approval_queue_review", "human_approval_points": ["pause_before_external_action", "pause_before_message_send"]}]}

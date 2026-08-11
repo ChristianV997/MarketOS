@@ -1,0 +1,1 @@
+{"approval_id": "missing-consent-seed", "request_type": "email_send", "conditions": [{"condition_id": "consent", "description": "recipient consent verified", "satisfied": false}]}

@@ -1,0 +1,9 @@
+{
+  "tools": {"tools": [{"tool_id": "send_email", "default_mode": "blocked"}, {"tool_id": "read_file", "default_mode": "read_only"}]},
+  "workflows": {"workflows": [{"workflow_id": "approval_queue_review", "human_approval_points": ["pause_before_external_action"]}]},
+  "agents": {"agents": [{"agent_id": "sdr-draft-agent", "forbidden_actions": ["send_email"]}]},
+  "skills": {"skills": [{"skill_id": "cold_email_draft", "approval_requirements": ["human review"]}]},
+  "model_router": {"policy": {"routes": [{"task_type": "sales_draft_variants"}]}},
+  "eval_registry": {"quality_gates": [{"gate_id": "approval_required_gate"}]},
+  "knowledge": {"sources": [{"source_id": "client-context", "access_level": "restricted"}]}
+}
