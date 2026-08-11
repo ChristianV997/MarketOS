@@ -1,0 +1,2 @@
+candidate_id,query,source,source_type,platform,comment,pain_point,desired_outcome,objection,sentiment_label,comment_count,source_confidence
+neck-massager,neck massager,Reddit comments,reddit_comments_manual_import,reddit,"I need something quiet for work",quiet relief,workday comfort,noise concern,positive,80,0.6

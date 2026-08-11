@@ -23,3 +23,10 @@ Supplier feasibility is the next report layer: run the offline importer first,
 then use its single top candidate and risk flags to make the eventual CJ
 read-only probe more valuable. Do not treat its fixture/manual score as live
 supplier proof.
+
+Consumer attention is now a parallel offline report layer: run the deterministic
+importer to add search, creative, review, hook, pain-point, and objection
+signals to the existing client report. It should improve the paid deliverable
+while credentials remain blocked, but it must not become ad-buying or posting
+authority. After all three offline layers are present, prioritize one bounded
+client-ready report and then the operator-approved live CJ proof.

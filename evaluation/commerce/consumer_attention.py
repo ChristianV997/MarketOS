@@ -1,0 +1,392 @@
+"""Offline consumer-attention and creative-evidence intelligence.
+
+This module turns sanitized trend, review, comment, and creative snapshots into
+deterministic marketing hypotheses. It never posts content, launches ads, or
+turns attention into supplier proof or launch authorization.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import asdict, dataclass, field
+from typing import Any, Iterable, Mapping
+
+PROVENANCE = frozenset({"observed", "derived", "assumed", "unavailable", "malformed", "blocked", "manual_import", "fixture"})
+SOURCE_TYPES = frozenset(
+    {
+        "google_trends_manual_import", "google_trends_fixture", "tiktok_creative_center_snapshot", "tiktok_ad_snapshot",
+        "meta_ad_library_snapshot", "youtube_search_snapshot", "youtube_comments_manual_import", "reddit_threads_manual_import",
+        "reddit_comments_manual_import", "amazon_reviews_snapshot", "mercadolibre_reviews_snapshot", "ebay_reviews_snapshot",
+        "shopify_reviews_snapshot", "minea_manual_import", "dropshipio_manual_import", "pipiads_manual_import",
+        "kalodata_manual_import", "minee_manual_import", "manual_csv_import", "fixture_demo",
+    }
+)
+PLATFORMS = frozenset({"google_trends", "tiktok", "meta", "youtube", "reddit", "amazon", "mercadolibre", "ebay", "shopify", "minea", "dropshipio", "pipiads", "kalodata", "manual"})
+
+
+def number(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().lower().replace(",", "")
+    multiplier = 1000000 if text.endswith("m") else 1000 if text.endswith("k") else 1
+    text = text.rstrip("km")
+    text = re.sub(r"[^0-9.\-]", "", text)
+    try:
+        return float(text) * multiplier
+    except (TypeError, ValueError):
+        return None
+
+
+def bounded(value: Any) -> float:
+    return round(max(0.0, min(1.0, number(value) or 0.0)), 4)
+
+
+# Keep the scoring module's private helper explicit.  Importers use the public
+# ``bounded`` name, while score formulas read more naturally with ``_bounded``.
+_bounded = bounded
+
+
+def text(value: Any, limit: int = 240) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+
+
+def normalize_sentiment(value: Any) -> str:
+    label = str(value or "").lower().replace(" ", "_")
+    if label in {"positive", "very_positive", "love", "satisfied"}:
+        return "positive"
+    if label in {"negative", "very_negative", "hate", "frustrated", "complaint"}:
+        return "negative"
+    if label in {"mixed", "neutral", "informational"}:
+        return label
+    return "unknown"
+
+
+def normalize_intent(value: Any) -> str:
+    label = str(value or "").lower().replace(" ", "_")
+    if label in {"buy", "purchase", "commercial", "transactional", "high_intent"}:
+        return "transactional"
+    if label in {"compare", "commercial_research", "consideration"}:
+        return "commercial_research"
+    if label in {"learn", "informational", "research"}:
+        return "informational"
+    if label in {"problem", "support", "complaint"}:
+        return "problem_aware"
+    return "unknown"
+
+
+@dataclass(frozen=True)
+class CreativeHookEvidence:
+    hook: str
+    angle: str
+    evidence_count: int
+    confidence: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class VoiceOfCustomerEvidence:
+    pain_points: tuple[str, ...] = ()
+    desired_outcomes: tuple[str, ...] = ()
+    objections: tuple[str, ...] = ()
+    claims: tuple[str, ...] = ()
+    proof_signals: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {key: list(value) for key, value in asdict(self).items()}
+
+
+@dataclass(frozen=True)
+class AdSignalEvidence:
+    platform: str
+    active: bool
+    creative_format: str
+    creator_style: str
+    engagement_rate: float
+    source_confidence: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class SearchTrendEvidence:
+    keyword: str
+    growth_signal: float
+    keyword_intent: str
+    trend_label: str
+    source_confidence: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ReviewMiningEvidence:
+    review_count: int
+    rating: float | None
+    sentiment_label: str
+    pain_points: tuple[str, ...]
+    objections: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["pain_points"] = list(self.pain_points)
+        result["objections"] = list(self.objections)
+        return result
+
+
+@dataclass(frozen=True)
+class ConsumerAttentionEvidence:
+    candidate_id: str
+    query: str
+    source: str
+    source_type: str
+    source_url: str = ""
+    evidence_mode: str = "fixture"
+    platform: str = "manual"
+    content_title: str = ""
+    content_text_excerpt: str = ""
+    hook: str = ""
+    angle: str = ""
+    pain_point: str = ""
+    desired_outcome: str = ""
+    objection: str = ""
+    claim: str = ""
+    proof_signal: str = ""
+    format: str = ""
+    engagement_count: int | None = None
+    view_count: int | None = None
+    like_count: int | None = None
+    comment_count: int | None = None
+    share_count: int | None = None
+    save_count: int | None = None
+    review_count: int | None = None
+    rating: float | None = None
+    sentiment_label: str = "unknown"
+    intent_label: str = "unknown"
+    trend_label: str = ""
+    search_growth_signal: float | None = None
+    keyword: str = ""
+    keyword_intent: str = "unknown"
+    ad_active_signal: bool = False
+    ad_platform: str = ""
+    creative_format: str = ""
+    creator_style: str = ""
+    ugc_scriptability: float | None = None
+    visual_demo_score: float | None = None
+    source_confidence: float = 0.0
+    field_provenance: Mapping[str, str] = field(default_factory=dict)
+    warnings: tuple[str, ...] = ()
+    observed_at: str = "deterministic"
+    read_only: bool = True
+    network_calls: bool = False
+    mutated: bool = False
+
+    def __post_init__(self) -> None:
+        if self.source_type not in SOURCE_TYPES:
+            raise ValueError(f"unsupported source_type: {self.source_type}")
+        if self.platform not in PLATFORMS:
+            raise ValueError(f"unsupported platform: {self.platform}")
+        if set(self.field_provenance.values()) - PROVENANCE:
+            raise ValueError("invalid consumer-attention provenance")
+        if not self.read_only or self.network_calls or self.mutated:
+            raise ValueError("consumer attention evidence must be offline and read-only")
+
+    def to_dict(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["field_provenance"] = dict(self.field_provenance)
+        result["warnings"] = list(self.warnings)
+        return result
+
+
+@dataclass(frozen=True)
+class ConsumerAttentionScore:
+    candidate_id: str
+    search_demand_signal: float
+    trend_growth_signal: float
+    social_engagement_signal: float
+    ad_activity_signal: float
+    review_density_signal: float
+    voice_of_customer_quality: float
+    pain_point_clarity: float
+    objection_density: float
+    creative_hook_diversity: float
+    ugc_scriptability: float
+    visual_demo_potential: float
+    intent_strength: float
+    source_diversity: float
+    attention_saturation_risk: float
+    overall_consumer_attention: float
+    recommendation: str
+    contributions: Mapping[str, float]
+    reasons: tuple[str, ...] = ()
+    creative_hooks: tuple[CreativeHookEvidence, ...] = ()
+    voice_of_customer: VoiceOfCustomerEvidence = VoiceOfCustomerEvidence()
+    ad_signals: tuple[AdSignalEvidence, ...] = ()
+    search_signals: tuple[SearchTrendEvidence, ...] = ()
+    review_signals: tuple[ReviewMiningEvidence, ...] = ()
+    recommended_ad_angles: tuple[str, ...] = ()
+    recommended_ugc_formats: tuple[str, ...] = ()
+    landing_page_copy_hints: tuple[str, ...] = ()
+    creative_risks: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["contributions"] = dict(self.contributions)
+        for key in ("reasons", "recommended_ad_angles", "recommended_ugc_formats", "landing_page_copy_hints", "creative_risks"):
+            result[key] = list(result[key])
+        result["creative_hooks"] = [item.to_dict() for item in self.creative_hooks]
+        result["ad_signals"] = [item.to_dict() for item in self.ad_signals]
+        result["search_signals"] = [item.to_dict() for item in self.search_signals]
+        result["review_signals"] = [item.to_dict() for item in self.review_signals]
+        result["voice_of_customer"] = self.voice_of_customer.to_dict()
+        return result
+
+
+@dataclass(frozen=True)
+class ConsumerAttentionCandidateResult:
+    candidate_id: str
+    query: str
+    evidence: tuple[ConsumerAttentionEvidence, ...]
+    score: ConsumerAttentionScore
+    warnings: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"candidate_id": self.candidate_id, "query": self.query, "evidence": [item.to_dict() for item in self.evidence], "score": self.score.to_dict(), "platforms": sorted({item.platform for item in self.evidence}), "source_types": sorted({item.source_type for item in self.evidence}), "warnings": list(self.warnings)}
+
+
+@dataclass(frozen=True)
+class ConsumerAttentionReport:
+    report_version: str
+    evidence_mode: str
+    candidate_count: int
+    evidence_count: int
+    platforms_observed: tuple[str, ...]
+    top_candidate_id: str | None
+    next_best_action: str
+    candidates: tuple[ConsumerAttentionCandidateResult, ...]
+    warnings: tuple[str, ...] = ()
+    read_only: bool = True
+    network_calls: bool = False
+    mutated: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"report_version": self.report_version, "evidence_mode": self.evidence_mode, "candidate_count": self.candidate_count, "evidence_count": self.evidence_count, "platforms_observed": list(self.platforms_observed), "top_candidate_id": self.top_candidate_id, "next_best_action": self.next_best_action, "candidates": [item.to_dict() for item in self.candidates], "warnings": list(self.warnings), "read_only": self.read_only, "network_calls": self.network_calls, "mutated": self.mutated}
+
+
+ANGLE_RULES = (
+    ("problem_solution", ("problem", "frustrat", "struggle", "messy")),
+    ("before_after", ("before", "after", "transform")),
+    ("giftable", ("gift", "present")),
+    ("demo", ("demo", "show", "how it works", "unbox")),
+    ("comparison", ("versus", "compare", "alternative")),
+    ("convenience", ("easy", "simple", "convenient")),
+    ("cost_saving", ("save", "affordable", "cost")),
+    ("time_saving", ("quick", "fast", "time")),
+    ("aesthetic", ("beautiful", "minimal", "design")),
+    ("health_wellness", ("health", "wellness", "relief")),
+    ("productivity", ("organize", "work", "productive")),
+    ("family_pet_home", ("family", "pet", "home")),
+    ("travel_portability", ("travel", "portable", "carry")),
+)
+
+
+def _average(values: Iterable[float]) -> float:
+    values = list(values)
+    return round(sum(values) / len(values), 4) if values else 0.0
+
+
+def _phrases(records: Iterable[ConsumerAttentionEvidence], field_name: str) -> tuple[str, ...]:
+    values = []
+    for record in records:
+        value = str(getattr(record, field_name, "") or "").strip()
+        if value and value.lower() not in {item.lower() for item in values}:
+            values.append(value)
+    return tuple(values[:5])
+
+
+def extract_creative_angles(records: list[ConsumerAttentionEvidence]) -> dict[str, Any]:
+    hooks = _phrases(records, "hook")
+    text_blob = " ".join(" ".join((record.hook, record.angle, record.pain_point, record.desired_outcome, record.claim, record.content_text_excerpt)) for record in records).lower()
+    angle_names = [name for name, keywords in ANGLE_RULES if any(keyword in text_blob for keyword in keywords)]
+    if not angle_names and records:
+        angle_names = ["problem_solution"]
+    formats = sorted({record.creative_format or record.format for record in records if record.creative_format or record.format})
+    ugc = ["talking_head_demo", "hands_only_demo"] if any(record.ugc_scriptability and record.ugc_scriptability >= 0.6 for record in records) else ["testimonial_voiceover"] if records else []
+    return {"top_hooks": list(hooks), "recommended_ad_angles": angle_names[:6], "recommended_ugc_formats": formats[:5] or ugc[:3], "landing_page_copy_hints": [f"Lead with: {item}" for item in _phrases(records, "desired_outcome")[:3]], "creative_risks": ["objection_evidence_present"] if any(record.objection for record in records) else []}
+
+
+def _voc(records: list[ConsumerAttentionEvidence]) -> VoiceOfCustomerEvidence:
+    return VoiceOfCustomerEvidence(_phrases(records, "pain_point"), _phrases(records, "desired_outcome"), _phrases(records, "objection"), _phrases(records, "claim"), _phrases(records, "proof_signal"))
+
+
+def score_candidate(candidate_id: str, evidence: list[ConsumerAttentionEvidence], *, supplier_proof: bool = False) -> ConsumerAttentionScore:
+    if not evidence:
+        return ConsumerAttentionScore(candidate_id, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "reject_low_attention", {}, ("no_consumer_attention_evidence",), voice_of_customer=VoiceOfCustomerEvidence())
+    growth = _average(bounded(item.search_growth_signal) for item in evidence if item.search_growth_signal is not None)
+    search = _average([bounded(item.search_growth_signal) for item in evidence if item.keyword or item.search_growth_signal is not None])
+    views = [item.view_count for item in evidence if item.view_count]
+    engagement = _average(min(1.0, ((item.engagement_count or (item.like_count or 0) + (item.comment_count or 0) + (item.share_count or 0)) / max(1, item.view_count or 10000)) * 10) for item in evidence)
+    ad = _average(1.0 if item.ad_active_signal else 0.0 for item in evidence)
+    reviews = _average(min(1.0, (item.review_count or 0) / 1000) for item in evidence if item.review_count is not None)
+    voc = _average(min(1.0, ((item.review_count or 0) + (item.comment_count or 0)) / 500) for item in evidence)
+    pains = _average(1.0 if item.pain_point else 0.0 for item in evidence)
+    objections = _average(1.0 if item.objection else 0.0 for item in evidence)
+    hooks = _bounded(len({item.hook.lower() for item in evidence if item.hook}) / 4)
+    ugc = _average(bounded(item.ugc_scriptability) for item in evidence if item.ugc_scriptability is not None)
+    visual = _average(bounded(item.visual_demo_score) for item in evidence if item.visual_demo_score is not None)
+    intent = _average({"transactional": 1.0, "commercial_research": 0.75, "problem_aware": 0.65, "informational": 0.35, "unknown": 0.2}.get(item.intent_label, 0.2) for item in evidence)
+    diversity = bounded(len({item.platform for item in evidence}) / 4)
+    saturation = bounded((len([item for item in evidence if item.ad_active_signal]) / max(1, len(evidence))) * 0.7 + (1 - hooks) * 0.3)
+    confidence = _average(item.source_confidence for item in evidence)
+    base = _average([search, growth, engagement, ad, reviews, voc, pains, hooks, ugc, visual, intent, diversity])
+    overall = round(bounded(base * (1 - saturation * 0.35) * (0.65 + confidence * 0.35)), 4)
+    creative = extract_creative_angles(evidence)
+    voc_result = _voc(evidence)
+    reasons = ["consumer_attention_is_not_supplier_proof"]
+    if not supplier_proof:
+        reasons.append("supplier_proof_not_observed")
+    if objections >= 0.6:
+        recommendation = "reject_high_objection_risk"
+    elif overall < 0.25:
+        recommendation = "reject_low_attention"
+    elif not supplier_proof and overall >= 0.45:
+        recommendation = "validate_supplier_first"
+    elif overall >= 0.7:
+        recommendation = "advance_to_launch_draft"
+    elif hooks >= 0.5:
+        recommendation = "generate_creative_tests"
+    else:
+        recommendation = "expand_consumer_research"
+    contributions = {"search_demand_signal": search, "trend_growth_signal": growth, "social_engagement_signal": engagement, "ad_activity_signal": ad, "review_density_signal": reviews, "voice_of_customer_quality": voc, "pain_point_clarity": pains, "objection_density": objections, "creative_hook_diversity": hooks, "ugc_scriptability": ugc, "visual_demo_potential": visual, "intent_strength": intent, "source_diversity": diversity, "attention_saturation_risk": saturation}
+    ads = tuple(AdSignalEvidence(item.ad_platform or item.platform, item.ad_active_signal, item.creative_format or item.format, item.creator_style, bounded(((item.engagement_count or 0) / max(1, item.view_count or 10000)) * 10), item.source_confidence) for item in evidence if item.ad_active_signal or item.ad_platform)
+    searches = tuple(SearchTrendEvidence(item.keyword or item.query, bounded(item.search_growth_signal), item.keyword_intent, item.trend_label, item.source_confidence) for item in evidence if item.keyword or item.search_growth_signal is not None)
+    reviews_mined = tuple(ReviewMiningEvidence(item.review_count or 0, item.rating, item.sentiment_label, (item.pain_point,) if item.pain_point else (), (item.objection,) if item.objection else ()) for item in evidence if item.review_count or item.pain_point or item.objection)
+    hook_items = tuple(CreativeHookEvidence(hook, next((name for name, keywords in ANGLE_RULES if any(keyword in hook.lower() for keyword in keywords)), "problem_solution"), sum(1 for item in evidence if item.hook == hook), confidence) for hook in creative["top_hooks"])
+    return ConsumerAttentionScore(candidate_id, search, growth, engagement, ad, reviews, voc, pains, objections, hooks, ugc, visual, intent, diversity, saturation, overall, recommendation, {key: round(value, 4) for key, value in contributions.items()}, tuple(reasons), hook_items, voc_result, ads, searches, reviews_mined, tuple(creative["recommended_ad_angles"]), tuple(creative["recommended_ugc_formats"]), tuple(creative["landing_page_copy_hints"]), tuple(creative["creative_risks"]))
+
+
+def collapse_duplicates(records: Iterable[ConsumerAttentionEvidence]) -> list[ConsumerAttentionEvidence]:
+    selected: dict[tuple[str, str, str], ConsumerAttentionEvidence] = {}
+    for record in records:
+        key = (record.candidate_id, record.source, record.content_title or record.hook)
+        old = selected.get(key)
+        if old is None or (record.source_confidence, record.engagement_count or 0, record.review_count or 0) > (old.source_confidence, old.engagement_count or 0, old.review_count or 0):
+            selected[key] = record
+    return sorted(selected.values(), key=lambda item: (item.candidate_id, item.platform, item.source, item.content_title))
+
+
+def build_report(records: list[ConsumerAttentionEvidence], *, evidence_mode: str = "fixture", supplier_proof_by_candidate: Mapping[str, bool] | None = None) -> ConsumerAttentionReport:
+    records = collapse_duplicates(records)
+    grouped: dict[str, list[ConsumerAttentionEvidence]] = {}
+    for record in records:
+        if record.candidate_id:
+            grouped.setdefault(record.candidate_id, []).append(record)
+    proofs = supplier_proof_by_candidate or {}
+    results = tuple(ConsumerAttentionCandidateResult(candidate_id, rows[0].query, tuple(rows), score_candidate(candidate_id, rows, supplier_proof=proofs.get(candidate_id, False)), tuple(sorted({warning for row in rows for warning in row.warnings}))) for candidate_id, rows in sorted(grouped.items()))
+    results = tuple(sorted(results, key=lambda item: (-item.score.overall_consumer_attention, item.candidate_id)))
+    top = results[0] if results else None
+    return ConsumerAttentionReport("consumer-attention-v1", evidence_mode, len(results), len(records), tuple(sorted({item.platform for item in records})), top.candidate_id if top else None, f"{top.score.recommendation}:{top.candidate_id}" if top else "expand_consumer_research", results, ("consumer_attention_is_not_supplier_proof",) if records else ("consumer_attention_not_supplied",))

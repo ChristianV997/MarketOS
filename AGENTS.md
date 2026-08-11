@@ -16,6 +16,7 @@
 - Run `scripts/ai/session_finish.py --dry-run` before committing; run the deterministic inference and commerce benchmarks when changing performance-sensitive paths.
 - Before selecting a new Phase 1 feature, run `python scripts/phase1_readiness_report.py --json`; follow its single `next_best_action` unless the operator explicitly changes phase.
 - When credentials are absent, prefer the offline marketplace and supplier-feasibility import layers for report value; never label fixture/manual supplier evidence as live proof.
+- Consumer-attention imports are also offline/manual evidence: keep hooks, reviews, and creative signals separate from supplier proof and never turn them into ad/posting authority.
 - Filter large test and Semgrep logs with `scripts/ai/filter_test_output.py` and `scripts/ai/filter_semgrep_output.py`.
 - Use architecture/dependency tooling only for architecture work; use current external documentation only for version-sensitive APIs.
 - Do not install or enable third-party MCP servers, skills, models, or plugins without review.

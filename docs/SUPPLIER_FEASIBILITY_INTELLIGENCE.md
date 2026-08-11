@@ -100,3 +100,11 @@ No credentials, raw provider payloads, raw HTML, paid-dashboard exports,
 browser traces, or private client data belong in these inputs. Paths are local
 JSON/CSV only and traversal is rejected. All generated reports assert
 `read_only=true`, `network_calls=false`, and `mutated=false`.
+
+## Relationship to consumer attention
+
+Consumer attention evidence can add hooks, pain points, objections, and UGC
+hypotheses to the same client report. It answers whether a product may be
+marketable; this supplier layer answers whether it may be sourceable. Keep the
+two scores separate. Neither fixture/manual score is live supplier proof, and
+consumer evidence never authorizes ad spend or publishing.
