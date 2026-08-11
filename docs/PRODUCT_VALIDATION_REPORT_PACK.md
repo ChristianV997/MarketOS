@@ -91,3 +91,14 @@ Matrix, Unit Economics and Break-Even Thresholds, Recommended Price Band,
 Creative Hooks and Ad Angles, Top Risks and Blockers, Kill / Scale Rules,
 Fourteen-Day Validation Plan, and Client Action Checklist. Thresholds are
 planning assumptions, not observed ad performance or launch permission.
+## Launch Draft Pack upsell
+
+After generating a Product Opportunity Synthesis, create a draft-only launch asset package:
+
+```powershell
+python scripts/generate_launch_draft_pack.py --markdown
+```
+
+The pack adds an offer stack, listing, landing-page structure, creative briefs, UGC plans, FAQ copy, and draft-only Shopify/Medusa payloads. Feed its summary back into this report with `--launch-draft-pack`; the report shows status, creative-test count, UGC count, payload draft status, and approval blockers without embedding the full asset package.
+
+This is consulting work product, not launch authorization. It does not publish, launch ads, spend money, create orders, send messages, or call storefront APIs.

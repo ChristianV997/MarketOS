@@ -64,3 +64,6 @@ still unknown, and what bounded validation should happen next. It can support a
 $500–$1,000 consulting package when a human reviews source provenance and
 assumptions before delivery. The next productized step is a Launch Draft Pack
 after read-only supplier proof; it remains separate from this offline report.
+## Next commercial deliverable
+
+When synthesis identifies a candidate worth drafting, use `scripts/generate_launch_draft_pack.py` to turn the existing evidence into client-reviewable launch assets. The pack is deterministic and offline; it inherits price, margin, hooks, objections, risks, and thresholds rather than creating a new score. Supplier proof and human approval remain required.

@@ -44,3 +44,4 @@
 - Final reports lead with outcome and include scope, changed files, test commands
   and results, unrun checks, safety/no-mutation confirmation, risk/rollback,
   PR status, and the next single operator action.
+- Launch Draft Pack outputs are client-facing drafts only. Keep Shopify/Medusa payloads at `status: draft`; never add publication, ad spend, order, payment, messaging, or provider mutation authority to this layer.

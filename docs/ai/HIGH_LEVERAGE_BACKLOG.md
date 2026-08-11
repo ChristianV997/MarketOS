@@ -36,3 +36,4 @@ milestone is Product Opportunity Synthesis and Consulting Report v2. Run the
 offline synthesis first, deliver one human-reviewed premium report, then use
 its single next action to prioritize live supplier proof or a future Launch
 Draft Pack.
+* Launch Draft Pack v1 is the current consulting-product milestone: generate offline assets from approved synthesis evidence; do not add publishing or spend authority.

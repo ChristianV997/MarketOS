@@ -1,0 +1,17 @@
+{
+  "report_version": "product-opportunity-synthesis-v1",
+  "evidence_mode": "fixture_demo",
+  "top_candidate_id": "mini-thermal-printer",
+  "top_candidate_title": "mini thermal printer",
+  "overall_recommendation": "expand_supplier_research",
+  "confidence_grade": "C_fixture_or_partial",
+  "combined_opportunity_score": 0.55,
+  "top_hooks": ["See this tiny printer work"],
+  "top_pain_points": ["printing from a phone is inconvenient"],
+  "top_objections": ["delivery timing"],
+  "top_ad_angles": ["demo", "convenience"],
+  "decision_thresholds": {"kill_if_cpa_above": 12.0, "scale_if_cpa_below": 7.0, "kill_if_ctr_below": 0.008, "scale_if_margin_above": 0.35},
+  "unit_economics_summary": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75, "break_even_cpa": 15.87, "break_even_roas": 1.89},
+  "risk_profile": {"supplier_risks": ["supplier_proof_missing"], "marketplace_risks": [], "consumer_risks": [], "blockers": ["supplier_proof_missing"]},
+  "candidates": [{"candidate_id": "mini-thermal-printer", "title": "mini thermal printer", "top_hooks": ["See this tiny printer work"], "top_pain_points": ["printing from a phone is inconvenient"], "top_objections": ["delivery timing"], "top_ad_angles": ["demo", "convenience"], "unit_economics_summary": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75}}]
+}
