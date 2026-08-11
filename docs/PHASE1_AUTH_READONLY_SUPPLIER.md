@@ -88,6 +88,12 @@ The command intentionally reports `credential_missing` when credentials are
 absent. It does not fall back to public CJ credentials, scrape a login page, or
 attempt an order.
 
+For an operator-safe first live check, use the
+[CJ Live Validation Pack](PHASE1_CJ_LIVE_VALIDATION_PACK.md). Its default
+mode is offline configuration preflight; its explicit live mode limits the
+authenticated catalog search to one candidate, sanitizes all generated
+artifacts, and evaluates the result against an optional public/JS baseline.
+
 ## Evaluation and operations
 
 Evaluation reports now separate `public_page_static`, `public_page_js`,

@@ -76,6 +76,17 @@ python scripts/evaluate_commerce_run.py `
 See [COMMERCE_EVALUATION_FRAMEWORK.md](COMMERCE_EVALUATION_FRAMEWORK.md) for
 metric definitions, Run A/Run B comparison, and read-only evaluation API views.
 
+### Authenticated CJ supplier comparison
+
+Public CJ product pages were proven insufficient in the Phase 1 benchmark, so
+the optional authenticated read-only adapter is evaluated with a separate
+offline-first, one-probe workflow. It is disabled unless server-side CJ
+credentials, `MARKETOS_SUPPLIER_AUTH_READONLY=1`, and `--allow-network` are
+all present. Use
+[PHASE1_CJ_LIVE_VALIDATION_PACK.md](PHASE1_CJ_LIVE_VALIDATION_PACK.md) for the
+exact command and sanitized artifact contract; it can compare a CJ result with
+the existing static/JS validation artifact without adding a second evaluator.
+
 ## Run on Railway (deployed backend)
 
 Required environment variables — all already used by the existing gated

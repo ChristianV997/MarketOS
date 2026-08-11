@@ -76,6 +76,31 @@ Add the documented competitor URLs only when intentionally measuring the
 combined supplier/competition run. Public JS competitor rendering remains
 separately optional and domain-allowlisted.
 
+## Preferred one-probe validation pack
+
+For the first credentialed validation, prefer the offline-first pack instead
+of manually combining several commands. It verifies configuration without
+network by default, then invokes one bounded CJ candidate search only after
+`--allow-network` is explicit:
+
+```powershell
+python scripts/run_phase1_cj_readonly_validation_pack.py --json
+
+python scripts/run_phase1_cj_readonly_validation_pack.py `
+  --provider cj `
+  --query "portable espresso maker" `
+  --allow-network `
+  --markdown
+```
+
+The pack writes only redacted normalized reports under
+`artifacts/phase1_cj_readonly_validation/`; it never writes raw provider
+payloads, headers, browser traces, or credentials. To compare authenticated
+supplier evidence with the JS/public benchmark, add
+`--compare-against artifacts/phase1_live_validation/js-rendered-py312` when
+that locally generated baseline exists. See
+[PHASE1_CJ_LIVE_VALIDATION_PACK.md](PHASE1_CJ_LIVE_VALIDATION_PACK.md).
+
 ## Status interpretation
 
 | Status | Meaning | Operator action |

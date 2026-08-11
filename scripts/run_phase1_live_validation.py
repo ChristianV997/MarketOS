@@ -61,6 +61,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--supplier-url", help="one real CJ product page URL")
     parser.add_argument("--supplier-source", choices=("public_static", "public_js", "authenticated_readonly", "unavailable"), default="public_static")
     parser.add_argument("--allow-authenticated-supplier", action="store_true", help="allow the separately gated CJ catalog read path")
+    parser.add_argument("--max-authenticated-supplier-candidates", type=int, default=5,
+                        help="bounded CJ catalog candidates for the explicitly gated read-only path (1-5)")
     parser.add_argument("--competitor-urls", help="comma-separated real competitor product/storefront page URLs (3-5 recommended)")
     parser.add_argument("--query", default="portable espresso maker")
     parser.add_argument("--signal-fixture", default=str(DEFAULT_FIXTURE), help="deterministic public-signal fixture driving candidate selection (evidence gathering is still attempted against the real URLs above)")
@@ -129,6 +131,8 @@ def _field_status_summary(field_status: dict[str, str]) -> dict[str, list[str]]:
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if not 1 <= args.max_authenticated_supplier_candidates <= 5:
+        parser.error("--max-authenticated-supplier-candidates must be between 1 and 5")
 
     from datetime import datetime, timezone
     timestamp = args.timestamp or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -158,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     if selected is not None and args.supplier_source != "unavailable":
         if args.supplier_source == "authenticated_readonly":
             supplier_evidence = gather_authenticated_supplier_evidence(
-                selected.product_name, context=context, max_candidates=5,
+                selected.product_name, context=context, max_candidates=args.max_authenticated_supplier_candidates,
                 allow_network=args.allow_network and args.allow_authenticated_supplier,
             )
         elif supplier_url:
