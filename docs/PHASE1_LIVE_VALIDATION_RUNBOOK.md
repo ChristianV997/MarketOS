@@ -64,6 +64,18 @@ Output: `artifacts\phase1_live_validation\<timestamp>\validation_report.json`
 the actual canonical events this run produced, replayable through the
 existing `scripts\query_canonical_events.py` or the operator dashboard.
 
+To measure the run without reading raw artifacts manually, use the deterministic
+evaluation framework:
+
+```powershell
+python scripts/evaluate_commerce_run.py `
+  --workspace artifacts/phase1_live_validation/<timestamp> `
+  --json
+```
+
+See [COMMERCE_EVALUATION_FRAMEWORK.md](COMMERCE_EVALUATION_FRAMEWORK.md) for
+metric definitions, Run A/Run B comparison, and read-only evaluation API views.
+
 ## Run on Railway (deployed backend)
 
 Required environment variables — all already used by the existing gated

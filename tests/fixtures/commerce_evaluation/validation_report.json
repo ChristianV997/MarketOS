@@ -1,0 +1,53 @@
+{
+  "commerce_mvp_run": {"run_id": "run-eval-b", "workspace_id": "eval-demo", "status": "completed"},
+  "supplier_evidence": {
+    "status": "observed",
+    "result": {
+      "source": "cj_public_page",
+      "source_url": "https://supplier.example/product/espresso",
+      "external_product_id": "supplier-espresso-1",
+      "title": "Rendered Travel Espresso Maker",
+      "price": 8.75,
+      "currency": "USD",
+      "field_status": {
+        "title": "observed", "price": "observed", "sku": "observed", "category": "unavailable",
+        "variants": "unavailable", "weight_kg": "unavailable", "inventory_status": "observed",
+        "warehouse_origin": "unavailable", "shipping_cost": "unavailable", "estimated_delivery_days": "unavailable",
+        "quality_evidence": "unavailable", "rating": "unavailable", "reviews_count": "unavailable",
+        "images": "unavailable", "description": "observed"
+      },
+      "extraction_method": "crawl4ai_js_rendered_structured_product",
+      "confidence": 0.3333,
+      "warnings": []
+    }
+  },
+  "competition_evidence": {
+    "status": "observed",
+    "observed_competitor_count": 2,
+    "offers": [
+      {"external_listing_id": "competitor-1", "source": "shopify_storefront", "source_url": "https://store.example/products/espresso", "title": "Portable Espresso Maker", "price": 29.99, "field_status": {"price": "observed"}},
+      {"external_listing_id": "competitor-2", "source": "manufacturer", "source_url": "https://maker.example/products/espresso", "title": "Travel Espresso Maker", "price": 34.99, "field_status": {"price": "observed"}}
+    ],
+    "warnings": []
+  },
+  "opportunity_scoring": {
+    "scores": [
+      {"candidate_id": "candidate-1", "effective_score": 68.13, "confidence": 0.72},
+      {"candidate_id": "candidate-2", "effective_score": 42.0, "confidence": 0.31}
+    ]
+  },
+  "product_research_portfolio": {
+    "candidate_ids": ["candidate-1", "candidate-2"],
+    "cluster_count": 1,
+    "clusters": [{"cluster_id": "cluster-1", "confidence": 0.8, "member_ids": ["candidate-1", "candidate-2"]}],
+    "duplicate_groups": [{"group_id": "dup-1", "member_ids": ["candidate-1", "candidate-2"], "representative_id": "candidate-1"}],
+    "bucket_counts": {"top_opportunities": 1, "high_risk_opportunities": 1}
+  },
+  "margin_intelligence": {
+    "observed_gross_margin": 0.65,
+    "observed_pricing_confidence": 0.75,
+    "observed_margin_confidence": 0.7,
+    "provenance": {"supplier_cost": "observed", "market_price": "observed"},
+    "warnings": []
+  }
+}
