@@ -41,3 +41,4 @@ from sanitized search, review, comment, and creative imports; enrich the
 existing Product Validation Report with hooks and objections; do not call
 platforms, launch ads, or publish content.”
 * After Product Opportunity Synthesis: generate and review the Launch Draft Pack; resolve approval blockers before any future Launch Copilot work.
+* After Launch Draft Pack: generate a site/store/funnel draft for the selected client type; resolve policy, asset, supplier, and platform-readiness blockers before implementation.

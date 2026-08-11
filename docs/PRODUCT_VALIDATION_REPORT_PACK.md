@@ -102,3 +102,7 @@ python scripts/generate_launch_draft_pack.py --markdown
 The pack adds an offer stack, listing, landing-page structure, creative briefs, UGC plans, FAQ copy, and draft-only Shopify/Medusa payloads. Feed its summary back into this report with `--launch-draft-pack`; the report shows status, creative-test count, UGC count, payload draft status, and approval blockers without embedding the full asset package.
 
 This is consulting work product, not launch authorization. It does not publish, launch ads, spend money, create orders, send messages, or call storefront APIs.
+
+## Website / Store / Funnel Draft Summary
+
+Pass `--site-draft-pack` to include a compact summary of site type, route count, CMS model count, platform payload availability, SEO/analytics status, conversion-test count, deployment blockers, and approval blockers. The full blueprint remains a separate export.

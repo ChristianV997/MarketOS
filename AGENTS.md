@@ -45,3 +45,4 @@
   and results, unrun checks, safety/no-mutation confirmation, risk/rollback,
   PR status, and the next single operator action.
 - Launch Draft Pack outputs are client-facing drafts only. Keep Shopify/Medusa payloads at `status: draft`; never add publication, ad spend, order, payment, messaging, or provider mutation authority to this layer.
+- Site Draft Builder outputs are platform-neutral blueprints only. Keep all platform payloads at `status: draft`; never add domain, hosting, CMS, analytics, publishing, or storefront mutation authority to this layer.

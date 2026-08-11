@@ -68,3 +68,5 @@ or planning CPA threshold as live proof.
 ## Launch Draft Pack upsell
 
 Offer the Launch Draft Pack after the evidence report when the client wants practical launch preparation. It includes a draft offer, listing, landing-page outline, creative concepts, UGC briefs, and draft storefront payloads. Keep the distinction clear: a draft package is useful consulting output, not a published store or ad campaign. Require a human approval review before any future activation.
+
+The Site Draft Builder is the next packaging step for clients who need a website, store, catalog, service site, or funnel brief. It preserves platform choice while giving an implementation team routes, CMS models, SEO/analytics plans, and approval gates.

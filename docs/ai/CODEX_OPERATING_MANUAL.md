@@ -39,3 +39,4 @@ The synthesis/report-v2 layer is the preferred commercial deliverable after
 the three offline evidence pillars. Reuse its existing scores; do not create a
 parallel ranking or promise launch readiness from fixture/manual evidence.
 * Treat `scripts/generate_launch_draft_pack.py` as an offline presentation command. Verify every output is draft-only and never add a provider call to make a launch asset look more complete.
+* Treat `scripts/generate_site_draft_pack.py` as a portable planning command. Do not migrate stacks, install dependencies, publish routes, or mutate domains/platforms.
