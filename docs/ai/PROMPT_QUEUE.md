@@ -13,3 +13,7 @@ is true.
 
 Every prompt must require: no mutation authority, no committed secrets or
 artifacts, targeted tests, a draft PR, and an evidence-based final report.
+
+Before a new prompt starts implementation, run the local quality gate against
+the proposed paths. Do not use it to override an active supplier/live
+validation PR; its role is to expose overlap and phase risk early.

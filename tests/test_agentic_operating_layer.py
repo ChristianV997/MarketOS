@@ -73,11 +73,11 @@ def test_phase_gate_detects_artifacts_and_real_env_files():
 
 
 def test_phase_gate_does_not_block_docs_that_describe_forbidden_actions():
-    assert phase_gate.check(["docs/ai/QUALITY_GATES.md"], "orders and payments are forbidden")["status"] == "clear"
+    assert phase_gate.check(["docs/ai/QUALITY_GATES.md"], "create_order and ad spend are forbidden")["status"] == "clear"
 
 
 def test_phase_gate_detects_supplier_mutation_text():
-    assert "supplier_mutation" in phase_gate.check([], "create order through supplier") ["blockers"]
+    assert "supplier_mutation" in phase_gate.check(["backend/supplier.py"], "create order through supplier")["blockers"]
 
 
 def test_pr_readiness_blocks_artifacts():
@@ -98,7 +98,7 @@ def test_pr_readiness_blocks_provider_mutation_terms():
 
 
 def test_pr_readiness_docs_only_is_ready_for_review():
-    report = pr_readiness_report.report(["docs/ai/QUALITY_GATES.md"], "", branch="codex/test")
+    report = pr_readiness_report.report(["docs/ai/QUALITY_GATES.md"], "client.create_order() is forbidden", branch="codex/test")
     assert report["merge_readiness"] == "ready_for_review"
     assert report["docs_touched"] is True
 

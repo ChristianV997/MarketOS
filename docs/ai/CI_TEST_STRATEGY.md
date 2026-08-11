@@ -17,3 +17,8 @@ The current CI remains authoritative. This document proposes additive lanes;
 
 Collect lane timing before changing workflows. Avoid broad GitHub Actions
 rewrites until the measured bottleneck warrants one.
+
+The advisory `Agentic Quality Gate` workflow validates the scripts themselves,
+prints the selected lanes, and writes the local quality-gate report to the PR
+job summary. It is intentionally not a required check until its false-positive
+rate is measured across normal PRs.
