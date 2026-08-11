@@ -251,6 +251,7 @@ export interface Phase1Readiness {
   network_calls: boolean;
 }
 export interface BenchmarkMatrixView { top_candidate_id: string | null; next_best_action: string; evidence_mode: string; warnings: string[]; candidates: Array<{ candidate: { candidate_id: string; title: string }; evidence_completeness: number; risk_level: string; commercial_decision: string; next_best_action: string; supplier_evidence: { score: number }; competition_evidence: { score: number }; economics: { margin_quality: string; assumption_ratio: number }; validation_priority: { priority: string; target: string } }>; read_only: boolean; mutated: boolean; network_calls: boolean; }
+export interface PublicMarketBenchmarkView { evidence_mode: string; candidates_tested: number; competitor_pages_attempted: number; competitor_offers_observed: number; pricing_coverage: number; top_candidate_from_public_market: string | null; public_evidence_confidence: number; remaining_supplier_blocker: string; next_best_action: string; warnings: string[]; read_only: boolean; mutated: boolean; }
 
 export interface PublicCommerceRunRequest {
   query: string;
@@ -323,6 +324,7 @@ export const fetchShopifyImports = (params: EventQueryParams) => get<{ imports: 
 export const fetchEventsReadiness = () => get<EventsReadiness>("/api/events/readiness");
 export const fetchPhase1Readiness = () => get<Phase1Readiness>("/api/phase1/readiness");
 export const fetchBenchmarkMatrix = () => get<BenchmarkMatrixView>("/api/phase1/benchmark-matrix");
+export const fetchPublicMarketBenchmark = () => get<PublicMarketBenchmarkView>("/api/phase1/public-market-benchmark");
 export const fetchSupplierEvidenceEvents = (params: EventQueryParams) => get<{ events: EventRecordView[]; read_only: boolean }>("/api/events/supplier-evidence", params);
 export const fetchOpportunityRankings = (params: EventQueryParams) => get<{ rankings: OpportunityRankingSummary[]; read_only: boolean }>("/api/events/opportunity-rankings", params);
 export const fetchCompetitionSummaries = (params: EventQueryParams) => get<{ summaries: CompetitionSummaryView[]; read_only: boolean }>("/api/events/competition-summaries", params);

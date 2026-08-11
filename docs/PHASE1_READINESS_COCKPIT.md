@@ -68,6 +68,8 @@ Run `python scripts/ai/run_local_quality_gate.py --json` before a PR. It now inc
 
 The [Evidence Benchmark Matrix](PHASE1_BENCHMARK_MATRIX.md) can optionally supply a best candidate and highest validation priority to the readiness evidence summary. Readiness remains fully functional without a benchmark artifact.
 
+The [Public Market Evidence Benchmark](PHASE1_PUBLIC_MARKET_BENCHMARK.md) can also be supplied through `--public-market-benchmark-report`; readiness then reports candidate/page/offer coverage and uses its top candidate in the credential-safe next action.
+
 ## Limitations
 
 The cockpit does not validate current source truth, authenticate to CJ, launch the validation pack, or infer profitability. A missing artifact is intentionally reported as missing rather than silently treated as a successful run.
