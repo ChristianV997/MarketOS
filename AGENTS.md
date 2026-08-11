@@ -17,3 +17,25 @@
 - Filter large test and Semgrep logs with `scripts/ai/filter_test_output.py` and `scripts/ai/filter_semgrep_output.py`.
 - Use architecture/dependency tooling only for architecture work; use current external documentation only for version-sensitive APIs.
 - Do not install or enable third-party MCP servers, skills, models, or plugins without review.
+
+## Codex operating rules
+
+- Start with `git fetch origin`, `git switch main`, `git pull --ff-only origin main`,
+  `git status --short`, and `gh pr list --state open`. Do not overlap an open
+  PR's paths; create `codex/<outcome>` branches only after the scope is clear.
+- Keep the canonical architecture intact: one event spine, one Commerce MVP
+  path, existing provider clients, and no parallel orchestration/scoring.
+- Treat network, credentials, provider calls, spending, publishing, orders,
+  inventory, payments, and customer messages as default-off. State whether a
+  result is fixture-tested, dry-run, integration-tested, or live-validated.
+- Never stage `artifacts/`, `.env`, credentials, raw provider payloads, browser
+  traces, cache files, or unrelated dirty-worktree changes. Stage explicit
+  paths only.
+- Use `scripts/ai/select_tests.py --from-git --json` before choosing tests and
+  `scripts/ai/pr_readiness_report.py --json` before opening a PR. Run
+  `session_finish.py --dry-run` and `git diff --check` before committing.
+- Use `gh` for PR state/checks/merge only after local scope and safety review.
+  Use web research only for version-sensitive external APIs; cite primary docs.
+- Final reports lead with outcome and include scope, changed files, test commands
+  and results, unrun checks, safety/no-mutation confirmation, risk/rollback,
+  PR status, and the next single operator action.
