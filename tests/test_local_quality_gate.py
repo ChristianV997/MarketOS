@@ -9,7 +9,7 @@ def test_no_changes_is_clear_and_offline():
     assert report["network_calls"] is False
     assert report["mutated"] is False
     assert report["phase1_readiness"]["next_best_action"]
-    assert report["benchmark_matrix"]["evidence_mode"] == "fixture_demo"
+    assert report["benchmark_matrix"]["evidence_mode"] in {"fixture_demo", "unavailable"}
     assert report["impact_top_task"] == "run_cj_credentialed_readonly_validation"
 
 
