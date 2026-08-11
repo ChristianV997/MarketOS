@@ -53,6 +53,11 @@ missing fields, field observation rate, provenance distribution, confidence
 histograms, cache status/hit rate, robots-blocked warnings, network failures,
 and extraction method counts. Extraction methods distinguish JS-rendered and
 static/JSON-LD observations where the source artifact records that provenance.
+Supplier source distribution also distinguishes `public_page_static`,
+`public_page_js`, `authenticated_readonly_api`, `fixture`, and `unavailable`,
+with authenticated attempt/success counts and observed price, inventory,
+shipping, SKU, and variant rates. A missing credential or disabled live gate is
+reported as a readiness metric, never converted to a favorable assumption.
 
 ### Competition Intelligence
 

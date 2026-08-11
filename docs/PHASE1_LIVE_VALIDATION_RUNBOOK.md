@@ -181,6 +181,17 @@ the browser/runtime boundary.
 For the sanitized CPython 3.12 paired benchmark and its CJ public-page
 diagnosis, see [Phase 1 live validation results](PHASE1_LIVE_VALIDATION_RESULTS.md).
 
+## Optional authenticated supplier evidence
+
+The public CJ page limitation is now complemented by an explicit, server-side
+authenticated read-only CJ catalog path. It is **not enabled by default** and
+does not use the public-page URL. See
+[Phase 1 Authenticated Read-Only Supplier Evidence](PHASE1_AUTH_READONLY_SUPPLIER.md)
+for the provider decision, environment contract, endpoint allowlist, and
+credentialed operator command. Missing credentials must remain a structured
+`credential_missing` result; do not substitute login scraping or private-page
+access.
+
 `MARKETOS_CRAWL4AI_BROWSER_CHANNEL` is deliberately unset by default. Set it
 only after a local Playwright launch probe confirms the requested channel is
 installed; it does not alter the allowlist, robots policy, or default runtime.

@@ -81,3 +81,14 @@ Do not create any of these branches until the validation outcome is actually kno
 Read this file, then `docs/PHASE1_LIVE_VALIDATION_RUNBOOK.md` in full before doing anything else. Only after the
 live-validation outcome is known should `docs/OPPORTUNITY_SCORING.md`, `docs/COMPETITION_INTELLIGENCE.md`, or
 `docs/PRODUCT_RESEARCH.md` need touching (and only if that outcome implicates one of them specifically).
+
+## Authenticated supplier evidence slice
+
+The next Phase 1 path is a gated CJ Dropshipping catalog read adapter. It
+reuses `backend.validation.suppliers.CJDropshippingClient`, allows only
+documented catalog/product/stock GET paths, and requires
+`MARKETOS_SUPPLIER_PROVIDER=cj`, `MARKETOS_SUPPLIER_AUTH_READONLY=1`, server
+credentials, and an explicit network gate. `scripts/check_phase1_supplier_readonly_access.py`
+is the no-network-by-default preflight. The adapter is fixture-tested but has
+not been live credential-validated; do not claim observed authenticated fields
+until an operator-owned account performs the explicit probe.

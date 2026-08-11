@@ -1,0 +1,17 @@
+{
+  "list": [
+    {"pid": "fixture-pid-001", "productNameEn": "Portable Espresso Maker", "productSku": "FIX-CJ-001"}
+  ],
+  "detail": {
+    "pid": "fixture-pid-001",
+    "productNameEn": "Portable Espresso Maker",
+    "productSku": "FIX-CJ-001",
+    "sellPrice": "12.50",
+    "currency": "USD",
+    "weight": "0.72",
+    "variants": [
+      {"vid": "fixture-vid-001", "variantSku": "FIX-CJ-001-BLK", "variantNameEn": "Black", "sellPrice": "12.50"}
+    ]
+  },
+  "stock": [{"storageNum": 37, "warehouse": "US"}]
+}

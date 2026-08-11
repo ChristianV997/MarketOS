@@ -304,6 +304,45 @@ class CJDropshippingClient(SupplierClient):
         # the base class only checks api_key_env, which isn't sufficient here.
         return bool(os.getenv("CJ_EMAIL") and os.getenv(self.api_key_env))
 
+    _READ_ONLY_PATHS = frozenset({
+        "/product/list",
+        "/product/query",
+        "/product/stock/queryByVid",
+        "/product/stock/queryBySku",
+    })
+
+    def read_only_get(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        timeout: float = 15.0,
+        request_get: Any | None = None,
+        access_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Perform one explicitly allowlisted CJ catalog GET.
+
+        This is shared by the existing supplier client and the Phase 1
+        evidence adapter. It cannot reach order, payment, logistics-write, or
+        any other non-catalog endpoint. ``request_get`` and ``access_token``
+        are test seams; production uses the existing token manager.
+        """
+        if path not in self._READ_ONLY_PATHS:
+            raise SupplierQuoteError("cj_read_only_endpoint_not_allowlisted", service=self.name)
+        import requests
+        getter = request_get or requests.get
+        response = getter(
+            f"https://developers.cjdropshipping.com/api2.0/v1{path}",
+            headers={"CJ-Access-Token": access_token or _cj_token_manager.access_token()},
+            params=params or {},
+            timeout=min(max(float(timeout), 1.0), 30.0),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise SupplierQuoteError("cj_read_only_response_not_object", service=self.name)
+        return payload
+
     def _live_quote(self, product_name: str) -> SupplierQuote | None:
         import requests
         resp = requests.get(

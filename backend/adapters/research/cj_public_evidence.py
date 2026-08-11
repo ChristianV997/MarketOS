@@ -61,7 +61,7 @@ FIELD_STATUSES = ("observed", "derived", "assumed", "unavailable", "malformed", 
 
 _EVIDENCE_FIELDS = (
     "title", "price", "sku", "category", "variants", "weight_kg", "inventory_status",
-    "warehouse_origin", "shipping_cost", "estimated_delivery_days", "quality_evidence",
+    "inventory_quantity", "warehouse_origin", "shipping_cost", "estimated_delivery_days", "quality_evidence",
     "rating", "reviews_count", "images", "description",
 )
 
@@ -83,6 +83,7 @@ class CJProductEvidence:
     variants: tuple[dict[str, Any], ...] = ()
     weight_kg: float | None = None
     inventory_status: str = "unavailable_publicly"
+    inventory_quantity: int | None = None
     warehouse_origin: str = ""
     shipping_cost: float | None = None
     estimated_delivery_days: int | None = None
@@ -101,7 +102,8 @@ class CJProductEvidence:
             "external_product_id": self.external_product_id, "title": self.title, "sku": self.sku,
             "category": self.category, "price": self.price, "currency": self.currency,
             "variants": [dict(v) for v in self.variants], "weight_kg": self.weight_kg,
-            "inventory_status": self.inventory_status, "warehouse_origin": self.warehouse_origin,
+            "inventory_status": self.inventory_status, "inventory_quantity": self.inventory_quantity,
+            "warehouse_origin": self.warehouse_origin,
             "shipping_cost": self.shipping_cost, "estimated_delivery_days": self.estimated_delivery_days,
             "quality_evidence": self.quality_evidence, "rating": self.rating, "reviews_count": self.reviews_count,
             "images": list(self.images), "description": self.description,
