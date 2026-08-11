@@ -32,6 +32,7 @@
   traces, cache files, or unrelated dirty-worktree changes. Stage explicit
   paths only.
 - Use `scripts/ai/select_tests.py --from-git --json` before choosing tests and
+  `scripts/ai/run_local_quality_gate.py --from-git --json` plus
   `scripts/ai/pr_readiness_report.py --json` before opening a PR. Run
   `session_finish.py --dry-run` and `git diff --check` before committing.
 - Use `gh` for PR state/checks/merge only after local scope and safety review.

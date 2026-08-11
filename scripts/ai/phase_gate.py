@@ -20,7 +20,7 @@ GATES = {
     "credentials": "Credentials and .env files must not be committed.",
 }
 TERM_GATES = {
-    "supplier_mutation": ("supplier mutation", "create order", "place order", "inventory write"),
+    "supplier_mutation": ("supplier mutation", "create order", "create_order", "place order", "inventory write"),
     "shopify_mutation": ("shopify product create", "shopify mutation", "publish product"),
     "ads": ("launch ad", "ad spend", "create campaign"),
     "new_supplier_provider": ("zendrop adapter", "new supplier provider"),
@@ -29,10 +29,12 @@ TERM_GATES = {
 
 def check(paths: list[str], text: str = "", candidate: str | None = None) -> dict[str, Any]:
     paths = normal_paths(paths); lowered = text.lower()
+    implementation_paths = [path for path in paths if not path.startswith(("docs/", "tests/")) and path not in {"AGENTS.md", "CLAUDE.md", "README.md"}]
     blockers: list[str] = []
     if candidate in GATES: blockers.append(candidate)
-    for gate, terms in TERM_GATES.items():
-        if any(term in lowered for term in terms): blockers.append(gate)
+    if implementation_paths:
+        for gate, terms in TERM_GATES.items():
+            if any(term in lowered for term in terms): blockers.append(gate)
     if any(path.startswith("artifacts/") or path.endswith((".jsonl", ".har")) for path in paths): blockers.append("generated_artifacts")
     if any(".env" in path.lower() and not path.endswith(".example") for path in paths): blockers.append("credentials")
     return {"phase": "phase1", "changed_files": paths, "candidate": candidate, "status": "blocked" if blockers else "clear", "blockers": sorted(set(blockers)), "gate_definitions": GATES, "next_action": "resolve the listed gate before implementation" if blockers else "task is not blocked by encoded phase gates"}

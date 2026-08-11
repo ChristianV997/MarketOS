@@ -10,3 +10,8 @@
 
 Use `scripts/ai/phase_gate.py` for deterministic guardrails. It is advisory
 planning infrastructure, not a replacement for human approval.
+
+Before opening a PR, run `python scripts/ai/run_local_quality_gate.py --from-git --json`.
+The same local-only, advisory check runs on pull requests through
+`.github/workflows/agentic-quality-gate.yml`; it writes a Markdown summary to
+the GitHub job summary and never runs a live supplier or credentialed probe.

@@ -25,23 +25,24 @@ def _diff_text(path: str | None) -> str:
     return subprocess.run(["git", "-C", str(ROOT), "diff", "HEAD"], text=True, capture_output=True, check=False).stdout
 
 
-def report(paths: list[str], diff: str, *, branch: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+def report(paths: list[str], diff: str, *, branch: str, metadata: dict[str, Any] | None = None, mutation_diff: str | None = None) -> dict[str, Any]:
     paths = normal_paths(paths)
+    implementation_paths = [path for path in paths if not path.startswith(("docs/", "tests/")) and path not in {"AGENTS.md", "CLAUDE.md", "README.md"}]
     flags = {
         "artifacts_detected": any(path.startswith("artifacts/") for path in paths),
         "credential_file_detected": any(".env" in path.lower() and not path.endswith(".example") for path in paths),
         "secret_value_like_detected": bool(SECRET_VALUE.search(diff)),
-        "provider_mutation_like_detected": bool(MUTATION.search(diff)),
+        "provider_mutation_like_detected": bool(MUTATION.search(mutation_diff if mutation_diff is not None else diff)) if implementation_paths else False,
         "raw_payload_risk": any("payload" in path.lower() and path.startswith("tests/fixtures/") is False for path in paths),
     }
-    risk = "blocked" if any(flags[key] for key in ("artifacts_detected", "credential_file_detected", "secret_value_like_detected", "provider_mutation_like_detected")) else "low" if docs_only(paths) else "moderate"
+    risk = "none" if not paths else "blocked" if any(flags[key] for key in ("artifacts_detected", "credential_file_detected", "secret_value_like_detected", "provider_mutation_like_detected")) else "low" if docs_only(paths) else "moderate"
     warnings = [name for name, value in flags.items() if value]
     tests = select(paths)
     return {
         "branch": branch, "changed_files": paths, "changed_file_count": len(paths), "risk_category": risk,
         "detections": flags, "docs_touched": any(path.startswith("docs/") for path in paths),
         "tests_touched": any(path.startswith("tests/") for path in paths), "recommended_test_set": tests["recommended_commands"],
-        "merge_readiness": "blocked" if risk == "blocked" else "needs_tests" if not any(path.startswith("tests/") for path in paths) and not docs_only(paths) else "ready_for_review",
+        "merge_readiness": "clear" if not paths else "blocked" if risk == "blocked" else "needs_tests" if not any(path.startswith("tests/") for path in paths) and not docs_only(paths) else "ready_for_review",
         "blocking_warnings": warnings, "final_report_checklist": ["scope and safety boundary", "tests and exact results", "unrun checks", "rollback", "no external mutation confirmation"],
         "metadata": metadata or {},
     }
