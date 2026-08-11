@@ -178,6 +178,9 @@ runtime blocker before attempting installation; use a CPython 3.12 or 3.13
 operator environment rather than changing default dependencies or bypassing
 the browser/runtime boundary.
 
+For the sanitized CPython 3.12 paired benchmark and its CJ public-page
+diagnosis, see [Phase 1 live validation results](PHASE1_LIVE_VALIDATION_RESULTS.md).
+
 `MARKETOS_CRAWL4AI_BROWSER_CHANNEL` is deliberately unset by default. Set it
 only after a local Playwright launch probe confirms the requested channel is
 installed; it does not alter the allowlist, robots policy, or default runtime.
