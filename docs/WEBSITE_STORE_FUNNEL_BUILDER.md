@@ -59,3 +59,6 @@ This maps the implementation conversation without locking a client into a platfo
 Unknown contact details, addresses, legal policies, specifications, inventory, claims, testimonials, reviews, certifications, and search performance remain `TBD`. SEO output does not invent volume or rank. Analytics output describes events and consent decisions; it does not install pixels. Conversion thresholds are planning inputs from the existing synthesis and do not authorize traffic or spend.
 
 The deployment checklist, approval checklist, and risk review are part of the deliverable. Publishing remains false until the client approves copy, claims, supplier proof, pricing, shipping, policies, assets, SEO, analytics/privacy, and the draft payload.
+## CompanyOS handoff
+
+Site drafts can be referenced by CompanyOS Operations and Sales as a delivery package. Platform payloads remain draft-only and require approval before any future implementation.

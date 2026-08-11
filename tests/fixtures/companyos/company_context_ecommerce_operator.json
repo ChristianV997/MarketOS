@@ -1,0 +1,12 @@
+{
+  "company_name": "Demo Commerce Operator",
+  "business_type": "ecommerce_operator",
+  "currency": "USD",
+  "candidate_ids": ["mini-thermal-printer", "portable-blender"],
+  "monthly_fixed_costs": {"software_subscription": 250},
+  "monthly_variable_costs": {"supplier_cogs": 400, "ad_spend": 0},
+  "product_test_budget": 300,
+  "supplier_validation_budget": 100,
+  "creative_validation_budget": 100,
+  "ad_spend_monthly_cap": 0
+}

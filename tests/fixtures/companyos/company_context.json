@@ -1,0 +1,11 @@
+{
+  "company_id": "marketos-demo",
+  "company_name": "MarketOS Demo",
+  "business_type": "consulting_first",
+  "country": "Mexico",
+  "currency": "USD",
+  "mission": "Turn evidence into approved operating decisions.",
+  "operating_mode": "offline_planning",
+  "candidate_ids": ["mini-thermal-printer"],
+  "privacy_policy_status": "draft"
+}

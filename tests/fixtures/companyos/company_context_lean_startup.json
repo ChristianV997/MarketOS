@@ -1,0 +1,7 @@
+{
+  "company_name": "Lean Startup",
+  "business_type": "consulting_first",
+  "currency": "USD",
+  "starting_cash": 5000,
+  "monthly_fixed_costs": {"software": 180, "contractors": 300}
+}

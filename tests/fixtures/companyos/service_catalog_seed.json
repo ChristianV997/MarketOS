@@ -1,0 +1,6 @@
+{
+  "packages": [
+    {"package_id": "product-opportunity-report", "price_min": 600, "price_max": 1200},
+    {"package_id": "launch-draft-pack", "price_min": 900, "price_max": 1800}
+  ]
+}
