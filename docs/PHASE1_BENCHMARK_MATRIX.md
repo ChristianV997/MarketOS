@@ -19,3 +19,5 @@ The default candidate set is synthetic fixture/demo evidence. It is intentionall
 ## Operator view
 
 `GET /api/phase1/benchmark-matrix` is GET-only and uses only server-configured paths beneath `artifacts/`. The existing `/operator/events` page renders the top candidates, decision, validation priority, and evidence status without credential input or action buttons.
+
+Use [Phase 1 Public Market Evidence Benchmark](PHASE1_PUBLIC_MARKET_BENCHMARK.md) to feed bounded multi-candidate public evidence into this same matrix without adding a second scoring engine.

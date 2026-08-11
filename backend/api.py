@@ -174,6 +174,11 @@ try:
         app.include_router(_phase1_benchmark_router)
     except ImportError:
         pass
+    try:
+        from api.routes.phase1_public_market_benchmark import router as _phase1_public_market_benchmark_router
+        app.include_router(_phase1_public_market_benchmark_router)
+    except ImportError:
+        pass
 except Exception:
     # The legacy API must remain importable if an optional route dependency is
     # unavailable in a minimal deployment image.

@@ -10,6 +10,7 @@ from .service import (
 )
 from .readiness import Phase1ReadinessReport, build_from_paths, build_phase1_readiness
 from .benchmark_matrix import BenchmarkMatrixReport, build_benchmark_from_paths, build_benchmark_matrix
+from .public_market_benchmark import PublicMarketBenchmarkReport, build_public_market_benchmark
 
 __all__ = [
     "ComparisonReport",
@@ -27,4 +28,6 @@ __all__ = [
     "BenchmarkMatrixReport",
     "build_benchmark_from_paths",
     "build_benchmark_matrix",
+    "PublicMarketBenchmarkReport",
+    "build_public_market_benchmark",
 ]
