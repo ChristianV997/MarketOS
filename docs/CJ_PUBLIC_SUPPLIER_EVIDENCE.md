@@ -52,17 +52,19 @@ evidence:
   still not part of the default API image; install it only in an operator
   environment that can provide the reviewed browser runtime.
   `docs/oss/LICENSE_MANIFEST.yml` records its license
-  (Apache-2.0-with-attribution) as reviewed, but it was never actually
-  wired into `requirements.txt` or installed. This module doesn't change
-  that status.
-- This development sandbox's own network egress policy blocks
+  (Apache-2.0-with-attribution) as reviewed. It is intentionally not wired
+  into the default `requirements.txt` or API image; an operator installs the
+  optional profile only when the explicit JS-render gate is needed.
+ - Earlier sandbox runs reported a network egress policy that blocked
   `cjdropshipping.com` (and almost every other general web domain) at the
   proxy `CONNECT` level — confirmed directly against the proxy's own
   status endpoint, which reported `connect_rejected` / "policy denial" for
   every attempt, not a CJ-side anti-bot response. That means Crawl4AI's
   Playwright-driven browser extraction against a real CJ page could not be
   exercised or verified in this environment at all, regardless of whether
-  it was installed.
+  it was installed. That historical note describes the earlier sandbox
+  limitation; the current unrestricted run reached the hosts but still
+  returned `degraded` because static extraction found no Product records.
 - `requests`, `beautifulsoup4`, and `lxml` are already first-class,
   installed dependencies (`requirements.txt`). A `requests`-based adapter
   needs zero new dependencies, zero new browser binaries, and zero new
