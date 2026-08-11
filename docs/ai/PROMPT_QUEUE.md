@@ -48,3 +48,5 @@ platforms, launch ads, or publish content.”
 2. Replace finance assumptions with accountant-reviewed inputs.
 3. Review one client handoff from opportunity → launch → site draft.
 4. Review sales consent and do-not-contact status before any human-approved outreach.
+
+5. Review the registry roadmap and choose one bounded, approval-gated integration only after Approval Ledger v1 is specified.

@@ -1,0 +1,1 @@
+{"tools": [{"tool_id": "send_email", "risk_level": "blocked"}, {"tool_id": "read_file", "risk_level": "read_only"}]}

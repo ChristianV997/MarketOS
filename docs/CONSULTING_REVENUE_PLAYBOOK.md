@@ -70,6 +70,8 @@ or planning CPA threshold as live proof.
 Offer the Launch Draft Pack after the evidence report when the client wants practical launch preparation. It includes a draft offer, listing, landing-page outline, creative concepts, UGC briefs, and draft storefront payloads. Keep the distinction clear: a draft package is useful consulting output, not a published store or ad campaign. Require a human approval review before any future activation.
 
 The Site Draft Builder is the next packaging step for clients who need a website, store, catalog, service site, or funnel brief. It preserves platform choice while giving an implementation team routes, CMS models, SEO/analytics plans, and approval gates.
+
+The registry layer now makes future agents and workflows safer to productize: each agent, skill, tool, workflow, model route, trace policy, and knowledge source has an owner, contract, cost boundary, and approval rule.
 ## CompanyOS Department Layer
 
 The report-to-delivery chain now has an internal operating layer. CompanyOS can turn opportunity, launch, and site drafts into department scorecards, finance scenarios, ledger-ready seeds, sales proposal drafts, approvals, and risks. It is an internal planning product and does not send outreach, publish sites, spend money, create invoices, or mutate external systems.
