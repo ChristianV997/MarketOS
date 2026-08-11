@@ -5,6 +5,7 @@ is true.
 
 | Gate result | Next prompt |
 |---|---|
+| Readiness cockpit reports `credential_missing` | â€œGuide the operator through server-side CJ credential setup; do not add code.â€ |
 | CJ validation pack reports `credential_missing` | “Guide the operator through server-side CJ credential setup; do not add code.” |
 | CJ run observes supplier fields | “Record sanitized CJ live proof and compare it to the JS baseline.” |
 | CJ response differs from fixture | “Harden only CJ read-only payload normalization with a sanitized fixture.” |

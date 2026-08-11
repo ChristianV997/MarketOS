@@ -109,6 +109,11 @@ not expose credentials. Canonical supplier events remain replayable and
 advisory; JSONL remains the default persistence target and Supabase staging is
 still separately opt-in.
 
+For a single operator-facing readiness answer across supplier, competition,
+evaluation, events, and safety, use the read-only
+[Phase 1 Readiness Cockpit](PHASE1_READINESS_COCKPIT.md). It reports missing
+credentials as a gate and never reads their values.
+
 ## Known limitations and next step
 
 This PR is fixture-tested and configuration-tested, not live credential-

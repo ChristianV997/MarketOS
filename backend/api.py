@@ -164,6 +164,11 @@ try:
         app.include_router(_commerce_evaluations_router)
     except ImportError:
         pass
+    try:
+        from api.routes.phase1_readiness import router as _phase1_readiness_router
+        app.include_router(_phase1_readiness_router)
+    except ImportError:
+        pass
 except Exception:
     # The legacy API must remain importable if an optional route dependency is
     # unavailable in a minimal deployment image.

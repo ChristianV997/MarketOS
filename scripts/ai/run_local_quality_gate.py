@@ -3,21 +3,32 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 try:
     from . import ci_matrix_plan, impact_planner, phase_gate, pr_readiness_report, select_tests
     from .operating_layer import ROOT, changed_from_git, normal_paths, render_json_or_markdown, write_optional_output
+    from evaluation.commerce.readiness import build_phase1_readiness
 except ImportError:  # pragma: no cover - direct script execution
     import ci_matrix_plan, impact_planner, phase_gate, pr_readiness_report, select_tests
     from operating_layer import ROOT, changed_from_git, normal_paths, render_json_or_markdown, write_optional_output
+    from evaluation.commerce.readiness import build_phase1_readiness
 
 
 def _diff_text(path: str | None) -> str:
     if path:
         return Path(path).read_text(encoding="utf-8")
-    return subprocess.run(["git", "-C", str(ROOT), "diff", "HEAD"], text=True, capture_output=True, check=False).stdout
+    completed = subprocess.run(
+        ["git", "-C", str(ROOT), "diff", "HEAD"],
+        text=True, encoding="utf-8", errors="replace", capture_output=True, check=False,
+    )
+    return completed.stdout or ""
 
 
 def _implementation_diff(paths: list[str], diff_text: str) -> str:
@@ -45,7 +56,8 @@ def run(paths: list[str], *, diff_text: str = "", branch: str = "local") -> dict
     phase = phase_gate.check(paths, implementation_diff)
     selected = select_tests.select(paths)
     ci_plan = ci_matrix_plan.plan(paths)
-    impact = impact_planner.plan(impact_planner.DEFAULT_BACKLOG)
+    phase1_readiness = build_phase1_readiness().to_dict()
+    impact = impact_planner.plan(impact_planner.DEFAULT_BACKLOG, phase1_readiness)
     blocked = phase["status"] == "blocked" or readiness["risk_category"] == "blocked"
     status = "blocked" if blocked else "clear" if not paths else "advisory"
     flags = readiness["detections"]
@@ -62,6 +74,7 @@ def run(paths: list[str], *, diff_text: str = "", branch: str = "local") -> dict
         "recommended_tests": selected["recommended_commands"], "recommended_ci_lanes": ci_plan["recommended_lanes"],
         "pr_merge_readiness": readiness["merge_readiness"],
         "impact_top_task": impact["ranked_backlog"][0]["task"], "recommended_next_action": next_action,
+        "phase1_readiness": {"overall_status": phase1_readiness["overall_status"], "overall_score": phase1_readiness["overall_score"], "next_best_action": phase1_readiness["next_best_action"], "blocking_gates": phase1_readiness["blocking_gates"]},
         "network_calls": False, "mutated": False,
     }
 

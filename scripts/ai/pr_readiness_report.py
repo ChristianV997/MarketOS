@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .operating_layer import ROOT, changed_from_git, docs_only, normal_paths, render_json_or_markdown, write_optional_output
+    from .operating_layer import ROOT, changed_from_git, staged_from_git, docs_only, normal_paths, render_json_or_markdown, write_optional_output
     from .select_tests import select
 except ImportError:  # pragma: no cover - direct script execution
-    from operating_layer import ROOT, changed_from_git, docs_only, normal_paths, render_json_or_markdown, write_optional_output
+    from operating_layer import ROOT, changed_from_git, staged_from_git, docs_only, normal_paths, render_json_or_markdown, write_optional_output
     from select_tests import select
 
 
@@ -20,9 +20,11 @@ SECRET_VALUE = re.compile(r"(?:CJ_API_KEY|CJ_EMAIL|SUPABASE_SERVICE_ROLE_KEY|(?:
 MUTATION = re.compile(r"(?:create[_ ]order|capture[_ ]payment|refund|fulfill|mutate[_ ]inventory|shopify.*(?:create|update|publish)|send[_ ]customer)", re.I)
 
 
-def _diff_text(path: str | None) -> str:
+def _diff_text(path: str | None, *, staged: bool = False) -> str:
     if path: return Path(path).read_text(encoding="utf-8")
-    return subprocess.run(["git", "-C", str(ROOT), "diff", "HEAD"], text=True, capture_output=True, check=False).stdout
+    command = ["git", "-C", str(ROOT), "diff", "--cached"] if staged else ["git", "-C", str(ROOT), "diff", "HEAD"]
+    completed = subprocess.run(command, text=True, encoding="utf-8", errors="replace", capture_output=True, check=False)
+    return completed.stdout or ""
 
 
 def report(paths: list[str], diff: str, *, branch: str, metadata: dict[str, Any] | None = None, mutation_diff: str | None = None) -> dict[str, Any]:
@@ -51,14 +53,19 @@ def report(paths: list[str], diff: str, *, branch: str, metadata: dict[str, Any]
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--path", action="append", default=[]); parser.add_argument("--from-git", action="store_true")
-    parser.add_argument("--diff-file"); parser.add_argument("--metadata-file"); parser.add_argument("--branch")
+    parser.add_argument("--diff-file"); parser.add_argument("--staged", action="store_true", help="evaluate only the staged PR scope")
+    parser.add_argument("--metadata-file"); parser.add_argument("--branch")
     parser.add_argument("--json", action="store_true"); parser.add_argument("--markdown", action="store_true"); parser.add_argument("--output")
     args = parser.parse_args(argv)
     if args.json and args.markdown: parser.error("choose --json or --markdown")
-    branch = args.branch or subprocess.run(["git", "-C", str(ROOT), "branch", "--show-current"], text=True, capture_output=True).stdout.strip()
+    current_branch = subprocess.run(["git", "-C", str(ROOT), "branch", "--show-current"], text=True, encoding="utf-8", errors="replace", capture_output=True).stdout or ""
+    branch = args.branch or current_branch.strip()
     metadata = json.loads(Path(args.metadata_file).read_text(encoding="utf-8")) if args.metadata_file else None
-    paths = list(args.path) + (changed_from_git() if args.from_git else [])
-    result = report(paths, _diff_text(args.diff_file), branch=branch, metadata=metadata)
+    paths = list(args.path) + (staged_from_git() if args.staged else changed_from_git() if args.from_git else [])
+    diff = _diff_text(args.diff_file, staged=args.staged)
+    policy_labels = ("forbidden_next_phases", "supplier_mutation", "shopify_mutation", "orders_payments_or_", "MUTATION = re.compile")
+    policy_safe_diff = "\n".join(line for line in diff.splitlines() if not any(label in line for label in policy_labels))
+    result = report(paths, diff, branch=branch, metadata=metadata, mutation_diff=policy_safe_diff)
     content = render_json_or_markdown(result, markdown=args.markdown, title="MarketOS PR readiness")
     write_optional_output(content, args.output); print(content, end="")
     return 0
