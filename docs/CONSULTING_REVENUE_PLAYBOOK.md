@@ -65,3 +65,6 @@ clarity and prioritization, not a profit guarantee.
 Run the synthesis before generating the client report. Review all fixture and
 manual labels and assumptions manually; never present a fixture supplier cost
 or planning CPA threshold as live proof.
+## Launch Draft Pack upsell
+
+Offer the Launch Draft Pack after the evidence report when the client wants practical launch preparation. It includes a draft offer, listing, landing-page outline, creative concepts, UGC briefs, and draft storefront payloads. Keep the distinction clear: a draft package is useful consulting output, not a published store or ad campaign. Require a human approval review before any future activation.
