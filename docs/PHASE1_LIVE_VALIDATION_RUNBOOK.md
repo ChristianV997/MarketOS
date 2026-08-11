@@ -146,6 +146,10 @@ reviewed optional profile in the operator environment, then explicitly set
 the render gate and the exact target-domain allowlist:
 
 ```powershell
+python scripts\check_phase1_crawl4ai_runtime.py --json
+
+# If the preflight reports Python 3.14 without a compatible optional profile,
+# create an isolated CPython 3.12 or 3.13 environment before installing.
 pip install -r requirements-oss.txt
 $env:MARKETOS_PHASE1_JS_RENDER = "1"
 $env:CRAWL4AI_ALLOWED_DOMAINS = "www.cjdropshipping.com,wacaco.com,aeropress.com"
@@ -160,6 +164,14 @@ It does not bypass CAPTCHA, login, anti-bot controls, or redirects. If the
 optional dependency is missing or the domain is not allowlisted, the run
 degrades rather than silently widening access. A `pass` still requires an
 observed supplier or competition field in `validation_report.json`.
+
+The optional profile is intentionally not a default API dependency. In the
+paired benchmark on CPython 3.14, the reviewed `crawl4ai==0.8.6` profile
+could not install because its `lxml~=5.3` dependency fell back to a source
+build without compatible libxml2 headers. The preflight above reports that
+runtime blocker before attempting installation; use a CPython 3.12 or 3.13
+operator environment rather than changing default dependencies or bypassing
+the browser/runtime boundary.
 
 ## If a fetch still fails from an unrestricted environment
 
