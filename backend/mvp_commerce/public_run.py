@@ -23,7 +23,7 @@ from .models import CommerceMvpRun
 from .opportunity import build_opportunity_candidates_from_signals, select_candidate
 from .opportunity_scoring import opportunity_scoring_events, rank_opportunities
 from .runner import run_commerce_mvp_slice
-from .supplier_evidence import gather_supplier_evidence, supplier_evidence_events
+from .supplier_evidence import gather_authenticated_supplier_evidence, gather_supplier_evidence, supplier_evidence_events
 
 
 @dataclass(frozen=True)
@@ -129,6 +129,8 @@ def run_commerce_mvp_from_public_rss(
     fetcher: Callable[[str, int], str] | None = None,
     operator_note: str = "",
     attempt_supplier_evidence: bool = False,
+    supplier_source: str = "public_page_static",
+    allow_authenticated_supplier: bool = False,
     supplier_candidate_urls: list[str] | None = None,
     use_opportunity_ranking: bool = False,
     attempt_competition_evidence: bool = False,
@@ -196,11 +198,17 @@ def run_commerce_mvp_from_public_rss(
         peeked_selected = select_candidate(peeked_candidates)
         if peeked_selected is not None:
             if attempt_supplier_evidence:
-                supplier_evidence_result = gather_supplier_evidence(
-                    peeked_selected.product_name,
-                    context=SidecarContext(workspace_id=workspace_id, dry_run=not allow_network),
-                    candidate_urls=supplier_candidate_urls,
-                )
+                supplier_context = SidecarContext(workspace_id=workspace_id, dry_run=not allow_network)
+                if supplier_source == "authenticated_readonly":
+                    supplier_evidence_result = gather_authenticated_supplier_evidence(
+                        peeked_selected.product_name, context=supplier_context, max_candidates=max_candidates,
+                        allow_network=allow_network and allow_authenticated_supplier,
+                    )
+                else:
+                    supplier_evidence_result = gather_supplier_evidence(
+                        peeked_selected.product_name, context=supplier_context,
+                        candidate_urls=supplier_candidate_urls,
+                    )
             if attempt_competition_evidence:
                 competition_evidence_result = gather_market_intelligence(
                     peeked_selected.product_name,
@@ -232,7 +240,13 @@ def run_commerce_mvp_from_public_rss(
         "cache_status": ingestion.cache_status,
         "source_url": ingestion.source_url,
         "operator_note": operator_note,
-        "provider_calls": False,
+        "supplier_source": supplier_source,
+        "authenticated_supplier_allowed": bool(allow_authenticated_supplier),
+        "provider_calls": bool(
+            supplier_evidence_result is not None
+            and supplier_evidence_result.attempted
+            and supplier_evidence_result.source_type == "authenticated_readonly_api"
+        ),
         "read_only": True,
         "advisory": True,
         "non_authoritative": True,

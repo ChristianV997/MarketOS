@@ -8,6 +8,7 @@ from backend.events.query_models import EventQuery
 from backend.events.query_service import event_query_report, load_events_from_jsonl
 from backend.events.supabase_query_service import explain_supabase_readiness, query_supabase_canonical_events
 from backend.security.rate_limit import check_rate_limit, event_read_policy
+from backend.adapters.research.cj_readonly_api import explain_cj_read_only_readiness
 
 router = APIRouter(prefix="/api/events", tags=["canonical-events"])
 ROOT = Path(__file__).resolve().parents[2]; ARTIFACTS = (ROOT / "artifacts").resolve()
@@ -131,4 +132,10 @@ def product_research(workspace_id: str | None = None, limit: int = Query(100, ge
     research_event_types = {"candidate_discovered", "candidate_clustered", "research_portfolio_updated", "ranking_changed", "research_completed"}
     return {"events": [event for event in events if event.get("event_type") in research_event_types], "read_only": True}
 @router.get("/readiness")
-def readiness(): return {"jsonl_path_configured": bool(os.getenv("MARKETOS_EVENT_READ_JSONL_PATH")), "supabase_staging": explain_supabase_readiness(), "read_only": True, "mutated": False}
+def readiness():
+    return {
+        "jsonl_path_configured": bool(os.getenv("MARKETOS_EVENT_READ_JSONL_PATH")),
+        "supabase_staging": explain_supabase_readiness(),
+        "supplier_auth_readonly": explain_cj_read_only_readiness(),
+        "read_only": True, "mutated": False,
+    }

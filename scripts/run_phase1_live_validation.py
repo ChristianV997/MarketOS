@@ -46,7 +46,8 @@ from backend.mvp_commerce.opportunity import build_opportunity_candidates_from_s
 from backend.mvp_commerce.opportunity_scoring import score_opportunity
 from backend.mvp_commerce.product_research import build_research_candidates, build_research_portfolio, product_research_events
 from backend.mvp_commerce.runner import _load_signals, run_commerce_mvp_slice
-from backend.mvp_commerce.supplier_evidence import gather_supplier_evidence
+from backend.mvp_commerce.supplier_evidence import gather_authenticated_supplier_evidence, gather_supplier_evidence
+from backend.adapters.research.cj_readonly_api import explain_cj_read_only_readiness
 
 DEFAULT_FIXTURE = ROOT / "tests/fixtures/commerce_mvp/public_signals.json"
 FAILURE_MODES = (
@@ -58,6 +59,8 @@ FAILURE_MODES = (
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the Phase 1 intelligence chain against real public URLs and produce one validation report.")
     parser.add_argument("--supplier-url", help="one real CJ product page URL")
+    parser.add_argument("--supplier-source", choices=("public_static", "public_js", "authenticated_readonly", "unavailable"), default="public_static")
+    parser.add_argument("--allow-authenticated-supplier", action="store_true", help="allow the separately gated CJ catalog read path")
     parser.add_argument("--competitor-urls", help="comma-separated real competitor product/storefront page URLs (3-5 recommended)")
     parser.add_argument("--query", default="portable espresso maker")
     parser.add_argument("--signal-fixture", default=str(DEFAULT_FIXTURE), help="deterministic public-signal fixture driving candidate selection (evidence gathering is still attempted against the real URLs above)")
@@ -137,7 +140,10 @@ def main(argv: list[str] | None = None) -> int:
     supplier_url = args.supplier_url
 
     # 1. Network diagnosis, independent of the adapters' own fetch order.
-    hosts = sorted({_hostname(url) for url in ([supplier_url] if supplier_url else []) + competitor_urls if url})
+    target_urls = ([supplier_url] if supplier_url and args.supplier_source != "authenticated_readonly" else []) + competitor_urls
+    hosts = sorted({_hostname(url) for url in target_urls if url})
+    if args.supplier_source == "authenticated_readonly":
+        hosts.append("developers.cjdropshipping.com")
     network_diagnosis = [_diagnose_reachability(host, allow_network=args.allow_network) for host in hosts]
 
     # 2. Candidate selection from a deterministic, already-reviewed fixture
@@ -149,8 +155,14 @@ def main(argv: list[str] | None = None) -> int:
     # 3. Real (or honestly-dry-run) supplier + competition evidence.
     context = SidecarContext(workspace_id=args.workspace_id, dry_run=not args.allow_network)
     supplier_evidence = None
-    if supplier_url and selected is not None:
-        supplier_evidence = gather_supplier_evidence(selected.product_name, context=context, candidate_urls=[supplier_url])
+    if selected is not None and args.supplier_source != "unavailable":
+        if args.supplier_source == "authenticated_readonly":
+            supplier_evidence = gather_authenticated_supplier_evidence(
+                selected.product_name, context=context, max_candidates=5,
+                allow_network=args.allow_network and args.allow_authenticated_supplier,
+            )
+        elif supplier_url:
+            supplier_evidence = gather_supplier_evidence(selected.product_name, context=context, candidate_urls=[supplier_url])
     competition_evidence = None
     if competitor_urls and selected is not None:
         competition_evidence = gather_market_intelligence(selected.product_name, context=context, competitor_urls=competitor_urls)
@@ -179,7 +191,10 @@ def main(argv: list[str] | None = None) -> int:
     read_report = event_query_report(replayed_events, EventQuery(workspace_id=args.workspace_id, limit=500))
 
     # 7. Assemble the validation report.
-    supplier_status = "no_url_supplied" if not supplier_url else ("observed" if supplier_evidence and supplier_evidence.unit_cost is not None else "unavailable")
+    supplier_status = "unavailable" if args.supplier_source == "unavailable" else (
+        "no_url_supplied" if args.supplier_source != "authenticated_readonly" and not supplier_url else
+        ("observed" if supplier_evidence and supplier_evidence.unit_cost is not None else (supplier_evidence.status if supplier_evidence else "unavailable"))
+    )
     competition_status = "no_urls_supplied" if not competitor_urls else ("observed" if competition_evidence and competition_evidence.observed_competitor_count > 0 else "unavailable")
     if not args.allow_network:
         overall_status = "degraded_dry_run"
@@ -202,6 +217,10 @@ def main(argv: list[str] | None = None) -> int:
         "network_status": {"allow_network": args.allow_network, "diagnosis": network_diagnosis},
         "supplier_evidence": {
             "status": supplier_status,
+            "source": args.supplier_source,
+            "credential_readiness": explain_cj_read_only_readiness(allow_network=args.allow_network) if args.supplier_source == "authenticated_readonly" else None,
+            "live_readonly_gate": bool(args.allow_authenticated_supplier and args.allow_network) if args.supplier_source == "authenticated_readonly" else False,
+            "provider_status": supplier_evidence.status if supplier_evidence else None,
             "result": supplier_evidence.evidence.to_dict() if supplier_evidence and supplier_evidence.evidence else None,
             "field_status_summary": _field_status_summary(supplier_evidence.evidence.field_status) if supplier_evidence and supplier_evidence.evidence else None,
             "warnings": list(supplier_evidence.warnings) if supplier_evidence else [],
@@ -229,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         "status": overall_status,
         "next_action": next_action,
         "read_only": True, "advisory": True, "mutated": False,
+        "no_supplier_mutation_authority": True, "no_order_authority": True,
     }
 
     (out_dir / "validation_report.json").write_text(json.dumps(report, sort_keys=True, indent=2), encoding="utf-8")

@@ -17,7 +17,7 @@ from typing import Any
 
 SUPPLIER_FIELDS = (
     "title", "price", "sku", "category", "variants", "weight_kg", "inventory_status",
-    "warehouse_origin", "shipping_cost", "estimated_delivery_days", "quality_evidence",
+    "inventory_quantity", "warehouse_origin", "shipping_cost", "estimated_delivery_days", "quality_evidence",
     "rating", "reviews_count", "images", "description",
 )
 CONFIDENCE_BINS = ((0.0, 0.2), (0.2, 0.4), (0.4, 0.6), (0.6, 0.8), (0.8, 1.01))
@@ -79,6 +79,12 @@ def supplier_metrics(artifact: Mapping[str, Any], events: Iterable[Mapping[str, 
     cache_states: Counter[str] = Counter()
     robots_blocked = 0
     network_failures = 0
+    source_distribution: Counter[str] = Counter()
+    attempted_sources: Counter[str] = Counter()
+    authenticated_attempted = 0
+    authenticated_succeeded = 0
+    credential_missing = 0
+    live_flag_disabled = 0
     for record in records:
         statuses = record.get("field_status", {})
         statuses = statuses if isinstance(statuses, Mapping) else {}
@@ -93,6 +99,16 @@ def supplier_metrics(artifact: Mapping[str, Any], events: Iterable[Mapping[str, 
             confidences.append(confidence)
         method = str(record.get("extraction_method", "unknown"))
         extraction_methods[method] += 1
+        source = str(record.get("source_type") or record.get("source") or "unavailable")
+        if "authenticated" in source or "cj_authenticated_api" in source:
+            source = "authenticated_readonly_api"
+        elif "js" in source.lower() or "js_render" in method.lower():
+            source = "public_page_js"
+        elif "public" in source:
+            source = "public_page_static"
+        source_distribution[source] += 1
+        if source == "authenticated_readonly_api":
+            authenticated_succeeded += 1
         for warning in record.get("warnings", []) if isinstance(record.get("warnings"), list) else []:
             lowered = str(warning).lower()
             if "robots" in lowered:
@@ -103,6 +119,26 @@ def supplier_metrics(artifact: Mapping[str, Any], events: Iterable[Mapping[str, 
         if cache_status:
             cache_states[str(cache_status)] += 1
     for event in events:
+        if event.get("event_type") == "supplier_evidence_requested":
+            payload = event.get("payload", {})
+            metadata = event.get("metadata", {})
+            source = payload.get("source_type") if isinstance(payload, Mapping) else None
+            source = source or (metadata.get("supplier_source") if isinstance(metadata, Mapping) else None) or "unavailable"
+            normalized_source = str(source)
+            if "authenticated" in normalized_source or "cj_authenticated_api" in normalized_source:
+                normalized_source = "authenticated_readonly_api"
+            elif "js" in normalized_source.lower():
+                normalized_source = "public_page_js"
+            elif "public" in normalized_source:
+                normalized_source = "public_page_static"
+            attempted_sources[normalized_source] += 1
+            if source == "authenticated_readonly_api":
+                authenticated_attempted += 1
+            status = str(payload.get("status", "")) if isinstance(payload, Mapping) else ""
+            if status == "credential_missing":
+                credential_missing += 1
+            if status == "live_flag_disabled":
+                live_flag_disabled += 1
         metadata = event.get("metadata", {})
         if isinstance(metadata, Mapping) and metadata.get("cache_status"):
             cache_states[str(metadata["cache_status"])] += 1
@@ -130,6 +166,16 @@ def supplier_metrics(artifact: Mapping[str, Any], events: Iterable[Mapping[str, 
         "js_rendered": sum("js_render" in method.lower() for method in extraction_methods.elements()),
         "static_extraction": sum("jsonld" in method.lower() or "static" in method.lower() for method in extraction_methods.elements()),
         "extraction_method_counts": dict(sorted(extraction_methods.items())),
+        "authenticated_supplier_attempted": authenticated_attempted,
+        "authenticated_supplier_succeeded": authenticated_succeeded,
+        "supplier_source_distribution": dict(sorted((attempted_sources or source_distribution).items())),
+        "supplier_observed_price_rate": _round(field_counts.get("price", 0) / len(records)) if records else 0.0,
+        "supplier_inventory_observed_rate": _round(field_counts.get("inventory_quantity", 0) / len(records)) if records else 0.0,
+        "supplier_shipping_observed_rate": _round(field_counts.get("shipping_cost", 0) / len(records)) if records else 0.0,
+        "supplier_sku_observed_rate": _round(field_counts.get("sku", 0) / len(records)) if records else 0.0,
+        "supplier_variant_observed_rate": _round(field_counts.get("variants", 0) / len(records)) if records else 0.0,
+        "credential_missing_count": credential_missing,
+        "live_flag_disabled_count": live_flag_disabled,
     }
     return metrics, metric_warnings, records
 
