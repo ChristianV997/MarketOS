@@ -52,3 +52,5 @@ platforms, launch ads, or publish content.”
 5. Review the registry roadmap and choose one bounded, approval-gated integration only after Approval Ledger v1 is specified.
 
 6. Run `python scripts/run_companyos_approval_ledger.py --markdown`; keep blocked actions blocked and add no live integration without a new ledger policy, evidence contract, and safety test.
+
+7. Run `python scripts/run_companyos_provider_registry.py --phase phase_2_live_read_only_intelligence --markdown`; compare Apify/DataForSEO/official API coverage and record only metadata, scopes, budgets, and activation gates.

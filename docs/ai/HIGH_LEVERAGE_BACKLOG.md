@@ -39,6 +39,7 @@ Draft Pack.
 * Launch Draft Pack v1 is the current consulting-product milestone: generate offline assets from approved synthesis evidence; do not add publishing or spend authority.
 * Site Draft Builder v1 is the next implementation-ready consulting milestone: portable site blueprints before any platform selection or mutation.
 - CompanyOS Approval Ledger v1 is the canonical offline gate for action-scoped approvals, budget caps, consent conditions, simulation, revocation, expiry, and audit records.
+- CompanyOS Credential / Provider / Subscription Registry v1 should remain metadata-only: prioritize Apify/DataForSEO references, keep secret values out of git, and require the Approval Ledger before any activation.
 ## CompanyOS next gates
 
 Use the CompanyOS Department Layer to prioritize one approved consulting deliverable, protect cash assumptions, reconcile ledger seeds, and review consent before outreach. Do not treat a scorecard as authorization for spend, publishing, payments, or messaging.

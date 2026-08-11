@@ -72,6 +72,8 @@ Offer the Launch Draft Pack after the evidence report when the client wants prac
 The Site Draft Builder is the next packaging step for clients who need a website, store, catalog, service site, or funnel brief. It preserves platform choice while giving an implementation team routes, CMS models, SEO/analytics plans, and approval gates.
 
 The registry layer now makes future agents and workflows safer to productize: each agent, skill, tool, workflow, model route, trace policy, and knowledge source has an owner, contract, cost boundary, and approval rule.
+
+The Provider / Credential / Subscription Registry is the next operational packaging layer. Use it to price and sequence future intelligence, model, observability, CRM, accounting, and commerce integrations without storing secrets or promising live capability. Every provider remains reference-only until ownership, scope, budget, terms, health, and Approval Ledger gates are reviewed.
 ## CompanyOS Department Layer
 
 The report-to-delivery chain now has an internal operating layer. CompanyOS can turn opportunity, launch, and site drafts into department scorecards, finance scenarios, ledger-ready seeds, sales proposal drafts, approvals, and risks. It is an internal planning product and does not send outreach, publish sites, spend money, create invoices, or mutate external systems.

@@ -8,6 +8,7 @@
 - Distinguish implemented, tested, dry-run, integration-tested, and live-validated capability.
 - CompanyOS outputs are offline planning records: never infer spend, outreach, publishing, payment, order, or platform authority from a scorecard, budget, deal, or draft.
 - CompanyOS Approval Ledger is the canonical pre-integration gate: external actions remain blocked or simulation-only until a human-approved, evidence-backed policy exists.
+- CompanyOS provider/credential work is metadata-only: never store secret values, real account IDs, `.env` contents, or live health results; link all future activation to the Approval Ledger.
 - Update repository-specific AI memory after significant architecture changes.
 
 ## Token-efficient workflow
