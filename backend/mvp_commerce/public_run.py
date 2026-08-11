@@ -242,7 +242,11 @@ def run_commerce_mvp_from_public_rss(
         "operator_note": operator_note,
         "supplier_source": supplier_source,
         "authenticated_supplier_allowed": bool(allow_authenticated_supplier),
-        "provider_calls": False,
+        "provider_calls": bool(
+            supplier_evidence_result is not None
+            and supplier_evidence_result.attempted
+            and supplier_evidence_result.source_type == "authenticated_readonly_api"
+        ),
         "read_only": True,
         "advisory": True,
         "non_authoritative": True,
