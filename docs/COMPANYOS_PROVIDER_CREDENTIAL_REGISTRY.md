@@ -73,6 +73,11 @@ python scripts/run_companyos_provider_registry.py --output artifacts/companyos_p
 
 The output is sanitized JSON/Markdown only. Do not commit generated artifacts.
 
+The [Intelligence Live Read-Only Adapter Plan](INTELLIGENCE_ADAPTER_PLAN.md)
+consumes these references to create offline request envelopes, cost/rate caps,
+approval checks, and normalized evidence mappings. It does not activate or
+validate any credential.
+
 ## Safety boundary
 
 No credentials, API keys, OAuth tokens, private keys, provider calls, model calls, vector indexing, CRM/accounting mutations, email, WhatsApp/SMS, voice, payments, ads, publishing, orders, customer messages, subscription activation, or live network calls occur by default.

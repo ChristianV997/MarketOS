@@ -1,0 +1,7 @@
+{
+  "approval_requests": [
+    {"request_type": "provider_call", "status": "blocked_by_policy", "approval_id": "approval-provider-fixture"},
+    {"request_type": "web_data_acquisition", "status": "blocked_by_policy", "approval_id": "approval-web-fixture"}
+  ],
+  "external_action_performed": false
+}

@@ -54,3 +54,4 @@ platforms, launch ads, or publish content.”
 6. Run `python scripts/run_companyos_approval_ledger.py --markdown`; keep blocked actions blocked and add no live integration without a new ledger policy, evidence contract, and safety test.
 
 7. Run `python scripts/run_companyos_provider_registry.py --phase phase_2_live_read_only_intelligence --markdown`; compare Apify/DataForSEO/official API coverage and record only metadata, scopes, budgets, and activation gates.
+8. Run `python scripts/run_intelligence_adapter_plan.py --markdown`; review the dry-run request plans and choose only one future provider activation candidate after approval, credential, terms/privacy, cost, and output-contract gates are explicit.

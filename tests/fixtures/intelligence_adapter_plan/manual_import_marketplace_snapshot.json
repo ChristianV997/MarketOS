@@ -1,0 +1,7 @@
+{
+  "provider": "manual-import",
+  "records": [
+    {"candidate_id": "electric-lunch-box", "query": "electric lunch box", "title": "Synthetic manual import", "price": 39.0, "currency": "USD", "rank": 3, "review_count": 31, "rating": 4.0}
+  ],
+  "fixture_mode": true
+}

@@ -1,0 +1,8 @@
+{
+  "providers": [
+    {"provider_id": "apify", "action_mode": "read_only_requires_approval"},
+    {"provider_id": "dataforseo", "action_mode": "read_only_requires_approval"},
+    {"provider_id": "serpapi", "action_mode": "read_only_requires_approval"}
+  ],
+  "network_calls": false
+}

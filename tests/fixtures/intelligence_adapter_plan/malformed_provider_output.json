@@ -1,0 +1,5 @@
+{
+  "provider": "fixture-provider",
+  "records": "not-a-list",
+  "fixture_mode": true
+}

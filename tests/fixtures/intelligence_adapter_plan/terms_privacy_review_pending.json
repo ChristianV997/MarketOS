@@ -1,0 +1,7 @@
+{
+  "provider_id": "apify",
+  "terms_review_complete": false,
+  "privacy_review_complete": false,
+  "required_before_live": true,
+  "network_calls": false
+}
