@@ -349,7 +349,10 @@ def _thresholds(market: Mapping[str, Any] | None, supplier: Mapping[str, Any] | 
     max_budget = round(min(500.0, max(0.0, profit * 20)), 2) if profit is not None else None
     kill_cpa = round(max(0.0, profit * 0.8), 2) if profit is not None else None
     scale_cpa = round(max(0.0, profit * 0.5), 2) if profit is not None else None
-    return ProductOpportunityDecisionThresholds(target, low, high, landed, margin, profit, cpa, roas, max_budget, 20, kill_cpa, 0.008, 0.02, scale_cpa, 0.35, not bool(supplier), tuple(assumptions))
+    live_supplier = any(item.get("evidence_mode") in {"live_readonly", "authenticated_live"} for item in _evidence(supplier, "offers"))
+    if not live_supplier:
+        assumptions.append("supplier_readonly_proof_missing")
+    return ProductOpportunityDecisionThresholds(target, low, high, landed, margin, profit, cpa, roas, max_budget, 20, kill_cpa, 0.008, 0.02, scale_cpa, 0.35, not live_supplier, tuple(assumptions))
 
 
 def _plan(candidate_id: str, recommendation: str) -> ProductOpportunityActionPlan:
