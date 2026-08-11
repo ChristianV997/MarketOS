@@ -6,6 +6,7 @@
 - Do not install MCP servers or skills globally.
 - Do not enable live external actions without approval and safety gates.
 - Distinguish implemented, tested, dry-run, integration-tested, and live-validated capability.
+- CompanyOS outputs are offline planning records: never infer spend, outreach, publishing, payment, order, or platform authority from a scorecard, budget, deal, or draft.
 - Update repository-specific AI memory after significant architecture changes.
 
 ## Token-efficient workflow

@@ -38,3 +38,6 @@ its single next action to prioritize live supplier proof or a future Launch
 Draft Pack.
 * Launch Draft Pack v1 is the current consulting-product milestone: generate offline assets from approved synthesis evidence; do not add publishing or spend authority.
 * Site Draft Builder v1 is the next implementation-ready consulting milestone: portable site blueprints before any platform selection or mutation.
+## CompanyOS next gates
+
+Use the CompanyOS Department Layer to prioritize one approved consulting deliverable, protect cash assumptions, reconcile ledger seeds, and review consent before outreach. Do not treat a scorecard as authorization for spend, publishing, payments, or messaging.

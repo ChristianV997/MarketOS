@@ -1,0 +1,4 @@
+transaction_id,date,description,amount,currency,category,department,project_id,counterparty,reconciliation_status,tax_tag
+txn-001,2026-08-01,Demo report planning revenue,750,USD,consulting_revenue,sales,client-demo,Client Demo,reconciled,income_review
+txn-002,2026-08-02,Software planning subscription,49,USD,software_subscription,operations,companyos,Tool Vendor,unreconciled,expense_review
+txn-003,2026-08-03,Product research supplier cost,80,USD,supplier_cogs,supplier,mini-thermal-printer,Supplier Demo,unreconciled,cogs_review

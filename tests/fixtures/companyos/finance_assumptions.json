@@ -1,0 +1,12 @@
+{
+  "currency": "USD",
+  "starting_cash": 10000,
+  "monthly_service_units": {"product-opportunity-report": 2, "launch-draft-pack": 1},
+  "monthly_fixed_costs": {"software": 300, "contractors": 500},
+  "monthly_variable_costs": {"delivery": 250},
+  "department_budgets": {"sales": 300, "intelligence": 500},
+  "product_test_budget": 500,
+  "supplier_validation_budget": 150,
+  "creative_validation_budget": 150,
+  "ad_spend_monthly_cap": 0
+}

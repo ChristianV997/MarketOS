@@ -1,0 +1,9 @@
+{
+  "account_name": "Demo Ecommerce Brand",
+  "industry": "ecommerce",
+  "country": "Mexico",
+  "recommended_package_id": "product-opportunity-report",
+  "lead": {"name": "Prospective Buyer", "source": "manual_context", "consent_status": "client_provided", "buying_intent": "high", "signals": ["requested evidence review"]},
+  "pain_points": ["unclear product priority", "supplier proof missing"],
+  "objections": ["What is live proof?", "What remains unknown?"]
+}

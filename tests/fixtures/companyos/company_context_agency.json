@@ -1,0 +1,7 @@
+{
+  "company_name": "Evidence Agency",
+  "business_type": "agency",
+  "currency": "USD",
+  "monthly_service_units": {"product-opportunity-report": 2, "launch-draft-pack": 1, "website-store-funnel-blueprint": 1},
+  "privacy_policy_status": "present"
+}

@@ -44,3 +44,6 @@ Before any future activation, a human must confirm supplier proof, landed cost, 
 ## Consulting use
 
 Sell this as the practical upsell after a Product Validation Report: the report answers whether a candidate merits further work; the Launch Draft Pack gives the client a coherent offer, page, creative, and review checklist without pretending that publishing or ad spend is complete. A later Launch Copilot may execute approved steps, but that is outside v1.
+## CompanyOS handoff
+
+Launch Draft Pack outputs can be linked into CompanyOS as a delivery workstream and approval subject. This creates a manager brief and handoff checklist without publishing, sending, spending, or mutating Shopify/Medusa.

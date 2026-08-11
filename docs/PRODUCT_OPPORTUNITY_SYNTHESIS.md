@@ -69,3 +69,6 @@ after read-only supplier proof; it remains separate from this offline report.
 When synthesis identifies a candidate worth drafting, use `scripts/generate_launch_draft_pack.py` to turn the existing evidence into client-reviewable launch assets. The pack is deterministic and offline; it inherits price, margin, hooks, objections, risks, and thresholds rather than creating a new score. Supplier proof and human approval remain required.
 
 After the Launch Draft Pack, `scripts/generate_site_draft_pack.py` can produce a portable implementation blueprint without selecting or mutating a storefront platform.
+## CompanyOS handoff
+
+Opportunity synthesis can be referenced by the offline CompanyOS Department Layer. Management uses it to prioritize work; Finance uses service-package assumptions; Sales uses it for a draft offer and handoff. The reference is advisory and does not authorize launch or outreach.
