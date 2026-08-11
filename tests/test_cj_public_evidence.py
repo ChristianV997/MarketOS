@@ -119,6 +119,42 @@ class TestJsonLdExtraction:
         assert evidence.field_status["price"] == "unavailable"
 
 
+class TestOptionalJsRendering:
+    def test_js_render_fallback_is_disabled_by_default(self, monkeypatch):
+        monkeypatch.delenv("MARKETOS_PHASE1_JS_RENDER", raising=False)
+        with patch.object(mod, "_bounded_get", return_value=NO_PRODUCT_HTML):
+            with patch.object(mod.Crawl4AIResearchAdapter, "discover_sync") as render:
+                evidence = mod.fetch_product_evidence(
+                    "https://www.cjdropshipping.com/product/static.html",
+                    context=SidecarContext(dry_run=False),
+                )
+        render.assert_not_called()
+        assert evidence.warnings == ("no_structured_product_data_found",)
+
+    def test_allowlisted_js_render_fallback_maps_observed_fields(self, monkeypatch):
+        monkeypatch.setenv("MARKETOS_PHASE1_JS_RENDER", "1")
+        monkeypatch.setenv("CRAWL4AI_ALLOWED_DOMAINS", "www.cjdropshipping.com")
+        records = [{
+            "name": "Rendered Travel Espresso Maker",
+            "product_id": "CJ-RENDERED-001",
+            "selling_price": 8.75,
+            "currency": "USD",
+            "availability": "InStock",
+            "description": "Rendered structured product record.",
+        }]
+        with patch.object(mod, "_bounded_get", return_value=NO_PRODUCT_HTML):
+            with patch.object(mod.Crawl4AIResearchAdapter, "discover_sync", return_value=records):
+                evidence = mod.fetch_product_evidence(
+                    "https://www.cjdropshipping.com/product/rendered.html",
+                    context=SidecarContext(dry_run=False),
+                )
+        assert evidence.title == "Rendered Travel Espresso Maker"
+        assert evidence.price == 8.75
+        assert evidence.sku == "CJ-RENDERED-001"
+        assert evidence.field_status["price"] == "observed"
+        assert evidence.extraction_method == "crawl4ai_js_rendered_structured_product"
+
+
 class TestNetworkFailureDegradation:
     def test_fetch_exception_degrades_without_raising(self):
         with patch.object(mod, "_bounded_get", side_effect=ConnectionError("blocked")):

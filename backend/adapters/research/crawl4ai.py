@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import asyncio
 import json
 import re
 import time
@@ -17,6 +18,21 @@ from urllib import robotparser
 
 from backend.contracts.adapters import AdapterHealth, SidecarContext
 from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
+
+
+PHASE1_JS_RENDER_ENV = "MARKETOS_PHASE1_JS_RENDER"
+
+
+def phase1_js_render_enabled() -> bool:
+    """Return whether the operator explicitly enabled the Phase 1 fallback.
+
+    The existing adapter remains usable as a dry-run/optional OSS adapter.  A
+    real browser-rendered fetch is deliberately a second gate, because it is
+    heavier than the bounded static transport and can download browser
+    assets.  Callers must still provide ``CRAWL4AI_ALLOWED_DOMAINS`` and the
+    adapter continues to enforce robots.txt.
+    """
+    return os.getenv(PHASE1_JS_RENDER_ENV, "0").strip() == "1"
 
 
 class Crawl4AIResearchAdapter:
@@ -238,6 +254,19 @@ class Crawl4AIResearchAdapter:
         # remains under Crawl4AI's own cache; this boundary emits only records
         # that satisfy the canonical product contract.
         return []
+
+    def discover_sync(self, url: str, *, context: SidecarContext) -> list[dict[str, Any]]:
+        """Synchronous bridge for the existing sync evidence adapters.
+
+        The Phase 1 evidence paths are intentionally synchronous.  Keep the
+        bridge narrow and fail closed if a caller tries to invoke it from an
+        already-running event loop rather than nesting or patching asyncio.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.discover(url, context=context))
+        raise RuntimeError("Crawl4AI sync bridge cannot run inside an active event loop")
 
     @staticmethod
     def normalize_candidates(records: list[dict[str, Any]]) -> list[ProductCandidate]:

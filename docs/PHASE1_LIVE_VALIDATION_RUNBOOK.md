@@ -100,7 +100,8 @@ railway run python scripts/run_phase1_live_validation.py \
 - **`pass`** — real supplier or competition evidence was observed.
 - **`degraded`** — pages were reachable but exposed no usable structured
   product data (no `schema.org Product` JSON-LD) — the pages themselves
-  may be JS-rendered, or genuinely lack structured data.
+  may be JS-rendered, or genuinely lack structured data. This is the result
+  that justifies the optional Crawl4AI fallback below; it is not a pass.
 - **`blocked`** — network egress itself was denied (the sandbox result
   documented throughout this repo's Phase 1 docs).
 - **`degraded_dry_run`** — `--allow-network` wasn't passed; nothing was
@@ -126,16 +127,37 @@ is ever filled in with a guess.
 proving the dashboard tabs would show real data for this run, without
 needing to actually start the FastAPI server.
 
+## Optional JS-rendered extraction after a degraded result
+
+Only use this after a real validation run reports `degraded`. Install the
+reviewed optional profile in the operator environment, then explicitly set
+the render gate and the exact target-domain allowlist:
+
+```powershell
+pip install -r requirements-oss.txt
+$env:MARKETOS_PHASE1_JS_RENDER = "1"
+$env:CRAWL4AI_ALLOWED_DOMAINS = "www.cjdropshipping.com,wacaco.com,aeropress.com"
+python scripts\run_phase1_live_validation.py `
+  --supplier-url "https://www.cjdropshipping.com/product/<real-slug>.html" `
+  --competitor-urls "https://www.wacaco.com/products/<real-slug>,https://aeropress.com/products/<real-slug>" `
+  --query "portable espresso maker" --allow-network --markdown
+```
+
+The fallback remains robots-aware and emits only structured Product records.
+It does not bypass CAPTCHA, login, anti-bot controls, or redirects. If the
+optional dependency is missing or the domain is not allowlisted, the run
+degrades rather than silently widening access. A `pass` still requires an
+observed supplier or competition field in `validation_report.json`.
+
 ## If a fetch still fails from an unrestricted environment
 
 That's real, useful information — capture it exactly as reported, don't
 retry with a different technique to force a result:
 
 - **`missing JSON-LD`/`no_structured_product_data_found`**: the page is
-  reachable but has no `schema.org Product` data — likely JS-rendered.
-  Document which specific page; do not add browser automation to this
-  harness speculatively — only after a real page proves it's needed (see
-  `docs/COMPETITION_INTELLIGENCE.md`'s "Future extensions").
+  reachable but has no `schema.org Product` data. First run the explicit
+  optional fallback above. If it still fails, document the specific page;
+  never bypass access controls or turn arbitrary page prose into evidence.
 - **`robots.txt disallow`** (a real disallow rule, not an unreachable
   robots.txt): the adapter is working correctly — it will not fetch a page
   robots.txt disallows. This is a policy boundary, not a bug.

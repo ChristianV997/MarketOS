@@ -21,27 +21,50 @@ nobody has configured yet (that remains later, credentialed work per the
 Phase 1 task brief). The public path works today, with no account, and is
 the thing this document is about.
 
-## Why not Crawl4AI
+## Static-first extraction and optional Crawl4AI fallback
 
-Crawl4AI (Apache-2.0, Playwright-based) was the task's preferred
-extraction infrastructure and was evaluated. It is **not** what this
-module uses. Evidence:
+Crawl4AI (Apache-2.0, Playwright-based) remains optional rather than part of
+the default API image. The Phase 1 live validation harness reached public
+CJ and storefront hosts, but static requests produced no usable Product
+records. That result justified a narrow fallback, without making browser
+rendering the default transport.
 
-- `requirements-oss.txt` already carries `# crawl4ai==0.8.6` as an
-  optional, commented-out dependency — "install only after the validation
-  harness records a pinned, security-reviewed release for the deployment
-  environment." `docs/oss/LICENSE_MANIFEST.yml` records its license
-  (Apache-2.0-with-attribution) as reviewed, but it was never actually
-  wired into `requirements.txt` or installed. This module doesn't change
-  that status.
-- This development sandbox's own network egress policy blocks
+The fallback is enabled only when both of these operator controls are set:
+
+```bash
+MARKETOS_PHASE1_JS_RENDER=1
+CRAWL4AI_ALLOWED_DOMAINS=www.cjdropshipping.com
+```
+
+The competitor adapter uses the same explicit domain allowlist, for example
+`CRAWL4AI_ALLOWED_DOMAINS=www.wacaco.com,aeropress.com`. Crawl4AI still
+checks robots.txt, keeps its bounded raw cache, emits only canonical Product
+records, and never follows a path to mutation, login, or provider APIs. If
+the package is absent, the page is disallowed, the allowlist is missing, or
+rendering fails, the evidence result remains degraded and no value is
+inferred.
+
+The static-first decision and fallback boundary are supported by this
+evidence:
+
+- `requirements-oss.txt` now carries the pinned `crawl4ai==0.8.6` optional
+  profile after the live harness justified a JS-rendering fallback. It is
+  still not part of the default API image; install it only in an operator
+  environment that can provide the reviewed browser runtime.
+  `docs/oss/LICENSE_MANIFEST.yml` records its license
+  (Apache-2.0-with-attribution) as reviewed. It is intentionally not wired
+  into the default `requirements.txt` or API image; an operator installs the
+  optional profile only when the explicit JS-render gate is needed.
+ - Earlier sandbox runs reported a network egress policy that blocked
   `cjdropshipping.com` (and almost every other general web domain) at the
   proxy `CONNECT` level — confirmed directly against the proxy's own
   status endpoint, which reported `connect_rejected` / "policy denial" for
   every attempt, not a CJ-side anti-bot response. That means Crawl4AI's
   Playwright-driven browser extraction against a real CJ page could not be
   exercised or verified in this environment at all, regardless of whether
-  it was installed.
+  it was installed. That historical note describes the earlier sandbox
+  limitation; the current unrestricted run reached the hosts but still
+  returned `degraded` because static extraction found no Product records.
 - `requests`, `beautifulsoup4`, and `lxml` are already first-class,
   installed dependencies (`requirements.txt`). A `requests`-based adapter
   needs zero new dependencies, zero new browser binaries, and zero new
@@ -57,6 +80,12 @@ module uses. Evidence:
   JSON-LD parser directly** (`Crawl4AIResearchAdapter._product_records_from_jsonld`)
   rather than duplicating it, and mirrors the rest of its safety pattern
   with `requests` instead of Crawl4AI's browser.
+
+The Phase 1 fallback is now the natural bounded upgrade path. The
+`fetch_product_evidence` and `fetch_competitor_offer` call sites invoke the
+existing adapter only after static extraction fails and the two gates are
+present. The evidence models, provenance rules, event vocabulary, and
+economics wiring remain transport-agnostic.
 
 If a future session in an environment with real network access to
 `cjdropshipping.com` finds that CJ's product pages require JS rendering to

@@ -55,6 +55,27 @@ Phase 1 feature work until this has been attempted at least once.** The next bra
 
 Do not create any of these branches until the validation outcome is actually known.
 
+## Codex live-validation takeover (2026-08-10)
+
+- Synced `main` to `3894233fb1a836a24a4b13d395b793c042848222`; PRs #149, #150,
+  and #151 are present.
+- Real public validation reached the CJ and competitor hostnames, but static
+  extraction produced no usable Product records. The final report is
+  `artifacts/phase1_live_validation/20260810T233412Z/validation_report.json`
+  with status `degraded` (not `pass`): no supplier or competition fields were
+  observed; the chain still produced 29 replayable events and dashboard
+  summaries.
+- Branch `codex/phase1-crawl4ai-js-extraction` adds the smallest justified
+  fallback: existing Crawl4AI sync bridging and normalized supplier/
+  competitor mappings, gated by `MARKETOS_PHASE1_JS_RENDER=1` and
+  `CRAWL4AI_ALLOWED_DOMAINS`. It preserves static-first extraction,
+  robots/allowlist checks, bounded cache, no credentials, and fail-closed
+  degradation when the optional package is unavailable.
+- Focused evidence/regression checks pass. Full pytest and frontend Node
+  checks exceeded bounded waits in this environment and were stopped without
+  being treated as failures. Do not claim live `pass` until an operator
+  installs the optional profile and reruns the harness with observed fields.
+
 ## What the next agent should inspect first
 
 Read this file, then `docs/PHASE1_LIVE_VALIDATION_RUNBOOK.md` in full before doing anything else. Only after the
