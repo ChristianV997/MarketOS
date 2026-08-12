@@ -70,7 +70,7 @@ qdrant-client>=1.18.0   # Qdrant vector store (in-memory fallback used without D
 # ── AWS standby (optional) ────────────────────────────────────────────────────
 # boto3: only needed if MARKETOS_HEARTBEAT_BUCKET is set (backend/aws/heartbeat.py,
 # deploy/aws/main.tf) — the PC/AWS standby heartbeat fails soft without it.
-boto3>=1.34.0  # AWS Secrets Manager research credentials and standby heartbeat
+boto3>=1.43.67  # AWS Secrets Manager research credentials and standby heartbeat
 
 # ── dev / test ────────────────────────────────────────────────────────────────
 pytest
