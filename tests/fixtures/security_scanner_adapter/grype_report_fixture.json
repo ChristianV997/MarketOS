@@ -1,0 +1,1 @@
+{"fixture_id":"grype-synthetic","fixture_mode":true,"findings":[{"id":"GRYPE-SYNTHETIC-001","category":"dependency_vulnerability","severity":"medium","title":"Synthetic package advisory","summary":"Synthetic package summary only."}]}

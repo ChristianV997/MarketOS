@@ -1,0 +1,1 @@
+{"fixture_id":"semgrep-sarif-synthetic","fixture_mode":true,"runs":[{"tool":{"driver":{"name":"Synthetic Semgrep"}},"results":[{"ruleId":"synthetic-semgrep-rule","level":"error","message":{"text":"Synthetic rule summary."}}]}]}

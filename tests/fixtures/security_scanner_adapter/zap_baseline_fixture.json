@@ -1,0 +1,1 @@
+{"fixture_id":"zap-synthetic","fixture_mode":true,"findings":[{"id":"ZAP-SYNTHETIC-001","category":"web_app_security","severity":"medium","title":"Synthetic web posture review","summary":"Synthetic web security summary only."}]}

@@ -1,0 +1,1 @@
+{"fixture_id":"osv-synthetic","fixture_mode":true,"findings":[{"id":"OSV-SYNTHETIC-001","category":"dependency_vulnerability","severity":"high","package_placeholder":"synthetic-package","title":"Synthetic dependency review","summary":"Synthetic advisory summary only."}]}

@@ -52,9 +52,16 @@ For provider planning, run `python scripts/run_companyos_provider_registry.py --
 For intelligence adapter planning, run `python scripts/run_intelligence_adapter_plan.py --markdown`. Treat request envelopes and normalized records as dry-run contracts; never turn them into provider calls without a separate approval-gated implementation.
 
 For the DataForSEO adapter, run `python scripts/run_dataforseo_readonly_adapter.py --markdown`. It is a deterministic fixture parser and commerce-context bridge, not a credential checker or live search transport. Reject raw payload/HTML inputs and preserve all cost, terms/privacy, and Approval Ledger blockers.
+
+For scanner evidence, keep normalization fixture-backed and fail-closed. Do not
+install scanners, invoke external services, or expose raw reports.
 # TrustOS operating note
 
 TrustOS is metadata-only: controls state requirements, evidence records state
 what is missing, gates fail closed, and exceptions route to a human or
 professional. Do not run scanners, read credentials, call providers, expose
 internal prompts, or treat readiness as authorization.
+
+The security scanner adapter is fixture/output normalization only. Do not install
+or execute scanners, call GitHub, read credentials, or commit raw findings,
+secrets, HTML, exploit payloads, or client data.

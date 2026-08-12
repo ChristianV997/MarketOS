@@ -1,0 +1,1 @@
+{"fixture_id":"pyrit-synthetic","fixture_mode":true,"findings":[{"id":"PYRIT-SYNTHETIC-001","category":"ai_prompt_injection","severity":"high","title":"Synthetic prompt-injection test","summary":"Synthetic AI safety result; no attack payload retained."}]}

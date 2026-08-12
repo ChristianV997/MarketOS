@@ -56,6 +56,8 @@ platforms, launch ads, or publish content.”
 7. Run `python scripts/run_companyos_provider_registry.py --phase phase_2_live_read_only_intelligence --markdown`; compare Apify/DataForSEO/official API coverage and record only metadata, scopes, budgets, and activation gates.
 8. Run `python scripts/run_intelligence_adapter_plan.py --markdown`; review the dry-run request plans and choose only one future provider activation candidate after approval, credential, terms/privacy, cost, and output-contract gates are explicit.
 9. Run `python scripts/run_dataforseo_readonly_adapter.py --markdown`; review normalized synthetic SERP/shopping signals and keep `--live-read-only` fail-closed until every activation gate is independently approved.
+
+10. Run `python scripts/run_security_scanner_adapter.py --markdown`; review normalized synthetic findings and keep scanner execution disabled until TrustOS evidence, redaction, ownership, and CI gates are approved.
 # TrustOS guardrail
 
 Before public launch or live provider activation, run the offline TrustOS

@@ -1,0 +1,1 @@
+{"fixture_id":"manual-review-synthetic","fixture_mode":true,"checks":[{"id":"manual-1","title":"Security owner review pending","status":"requires_review","severity":"unknown"}]}
