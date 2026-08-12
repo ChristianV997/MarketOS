@@ -72,3 +72,5 @@ network access, credentials, uploads, or raw scanner artifact persistence.
 # Client workspace rule
 
 Treat client workspaces as curated projections, never source-code forks or unrestricted copies. Run the offline leakage checker and TrustOS gates before any client-safe export; future auth, database, and RLS implementation must preserve this boundary.
+
+Route proposed execution through the Resource & Execution Governor. Treat budgets, quotas, portfolio caps, kill/scale rules, retry limits, and learning capture as mandatory safety metadata.

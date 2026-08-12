@@ -54,3 +54,5 @@ Before live agents, use the CompanyOS Registry to resolve one bounded integratio
 # Client workspace isolation
 
 Completed next boundary: define deterministic workspace manifests, clone projections, visibility rules, export policies, leakage checks, TrustOS gates, and service-package mappings before implementing auth/database/RLS.
+
+Next coordination layer: Resource & Execution Governor for budgets, quotas, portfolio, experiments, model/provider spend, runaway protection, cross-department decisions, and learning requirements.

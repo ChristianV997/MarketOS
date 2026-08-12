@@ -13,6 +13,8 @@ The plan uses four protections:
 
 Clone manifests are curated projections. They list source references, client-visible references, excluded modules and fields, policy packs, retention, redaction, and review requirements. No clone copies code or creates a tenant.
 
+The Resource & Execution Governor consumes the workspace decision before allowing a client export. Client export quota, workspace isolation, leakage checks, TrustOS, and Approval Ledger state are all reviewed together.
+
 ## Leakage and gates
 
 The deterministic leakage checker scans metadata-shaped input for internal classes, cross-client markers, secret-like keys, raw HTML, and unredacted professional packets. Findings are metadata-only and fail closed. TrustOS gate actions include `client_workspace_export`, `client_clone_generation`, professional packet exports, `client_workspace_activation`, and `multi_client_workspace_access`.

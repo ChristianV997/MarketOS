@@ -47,3 +47,6 @@ Sell this as the practical upsell after a Product Validation Report: the report 
 ## CompanyOS handoff
 
 Launch Draft Pack outputs can be linked into CompanyOS as a delivery workstream and approval subject. This creates a manager brief and handoff checklist without publishing, sending, spending, or mutating Shopify/Medusa.
+# Execution governance
+
+Launch drafts are bounded by portfolio capacity, budget, TrustOS, workspace, experiment, and learning-capture rules in the Resource & Execution Governor. Draft generation does not authorize publishing, ads, orders, or payments.

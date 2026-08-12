@@ -70,3 +70,5 @@ legal, tax, security, or compliance conclusion from a score.
 # Client-safe projection
 
 Use Client Workspace Isolation before generating any client-facing TrustOS, CompanyOS, launch, growth, or professional packet export. Keep internal prompts, formulas, heuristics, source code, global intelligence, and cross-client data out of the projection.
+
+Use the Resource & Execution Governor before proposing material model/provider spend, inventory exposure, new brands/sites, ad experiments, client exports, or agent workflow expansion.

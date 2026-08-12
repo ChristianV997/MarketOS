@@ -4,6 +4,7 @@ from .companyos_registry_report import CompanyOSRegistryReport, build_companyos_
 from .department_layer import CompanyOSReport, build_companyos_report
 from .approval_ledger import ApprovalLedgerReport, build_approval_ledger
 from .provider_credential_report import ProviderCredentialReport, build_provider_credential_report
+from .resource_execution_governor import ResourceExecutionGovernorReport, build_resource_execution_governor_report
 
 __all__ = [
     "CompanyOSReport",
@@ -14,4 +15,6 @@ __all__ = [
     "build_approval_ledger",
     "ProviderCredentialReport",
     "build_provider_credential_report",
+    "ResourceExecutionGovernorReport",
+    "build_resource_execution_governor_report",
 ]
