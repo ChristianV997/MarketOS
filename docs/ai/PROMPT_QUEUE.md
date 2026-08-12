@@ -58,6 +58,10 @@ platforms, launch ads, or publish content.”
 9. Run `python scripts/run_dataforseo_readonly_adapter.py --markdown`; review normalized synthetic SERP/shopping signals and keep `--live-read-only` fail-closed until every activation gate is independently approved.
 
 10. Run `python scripts/run_security_scanner_adapter.py --markdown`; review normalized synthetic findings and keep scanner execution disabled until TrustOS evidence, redaction, ownership, and CI gates are approved.
+
+11. Run `python scripts/run_security_ci_gate.py --plan-only --markdown`; review
+allowlisted commands and only consider `--run-local-scanners` after tool
+availability, timeout, output-cap, retention, and security-owner gates are explicit.
 # TrustOS guardrail
 
 Before public launch or live provider activation, run the offline TrustOS

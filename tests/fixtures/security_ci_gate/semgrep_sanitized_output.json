@@ -1,0 +1,1 @@
+{"fixture_id":"semgrep-ci-synthetic","fixture_mode":true,"results":[{"check_id":"synthetic.semgrep.rule","severity":"WARNING","extra":{"message":"Synthetic static-analysis summary."}}]}

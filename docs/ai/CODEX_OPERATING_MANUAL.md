@@ -65,3 +65,7 @@ internal prompts, or treat readiness as authorization.
 The security scanner adapter is fixture/output normalization only. Do not install
 or execute scanners, call GitHub, read credentials, or commit raw findings,
 secrets, HTML, exploit payloads, or client data.
+
+Security CI Gate permits only explicit, allowlisted, bounded local execution.
+Default to `--plan-only` or fixture ingestion; never add shell execution,
+network access, credentials, uploads, or raw scanner artifact persistence.

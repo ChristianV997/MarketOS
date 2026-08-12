@@ -44,6 +44,7 @@ Draft Pack.
 - DataForSEO Read-Only Adapter v1 is the first concrete provider adapter: keep SERP/shopping/keyword/competitor transport absent, use synthetic fixtures, and require approval, credential, budget, terms/privacy, and output-contract gates before future activation.
 
 - Security Scanner Evidence Adapter v1 wraps sanitized scanner-shaped outputs into TrustOS. Keep scanner execution, GitHub access, raw findings, and external actions disabled until CI ownership and redaction tests exist.
+- Security CI Gate v1 is the first controlled execution layer: keep default fixture/plan mode, require explicit local execution flags, and preserve command allowlists, output caps, redaction, and TrustOS decisions.
 ## CompanyOS next gates
 
 Use the CompanyOS Department Layer to prioritize one approved consulting deliverable, protect cash assumptions, reconcile ledger seeds, and review consent before outreach. Do not treat a scorecard as authorization for spend, publishing, payments, or messaging.

@@ -1,0 +1,1 @@
+{"fixture_id":"scanner-timeout","fixture_mode":true,"timeout_seconds":1,"expected_status":"failed_timeout"}

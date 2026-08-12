@@ -1,0 +1,1 @@
+{"fixture_id":"codeql-ci-synthetic","fixture_mode":true,"runs":[{"tool":{"driver":{"name":"Synthetic CodeQL"}},"results":[{"ruleId":"synthetic-code-rule","level":"warning","message":{"text":"Synthetic code review summary."}}]}]}

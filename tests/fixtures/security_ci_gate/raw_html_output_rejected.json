@@ -1,0 +1,1 @@
+{"fixture_id":"unsafe-html","fixture_mode":true,"findings":[{"summary":"<html><body>raw output</body></html>"}]}
