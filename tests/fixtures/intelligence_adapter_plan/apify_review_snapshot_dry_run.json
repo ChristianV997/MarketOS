@@ -1,0 +1,7 @@
+{
+  "provider": "apify",
+  "records": [
+    {"candidate_id": "portable-blender", "query": "portable blender", "title": "Synthetic review summary", "review_count": 87, "rating": 4.2, "trend_label": "fixture_mixed"}
+  ],
+  "fixture_mode": true
+}

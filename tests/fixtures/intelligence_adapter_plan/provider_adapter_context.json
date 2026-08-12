@@ -1,0 +1,9 @@
+{
+  "mode": "dry_run_request_plan",
+  "generated_at": "offline-deterministic",
+  "network_allowed": false,
+  "credentials_loaded": false,
+  "approval_status": "pending_review",
+  "terms_review": "pending",
+  "privacy_review": "pending"
+}

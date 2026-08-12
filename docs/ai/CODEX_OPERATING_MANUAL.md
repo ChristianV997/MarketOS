@@ -49,3 +49,4 @@ For agent architecture work, run `python scripts/run_companyos_registry_layer.py
 For external-action planning, run `python scripts/run_companyos_approval_ledger.py --markdown`. Treat scopes, conditions, budget caps, simulations, and audit events as control records; never treat a draft or simulated approval as execution authority.
 
 For provider planning, run `python scripts/run_companyos_provider_registry.py --markdown`. Store references and placeholders only; never read, print, validate, or write credential values.
+For intelligence adapter planning, run `python scripts/run_intelligence_adapter_plan.py --markdown`. Treat request envelopes and normalized records as dry-run contracts; never turn them into provider calls without a separate approval-gated implementation.

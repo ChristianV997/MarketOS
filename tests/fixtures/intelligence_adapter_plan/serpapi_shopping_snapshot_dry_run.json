@@ -1,0 +1,7 @@
+{
+  "provider": "serpapi",
+  "records": [
+    {"candidate_id": "neck-massager", "query": "neck massager", "title": "Synthetic shopping result", "rank": 5, "price": 35.0, "currency": "USD", "review_count": 44, "rating": 4.1}
+  ],
+  "fixture_mode": true
+}

@@ -1,0 +1,7 @@
+{
+  "provider": "dataforseo",
+  "records": [
+    {"candidate_id": "portable-espresso-maker", "query": "portable espresso maker", "title": "Synthetic SERP result", "rank": 8, "price": 49.0, "currency": "USD", "trend_label": "fixture_stable"}
+  ],
+  "fixture_mode": true
+}

@@ -1,0 +1,7 @@
+{
+  "provider": "apify",
+  "records": [
+    {"candidate_id": "mini-thermal-printer", "query": "mini thermal printer", "title": "Synthetic marketplace listing", "price": 29.99, "currency": "USD", "rank": 4, "review_count": 120, "rating": 4.4, "trend_label": "fixture_rising"}
+  ],
+  "fixture_mode": true
+}

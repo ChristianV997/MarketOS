@@ -63,4 +63,9 @@ The ledger is the prerequisite for a future credential registry, bounded LiteLLM
 
 The [Credential / Provider / Subscription Registry](COMPANYOS_PROVIDER_CREDENTIAL_REGISTRY.md) is the metadata layer that follows this gate. It may describe a secret-manager reference or provider plan, but it cannot activate or validate it.
 
+The [Intelligence Adapter Plan](INTELLIGENCE_ADAPTER_PLAN.md) is the next
+offline consumer of this gate: Apify, DataForSEO, SerpApi, and official API
+request plans remain dry-run or blocked until the ledger, credential, budget,
+terms, privacy, and output-contract prerequisites are satisfied.
+
 No credentials, API keys, model credentials, private recipients, client data, raw payloads, live network calls, provider calls, model calls, vector indexing, CRM mutations, accounting sync, email, WhatsApp/SMS, voice calls, payments, ads, publishing, orders, or customer messages are performed by Approval Ledger v1.
