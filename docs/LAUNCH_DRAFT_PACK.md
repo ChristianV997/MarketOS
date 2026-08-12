@@ -1,5 +1,9 @@
 # Launch Draft Pack v1
 
+## Learning Ledger relationship
+
+Launch drafts can record whether a test was won, lost, paused, killed, or scaled and what should change next. Learning does not publish a site, launch an ad, spend money, or authorize an order; those actions remain behind TrustOS, Approval Ledger, and future live integrations.
+
 Launch Draft Pack is the first consulting upsell after Product Opportunity Synthesis. It converts the existing marketplace, supplier-feasibility, consumer-attention, and unit-economics evidence into a human-reviewable asset package:
 
 - offer stack and price-band guidance;

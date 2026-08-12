@@ -1,5 +1,9 @@
 # Product Opportunity Synthesis v1
 
+## Learning Ledger relationship
+
+Product Opportunity Synthesis can consume future Learning Ledger influence as supplemental context: recurring weak demand, supplier uncertainty, poor margins, or strong portfolio fit can change priority. Fixture/manual evidence remains planning evidence, not live proof, and the ledger never replaces the canonical synthesis scores.
+
 Product Opportunity Synthesis is the decision layer over the existing three
 offline evidence pillars: marketplace demand and pricing, supplier feasibility
 and landed-cost scenarios, and consumer attention with creative evidence.

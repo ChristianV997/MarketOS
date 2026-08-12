@@ -2,6 +2,8 @@
 
 ## One task, one gate, one outcome
 
+Learning Ledger is the canonical offline memory for experiment outcomes and bounded lessons. Reuse its event, do-not-repeat, iteration, and decision-influence vocabulary; do not add vector memory, live metrics ingestion, or a parallel learning store.
+
 Choose one concrete task that clears the highest unblocked gate. Start with
 `session_start`, current `main`, and open PR inspection. Use Codex for local
 implementation, deterministic tooling, targeted tests, and PR hygiene; use

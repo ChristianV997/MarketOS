@@ -1,5 +1,9 @@
 # Platform-Agnostic Website / Store / Funnel Draft Builder v1
 
+## Learning Ledger relationship
+
+Site and funnel drafts can produce bounded landing-page and site-funnel lessons. A failed page can recommend an offer, structure, or evidence change before another draft; it cannot authorize a new website, domain, hosting change, publishing, analytics mutation, or customer action.
+
 The Site Draft Builder is the implementation-planning upsell after Launch Draft Pack. It turns existing launch copy and evidence into a portable blueprint for ecommerce and non-ecommerce clients:
 
 - route manifest, sitemap, navigation, and page goals;

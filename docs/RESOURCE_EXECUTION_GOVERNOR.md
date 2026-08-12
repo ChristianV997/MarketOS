@@ -18,6 +18,10 @@ New brands and websites are blocked when an existing brand/category can absorb t
 
 Ad/content experiments require a hypothesis, budget cap, sample target, success metric, kill threshold, scale threshold, and learning capture. Winners scale in controlled increments; losers are killed after sufficient evidence; inconclusive tests pause. Workflow steps, retries, child tasks, spawned agents, provider calls, model calls, frontier calls, output files, runtime, budget, and repeated outputs are capped.
 
+## Learning feedback
+
+The Learning Ledger supplies prior wins, losses, missing-learning blockers, do-not-repeat rules, iteration recommendations, and model/provider cost lessons. A winner can support controlled scale; a loser can trigger kill or deprioritization; an incomplete learning record pauses the next iteration. This is a read-only planning contract, not a persistence or execution engine.
+
 ## Cross-department wiring
 
 Promotion combines Intelligence, Supplier, Consumer Attention, Finance, TrustOS, Approval Ledger, and Management. New sites combine Launch, Website/Store/Funnel, Finance, TrustOS, Workspace Isolation, and Management. Provider pulls combine Provider Registry, Finance, TrustOS, and Approval Ledger. Model usage combines Model Router, Finance, Runaway Guard, and TrustOS. This is coordination metadata, not a project-management clone or Learning Ledger.

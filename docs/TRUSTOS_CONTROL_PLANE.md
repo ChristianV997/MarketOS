@@ -1,5 +1,9 @@
 # TrustOS Control Plane v1
 
+## Learning Ledger relationship
+
+Learning Ledger v1 records recurring TrustOS and security blockers as bounded, metadata-only lessons. It can recommend completing evidence, obtaining professional review, or preserving a provider/client-isolation gate; it cannot make legal or tax conclusions, weaken a TrustOS gate, or authorize an external action.
+
 TrustOS is MarketOS' common trust and readiness layer before public launch or
 live provider activation. It does not add another approval engine, provider
 registry, scanner, evidence engine, or professional-advice system. It applies

@@ -2,6 +2,10 @@
 
 CompanyOS is MarketOS' offline operating spine. It gives Management, Finance, Accounting, and Sales a shared vocabulary for departments, managers, workstreams, tasks, approvals, risks, budgets, ledger-ready records, leads, deals, and operating reviews.
 
+## Learning Ledger relationship
+
+Department reviews and scorecards can become sanitized learning events after a decision has an outcome. The event retains department ownership and evidence references so Management, Finance, Sales, and Operations can learn without creating a second event or approval system. All records remain offline planning metadata.
+
 It is not a CRM, accounting platform, project-management product, bank integration, messaging system, or payment system. It creates deterministic planning records and draft outputs that a human can review.
 
 ## Run it

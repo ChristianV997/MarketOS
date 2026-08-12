@@ -51,6 +51,8 @@ Use the CompanyOS Department Layer to prioritize one approved consulting deliver
 
 Before live agents, use the CompanyOS Registry to resolve one bounded integration decision, verify tool risk, define model caps, and add regression cases. Prioritize Approval Ledger v1 before external action adapters.
 - TrustOS Control Plane v1 is the pre-launch gate: reuse Approval Ledger and Credential/Provider Registry vocabulary; keep scanners, legal/tax conclusions, provider calls, and external actions disabled until evidence and professional review exist.
+- Resource & Execution Governor v1 is the company-level budget, portfolio, experiment, model/provider spend, and runaway guard; keep decisions simulated and require learning capture before iteration.
+- Learning Ledger v1 is the offline feedback layer: capture wins, losses, kill/scale decisions, do-not-repeat rules, model/provider lessons, and recurring TrustOS blockers before adding persistence or live execution.
 # Client workspace isolation
 
 Completed next boundary: define deterministic workspace manifests, clone projections, visibility rules, export policies, leakage checks, TrustOS gates, and service-package mappings before implementing auth/database/RLS.

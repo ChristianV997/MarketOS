@@ -13,7 +13,7 @@ The plan uses four protections:
 
 Clone manifests are curated projections. They list source references, client-visible references, excluded modules and fields, policy packs, retention, redaction, and review requirements. No clone copies code or creates a tenant.
 
-The Resource & Execution Governor consumes the workspace decision before allowing a client export. Client export quota, workspace isolation, leakage checks, TrustOS, and Approval Ledger state are all reviewed together.
+The Resource & Execution Governor consumes the workspace decision before allowing a client export. Client export quota, workspace isolation, leakage checks, TrustOS, and Approval Ledger state are all reviewed together. Learning Ledger feedback is client-safe only when reduced to redacted summaries, blockers, evidence requirements, and next actions.
 
 ## Leakage and gates
 

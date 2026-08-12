@@ -1,5 +1,7 @@
 # Gate-Driven Prompt Queue
 
+Learning Ledger is the next feedback gate after Resource & Execution Governor: use it to record synthetic wins/losses and missing-learning blockers before proposing persistence, live metrics, or autonomous execution.
+
 Use one prompt at a time; do not start a downstream task until its stated gate
 is true.
 
