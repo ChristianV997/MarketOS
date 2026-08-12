@@ -65,6 +65,10 @@ python scripts/run_companyos_approval_ledger.py --output artifacts/companyos_app
 
 With `--output`, only sanitized ledger, queue, policy, audit, simulation, blocked-action, and budget-cap files are written. Generated artifacts are local outputs and must not be committed.
 
+Security scanner evidence may add simulated gate impacts to the ledger-facing
+readiness view, but it never grants approval and never triggers a scanner or
+external action.
+
 ## Roadmap and safety boundary
 
 The ledger is the prerequisite for a future credential registry, bounded LiteLLM gateway, Langfuse/Phoenix trace sink, and Sales Department v2. Those integrations require a new review of secrets, ownership, budgets, privacy, provider terms, and live-action tests.

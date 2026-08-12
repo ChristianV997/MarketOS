@@ -98,3 +98,8 @@ provider/model calls, vector indexing, scraping, raw-payload storage, legal or
 tax conclusions, publishing, advertising, orders, payments, messaging,
 accounting mutations, or client-data processing. Future scanners and
 professional review workflows require separate approval-gated integrations.
+
+The Security Scanner Evidence Adapter extends TrustOS by normalizing sanitized
+scanner-shaped fixtures into the existing Evidence Locker and gate vocabulary.
+It does not run scanners or expose raw findings; see
+`SECURITY_SCANNER_EVIDENCE_ADAPTER.md`.

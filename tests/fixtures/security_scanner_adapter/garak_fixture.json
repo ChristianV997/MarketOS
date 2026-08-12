@@ -1,0 +1,1 @@
+{"fixture_id":"garak-synthetic","fixture_mode":true,"findings":[{"id":"GARAK-SYNTHETIC-001","category":"ai_approval_bypass","severity":"critical","title":"Synthetic approval-bypass test","summary":"Synthetic AI governance result; no exploit content retained."}]}

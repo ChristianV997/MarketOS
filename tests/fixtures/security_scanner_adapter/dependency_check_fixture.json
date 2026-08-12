@@ -1,0 +1,1 @@
+{"fixture_id":"dependency-check-synthetic","fixture_mode":true,"findings":[{"id":"DC-SYNTHETIC-001","category":"dependency_vulnerability","severity":"low","title":"Synthetic dependency check","summary":"Synthetic dependency summary only."}]}

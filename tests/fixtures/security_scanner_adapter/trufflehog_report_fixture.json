@@ -1,0 +1,1 @@
+{"fixture_id":"trufflehog-synthetic","fixture_mode":true,"findings":[{"id":"trufflehog-demo-1","category":"secret_exposure","severity":"medium","title":"Synthetic verified-pattern review","summary":"Synthetic review marker only."}]}

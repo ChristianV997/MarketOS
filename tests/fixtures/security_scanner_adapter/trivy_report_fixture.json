@@ -1,0 +1,1 @@
+{"fixture_id":"trivy-synthetic","fixture_mode":true,"findings":[{"id":"TRIVY-SYNTHETIC-001","category":"dependency_vulnerability","severity":"critical","title":"Synthetic image dependency review","summary":"Synthetic finding without image contents."}]}

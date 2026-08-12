@@ -1,0 +1,1 @@
+{"fixture_id":"codeql-sarif-synthetic","fixture_mode":true,"runs":[{"tool":{"driver":{"name":"Synthetic CodeQL"}},"results":[{"ruleId":"synthetic-code-rule","level":"warning","message":{"text":"Synthetic code safety finding."}}]}]}

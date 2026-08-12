@@ -1,0 +1,1 @@
+{"fixture_id":"gitleaks-synthetic","fixture_mode":true,"findings":[{"id":"gitleaks-demo-1","category":"secret_exposure","severity":"low","title":"Synthetic secret pattern","summary":"Synthetic metadata only; no secret value retained."}]}

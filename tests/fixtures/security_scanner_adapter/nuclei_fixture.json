@@ -1,0 +1,1 @@
+{"fixture_id":"nuclei-synthetic","fixture_mode":true,"findings":[{"id":"NUCLEI-SYNTHETIC-001","category":"web_app_security","severity":"low","title":"Synthetic template review","summary":"Synthetic template summary only."}]}
