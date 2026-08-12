@@ -50,3 +50,5 @@ For external-action planning, run `python scripts/run_companyos_approval_ledger.
 
 For provider planning, run `python scripts/run_companyos_provider_registry.py --markdown`. Store references and placeholders only; never read, print, validate, or write credential values.
 For intelligence adapter planning, run `python scripts/run_intelligence_adapter_plan.py --markdown`. Treat request envelopes and normalized records as dry-run contracts; never turn them into provider calls without a separate approval-gated implementation.
+
+For the DataForSEO adapter, run `python scripts/run_dataforseo_readonly_adapter.py --markdown`. It is a deterministic fixture parser and commerce-context bridge, not a credential checker or live search transport. Reject raw payload/HTML inputs and preserve all cost, terms/privacy, and Approval Ledger blockers.

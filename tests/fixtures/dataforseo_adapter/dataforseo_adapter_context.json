@@ -1,0 +1,8 @@
+{
+  "provider_id": "dataforseo",
+  "mode": "dry_run_ready",
+  "credential_reference_id": "credential-dataforseo",
+  "network_calls": false,
+  "sdk_used": false,
+  "approval_request_type": "provider_call"
+}

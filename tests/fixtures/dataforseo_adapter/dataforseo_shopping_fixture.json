@@ -1,0 +1,11 @@
+{
+  "fixture_id": "dataforseo-shopping-synthetic-v1",
+  "fixture_mode": true,
+  "request_kind": "serp_google_shopping_snapshot",
+  "tasks": [
+    {"candidate_id": "mini-thermal-printer", "query": "mini thermal printer", "items": [
+      {"rank": 1, "title": "Synthetic Shopping Printer", "domain": "shop.example.invalid", "price": 29.99, "currency": "USD", "rating": 4.4, "review_count": 120, "seller": "Synthetic Seller", "shopping": true, "availability": "in_stock"},
+      {"rank": 4, "title": "Synthetic Pocket Printer", "domain": "store.demo.invalid", "price": 34.0, "currency": "USD", "rating": 4.1, "review_count": 51, "shopping": true}
+    ]}
+  ]
+}

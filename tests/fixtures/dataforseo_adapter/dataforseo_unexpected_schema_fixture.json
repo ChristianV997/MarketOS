@@ -1,0 +1,6 @@
+{
+  "fixture_id": "dataforseo-unexpected-synthetic-v1",
+  "fixture_mode": true,
+  "request_kind": "serp_google_organic_snapshot",
+  "tasks": {"unexpected": true}
+}

@@ -1,0 +1,11 @@
+{
+  "fixture_id": "dataforseo-serp-synthetic-v1",
+  "fixture_mode": true,
+  "request_kind": "serp_google_organic_snapshot",
+  "tasks": [
+    {"candidate_id": "mini-thermal-printer", "query": "mini thermal printer", "items": [
+      {"rank": 2, "title": "Synthetic Mini Printer Guide", "domain": "example.invalid", "snippet": "Synthetic organic result.", "detected_competitor": true},
+      {"rank": 7, "title": "Synthetic Compact Printer", "domain": "demo.invalid", "snippet": "Synthetic comparison result."}
+    ]}
+  ]
+}

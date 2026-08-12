@@ -41,6 +41,7 @@ Draft Pack.
 - CompanyOS Approval Ledger v1 is the canonical offline gate for action-scoped approvals, budget caps, consent conditions, simulation, revocation, expiry, and audit records.
 - CompanyOS Credential / Provider / Subscription Registry v1 should remain metadata-only: prioritize Apify/DataForSEO references, keep secret values out of git, and require the Approval Ledger before any activation.
 - Intelligence Live Read-Only Adapter Plan v1 is the next gate: define bounded request envelopes, normalized evidence contracts, cost/rate caps, terms/privacy checks, and fixture dry runs before any provider adapter or network call.
+- DataForSEO Read-Only Adapter v1 is the first concrete provider adapter: keep SERP/shopping/keyword/competitor transport absent, use synthetic fixtures, and require approval, credential, budget, terms/privacy, and output-contract gates before future activation.
 ## CompanyOS next gates
 
 Use the CompanyOS Department Layer to prioritize one approved consulting deliverable, protect cash assumptions, reconcile ledger seeds, and review consent before outreach. Do not treat a scorecard as authorization for spend, publishing, payments, or messaging.

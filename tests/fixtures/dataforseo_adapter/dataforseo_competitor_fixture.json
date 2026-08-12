@@ -1,0 +1,10 @@
+{
+  "fixture_id": "dataforseo-competitor-synthetic-v1",
+  "fixture_mode": true,
+  "request_kind": "competitor_serp_snapshot",
+  "tasks": [
+    {"candidate_id": "portable-blender", "query": "portable blender", "items": [
+      {"rank": 3, "title": "Synthetic Blender Competitor", "domain": "competitor.example.invalid", "price": 39.0, "currency": "USD", "competitor_name": "Synthetic Competitor", "detected_competitor": true}
+    ]}
+  ]
+}

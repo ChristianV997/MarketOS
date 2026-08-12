@@ -1,0 +1,10 @@
+{
+  "fixture_id": "dataforseo-keyword-synthetic-v1",
+  "fixture_mode": true,
+  "request_kind": "keyword_demand_snapshot",
+  "tasks": [
+    {"candidate_id": "portable-espresso-maker", "query": "portable espresso maker", "items": [
+      {"rank": 1, "title": "Synthetic Keyword Demand Result", "domain": "keywords.example.invalid", "snippet": "Aggregate keyword fixture signal."}
+    ]}
+  ]
+}

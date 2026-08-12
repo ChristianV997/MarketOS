@@ -1,0 +1,7 @@
+{
+  "provider_id": "dataforseo",
+  "terms_review_complete": false,
+  "privacy_review_complete": false,
+  "blocked_until_review": true,
+  "network_calls": false
+}

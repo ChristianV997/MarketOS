@@ -31,6 +31,13 @@ acquisition has higher legal, privacy, terms, and cost risk.
   compliance-first path.
 - **Manual imports:** the current safe path for sanitized JSON/CSV evidence.
 
+DataForSEO now has a concrete offline adapter in
+`evaluation/commerce/dataforseo_adapter.py`. It retains the generic plan's
+provider, approval, credential, cost, and terms/privacy vocabulary while
+adding deterministic SERP, shopping, keyword, and competitor fixture parsing.
+Its live flag is intentionally fail-closed; see
+`docs/DATAFORSEO_READONLY_ADAPTER.md`.
+
 ## Readiness gates
 
 Each provider is checked for:
