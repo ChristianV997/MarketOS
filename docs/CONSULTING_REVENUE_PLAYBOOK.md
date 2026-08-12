@@ -88,3 +88,5 @@ future action.
 # Client-safe delivery boundary
 
 Client Workspace Isolation makes TrustOps, CompanyOS, launch, and growth deliverables exportable as curated projections. It separates client-visible blockers and next actions from internal prompts, scoring logic, pricing strategy, provider intelligence, and cross-client learning. This is a delivery-control layer, not auth, tenancy, or a SaaS database.
+
+Resource & Execution Governor adds the operating spine for those packages: capacity, spend caps, portfolio selection, experiment controls, approval routing, and learning capture before future execution.

@@ -39,3 +39,5 @@ The Provider / Credential / Subscription Registry extends this operating spine w
 # Client workspace boundary
 
 CompanyOS department outputs can be projected to a client workspace only through the offline Client Workspace Isolation Plan. Department internals and cross-client operating knowledge remain internal.
+
+The Resource & Execution Governor coordinates department proposals with Finance budgets, Management priorities, TrustOS gates, Approval Ledger decisions, and learning requirements.

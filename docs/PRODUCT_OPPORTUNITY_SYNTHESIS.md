@@ -77,3 +77,6 @@ After the Launch Draft Pack, `scripts/generate_site_draft_pack.py` can produce a
 ## CompanyOS handoff
 
 Opportunity synthesis can be referenced by the offline CompanyOS Department Layer. Management uses it to prioritize work; Finance uses service-package assumptions; Sales uses it for a draft offer and handoff. The reference is advisory and does not authorize launch or outreach.
+# Portfolio governance
+
+Opportunity synthesis feeds the Resource & Execution Governor. Scores, supplier feasibility, attention evidence, unit economics, and portfolio fit determine whether an opportunity can proceed to deep validation, launch drafting, or a bounded experiment.

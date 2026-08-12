@@ -90,3 +90,6 @@ validate any credential.
 ## Safety boundary
 
 No credentials, API keys, OAuth tokens, private keys, provider calls, model calls, vector indexing, CRM/accounting mutations, email, WhatsApp/SMS, voice, payments, ads, publishing, orders, customer messages, subscription activation, or live network calls occur by default.
+# Governor integration
+
+Provider spend is bounded by the Resource & Execution Governor. A future live pull must have a registered provider, credential reference, terms/privacy review, output contract, budget, retry cap, and Approval Ledger decision.

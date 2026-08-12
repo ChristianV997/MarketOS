@@ -62,3 +62,6 @@ The deployment checklist, approval checklist, and risk review are part of the de
 ## CompanyOS handoff
 
 Site drafts can be referenced by CompanyOS Operations and Sales as a delivery package. Platform payloads remain draft-only and require approval before any future implementation.
+# Execution governance
+
+Website/store/funnel drafts consume site capacity and portfolio rules. The governor prefers expanding an existing brand when fit exists and requires Finance, TrustOS, Workspace Isolation, and approval review before any future live action.

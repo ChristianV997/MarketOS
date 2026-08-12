@@ -1,6 +1,7 @@
 # AI Development Policy
 
 - Use `evaluation/trustos/client_workspace_isolation.py` as the canonical internal-to-client export boundary. Never export internal prompts, formulas, heuristics, source code, cross-client data, or unredacted professional packets.
+- Use `evaluation/companyos/resource_execution_governor.py` for deterministic budget, quota, portfolio, experiment, model/provider spend, runaway, and cross-department decisions. It must remain offline and simulated.
 
 - Use the smallest sufficient context: inspect symbols and direct references before full files.
 - Search for existing equivalent functionality before creating a module.

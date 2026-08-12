@@ -81,3 +81,6 @@ request plans remain dry-run or blocked until the ledger, credential, budget,
 terms, privacy, and output-contract prerequisites are satisfied.
 
 No credentials, API keys, model credentials, private recipients, client data, raw payloads, live network calls, provider calls, model calls, vector indexing, CRM mutations, accounting sync, email, WhatsApp/SMS, voice calls, payments, ads, publishing, orders, or customer messages are performed by Approval Ledger v1.
+# Governor integration
+
+The Resource & Execution Governor requests Approval Ledger authorization when an action crosses a material spend, external-world, provider, model, ad, inventory, or client-export boundary. It never grants live authority or executes the action itself.

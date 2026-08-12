@@ -110,3 +110,5 @@ plan/fixture-only; see `SECURITY_CI_GATE.md`.
 # Client workspace boundary
 
 Client exports are governed by the Client Workspace Isolation Plan. It keeps internal prompts, formulas, heuristics, source code, cross-client learning, and provider internals out of client-safe projections, and adds TrustOS gates for workspace export, clone generation, professional packets, activation, and multi-client access. See [CLIENT_WORKSPACE_ISOLATION.md](CLIENT_WORKSPACE_ISOLATION.md).
+
+The Resource & Execution Governor consumes TrustOS decisions as a hard safety input for provider activation, client exports, model usage, experiments, and other coordinated actions.
