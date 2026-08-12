@@ -107,3 +107,6 @@ It does not run scanners or expose raw findings; see
 Security CI Gate adds explicit, allowlisted, bounded local execution while
 preserving the same fail-closed TrustOS boundary. Its default remains
 plan/fixture-only; see `SECURITY_CI_GATE.md`.
+# Client workspace boundary
+
+Client exports are governed by the Client Workspace Isolation Plan. It keeps internal prompts, formulas, heuristics, source code, cross-client learning, and provider internals out of client-safe projections, and adds TrustOS gates for workspace export, clone generation, professional packets, activation, and multi-client access. See [CLIENT_WORKSPACE_ISOLATION.md](CLIENT_WORKSPACE_ISOLATION.md).

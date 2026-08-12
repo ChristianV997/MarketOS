@@ -85,3 +85,6 @@ readiness, and lawyer/accountant/security reviewer packets. Sell the evidence
 checklist and operating review, not a legal, tax, security, or compliance
 guarantee. Keep external exports minimal and use the Approval Ledger for every
 future action.
+# Client-safe delivery boundary
+
+Client Workspace Isolation makes TrustOps, CompanyOS, launch, and growth deliverables exportable as curated projections. It separates client-visible blockers and next actions from internal prompts, scoring logic, pricing strategy, provider intelligence, and cross-client learning. This is a delivery-control layer, not auth, tenancy, or a SaaS database.

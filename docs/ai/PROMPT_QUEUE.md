@@ -67,3 +67,6 @@ availability, timeout, output-cap, retention, and security-owner gates are expli
 Before public launch or live provider activation, run the offline TrustOS
 report. Resolve hard blockers and assign professional review; never infer a
 legal, tax, security, or compliance conclusion from a score.
+# Client-safe projection
+
+Use Client Workspace Isolation before generating any client-facing TrustOS, CompanyOS, launch, growth, or professional packet export. Keep internal prompts, formulas, heuristics, source code, global intelligence, and cross-client data out of the projection.
