@@ -4,6 +4,11 @@ The Approval Ledger is the canonical offline gate for future CompanyOS integrati
 
 It is not an approval provider or an execution engine. The current implementation always keeps `read_only=true`, `network_calls=false`, `mutated=false`, and `external_action_performed=false`. A simulated approval is never live authority.
 
+Provider-specific intelligence adapters use the ledger's `provider_call` and
+`web_data_acquisition` request vocabulary. The DataForSEO implementation is
+fixture/dry-run only and reports missing approval as a readiness blocker; no
+ledger decision grants live transport authority.
+
 ## Why the ledger comes before integrations
 
 The registry layer describes what an agent, skill, tool, workflow, or model route could do. The ledger answers whether a specific action would need approval, which human role would review it, what evidence is missing, which budget cap applies, and how the decision would be recorded. This makes later integrations easier to test and safer to audit.

@@ -4,6 +4,11 @@ Product Opportunity Synthesis is the decision layer over the existing three
 offline evidence pillars: marketplace demand and pricing, supplier feasibility
 and landed-cost scenarios, and consumer attention with creative evidence.
 
+DataForSEO search and shopping summaries can feed opportunity context in
+fixture mode through the existing evidence interfaces. They are supplemental
+search/competitor signals, not supplier proof, live validation, or launch
+authorization.
+
 It is not a fourth evidence engine. It reuses existing scores and provenance,
 applies transparent weights, and produces one client and operator decision
 package.

@@ -1,0 +1,9 @@
+{
+  "provider_registered": true,
+  "credential_reference_exists": true,
+  "secret_value_absent": true,
+  "approval_required": true,
+  "approval_request_type": "provider_call",
+  "fixture_output_contract_tested": true,
+  "live_mode_blocked": true
+}

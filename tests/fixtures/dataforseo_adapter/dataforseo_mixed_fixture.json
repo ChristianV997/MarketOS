@@ -1,0 +1,14 @@
+{
+  "fixture_id": "dataforseo-mixed-synthetic-v1",
+  "fixture_mode": true,
+  "request_kind": "serp_google_shopping_snapshot",
+  "tasks": [
+    {"candidate_id": "mini-thermal-printer", "query": "mini thermal printer", "items": [
+      {"rank": 1, "title": "Synthetic Shopping Result", "domain": "shop.example.invalid", "price": 29.99, "currency": "USD", "shopping": true, "detected_competitor": true},
+      {"rank": 6, "title": "Synthetic Organic Result", "domain": "guide.example.invalid", "snippet": "Synthetic result."}
+    ]},
+    {"candidate_id": "portable-espresso-maker", "query": "portable espresso maker", "items": [
+      {"rank": 4, "title": "Synthetic Espresso Result", "domain": "coffee.example.invalid", "price": 49.0, "currency": "USD", "shopping": true}
+    ]}
+  ]
+}
