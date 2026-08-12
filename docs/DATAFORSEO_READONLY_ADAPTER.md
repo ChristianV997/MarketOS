@@ -72,3 +72,7 @@ calls, vector indexing, scraping, DataForSEO requests, SDK usage, raw HTML,
 raw provider payloads, external mutations, ads, publishing, orders, payments,
 or customer actions occur in this version. Fixture evidence is synthetic and
 is not live search proof or launch authorization.
+TrustOS is the common readiness layer around any future DataForSEO activation.
+The adapter's metadata-only credential, approval, budget, terms/privacy, and
+output-contract checks can feed TrustOS provider controls; `dry_run_ready` is
+not live authorization.

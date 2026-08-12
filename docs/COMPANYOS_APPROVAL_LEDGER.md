@@ -9,6 +9,9 @@ Provider-specific intelligence adapters use the ledger's `provider_call` and
 fixture/dry-run only and reports missing approval as a readiness blocker; no
 ledger decision grants live transport authority.
 
+TrustOS adds evidence and readiness context around this ledger. It does not
+replace approval requests or convert a simulation into execution authority.
+
 ## Why the ledger comes before integrations
 
 The registry layer describes what an agent, skill, tool, workflow, or model route could do. The ledger answers whether a specific action would need approval, which human role would review it, what evidence is missing, which budget cap applies, and how the decision would be recorded. This makes later integrations easier to test and safer to audit.

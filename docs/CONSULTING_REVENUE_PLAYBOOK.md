@@ -77,3 +77,11 @@ The Provider / Credential / Subscription Registry is the next operational packag
 ## CompanyOS Department Layer
 
 The report-to-delivery chain now has an internal operating layer. CompanyOS can turn opportunity, launch, and site drafts into department scorecards, finance scenarios, ledger-ready seeds, sales proposal drafts, approvals, and risks. It is an internal planning product and does not send outreach, publish sites, spend money, create invoices, or mutate external systems.
+# TrustOS service extension
+
+TrustOS packages the recurring trust work around MarketOS deliverables: public
+launch readiness, provider/vendor risk, AI-agent safety, ecommerce compliance
+readiness, and lawyer/accountant/security reviewer packets. Sell the evidence
+checklist and operating review, not a legal, tax, security, or compliance
+guarantee. Keep external exports minimal and use the Approval Ledger for every
+future action.

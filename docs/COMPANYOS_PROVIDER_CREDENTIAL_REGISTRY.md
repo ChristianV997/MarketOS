@@ -9,6 +9,10 @@ The DataForSEO adapter consumes this registry as metadata only. Its
 declared; it never loads or validates a secret. Provider activation still
 requires Approval Ledger approval, budget/rate caps, and terms/privacy review.
 
+TrustOS consumes the same metadata to decide whether provider activation is
+blocked, warned, or ready for a future professional/human review. It does not
+read or validate the referenced secret.
+
 ## Why it follows the Approval Ledger
 
 The Approval Ledger defines action-level gates. This registry attaches those gates to provider metadata and credential references. A provider can be strategically useful while still being blocked from activation. A credential can have a safe server-side reference while remaining `needed`, `pending_approval`, or `active_reference_only` rather than live.

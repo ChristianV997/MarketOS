@@ -1,0 +1,15 @@
+{
+  "evidence_mode": "fixture_demo",
+  "provider_id": "dataforseo",
+  "provider_registered": true,
+  "credential_reference_exists": true,
+  "secret_value_absent": true,
+  "approval_recorded": false,
+  "budget_cap_set": true,
+  "terms_review_complete": false,
+  "privacy_review_complete": false,
+  "output_contract_tested": true,
+  "security_evidence_present": false,
+  "client_isolated": false,
+  "internal_notes_excluded": false
+}
