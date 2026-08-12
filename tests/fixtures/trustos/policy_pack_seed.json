@@ -1,0 +1,1 @@
+{"fixture_mode": true, "policy_packs": ["security_baseline", "provider_activation", "privacy_legal_baseline", "tax_accounting_readiness", "public_launch_readiness", "client_trustos_service"]}

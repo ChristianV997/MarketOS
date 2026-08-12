@@ -1,0 +1,7 @@
+{
+  "fixture_mode": true,
+  "controls": [
+    {"control_id": "control-provider-activation-approval_request", "domain": "provider_risk", "gate_behavior": "hard_block", "status": "planned"},
+    {"control_id": "control-privacy_legal_baseline-privacy_policy", "domain": "privacy", "gate_behavior": "needs_professional_review", "status": "planned"}
+  ]
+}
