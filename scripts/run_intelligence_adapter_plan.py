@@ -20,7 +20,10 @@ def _safe_path(value: str | None, *, must_exist: bool = True) -> Path | None:
     if not value:
         return None
     raw = Path(value)
-    if any(part == ".." for part in raw.parts):
+    # Reject both native and cross-platform traversal spellings before
+    # resolving. CI runs on POSIX while operators commonly pass Windows paths.
+    raw_text = str(value).replace("\\", "/")
+    if any(part == ".." for part in raw.parts) or any(part == ".." for part in Path(raw_text).parts):
         raise ValueError("path traversal is not accepted")
     path = (raw if raw.is_absolute() else ROOT / raw).resolve()
     if must_exist and not path.is_file():
