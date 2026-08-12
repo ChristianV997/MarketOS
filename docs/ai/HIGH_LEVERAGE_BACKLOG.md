@@ -51,3 +51,6 @@ Use the CompanyOS Department Layer to prioritize one approved consulting deliver
 
 Before live agents, use the CompanyOS Registry to resolve one bounded integration decision, verify tool risk, define model caps, and add regression cases. Prioritize Approval Ledger v1 before external action adapters.
 - TrustOS Control Plane v1 is the pre-launch gate: reuse Approval Ledger and Credential/Provider Registry vocabulary; keep scanners, legal/tax conclusions, provider calls, and external actions disabled until evidence and professional review exist.
+# Client workspace isolation
+
+Completed next boundary: define deterministic workspace manifests, clone projections, visibility rules, export policies, leakage checks, TrustOS gates, and service-package mappings before implementing auth/database/RLS.

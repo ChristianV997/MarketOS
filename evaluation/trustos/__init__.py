@@ -3,3 +3,4 @@
 from .control_plane import *
 from .security_scanner_adapter import *
 from .security_ci_gate import *
+from .client_workspace_isolation import *

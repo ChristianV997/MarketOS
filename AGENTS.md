@@ -1,5 +1,7 @@
 # AI Development Policy
 
+- Use `evaluation/trustos/client_workspace_isolation.py` as the canonical internal-to-client export boundary. Never export internal prompts, formulas, heuristics, source code, cross-client data, or unredacted professional packets.
+
 - Use the smallest sufficient context: inspect symbols and direct references before full files.
 - Search for existing equivalent functionality before creating a module.
 - Use architecture tools only for architecture work, current documentation tools only for external APIs, and bounded repository snapshots only for external-repository evaluation.

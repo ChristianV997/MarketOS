@@ -36,3 +36,6 @@ The Agent / Skill / Tool / Workflow Registry is the next control-plane layer. It
 The Approval Ledger is the next gate after the registry: department plans, sales drafts, budgets, and ledger seeds may be produced locally, while messaging, payments, accounting sync, publishing, orders, and external calls remain blocked or simulation-only.
 
 The Provider / Credential / Subscription Registry extends this operating spine with safe ownership, secret-manager references, scopes, budgets, rotation, health placeholders, and activation gates. It stores metadata only and does not validate or activate credentials.
+# Client workspace boundary
+
+CompanyOS department outputs can be projected to a client workspace only through the offline Client Workspace Isolation Plan. Department internals and cross-client operating knowledge remain internal.

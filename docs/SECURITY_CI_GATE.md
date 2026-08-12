@@ -65,3 +65,6 @@ ownership, retention, artifact handling, redaction, and TrustOS gate policy.
 This version does not install scanners, call GitHub or external services, read
 credentials, upload reports, persist raw scanner output, run CodeQL setup,
 perform network access, or make external mutations.
+# Export boundary
+
+Security CI evidence is internal TrustOS evidence until Client Workspace Isolation checks approve a redacted client-safe projection. Scanner findings, source details, prompts, formulas, and cross-client references are not exported by default.

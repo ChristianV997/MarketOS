@@ -27,6 +27,9 @@ ACTION_CATEGORIES = (
     "sync_accounting", "collect_personal_data", "process_uploaded_file",
     "enable_public_signup", "enable_live_model_calls", "run_provider_readonly_call",
     "run_provider_write_call", "public_beta_launch", "client_workspace_export",
+    "client_clone_generation", "client_report_generation", "lawyer_packet_export",
+    "accountant_packet_export", "security_reviewer_packet_export",
+    "client_workspace_activation", "multi_client_workspace_access",
 )
 
 

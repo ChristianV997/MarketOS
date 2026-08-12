@@ -69,3 +69,6 @@ secrets, HTML, exploit payloads, or client data.
 Security CI Gate permits only explicit, allowlisted, bounded local execution.
 Default to `--plan-only` or fixture ingestion; never add shell execution,
 network access, credentials, uploads, or raw scanner artifact persistence.
+# Client workspace rule
+
+Treat client workspaces as curated projections, never source-code forks or unrestricted copies. Run the offline leakage checker and TrustOS gates before any client-safe export; future auth, database, and RLS implementation must preserve this boundary.
