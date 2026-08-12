@@ -103,3 +103,7 @@ The Security Scanner Evidence Adapter extends TrustOS by normalizing sanitized
 scanner-shaped fixtures into the existing Evidence Locker and gate vocabulary.
 It does not run scanners or expose raw findings; see
 `SECURITY_SCANNER_EVIDENCE_ADAPTER.md`.
+
+Security CI Gate adds explicit, allowlisted, bounded local execution while
+preserving the same fail-closed TrustOS boundary. Its default remains
+plan/fixture-only; see `SECURITY_CI_GATE.md`.

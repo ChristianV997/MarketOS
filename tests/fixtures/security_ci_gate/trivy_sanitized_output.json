@@ -1,0 +1,1 @@
+{"fixture_id":"trivy-ci-synthetic","fixture_mode":true,"findings":[{"id":"trivy-ci-1","category":"dependency_vulnerability","severity":"critical","title":"Synthetic filesystem review","summary":"Synthetic finding without image or source contents."}]}

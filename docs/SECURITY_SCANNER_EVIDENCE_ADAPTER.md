@@ -38,6 +38,11 @@ The next safe step is CI-owned scanner execution with reviewed licenses, bounded
 artifacts, a redaction check, and TrustOS evidence tests. Scanner execution,
 GitHub API access, live services, and public launch remain disabled by default.
 
+Security CI Gate v1 is the bounded execution layer for that future path. It
+allows only explicit local execution of Gitleaks, TruffleHog, OSV-Scanner, or
+Trivy; unavailable tools skip safely; all other scanner references remain
+fixture/ingestion/plan-only.
+
 ## Commands
 
 ```text

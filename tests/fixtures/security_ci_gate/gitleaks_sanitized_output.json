@@ -1,0 +1,1 @@
+{"fixture_id":"gitleaks-ci-synthetic","fixture_mode":true,"findings":[{"id":"gitleaks-ci-1","category":"secret_exposure","severity":"low","title":"Synthetic secret-pattern review","summary":"Synthetic summary only; no secret value retained."}]}
