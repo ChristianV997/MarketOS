@@ -21,10 +21,38 @@ from backend.core.persistence import load_json, save_json_atomic, state_path
 _log = logging.getLogger(__name__)
 
 
+def _reject_unsafe_component(value: str, field: str) -> None:
+    # workspace_id/experiment_id/filename are caller-supplied and otherwise
+    # unvalidated. Checking only the final joined-and-normalized path
+    # against the workspaces/ prefix is not enough: a ".." inside
+    # experiment_id or filename normalizes away *within* workspaces/,
+    # landing in a sibling, attacker-chosen workspace's directory rather
+    # than truly escaping - each component must be rejected individually,
+    # before joining, if it could step outside its own path segment.
+    if not value:
+        return
+    normalized = value.replace("\\", "/")
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
+        raise ValueError(f"{field} must not be an absolute path: {value!r}")
+    if ".." in normalized.split("/"):
+        raise ValueError(f"{field} must not contain a parent-directory traversal ('..'): {value!r}")
+
+
+def _resolve_within_workspaces(rel: str) -> str:
+    base = os.path.normpath(state_path("workspaces"))
+    resolved = os.path.normpath(state_path(rel))
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError("workspace_id, experiment_id, and filename must stay within the workspace state directory")
+    return resolved
+
+
 class ArtifactStore:
     def path_for(self, workspace_id: str, experiment_id: str, filename: str = "") -> str:
+        _reject_unsafe_component(workspace_id, "workspace_id")
+        _reject_unsafe_component(experiment_id, "experiment_id")
+        _reject_unsafe_component(filename, "filename")
         rel = os.path.join("workspaces", workspace_id, "experiments", experiment_id, filename)
-        return state_path(rel)
+        return _resolve_within_workspaces(rel)
 
     def save(self, workspace_id: str, experiment_id: str, filename: str, data: Any) -> bool:
         return save_json_atomic(self.path_for(workspace_id, experiment_id, filename), data)
@@ -61,9 +89,10 @@ class ArtifactStore:
             return default
 
     def list_experiments(self, workspace_id: str) -> list[str]:
-        base = state_path(os.path.join("workspaces", workspace_id, "experiments"))
         try:
+            _reject_unsafe_component(workspace_id, "workspace_id")
+            base = _resolve_within_workspaces(os.path.join("workspaces", workspace_id, "experiments"))
             return sorted(os.listdir(base)) if os.path.isdir(base) else []
-        except Exception as exc:  # noqa: BLE001 — fail-silent listing
+        except Exception as exc:  # noqa: BLE001 — fail-silent listing, including a rejected traversal attempt
             _log.debug("artifact_store_list_experiments_failed workspace=%s error=%s", workspace_id, exc)
             return []
