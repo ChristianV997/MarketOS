@@ -25,6 +25,49 @@ def _default_workspace() -> ClientWorkspace:
     return ClientWorkspace(name="ephemeral", workspace_type="internal")
 
 
+def _validate_unit_economics_inputs(
+    product_name: str,
+    supplier_cost: float,
+    retail_price: float,
+    shipping_cost: float,
+) -> list[str]:
+    errors: list[str] = []
+    if not str(product_name).strip():
+        errors.append("product_name must be a non-empty string")
+    for field_name, value in (
+        ("supplier_cost", supplier_cost),
+        ("retail_price", retail_price),
+        ("shipping_cost", shipping_cost),
+    ):
+        if not isinstance(value, (int, float)):
+            errors.append(f"{field_name} must be numeric")
+            continue
+        if value != value:
+            errors.append(f"{field_name} must be finite")
+        elif value < 0:
+            errors.append(f"{field_name} must be >= 0")
+    return errors
+
+
+def _blocked_result(
+    *,
+    product_name: str,
+    category: str,
+    workspace: ClientWorkspace,
+    validation_errors: list[str],
+) -> UnitEconomicsResult:
+    from services.status import commercial_status
+
+    return UnitEconomicsResult(
+        product_name=str(product_name).strip(),
+        category=category,
+        verdict="invalid_input",
+        status=commercial_status(workspace=workspace),
+        dry_run=workspace.dry_run_default,
+        validation_errors=list(validation_errors),
+    )
+
+
 def run_unit_economics(
     product_name: str,
     supplier_cost: float,
@@ -42,6 +85,7 @@ def run_unit_economics(
     workspace = workspace or _default_workspace()
     registry = get_experiment_registry()
     store = ArtifactStore()
+    product_name = str(product_name).strip()
 
     envelope = CommercialRunEnvelope(
         service_name=SERVICE_NAME,
@@ -56,6 +100,24 @@ def run_unit_economics(
     log_transition(envelope, "experiment_created")
     envelope.mark_running()
     log_transition(envelope, "experiment_running")
+
+    validation_errors = _validate_unit_economics_inputs(
+        product_name, supplier_cost, retail_price, shipping_cost,
+    )
+    if validation_errors:
+        result = _blocked_result(
+            product_name=product_name,
+            category=category,
+            workspace=workspace,
+            validation_errors=validation_errors,
+        )
+        envelope.mark_blocked(validation_errors)
+        log_transition(envelope, "experiment_blocked_invalid_input")
+        try:
+            store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("unit_economics_invalid_input_save_failed error=%s", exc)
+        return result, envelope
 
     base_margin: dict[str, Any] = {}
     geo_margin: dict[str, Any] | None = None
