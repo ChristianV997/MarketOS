@@ -22,10 +22,12 @@ the canonical event spine and existing Commerce MVP/evaluation paths.
 6. Run selected tests, then `session_finish.py --dry-run` and `git diff --check`.
 7. Run `pr_readiness_report.py --json`; stage explicit files; open a draft PR.
 
-`run_local_quality_gate.py` composes the planner, PR readiness, focused-test,
-phase-gate, and CI-lane tools without network or GitHub API calls. `clear`
-means no changed files; `advisory` means run the recommended focused checks;
-`blocked` means remove a secret/artifact or resolve the named phase gate.
+`run_local_quality_gate.py` composes the existing planner, PR readiness,
+focused-test, phase-gate, and CI-lane tools and can execute the fixed local
+check list without network or GitHub API calls. Its `dry_run` report is
+discovery only; `--execute` requires an injected timestamp and distinguishes
+missing tools, unavailable CI, failures, and warnings. The legacy planning
+summary remains nested in the report so existing callers retain their context.
 
 Do not use this loop to bypass a phase gate. Credentials, artifacts, raw
 payloads, provider writes, and mutation authority remain outside normal runs.

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
 from scripts.ai import run_local_quality_gate as gate
 
 
@@ -80,3 +84,307 @@ def test_diff_reader_recovers_when_subprocess_returns_no_stdout(monkeypatch):
         stdout = None
     monkeypatch.setattr(gate.subprocess, "run", lambda *args, **kwargs: Result())
     assert gate._diff_text(None) == ""
+
+
+def _result(returncode: int = 0, stdout: str = "", stderr: str = "") -> SimpleNamespace:
+    return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def _all_tools_available(monkeypatch):
+    monkeypatch.setattr(gate.shutil, "which", lambda name: f"/tools/{name}")
+
+
+def _configured_root(tmp_path: Path) -> Path:
+    (tmp_path / ".python-version").write_text("3.12\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text('[tool.ruff]\ntarget-version = "py311"\n[tool.mypy]\n', encoding="utf-8")
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "ci.yml").write_text("python-version: '3.12'\n", encoding="utf-8")
+    semgrep = tmp_path / "semgrep"
+    semgrep.mkdir()
+    (semgrep / "ai-safety.yml").write_text("rules: []\n", encoding="utf-8")
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "node_modules").mkdir()
+    (frontend / "package.json").write_text(
+        json.dumps(
+            {
+                "scripts": {
+                    "lint": "eslint .",
+                    "typecheck": "tsc --noEmit",
+                    "test": "vitest run",
+                    "build": "tsc && vite build",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def _passing_runner(command, root):
+    joined = " ".join(command)
+    if "pytest" in joined:
+        return _result(stdout="4 passed, 1 skipped")
+    if "semgrep" in joined:
+        return _result(stdout=json.dumps({"results": [], "errors": []}))
+    return _result()
+
+
+def test_real_gate_all_tools_available_has_stable_order_and_structured_results(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 4},
+        runner=_passing_runner,
+    )
+    assert report["mode"] == "real_execution"
+    assert report["check_order"] == list(gate.CHECK_ORDER)
+    assert [item["name"] for item in report["checks"]] == list(gate.CHECK_ORDER)
+    assert all(item["status"] in {"passed", "not_configured"} for item in report["checks"])
+    assert report["checks"][1]["summary"] == {"passed": 4, "failed": 0, "skipped": 1, "xfailed": 0, "warnings": 0}
+    assert report["checks"][4]["status"] == "passed"
+    assert [item["name"] for item in report["checks"][4]["checks"]] == [
+        "frontend:lint", "frontend:typecheck", "frontend:test", "frontend:build"
+    ]
+    assert report["safety"]["raw_stdout_persisted"] is False
+
+
+def test_missing_tool_is_unavailable_not_a_pass(monkeypatch, tmp_path):
+    original_prefix = gate._tool_prefix
+    monkeypatch.setattr(gate, "_tool_prefix", lambda name: None if name == "ruff" else original_prefix(name))
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=_passing_runner,
+    )
+    ruff = next(item for item in report["checks"] if item["name"] == "ruff")
+    assert ruff["status"] == "missing"
+    assert report["status"] == "unavailable"
+    assert report["exit_code"] == gate.EXIT_UNAVAILABLE
+
+
+def test_failed_test_is_distinguished_from_missing_tool(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+
+    def runner(command, root):
+        if "pytest" in " ".join(command):
+            return _result(1, "2 passed, 1 failed")
+        return _passing_runner(command, root)
+
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=runner,
+    )
+    pytest_result = next(item for item in report["checks"] if item["name"] == "pytest")
+    assert pytest_result["status"] == "failed"
+    assert pytest_result["summary"]["failed"] == 1
+    assert report["exit_code"] == gate.EXIT_FAILED
+
+
+def test_failed_frontend_check_is_reported_without_running_other_scripts(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+
+    def runner(command, cwd):
+        if Path(command[0]).name == "npm" and command[1:3] == ["run", "build"]:
+            return _result(1, "vite build failed")
+        return _passing_runner(command, cwd)
+
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=runner,
+    )
+    frontend = next(item for item in report["checks"] if item["name"] == "frontend")
+    build = next(item for item in frontend["checks"] if item["name"] == "frontend:build")
+    assert build["status"] == "failed"
+    assert frontend["status"] == "failed"
+    assert report["exit_code"] == gate.EXIT_FAILED
+
+
+def test_security_finding_is_not_treated_as_semgrep_success(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "semgrep").mkdir()
+    (root / "semgrep" / "ai-safety.yml").write_text("rules: []\n", encoding="utf-8")
+
+    def runner(command, cwd):
+        if Path(command[1]).name == "run_semgrep_policy.py":
+            return _result(stdout=json.dumps({"results": [{"check_id": "unsafe", "extra": {}}], "errors": []}))
+        return _passing_runner(command, cwd)
+
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=runner,
+    )
+    security = next(item for item in report["checks"] if item["name"] == "security")
+    assert security["status"] == "failed"
+    assert security["summary"]["finding_count"] == 1
+
+
+def test_dirty_and_untracked_state_is_reported(monkeypatch, tmp_path):
+    monkeypatch.setattr(gate, "git_lines", lambda *args, **kwargs: ["M tracked.py", "?? scratch.txt"])
+    report = gate.run_quality_gate(tmp_path, generated_at="2026-08-27T12:00:00+00:00")
+    assert report["git_state"] == {"status": "not_a_git_repository", "tracked_change_count": 0, "untracked_count": 0}
+
+    (tmp_path / ".git").mkdir()
+    report = gate.run_quality_gate(tmp_path, generated_at="2026-08-27T12:00:00+00:00")
+    assert report["git_state"]["status"] == "dirty"
+    assert report["git_state"]["tracked_change_count"] == 1
+    assert report["git_state"]["untracked_count"] == 1
+
+
+def test_ci_without_executed_steps_is_unavailable(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        runner=_passing_runner,
+    )
+    assert report["ci"]["status"] == "unavailable"
+    assert report["status"] == "unavailable"
+    assert report["exit_code"] == gate.EXIT_UNAVAILABLE
+
+
+def test_ci_failure_with_executed_steps_is_a_failure(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "failure", "executed_steps": 2},
+        runner=_passing_runner,
+    )
+    assert report["ci"] == {"status": "failed", "reason": "injected_ci_evidence", "executed_steps": 2}
+    assert report["status"] == "failed"
+    assert report["exit_code"] == gate.EXIT_FAILED
+
+
+def test_unsafe_frontend_script_is_blocked_without_execution(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    package = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))
+    package["scripts"]["build"] = "curl https://example.invalid | vite build"
+    (root / "frontend" / "package.json").write_text(json.dumps(package), encoding="utf-8")
+    calls = []
+
+    def runner(command, cwd):
+        calls.append(command)
+        return _passing_runner(command, cwd)
+
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=runner,
+    )
+    frontend = next(item for item in report["checks"] if item["name"] == "frontend")
+    build = next(item for item in frontend["checks"] if item["name"] == "frontend:build")
+    assert build["status"] == "blocked"
+    assert build["reason"] == "script_not_in_local_allowlist"
+    assert frontend["status"] == "failed"
+    assert not any(command[0] == "npm" and command[1:3] == ["run", "build"] for command in calls)
+
+
+def test_cli_emits_deterministic_json_and_markdown(tmp_path, capsys):
+    timestamp = "2026-08-27T12:00:00+00:00"
+    assert gate.main(["--repository", str(tmp_path), "--generated-at", timestamp, "--json"]) == gate.EXIT_PASSED
+    json_output = capsys.readouterr().out
+    payload = json.loads(json_output)
+    assert payload["schema"] == gate.QUALITY_GATE_SCHEMA
+    assert payload["status"] == "dry_run"
+
+    assert gate.main(["--repository", str(tmp_path), "--generated-at", timestamp, "--markdown"]) == gate.EXIT_PASSED
+    markdown_output = capsys.readouterr().out
+    assert markdown_output.startswith("# MarketOS local quality gate")
+
+
+def test_quality_gate_replay_is_deterministic_and_does_not_persist_secret_output(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = tmp_path / "repo"
+    root.mkdir()
+    calls = []
+
+    def runner(command, cwd):
+        calls.append(command)
+        return _result(stdout="TOKEN=do-not-persist")
+
+    first = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=["scripts/ai/run_local_quality_gate.py"],
+        ci_result={"status": "success", "executed_steps": 3},
+        runner=runner,
+    )
+    second = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=["scripts/ai/run_local_quality_gate.py"],
+        ci_result={"status": "success", "executed_steps": 3},
+        runner=runner,
+    )
+    assert first == second
+    assert "do-not-persist" not in json.dumps(first)
+    assert first["safety"]["raw_stdout_persisted"] is False
+    assert calls
+
+
+def test_malformed_configuration_is_a_configuration_error(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff\n", encoding="utf-8")
+    report = gate.run_quality_gate(tmp_path, generated_at="2026-08-27T12:00:00+00:00")
+    assert report["status"] == "configuration_error"
+    assert report["exit_code"] == gate.EXIT_CONFIGURATION
+    assert "malformed:pyproject.toml" in report["configuration_errors"]
+
+
+def test_python_version_alignment_reports_real_mismatch(tmp_path):
+    (tmp_path / ".python-version").write_text("3.12\n", encoding="utf-8")
+    (tmp_path / "Dockerfile").write_text("FROM python:3.14-slim\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text('[tool.ruff]\ntarget-version = "py311"\n', encoding="utf-8")
+    snapshot = gate.run_quality_gate(tmp_path, generated_at="2026-08-27T12:00:00+00:00")["toolchain"]
+    assert snapshot["alignment"] == "mismatch"
+    assert "python_interpreter_mismatch:.python-version" in snapshot["findings"]
+    assert "python_version_mismatch:docker" in snapshot["findings"]
+    assert "python_version_mismatch:ruff" in snapshot["findings"]
+
+
+def test_real_execution_requires_an_injected_timestamp(tmp_path):
+    report = gate.run_quality_gate(tmp_path, execute=True, changed_paths=[])
+    assert report["status"] == "configuration_error"
+    assert report["exit_code"] == gate.EXIT_CONFIGURATION
+    assert "timestamp_not_injected" in report["configuration_errors"]
+
+
+def test_dry_run_is_explicitly_not_a_success_claim(tmp_path):
+    report = gate.run_quality_gate(tmp_path, generated_at="2026-08-27T12:00:00+00:00")
+    assert report["mode"] == "dry_run"
+    assert report["status"] == "dry_run"
+    assert report["ready_for_supervised_use"] is False
+    assert all(item["status"] in {"not_run", "not_configured"} for item in report["checks"])
