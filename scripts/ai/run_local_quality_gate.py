@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -358,10 +360,28 @@ def _command_summary(name: str, stdout: str, stderr: str, returncode: int) -> di
 def _invoke_local(command: list[str], root: Path, runner: CommandRunner | None) -> Any:
     if runner is not None:
         return runner(command, root)
-    return subprocess.run(
-        command, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace",
-        check=False, shell=False, timeout=900,
+    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+    process = subprocess.Popen(
+        command, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        encoding="utf-8", errors="replace", shell=False, creationflags=creationflags,
+        start_new_session=os.name != "nt",
     )
+    try:
+        stdout, stderr = process.communicate(timeout=900)
+    except subprocess.TimeoutExpired:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True, text=True, check=False, timeout=30,
+            )
+        else:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        process.kill()
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+        raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def _check_command(
