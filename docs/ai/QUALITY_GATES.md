@@ -19,3 +19,44 @@ the GitHub job summary and never runs a live supplier or credentialed probe.
 The quality-gate JSON includes the compact Phase 1 readiness score, blocking
 gates, and deterministic next action. It remains useful in no-artifact mode;
 missing proof is surfaced rather than fabricated.
+
+## Reproducible local gate
+
+`run_local_quality_gate.py` is the local quality-gate authority. It plans the
+fixed check order `compile`, `pytest`, `ruff`, `typed`, `frontend`, `security`,
+and `diff_check`; with `--execute` it runs only those repository-local checks.
+It never installs dependencies, queries CI, calls providers, or publishes
+raw command output. Use `--generated-at` to make the report timestamp an
+explicit input, and use `--baseline-file` only for an operator-supplied
+baseline whose check statuses are classified separately from the current run.
+
+The structured report uses schema `MarketOS.LocalQualityGate.v2` and these
+process exits:
+
+| Exit | Meaning |
+|---:|---|
+| `0` | Checks passed, or a dry-run/advisory report was produced. `ready_for_supervised_use` is still false unless all readiness conditions hold. |
+| `1` | An observed check failure, security finding, timeout, blocked safety condition, or unverified failure origin. |
+| `2` | A required tool/dependency is unavailable, or CI is unavailable/has no executed steps. |
+| `3` | The report request or repository configuration is malformed. |
+
+Failure classifications distinguish `changed_scope_failure` from
+`pre_existing_failure` only when the injected baseline supports that claim.
+Without baseline evidence, a failed check is `failure_origin_unverified`.
+Missing tools, missing frontend dependencies, and CI billing/zero-step states
+remain unavailable rather than becoming passes. A security scanner that exits
+zero while returning findings remains a security failure. The readiness field
+stays false while any blocker exists, while the repository is dirty, or while
+CI is not an observed success with executed steps.
+
+The per-check status vocabulary is explicit: `passed`, `failed`, `unavailable`,
+`timed_out`, `not_run`, `not_configured`, `collection_failed`, `blocked`, and
+`malformed`. A pytest collection failure is separate from an ordinary test
+failure; when its evidence contains a missing-import signal, its classification
+is `unavailable_dependency`. A scanner that cannot produce valid structured
+output is `security_scanner_failure`, and a failed `git diff --check` is
+`diff_failure`. These classifications are observed evidence, not permission to
+ignore the failed check.
+
+For the full operator procedure, see
+`docs/ai/REPRODUCIBLE_QUALITY_GATE_V1.md`.
