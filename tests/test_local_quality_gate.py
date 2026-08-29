@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from scripts.ai import run_local_quality_gate as gate
 
 
@@ -230,6 +232,44 @@ def test_timeout_is_not_a_pass(monkeypatch, tmp_path):
     assert pytest_result["classification"] == gate.CLASS_TIMEOUT
     assert pytest_result["execution_status"] == "timed_out"
     assert report["status"] == "failed"
+
+
+def test_windows_timeout_terminates_descendants_without_waiting(monkeypatch, tmp_path):
+    class FakeStream:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakeProcess:
+        pid = 1234
+
+        def __init__(self):
+            self.stdout = FakeStream()
+            self.stderr = FakeStream()
+            self.killed = False
+
+        def communicate(self, timeout):
+            raise subprocess.TimeoutExpired(["python", "-m", "pytest"], timeout)
+
+        def kill(self):
+            self.killed = True
+
+    process = FakeProcess()
+    taskkill_calls = []
+    monkeypatch.setattr(gate.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(
+        gate.subprocess,
+        "run",
+        lambda command, **kwargs: taskkill_calls.append((command, kwargs)) or _result(),
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        gate._invoke_local(["python", "-m", "pytest"], tmp_path, None)
+    assert taskkill_calls[0][0] == ["taskkill", "/PID", "1234", "/T", "/F"]
+    assert process.killed is True
+    assert process.stdout.closed is True
+    assert process.stderr.closed is True
 
 
 def test_frontend_dependency_unavailability_is_explicit(monkeypatch, tmp_path):
