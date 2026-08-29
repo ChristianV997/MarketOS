@@ -1,15 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
-const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
+import { joinApiPath, resolveApiBaseUrl } from "./apiBase";
+
+const BASE = resolveApiBaseUrl();
 
 async function get<T>(path: string): Promise<T> {
-  const r = await fetch(`${BASE}${path}`);
+  const r = await fetch(joinApiPath(BASE, path));
   if (!r.ok) throw new Error(`${r.status} ${path}`);
   return r.json() as T;
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const r = await fetch(`${BASE}${path}`, {
+  const r = await fetch(joinApiPath(BASE, path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body != null ? JSON.stringify(body) : undefined,
@@ -32,7 +34,7 @@ async function postServiceCall<T>(
   Object.entries(query).forEach(([k, v]) => {
     if (v !== undefined) qs.set(k, String(v));
   });
-  const url = `${BASE}${path}${qs.toString() ? `?${qs}` : ""}`;
+  const url = joinApiPath(BASE, `${path}${qs.toString() ? `?${qs}` : ""}`);
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
