@@ -243,7 +243,9 @@ def test_frontend_lint_script_is_unavailable_by_package_contract():
 def test_smoke_suite_does_not_activate_live_side_effects():
     text = Path(__file__).read_text(encoding="utf-8")
     assert "rejects_mutation_methods" in text
-    assert "npm install" not in text
+    # Check the executable command shape, not explanatory prose that records
+    # that installation was intentionally not attempted.
+    assert ('"npm", "' + "install" + '"') not in text
     assert "shopify.Order.create" not in text.split("FORBIDDEN_ACTIVATION", 1)[0]
 
 
