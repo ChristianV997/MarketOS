@@ -141,7 +141,11 @@ def test_real_gate_reports_stable_order_and_observed_evidence(monkeypatch, tmp_p
     assert report["classification"] == gate.CLASS_PASS
     assert report["status"] == "passed_with_warnings"
     assert report["ready_for_supervised_use"] is False
-    assert report["checks"][1]["summary"] == {"passed": 4, "failed": 0, "skipped": 1, "xfailed": 0, "warnings": 0}
+    assert report["checks"][1]["summary"]["passed"] == 4
+    assert report["checks"][1]["summary"]["skipped"] == 1
+    assert report["checks"][1]["summary"]["collection_failed"] is False
+    assert report["checks"][1]["summary"]["dependency_error"] is False
+    assert report["status_taxonomy"] == list(gate.CHECK_STATUS_TAXONOMY)
     assert all(item["evidence_classification"] == "observed" for item in report["checks"] if item["status"] == "passed")
     assert report["safety"]["raw_stdout_persisted"] is False
 
@@ -219,6 +223,114 @@ def test_security_findings_are_failures_even_when_scanner_exits_zero(monkeypatch
     assert report["exit_code"] == gate.EXIT_FAILED
 
 
+def test_collection_dependency_scanner_and_diff_outcomes_remain_distinct(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+
+    def runner(command, cwd):
+        joined = " ".join(command)
+        if "pytest" in joined:
+            return _result(1, "ERROR collecting tests/test_optional.py\nModuleNotFoundError: No module named 'optional_dep'")
+        if "run_semgrep_policy.py" in joined:
+            return _result(2, "not-json", "scanner crashed")
+        if "git diff" in joined:
+            return _result(1, "", "trailing whitespace")
+        return _passing_runner(command, cwd)
+
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=runner,
+    )
+    checks = {item["name"]: item for item in report["checks"]}
+    assert checks["pytest"]["status"] == "collection_failed"
+    assert checks["pytest"]["summary"]["collection_failed"] is True
+    assert checks["pytest"]["summary"]["dependency_error"] is True
+    assert checks["pytest"]["classification"] == gate.CLASS_UNAVAILABLE_DEPENDENCY
+    assert checks["security"]["classification"] == gate.CLASS_SECURITY_SCANNER_FAILURE
+    assert checks["diff_check"]["classification"] == gate.CLASS_DIFF_FAILURE
+    assert set(report["failure_classes"]) >= {
+        gate.CLASS_UNAVAILABLE_DEPENDENCY,
+        gate.CLASS_SECURITY_SCANNER_FAILURE,
+        gate.CLASS_DIFF_FAILURE,
+    }
+    assert report["status"] == "failed"
+    assert report["exit_code"] == gate.EXIT_FAILED
+
+
+def test_collection_failure_without_dependency_is_explicit(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+
+    def runner(command, root):
+        if "pytest" in " ".join(command):
+            return _result(1, "ERROR collecting tests/test_syntax.py\nSyntaxError: invalid syntax")
+        return _passing_runner(command, root)
+
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=runner,
+    )
+    pytest_result = next(item for item in report["checks"] if item["name"] == "pytest")
+    assert pytest_result["status"] == "collection_failed"
+    assert pytest_result["classification"] == gate.CLASS_COLLECTION_FAILED
+
+
+def test_missing_dependency_without_collection_is_unavailable(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+
+    def runner(command, root):
+        if "pytest" in " ".join(command):
+            return _result(1, "ModuleNotFoundError: No module named 'optional_dep'")
+        return _passing_runner(command, root)
+
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=runner,
+    )
+    pytest_result = next(item for item in report["checks"] if item["name"] == "pytest")
+    assert pytest_result["status"] == "unavailable"
+    assert pytest_result["classification"] == gate.CLASS_UNAVAILABLE_DEPENDENCY
+    assert report["status"] == "unavailable"
+    assert report["exit_code"] == gate.EXIT_UNAVAILABLE
+
+
+def test_typed_dependency_and_timeout_aggregates_do_not_pass(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text('[tool.mypy]\ncheck_untyped_defs = true\n', encoding="utf-8")
+
+    def runner(command, cwd):
+        joined = " ".join(command)
+        if "mypy" in joined:
+            return _result(1, "ModuleNotFoundError: No module named 'mypy_plugin'")
+        return _passing_runner(command, cwd)
+
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=runner,
+    )
+    typed = next(item for item in report["checks"] if item["name"] == "typed")
+    assert typed["status"] == "unavailable"
+    assert typed["classification"] == gate.CLASS_UNAVAILABLE_DEPENDENCY
+    assert report["status"] == "unavailable"
+
+
 def test_timeout_is_not_a_pass(monkeypatch, tmp_path):
     _all_tools_available(monkeypatch)
 
@@ -229,6 +341,7 @@ def test_timeout_is_not_a_pass(monkeypatch, tmp_path):
 
     report = gate.run_quality_gate(tmp_path, generated_at="2026-08-27T12:00:00+00:00", execute=True, changed_paths=[], ci_result={"status": "success", "executed_steps": 1}, runner=runner)
     pytest_result = next(item for item in report["checks"] if item["name"] == "pytest")
+    assert pytest_result["status"] == "timed_out"
     assert pytest_result["classification"] == gate.CLASS_TIMEOUT
     assert pytest_result["execution_status"] == "timed_out"
     assert report["status"] == "failed"

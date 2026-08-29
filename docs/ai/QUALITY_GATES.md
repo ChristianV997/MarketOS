@@ -49,5 +49,14 @@ zero while returning findings remains a security failure. The readiness field
 stays false while any blocker exists, while the repository is dirty, or while
 CI is not an observed success with executed steps.
 
+The per-check status vocabulary is explicit: `passed`, `failed`, `unavailable`,
+`timed_out`, `not_run`, `not_configured`, `collection_failed`, `blocked`, and
+`malformed`. A pytest collection failure is separate from an ordinary test
+failure; when its evidence contains a missing-import signal, its classification
+is `unavailable_dependency`. A scanner that cannot produce valid structured
+output is `security_scanner_failure`, and a failed `git diff --check` is
+`diff_failure`. These classifications are observed evidence, not permission to
+ignore the failed check.
+
 For the full operator procedure, see
 `docs/ai/REPRODUCIBLE_QUALITY_GATE_V1.md`.

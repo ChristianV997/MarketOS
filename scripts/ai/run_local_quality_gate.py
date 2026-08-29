@@ -41,6 +41,9 @@ CLASS_MISSING_TOOL = "missing_tool"
 CLASS_UNAVAILABLE_DEPENDENCY = "unavailable_dependency"
 CLASS_CI_UNAVAILABLE = "ci_unavailable"
 CLASS_SECURITY_FINDING = "security_finding"
+CLASS_SECURITY_SCANNER_FAILURE = "security_scanner_failure"
+CLASS_DIFF_FAILURE = "diff_failure"
+CLASS_COLLECTION_FAILED = "collection_failed"
 CLASS_TIMEOUT = "timeout"
 CLASS_MALFORMED_CONFIGURATION = "malformed_configuration"
 
@@ -67,7 +70,16 @@ PYTEST_COUNTS = {
     "xfailed": re.compile(r"(\d+)\s+xfailed"),
     "warnings": re.compile(r"(\d+)\s+warnings?"),
 }
+PYTEST_COLLECTION_RE = re.compile(
+    r"(?:ERROR collecting|ImportError while importing test module|collected\s+0\s+items)",
+    re.I,
+)
+DEPENDENCY_ERROR_RE = re.compile(r"(?:ModuleNotFoundError|No module named|ImportError)", re.I)
 RUFF_FINDING_RE = re.compile(r"(?:^|\s)[A-Z]\d{3}(?:\s|$)")
+CHECK_STATUS_TAXONOMY = (
+    "passed", "failed", "unavailable", "timed_out", "not_run", "not_configured",
+    "collection_failed", "blocked", "malformed",
+)
 
 
 def _optional_phase1_summary() -> tuple[dict[str, Any], dict[str, Any]]:
@@ -338,10 +350,12 @@ def _command_summary(name: str, stdout: str, stderr: str, returncode: int) -> di
             matches = pattern.findall(combined)
             if matches:
                 summary[key] = int(matches[-1])
+        summary["collection_failed"] = bool(PYTEST_COLLECTION_RE.search(combined))
+        summary["dependency_error"] = bool(DEPENDENCY_ERROR_RE.search(combined))
         return summary
     if name == "ruff":
         finding_count = sum(1 for line in combined.splitlines() if RUFF_FINDING_RE.search(line))
-        return {"finding_count": finding_count}
+        return {"finding_count": finding_count, "dependency_error": bool(DEPENDENCY_ERROR_RE.search(combined))}
     if name == "security":
         try:
             payload = json.loads(stdout)
@@ -349,12 +363,16 @@ def _command_summary(name: str, stdout: str, stderr: str, returncode: int) -> di
             return {"finding_count": None, "error_count": 1, "output_parse": "invalid_json"}
         if not isinstance(payload, dict):
             return {"finding_count": None, "error_count": 1, "output_parse": "invalid_json"}
+        results = payload.get("results", [])
+        errors = payload.get("errors", [])
+        if not isinstance(results, list) or not isinstance(errors, list):
+            return {"finding_count": None, "error_count": 1, "output_parse": "invalid_json_shape"}
         return {
-            "finding_count": len(payload.get("results", [])),
-            "error_count": len(payload.get("errors", [])),
+            "finding_count": len(results),
+            "error_count": len(errors),
             "output_parse": "valid_json",
         }
-    return {"return_code": returncode}
+    return {"return_code": returncode, "dependency_error": bool(DEPENDENCY_ERROR_RE.search(combined))}
 
 
 def _invoke_local(command: list[str], root: Path, runner: CommandRunner | None) -> Any:
@@ -416,13 +434,20 @@ def _check_command(
         result.update({"status": "missing", "availability": "missing", "execution_status": "not_executed", "reason": "tool_invocation_failed"})
         return result
     except subprocess.TimeoutExpired:
-        result.update({"status": "failed", "execution_status": "timed_out", "timeout": True, "reason": "timeout"})
+        result.update({"status": "timed_out", "execution_status": "timed_out", "timeout": True, "reason": "timeout"})
         return result
     stdout = str(getattr(completed, "stdout", "") or "")
     stderr = str(getattr(completed, "stderr", "") or "")
     returncode = int(getattr(completed, "returncode", 1))
     summary = _command_summary(name, stdout, stderr, returncode)
-    status = "passed" if returncode == 0 else "failed"
+    if returncode == 0:
+        status = "passed"
+    elif name == "pytest" and summary.get("collection_failed"):
+        status = "collection_failed"
+    elif summary.get("dependency_error"):
+        status = "unavailable"
+    else:
+        status = "failed"
     if semantic_failure and semantic_failure(summary):
         status = "failed"
     result.update({
@@ -444,14 +469,19 @@ def _typed_check(root: Path, typed: dict[str, Any], *, execute: bool, runner: Co
     statuses = {item["status"] for item in subchecks}
     if "failed" in statuses:
         status = "failed"
+    elif "timed_out" in statuses:
+        status = "timed_out"
     elif "missing" in statuses:
         status = "missing"
+    elif "unavailable" in statuses:
+        status = "unavailable"
     elif not execute:
         status = "not_run"
     else:
         status = "passed"
-    execution_status = "executed" if any(item.get("execution_status") == "executed" for item in subchecks) else "timed_out" if any(item.get("execution_status") == "timed_out" for item in subchecks) else "not_executed"
-    return {"name": "typed", "status": status, "availability": "missing" if "missing" in statuses else "available", "execution_status": execution_status, "subchecks": subchecks}
+    execution_status = "timed_out" if any(item.get("execution_status") == "timed_out" for item in subchecks) else "executed" if any(item.get("execution_status") == "executed" for item in subchecks) else "not_executed"
+    availability = "missing" if "missing" in statuses else "unavailable" if "unavailable" in statuses else "available"
+    return {"name": "typed", "status": status, "availability": availability, "execution_status": execution_status, "subchecks": subchecks}
 
 
 def _safe_frontend_script(script: Any) -> bool:
@@ -511,6 +541,8 @@ def _frontend_check(root: Path, *, execute: bool, runner: CommandRunner | None) 
     statuses = {item["status"] for item in configured}
     if "blocked" in statuses or "failed" in statuses:
         status = "failed"
+    elif "timed_out" in statuses:
+        status = "timed_out"
     elif "missing" in statuses or "unavailable" in statuses:
         status = "unavailable"
     elif not configured:
@@ -523,7 +555,7 @@ def _frontend_check(root: Path, *, execute: bool, runner: CommandRunner | None) 
         "name": "frontend", "status": status, "manifest_status": "valid", "package_manager": manager,
         "package_manager_available": manager_available, "lockfile": lockfile,
         "lockfile_status": "present" if lockfile else "missing", "dependencies_status": "installed" if dependencies_available else "missing",
-        "execution_status": "executed" if any(item.get("execution_status") == "executed" for item in checks) else "timed_out" if any(item.get("execution_status") == "timed_out" for item in checks) else "not_executed", "checks": checks,
+        "execution_status": "timed_out" if any(item.get("execution_status") == "timed_out" for item in checks) else "executed" if any(item.get("execution_status") == "executed" for item in checks) else "not_executed", "checks": checks,
     }
 
 
@@ -590,9 +622,15 @@ def _classify_check(item: dict[str, Any], *, baseline_statuses: Mapping[str, str
         return CLASS_MALFORMED_CONFIGURATION
     if status == "missing":
         return CLASS_MISSING_TOOL
+    if status == "timed_out":
+        return CLASS_TIMEOUT
+    if status == "collection_failed":
+        if (item.get("summary") or {}).get("dependency_error"):
+            return CLASS_UNAVAILABLE_DEPENDENCY
+        return CLASS_COLLECTION_FAILED
     if status == "unavailable":
         reason = str(item.get("reason") or "")
-        if "depend" in reason or (item.get("name") == "frontend" and any(isinstance(child, Mapping) and child.get("status") == "unavailable" for child in item.get("checks", []))):
+        if "depend" in reason or (item.get("summary") or {}).get("dependency_error") or (item.get("name") == "typed" and any(isinstance(child, Mapping) and child.get("status") == "unavailable" for child in item.get("subchecks", []))) or (item.get("name") == "frontend" and any(isinstance(child, Mapping) and child.get("status") == "unavailable" for child in item.get("checks", []))):
             return CLASS_UNAVAILABLE_DEPENDENCY
         return CLASS_MISSING_TOOL
     if status == "blocked":
@@ -603,10 +641,14 @@ def _classify_check(item: dict[str, Any], *, baseline_statuses: Mapping[str, str
             for child in item.get("checks", [])
         ):
             return "blocked"
-        if item.get("reason") == "timeout" or item.get("timeout"):
-            return CLASS_TIMEOUT
-        if item.get("name") == "security" and (item.get("summary") or {}).get("finding_count"):
-            return CLASS_SECURITY_FINDING
+        if item.get("name") == "security":
+            if (item.get("summary") or {}).get("finding_count"):
+                return CLASS_SECURITY_FINDING
+            return CLASS_SECURITY_SCANNER_FAILURE
+        if item.get("name") == "diff_check":
+            return CLASS_DIFF_FAILURE
+        if (item.get("summary") or {}).get("dependency_error"):
+            return CLASS_UNAVAILABLE_DEPENDENCY
         baseline_status = baseline_statuses.get(str(item.get("name")))
         if baseline_status == "failed":
             return CLASS_PRE_EXISTING_FAILURE
@@ -706,7 +748,7 @@ def run_quality_gate(
         status, exit_code = "configuration_error", EXIT_CONFIGURATION
     elif not execute:
         status, exit_code = "dry_run", EXIT_PASSED
-    elif "failed" in statuses or "blocked" in statuses or ci["status"] == "failed":
+    elif {"failed", "timed_out", "collection_failed"} & statuses or "blocked" in statuses or ci["status"] == "failed":
         status, exit_code = "failed", EXIT_FAILED
     elif "missing" in statuses or "unavailable" in statuses or ci["status"] == "unavailable":
         status, exit_code = "unavailable", EXIT_UNAVAILABLE
@@ -721,7 +763,8 @@ def run_quality_gate(
         classification = "dry_run"
     elif failure_classes:
         priority = (
-            CLASS_MALFORMED_CONFIGURATION, CLASS_SECURITY_FINDING, CLASS_TIMEOUT,
+            CLASS_MALFORMED_CONFIGURATION, CLASS_SECURITY_FINDING, CLASS_SECURITY_SCANNER_FAILURE,
+            CLASS_DIFF_FAILURE, CLASS_TIMEOUT, CLASS_COLLECTION_FAILED,
             CLASS_CHANGED_SCOPE_FAILURE, CLASS_PRE_EXISTING_FAILURE,
             CLASS_FAILURE_ORIGIN_UNVERIFIED, CLASS_MISSING_TOOL,
             CLASS_UNAVAILABLE_DEPENDENCY, CLASS_CI_UNAVAILABLE, "blocked",
@@ -746,6 +789,7 @@ def run_quality_gate(
         "typed_analysis": typed,
         "checks": checks,
         "check_order": list(CHECK_ORDER),
+        "status_taxonomy": list(CHECK_STATUS_TAXONOMY),
         "frontend_check_order": list(FRONTEND_CHECK_ORDER),
         "ci": ci,
         "baseline": {"provided": baseline_report is not None, "check_statuses": dict(sorted(baseline_statuses.items()))},

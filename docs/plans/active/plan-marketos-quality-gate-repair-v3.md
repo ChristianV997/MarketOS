@@ -1,8 +1,8 @@
-# Plan: MarketOS Reproducible Quality Gate Repair v2
+# Plan: MarketOS Reproducible Quality Gate Repair v3
 
-- **Plan ID:** `plan-marketos-quality-gate-repair-v2`
+- **Plan ID:** `plan-marketos-quality-gate-repair-v3`
 - **Task:** Repair the existing MarketOS local quality gate with truthful deterministic baseline and tool-availability reporting.
-- **Branch:** `gpt/marketos-quality-gate-repair-v2`
+- **Branch:** `gpt/marketos-quality-gate-repair-v3`
 - **Lane:** `antigravity`
 - **Status:** `active`
 
@@ -24,7 +24,7 @@ behavior.
     "tests/test_local_quality_gate.py",
     "docs/ai/QUALITY_GATES.md",
     "docs/ai/REPRODUCIBLE_QUALITY_GATE_V1.md",
-    "docs/plans/active/plan-marketos-quality-gate-repair-v2.md"
+    "docs/plans/active/plan-marketos-quality-gate-repair-v3.md"
   ],
   "out_of_scope": [
     "backend, frontend application, services, providers, commerce, workflows, Docker, CoderOS, credentials, and unrelated tests",
@@ -39,7 +39,7 @@ behavior.
 - `tests/test_local_quality_gate.py`
 - `docs/ai/QUALITY_GATES.md`
 - `docs/ai/REPRODUCIBLE_QUALITY_GATE_V1.md`
-- `docs/plans/active/plan-marketos-quality-gate-repair-v2.md`
+- `docs/plans/active/plan-marketos-quality-gate-repair-v3.md`
 
 ## Contracts
 
@@ -77,9 +77,10 @@ credential, and live-validation authority.
 ## Evidence
 
 - Focused tests cover pass, changed-scope failure, pre-existing failure,
-  unverified failure origin, missing tools, unavailable dependencies, frontend
-  unavailability, security findings, timeout, malformed configuration, CI
-  unavailability, baseline parsing, deterministic replay, and redaction.
+  unverified failure origin, missing tools, unavailable dependencies, pytest
+  collection failure, frontend unavailability, security findings, scanner
+  failure, diff failure, timeout, malformed configuration, CI unavailability,
+  baseline parsing, deterministic replay, and redaction.
 - The final handoff records exact command exits, check classifications, real
   versus unavailable evidence, readiness, and safety-scan results.
 

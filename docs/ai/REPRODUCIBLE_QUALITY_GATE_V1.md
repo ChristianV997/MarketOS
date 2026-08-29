@@ -34,6 +34,16 @@ and credentials are never included in the report. Semgrep findings are
 counted from structured output, while non-empty findings remain visible even
 when the scanner exits zero.
 
+The status vocabulary is stable and included in the report as
+`status_taxonomy`: `passed`, `failed`, `unavailable`, `timed_out`, `not_run`,
+`not_configured`, `collection_failed`, `blocked`, and `malformed`. Pytest
+collection errors are detected separately from test failures. A collection
+error with a missing-import marker is classified as `unavailable_dependency`;
+other collection errors are `collection_failed`. A malformed or non-zero
+security scanner result is `security_scanner_failure` unless findings are
+present, in which case it is `security_finding`. Failed whitespace validation
+is `diff_failure`. Timeouts retain status `timed_out` and never become passes.
+
 An operator-supplied baseline may classify a current failure as
 `pre_existing_failure`. A current failure with changed paths and a passing
 baseline is `changed_scope_failure`. If the baseline does not prove either
@@ -53,7 +63,7 @@ process exits are:
 | Exit | Stable meaning |
 |---:|---|
 | `0` | dry-run or all observed checks passed; inspect readiness separately |
-| `1` | observed failure, security finding, timeout, blocked safety state, or unverified failure |
+| `1` | observed failure, collection failure, security finding/scanner failure, diff failure, timeout, blocked safety state, or unverified failure |
 | `2` | missing tool/dependency or unavailable CI |
 | `3` | malformed request, baseline, or repository configuration |
 
