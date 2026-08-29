@@ -24,6 +24,7 @@ class UnitEconomicsResult:
     status: str = "ready_for_client_service"
     generated_at: float = field(default_factory=time.time)
     validation_errors: list[str] = field(default_factory=list)
+    calculation_errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +42,7 @@ class UnitEconomicsResult:
             "status": self.status,
             "generated_at": self.generated_at,
             "validation_errors": list(self.validation_errors),
+            "calculation_errors": list(self.calculation_errors),
         }
 
     def deterministic_fingerprint(self) -> str:
@@ -59,6 +61,7 @@ class UnitEconomicsResult:
             "dry_run": self.dry_run,
             "status": self.status,
             "validation_errors": list(self.validation_errors),
+            "calculation_errors": list(self.calculation_errors),
         }
         blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()

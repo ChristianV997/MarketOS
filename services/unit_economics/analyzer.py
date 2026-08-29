@@ -5,6 +5,7 @@ margin logic lives here beyond break_even.py's derived formulas.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from backend.experiments.audit_log import log_transition
@@ -39,10 +40,10 @@ def _validate_unit_economics_inputs(
         ("retail_price", retail_price),
         ("shipping_cost", shipping_cost),
     ):
-        if not isinstance(value, (int, float)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             errors.append(f"{field_name} must be numeric")
             continue
-        if value != value:
+        if not math.isfinite(value):
             errors.append(f"{field_name} must be finite")
         elif value < 0:
             errors.append(f"{field_name} must be >= 0")
@@ -122,6 +123,7 @@ def run_unit_economics(
     base_margin: dict[str, Any] = {}
     geo_margin: dict[str, Any] | None = None
     ltv_margin: dict[str, Any] = {}
+    calculation_errors: list[str] = []
     be_cac = 0.0
     roas = 0.0
     eff_cac = 0.0
@@ -134,6 +136,7 @@ def run_unit_economics(
         )
     except Exception as exc:  # noqa: BLE001
         _log.warning("unit_economics_base_margin_failed product=%s error=%s", product_name, exc)
+        calculation_errors.append("base_margin_calculation_failed")
 
     if geo:
         try:
@@ -144,6 +147,7 @@ def run_unit_economics(
             )
         except Exception as exc:  # noqa: BLE001
             _log.debug("unit_economics_geo_margin_failed product=%s geo=%s error=%s", product_name, geo, exc)
+            calculation_errors.append("geo_margin_calculation_failed")
 
     try:
         from backend.validation.margin_calculator import calculate_ltv_adjusted_margin
@@ -153,12 +157,14 @@ def run_unit_economics(
         )
     except Exception as exc:  # noqa: BLE001
         _log.debug("unit_economics_ltv_margin_failed product=%s error=%s", product_name, exc)
+        calculation_errors.append("ltv_margin_calculation_failed")
 
     try:
         be_cac = break_even_cac(supplier_cost, retail_price, shipping_cost, category=category)
         roas = required_roas(supplier_cost, retail_price, shipping_cost, category=category)
     except Exception as exc:  # noqa: BLE001
         _log.debug("unit_economics_break_even_failed product=%s error=%s", product_name, exc)
+        calculation_errors.append("break_even_calculation_failed")
 
     try:
         from backend.economics.ltv import effective_cac
@@ -166,6 +172,7 @@ def run_unit_economics(
         eff_cac = round(effective_cac(base_cac, category=category), 2) if base_cac else 0.0
     except Exception as exc:  # noqa: BLE001
         _log.debug("unit_economics_effective_cac_failed product=%s error=%s", product_name, exc)
+        calculation_errors.append("effective_cac_calculation_failed")
 
     from services.status import commercial_status
     status = commercial_status(workspace=workspace)  # pure math, no external credentials/live data needed
@@ -182,7 +189,18 @@ def run_unit_economics(
         verdict=verdict_from_margin(base_margin) if base_margin else "unknown",
         status=status,
         dry_run=workspace.dry_run_default,
+        calculation_errors=calculation_errors,
     )
+
+    if calculation_errors:
+        result.verdict = "calculation_failed"
+        try:
+            store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("unit_economics_calculation_failure_save_failed error=%s", exc)
+        envelope.mark_failed(calculation_errors[0])
+        log_transition(envelope, "experiment_failed_calculation")
+        return result, envelope
 
     try:
         from services.reporting import save_report_artifacts

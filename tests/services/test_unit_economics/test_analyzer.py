@@ -78,4 +78,4 @@ class TestUnitEconomicsNeverRaises:
         monkeypatch.setattr("backend.validation.margin_calculator.calculate_margin", _boom)
         result, envelope = run_unit_economics("Widget", supplier_cost=10.0, retail_price=40.0)
         assert isinstance(result, UnitEconomicsResult)
-        assert envelope.status == "completed"
+        assert envelope.status == "failed"

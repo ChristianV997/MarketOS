@@ -85,7 +85,7 @@ class TestUnitEconomicsLowRiskPilot:
       monkeypatch.setattr("backend.validation.margin_calculator.calculate_margin", _boom)
       result, envelope = run_unit_economics("Widget", supplier_cost=10.0, retail_price=40.0)
 
-      assert envelope.status == "completed"
+      assert envelope.status == "failed"
       assert result.base_margin == {}
 
   def test_execution_and_external_mutation_remain_disabled(self):
@@ -108,3 +108,22 @@ class TestUnitEconomicsLowRiskPilot:
 
       assert result.verdict == "invalid_input"
       assert envelope.status == "blocked"
+
+  def test_infinite_input_is_blocked(self):
+      result, envelope = run_unit_economics("Widget", supplier_cost=math.inf, retail_price=40.0)
+
+      assert result.verdict == "invalid_input"
+      assert envelope.status == "blocked"
+      assert "supplier_cost must be finite" in result.validation_errors
+
+  def test_calculator_failure_is_not_reported_as_completed(self, monkeypatch):
+      def _boom(*_args, **_kwargs):
+          raise RuntimeError("boom")
+
+      monkeypatch.setattr("backend.validation.margin_calculator.calculate_margin", _boom)
+      result, envelope = run_unit_economics("Widget", supplier_cost=10.0, retail_price=40.0)
+
+      assert result.verdict == "calculation_failed"
+      assert "base_margin_calculation_failed" in result.calculation_errors
+      assert envelope.status == "failed"
+      assert envelope.blocked_reasons[0] == "base_margin_calculation_failed"
