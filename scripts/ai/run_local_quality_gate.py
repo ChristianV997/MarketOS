@@ -450,7 +450,8 @@ def _typed_check(root: Path, typed: dict[str, Any], *, execute: bool, runner: Co
         status = "not_run"
     else:
         status = "passed"
-    return {"name": "typed", "status": status, "availability": "missing" if "missing" in statuses else "available", "execution_status": "executed" if execute else "not_executed", "subchecks": subchecks}
+    execution_status = "executed" if any(item.get("execution_status") == "executed" for item in subchecks) else "timed_out" if any(item.get("execution_status") == "timed_out" for item in subchecks) else "not_executed"
+    return {"name": "typed", "status": status, "availability": "missing" if "missing" in statuses else "available", "execution_status": execution_status, "subchecks": subchecks}
 
 
 def _safe_frontend_script(script: Any) -> bool:
@@ -522,7 +523,7 @@ def _frontend_check(root: Path, *, execute: bool, runner: CommandRunner | None) 
         "name": "frontend", "status": status, "manifest_status": "valid", "package_manager": manager,
         "package_manager_available": manager_available, "lockfile": lockfile,
         "lockfile_status": "present" if lockfile else "missing", "dependencies_status": "installed" if dependencies_available else "missing",
-        "execution_status": "executed" if execute and configured else "not_executed", "checks": checks,
+        "execution_status": "executed" if any(item.get("execution_status") == "executed" for item in checks) else "timed_out" if any(item.get("execution_status") == "timed_out" for item in checks) else "not_executed", "checks": checks,
     }
 
 
