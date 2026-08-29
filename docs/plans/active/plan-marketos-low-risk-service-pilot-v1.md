@@ -5,6 +5,10 @@
 - **Branch:** `cursor/marketos-low-risk-service-pilot-v1`
 - **Status:** `active`
 
+## Lane
+
+human_operator
+
 ## Objective
 
 Harden the unit economics service boundary for offline, deterministic,
@@ -31,6 +35,36 @@ authority.
   ]
 }
 ```
+
+## Risk
+
+```json
+{
+  "level": "LOW",
+  "mitigation": "Keep the unit economics pilot offline, deterministic, human-supervised, and bounded to the declared service, tests, and documentation paths."
+}
+```
+
+## Ownership
+
+The human operator owns approval and review. The supervised service-pilot
+implementation remains bounded to the declared unit-economics service lane;
+existing governance, orchestration, and provider authorities remain canonical.
+
+## Stop Conditions
+
+- Stop if inputs or calculations are invalid, non-finite, negative where prohibited, or otherwise fail closed.
+- Stop if the pilot requires provider access, network access, subprocess execution, orchestration, or external mutation.
+- Stop if a changed file falls outside the declared target list or if deterministic tests cannot reproduce the result.
+
+## Target Files
+
+- `services/unit_economics/analyzer.py`
+- `services/unit_economics/schemas.py`
+- `services/unit_economics/OPERATOR_PILOT.md`
+- `tests/services/test_unit_economics/test_analyzer.py`
+- `tests/services/test_unit_economics/test_low_risk_service_pilot.py`
+- `docs/plans/active/plan-marketos-low-risk-service-pilot-v1.md`
 
 ## Verification Commands
 
