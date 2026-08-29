@@ -74,7 +74,10 @@ PYTEST_COLLECTION_RE = re.compile(
     r"(?:ERROR collecting|ImportError while importing test module|collected\s+0\s+items)",
     re.I,
 )
-DEPENDENCY_ERROR_RE = re.compile(r"(?:ModuleNotFoundError|No module named|ImportError)", re.I)
+DEPENDENCY_ERROR_RE = re.compile(
+    r"(?:ModuleNotFoundError|No module named|ImportError while importing|ImportError:\s+No module named)",
+    re.I,
+)
 RUFF_FINDING_RE = re.compile(r"(?:^|\s)[A-Z]\d{3}(?:\s|$)")
 CHECK_STATUS_TAXONOMY = (
     "passed", "failed", "unavailable", "timed_out", "not_run", "not_configured",

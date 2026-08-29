@@ -282,6 +282,12 @@ def test_collection_failure_without_dependency_is_explicit(monkeypatch, tmp_path
     assert pytest_result["classification"] == gate.CLASS_COLLECTION_FAILED
 
 
+def test_lint_text_with_import_error_word_is_not_dependency_failure():
+    summary = gate._command_summary("ruff", "example.py:1: F401 ImportError is documented", "", 1)
+    assert summary["finding_count"] == 1
+    assert summary["dependency_error"] is False
+
+
 def test_missing_dependency_without_collection_is_unavailable(monkeypatch, tmp_path):
     _all_tools_available(monkeypatch)
 
