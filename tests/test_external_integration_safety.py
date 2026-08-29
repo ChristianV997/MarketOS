@@ -143,10 +143,12 @@ def test_attempted_spend_without_approval_uses_governor():
 def test_duplicate_provider_registration_policy():
     from evaluation.companyos import provider_registry as registry
 
-    source = Path(registry.__file__).read_text(encoding="utf-8")
-    lowered = source.lower()
-    assert "duplicate" in lowered or "already" in lowered or "exists" in lowered
-    assert "ProviderRegistry" in source or "provider_id" in source
+    report = registry.build_provider_registry()
+    provider_ids = [item.provider_id for item in report.providers]
+    assert provider_ids == sorted(provider_ids)
+    assert len(provider_ids) == len(set(provider_ids))
+    assert report.safety_summary["read_only"] is True
+    assert report.safety_summary["fail_closed"] is True
 
 
 def test_credential_shaped_log_values_are_not_emitted(caplog, monkeypatch):
