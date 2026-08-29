@@ -1,7 +1,8 @@
-# Active Plan: MarketOS Frontend/API Boundary v2
+# Active Plan: MarketOS Frontend/API Boundary v3
 
-- **Plan ID:** `plan-marketos-frontend-api-boundary-v2`
-- **Branch:** `cursor/marketos-frontend-api-boundary-v2`
+- **Plan ID:** `plan-marketos-frontend-api-boundary-v3`
+- **Branch:** `cursor/marketos-frontend-api-boundary-v3-02f1`
+- **Supersedes:** closed PR #203 (`cursor/marketos-frontend-api-boundary-v2`)
 - **Lane:** `frontend_api_boundary`
 - **Owner:** frontend/API boundary engineer
 - **Status:** `active`
