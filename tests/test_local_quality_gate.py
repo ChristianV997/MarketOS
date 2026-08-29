@@ -376,6 +376,8 @@ def test_missing_frontend_dependencies_are_unavailable(monkeypatch, tmp_path):
     frontend = next(item for item in report["checks"] if item["name"] == "frontend")
     assert frontend["status"] == "unavailable"
     assert frontend["classification"] == gate.CLASS_UNAVAILABLE_DEPENDENCY
+    build = next(item for item in frontend["checks"] if item["name"] == "frontend:build")
+    assert build["classification"] == gate.CLASS_UNAVAILABLE_DEPENDENCY
     assert report["status"] == "unavailable"
 
 

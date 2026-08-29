@@ -609,7 +609,8 @@ def _classify_check(item: dict[str, Any], *, baseline_statuses: Mapping[str, str
     if status == "missing":
         return CLASS_MISSING_TOOL
     if status == "unavailable":
-        if item.get("name") == "frontend" and any(child.get("status") == "unavailable" for child in item.get("checks", [])):
+        reason = str(item.get("reason") or "")
+        if "depend" in reason or (item.get("name") == "frontend" and any(child.get("status") == "unavailable" for child in item.get("checks", []))):
             return CLASS_UNAVAILABLE_DEPENDENCY
         return CLASS_MISSING_TOOL
     if status == "blocked":
