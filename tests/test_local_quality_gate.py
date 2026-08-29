@@ -279,6 +279,7 @@ def test_frontend_dependency_unavailability_is_explicit(monkeypatch, tmp_path):
     report = gate.run_quality_gate(root, generated_at="2026-08-27T12:00:00+00:00", execute=True, changed_paths=[], ci_result={"status": "success", "executed_steps": 1}, runner=_passing_runner)
     frontend = next(item for item in report["checks"] if item["name"] == "frontend")
     assert frontend["status"] == "unavailable"
+    assert frontend["execution_status"] == "not_executed"
     assert frontend["classification"] == gate.CLASS_UNAVAILABLE_DEPENDENCY
     assert report["status"] == "unavailable"
 
