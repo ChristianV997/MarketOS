@@ -51,11 +51,13 @@ PY
 | --- | --- |
 | `completed` | Valid inputs; economics computed offline |
 | `blocked` | Invalid inputs rejected before margin math |
+| `failed` | Calculator failure; economics not completed |
 
 | Result verdict | Meaning |
 | --- | --- |
 | `profitable` / `breakeven` / `loss` | Implemented margin-calculator outcome |
 | `invalid_input` | Service-boundary validation failed |
+| `calculation_failed` | Margin math failed; envelope must not be `completed` |
 | `unknown` | Margin calculator unavailable or returned no status |
 
 ## Safety boundaries

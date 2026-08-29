@@ -77,6 +77,8 @@ class TestUnitEconomicsLowRiskPilot:
       assert envelope.status == "completed"
       assert result.base_margin
       assert result.dry_run is True
+      assert envelope.proposed_spend == 0.0
+      assert envelope.actual_spend == 0.0
 
   def test_unsafe_margin_calculator_failure_never_raises(self, monkeypatch):
       def _boom(*_args, **_kwargs):
@@ -115,6 +117,13 @@ class TestUnitEconomicsLowRiskPilot:
       assert result.verdict == "invalid_input"
       assert envelope.status == "blocked"
       assert "supplier_cost must be finite" in result.validation_errors
+
+  def test_boolean_input_is_blocked(self):
+      result, envelope = run_unit_economics("Widget", supplier_cost=True, retail_price=40.0)  # type: ignore[arg-type]
+
+      assert result.verdict == "invalid_input"
+      assert envelope.status == "blocked"
+      assert any("supplier_cost must be numeric" in reason for reason in envelope.blocked_reasons)
 
   def test_calculator_failure_is_not_reported_as_completed(self, monkeypatch):
       def _boom(*_args, **_kwargs):
