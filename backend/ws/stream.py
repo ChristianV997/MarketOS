@@ -6,6 +6,7 @@ Features
 - Deterministic event envelopes with sequence_id + replay_hash.
 - Heartbeat frames for long-lived command-center sessions.
 - Compatibility with legacy payload-only frontend consumers.
+- Client disconnect ends the handler so TestClient and process teardown stay bounded.
 """
 from __future__ import annotations
 
@@ -55,6 +56,14 @@ class WebSocketStream:
         last_hb = time.time()
 
         while True:
+            incoming = await self._receive_or_idle(ws)
+            if incoming is False:
+                return
+            if isinstance(incoming, dict):
+                incoming_type = incoming.get("type")
+                if incoming_type in {"websocket.disconnect", "websocket.close"}:
+                    return
+
             try:
                 envelopes = await asyncio.to_thread(
                     broker.consume,
@@ -84,8 +93,17 @@ class WebSocketStream:
                 except Exception:
                     return
 
-            if not envelopes:
-                await asyncio.sleep(self._idle_sleep_s)
+            if not envelopes and incoming is None:
+                await asyncio.sleep(0)
+
+    async def _receive_or_idle(self, ws: Any):
+        """Wait briefly for a client frame so disconnect can end the loop."""
+        try:
+            return await asyncio.wait_for(ws.receive(), timeout=self._idle_sleep_s)
+        except TimeoutError:
+            return None
+        except Exception:
+            return False
 
     def _load_replay_payloads(self, broker: Any) -> list[str]:
         """Return recent event envelopes for websocket hydration."""
