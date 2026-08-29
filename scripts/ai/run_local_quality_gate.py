@@ -78,6 +78,7 @@ PYTEST_COUNTS = {
     "xfailed": re.compile(r"(\d+)\s+xfailed"),
     "warnings": re.compile(r"(\d+)\s+warnings?"),
 }
+RUFF_FINDING_RE = re.compile(r"(?:^|\s)[A-Z]\d{3}(?:\s|$)")
 
 
 def _optional_phase1_summary() -> tuple[dict[str, Any], dict[str, Any]]:
@@ -358,7 +359,10 @@ def _command_summary(name: str, stdout: str, stderr: str, returncode: int) -> di
                 summary[key] = int(matches[-1])
         return summary
     if name == "ruff":
-        finding_count = sum(1 for line in combined.splitlines() if re.search(r":\d+:\d+:\s*[A-Z]\d+", line))
+        # Ruff's default formatter puts the diagnostic code at the beginning
+        # of a line, while concise output includes file coordinates first.
+        # Count both formats so a failed run cannot look like zero findings.
+        finding_count = sum(1 for line in combined.splitlines() if RUFF_FINDING_RE.search(line))
         return {"finding_count": finding_count}
     if name == "security":
         try:

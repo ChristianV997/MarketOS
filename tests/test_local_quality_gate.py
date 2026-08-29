@@ -242,6 +242,16 @@ def test_security_finding_is_not_treated_as_semgrep_success(monkeypatch, tmp_pat
     assert security["summary"]["finding_count"] == 1
 
 
+def test_ruff_summary_counts_default_and_concise_diagnostics():
+    summary = gate._command_summary(
+        "ruff",
+        "F401 [*] unused import\napi/example.py:10:4: F821 undefined name",
+        "",
+        1,
+    )
+    assert summary["finding_count"] == 2
+
+
 def test_dirty_and_untracked_state_is_reported(monkeypatch, tmp_path):
     monkeypatch.setattr(gate, "git_lines", lambda *args, **kwargs: ["M tracked.py", "?? scratch.txt"])
     report = gate.run_quality_gate(tmp_path, generated_at="2026-08-27T12:00:00+00:00")
