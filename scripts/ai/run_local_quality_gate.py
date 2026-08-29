@@ -32,6 +32,17 @@ EXIT_FAILED = 1
 EXIT_UNAVAILABLE = 2
 EXIT_CONFIGURATION = 3
 
+CLASS_PASS = "pass"
+CLASS_CHANGED_SCOPE_FAILURE = "changed_scope_failure"
+CLASS_PRE_EXISTING_FAILURE = "pre_existing_failure"
+CLASS_FAILURE_ORIGIN_UNVERIFIED = "failure_origin_unverified"
+CLASS_MISSING_TOOL = "missing_tool"
+CLASS_UNAVAILABLE_DEPENDENCY = "unavailable_dependency"
+CLASS_CI_UNAVAILABLE = "ci_unavailable"
+CLASS_SECURITY_FINDING = "security_finding"
+CLASS_TIMEOUT = "timeout"
+CLASS_MALFORMED_CONFIGURATION = "malformed_configuration"
+
 CHECK_ORDER = ("compile", "pytest", "ruff", "typed", "frontend", "security", "diff_check")
 FRONTEND_CHECK_ORDER = ("lint", "typecheck", "test", "build")
 KNOWN_LOCKFILES = (
@@ -558,14 +569,77 @@ def _security_check(root: Path, *, execute: bool, runner: CommandRunner | None) 
 
 def _ci_snapshot(ci_result: Mapping[str, Any] | None) -> dict[str, Any]:
     if not ci_result:
-        return {"status": "unavailable", "reason": "external_ci_not_queried", "executed_steps": 0}
+        return {"status": "unavailable", "reason": "external_ci_not_queried", "executed_steps": 0, "classification": CLASS_CI_UNAVAILABLE}
     status = str(ci_result.get("status", "")).casefold()
     steps = int(ci_result.get("executed_steps", 0) or 0)
     if status == "success" and steps > 0:
-        return {"status": "passed", "reason": "injected_ci_evidence", "executed_steps": steps}
+        return {"status": "passed", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_PASS}
     if status == "failure" and steps > 0:
-        return {"status": "failed", "reason": "injected_ci_evidence", "executed_steps": steps}
-    return {"status": "unavailable", "reason": "ci_report_has_no_executed_steps", "executed_steps": steps}
+        return {"status": "failed", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_FAILURE_ORIGIN_UNVERIFIED}
+    return {"status": "unavailable", "reason": "ci_report_has_no_executed_steps", "executed_steps": steps, "classification": CLASS_CI_UNAVAILABLE}
+
+
+def _baseline_statuses(baseline_report: Mapping[str, Any] | None) -> dict[str, str]:
+    """Extract only check statuses from an operator-supplied baseline report."""
+    if not isinstance(baseline_report, Mapping):
+        return {}
+    raw_checks = baseline_report.get("checks", baseline_report)
+    if isinstance(raw_checks, list):
+        entries = ((item.get("name"), item) for item in raw_checks if isinstance(item, Mapping))
+    elif isinstance(raw_checks, Mapping):
+        entries = raw_checks.items()
+    else:
+        return {}
+    statuses: dict[str, str] = {}
+    for name, value in entries:
+        if not isinstance(name, str):
+            continue
+        status = value if isinstance(value, str) else value.get("status") if isinstance(value, Mapping) else None
+        if isinstance(status, str) and status:
+            statuses[name] = status
+    return statuses
+
+
+def _classify_check(item: dict[str, Any], *, baseline_statuses: Mapping[str, str], changed_paths: list[str]) -> str:
+    status = item.get("status")
+    if status == "passed":
+        return CLASS_PASS
+    if status == "malformed":
+        return CLASS_MALFORMED_CONFIGURATION
+    if status == "missing":
+        return CLASS_MISSING_TOOL
+    if status == "unavailable":
+        if item.get("name") == "frontend" and any(child.get("status") == "unavailable" for child in item.get("checks", [])):
+            return CLASS_UNAVAILABLE_DEPENDENCY
+        return CLASS_MISSING_TOOL
+    if status == "blocked":
+        return "blocked"
+    if status == "failed":
+        if item.get("reason") == "timeout":
+            return CLASS_TIMEOUT
+        if item.get("name") == "security" and (item.get("summary") or {}).get("finding_count"):
+            return CLASS_SECURITY_FINDING
+        baseline_status = baseline_statuses.get(str(item.get("name")))
+        if baseline_status == "failed":
+            return CLASS_PRE_EXISTING_FAILURE
+        if baseline_status in {"passed", "not_configured"} and changed_paths:
+            return CLASS_CHANGED_SCOPE_FAILURE
+        return CLASS_FAILURE_ORIGIN_UNVERIFIED
+    return str(status or "not_run")
+
+
+def _annotate_check_classes(checks: list[dict[str, Any]], *, baseline_statuses: Mapping[str, str], changed_paths: list[str]) -> list[str]:
+    classes: list[str] = []
+    for item in checks:
+        classification = _classify_check(item, baseline_statuses=baseline_statuses, changed_paths=changed_paths)
+        item["classification"] = classification
+        classes.append(classification)
+        for child in item.get("checks", []):
+            if isinstance(child, dict):
+                child_classification = _classify_check(child, baseline_statuses=baseline_statuses, changed_paths=changed_paths)
+                child["classification"] = child_classification
+                classes.append(child_classification)
+    return sorted(set(classes))
 
 
 def _timestamp_status(generated_at: str | None) -> tuple[bool, str | None]:
@@ -585,6 +659,8 @@ def run_quality_gate(
     execute: bool = False,
     changed_paths: list[str] | None = None,
     ci_result: Mapping[str, Any] | None = None,
+    baseline_report: Mapping[str, Any] | None = None,
+    baseline_error: str | None = None,
     runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     """Discover and optionally execute the existing local quality checks.
@@ -608,6 +684,8 @@ def run_quality_gate(
         configuration_errors.append(timestamp_error)
     if execute and not timestamp_injected:
         configuration_errors.append("timestamp_not_injected")
+    if baseline_error:
+        configuration_errors.append(baseline_error)
 
     checks: list[dict[str, Any]] = [
         _check_command("compile", [sys.executable, "-m", "compileall", "-q", "."], root=root, execute=execute, runner=runner),
@@ -618,7 +696,20 @@ def run_quality_gate(
         _security_check(root, execute=execute, runner=runner),
         _check_command("diff_check", ["git", "diff", "--check"], root=root, execute=execute, runner=runner),
     ]
+    for item in checks:
+        if item.get("status") == "malformed":
+            configuration_errors.append(f"malformed:{item.get('name')}")
+    baseline_statuses = _baseline_statuses(baseline_report)
+    check_classifications = _annotate_check_classes(checks, baseline_statuses=baseline_statuses, changed_paths=paths)
     ci = _ci_snapshot(ci_result)
+    failure_classes = {
+        classification
+        for classification in check_classifications
+        if classification not in {CLASS_PASS, "not_configured", "not_run"}
+    }
+    if ci["classification"] != CLASS_PASS:
+        failure_classes.add(ci["classification"])
+    failure_classes = sorted(failure_classes)
     git = _git_state(root)
     warnings = list(toolchain["findings"])
     if dependencies["lockfile_status"] == "missing":
@@ -648,12 +739,35 @@ def run_quality_gate(
         status, exit_code = "passed", EXIT_PASSED
 
     ready = execute and status == "passed" and git["status"] == "clean" and ci["status"] == "passed"
+    if configuration_errors:
+        classification = CLASS_MALFORMED_CONFIGURATION
+    elif not execute:
+        classification = CLASS_PASS
+    elif failure_classes:
+        priority = (
+            CLASS_MALFORMED_CONFIGURATION,
+            CLASS_TIMEOUT,
+            CLASS_SECURITY_FINDING,
+            CLASS_CHANGED_SCOPE_FAILURE,
+            CLASS_PRE_EXISTING_FAILURE,
+            CLASS_FAILURE_ORIGIN_UNVERIFIED,
+            CLASS_MISSING_TOOL,
+            CLASS_UNAVAILABLE_DEPENDENCY,
+            CLASS_CI_UNAVAILABLE,
+            "blocked",
+            CLASS_PASS,
+        )
+        classification = next((value for value in priority if value in failure_classes), failure_classes[0])
+    else:
+        classification = CLASS_PASS
     return {
         "schema": QUALITY_GATE_SCHEMA,
         "generated_at": generated_at,
         "timestamp_injected": timestamp_injected,
         "mode": "real_execution" if execute else "dry_run",
         "status": status,
+        "classification": classification,
+        "failure_classes": failure_classes,
         "exit_code": exit_code,
         "ready_for_supervised_use": ready,
         "changed_files": paths,
@@ -664,6 +778,7 @@ def run_quality_gate(
         "check_order": list(CHECK_ORDER),
         "frontend_check_order": list(FRONTEND_CHECK_ORDER),
         "ci": ci,
+        "baseline": {"provided": baseline_report is not None, "check_statuses": dict(sorted(baseline_statuses.items()))},
         "git_state": git,
         "warnings": warnings,
         "configuration_errors": sorted(set(configuration_errors)),
@@ -692,17 +807,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--generated-at", help="timezone-aware ISO timestamp injected by the caller")
     parser.add_argument("--ci-status", choices=("success", "failure", "unavailable"), help="optional external CI result; never queried by this tool")
     parser.add_argument("--ci-steps", type=int, default=0, help="executed-step count accompanying --ci-status")
+    parser.add_argument("--baseline-file", help="optional JSON baseline report used to classify pre-existing failures")
     parser.add_argument("--json", action="store_true"); parser.add_argument("--markdown", action="store_true"); parser.add_argument("--output")
     args = parser.parse_args(argv)
     if args.json and args.markdown: parser.error("choose --json or --markdown")
     paths = list(args.changed_file) + (changed_from_git(args.repository) if args.from_git else [])
     ci_result = None if args.ci_status is None else {"status": args.ci_status, "executed_steps": args.ci_steps}
+    baseline_report = None
+    baseline_error = None
+    if args.baseline_file:
+        try:
+            baseline_report = json.loads(Path(args.baseline_file).read_text(encoding="utf-8"))
+            if not isinstance(baseline_report, Mapping):
+                baseline_report = None
+                baseline_error = "malformed_baseline"
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            baseline_error = "malformed_baseline"
     report = run_quality_gate(
         args.repository,
         generated_at=args.generated_at,
         execute=args.execute,
         changed_paths=paths,
         ci_result=ci_result,
+        baseline_report=baseline_report,
+        baseline_error=baseline_error,
     )
     report["planning_summary"] = run(paths, diff_text=_diff_text(args.diff_file), branch=args.branch)
     content = render_json_or_markdown(report, markdown=args.markdown, title="MarketOS local quality gate")

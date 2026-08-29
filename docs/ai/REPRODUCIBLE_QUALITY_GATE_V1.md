@@ -42,6 +42,16 @@ Each check reports `passed`, `failed`, `missing`, `unavailable`,
 tool availability, and bounded numeric summaries only. Raw stdout and stderr
 are intentionally absent from the report.
 
+Each check also has a deterministic `classification`. Passing checks use
+`pass`; missing executables use `missing_tool`; absent installed dependencies
+use `unavailable_dependency`; Semgrep findings use `security_finding`; command
+timeouts use `timeout`; and malformed inputs use `malformed_configuration`.
+A failed local check is classified as `changed_scope_failure` or
+`pre_existing_failure` only when the operator supplies explicit baseline
+evidence. Without that evidence it is `failure_origin_unverified`, never an
+invented attribution. The aggregate report retains all classifications in
+`failure_classes` so baseline Ruff findings and other blockers remain visible.
+
 Stable process exit codes are:
 
 | Code | Meaning |
@@ -80,8 +90,17 @@ credential, deployment, or installation markers are blocked.
 The gate never queries external CI. Operators may inject a CI result with
 `--ci-status` and `--ci-steps` or through `ci_result` in Python. A failure with
 zero executed steps is classified as `unavailable`, not as a test failure or a
-pass. Local dirty and untracked state is reported as counts, without retaining
+  pass, and carries the `ci_unavailable` classification. Local dirty and
+  untracked state is reported as counts, without retaining
 the raw status transcript.
+
+To attribute a new failure to a changed scope, provide a prior structured gate
+report through `--baseline-file`. The file is reduced to check names and status
+values; its raw contents are never copied into the output. A current failure
+against a baseline `passed` check and a non-empty changed scope is a
+`changed_scope_failure`. A baseline `failed` check is `pre_existing_failure`.
+If the baseline is absent or does not identify the check, the origin remains
+unverified and readiness stays false.
 
 ## Safety and Evidence Modes
 

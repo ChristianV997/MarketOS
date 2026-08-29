@@ -82,6 +82,7 @@ deployment authorities are unchanged. Human review remains required.
 - `python -m pytest -q tests/test_local_quality_gate.py tests/test_ai_dev_stack.py tests/test_agentic_operating_layer.py`
 - `python scripts/ai/run_local_quality_gate.py --from-git --execute --generated-at 2026-08-28T12:00:00+00:00 --json`
 - `python scripts/ai/run_local_quality_gate.py --from-git --generated-at 2026-08-28T12:00:00+00:00 --markdown`
+- `python scripts/ai/run_local_quality_gate.py --from-git --execute --baseline-file <prior-gate-report.json> --generated-at 2026-08-28T12:00:00+00:00 --json`
 - `python scripts/ai/session_finish.py --dry-run`
 - `git diff --check`
 
@@ -93,6 +94,8 @@ deployment authorities are unchanged. Human review remains required.
 - [ ] CI failures with zero executed steps are unavailable rather than successful.
 - [ ] Dirty and untracked state, secret redaction, malformed configuration,
       Python-version mismatch, deterministic replay, and dry-run behavior are tested.
+- [ ] Failed checks are classified as changed-scope or pre-existing only from
+      explicit baseline evidence; otherwise their origin remains unverified.
 - [ ] Real local execution output and fixture-injected output are clearly
       distinguished in the handoff.
 

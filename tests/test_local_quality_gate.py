@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -148,6 +149,8 @@ def test_real_gate_all_tools_available_has_stable_order_and_structured_results(m
     assert all(item["status"] in {"passed", "not_configured"} for item in report["checks"])
     assert report["checks"][1]["summary"] == {"passed": 4, "failed": 0, "skipped": 1, "xfailed": 0, "warnings": 0}
     assert report["checks"][4]["status"] == "passed"
+    assert report["classification"] == gate.CLASS_PASS
+    assert all(item["classification"] in {gate.CLASS_PASS, "not_configured"} for item in report["checks"])
     assert [item["name"] for item in report["checks"][4]["checks"]] == [
         "frontend:lint", "frontend:typecheck", "frontend:test", "frontend:build"
     ]
@@ -167,6 +170,7 @@ def test_missing_tool_is_unavailable_not_a_pass(monkeypatch, tmp_path):
     )
     ruff = next(item for item in report["checks"] if item["name"] == "ruff")
     assert ruff["status"] == "missing"
+    assert ruff["classification"] == gate.CLASS_MISSING_TOOL
     assert report["status"] == "unavailable"
     assert report["exit_code"] == gate.EXIT_UNAVAILABLE
 
@@ -189,6 +193,7 @@ def test_failed_test_is_distinguished_from_missing_tool(monkeypatch, tmp_path):
     )
     pytest_result = next(item for item in report["checks"] if item["name"] == "pytest")
     assert pytest_result["status"] == "failed"
+    assert pytest_result["classification"] == gate.CLASS_FAILURE_ORIGIN_UNVERIFIED
     assert pytest_result["summary"]["failed"] == 1
     assert report["exit_code"] == gate.EXIT_FAILED
 
@@ -213,6 +218,7 @@ def test_failed_frontend_check_is_reported_without_running_other_scripts(monkeyp
     frontend = next(item for item in report["checks"] if item["name"] == "frontend")
     build = next(item for item in frontend["checks"] if item["name"] == "frontend:build")
     assert build["status"] == "failed"
+    assert build["classification"] == gate.CLASS_FAILURE_ORIGIN_UNVERIFIED
     assert frontend["status"] == "failed"
     assert report["exit_code"] == gate.EXIT_FAILED
 
@@ -239,6 +245,7 @@ def test_security_finding_is_not_treated_as_semgrep_success(monkeypatch, tmp_pat
     )
     security = next(item for item in report["checks"] if item["name"] == "security")
     assert security["status"] == "failed"
+    assert security["classification"] == gate.CLASS_SECURITY_FINDING
     assert security["summary"]["finding_count"] == 1
 
 
@@ -274,6 +281,7 @@ def test_ci_without_executed_steps_is_unavailable(monkeypatch, tmp_path):
         runner=_passing_runner,
     )
     assert report["ci"]["status"] == "unavailable"
+    assert report["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
     assert report["status"] == "unavailable"
     assert report["exit_code"] == gate.EXIT_UNAVAILABLE
 
@@ -288,7 +296,12 @@ def test_ci_failure_with_executed_steps_is_a_failure(monkeypatch, tmp_path):
         ci_result={"status": "failure", "executed_steps": 2},
         runner=_passing_runner,
     )
-    assert report["ci"] == {"status": "failed", "reason": "injected_ci_evidence", "executed_steps": 2}
+    assert report["ci"] == {
+        "status": "failed",
+        "reason": "injected_ci_evidence",
+        "executed_steps": 2,
+        "classification": gate.CLASS_FAILURE_ORIGIN_UNVERIFIED,
+    }
     assert report["status"] == "failed"
     assert report["exit_code"] == gate.EXIT_FAILED
 
@@ -319,6 +332,72 @@ def test_unsafe_frontend_script_is_blocked_without_execution(monkeypatch, tmp_pa
     assert build["reason"] == "script_not_in_local_allowlist"
     assert frontend["status"] == "failed"
     assert not any(command[0] == "npm" and command[1:3] == ["run", "build"] for command in calls)
+
+
+def test_baseline_evidence_distinguishes_changed_scope_and_pre_existing_failures(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+
+    def runner(command, root):
+        joined = " ".join(command)
+        if "pytest" in joined:
+            return _result(1, "1 failed")
+        if "ruff" in joined:
+            return _result(1, "scripts/ai/example.py:1: F401 unused")
+        return _passing_runner(command, root)
+
+    report = gate.run_quality_gate(
+        _configured_root(tmp_path),
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=["scripts/ai/example.py"],
+        ci_result={"status": "success", "executed_steps": 1},
+        baseline_report={"checks": {"pytest": {"status": "passed"}, "ruff": {"status": "failed", "finding_count": 300}}},
+        runner=runner,
+    )
+    checks = {item["name"]: item for item in report["checks"]}
+    assert checks["pytest"]["classification"] == gate.CLASS_CHANGED_SCOPE_FAILURE
+    assert checks["ruff"]["classification"] == gate.CLASS_PRE_EXISTING_FAILURE
+    assert set(report["failure_classes"]) >= {gate.CLASS_CHANGED_SCOPE_FAILURE, gate.CLASS_PRE_EXISTING_FAILURE}
+    assert report["baseline"] == {"provided": True, "check_statuses": {"pytest": "passed", "ruff": "failed"}}
+
+
+def test_missing_frontend_dependencies_are_unavailable(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    (root / "frontend" / "node_modules").rmdir()
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=_passing_runner,
+    )
+    frontend = next(item for item in report["checks"] if item["name"] == "frontend")
+    assert frontend["status"] == "unavailable"
+    assert frontend["classification"] == gate.CLASS_UNAVAILABLE_DEPENDENCY
+    assert report["status"] == "unavailable"
+
+
+def test_timeout_is_not_a_pass(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+
+    def runner(command, root):
+        if "pytest" in " ".join(command):
+            raise subprocess.TimeoutExpired(command, timeout=1)
+        return _passing_runner(command, root)
+
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=runner,
+    )
+    pytest_result = next(item for item in report["checks"] if item["name"] == "pytest")
+    assert pytest_result["classification"] == gate.CLASS_TIMEOUT
+    assert report["status"] == "failed"
 
 
 def test_cli_emits_deterministic_json_and_markdown(tmp_path, capsys):
@@ -370,6 +449,7 @@ def test_malformed_configuration_is_a_configuration_error(tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.ruff\n", encoding="utf-8")
     report = gate.run_quality_gate(tmp_path, generated_at="2026-08-27T12:00:00+00:00")
     assert report["status"] == "configuration_error"
+    assert report["classification"] == gate.CLASS_MALFORMED_CONFIGURATION
     assert report["exit_code"] == gate.EXIT_CONFIGURATION
     assert "malformed:pyproject.toml" in report["configuration_errors"]
 
@@ -396,5 +476,6 @@ def test_dry_run_is_explicitly_not_a_success_claim(tmp_path):
     report = gate.run_quality_gate(tmp_path, generated_at="2026-08-27T12:00:00+00:00")
     assert report["mode"] == "dry_run"
     assert report["status"] == "dry_run"
+    assert report["classification"] == gate.CLASS_PASS
     assert report["ready_for_supervised_use"] is False
     assert all(item["status"] in {"not_run", "not_configured"} for item in report["checks"])
