@@ -11,8 +11,15 @@ SHOP_URL = os.getenv("SHOPIFY_STORE_URL")
 ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
 
 
+def _is_dry_run() -> bool:
+    """Dry-run unless SHOPIFY_DRY_RUN=false AND credentials are present."""
+    if os.getenv("SHOPIFY_DRY_RUN", "true").lower() != "false":
+        return True
+    return not (SHOP_URL and ACCESS_TOKEN)
+
+
 def init_shopify():
-    if not SHOP_URL or not ACCESS_TOKEN or shopify is None:
+    if _is_dry_run() or not SHOP_URL or not ACCESS_TOKEN or shopify is None:
         return False
 
     session = shopify.Session(SHOP_URL, API_VERSION, ACCESS_TOKEN)
