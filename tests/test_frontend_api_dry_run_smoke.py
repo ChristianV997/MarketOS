@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import socket
 import subprocess
 from pathlib import Path
@@ -25,6 +26,13 @@ FORBIDDEN_ACTIVATION = (
     "shopify.Order.create",
     "openai.OpenAI(",
 )
+
+
+def _npm_executable() -> str:
+    """Resolve npm's native Windows launcher for shell-free subprocess calls."""
+    if shutil.which("npm.cmd"):
+        return "npm.cmd"
+    return "npm"
 
 
 class InertThread:
@@ -224,7 +232,7 @@ def test_frontend_build_when_dependencies_installed():
     if not node_modules.is_dir():
         pytest.skip("unavailable: frontend/node_modules missing; no npm install attempted in smoke")
     build = subprocess.run(
-        ["npm", "run", "build"],
+        [_npm_executable(), "run", "build"],
         cwd=FRONTEND,
         capture_output=True,
         text=True,
