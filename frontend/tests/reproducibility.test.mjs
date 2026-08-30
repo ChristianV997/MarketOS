@@ -36,6 +36,9 @@ test("API helpers share base-url resolution and fail closed on non-OK responses"
 
 test("websocket hook reconnects and ignores malformed frames", () => {
   assert.match(wsSource, /RECONNECT_MS/);
+  assert.match(wsSource, /MAX_RECONNECT_ATTEMPTS/);
+  assert.match(wsSource, /attemptsRef\.current >= MAX_RECONNECT_ATTEMPTS/);
+  assert.match(wsSource, /attemptsRef\.current = 0/);
   assert.match(wsSource, /malformed frames are ignored/);
   assert.match(wsSource, /\/ws/);
   assert.match(wsSource, /reconnectTimerRef/);

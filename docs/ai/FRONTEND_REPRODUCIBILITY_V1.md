@@ -19,8 +19,9 @@ There is no `lint` script because no supported linter configuration is
 committed.
 
 The Node tests verify lockfile alignment, unsafe script markers, API base-url
-sharing, websocket reconnect semantics, and Vite proxy coverage. They do not
-start a server or call a provider.
+sharing, bounded websocket reconnect/teardown semantics, and Vite proxy coverage.
+The websocket teardown tests are source/facsimile contract checks, not a React
+runtime harness. They do not start a server or call a provider.
 
 ## Backend and environment boundaries
 

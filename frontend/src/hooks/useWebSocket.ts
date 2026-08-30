@@ -8,6 +8,7 @@ import type { RuntimeEnvelope, WsEvent } from "../types";
 // (it fell back to polling via react-query, which masked the bug).
 const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 const RECONNECT_MS = [1000, 2000, 4000, 8000, 16000];
+const MAX_RECONNECT_ATTEMPTS = RECONNECT_MS.length;
 const FLUSH_MS = 50;
 const MAX_BATCH = 32;
 
@@ -112,7 +113,10 @@ export function useWebSocket(onMessage: (e: WsEvent) => void) {
       if (!activeRef.current) {
         return;
       }
-      const delay = RECONNECT_MS[Math.min(attemptsRef.current, RECONNECT_MS.length - 1)];
+      if (attemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
+        return;
+      }
+      const delay = RECONNECT_MS[attemptsRef.current];
       attemptsRef.current += 1;
       clearReconnectTimer();
       reconnectTimerRef.current = window.setTimeout(() => {
