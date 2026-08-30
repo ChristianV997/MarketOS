@@ -53,6 +53,41 @@ Every parse/normalize/evidence decision is delegated to
 whitespace-normalized input query only — no live keyword-suggestion call is
 made in this release.
 
+## Canonical `ProductResearchProvider` integration (this update)
+
+Two additions make the adapter directly usable by anything that already
+speaks `backend.contracts.adapters.ProductResearchProvider`'s
+`async def discover(query, *, context) -> Sequence[Mapping[str, Any]]`
+shape, without a second Protocol or registry:
+
+- **`discover(query, *, context, request_kind=...)`** (module-level
+  `async` function) — dry-run: returns every normalized search/shopping/
+  competitor signal already produced by `fetch_search_evidence`, as plain
+  mappings, each enriched with `request_kind` and `readiness_state` so a
+  caller sees query lineage, source method, confidence, and limitations
+  without re-deriving them from the nested report. Live
+  (`context.dry_run=False`): returns a single-element sequence containing
+  the structured `blocked_live_mode` result — the network is never called.
+- **`DataForSEOResearchAdapter`** — a stateless class wrapper (`health()` +
+  `async def discover(...)`) around the same module functions, for callers
+  that prefer an instance over free functions. Holds no registry entry and
+  no state of its own; a fresh instance is always behaviorally identical to
+  calling the free functions directly.
+- **`signals_to_additional_evidence(signals)`** — the per-signal
+  counterpart to `to_additional_evidence`: shapes a `discover()` result into
+  `{"dataforseo_signals": [...]}` for `ResearchCandidate.additional_evidence`.
+  The two helpers use distinct keys (`"dataforseo"` vs. `"dataforseo_signals"`)
+  and can coexist on the same candidate without collision.
+
+Both `discover()` and `DataForSEOResearchAdapter.discover()` are `async`
+only for Protocol conformance — no I/O occurs; everything is delegated to
+the same offline, instantaneous builder. Default Commerce MVP behavior is
+unchanged when this adapter is not supplied: `build_research_candidates(...)`
+called with no `additional_evidence_by_id` still produces candidates with
+`additional_evidence == {}`, exactly as before this adapter existed
+(verified by `test_build_research_candidates_default_behavior_unchanged_without_dataforseo`
+in `tests/test_dataforseo_product_research_integration.py`).
+
 ## Evidence mapping
 
 `to_additional_evidence(evidence)` shapes a `DataForSEOSearchEvidence` into

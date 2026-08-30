@@ -31,12 +31,21 @@ Output attaches to `backend.mvp_commerce.product_research.ResearchCandidate
 future source... attached without changing [ResearchCandidate's] shape."
 Nothing here constructs a `ResearchCandidate` directly; the caller decides
 which candidate a result attaches to.
+
+`discover()` (module function) and `DataForSEOResearchAdapter` (a thin,
+stateless class wrapper around it) structurally satisfy
+`backend.contracts.adapters.ProductResearchProvider`'s
+`async def discover(query, *, context) -> Sequence[Mapping[str, Any]]`
+signature -- no second Protocol, no second registry. Both are `async` only
+for Protocol conformance; no I/O occurs, since everything is delegated to
+the same offline, instantaneous builder `fetch_search_evidence` already
+uses.
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field as dataclass_field
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from backend.contracts.adapters import AdapterHealth, SidecarContext
 from evaluation.commerce.dataforseo_adapter import (
@@ -188,6 +197,73 @@ def to_additional_evidence(evidence: DataForSEOSearchEvidence) -> dict[str, Any]
     return {"dataforseo": evidence.to_dict()}
 
 
+def signals_to_additional_evidence(signals: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Shape a `discover()` result sequence for
+    `ResearchCandidate.additional_evidence` -- the per-signal counterpart to
+    `to_additional_evidence`, which wraps a single aggregate
+    `DataForSEOSearchEvidence` instead. Additive only: does not replace or
+    change `to_additional_evidence`'s existing "dataforseo" key."""
+    return {"dataforseo_signals": list(signals)}
+
+
+async def discover(
+    query: str,
+    *,
+    context: SidecarContext,
+    request_kind: str = DEFAULT_REQUEST_KIND,
+) -> Sequence[Mapping[str, Any]]:
+    """Structurally satisfies
+    `backend.contracts.adapters.ProductResearchProvider.discover` (same
+    `async def discover(query, *, context) -> Sequence[Mapping[str, Any]]`
+    signature) without introducing a second Protocol, registry, or parser.
+    Entirely offline and instantaneous -- `async` only for Protocol
+    conformance, no actual I/O occurs.
+
+    Dry-run (`context.dry_run=True`, the default): returns each normalized
+    search/shopping/competitor signal already produced by the existing
+    offline builder (via `fetch_search_evidence`), as plain mappings, each
+    enriched with `request_kind` and `readiness_state` so a caller sees
+    query lineage, source method, confidence, limitations, and readiness
+    state without re-deriving them. No raw provider-shaped payload is ever
+    included -- every mapping here is already the sanitized, normalized
+    signal shape `evaluation.commerce.dataforseo_adapter` produces.
+
+    Live (`context.dry_run=False`): returns a single-element sequence
+    containing the structured `blocked_live_mode` result -- the network is
+    never called, matching `fetch_search_evidence`'s fail-closed behavior.
+    """
+    evidence = fetch_search_evidence(query, context=context, request_kind=request_kind)
+    if evidence.status == "blocked_live_mode":
+        return (evidence.to_dict(),)
+
+    parsed = evidence.report.get("parse_result", {})
+    records: list[dict[str, Any]] = []
+    for key in ("search_signals", "shopping_signals", "competitor_signals"):
+        for signal in parsed.get(key, ()):
+            record = dict(signal)
+            record["request_kind"] = evidence.request_kind
+            record["readiness_state"] = evidence.readiness_state
+            records.append(record)
+    return tuple(records)
+
+
+class DataForSEOResearchAdapter:
+    """Thin class wrapper structurally satisfying
+    `backend.contracts.adapters.ProductResearchProvider` for callers that
+    prefer an instance over free functions (e.g. a future caller iterating
+    over several `ProductResearchProvider`-shaped sources uniformly). Holds
+    no state and no registry entry of its own -- it delegates every call to
+    the module-level functions above, which remain independently usable."""
+
+    name = SOURCE
+
+    def health(self) -> AdapterHealth:
+        return health()
+
+    async def discover(self, query: str, *, context: SidecarContext) -> Sequence[Mapping[str, Any]]:
+        return await discover(query, context=context)
+
+
 def health() -> AdapterHealth:
     return AdapterHealth(
         name=SOURCE,
@@ -202,8 +278,11 @@ __all__ = [
     "SOURCE",
     "DEFAULT_REQUEST_KIND",
     "DataForSEOSearchEvidence",
+    "DataForSEOResearchAdapter",
     "fetch_search_evidence",
     "discover_search_queries",
+    "discover",
     "to_additional_evidence",
+    "signals_to_additional_evidence",
     "health",
 ]
