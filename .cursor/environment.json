@@ -5,13 +5,13 @@
   "terminals": [
     {
       "name": "backend",
-      "command": ". .venv/bin/activate && uvicorn backend.api:app --host 0.0.0.0 --port 3000",
-      "description": "FastAPI backend + background decision loop (http://localhost:3000)."
+      "command": ". .venv/bin/activate && uvicorn backend.api:app --host 127.0.0.1 --port 3000",
+      "description": "FastAPI backend + background decision loop (http://127.0.0.1:3000)."
     },
     {
       "name": "frontend",
-      "command": "npm --prefix frontend run dev -- --host",
-      "description": "Vite React dashboard, proxies /api and /ws to the backend (http://localhost:5173)."
+      "command": "npm --prefix frontend run dev -- --host 127.0.0.1",
+      "description": "Vite React dashboard, proxies /api and /ws to the backend (http://127.0.0.1:5173)."
     }
   ],
   "ports": [
