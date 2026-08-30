@@ -36,13 +36,15 @@ when the scanner exits zero.
 
 The status vocabulary is stable and included in the report as
 `status_taxonomy`: `passed`, `failed`, `unavailable`, `timed_out`, `not_run`,
-`not_configured`, `collection_failed`, `blocked`, and `malformed`. Pytest
+`not_configured`, `collection_failed`, `blocked`, `malformed`, and
+`ci_unavailable`. Pytest
 collection errors are detected separately from test failures. A collection
 error with a missing-import marker is classified as `unavailable_dependency`;
-other collection errors are `collection_failed`. A malformed or non-zero
-security scanner result is `security_scanner_failure` unless findings are
-present, in which case it is `security_finding`. Failed whitespace validation
-is `diff_failure`. Timeouts retain status `timed_out` and never become passes.
+other collection errors are `collection_failed`. A malformed security scanner
+result is `malformed`; a non-zero scanner result with valid output is
+`security_scanner_failure` unless findings are present, in which case it is
+`security_finding`. Failed whitespace validation is `diff_failure`. Timeouts
+retain status `timed_out` and never become passes.
 
 An operator-supplied baseline may classify a current failure as
 `pre_existing_failure`. A current failure with changed paths and a passing
@@ -62,9 +64,9 @@ process exits are:
 
 | Exit | Stable meaning |
 |---:|---|
-| `0` | dry-run or all observed checks passed; inspect readiness separately |
+| `0` | all observed checks passed; inspect readiness separately |
 | `1` | observed failure, collection failure, security finding/scanner failure, diff failure, timeout, blocked safety state, or unverified failure |
-| `2` | missing tool/dependency or unavailable CI |
+| `2` | missing tool/dependency, checks not run, or unavailable CI |
 | `3` | malformed request, baseline, or repository configuration |
 
 `ready_for_supervised_use` is true only for an executed report with passed

@@ -10,8 +10,6 @@ permissions:
 
 jobs:
   agentic-quality-gate:
-    # Advisory until the gate has a measured false-positive baseline.
-    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -29,10 +27,12 @@ jobs:
       - name: Compile agentic tooling
         run: python -m compileall -q scripts tests
       - name: Run local quality gate
-        run: python scripts/ai/run_local_quality_gate.py --from-git --json
+        run: |
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "quality_gate_generated_at: ${generated_at}" >> "$GITHUB_STEP_SUMMARY"
+          python scripts/ai/run_local_quality_gate.py --from-git --execute --generated-at "$generated_at" --markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Write advisory summary
         run: |
-          python scripts/ai/run_local_quality_gate.py --from-git --markdown >> "$GITHUB_STEP_SUMMARY"
           python scripts/ai/select_tests.py --from-git --markdown >> "$GITHUB_STEP_SUMMARY"
           python scripts/ai/ci_matrix_plan.py --from-git --markdown >> "$GITHUB_STEP_SUMMARY"
           python scripts/ai/phase_gate.py --markdown >> "$GITHUB_STEP_SUMMARY"

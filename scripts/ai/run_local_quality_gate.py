@@ -45,7 +45,7 @@ CLASS_SECURITY_SCANNER_FAILURE = "security_scanner_failure"
 CLASS_DIFF_FAILURE = "diff_failure"
 CLASS_COLLECTION_FAILED = "collection_failed"
 CLASS_TIMEOUT = "timeout"
-CLASS_MALFORMED_CONFIGURATION = "malformed_configuration"
+CLASS_MALFORMED_CONFIGURATION = "malformed"
 
 CHECK_ORDER = ("compile", "pytest", "ruff", "typed", "frontend", "security", "diff_check")
 FRONTEND_CHECK_ORDER = ("lint", "typecheck", "test", "build")
@@ -81,7 +81,7 @@ DEPENDENCY_ERROR_RE = re.compile(
 RUFF_FINDING_RE = re.compile(r"(?:^|\s)[A-Z]\d{3}(?:\s|$)")
 CHECK_STATUS_TAXONOMY = (
     "passed", "failed", "unavailable", "timed_out", "not_run", "not_configured",
-    "collection_failed", "blocked", "malformed",
+    "collection_failed", "blocked", "malformed", "ci_unavailable",
 )
 
 
@@ -423,7 +423,7 @@ def _check_command(
         "command": _display_command(actual_command),
         "tool": tool,
         "availability": "available" if available else "missing",
-        "status": "not_run" if not execute else "missing" if not available else "pending",
+        "status": "not_run" if not execute else "unavailable" if not available else "pending",
         "execution_status": "not_executed" if not execute or not available else "pending",
         "timeout": False,
     }
@@ -434,7 +434,7 @@ def _check_command(
     try:
         completed = _invoke_local(actual_command, root, runner)
     except (FileNotFoundError, OSError):
-        result.update({"status": "missing", "availability": "missing", "execution_status": "not_executed", "reason": "tool_invocation_failed"})
+        result.update({"status": "unavailable", "availability": "missing", "execution_status": "not_executed", "reason": "tool_invocation_failed"})
         return result
     except subprocess.TimeoutExpired:
         result.update({"status": "timed_out", "execution_status": "timed_out", "timeout": True, "reason": "timeout"})
@@ -443,7 +443,9 @@ def _check_command(
     stderr = str(getattr(completed, "stderr", "") or "")
     returncode = int(getattr(completed, "returncode", 1))
     summary = _command_summary(name, stdout, stderr, returncode)
-    if returncode == 0:
+    if name == "security" and summary.get("output_parse") != "valid_json":
+        status = "malformed"
+    elif returncode == 0:
         status = "passed"
     elif name == "pytest" and summary.get("collection_failed"):
         status = "collection_failed"
@@ -451,7 +453,7 @@ def _check_command(
         status = "unavailable"
     else:
         status = "failed"
-    if semantic_failure and semantic_failure(summary):
+    if status != "malformed" and semantic_failure and semantic_failure(summary):
         status = "failed"
     result.update({
         "status": status,
@@ -474,8 +476,6 @@ def _typed_check(root: Path, typed: dict[str, Any], *, execute: bool, runner: Co
         status = "failed"
     elif "timed_out" in statuses:
         status = "timed_out"
-    elif "missing" in statuses:
-        status = "missing"
     elif "unavailable" in statuses:
         status = "unavailable"
     elif not execute:
@@ -483,7 +483,7 @@ def _typed_check(root: Path, typed: dict[str, Any], *, execute: bool, runner: Co
     else:
         status = "passed"
     execution_status = "timed_out" if any(item.get("execution_status") == "timed_out" for item in subchecks) else "executed" if any(item.get("execution_status") == "executed" for item in subchecks) else "not_executed"
-    availability = "missing" if "missing" in statuses else "unavailable" if "unavailable" in statuses else "available"
+    availability = "unavailable" if "unavailable" in statuses else "available"
     return {"name": "typed", "status": status, "availability": availability, "execution_status": execution_status, "subchecks": subchecks}
 
 
@@ -533,7 +533,7 @@ def _frontend_check(root: Path, *, execute: bool, runner: CommandRunner | None) 
         if not execute:
             checks.append({"name": f"frontend:{script_name}", "command": _display_command(command), "status": "not_run", "availability": "available" if manager_available else "missing", "execution_status": "not_executed"})
         elif not manager_available:
-            checks.append({"name": f"frontend:{script_name}", "command": _display_command(command), "status": "missing", "availability": "missing", "execution_status": "not_executed", "reason": "package_manager_missing"})
+            checks.append({"name": f"frontend:{script_name}", "command": _display_command(command), "status": "unavailable", "availability": "missing", "execution_status": "not_executed", "reason": "package_manager_missing"})
         elif not dependencies_available:
             checks.append({"name": f"frontend:{script_name}", "command": _display_command(command), "status": "unavailable", "availability": "available", "execution_status": "not_executed", "reason": "dependencies_not_installed_network_not_attempted"})
         elif not _safe_frontend_script(script):
@@ -542,11 +542,13 @@ def _frontend_check(root: Path, *, execute: bool, runner: CommandRunner | None) 
             checks.append(_check_command(f"frontend:{script_name}", command, root=frontend, execute=True, tool=manager, runner=runner))
     configured = [item for item in checks if item["status"] != "not_configured"]
     statuses = {item["status"] for item in configured}
-    if "blocked" in statuses or "failed" in statuses:
+    if "blocked" in statuses:
+        status = "blocked"
+    elif "failed" in statuses:
         status = "failed"
     elif "timed_out" in statuses:
         status = "timed_out"
-    elif "missing" in statuses or "unavailable" in statuses:
+    elif "unavailable" in statuses:
         status = "unavailable"
     elif not configured:
         status = "not_configured"
@@ -564,7 +566,13 @@ def _frontend_check(root: Path, *, execute: bool, runner: CommandRunner | None) 
 
 def _security_check(root: Path, *, execute: bool, runner: CommandRunner | None) -> dict[str, Any]:
     if not (root / "semgrep" / "ai-safety.yml").is_file():
-        return {"name": "security", "status": "not_configured", "availability": "not_applicable", "execution_status": "not_executed"}
+        return {
+            "name": "security",
+            "status": "unavailable" if execute else "not_run",
+            "availability": "missing",
+            "execution_status": "not_executed",
+            "reason": "security_policy_missing",
+        }
     return _check_command(
         "security", [sys.executable, "scripts/ai/run_semgrep_policy.py", "--json"], root=root, execute=execute,
         tool="semgrep", runner=runner, semantic_failure=lambda summary: bool(summary.get("finding_count") or summary.get("error_count")),
@@ -623,8 +631,6 @@ def _classify_check(item: dict[str, Any], *, baseline_statuses: Mapping[str, str
         return CLASS_PASS
     if status == "malformed":
         return CLASS_MALFORMED_CONFIGURATION
-    if status == "missing":
-        return CLASS_MISSING_TOOL
     if status == "timed_out":
         return CLASS_TIMEOUT
     if status == "collection_failed":
@@ -655,10 +661,25 @@ def _classify_check(item: dict[str, Any], *, baseline_statuses: Mapping[str, str
         baseline_status = baseline_statuses.get(str(item.get("name")))
         if baseline_status == "failed":
             return CLASS_PRE_EXISTING_FAILURE
-        if baseline_status in {"passed", "not_configured"} and changed_paths:
+        if baseline_status in {"passed", "not_configured"} and _changed_scope_supports_check(str(item.get("name")), changed_paths):
             return CLASS_CHANGED_SCOPE_FAILURE
         return CLASS_FAILURE_ORIGIN_UNVERIFIED
     return str(status or "not_run")
+
+
+def _changed_scope_supports_check(name: str, changed_paths: list[str]) -> bool:
+    """Only attribute failures to changed scope when the path types support it."""
+    base_name = name.split(":", 1)[0]
+    paths = [path.casefold() for path in changed_paths]
+    if base_name in {"compile", "pytest", "ruff", "typed"}:
+        return any(path.endswith((".py", ".pyi")) or path in {"pyproject.toml", "pytest.ini"} for path in paths)
+    if base_name == "frontend":
+        return any(path.startswith("frontend/") for path in paths)
+    if base_name == "security":
+        return any(not path.startswith(("docs/", "tests/")) for path in paths)
+    if base_name == "diff_check":
+        return bool(paths)
+    return False
 
 
 def _annotate_check_classes(checks: list[dict[str, Any]], *, baseline_statuses: Mapping[str, str], changed_paths: list[str]) -> list[str]:
@@ -750,10 +771,10 @@ def run_quality_gate(
     if configuration_errors:
         status, exit_code = "configuration_error", EXIT_CONFIGURATION
     elif not execute:
-        status, exit_code = "dry_run", EXIT_PASSED
+        status, exit_code = "not_run", EXIT_UNAVAILABLE
     elif {"failed", "timed_out", "collection_failed"} & statuses or "blocked" in statuses or ci["status"] == "failed":
         status, exit_code = "failed", EXIT_FAILED
-    elif "missing" in statuses or "unavailable" in statuses or ci["status"] == "unavailable":
+    elif "unavailable" in statuses or ci["status"] == "unavailable":
         status, exit_code = "unavailable", EXIT_UNAVAILABLE
     elif warnings:
         status, exit_code = "passed_with_warnings", EXIT_PASSED
@@ -763,7 +784,7 @@ def run_quality_gate(
     if configuration_errors:
         classification = CLASS_MALFORMED_CONFIGURATION
     elif not execute:
-        classification = "dry_run"
+        classification = CLASS_CI_UNAVAILABLE if ci["status"] == "unavailable" else "not_run"
     elif failure_classes:
         priority = (
             CLASS_MALFORMED_CONFIGURATION, CLASS_SECURITY_FINDING, CLASS_SECURITY_SCANNER_FAILURE,

@@ -155,7 +155,7 @@ def test_missing_tool_is_unavailable_not_a_pass(monkeypatch, tmp_path):
     monkeypatch.setattr(gate, "_tool_prefix", lambda name: None if name == "ruff" else original_prefix(name))
     report = gate.run_quality_gate(tmp_path, generated_at="2026-08-27T12:00:00+00:00", execute=True, changed_paths=[], runner=_passing_runner, ci_result={"status": "success", "executed_steps": 1})
     ruff = next(item for item in report["checks"] if item["name"] == "ruff")
-    assert ruff["status"] == "missing"
+    assert ruff["status"] == "unavailable"
     assert ruff["classification"] == gate.CLASS_MISSING_TOOL
     assert report["status"] == "unavailable"
     assert report["exit_code"] == gate.EXIT_UNAVAILABLE
@@ -188,6 +188,27 @@ def test_changed_and_pre_existing_failures_require_baseline_evidence(monkeypatch
     assert checks["ruff"]["classification"] == gate.CLASS_PRE_EXISTING_FAILURE
     assert set(report["failure_classes"]) >= {gate.CLASS_CHANGED_SCOPE_FAILURE, gate.CLASS_PRE_EXISTING_FAILURE}
     assert report["baseline"]["check_statuses"] == {"pytest": "passed", "ruff": "failed"}
+
+
+def test_unrelated_changed_paths_do_not_prove_changed_scope(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+
+    def runner(command, root):
+        if "pytest" in " ".join(command):
+            return _result(1, "1 failed")
+        return _passing_runner(command, root)
+
+    report = gate.run_quality_gate(
+        _configured_root(tmp_path),
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=["docs/README.md"],
+        ci_result={"status": "success", "executed_steps": 1},
+        baseline_report={"checks": {"pytest": {"status": "passed"}}},
+        runner=runner,
+    )
+    pytest_result = next(item for item in report["checks"] if item["name"] == "pytest")
+    assert pytest_result["classification"] == gate.CLASS_FAILURE_ORIGIN_UNVERIFIED
 
 
 def test_failure_without_baseline_has_unverified_origin(monkeypatch, tmp_path):
@@ -250,15 +271,16 @@ def test_collection_dependency_scanner_and_diff_outcomes_remain_distinct(monkeyp
     assert checks["pytest"]["summary"]["collection_failed"] is True
     assert checks["pytest"]["summary"]["dependency_error"] is True
     assert checks["pytest"]["classification"] == gate.CLASS_UNAVAILABLE_DEPENDENCY
-    assert checks["security"]["classification"] == gate.CLASS_SECURITY_SCANNER_FAILURE
+    assert checks["security"]["status"] == "malformed"
+    assert checks["security"]["classification"] == gate.CLASS_MALFORMED_CONFIGURATION
     assert checks["diff_check"]["classification"] == gate.CLASS_DIFF_FAILURE
     assert set(report["failure_classes"]) >= {
         gate.CLASS_UNAVAILABLE_DEPENDENCY,
-        gate.CLASS_SECURITY_SCANNER_FAILURE,
+        gate.CLASS_MALFORMED_CONFIGURATION,
         gate.CLASS_DIFF_FAILURE,
     }
-    assert report["status"] == "failed"
-    assert report["exit_code"] == gate.EXIT_FAILED
+    assert report["status"] == "configuration_error"
+    assert report["exit_code"] == gate.EXIT_CONFIGURATION
 
 
 def test_collection_failure_without_dependency_is_explicit(monkeypatch, tmp_path):
@@ -280,6 +302,26 @@ def test_collection_failure_without_dependency_is_explicit(monkeypatch, tmp_path
     pytest_result = next(item for item in report["checks"] if item["name"] == "pytest")
     assert pytest_result["status"] == "collection_failed"
     assert pytest_result["classification"] == gate.CLASS_COLLECTION_FAILED
+
+
+def test_missing_security_policy_is_unavailable_and_blocks(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    (root / "semgrep" / "ai-safety.yml").unlink()
+
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=_passing_runner,
+    )
+    security = next(item for item in report["checks"] if item["name"] == "security")
+    assert security["status"] == "unavailable"
+    assert security["classification"] == gate.CLASS_MISSING_TOOL
+    assert report["exit_code"] == gate.EXIT_UNAVAILABLE
+    assert report["ready_for_supervised_use"] is False
 
 
 def test_lint_text_with_import_error_word_is_not_dependency_failure():
@@ -457,6 +499,7 @@ def test_unsafe_frontend_script_is_blocked_before_execution(monkeypatch, tmp_pat
     frontend_result = next(item for item in report["checks"] if item["name"] == "frontend")
     test_result = next(item for item in frontend_result["checks"] if item["name"] == "frontend:test")
     assert frontend_result["classification"] == "blocked"
+    assert frontend_result["status"] == "blocked"
     assert test_result["status"] == "blocked"
     assert test_result["reason"] == "script_not_in_local_allowlist"
     assert not any("frontend:test" in " ".join(command) for command in called)
@@ -464,10 +507,10 @@ def test_unsafe_frontend_script_is_blocked_before_execution(monkeypatch, tmp_pat
 
 def test_dry_run_and_cli_baseline_are_not_false_successes(tmp_path, capsys):
     timestamp = "2026-08-27T12:00:00+00:00"
-    assert gate.main(["--repository", str(tmp_path), "--generated-at", timestamp, "--json"]) == gate.EXIT_PASSED
+    assert gate.main(["--repository", str(tmp_path), "--generated-at", timestamp, "--json"]) == gate.EXIT_UNAVAILABLE
     payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "dry_run"
-    assert payload["classification"] == "dry_run"
+    assert payload["status"] == "not_run"
+    assert payload["classification"] == gate.CLASS_CI_UNAVAILABLE
     assert payload["ready_for_supervised_use"] is False
 
     bad_baseline = tmp_path / "bad-baseline.json"
