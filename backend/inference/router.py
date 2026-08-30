@@ -90,24 +90,6 @@ class InferenceRouter:
         self._cache_lock = Lock()
         self._provider_failure_backoff_s = max(0.0, provider_failure_backoff_s)
         self._provider_failed_until: dict[str, float] = {}
-        self._ensure_ollama_model()
-
-    def _ensure_ollama_model(self) -> None:
-        """Best-effort: if OllamaProvider is active, make sure its configured
-        model is pulled. Never blocks or raises — router construction must
-        succeed even when Ollama is unreachable."""
-        if not any(p.name == "ollama" for p in self._providers):
-            return
-        try:
-            from ..ollama_manager import OllamaManager
-            model = os.getenv("OLLAMA_MODEL", "mistral:7b")
-            manager = OllamaManager()
-            # ensure_running() is a no-op health check unless OLLAMA_AUTO_START=true,
-            # in which case it also attempts to start the daemon when unhealthy.
-            if manager.ensure_running():
-                manager.ensure_model(model)
-        except Exception as exc:
-            _log.debug("ollama_ensure_model_startup_skipped error=%s", exc)
 
     # ── completion ────────────────────────────────────────────────────────────
 
@@ -148,7 +130,7 @@ class InferenceRouter:
                     )
                 _log.warning(
                     "inference_provider_failed provider=%s seq=%s error=%s",
-                    provider_name, request.sequence_id, exc,
+                    provider_name, request.sequence_id, type(exc).__name__,
                 )
                 _emit_failed(request, decision, provider_name, exc)
 
@@ -185,7 +167,7 @@ class InferenceRouter:
             except NotImplementedError:
                 continue  # AirLLM raises this — skip silently
             except Exception as exc:
-                _log.warning("embed_failed provider=%s error=%s", provider_name, exc)
+                _log.warning("embed_failed provider=%s error=%s", provider_name, type(exc).__name__)
 
         # Fallback: MockProvider always works
         return MockProvider().embed(request)
@@ -221,7 +203,7 @@ class InferenceRouter:
                 _emit_completed(request, response, decision)
                 return response
             except Exception as exc:
-                _log.warning("stream_provider_failed provider=%s error=%s", provider_name, exc)
+                _log.warning("stream_provider_failed provider=%s error=%s", provider_name, type(exc).__name__)
 
         mock     = MockProvider()
         response = mock.complete(request)
@@ -287,6 +269,6 @@ def _emit_failed(
 ) -> None:
     try:
         from .telemetry import emit_inference_failed
-        emit_inference_failed(request, decision, provider_name, str(error))
+        emit_inference_failed(request, decision, provider_name, type(error).__name__)
     except Exception as exc:
         _log.debug("telemetry_emit_failed error=%s", exc)

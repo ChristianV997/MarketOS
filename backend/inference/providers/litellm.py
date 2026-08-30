@@ -29,17 +29,25 @@ _MODEL   = os.getenv("LITELLM_MODEL", "openai/gpt-4o-mini")
 _TIMEOUT = float(os.getenv("LITELLM_TIMEOUT_S", "30"))
 
 
+_EXPLICIT_ENABLED = os.getenv("LITELLM_ENABLED", "false").lower() == "true"
+
 class LiteLLMProvider(BaseProvider):
     """Thin wrapper around litellm.completion — enables any provider with one import."""
 
     name = "litellm"
 
     def is_available(self) -> bool:
+        if not _EXPLICIT_ENABLED:
+            return False
         try:
             import litellm  # noqa: F401
             return True
         except ImportError:
             return False
+
+    def probe(self) -> bool:
+        # LiteLLM availability check must not perform provider calls
+        return self.is_available()
 
     def complete(self, request: InferenceRequest) -> InferenceResponse:
         import litellm  # noqa: PLC0415

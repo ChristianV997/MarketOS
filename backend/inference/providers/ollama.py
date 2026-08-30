@@ -32,12 +32,12 @@ class OllamaProvider(BaseProvider):
     # ── availability ─────────────────────────────────────────────────────────
 
     def is_available(self) -> bool:
-        try:
-            import httpx
-            r = httpx.get(f"{_BASE}/api/tags", timeout=_HEALTH_TIMEOUT)
-            return r.status_code == 200
-        except Exception:
-            return False
+        from ...ollama_manager import OllamaManager
+        return OllamaManager().is_enabled()
+
+    def probe(self) -> bool:
+        from ...ollama_manager import OllamaManager
+        return OllamaManager().probe_health() == "ready"
 
     # ── inference ─────────────────────────────────────────────────────────────
 
