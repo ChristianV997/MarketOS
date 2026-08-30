@@ -35,8 +35,17 @@ export function useWebSocket(onMessage: (e: WsEvent) => void) {
   const attemptsRef = useRef(0);
   const queueRef = useRef<WsEvent[]>([]);
   const flushTimerRef = useRef<number | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const activeRef = useRef(true);
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
 
   const flushQueue = useCallback(() => {
     const queued = queueRef.current.splice(0, MAX_BATCH);
@@ -74,10 +83,11 @@ export function useWebSocket(onMessage: (e: WsEvent) => void) {
   }, [flushQueue]);
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (!activeRef.current || wsRef.current?.readyState === WebSocket.OPEN) {
       return;
     }
 
+    clearReconnectTimer();
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
@@ -98,25 +108,40 @@ export function useWebSocket(onMessage: (e: WsEvent) => void) {
 
     ws.onclose = () => {
       setConnected(false);
+      wsRef.current = null;
+      if (!activeRef.current) {
+        return;
+      }
       const delay = RECONNECT_MS[Math.min(attemptsRef.current, RECONNECT_MS.length - 1)];
       attemptsRef.current += 1;
-      setTimeout(connect, delay);
+      clearReconnectTimer();
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        connect();
+      }, delay);
     };
 
     ws.onerror = () => ws.close();
-  }, [scheduleFlush]);
+  }, [clearReconnectTimer, scheduleFlush]);
 
   useEffect(() => {
+    activeRef.current = true;
+
     connect();
 
     return () => {
+      activeRef.current = false;
+      clearReconnectTimer();
       if (flushTimerRef.current !== null) {
         window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
       }
 
-      wsRef.current?.close();
+      const ws = wsRef.current;
+      wsRef.current = null;
+      ws?.close();
     };
-  }, [connect]);
+  }, [clearReconnectTimer, connect]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {

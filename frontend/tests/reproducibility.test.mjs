@@ -38,6 +38,9 @@ test("websocket hook reconnects and ignores malformed frames", () => {
   assert.match(wsSource, /RECONNECT_MS/);
   assert.match(wsSource, /malformed frames are ignored/);
   assert.match(wsSource, /\/ws/);
+  assert.match(wsSource, /reconnectTimerRef/);
+  assert.match(wsSource, /clearReconnectTimer/);
+  assert.match(wsSource, /activeRef\.current = false/);
 });
 
 test("vite dev proxy forwards backend root routes and websocket path", () => {
