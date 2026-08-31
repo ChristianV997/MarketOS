@@ -2,7 +2,7 @@
 
 Ollama lifecycle operations require an explicit opt-in configuration.
 This module separates deterministic readiness metadata from an explicit local-loopback probe.
-The normal readiness path is completely offline. An explicit probe path is available 
+The normal readiness path is completely offline. An explicit probe path is available
 for operator use but never runs by default.
 """
 from __future__ import annotations
@@ -12,8 +12,6 @@ import os
 import subprocess
 import time
 from typing import Any
-
-from backend.inference._utils import now_ms
 
 _log = logging.getLogger(__name__)
 
@@ -46,11 +44,11 @@ class OllamaManager:
     def __init__(self, base_url: str = _BASE) -> None:
         self._base = base_url
         self._enabled = _OLLAMA_ENABLED
-        
+
     def is_enabled(self) -> bool:
         """Deterministic offline metadata check."""
         return self._enabled
-        
+
     def probe_health(self) -> str:
         """Explicit local-loopback probe. Returns 'ready', 'unavailable', or 'blocked'."""
         if not self._enabled:
@@ -72,14 +70,14 @@ class OllamaManager:
             return True
         if not _AUTO_START:
             return False
-            
+
         try:
             subprocess.Popen(
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except Exception as exc:
+        except Exception:
             _log.warning("ollama_auto_start_failed")
             return False
 
@@ -100,18 +98,17 @@ class OllamaManager:
             r.raise_for_status()
             data = r.json()
             return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
-        except Exception as exc:
+        except Exception:
             return []
 
     def pull_model(self, name: str) -> bool:
         """Pull a model explicitly. No auto-retry loop, bounded timeout, no credential/prompt logging."""
         if not self._enabled:
             return False
-            
+
         if name in self.list_models():
             return True
-            
-        status = "error"
+
         try:
             import httpx
             with httpx.stream(
@@ -121,7 +118,6 @@ class OllamaManager:
                 resp.raise_for_status()
                 for _ in resp.iter_lines():
                     pass
-            status = "ok"
             return True
         except Exception:
             # Explicitly not logging raw prompt/model-output/credentials

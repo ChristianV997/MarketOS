@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from typing import Generator
 
 from .._utils import compute_replay_hash, now_ms

@@ -26,14 +26,13 @@ from collections import OrderedDict
 from threading import Lock
 from typing import Generator
 
-from ._utils import compute_replay_hash, now_ms
 from .models.inference_request  import InferenceRequest
 from .models.inference_response import InferenceResponse
 from .models.embedding_request  import EmbeddingRequest
 from .models.routing_decision   import RoutingDecision
 from .policies.routing_policy   import RoutingPolicy
 from .providers.base            import BaseProvider
-from .providers                 import REGISTRY, MockProvider
+from .providers                 import MockProvider
 
 _log = logging.getLogger(__name__)
 
