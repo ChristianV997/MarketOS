@@ -15,6 +15,7 @@ test("hook source cancels reconnect timers during unmount cleanup", () => {
   assert.match(wsSource, /clearReconnectTimer\(\)/);
   assert.match(wsSource, /if \(!activeRef\.current\)/);
   assert.match(wsSource, /MAX_RECONNECT_ATTEMPTS/);
+  assert.match(wsSource, /attemptsRef\.current = 0;/);
 });
 
 /**
@@ -64,12 +65,19 @@ function createReconnectLifecycle({ maxAttempts = MAX_RECONNECT_ATTEMPTS } = {})
     }, delay);
   };
 
+  const mount = () => {
+    active = true;
+    attempts = 0;
+    terminal = false;
+  };
+
   const teardown = () => {
     active = false;
     clearReconnectTimer();
   };
 
   return {
+    mount,
     onOpen,
     onClose,
     teardown,
@@ -146,6 +154,26 @@ test("facsimile: successful open resets attempts and allows reconnect again", ()
     mock.timers.tick(RECONNECT_DELAYS_MS[0]);
     assert.equal(lifecycle.connectCalls, 1);
     lifecycle.onOpen();
+    lifecycle.onClose();
+    mock.timers.tick(RECONNECT_DELAYS_MS[0]);
+    assert.equal(lifecycle.connectCalls, 2);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("facsimile: remount resets attempt budget after terminal cap", () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const lifecycle = createReconnectLifecycle({ maxAttempts: 1 });
+    lifecycle.onClose();
+    mock.timers.tick(RECONNECT_DELAYS_MS[0]);
+    assert.equal(lifecycle.connectCalls, 1);
+    lifecycle.onClose();
+    mock.timers.tick(20000);
+    assert.equal(lifecycle.terminal, true);
+    lifecycle.teardown();
+    lifecycle.mount();
     lifecycle.onClose();
     mock.timers.tick(RECONNECT_DELAYS_MS[0]);
     assert.equal(lifecycle.connectCalls, 2);

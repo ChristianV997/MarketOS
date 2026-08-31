@@ -15,6 +15,26 @@ test("api base helper preserves empty default for same-origin dev proxy", () => 
   assert.match(apiBaseSource, /\?\? ""/);
 });
 
+/** Facsimile of apiBase.ts helpers for executable normalization checks. */
+function resolveApiBaseUrl(baseUrl, legacyUrl) {
+  const base = baseUrl ?? legacyUrl ?? "";
+  return base.replace(/\/$/, "");
+}
+
+function joinApiPath(baseUrl, path) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${baseUrl}${normalizedPath}`;
+}
+
+test("api base URL normalization is deterministic", () => {
+  assert.equal(resolveApiBaseUrl(undefined, undefined), "");
+  assert.equal(resolveApiBaseUrl("https://api.example.com/", undefined), "https://api.example.com");
+  assert.equal(resolveApiBaseUrl(undefined, "https://legacy.example.com/"), "https://legacy.example.com");
+  assert.equal(joinApiPath("", "/metrics"), "/metrics");
+  assert.equal(joinApiPath("https://api.example.com", "metrics"), "https://api.example.com/metrics");
+  assert.equal(joinApiPath("https://api.example.com", "/api/events/readiness"), "https://api.example.com/api/events/readiness");
+});
+
 test("canonical and dashboard clients do not embed provider credentials", async () => {
   const forbidden = ["sk-live-", "ghp_", "SHOPIFY_ACCESS_TOKEN", "STRIPE_SECRET_KEY"];
   for (const path of ["../src/lib/api.ts", "../src/lib/canonicalEventsApi.ts", "../src/hooks/useWebSocket.ts"]) {

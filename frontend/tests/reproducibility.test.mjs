@@ -39,6 +39,7 @@ test("websocket hook reconnects and ignores malformed frames", () => {
   assert.match(wsSource, /MAX_RECONNECT_ATTEMPTS/);
   assert.match(wsSource, /attemptsRef\.current >= MAX_RECONNECT_ATTEMPTS/);
   assert.match(wsSource, /attemptsRef\.current = 0/);
+  assert.match(wsSource, /activeRef\.current = true;\s*\n\s*attemptsRef\.current = 0;/);
   assert.match(wsSource, /malformed frames are ignored/);
   assert.match(wsSource, /\/ws/);
   assert.match(wsSource, /reconnectTimerRef/);
@@ -49,6 +50,15 @@ test("websocket hook reconnects and ignores malformed frames", () => {
 test("vite dev proxy forwards backend root routes and websocket path", () => {
   assert.match(viteSource, /BACKEND_ROOT_PROXY/);
   assert.match(viteSource, /metrics\|snapshot/);
+  assert.match(viteSource, /health\|ready/);
   assert.match(viteSource, /"\/api"/);
   assert.match(viteSource, /"\/ws"/);
+});
+
+test("clean-clone script contract documents lockfile install", async () => {
+  const reproDoc = await readFile(new URL("../../docs/ai/FRONTEND_REPRODUCIBILITY_V1.md", import.meta.url), "utf8");
+  assert.match(reproDoc, /npm ci --ignore-scripts --no-audit --no-fund/);
+  assert.match(reproDoc, /npm run typecheck/);
+  assert.match(reproDoc, /npm test/);
+  assert.match(reproDoc, /npm run build/);
 });
