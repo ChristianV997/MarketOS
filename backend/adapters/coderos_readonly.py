@@ -297,12 +297,15 @@ class SanitizedAdapterReport:
         }
 
 
+def _redact_if_secret_like(value: str) -> str:
+    return "[redacted]" if _secret_like(value) else value
+
+
 def _sanitized_config(config: CoderOSAdapterConfig) -> dict[str, Any]:
     raw = config.to_dict()
     for key in ("coderos_root", "executable"):
-        if _secret_like(raw[key]):
-            raw[key] = "[redacted]"
-    raw["probe_args"] = ["[redacted]" if _secret_like(item) else item for item in raw["probe_args"]]
+        raw[key] = _redact_if_secret_like(raw[key])
+    raw["probe_args"] = [_redact_if_secret_like(item) for item in raw["probe_args"]]
     return raw
 
 
@@ -318,10 +321,16 @@ def _planned_action(config: CoderOSAdapterConfig, *, would_execute: bool, reason
         resolved_executable = str(_resolve_executable(config))
     except (OSError, ValueError):
         resolved_executable = config.executable
-    executable_display = "[redacted]" if _secret_like(resolved_executable) else resolved_executable
+    executable_display = _redact_if_secret_like(resolved_executable)
+    # planned_action.argv is a reviewable *display* of what would run, not
+    # the actual invocation -- it must never leak a secret-shaped
+    # probe_args element, even though the real subprocess call (in
+    # probe(), if mode="probe") correctly uses the raw config.probe_args
+    # value, since redacting the real invocation would break it.
+    sanitized_probe_args = tuple(_redact_if_secret_like(arg) for arg in config.probe_args)
     return PlannedAction(
         executable=executable_display,
-        argv=(executable_display, *config.probe_args),
+        argv=(executable_display, *sanitized_probe_args),
         working_directory=config.coderos_root or "",
         timeout_s=config.timeout_s,
         would_execute=would_execute,

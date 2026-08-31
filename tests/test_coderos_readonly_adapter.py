@@ -85,6 +85,36 @@ def test_correct_argv_construction_and_shell_false_mocked(monkeypatch, tmp_path)
     assert kwargs["cwd"] == str((tmp_path).resolve())
 
 
+def test_planned_action_argv_redacts_secret_shaped_probe_args(tmp_path):
+    """Regression: report.config already redacted secret-shaped probe_args,
+    but planned_action.argv previously leaked them verbatim -- the
+    "sanitized" report was not fully sanitized. The real subprocess
+    invocation (mode="probe") must still receive the raw, unredacted
+    value -- only the reviewable planned_action display is redacted."""
+    credential_shaped_value = "ghp_abcdefghijklmnopqrstuvwxyz012345"
+    config = adapter.CoderOSAdapterConfig(
+        coderos_root=str(tmp_path), probe_args=("--token", credential_shaped_value), mode="plan_only",
+    )
+    report = adapter.probe(config)
+    assert credential_shaped_value not in report.planned_action.argv
+    assert report.planned_action.argv[-1] == "[redacted]"
+    assert credential_shaped_value not in str(report.to_dict())
+    assert report.config["probe_args"][-1] == "[redacted]"
+
+
+def test_real_invocation_still_receives_raw_unredacted_probe_args(monkeypatch, tmp_path):
+    """The planned_action *display* redacts secret-shaped probe_args (see
+    test_planned_action_argv_redacts_secret_shaped_probe_args above), but
+    the actual subprocess call must still receive the real, unredacted
+    value -- redacting the real invocation would silently break it."""
+    credential_shaped_value = "ghp_abcdefghijklmnopqrstuvwxyz012345"
+    calls = _patch_run(monkeypatch, returncode=0, stdout=json.dumps({"capabilities": []}))
+    config = _probe_config(tmp_path, mode="probe", probe_args=("--token", credential_shaped_value))
+    adapter.probe(config)
+    argv, _kwargs = calls[0]
+    assert credential_shaped_value in argv
+
+
 def test_real_subprocess_end_to_end_argv_and_output(tmp_path):
     """No mock: a genuine local script proves the real subprocess path
     (argv list, shell=False) actually works, not just against a stub."""
