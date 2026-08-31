@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+import os
 import stat
 import subprocess
 
@@ -118,6 +119,8 @@ def test_real_invocation_still_receives_raw_unredacted_probe_args(monkeypatch, t
 def test_real_subprocess_end_to_end_argv_and_output(tmp_path):
     """No mock: a genuine local script proves the real subprocess path
     (argv list, shell=False) actually works, not just against a stub."""
+    if os.name == "nt":
+        pytest.skip("Unix shebang fixture is unavailable on Windows")
     script = tmp_path / "fake_coderos"
     script.write_text(
         "#!/usr/bin/env python3\n"
@@ -172,6 +175,16 @@ def test_missing_executable_is_unavailable(tmp_path):
 
 def test_executable_escaping_root_is_blocked(tmp_path):
     config = adapter.CoderOSAdapterConfig(coderos_root=str(tmp_path), executable="../escape", mode="probe")
+    report = adapter.probe(config)
+    assert report.probe_result.state == "blocked"
+
+
+def test_absolute_executable_escaping_root_is_blocked(tmp_path):
+    outside = tmp_path.parent / "outside-coderos"
+    outside.touch()
+    config = adapter.CoderOSAdapterConfig(
+        coderos_root=str(tmp_path), executable=str(outside), mode="probe"
+    )
     report = adapter.probe(config)
     assert report.probe_result.state == "blocked"
 

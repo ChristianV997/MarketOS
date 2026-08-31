@@ -311,7 +311,7 @@ def _sanitized_config(config: CoderOSAdapterConfig) -> dict[str, Any]:
 
 def _resolve_executable(config: CoderOSAdapterConfig) -> Path:
     if os.path.isabs(config.executable):
-        return Path(config.executable)
+        return Path(config.executable).resolve()
     root = Path(config.coderos_root).resolve() if config.coderos_root else Path(".").resolve()
     return (root / config.executable).resolve()
 
@@ -414,12 +414,11 @@ def probe(config: CoderOSAdapterConfig) -> SanitizedAdapterReport:
     root = Path(config.coderos_root).resolve()
     resolved_executable = _resolve_executable(config)
 
-    if not os.path.isabs(config.executable):
-        try:
-            resolved_executable.relative_to(root)
-        except ValueError:
-            return _report(config, planned=planned, state="blocked",
-                            warnings=("resolved executable escapes coderos_root",))
+    try:
+        resolved_executable.relative_to(root)
+    except ValueError:
+        return _report(config, planned=planned, state="blocked",
+                        warnings=("resolved executable escapes coderos_root",))
 
     if not resolved_executable.exists():
         return _report(config, planned=planned, state="unavailable",
