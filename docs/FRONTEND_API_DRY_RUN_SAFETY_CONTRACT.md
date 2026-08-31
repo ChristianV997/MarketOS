@@ -1,6 +1,6 @@
 # Frontend/API dry-run safety contract
 
-This contract binds the `cursor/marketos-frontend-api-boundary-v2` lane.
+This contract binds PR #213 (`codex/marketos-frontend-api-boundary-v5`).
 
 ## Posture
 
