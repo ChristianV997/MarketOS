@@ -22,7 +22,11 @@ class BaseProvider(ABC):
 
     @abstractmethod
     def is_available(self) -> bool:
-        """Return True if the provider can accept requests right now."""
+        """Return True if the provider is configured and available (offline check)."""
+
+    def probe(self) -> bool:
+        """Explicit network or state probe. Defaults to returning is_available()."""
+        return self.is_available()
 
     # ── inference ─────────────────────────────────────────────────────────────
 
