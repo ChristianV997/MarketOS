@@ -1,11 +1,15 @@
 """Tests for local inference safety boundaries."""
+import sys
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 from backend.inference.router import InferenceRouter
 from backend.ollama_manager import OllamaManager
 from backend.inference.providers.ollama import OllamaProvider
 from backend.inference.providers.litellm import LiteLLMProvider
 from backend.inference.models.inference_request import InferenceRequest
+from backend.inference.models.embedding_request import EmbeddingRequest
 
 def test_router_construction_offline():
     # Router construction must not perform network calls or start processes.
@@ -32,6 +36,42 @@ def test_litellm_availability_no_network():
     provider = LiteLLMProvider()
     # Just calling is_available shouldn't trigger anything network
     assert not provider.is_available() # Default disabled
+
+def test_disabled_ollama_direct_calls_fail_closed_without_http():
+    provider = OllamaProvider()
+    request = InferenceRequest(prompt="offline")
+    embedding = EmbeddingRequest(texts=["offline"])
+
+    with patch.object(provider, "is_available", return_value=False), \
+         patch("httpx.post") as mock_post, \
+         patch("httpx.stream") as mock_stream:
+        with pytest.raises(RuntimeError, match="disabled or unavailable"):
+            provider.complete(request)
+        with pytest.raises(RuntimeError, match="disabled or unavailable"):
+            provider.embed(embedding)
+        with pytest.raises(RuntimeError, match="disabled or unavailable"):
+            list(provider.stream(request))
+
+        mock_post.assert_not_called()
+        mock_stream.assert_not_called()
+
+def test_disabled_litellm_direct_calls_fail_closed_without_import_call():
+    provider = LiteLLMProvider()
+    request = InferenceRequest(prompt="offline")
+    embedding = EmbeddingRequest(texts=["offline"])
+    fake_litellm = MagicMock()
+
+    with patch.object(provider, "is_available", return_value=False), \
+         patch.dict(sys.modules, {"litellm": fake_litellm}):
+        with pytest.raises(RuntimeError, match="disabled or unavailable"):
+            provider.complete(request)
+        with pytest.raises(RuntimeError, match="disabled or unavailable"):
+            provider.embed(embedding)
+        with pytest.raises(RuntimeError, match="disabled or unavailable"):
+            list(provider.stream(request))
+
+    fake_litellm.completion.assert_not_called()
+    fake_litellm.embedding.assert_not_called()
 
 def test_explicit_probe_behavior():
     manager = OllamaManager()

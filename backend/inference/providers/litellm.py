@@ -50,6 +50,8 @@ class LiteLLMProvider(BaseProvider):
         return self.is_available()
 
     def complete(self, request: InferenceRequest) -> InferenceResponse:
+        if not self.is_available():
+            raise RuntimeError("litellm provider is disabled or unavailable")
         import litellm  # noqa: PLC0415
 
         model    = request.model if request.model != "default" else _MODEL
@@ -87,6 +89,8 @@ class LiteLLMProvider(BaseProvider):
         )
 
     def embed(self, request: EmbeddingRequest) -> list[list[float]]:
+        if not self.is_available():
+            raise RuntimeError("litellm provider is disabled or unavailable")
         import litellm, math  # noqa: PLC0415
 
         model = request.model if request.model != "default" else "openai/text-embedding-3-small"
@@ -103,6 +107,8 @@ class LiteLLMProvider(BaseProvider):
     def stream(
         self, request: InferenceRequest
     ) -> Generator[str, None, InferenceResponse]:
+        if not self.is_available():
+            raise RuntimeError("litellm provider is disabled or unavailable")
         import litellm  # noqa: PLC0415
 
         model    = request.model if request.model != "default" else _MODEL

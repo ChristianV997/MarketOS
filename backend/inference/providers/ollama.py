@@ -41,6 +41,8 @@ class OllamaProvider(BaseProvider):
     # ── inference ─────────────────────────────────────────────────────────────
 
     def complete(self, request: InferenceRequest) -> InferenceResponse:
+        if not self.is_available():
+            raise RuntimeError("ollama provider is disabled or unavailable")
         import httpx
 
         model    = request.model if request.model != "default" else _MODEL
@@ -79,6 +81,8 @@ class OllamaProvider(BaseProvider):
     # ── embeddings ────────────────────────────────────────────────────────────
 
     def embed(self, request: EmbeddingRequest) -> list[list[float]]:
+        if not self.is_available():
+            raise RuntimeError("ollama provider is disabled or unavailable")
         import httpx, math
 
         model   = request.model if request.model != "default" else _MODEL
@@ -102,6 +106,8 @@ class OllamaProvider(BaseProvider):
     def stream(
         self, request: InferenceRequest
     ) -> Generator[str, None, InferenceResponse]:
+        if not self.is_available():
+            raise RuntimeError("ollama provider is disabled or unavailable")
         import httpx
 
         model    = request.model if request.model != "default" else _MODEL
