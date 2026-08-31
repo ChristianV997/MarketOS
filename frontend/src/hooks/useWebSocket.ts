@@ -130,6 +130,7 @@ export function useWebSocket(onMessage: (e: WsEvent) => void) {
 
   useEffect(() => {
     activeRef.current = true;
+    attemptsRef.current = 0;
 
     connect();
 
