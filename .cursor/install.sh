@@ -8,7 +8,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
-  echo "ensurepip is unavailable; rebuild the Cloud Agent image with python3-venv instead of using apt-get here" >&2
+  echo "ensurepip is unavailable; rebuild the Cloud Agent image with python3-venv enabled" >&2
   exit 1
 fi
 
@@ -26,5 +26,7 @@ if [ ! -f "$lockfile" ]; then
 fi
 
 npm --prefix frontend ci --ignore-scripts --no-audit --no-fund
+
+bash "$repo_root/.cursor/validate.sh"
 
 echo "MarketOS environment ready."
