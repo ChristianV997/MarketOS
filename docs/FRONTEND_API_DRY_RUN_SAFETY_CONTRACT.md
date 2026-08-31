@@ -43,7 +43,9 @@ environment and asserts it never appears in responses.
 When the backend is down, the existing UI must not invent live state:
 
 - `PhaseHeader` shows `reconnecting` rather than `live`
-- `useWebSocket` reconnects with backoff and ignores malformed frames
+- `useWebSocket` reconnects with bounded backoff while mounted, stops after the cap,
+  resets attempts only after a confirmed open, ignores malformed frames, and cancels
+  pending reconnect timers on unmount
 - `canonicalEventsApi` throws `Unable to load operator events (<status>)`
 - `api.ts` throws `<status> <path>` and does not echo response bodies
 
