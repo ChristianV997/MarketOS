@@ -83,6 +83,15 @@ CHECK_STATUS_TAXONOMY = (
     "passed", "failed", "unavailable", "timed_out", "not_run", "not_configured",
     "collection_failed", "blocked", "malformed", "ci_unavailable",
 )
+CI_EVIDENCE_SCHEMA = "MarketOS.CIEvidence.v1"
+CI_EVIDENCE_RUN_STATUSES = {"queued", "in_progress", "completed", "waiting", "requested", "pending"}
+CI_EVIDENCE_CONCLUSIONS = {
+    "success", "failure", "neutral", "cancelled", "skipped", "timed_out",
+    "action_required", "stale", "startup_failure",
+}
+CI_EVIDENCE_CHECK_STATUSES = {"success", "failure", "neutral", "cancelled", "skipped", "pending"}
+CI_EVIDENCE_MAX_BYTES = 64 * 1024
+CI_EVIDENCE_MAX_JOBS = 100
 
 
 def _optional_phase1_summary() -> tuple[dict[str, Any], dict[str, Any]]:
@@ -579,14 +588,151 @@ def _security_check(root: Path, *, execute: bool, runner: CommandRunner | None) 
     )
 
 
+def _ci_evidence_error(reason: str) -> tuple[dict[str, Any], str]:
+    return {
+        "status": "malformed",
+        "reason": reason,
+        "executed_steps": 0,
+        "classification": CLASS_MALFORMED_CONFIGURATION,
+    }, "malformed_ci_evidence"
+
+
+def _validate_ci_mapping(value: Any, allowed: set[str]) -> bool:
+    return isinstance(value, Mapping) and not (set(value) - allowed)
+
+
+def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
+    """Load strict, sanitized CI metadata without importing logs or API behavior."""
+    try:
+        if path.stat().st_size > CI_EVIDENCE_MAX_BYTES:
+            return _ci_evidence_error("ci_evidence_too_large")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return _ci_evidence_error("unreadable_ci_evidence")
+    if not _validate_ci_mapping(payload, {"schema", "run", "jobs"}) or payload.get("schema") != CI_EVIDENCE_SCHEMA:
+        return _ci_evidence_error("invalid_ci_evidence_schema")
+
+    run = payload.get("run")
+    if not _validate_ci_mapping(run, {"status", "conclusion"}):
+        return _ci_evidence_error("invalid_ci_run_metadata")
+    run_status = run.get("status")
+    run_conclusion = run.get("conclusion")
+    if run_status not in CI_EVIDENCE_RUN_STATUSES or run_conclusion not in CI_EVIDENCE_CONCLUSIONS:
+        return _ci_evidence_error("invalid_ci_run_status")
+
+    raw_jobs = payload.get("jobs")
+    if not isinstance(raw_jobs, list) or not raw_jobs or len(raw_jobs) > CI_EVIDENCE_MAX_JOBS:
+        return _ci_evidence_error("ci_jobs_required")
+    normalized_jobs: list[dict[str, Any]] = []
+    allowed_job_fields = {
+        "name", "required", "status", "conclusion", "runner_id", "runner_name",
+        "steps_executed", "logs_available", "required_check_status",
+    }
+    for raw_job in raw_jobs:
+        if not _validate_ci_mapping(raw_job, allowed_job_fields):
+            return _ci_evidence_error("invalid_ci_job_metadata")
+        name = raw_job.get("name")
+        required = raw_job.get("required")
+        status = raw_job.get("status")
+        conclusion = raw_job.get("conclusion")
+        steps = raw_job.get("steps_executed")
+        logs_available = raw_job.get("logs_available")
+        required_check_status = raw_job.get("required_check_status")
+        runner_id = raw_job.get("runner_id")
+        runner_name = raw_job.get("runner_name")
+        if (
+            not isinstance(name, str) or not name.strip() or not isinstance(required, bool)
+            or status not in CI_EVIDENCE_RUN_STATUSES or conclusion not in CI_EVIDENCE_CONCLUSIONS
+            or not isinstance(steps, int) or isinstance(steps, bool) or steps < 0
+            or not isinstance(logs_available, bool)
+            or required_check_status not in CI_EVIDENCE_CHECK_STATUSES
+        ):
+            return _ci_evidence_error("invalid_ci_job_fields")
+        if runner_id is not None and (not isinstance(runner_id, int) or isinstance(runner_id, bool) or runner_id < 0):
+            return _ci_evidence_error("invalid_ci_runner_id")
+        if runner_name is not None and not isinstance(runner_name, str):
+            return _ci_evidence_error("invalid_ci_runner_name")
+        normalized_jobs.append({
+            "name": name.strip(),
+            "required": required,
+            "status": status,
+            "conclusion": conclusion,
+            "runner_id": runner_id,
+            "runner_name_present": bool(runner_name and runner_name.strip()),
+            "steps_executed": steps,
+            "logs_available": logs_available,
+            "required_check_status": required_check_status,
+        })
+    if not any(job["required"] for job in normalized_jobs):
+        return _ci_evidence_error("required_ci_job_missing")
+    return {
+        "evidence_format": CI_EVIDENCE_SCHEMA,
+        "run_status": run_status,
+        "run_conclusion": run_conclusion,
+        "jobs": normalized_jobs,
+    }, None
+
+
+def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
+    jobs: list[dict[str, Any]] = []
+    for job in ci_result["jobs"]:
+        runner_assigned = job["runner_id"] is not None and job["runner_id"] > 0
+        if not runner_assigned:
+            job_status, reason = "unavailable", "runner_unassigned"
+        elif job["steps_executed"] == 0:
+            job_status, reason = "unavailable", "ci_report_has_no_executed_steps"
+        elif not job["logs_available"]:
+            job_status, reason = "unavailable", "ci_logs_unavailable"
+        elif job["status"] != "completed":
+            job_status, reason = "unavailable", "ci_job_not_completed"
+        elif job["conclusion"] != "success" or job["required_check_status"] != "success":
+            job_status, reason = "failed", "ci_required_check_failed"
+        else:
+            job_status, reason = "passed", "observed_ci_success"
+        jobs.append({
+            "name": job["name"],
+            "required": job["required"],
+            "status": job_status,
+            "conclusion": job["conclusion"],
+            "required_check_status": job["required_check_status"],
+            "runner_assigned": runner_assigned,
+            "steps_executed": job["steps_executed"],
+            "logs_available": job["logs_available"],
+            "reason": reason,
+        })
+    required_jobs = [job for job in jobs if job["required"]]
+    executed_steps = sum(job["steps_executed"] for job in required_jobs)
+    if ci_result["run_status"] != "completed":
+        status, reason, classification = "unavailable", "ci_run_not_completed", CLASS_CI_UNAVAILABLE
+    elif any(job["status"] == "unavailable" for job in required_jobs):
+        status, reason, classification = "unavailable", "required_ci_evidence_unavailable", CLASS_CI_UNAVAILABLE
+    elif ci_result["run_conclusion"] != "success" or any(job["status"] == "failed" for job in required_jobs):
+        status, reason, classification = "failed", "required_ci_check_failed", CLASS_FAILURE_ORIGIN_UNVERIFIED
+    else:
+        status, reason, classification = "passed", "observed_ci_success", CLASS_PASS
+    return {
+        "status": status,
+        "reason": reason,
+        "executed_steps": executed_steps,
+        "classification": classification,
+        "run_status": ci_result["run_status"],
+        "run_conclusion": ci_result["run_conclusion"],
+        "jobs": jobs,
+    }
+
+
 def _ci_snapshot(ci_result: Mapping[str, Any] | None) -> dict[str, Any]:
     if not ci_result:
         return {"status": "unavailable", "reason": "external_ci_not_queried", "executed_steps": 0, "classification": "ci_unavailable"}
+    if ci_result.get("evidence_format") == CI_EVIDENCE_SCHEMA:
+        return _ci_evidence_snapshot(ci_result)
     try:
         status = str(ci_result.get("status", "")).casefold()
         steps = int(ci_result.get("executed_steps", 0) or 0)
     except (AttributeError, TypeError, ValueError):
         return {"status": "unavailable", "reason": "malformed_ci_evidence", "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
+    if status == "malformed":
+        return {"status": "malformed", "reason": ci_result.get("reason", "malformed_ci_evidence"), "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
     if status == "success" and steps > 0:
         return {"status": "passed", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_PASS}
     if status == "failure" and steps > 0:
@@ -709,6 +855,7 @@ def run_quality_gate(
     ci_result: Mapping[str, Any] | None = None,
     baseline_report: Mapping[str, Any] | None = None,
     baseline_error: str | None = None,
+    ci_evidence_error: str | None = None,
     runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     """Run fixed local checks while preserving evidence boundaries.
@@ -733,6 +880,8 @@ def run_quality_gate(
         configuration_errors.append("timestamp_not_injected")
     if baseline_error:
         configuration_errors.append(baseline_error)
+    if ci_evidence_error:
+        configuration_errors.append(ci_evidence_error)
 
     checks = [
         _check_command("compile", [sys.executable, "-m", "compileall", "-q", "."], root=root, execute=execute, runner=runner),
@@ -841,12 +990,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--generated-at", help="timezone-aware ISO timestamp injected by the caller")
     parser.add_argument("--ci-status", choices=("success", "failure", "unavailable"), help="optional external CI result; never queried by this tool")
     parser.add_argument("--ci-steps", type=int, default=0, help="executed-step count accompanying --ci-status")
+    parser.add_argument("--ci-evidence-file", type=Path, help="local sanitized CI metadata JSON; never queries GitHub or reads logs")
     parser.add_argument("--baseline-file", help="optional JSON baseline report used to classify pre-existing failures")
     parser.add_argument("--json", action="store_true"); parser.add_argument("--markdown", action="store_true"); parser.add_argument("--output")
     args = parser.parse_args(argv)
     if args.json and args.markdown: parser.error("choose --json or --markdown")
     paths = list(args.changed_file) + (changed_from_git(args.repository) if args.from_git else [])
-    ci_result = None if args.ci_status is None else {"status": args.ci_status, "executed_steps": args.ci_steps}
+    if args.ci_status is not None and args.ci_evidence_file is not None:
+        parser.error("choose --ci-status or --ci-evidence-file")
+    ci_evidence_error = None
+    if args.ci_evidence_file is not None:
+        ci_result, ci_evidence_error = load_ci_evidence(args.ci_evidence_file)
+    else:
+        ci_result = None if args.ci_status is None else {"status": args.ci_status, "executed_steps": args.ci_steps}
     baseline_report = None
     baseline_error = None
     if args.baseline_file:
@@ -865,6 +1021,7 @@ def main(argv: list[str] | None = None) -> int:
         ci_result=ci_result,
         baseline_report=baseline_report,
         baseline_error=baseline_error,
+        ci_evidence_error=ci_evidence_error,
     )
     report["planning_summary"] = run(paths, diff_text=_diff_text(args.diff_file, args.repository), branch=args.branch)
     content = render_json_or_markdown(report, markdown=args.markdown, title="MarketOS local quality gate")

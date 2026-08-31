@@ -125,6 +125,163 @@ def _passing_runner(command, root):
     return _result()
 
 
+def _write_ci_evidence(tmp_path: Path, *, run=None, jobs=None, extra_job_fields=None) -> Path:
+    job = {
+        "name": "agentic-quality-gate",
+        "required": True,
+        "status": "completed",
+        "conclusion": "success",
+        "runner_id": 123,
+        "runner_name": "ubuntu-latest",
+        "steps_executed": 4,
+        "logs_available": True,
+        "required_check_status": "success",
+    }
+    if extra_job_fields:
+        job.update(extra_job_fields)
+    payload = {
+        "schema": gate.CI_EVIDENCE_SCHEMA,
+        "run": run or {"status": "completed", "conclusion": "success"},
+        "jobs": jobs or [job],
+    }
+    path = tmp_path / "ci-evidence.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_ci_evidence_file_reports_observed_required_success(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    evidence_path = _write_ci_evidence(root)
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert error is None
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        runner=_passing_runner,
+    )
+    assert report["ci"]["status"] == "passed"
+    assert report["ci"]["classification"] == gate.CLASS_PASS
+    assert report["ci"]["executed_steps"] == 4
+    assert report["ci"]["jobs"][0]["runner_assigned"] is True
+
+
+def test_ci_evidence_file_preserves_executed_failure(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    evidence_path = _write_ci_evidence(
+        root,
+        run={"status": "completed", "conclusion": "failure"},
+        extra_job_fields={"conclusion": "failure", "required_check_status": "failure"},
+    )
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert error is None
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        runner=_passing_runner,
+    )
+    assert report["ci"]["status"] == "failed"
+    assert report["ci"]["classification"] == gate.CLASS_FAILURE_ORIGIN_UNVERIFIED
+    assert report["exit_code"] == gate.EXIT_FAILED
+
+
+def test_ci_evidence_file_zero_steps_and_runnerless_are_unavailable(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    evidence_path = _write_ci_evidence(
+        root,
+        extra_job_fields={"runner_id": 0, "runner_name": "", "steps_executed": 0, "logs_available": False},
+    )
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert error is None
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        runner=_passing_runner,
+    )
+    assert report["ci"]["status"] == "unavailable"
+    assert report["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
+    assert report["ci"]["jobs"][0]["reason"] == "runner_unassigned"
+    assert report["ready_for_supervised_use"] is False
+    assert report["exit_code"] == gate.EXIT_UNAVAILABLE
+
+
+def test_ci_evidence_file_missing_logs_are_unavailable(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    evidence_path = _write_ci_evidence(root, extra_job_fields={"logs_available": False})
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert error is None
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        runner=_passing_runner,
+    )
+    assert report["ci"]["status"] == "unavailable"
+    assert report["ci"]["jobs"][0]["reason"] == "ci_logs_unavailable"
+    assert report["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
+
+
+def test_ci_evidence_file_rejects_raw_log_fields_as_malformed(tmp_path, capsys):
+    evidence_path = _write_ci_evidence(tmp_path, extra_job_fields={"stdout": "secret-like raw log"})
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert evidence["status"] == "malformed"
+    assert evidence["classification"] == gate.CLASS_MALFORMED_CONFIGURATION
+    assert error == "malformed_ci_evidence"
+
+    exit_code = gate.main(["--ci-evidence-file", str(evidence_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == gate.EXIT_CONFIGURATION
+    assert payload["classification"] == gate.CLASS_MALFORMED_CONFIGURATION
+
+
+def test_ci_evidence_file_is_bounded(tmp_path):
+    evidence_path = tmp_path / "ci-evidence.json"
+    evidence_path.write_bytes(b"{" + b" " * gate.CI_EVIDENCE_MAX_BYTES + b"}")
+
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert evidence["status"] == "malformed"
+    assert evidence["reason"] == "ci_evidence_too_large"
+    assert error == "malformed_ci_evidence"
+
+
+def test_ci_evidence_file_cli_path_is_deterministic_and_fail_closed(monkeypatch, tmp_path, capsys):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    evidence_path = _write_ci_evidence(root, extra_job_fields={"runner_id": None})
+    exit_code = gate.main([
+        "--repository", str(root),
+        "--ci-evidence-file", str(evidence_path),
+        "--generated-at", "2026-08-27T12:00:00+00:00",
+        "--json",
+    ])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == gate.EXIT_UNAVAILABLE
+    assert payload["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
+    assert payload["ci"]["jobs"][0]["runner_assigned"] is False
+    assert payload["ready_for_supervised_use"] is False
+
+
 def test_real_gate_reports_stable_order_and_observed_evidence(monkeypatch, tmp_path):
     _all_tools_available(monkeypatch)
     report = gate.run_quality_gate(

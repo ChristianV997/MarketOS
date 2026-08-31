@@ -55,7 +55,31 @@ ownership from history or from a green-looking summary.
 CI is an explicit input only. The local gate never queries GitHub. A missing
 CI input is `ci_unavailable`, and a reported CI failure with zero executed
 steps is also `ci_unavailable`, not a pass. A real failure with executed steps
-is a failure.
+is a failure. For local replay of sanitized CI metadata, use
+`--ci-evidence-file <path>` with schema `MarketOS.CIEvidence.v1`. The file
+contains only run status/conclusion and job metadata; raw logs and unknown
+fields are rejected. Required jobs pass only when a runner is assigned, at
+least one step executed, logs are available, the job completed successfully,
+and its required check status is `success`. Otherwise the evidence remains
+`ci_unavailable` or `failed`. The file is bounded to 64 KiB and 100 jobs.
+
+```json
+{
+  "schema": "MarketOS.CIEvidence.v1",
+  "run": {"status": "completed", "conclusion": "failure"},
+  "jobs": [{
+    "name": "agentic-quality-gate",
+    "required": true,
+    "status": "completed",
+    "conclusion": "failure",
+    "runner_id": 0,
+    "runner_name": "",
+    "steps_executed": 0,
+    "logs_available": false,
+    "required_check_status": "failure"
+  }]
+}
+```
 
 ## Readiness and exits
 
