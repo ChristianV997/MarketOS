@@ -6,8 +6,6 @@ credential, no live transport. See docs/DATAFORSEO_RUNTIME_ADAPTER.md.
 """
 from __future__ import annotations
 
-import copy
-
 import pytest
 
 from backend.adapters.research import dataforseo as adapter
@@ -217,3 +215,76 @@ def test_health_reports_unreachable_offline_adapter():
     assert result.reachable is False
     assert "fixture_only" in result.capabilities
     assert "dry_run_only" in result.capabilities
+
+
+# --- explicit retry cap ---------------------------------------------------------
+
+
+def test_retry_attempts_allowed_is_explicitly_zero():
+    """No live transport exists, so retries must be an explicit, testable
+    zero -- not merely an unstated absence."""
+    assert adapter.MAX_RETRY_ATTEMPTS == 0
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    assert evidence.retry_attempts_allowed == 0
+    assert evidence.to_dict()["retry_attempts_allowed"] == 0
+
+
+def test_retry_attempts_allowed_is_zero_in_live_blocked_result():
+    live_context = SidecarContext(workspace_id="test-workspace", run_id="run-1", dry_run=False)
+    evidence = adapter.fetch_search_evidence("widget", context=live_context)
+    assert evidence.retry_attempts_allowed == 0
+
+
+# --- evidence tier label (supplemental / non-live) ------------------------------
+
+
+def test_evidence_tier_labels_dry_run_result_as_supplemental_non_live():
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    assert evidence.evidence_tier == "supplemental_non_live"
+    assert adapter.EVIDENCE_TIER == "supplemental_non_live"
+
+
+def test_evidence_tier_labels_live_blocked_result_as_supplemental_non_live():
+    live_context = SidecarContext(workspace_id="test-workspace", run_id="run-1", dry_run=False)
+    evidence = adapter.fetch_search_evidence("widget", context=live_context)
+    assert evidence.evidence_tier == "supplemental_non_live"
+
+
+@pytest.mark.asyncio
+async def test_discover_signals_carry_evidence_tier_label():
+    signals = await adapter.discover("widget", context=_dry_run_context())
+    assert signals
+    assert all(record["evidence_tier"] == "supplemental_non_live" for record in signals)
+
+
+# --- malformed/unexpected offline-builder failure fails closed, no leak --------
+
+
+def test_unexpected_offline_builder_failure_fails_closed_without_leaking(monkeypatch):
+    """Regression: fetch_search_evidence had no exception boundary around
+    the offline builder call. If it ever raised, the raw exception (which
+    could embed caller-derived input) would propagate uncaught. Now any
+    unexpected failure is converted to a safe, generic degraded result."""
+
+    def _raise(*args, **kwargs):
+        raise ValueError("internal failure referencing secret=sk-test-abcdefghijklmnopqrstuvwxyz")
+
+    monkeypatch.setattr(adapter, "build_dataforseo_adapter_report", _raise)
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    assert evidence.status == "error"
+    assert evidence.readiness_state == "unavailable"
+    assert evidence.search_signal_count == 0
+    blob = str(evidence.to_dict())
+    assert "sk-test" not in blob
+    assert "secret=" not in blob
+
+
+@pytest.mark.asyncio
+async def test_discover_surfaces_offline_builder_failure_as_single_record(monkeypatch):
+    def _raise(*args, **kwargs):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(adapter, "build_dataforseo_adapter_report", _raise)
+    signals = await adapter.discover("widget", context=_dry_run_context())
+    assert len(signals) == 1
+    assert signals[0]["status"] == "error"

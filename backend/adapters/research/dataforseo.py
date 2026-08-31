@@ -43,6 +43,7 @@ uses.
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field as dataclass_field
 from typing import Any, Mapping, Sequence
@@ -54,8 +55,20 @@ from evaluation.commerce.dataforseo_adapter import (
     build_dataforseo_adapter_report,
 )
 
+_log = logging.getLogger(__name__)
+
 SOURCE = "dataforseo_readonly_search"
 DEFAULT_REQUEST_KIND = "serp_google_organic_snapshot"
+
+# No live transport exists in this release, so no retry logic exists either
+# -- this is an explicit, testable zero, not merely an absence. A future
+# transport PR must define and justify any non-zero value.
+MAX_RETRY_ATTEMPTS = 0
+
+# Every result from this module is offline/fixture-sourced and must never be
+# mistaken for a live-validated signal -- this label is attached to every
+# DataForSEOSearchEvidence and every per-signal discover() record.
+EVIDENCE_TIER = "supplemental_non_live"
 
 # Every prerequisite a live request is missing today -- named explicitly so
 # a blocked result is never a bare "no", matching
@@ -95,6 +108,8 @@ class DataForSEOSearchEvidence:
     confidence: str
     warnings: tuple[str, ...]
     report: dict[str, Any] = dataclass_field(default_factory=dict)
+    evidence_tier: str = EVIDENCE_TIER
+    retry_attempts_allowed: int = MAX_RETRY_ATTEMPTS
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -111,6 +126,8 @@ class DataForSEOSearchEvidence:
             "confidence": self.confidence,
             "warnings": list(self.warnings),
             "report": self.report,
+            "evidence_tier": self.evidence_tier,
+            "retry_attempts_allowed": self.retry_attempts_allowed,
         }
 
 
@@ -152,11 +169,32 @@ def fetch_search_evidence(
     if not context.dry_run:
         return _blocked_live_result(query, request_kind=kind)
 
-    report: DataForSEOAdapterReport = build_dataforseo_adapter_report(
-        request_kind=kind,
-        keywords=(query,),
-        live_read_only=False,
-    )
+    try:
+        report: DataForSEOAdapterReport = build_dataforseo_adapter_report(
+            request_kind=kind,
+            keywords=(query,),
+            live_read_only=False,
+        )
+    except Exception:
+        # Fail closed on any unexpected failure from the offline builder --
+        # never propagate the raw exception (its message could embed a
+        # value derived from caller input) and never fabricate signals.
+        _log.warning("dataforseo_offline_builder_failed request_kind=%s", kind)
+        return DataForSEOSearchEvidence(
+            source=SOURCE,
+            request_kind=kind,
+            observed_at=time.time(),
+            query=query,
+            status="error",
+            readiness_state="unavailable",
+            blockers=("offline_builder_failed",),
+            search_signal_count=0,
+            shopping_signal_count=0,
+            competitor_signal_count=0,
+            confidence="none",
+            warnings=("DataForSEO offline builder failed unexpectedly; details withheld.",),
+            report={},
+        )
     return DataForSEOSearchEvidence(
         source=SOURCE,
         request_kind=kind,
@@ -233,7 +271,7 @@ async def discover(
     never called, matching `fetch_search_evidence`'s fail-closed behavior.
     """
     evidence = fetch_search_evidence(query, context=context, request_kind=request_kind)
-    if evidence.status == "blocked_live_mode":
+    if evidence.status in ("blocked_live_mode", "error"):
         return (evidence.to_dict(),)
 
     parsed = evidence.report.get("parse_result", {})
@@ -243,6 +281,7 @@ async def discover(
             record = dict(signal)
             record["request_kind"] = evidence.request_kind
             record["readiness_state"] = evidence.readiness_state
+            record["evidence_tier"] = evidence.evidence_tier
             records.append(record)
     return tuple(records)
 
@@ -277,6 +316,8 @@ def health() -> AdapterHealth:
 __all__ = [
     "SOURCE",
     "DEFAULT_REQUEST_KIND",
+    "MAX_RETRY_ATTEMPTS",
+    "EVIDENCE_TIER",
     "DataForSEOSearchEvidence",
     "DataForSEOResearchAdapter",
     "fetch_search_evidence",
