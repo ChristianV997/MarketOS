@@ -15,6 +15,8 @@ MarketOS.
 - **Line endings:** `.cursor/*.sh` must stay LF. CRLF breaks bash `set -o pipefail`
   on Windows (`pipefail\r: invalid option name`). `.gitattributes` enforces LF on
   checkout; Windows contributors must use the PowerShell bootstrap path below.
+- **Node:** contract validation requires `node` on PATH. Missing Node is an
+  environment defect (exit `127`), not a repository contract failure.
 
 ## Branch relationship
 

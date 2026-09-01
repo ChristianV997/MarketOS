@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { access } from "node:fs/promises";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
@@ -33,15 +37,36 @@ test("install.sh stays lockfile-only and avoids privileged bootstrap", () => {
   assert.match(installSh, /ensurepip is unavailable/);
 });
 
+test("install.ps1 stays lockfile-only and avoids privileged bootstrap", () => {
+  assert.doesNotMatch(installPs1, /sudo /);
+  assert.doesNotMatch(installPs1, /apt-get install/);
+  assert.doesNotMatch(installPs1, /npm install/);
+  assert.match(installPs1, /ci --ignore-scripts --no-audit --no-fund/);
+  assert.match(installPs1, /ensurepip is unavailable/);
+  assert.match(installPs1, /validate\.ps1/);
+});
+
 test("shell scripts remain LF-only in the repository contract", () => {
   for (const [name, source] of shellScripts) {
     assert.doesNotMatch(source, /\r/, `${name} must not contain CRLF (breaks bash pipefail)`);
   }
 });
 
+test("CRLF shell scripts fail bash before contract logic runs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cursor-crlf-"));
+  const script = join(dir, "validate.sh");
+  writeFileSync(script, validateSh.replace(/\n/g, "\r\n"));
+  assert.throws(
+    () => execFileSync("bash", [script], { encoding: "utf8" }),
+    (error) => /pipefail|invalid option/.test(String(error.stderr ?? error.message)),
+  );
+});
+
 test("validate.sh delegates to node contract tests without bash heredocs", () => {
   assert.doesNotMatch(validateSh, /<<['"]?[A-Z_]+/);
   assert.match(validateSh, /node --test \.cursor\/environment\.contract\.test\.mjs/);
+  assert.match(validateSh, /node is unavailable in this environment/);
+  assert.match(validateSh, /CRLF line endings/);
 });
 
 test(".gitattributes enforces LF for Cursor shell and contract files", () => {
@@ -56,8 +81,10 @@ test("frontend lockfile exists for reproducible bootstrap", async () => {
 
 test("Windows bootstrap validates through PowerShell contract script", () => {
   assert.match(installPs1, /validate\.ps1/);
-  assert.match(validatePs1, /node --test/);
+  assert.match(validatePs1, /--test \(Join-Path \$repoRoot "\.cursor\\environment\.contract\.test\.mjs"\)/);
   assert.match(validatePs1, /CRLF line endings/);
+  assert.match(validatePs1, /node is unavailable in this environment/);
+  assert.match(validatePs1, /exit 127/);
 });
 
 test("bootstrap documents Windows and contributor validation commands", () => {
