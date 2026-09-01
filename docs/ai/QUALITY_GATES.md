@@ -49,6 +49,8 @@ local checks executed successfully. A preflight report always keeps
 `ci_unavailable`; its zero exit code is not final merge evidence. Final
 attestation uses the default `final` phase with complete sanitized
 `MarketOS.CIEvidence.v1` input after required jobs have completed.
+When local execution fails while final CI evidence is absent, the local
+failure classification remains visible; `ci_unavailable` does not mask it.
 
 Failure classifications distinguish `changed_scope_failure` from
 `pre_existing_failure` only when the injected baseline supports that claim.

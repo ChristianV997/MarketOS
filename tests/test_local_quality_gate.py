@@ -328,15 +328,17 @@ def test_preflight_preserves_local_failure_and_final_phase_stays_strict(monkeypa
         generated_at="2026-09-01T12:00:00+00:00",
         execute=True,
         changed_paths=[],
-        runner=_passing_runner,
+        runner=failing_runner,
     )
 
     assert preflight["preflight"]["status"] == "failed"
+    assert preflight["classification"] == gate.CLASS_FAILURE_ORIGIN_UNVERIFIED
     assert preflight["exit_code"] == gate.EXIT_FAILED
     assert preflight["ready_for_supervised_use"] is False
     assert final["phase"] == "final"
     assert final["ci"]["reason"] == "external_ci_not_queried"
-    assert final["exit_code"] == gate.EXIT_UNAVAILABLE
+    assert final["classification"] == gate.CLASS_FAILURE_ORIGIN_UNVERIFIED
+    assert final["exit_code"] == gate.EXIT_FAILED
     assert final["ready_for_supervised_use"] is False
 
 

@@ -940,10 +940,11 @@ def run_quality_gate(
             configuration_errors.append(f"malformed:{item.get('name')}")
     baseline_statuses = _baseline_statuses(baseline_report)
     check_classes = _annotate_check_classes(checks, baseline_statuses=baseline_statuses, changed_paths=paths)
-    ci = _ci_snapshot(ci_result)
-    failure_classes = {
+    local_failure_classes = {
         value for value in check_classes if value not in {CLASS_PASS, "not_configured", "not_run"}
     }
+    ci = _ci_snapshot(ci_result)
+    failure_classes = set(local_failure_classes)
     failure_classes.update(ci.get("failure_classes", []))
     if ci["classification"] != CLASS_PASS:
         failure_classes.add(ci["classification"])
@@ -990,17 +991,19 @@ def run_quality_gate(
     elif not execute:
         classification = CLASS_CI_UNAVAILABLE if ci["status"] == "unavailable" else "not_run"
     elif failure_classes:
-        if ci["classification"] == CLASS_CI_UNAVAILABLE:
+        priority = (
+            CLASS_MALFORMED_CONFIGURATION, CLASS_SECURITY_FINDING, CLASS_SECURITY_SCANNER_FAILURE,
+            CLASS_DIFF_FAILURE, CLASS_TIMEOUT, CLASS_COLLECTION_FAILED,
+            CLASS_CHANGED_SCOPE_FAILURE, CLASS_PRE_EXISTING_FAILURE,
+            CLASS_FAILURE_ORIGIN_UNVERIFIED, CLASS_MISSING_TOOL,
+            CLASS_UNAVAILABLE_DEPENDENCY, CLASS_CI_UNAVAILABLE, "blocked",
+        )
+        if local_failure_classes:
+            classification = next((value for value in priority if value in local_failure_classes), sorted(local_failure_classes)[0])
+        elif ci["classification"] == CLASS_CI_UNAVAILABLE:
             classification = CLASS_CI_UNAVAILABLE
         else:
-            priority = (
-                CLASS_MALFORMED_CONFIGURATION, CLASS_SECURITY_FINDING, CLASS_SECURITY_SCANNER_FAILURE,
-                CLASS_DIFF_FAILURE, CLASS_TIMEOUT, CLASS_COLLECTION_FAILED,
-                CLASS_CHANGED_SCOPE_FAILURE, CLASS_PRE_EXISTING_FAILURE,
-                CLASS_FAILURE_ORIGIN_UNVERIFIED, CLASS_MISSING_TOOL,
-                CLASS_UNAVAILABLE_DEPENDENCY, CLASS_CI_UNAVAILABLE, "blocked",
-            )
-            classification = next((value for value in priority if value in failure_classes), failure_classes[0])
+            classification = next((value for value in priority if value in failure_classes), sorted(failure_classes)[0])
     else:
         classification = CLASS_PASS
     ready = (
