@@ -69,6 +69,14 @@ proof.
   `ValueError` by this module's own guard, *before* it ever reaches the
   adapter — defense in depth on top of the adapter's own equivalent
   guard.
+- An oversized `fixture_payload` is rejected with `ValueError` before it
+  ever reaches the adapter — bounded by both serialized byte size
+  (`MAX_FIXTURE_PAYLOAD_BYTES` = 65,536 bytes) and record count
+  (`MAX_FIXTURE_RECORDS` = 100). Neither the adapter nor this module's own
+  secret-shape scan previously capped fixture size at all — a caller could
+  have passed thousands of records or a multi-megabyte payload and it
+  would have been processed in full; this is now rejected outright rather
+  than silently truncated.
 - A payload that is malformed at the adapter's own contract level (e.g.
   `records` not a list) is *not* re-validated here — it fails closed via
   the adapter's existing `status="error"` path, which this module passes

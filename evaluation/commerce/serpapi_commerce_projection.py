@@ -44,7 +44,12 @@ Safety, by construction:
   by this module's own guard *before* it ever reaches the adapter --
   defense in depth on top of the adapter's own equivalent guard.
 - `query` length is bounded; an oversized query is rejected rather than
-  passed through unbounded.
+  passed through unbounded. `fixture_payload` is likewise bounded by both
+  serialized byte size (`MAX_FIXTURE_PAYLOAD_BYTES`) and record count
+  (`MAX_FIXTURE_RECORDS`) -- neither the adapter nor this module's own
+  secret-shape scan previously capped the size of a caller-supplied
+  fixture, so an oversized payload would have been processed in full
+  before this fix.
 - Every projected record carries `fixture_identity_label` (always
   `"synthetic_fixture_example"` in this release -- no live search proof
   exists) and `evidence_tier="supplemental_non_live"`.
@@ -54,6 +59,7 @@ Safety, by construction:
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
@@ -66,6 +72,8 @@ REPORT_VERSION = "serpapi-commerce-projection-v1"
 FIXTURE_IDENTITY_LABEL = "synthetic_fixture_example"
 EVIDENCE_TIER = "supplemental_non_live"
 MAX_QUERY_LENGTH = 200
+MAX_FIXTURE_PAYLOAD_BYTES = 65_536
+MAX_FIXTURE_RECORDS = 100
 
 _SECRET_KEY_NAMES = frozenset({
     "api_key", "apikey", "access_token", "authorization", "auth_token",
@@ -95,6 +103,21 @@ def _secret_like(value: Any) -> bool:
     if isinstance(value, str):
         return bool(_SECRET_SHAPED_VALUE.search(value))
     return False
+
+
+def _check_fixture_payload_bounded(payload: Mapping[str, Any]) -> None:
+    """Reject an oversized fixture_payload before it ever reaches the
+    adapter -- bounded by both serialized byte size and record count.
+    Never truncates silently; an oversized payload is refused outright."""
+    try:
+        serialized_bytes = len(json.dumps(payload, default=str).encode("utf-8", errors="replace"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("fixture_payload is not JSON-serializable") from exc
+    if serialized_bytes > MAX_FIXTURE_PAYLOAD_BYTES:
+        raise ValueError(f"fixture_payload exceeds the {MAX_FIXTURE_PAYLOAD_BYTES}-byte bound")
+    records = payload.get("records")
+    if isinstance(records, (list, tuple)) and len(records) > MAX_FIXTURE_RECORDS:
+        raise ValueError(f"fixture_payload exceeds the {MAX_FIXTURE_RECORDS}-record bound")
 
 
 @dataclass(frozen=True)
@@ -300,8 +323,10 @@ def build_serpapi_commerce_projection(
     if not clean_query:
         clean_query = "unspecified query"
 
-    if fixture_payload is not None and _secret_like(fixture_payload):
-        raise ValueError("secret-like or raw fixture_payload is not accepted")
+    if fixture_payload is not None:
+        if _secret_like(fixture_payload):
+            raise ValueError("secret-like or raw fixture_payload is not accepted")
+        _check_fixture_payload_bounded(fixture_payload)
 
     validated_marketplace = _validate_marketplace(marketplace)
     context = SidecarContext(workspace_id="serpapi-commerce-projection", run_id="offline-deterministic", dry_run=True)
@@ -352,6 +377,8 @@ __all__ = [
     "FIXTURE_IDENTITY_LABEL",
     "EVIDENCE_TIER",
     "MAX_QUERY_LENGTH",
+    "MAX_FIXTURE_PAYLOAD_BYTES",
+    "MAX_FIXTURE_RECORDS",
     "SerpApiCommerceProjectionRecord",
     "SerpApiCommerceProjectionSafetySummary",
     "SerpApiCommerceProjectionReport",

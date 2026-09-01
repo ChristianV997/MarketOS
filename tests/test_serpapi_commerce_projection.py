@@ -159,6 +159,39 @@ def test_oversized_query_is_rejected():
         build_serpapi_commerce_projection(query="x" * (MAX_QUERY_LENGTH + 1))
 
 
+def test_oversized_fixture_payload_record_count_is_rejected():
+    """Regression: fixture_payload was previously only scanned for
+    secret-shaped content, with no bound on size at all -- an oversized
+    payload would have been processed in full."""
+    from evaluation.commerce.serpapi_commerce_projection import MAX_FIXTURE_RECORDS
+
+    payload = {
+        "provider": "serpapi",
+        "records": [{"candidate_id": f"item-{i}", "query": "q"} for i in range(MAX_FIXTURE_RECORDS + 1)],
+        "fixture_mode": True,
+    }
+    with pytest.raises(ValueError):
+        build_serpapi_commerce_projection(query="widget", fixture_payload=payload)
+
+
+def test_oversized_fixture_payload_byte_size_is_rejected():
+    from evaluation.commerce.serpapi_commerce_projection import MAX_FIXTURE_PAYLOAD_BYTES
+
+    payload = {
+        "provider": "serpapi",
+        "records": [{"candidate_id": "x", "query": "q", "title": "y" * (MAX_FIXTURE_PAYLOAD_BYTES)}],
+        "fixture_mode": True,
+    }
+    with pytest.raises(ValueError):
+        build_serpapi_commerce_projection(query="widget", fixture_payload=payload)
+
+
+def test_fixture_payload_within_bounds_is_accepted():
+    payload = {"provider": "serpapi", "records": [{"candidate_id": "ok", "query": "q"}], "fixture_mode": True}
+    report = build_serpapi_commerce_projection(query="widget", fixture_payload=payload)
+    assert report.record_count == 1
+
+
 def test_secret_like_fixture_payload_is_rejected_before_reaching_adapter():
     payload = {"provider": "serpapi", "records": [], "api_key": "sk-test-abcdefghijklmnopqrstuvwxyz"}
     with pytest.raises(ValueError):
