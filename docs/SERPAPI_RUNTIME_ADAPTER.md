@@ -31,16 +31,41 @@ research/serpapi.py` delegates to that existing generic machinery
 instead — no new provider registry, adapter framework, or parser is
 introduced.
 
+## Two bounded request kinds
+
+- **`"organic_search_snapshot"`** (default, primary, required) — organic
+  SERP/keyword-demand signals, `SearchDemandEvidence`, its own sanitized
+  fixture added by this PR
+  (`tests/fixtures/intelligence_adapter_plan/serpapi_organic_snapshot_dry_run.json`,
+  fields: `candidate_id`, `query`, `title`, `rank`, `trend_label` — no
+  price/rating, appropriately absent for organic results).
+- **`"shopping_snapshot"`** (optional, secondary) — competitor-pricing
+  signals, `CompetitorPricingEvidence`, reusing the one fixture that
+  existed before this PR
+  (`tests/fixtures/intelligence_adapter_plan/serpapi_shopping_snapshot_dry_run.json`).
+
+Both are parsed by the same existing, generic `parse_dry_run_fixture()` —
+neither introduces a new parser or evidence type.
+
 ## Dry-run-only status
 
 `mode="plan_only"` via `SidecarContext.dry_run=True` (the default) is the
 only reachable path. `fetch_search_evidence()`/`discover()` parse the
-bundled sanitized fixture (`tests/fixtures/intelligence_adapter_plan/
-serpapi_shopping_snapshot_dry_run.json`, substituting the caller's own
-query into its single synthetic record) or a caller-supplied fixture
+bundled sanitized fixture for the requested `request_kind` (substituting
+the caller's own query into its records) or a caller-supplied fixture
 payload — never a live SerpApi request. A `context.dry_run=False` request
 never reaches the offline plan/parser; it returns a structured
 `blocked_live_mode` result naming every unmet prerequisite.
+
+## Provider Registry check
+
+`evaluation/commerce/intelligence_adapter_plan.py` imports
+`build_provider_registry` but never actually calls it — this adapter does
+not inherit that gap. `fetch_search_evidence()` checks Provider Registry
+membership explicitly (`provider_registered` field on every result); if
+`serpapi` were ever absent from the registry, `provider_not_registered`
+is added to `blockers` and the result is forced to `status="blocked"`,
+never silently treated as ready.
 
 ## Safety boundary
 
