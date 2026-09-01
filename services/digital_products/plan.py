@@ -8,6 +8,7 @@ from backend.experiments.envelope import CommercialRunEnvelope
 from backend.experiments.registry import get_experiment_registry
 from backend.workspaces.artifact_store import ArtifactStore
 from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import get_workspace_registry
 
 from .checklist import build_launch_checklist
 from .content_plan import generate_content_plan
@@ -23,7 +24,7 @@ _DEFAULT_METRICS = ["visitors", "lead-magnet opt-in rate", "checkout conversion 
 
 
 def _default_workspace() -> ClientWorkspace:
-    return ClientWorkspace(name="ephemeral", workspace_type="internal")
+    return get_workspace_registry().register(ClientWorkspace(name="ephemeral", workspace_type="internal"))
 
 
 def build_digital_product_plan(
@@ -40,7 +41,7 @@ def build_digital_product_plan(
     """Never raises: every function above is individually fail-soft."""
     workspace = workspace or _default_workspace()
     registry = get_experiment_registry()
-    store = ArtifactStore()
+    store = ArtifactStore(workspace)
 
     envelope = CommercialRunEnvelope(
         service_name=SERVICE_NAME,
@@ -78,10 +79,10 @@ def build_digital_product_plan(
     try:
         from services.reporting import save_report_artifacts
         from .report import render_digital_product_markdown
-        save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id,
+        save_report_artifacts(store, envelope.experiment_id,
                                render_digital_product_markdown(result), result.to_dict())
     except Exception:  # noqa: BLE001 — the JSON result below is the durable fallback
-        store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+        store.save(envelope.experiment_id, "result.json", result.to_dict())
 
     envelope.mark_completed(result.to_dict())
     log_transition(envelope, "experiment_completed")

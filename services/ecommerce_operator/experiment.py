@@ -14,12 +14,13 @@ from backend.experiments.audit_log import log_transition
 from backend.experiments.envelope import CommercialRunEnvelope
 from backend.experiments.registry import get_experiment_registry
 from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import get_workspace_registry
 
 SERVICE_NAME = "ecommerce_operator"
 
 
 def _default_workspace() -> ClientWorkspace:
-    return ClientWorkspace(name="ephemeral", workspace_type="internal")
+    return get_workspace_registry().register(ClientWorkspace(name="ephemeral", workspace_type="internal"))
 
 
 def create_commerce_experiment(

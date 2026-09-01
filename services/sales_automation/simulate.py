@@ -13,6 +13,7 @@ from backend.experiments.envelope import CommercialRunEnvelope
 from backend.experiments.registry import get_experiment_registry
 from backend.workspaces.artifact_store import ArtifactStore
 from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import get_workspace_registry
 
 from .appointment_flow import create_appointment_handoff, handle_chat_turn
 from .follow_up import generate_follow_up_sequence
@@ -23,7 +24,7 @@ SERVICE_NAME = "sales_automation"
 
 
 def _default_workspace() -> ClientWorkspace:
-    return ClientWorkspace(name="ephemeral", workspace_type="internal")
+    return get_workspace_registry().register(ClientWorkspace(name="ephemeral", workspace_type="internal"))
 
 
 def run_simulated_conversation(vertical: str, scripted_lead_messages: list[str]) -> ChatSession:
@@ -47,7 +48,7 @@ def run_sales_bot_simulation(
     """Never raises. Returns (session, handoff, qualification_flow, envelope)."""
     workspace = workspace or _default_workspace()
     registry = get_experiment_registry()
-    store = ArtifactStore()
+    store = ArtifactStore(workspace)
 
     envelope = CommercialRunEnvelope(
         service_name=SERVICE_NAME,
@@ -89,9 +90,9 @@ def run_sales_bot_simulation(
         from services.reporting import save_report_artifacts
         from .report import render_sales_bot_setup_plan_markdown
         markdown = render_sales_bot_setup_plan_markdown(session, handoff, qualification_flow, dry_run=workspace.dry_run_default)
-        save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id, markdown, outputs)
+        save_report_artifacts(store, envelope.experiment_id, markdown, outputs)
     except Exception:  # noqa: BLE001 — the JSON result below is the durable fallback
-        store.save(workspace.workspace_id, envelope.experiment_id, "result.json", outputs)
+        store.save(envelope.experiment_id, "result.json", outputs)
 
     envelope.mark_completed(outputs)
     log_transition(envelope, "experiment_completed")
