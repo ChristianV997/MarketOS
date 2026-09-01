@@ -56,8 +56,13 @@ test("CRLF shell scripts fail bash before contract logic runs", () => {
   const dir = mkdtempSync(join(tmpdir(), "cursor-crlf-"));
   const script = join(dir, "validate.sh");
   writeFileSync(script, validateSh.replace(/\n/g, "\r\n"));
+  // Git Bash does not accept native Windows paths in every invocation mode;
+  // normalize the temporary path before testing the shell's CRLF handling.
+  const bashScript = process.platform === "win32"
+    ? script.replaceAll("\\", "/").replace(/^([A-Za-z]):/, (_, drive) => `/mnt/${drive.toLowerCase()}`)
+    : script;
   assert.throws(
-    () => execFileSync("bash", [script], { encoding: "utf8" }),
+    () => execFileSync("bash", [bashScript], { encoding: "utf8" }),
     (error) => /pipefail|invalid option/.test(String(error.stderr ?? error.message)),
   );
 });
