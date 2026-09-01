@@ -38,6 +38,16 @@ function but never calls it (a pre-existing gap in that shared module,
 out of this file's scope to fix); this adapter does not silently assume
 registration.
 
+SerpApi and DataForSEO are **consolidation-choice alternatives for the
+same search_serp_data capability, not two independent confirmations**
+(see `evaluation/companyos/subscription_registry.py`'s own
+"consolidate-search" recommendation: "choose one search provider after a
+bounded benchmark"). A caller attaching both
+`to_additional_evidence()`/`signals_to_additional_evidence()` results to
+the same `ResearchCandidate` must not sum, average, or otherwise treat
+them as independent corroborating signals -- they are two candidate
+sources for one data need, evaluated so one can eventually be selected.
+
 Safety, by construction (mirrors backend.adapters.research.dataforseo):
 
 - `mode="plan_only"` is the default via `SidecarContext.dry_run=True`;
@@ -177,9 +187,22 @@ def _is_provider_registered() -> bool:
     build_provider_registry but never actually calls it (a pre-existing
     gap in that shared module, out of this adapter's file scope to fix);
     this adapter checks registration itself instead of silently assuming
-    it."""
-    registry = build_provider_registry()
-    return any(item.provider_id == PROVIDER_ID for item in registry.providers)
+    it.
+
+    Fails closed: if the registry lookup itself fails unexpectedly, this
+    returns False (not registered) rather than propagating the raw
+    exception or assuming registration -- the caller sees a `blocked`
+    result with `provider_not_registered`, never a crash."""
+    try:
+        registry = build_provider_registry()
+        return any(item.provider_id == PROVIDER_ID for item in registry.providers)
+    except Exception:
+        _log.warning("serpapi_provider_registry_check_failed")
+        return False
+
+
+def _slugify(query: str) -> str:
+    return "-".join((query or "").lower().split()) or "unknown-query"
 
 
 def _blocked_live_result(query: str, *, request_kind: str, evidence_category: str, provider_registered: bool) -> SerpApiSearchEvidence:
@@ -206,14 +229,30 @@ def _blocked_live_result(query: str, *, request_kind: str, evidence_category: st
 
 def _default_fixture_payload(query: str, *, request_kind: str) -> dict[str, Any]:
     """Load the bundled sanitized fixture for this request kind and
-    substitute the caller's own query into its records, so returned
-    evidence reflects the actual query rather than the fixture's
-    hardcoded example -- every other field stays exactly as the
-    sanitized fixture defines it."""
+    substitute the caller's own query into its records.
+
+    Regression fix: overlaying only `query` while leaving `candidate_id`
+    and `title` at the fixture's own hardcoded example (e.g.
+    candidate_id="neck-massager") produced a self-contradictory record --
+    a caller querying "portable espresso maker" would see
+    candidate_id="neck-massager" beside query="portable espresso maker",
+    misrepresenting an unrelated candidate as if it were that query's
+    result. `candidate_id` and `title` are now both derived from the
+    same query, mirroring
+    `evaluation.commerce.dataforseo_adapter._default_payload`'s existing
+    precedent (candidate_id/title are both keyword-derived there too) --
+    every other sanitized field (rank, trend_label, price, currency,
+    review_count, rating) stays exactly as the fixture defines it."""
     fixture_path = _REQUEST_KIND_TO_FIXTURE_PATH[request_kind]
     raw = json.loads(fixture_path.read_text(encoding="utf-8"))
     records = raw.get("records", [])
-    patched = [{**item, "query": query} for item in records if isinstance(item, Mapping)]
+    candidate_id = _slugify(query)
+    patched = []
+    for item in records:
+        if not isinstance(item, Mapping):
+            continue
+        base_title = str(item.get("title", "Synthetic result"))
+        patched.append({**item, "candidate_id": candidate_id, "query": query, "title": f"{base_title} for {query}"})
     return {**raw, "records": patched}
 
 

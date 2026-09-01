@@ -65,7 +65,34 @@ not inherit that gap. `fetch_search_evidence()` checks Provider Registry
 membership explicitly (`provider_registered` field on every result); if
 `serpapi` were ever absent from the registry, `provider_not_registered`
 is added to `blockers` and the result is forced to `status="blocked"`,
-never silently treated as ready.
+never silently treated as ready. The check itself is fail-closed: if the
+registry lookup raises unexpectedly, this is treated as "not registered"
+(`provider_registered=False`, `blocked`) rather than propagating the raw
+exception or assuming registration.
+
+## Fixture identity safety
+
+Overlaying only the caller's `query` onto the bundled fixture's static
+example previously left `candidate_id`/`title` describing an unrelated
+fixture example (e.g. `candidate_id="neck-massager"`) beside a real,
+different query — a misleading identity mismatch that could be read as
+"this candidate is a result for that query." `candidate_id` and `title`
+are now both derived from the same query as the record's own `query`
+field (mirroring `evaluation.commerce.dataforseo_adapter._default_payload`'s
+existing precedent), so every field in a normalized record is
+self-consistent. Every other sanitized field the fixture defines (`rank`,
+`trend_label` for organic; `price`, `currency`, `review_count`, `rating`
+for shopping) is preserved unchanged.
+
+## SerpApi and DataForSEO are not dual proof
+
+Both are consolidation-choice alternatives for the same `search_serp_data`
+capability (`evaluation/companyos/subscription_registry.py`'s own
+"consolidate-search" recommendation: "choose one search provider after a
+bounded benchmark"), not two independent confirmations. A caller
+attaching both `to_additional_evidence()`/`signals_to_additional_evidence()`
+results to the same `ResearchCandidate` must not sum, average, or
+otherwise treat them as independent corroborating signals.
 
 ## Safety boundary
 

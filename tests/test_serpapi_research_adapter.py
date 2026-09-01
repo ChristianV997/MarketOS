@@ -37,9 +37,27 @@ def test_organic_snapshot_substitutes_caller_query_into_fixture_record():
     evidence = adapter.fetch_search_evidence("portable espresso maker", context=_dry_run_context())
     record = evidence.report["records"][0]
     assert record["normalized_fields"]["query"] == "portable espresso maker"
-    assert record["normalized_fields"]["candidate_id"] == "neck-massager"
     assert "rank" in record["normalized_fields"]
     assert "trend_label" in record["normalized_fields"]
+
+
+def test_fixture_overlay_keeps_candidate_id_title_and_query_self_consistent():
+    """Regression: overlaying only `query` onto the fixture's static
+    example previously left candidate_id/title describing an unrelated
+    fixture example (e.g. candidate_id="neck-massager") beside the
+    caller's real query -- a misleading identity mismatch. candidate_id
+    and title must now be derived from the same query as the record's
+    own query field, for both request kinds."""
+    for request_kind in adapter.REQUEST_KINDS:
+        evidence = adapter.fetch_search_evidence(
+            "portable espresso maker", context=_dry_run_context(), request_kind=request_kind
+        )
+        fields = evidence.report["records"][0]["normalized_fields"]
+        assert fields["query"] == "portable espresso maker"
+        assert fields["candidate_id"] == "portable-espresso-maker"
+        assert "portable espresso maker" in fields["title"]
+        assert "neck" not in fields["candidate_id"]
+        assert "neck" not in fields["title"].lower()
 
 
 def test_organic_request_plan_is_bounded():
@@ -144,6 +162,23 @@ def test_missing_provider_registration_blocks_and_is_named(monkeypatch):
     assert evidence.status == "blocked"
 
 
+def test_provider_registry_lookup_failure_fails_closed_without_leaking(monkeypatch):
+    """Regression: _is_provider_registered() called build_provider_registry()
+    outside any exception boundary -- an unexpected failure there (not just
+    an empty registry) would have propagated uncaught out of
+    fetch_search_evidence, contradicting the 'must fail closed' contract."""
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("registry lookup failed embedding credential-shaped-value: sk-test-abcdefghijklmnopqrstuvwxyz")
+
+    monkeypatch.setattr(adapter, "build_provider_registry", _raise)
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    assert evidence.provider_registered is False
+    assert "provider_not_registered" in evidence.blockers
+    assert evidence.status == "blocked"
+    assert "sk-test" not in str(evidence.to_dict())
+
+
 # --- approval / credential / terms-privacy blockers -----------------------------
 
 
@@ -238,6 +273,16 @@ def test_malformed_fixture_records_field_fails_closed_not_raises():
     assert evidence.status == "error"
     assert evidence.readiness_state == "unavailable"
     assert evidence.signal_count == 0
+
+
+def test_empty_records_list_is_valid_not_an_error():
+    """An empty (but syntactically valid) records list is a legitimate,
+    zero-signal dry-run result -- distinct from a malformed payload."""
+    payload = {"provider": "serpapi", "records": [], "fixture_mode": True}
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context(), payload=payload)
+    assert evidence.status == "dry_run_ready"
+    assert evidence.signal_count == 0
+    assert evidence.report["records"] == []
 
 
 def test_secret_like_fixture_payload_is_rejected_not_kept():
@@ -338,6 +383,10 @@ def test_health_reports_unreachable_offline_adapter():
 
 
 def test_module_imports_no_network_or_sdk_modules():
+    """Strengthened denylist: covers both third-party HTTP/SDK clients and
+    stdlib network-capable modules (urllib itself, not just urllib3;
+    http.client; ftplib/smtplib/telnetlib; ssl; subprocess, which could be
+    used to shell out to curl/wget as an indirect network path)."""
     import ast
     import inspect
 
@@ -349,5 +398,20 @@ def test_module_imports_no_network_or_sdk_modules():
             imported_names.update(alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported_names.add(node.module.split(".")[0])
-    forbidden = {"requests", "httpx", "urllib3", "socket", "aiohttp", "boto3", "openai", "anthropic"}
+    forbidden = {
+        "requests", "httpx", "urllib", "urllib3", "socket", "aiohttp", "boto3",
+        "openai", "anthropic", "http", "ftplib", "smtplib", "telnetlib", "ssl",
+        "subprocess", "grpc", "websocket", "websockets", "paramiko",
+    }
     assert imported_names.isdisjoint(forbidden)
+
+
+def test_report_blob_never_contains_html_or_script_tags():
+    """Defensive scan of the full serialized report for HTML/script
+    markers, independent of the output-contract's own raw_payload_allowed
+    assertion -- belt-and-suspenders against an unsafe payload ever
+    surfacing in a raw report blob."""
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    blob = str(evidence.to_dict()).lower()
+    for marker in ("<html", "<script", "<!doctype", "javascript:"):
+        assert marker not in blob
