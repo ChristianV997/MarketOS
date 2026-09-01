@@ -682,6 +682,8 @@ def test_timeout_is_not_a_pass(monkeypatch, tmp_path):
 
 
 def test_windows_timeout_terminates_descendants_without_waiting(monkeypatch, tmp_path):
+    monkeypatch.setattr(gate.os, "name", "nt")
+
     class FakeStream:
         def __init__(self):
             self.closed = False
