@@ -27,4 +27,6 @@ if (-not $npm) {
 }
 & $npm.Source --prefix frontend ci --ignore-scripts --no-audit --no-fund
 
+& (Join-Path $PSScriptRoot "validate.ps1")
+
 Write-Output "MarketOS environment ready."

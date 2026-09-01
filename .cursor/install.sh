@@ -2,6 +2,7 @@
 # Idempotent Cloud Agent bootstrap for MarketOS.
 # System toolchains (Python 3.12, Node 22) come from the base image; this
 # script only refreshes repository-scoped dependencies against the checkout.
+# Shell scripts in .cursor/ are LF-only (.gitattributes); use install.ps1 on Windows.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
