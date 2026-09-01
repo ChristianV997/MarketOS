@@ -283,6 +283,32 @@ def test_ci_evidence_file_cli_path_is_deterministic_and_fail_closed(monkeypatch,
     assert payload["ready_for_supervised_use"] is False
 
 
+def test_ci_evidence_file_rejects_duplicate_job_names(tmp_path):
+    job_path = _write_ci_evidence(tmp_path)
+    payload = json.loads(job_path.read_text(encoding="utf-8"))
+    payload["jobs"].append(dict(payload["jobs"][0]))
+    job_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence, error = gate.load_ci_evidence(job_path)
+
+    assert evidence["status"] == "malformed"
+    assert evidence["reason"] == "duplicate_ci_job_name"
+    assert error == "malformed_ci_evidence"
+
+
+def test_ci_evidence_file_rejects_required_flag_mismatch(tmp_path):
+    job_path = _write_ci_evidence(tmp_path)
+    payload = json.loads(job_path.read_text(encoding="utf-8"))
+    payload["jobs"][0]["required"] = False
+    job_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence, error = gate.load_ci_evidence(job_path)
+
+    assert evidence["status"] == "malformed"
+    assert evidence["reason"] == "ci_job_required_flag_mismatch"
+    assert error == "malformed_ci_evidence"
+
+
 def test_ci_evidence_partial_required_jobs_preserve_failure_and_unavailability(monkeypatch, tmp_path):
     _all_tools_available(monkeypatch)
     root = _configured_root(tmp_path)
