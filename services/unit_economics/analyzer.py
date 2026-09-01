@@ -41,6 +41,7 @@ def run_unit_economics(
     this function wraps them anyway so a surprise failure degrades to a
     partial result instead of aborting."""
     workspace = workspace or _default_workspace()
+    workspace = get_workspace_registry().register(workspace)
     registry = get_experiment_registry()
     store = ArtifactStore(workspace)
 

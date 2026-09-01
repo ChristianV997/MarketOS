@@ -38,6 +38,7 @@ def create_commerce_experiment(
     """Never raises. Returns a registered, "created"-status envelope — call
     evaluate_launch_readiness() next before requesting any live action."""
     workspace = workspace or _default_workspace()
+    workspace = get_workspace_registry().register(workspace)
     registry = get_experiment_registry()
 
     resolved_budget_ceiling = budget_ceiling if budget_ceiling is not None else (

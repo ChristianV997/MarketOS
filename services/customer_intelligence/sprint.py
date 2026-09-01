@@ -58,6 +58,7 @@ def build_customer_intelligence_sprint(
 ) -> tuple[CustomerIntelligenceSprint, CommercialRunEnvelope]:
     """Never raises."""
     workspace = workspace or _default_workspace()
+    workspace = get_workspace_registry().register(workspace)
     registry = get_experiment_registry()
     store = ArtifactStore(workspace)
 

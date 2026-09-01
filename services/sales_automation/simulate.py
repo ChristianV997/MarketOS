@@ -47,6 +47,7 @@ def run_sales_bot_simulation(
 ) -> tuple[ChatSession, AppointmentHandoff, list[str], CommercialRunEnvelope]:
     """Never raises. Returns (session, handoff, qualification_flow, envelope)."""
     workspace = workspace or _default_workspace()
+    workspace = get_workspace_registry().register(workspace)
     registry = get_experiment_registry()
     store = ArtifactStore(workspace)
 

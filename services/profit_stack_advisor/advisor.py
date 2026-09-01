@@ -47,6 +47,7 @@ def run_profit_stack_advisor(
     never-raise; this function wraps it anyway so a surprise failure
     degrades to a partial result instead of aborting."""
     workspace = workspace or _default_workspace()
+    workspace = get_workspace_registry().register(workspace)
     registry = get_experiment_registry()
     store = ArtifactStore(workspace)
 

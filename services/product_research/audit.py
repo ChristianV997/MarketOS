@@ -49,6 +49,7 @@ def run_product_audit(
     failure in an optional dependency degrades to a partial result instead
     of aborting the whole audit."""
     workspace = workspace or _default_workspace()
+    workspace = get_workspace_registry().register(workspace)
     registry = get_experiment_registry()
     store = ArtifactStore(workspace)
 

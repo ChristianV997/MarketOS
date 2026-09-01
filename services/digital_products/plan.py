@@ -40,6 +40,7 @@ def build_digital_product_plan(
 ) -> tuple[DigitalProductPlan, CommercialRunEnvelope]:
     """Never raises: every function above is individually fail-soft."""
     workspace = workspace or _default_workspace()
+    workspace = get_workspace_registry().register(workspace)
     registry = get_experiment_registry()
     store = ArtifactStore(workspace)
 

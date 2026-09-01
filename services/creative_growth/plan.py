@@ -62,6 +62,7 @@ def build_creative_growth_plan(
     """Never raises: composes every function above; each is already
     individually fail-soft."""
     workspace = workspace or _default_workspace()
+    workspace = get_workspace_registry().register(workspace)
     registry = get_experiment_registry()
     store = ArtifactStore(workspace)
 
