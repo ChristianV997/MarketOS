@@ -67,6 +67,7 @@ and its required check status is `success`. Otherwise the evidence remains
 {
   "schema": "MarketOS.CIEvidence.v1",
   "run": {"status": "completed", "conclusion": "failure"},
+  "required_jobs": ["agentic-quality-gate"],
   "jobs": [{
     "name": "agentic-quality-gate",
     "required": true,

@@ -48,11 +48,13 @@ Missing tools, missing frontend dependencies, missing security policy, and CI
 billing/zero-step states remain unavailable rather than becoming passes.
 For sanitized CI metadata, pass a local JSON file with
 `--ci-evidence-file <path>`. It must use schema `MarketOS.CIEvidence.v1` and
-contain only run status/conclusion plus required-job metadata: job name,
+contain an explicit `required_jobs` list plus run status/conclusion and
+required-job metadata: job name,
 required flag, status, conclusion, runner id/name, executed-step count, log
 availability, and required-check status. Unknown fields, including raw logs,
-are malformed. A missing runner, zero steps, incomplete job, or unavailable
-logs is `ci_unavailable`; it cannot become a pass.
+are malformed. A required job missing from the observed jobs is synthetic
+`ci_unavailable` evidence. A missing runner, zero steps, incomplete job, or
+unavailable logs is `ci_unavailable`; it cannot become a pass.
 Malformed scanner output is malformed evidence. A security scanner that exits
 zero while returning findings remains a security failure. The readiness field
 stays false while any blocker exists, while the repository is dirty, or while

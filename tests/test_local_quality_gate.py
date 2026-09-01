@@ -125,7 +125,7 @@ def _passing_runner(command, root):
     return _result()
 
 
-def _write_ci_evidence(tmp_path: Path, *, run=None, jobs=None, extra_job_fields=None) -> Path:
+def _write_ci_evidence(tmp_path: Path, *, run=None, required_jobs=None, jobs=None, extra_job_fields=None) -> Path:
     job = {
         "name": "agentic-quality-gate",
         "required": True,
@@ -142,6 +142,7 @@ def _write_ci_evidence(tmp_path: Path, *, run=None, jobs=None, extra_job_fields=
     payload = {
         "schema": gate.CI_EVIDENCE_SCHEMA,
         "run": run or {"status": "completed", "conclusion": "success"},
+        "required_jobs": required_jobs or [job["name"]],
         "jobs": jobs or [job],
     }
     path = tmp_path / "ci-evidence.json"
@@ -280,6 +281,108 @@ def test_ci_evidence_file_cli_path_is_deterministic_and_fail_closed(monkeypatch,
     assert payload["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
     assert payload["ci"]["jobs"][0]["runner_assigned"] is False
     assert payload["ready_for_supervised_use"] is False
+
+
+def test_ci_evidence_partial_required_jobs_preserve_failure_and_unavailability(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    jobs = [
+        {
+            "name": "agentic-quality-gate",
+            "required": True,
+            "status": "completed",
+            "conclusion": "success",
+            "runner_id": 123,
+            "runner_name": "ubuntu-latest",
+            "steps_executed": 4,
+            "logs_available": True,
+            "required_check_status": "success",
+        },
+        {
+            "name": "test",
+            "required": True,
+            "status": "completed",
+            "conclusion": "failure",
+            "runner_id": 124,
+            "runner_name": "ubuntu-latest",
+            "steps_executed": 3,
+            "logs_available": True,
+            "required_check_status": "failure",
+        },
+        {
+            "name": "quality-advisory",
+            "required": True,
+            "status": "in_progress",
+            "conclusion": "pending",
+            "runner_id": 125,
+            "runner_name": "ubuntu-latest",
+            "steps_executed": 0,
+            "logs_available": True,
+            "required_check_status": "pending",
+        },
+        {
+            "name": "semgrep-policy",
+            "required": True,
+            "status": "completed",
+            "conclusion": "failure",
+            "runner_id": 0,
+            "runner_name": "",
+            "steps_executed": 0,
+            "logs_available": False,
+            "required_check_status": "failure",
+        },
+    ]
+    evidence_path = _write_ci_evidence(
+        root,
+        run={"status": "completed", "conclusion": "failure"},
+        required_jobs=[job["name"] for job in jobs],
+        jobs=jobs,
+    )
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert error is None
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        runner=_passing_runner,
+    )
+    ci_jobs = {job["name"]: job for job in report["ci"]["jobs"]}
+    assert ci_jobs["agentic-quality-gate"]["status"] == "passed"
+    assert ci_jobs["test"]["status"] == "failed"
+    assert ci_jobs["quality-advisory"]["status"] == "unavailable"
+    assert ci_jobs["semgrep-policy"]["reason"] == "runner_unassigned"
+    assert report["ci"]["status"] == "unavailable"
+    assert report["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
+    assert gate.CLASS_FAILURE_ORIGIN_UNVERIFIED in report["failure_classes"]
+    assert report["ready_for_supervised_use"] is False
+
+
+def test_ci_evidence_missing_required_job_is_unavailable(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    evidence_path = _write_ci_evidence(
+        root,
+        required_jobs=["agentic-quality-gate", "test"],
+    )
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert error is None
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        runner=_passing_runner,
+    )
+    missing = next(job for job in report["ci"]["jobs"] if job["name"] == "test")
+    assert missing["status"] == "unavailable"
+    assert missing["reason"] == "required_ci_job_missing"
+    assert report["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
+    assert report["ready_for_supervised_use"] is False
 
 
 def test_real_gate_reports_stable_order_and_observed_evidence(monkeypatch, tmp_path):

@@ -87,7 +87,7 @@ CI_EVIDENCE_SCHEMA = "MarketOS.CIEvidence.v1"
 CI_EVIDENCE_RUN_STATUSES = {"queued", "in_progress", "completed", "waiting", "requested", "pending"}
 CI_EVIDENCE_CONCLUSIONS = {
     "success", "failure", "neutral", "cancelled", "skipped", "timed_out",
-    "action_required", "stale", "startup_failure",
+    "action_required", "stale", "startup_failure", "pending",
 }
 CI_EVIDENCE_CHECK_STATUSES = {"success", "failure", "neutral", "cancelled", "skipped", "pending"}
 CI_EVIDENCE_MAX_BYTES = 64 * 1024
@@ -609,7 +609,7 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return _ci_evidence_error("unreadable_ci_evidence")
-    if not _validate_ci_mapping(payload, {"schema", "run", "jobs"}) or payload.get("schema") != CI_EVIDENCE_SCHEMA:
+    if not _validate_ci_mapping(payload, {"schema", "run", "required_jobs", "jobs"}) or payload.get("schema") != CI_EVIDENCE_SCHEMA:
         return _ci_evidence_error("invalid_ci_evidence_schema")
 
     run = payload.get("run")
@@ -620,14 +620,24 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
     if run_status not in CI_EVIDENCE_RUN_STATUSES or run_conclusion not in CI_EVIDENCE_CONCLUSIONS:
         return _ci_evidence_error("invalid_ci_run_status")
 
+    required_jobs = payload.get("required_jobs")
+    if (
+        not isinstance(required_jobs, list) or not required_jobs
+        or len(required_jobs) > CI_EVIDENCE_MAX_JOBS
+        or any(not isinstance(name, str) or not name.strip() for name in required_jobs)
+        or len({name.strip() for name in required_jobs}) != len(required_jobs)
+    ):
+        return _ci_evidence_error("required_ci_jobs_expected")
+    required_jobs = [name.strip() for name in required_jobs]
     raw_jobs = payload.get("jobs")
-    if not isinstance(raw_jobs, list) or not raw_jobs or len(raw_jobs) > CI_EVIDENCE_MAX_JOBS:
+    if not isinstance(raw_jobs, list) or len(raw_jobs) > CI_EVIDENCE_MAX_JOBS:
         return _ci_evidence_error("ci_jobs_required")
     normalized_jobs: list[dict[str, Any]] = []
     allowed_job_fields = {
         "name", "required", "status", "conclusion", "runner_id", "runner_name",
         "steps_executed", "logs_available", "required_check_status",
     }
+    seen_job_names: set[str] = set()
     for raw_job in raw_jobs:
         if not _validate_ci_mapping(raw_job, allowed_job_fields):
             return _ci_evidence_error("invalid_ci_job_metadata")
@@ -648,6 +658,9 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
             or required_check_status not in CI_EVIDENCE_CHECK_STATUSES
         ):
             return _ci_evidence_error("invalid_ci_job_fields")
+        if name.strip() in seen_job_names:
+            return _ci_evidence_error("duplicate_ci_job_name")
+        seen_job_names.add(name.strip())
         if runner_id is not None and (not isinstance(runner_id, int) or isinstance(runner_id, bool) or runner_id < 0):
             return _ci_evidence_error("invalid_ci_runner_id")
         if runner_name is not None and not isinstance(runner_name, str):
@@ -663,18 +676,21 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
             "logs_available": logs_available,
             "required_check_status": required_check_status,
         })
-    if not any(job["required"] for job in normalized_jobs):
-        return _ci_evidence_error("required_ci_job_missing")
+    if any(job["required"] != (job["name"] in required_jobs) for job in normalized_jobs):
+        return _ci_evidence_error("ci_job_required_flag_mismatch")
     return {
         "evidence_format": CI_EVIDENCE_SCHEMA,
         "run_status": run_status,
         "run_conclusion": run_conclusion,
+        "required_jobs": required_jobs,
         "jobs": normalized_jobs,
     }, None
 
 
 def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
     jobs: list[dict[str, Any]] = []
+    expected_jobs = set(ci_result["required_jobs"])
+    observed_jobs = {job["name"] for job in ci_result["jobs"]}
     for job in ci_result["jobs"]:
         runner_assigned = job["runner_id"] is not None and job["runner_id"] > 0
         if not runner_assigned:
@@ -700,8 +716,27 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
             "logs_available": job["logs_available"],
             "reason": reason,
         })
+    for missing_name in sorted(expected_jobs - observed_jobs):
+        jobs.append({
+            "name": missing_name,
+            "required": True,
+            "status": "unavailable",
+            "conclusion": "pending",
+            "required_check_status": "pending",
+            "runner_assigned": False,
+            "steps_executed": 0,
+            "logs_available": False,
+            "reason": "required_ci_job_missing",
+        })
     required_jobs = [job for job in jobs if job["required"]]
     executed_steps = sum(job["steps_executed"] for job in required_jobs)
+    failure_classes = {
+        CLASS_FAILURE_ORIGIN_UNVERIFIED
+        for job in required_jobs
+        if job["status"] == "failed"
+    }
+    if any(job["status"] == "unavailable" for job in required_jobs):
+        failure_classes.add(CLASS_CI_UNAVAILABLE)
     if ci_result["run_status"] != "completed":
         status, reason, classification = "unavailable", "ci_run_not_completed", CLASS_CI_UNAVAILABLE
     elif any(job["status"] == "unavailable" for job in required_jobs):
@@ -718,6 +753,8 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
         "run_status": ci_result["run_status"],
         "run_conclusion": ci_result["run_conclusion"],
         "jobs": jobs,
+        "required_jobs": sorted(expected_jobs),
+        "failure_classes": sorted(failure_classes),
     }
 
 
@@ -901,6 +938,7 @@ def run_quality_gate(
     failure_classes = {
         value for value in check_classes if value not in {CLASS_PASS, "not_configured", "not_run"}
     }
+    failure_classes.update(ci.get("failure_classes", []))
     if ci["classification"] != CLASS_PASS:
         failure_classes.add(ci["classification"])
     failure_classes = sorted(failure_classes)
@@ -935,14 +973,17 @@ def run_quality_gate(
     elif not execute:
         classification = CLASS_CI_UNAVAILABLE if ci["status"] == "unavailable" else "not_run"
     elif failure_classes:
-        priority = (
-            CLASS_MALFORMED_CONFIGURATION, CLASS_SECURITY_FINDING, CLASS_SECURITY_SCANNER_FAILURE,
-            CLASS_DIFF_FAILURE, CLASS_TIMEOUT, CLASS_COLLECTION_FAILED,
-            CLASS_CHANGED_SCOPE_FAILURE, CLASS_PRE_EXISTING_FAILURE,
-            CLASS_FAILURE_ORIGIN_UNVERIFIED, CLASS_MISSING_TOOL,
-            CLASS_UNAVAILABLE_DEPENDENCY, CLASS_CI_UNAVAILABLE, "blocked",
-        )
-        classification = next((value for value in priority if value in failure_classes), failure_classes[0])
+        if ci["classification"] == CLASS_CI_UNAVAILABLE:
+            classification = CLASS_CI_UNAVAILABLE
+        else:
+            priority = (
+                CLASS_MALFORMED_CONFIGURATION, CLASS_SECURITY_FINDING, CLASS_SECURITY_SCANNER_FAILURE,
+                CLASS_DIFF_FAILURE, CLASS_TIMEOUT, CLASS_COLLECTION_FAILED,
+                CLASS_CHANGED_SCOPE_FAILURE, CLASS_PRE_EXISTING_FAILURE,
+                CLASS_FAILURE_ORIGIN_UNVERIFIED, CLASS_MISSING_TOOL,
+                CLASS_UNAVAILABLE_DEPENDENCY, CLASS_CI_UNAVAILABLE, "blocked",
+            )
+            classification = next((value for value in priority if value in failure_classes), failure_classes[0])
     else:
         classification = CLASS_PASS
     ready = execute and status == "passed" and git["status"] == "clean" and ci["status"] == "passed"
