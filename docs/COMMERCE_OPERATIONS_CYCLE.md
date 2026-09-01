@@ -9,17 +9,52 @@ Product Opportunity Synthesis remains the scoring authority. This cycle calls
 `evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis`
 and does not recopy weights or grades.
 
+Product validation is a later stage. After synthesis and before launch-draft
+readiness, the cycle calls
+`evaluation.commerce.product_validation_report.generate` with the three pillar
+reports plus the synthesis dict. It does not pass launch or site packs, does
+not copy scoring, and projects only compact metadata.
+
 ## What it composes
 
 1. Marketplace or research evidence (existing fixture importers + `build_report`)
 2. Supplier feasibility (same)
 3. Consumer-attention (same)
 4. Product-opportunity synthesis (existing builder only)
-5. Resource & Execution Governor decision (`evaluate_execution_request`)
-6. TrustOS and Approval Ledger status (existing APIs, metadata only)
-7. Launch and site draft **readiness** (plan-only; packs are not written unless `--output` is set, and even then only the cycle report is written)
-8. Client-workspace-safe projection metadata (existing isolation plan; no tenant creation)
-9. `next_best_action` plus explicit blockers
+5. Product validation (`generate`, compact projection only)
+6. TrustOS status (`evaluate_action` / combined report, metadata only)
+7. Resource & Execution Governor (`evaluate_execution_request`), with the
+   existing TrustOS `evaluate_action` result passed through as
+   `trustos_decision` (no cycle-local gate)
+8. Approval Ledger status (`simulate_action` / `build_approval_ledger` with an
+   empty `registry_report`, so this cycle does not call `build_provider_registry`)
+9. Launch and site draft **readiness** (plan-only; packs are not written unless `--output` is set, and even then only the cycle report is written)
+10. Client-workspace-safe projection metadata (existing isolation plan; no tenant creation)
+11. `next_best_action` plus explicit blockers
+
+## Uniform stage schema
+
+Every stage is projected onto the same dict keys (plus stage-specific extras):
+
+- `status`
+- `evidence_references`
+- `blocking_reasons` (aliased as `blockers` for the existing report shape)
+- `next_action`
+- `owner_department`
+- `required_approval_or_gate`
+- `client_visible_projection_state`
+
+Top-level `stages` holds the compact form of marketplace, supplier,
+consumer_attention, synthesis, product_validation, trustos, governor,
+approval_ledger, launch_draft_readiness, site_draft_readiness, and
+client_workspace. This mapping does not add a second scorer or a second
+TrustOS gate.
+
+Governor `ExecutionDecisionRequest.trustos_decision` is the existing
+`evaluate_action` decision for the mapped TrustOS action
+(`public_beta_launch`, `publish_site`, or `run_provider_readonly_call`).
+If TrustOS is unavailable, the cycle passes `blocked` (fail closed) rather
+than hardcoding `allow`.
 
 ## Evidence classes
 

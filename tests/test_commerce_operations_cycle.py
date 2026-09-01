@@ -12,10 +12,13 @@ from backend.mvp_commerce.opportunity import OpportunityCandidate
 from backend.mvp_commerce.product_research import build_research_candidates
 from evaluation.commerce.commerce_operations_cycle import (
     EVIDENCE_CLASSES,
+    STAGE_ORDER,
+    UNIFORM_STAGE_KEYS,
     build_commerce_operations_cycle,
     reject_unsafe_input,
 )
 from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis
+from evaluation.trustos.gate_runner import evaluate_action as evaluate_trustos_action
 from scripts.run_commerce_operations_cycle import main
 from scripts.run_product_opportunity_synthesis import main as synthesis_main
 
@@ -201,8 +204,9 @@ def test_live_flag_fail_closes_as_blocked():
     assert report["governor"]["status"] == "blocked"
     assert report["governor"].get("live_go") is not True
     for decision in report["governor"].get("decisions") or []:
-        assert decision.get("outcome") != "allow"
         assert decision.get("simulated_only") is True
+        assert decision.get("trustos_decision") not in {None, "allow"}
+        assert decision.get("outcome") != "allow"
 
 
 def test_client_safe_projection_omits_secrets():
@@ -231,6 +235,7 @@ def test_new_modules_have_no_live_clients():
         assert "httpx" not in source
         assert "openai" not in source
         assert "anthropic" not in source
+        assert "build_provider_registry" not in source
 
 
 def test_build_research_candidates_unchanged_without_this_cycle():
@@ -335,3 +340,158 @@ def test_cli_missing_pillar_from_partial_inputs(capsys):
     assert "consumer_pillar_missing" in report["blockers"]
     assert report["synthesis"]["confidence_grade"] != "A_live_validated"
     assert report["governor"].get("live_go") is not True
+
+
+def _assert_uniform_stage(section: dict, *, blockers_alias: bool = False) -> None:
+    for key in UNIFORM_STAGE_KEYS:
+        assert key in section
+    assert isinstance(section["evidence_references"], list)
+    assert isinstance(section["blocking_reasons"], list)
+    if blockers_alias:
+        assert section["blocking_reasons"] == section.get("blockers")
+    assert section["client_visible_projection_state"] in {
+        "internal_only",
+        "client_safe_projection",
+        "blocked",
+        "client_visible",
+    }
+
+
+def test_every_stage_uses_uniform_schema():
+    report = cycle().to_dict()
+    assert list(report["stages"]) == list(STAGE_ORDER)
+    for name in STAGE_ORDER:
+        _assert_uniform_stage(report[name], blockers_alias=True)
+        _assert_uniform_stage(report["stages"][name])
+        assert report["stages"][name]["status"] == report[name]["status"]
+        assert report["stages"][name]["blocking_reasons"] == report[name]["blocking_reasons"]
+
+
+def test_happy_plan_only_path_is_offline():
+    report = cycle().to_dict()
+    assert report["overall_status"] == "plan_only"
+    assert report["cycle_mode"] == "dry_run"
+    assert report["live_validated"] is False
+    assert report["confidence_claim"] == "not_live_validated"
+    assert report["synthesis"]["confidence_grade"] != "A_live_validated"
+    assert report["product_validation"]["live_go"] is not True
+    assert report["launch_draft_readiness"]["packs_written"] is False
+    assert report["site_draft_readiness"]["publishing_authorized"] is False
+    assert report["governor"].get("live_go") is not True
+    assert report["approval_ledger"]["live_approval_granted"] is False
+
+
+def test_product_validation_is_called_after_synthesis_before_launch():
+    report = cycle().to_dict()
+    validation = report["product_validation"]
+    assert validation["scoring_authority"].endswith("product_validation_report.generate")
+    assert validation["source_reports"]["opportunity_synthesis"] == "supplied"
+    assert validation["source_reports"]["launch_draft_pack"] == "missing"
+    assert validation["source_reports"]["site_draft_pack"] == "missing"
+    assert "executive_summary" not in validation
+    assert "top_candidates" not in validation
+    assert validation["overall_recommendation"] == report["synthesis"]["overall_recommendation"]
+    assert list(STAGE_ORDER).index("product_validation") == list(STAGE_ORDER).index("synthesis") + 1
+    assert list(STAGE_ORDER).index("launch_draft_readiness") > list(STAGE_ORDER).index("product_validation")
+
+
+def test_governor_trustos_decision_is_passthrough_not_hardcoded():
+    report = cycle().to_dict()
+    public_beta = evaluate_trustos_action("public_beta_launch", generated_at="offline-deterministic").to_dict()
+    publish_site = evaluate_trustos_action("publish_site", generated_at="offline-deterministic").to_dict()
+    by_action = {item["action_type"]: item for item in report["governor"]["decisions"]}
+    assert by_action["screen_product_opportunities"]["trustos_decision"] == public_beta["decision"]
+    assert by_action["screen_product_opportunities"]["trustos_action"] == "public_beta_launch"
+    assert by_action["generate_launch_draft"]["trustos_decision"] == publish_site["decision"]
+    assert by_action["generate_site_draft"]["trustos_decision"] == publish_site["decision"]
+    assert "allow" not in {
+        by_action["screen_product_opportunities"]["trustos_decision"],
+        by_action["generate_launch_draft"]["trustos_decision"],
+    }
+
+
+def test_insufficient_supplier_evidence_scenario():
+    market, _, consumer = pillars()
+    expected = build_product_opportunity_synthesis(market, load("insufficient_supplier_report.json"), consumer).to_dict()
+    report = build_commerce_operations_cycle(
+        market,
+        load("insufficient_supplier_report.json"),
+        consumer,
+    ).to_dict()
+    assert report["supplier"]["status"] == "unavailable"
+    assert "supplier_candidates_missing" in report["blockers"]
+    assert report["synthesis"]["overall_recommendation"] == expected["overall_recommendation"]
+    assert expected["overall_recommendation"] in {"validate_supplier_first", "expand_supplier_research"}
+    assert report["live_validated"] is False
+    assert report["governor"].get("live_go") is not True
+    assert report["confidence_claim"] != "A_live_validated"
+
+
+def test_weak_consumer_attention_scenario():
+    market, supplier, _ = pillars()
+    consumer = load("weak_consumer_attention_report.json")
+    expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    assert report["synthesis"]["overall_recommendation"] == expected["overall_recommendation"]
+    assert expected["overall_recommendation"] in {"reject_low_attention", "expand_consumer_research", "reject_high_objection_risk"}
+    assert report["product_validation"]["overall_recommendation"] == expected["overall_recommendation"]
+    assert report["live_validated"] is False
+    assert report["governor"].get("live_go") is not True
+
+
+def test_poor_economics_scenario():
+    market, _, consumer = pillars()
+    supplier = load("poor_economics_supplier_report.json")
+    expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    assert report["synthesis"]["overall_recommendation"] == expected["overall_recommendation"]
+    assert expected["overall_recommendation"] in {"reject_poor_margin", "reject_logistics_risk", "reject_inventory_risk"}
+    assert report["product_validation"]["overall_recommendation"] == expected["overall_recommendation"]
+    assert report["live_validated"] is False
+    assert report["governor"].get("live_go") is not True
+
+
+def test_trustos_block_scenario():
+    report = cycle().to_dict()
+    decisions = {item.get("action"): item.get("decision") for item in report["trustos"].get("gates") or []}
+    assert decisions.get("public_beta_launch") == "hard_block"
+    assert decisions.get("launch_ad") == "hard_block"
+    assert any(str(item).startswith("trustos_") and "hard_block" in str(item) for item in report["blockers"])
+    assert report["trustos"]["required_approval_or_gate"] == "TrustOS evaluate_action"
+    assert report["trustos"]["professional_conclusion"] is False
+    assert report["governor"].get("live_go") is not True
+
+
+def test_missing_approval_scenario():
+    report = cycle().to_dict()
+    sims = report["approval_ledger"].get("simulations") or []
+    assert sims
+    assert any(
+        item.get("missing_conditions")
+        or "denied" in str(item.get("result") or "")
+        or "blocked" in str(item.get("result") or "")
+        for item in sims
+    )
+    assert report["approval_ledger"]["live_approval_granted"] is False
+    assert report["approval_ledger"]["status"] == "requires_approval"
+    assert any("approval_missing:" in item or "approval_" in item for item in report["blockers"])
+    assert report["governor"].get("live_go") is not True
+
+
+def test_client_safe_export_block_scenario():
+    report = cycle().to_dict()
+    export = next((item for item in report["trustos"].get("gates") or [] if item.get("action") == "client_workspace_export"), None)
+    assert export is not None
+    assert export.get("decision") == "hard_block"
+    assert report["client_workspace"]["tenant_created"] is False
+    assert report["client_workspace"]["client_visible_projection_state"] in {"blocked", "client_safe_projection"}
+    assert report["client_workspace"]["blocking_reasons"]
+    assert report["client_safe_projection"]["launch_authorized"] is False
+    assert report["governor"].get("live_go") is not True
+
+
+def test_cycle_source_does_not_call_provider_registry():
+    for path in MODULE_PATHS:
+        source = path.read_text(encoding="utf8")
+        assert "build_provider_registry" not in source
+        assert "build_companyos_registry_report" not in source
