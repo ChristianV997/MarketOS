@@ -19,6 +19,13 @@ Run the fixed local checks in a clean isolated worktree:
 python scripts/ai/run_local_quality_gate.py --from-git --execute --generated-at 2026-08-29T12:00:00+00:00 --json
 ```
 
+Run the workflow-compatible local preflight when final CI evidence does not
+yet exist:
+
+```powershell
+python scripts/ai/run_local_quality_gate.py --from-git --execute --phase preflight --generated-at 2026-08-29T12:00:00+00:00 --json
+```
+
 The timestamp is injected by the operator. Check ordering is stable and is
 always `compile`, `pytest`, `ruff`, `typed`, `frontend`, `security`, then
 `diff_check`. The executable mode does not install dependencies or make
@@ -99,6 +106,12 @@ checks, clean git state, and observed CI success with at least one executed
 step. Human review remains required. Planning output never authorizes
 deployment, publishing, provider calls, supplier calls, commerce mutation,
 repair, merge, or credential use.
+
+Preflight has a deliberately narrower exit contract: it exits zero only when
+the local checks pass, but it always reports `ready_for_supervised_use: false`
+and does not turn missing final CI evidence into success. Supply complete
+sanitized `MarketOS.CIEvidence.v1` to the default final phase after required
+jobs finish to obtain final attestation.
 
 ## Operator interpretation
 

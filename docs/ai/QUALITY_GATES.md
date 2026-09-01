@@ -41,6 +41,15 @@ process exits:
 | `2` | A required tool/dependency is unavailable, checks were not run, or CI is unavailable/has no executed steps. |
 | `3` | The report request or repository configuration is malformed. |
 
+## CI preflight and final attestation
+
+The existing workflow runs `--phase preflight`: it proves only that bounded
+local checks executed successfully. A preflight report always keeps
+`ready_for_supervised_use` false and retains absent CI evidence as
+`ci_unavailable`; its zero exit code is not final merge evidence. Final
+attestation uses the default `final` phase with complete sanitized
+`MarketOS.CIEvidence.v1` input after required jobs have completed.
+
 Failure classifications distinguish `changed_scope_failure` from
 `pre_existing_failure` only when the injected baseline supports that claim.
 Without baseline evidence, a failed check is `failure_origin_unverified`.

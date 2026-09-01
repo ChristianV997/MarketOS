@@ -283,6 +283,70 @@ def test_ci_evidence_file_cli_path_is_deterministic_and_fail_closed(monkeypatch,
     assert payload["ready_for_supervised_use"] is False
 
 
+def test_preflight_succeeds_locally_without_claiming_final_readiness(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-09-01T12:00:00+00:00",
+        execute=True,
+        phase="preflight",
+        changed_paths=[],
+        runner=_passing_runner,
+    )
+
+    assert report["phase"] == "preflight"
+    assert report["mode"] == "preflight_execution"
+    assert report["status"] == "unavailable"
+    assert report["classification"] == gate.CLASS_CI_UNAVAILABLE
+    assert report["preflight"]["status"] in {"passed", "passed_with_warnings"}
+    assert report["preflight"]["exit_code"] == gate.EXIT_PASSED
+    assert report["exit_code"] == gate.EXIT_PASSED
+    assert report["ready_for_supervised_use"] is False
+
+
+def test_preflight_preserves_local_failure_and_final_phase_stays_strict(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+
+    def failing_runner(command, root):
+        if "pytest" in " ".join(command):
+            return _result(returncode=1, stdout="1 failed")
+        return _passing_runner(command, root)
+
+    preflight = gate.run_quality_gate(
+        root,
+        generated_at="2026-09-01T12:00:00+00:00",
+        execute=True,
+        phase="preflight",
+        changed_paths=[],
+        runner=failing_runner,
+    )
+    final = gate.run_quality_gate(
+        root,
+        generated_at="2026-09-01T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        runner=_passing_runner,
+    )
+
+    assert preflight["preflight"]["status"] == "failed"
+    assert preflight["exit_code"] == gate.EXIT_FAILED
+    assert preflight["ready_for_supervised_use"] is False
+    assert final["phase"] == "final"
+    assert final["ci"]["reason"] == "external_ci_not_queried"
+    assert final["exit_code"] == gate.EXIT_UNAVAILABLE
+    assert final["ready_for_supervised_use"] is False
+
+
+def test_preflight_cli_rejects_final_ci_evidence(tmp_path):
+    evidence_path = _write_ci_evidence(tmp_path)
+
+    with pytest.raises(SystemExit):
+        gate.main(["--execute", "--phase", "preflight", "--ci-evidence-file", str(evidence_path)])
+
+
 def test_ci_evidence_file_rejects_duplicate_job_names(tmp_path):
     job_path = _write_ci_evidence(tmp_path)
     payload = json.loads(job_path.read_text(encoding="utf-8"))

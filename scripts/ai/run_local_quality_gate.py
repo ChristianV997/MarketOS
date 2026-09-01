@@ -92,6 +92,7 @@ CI_EVIDENCE_CONCLUSIONS = {
 CI_EVIDENCE_CHECK_STATUSES = {"success", "failure", "neutral", "cancelled", "skipped", "pending"}
 CI_EVIDENCE_MAX_BYTES = 64 * 1024
 CI_EVIDENCE_MAX_JOBS = 100
+QUALITY_GATE_PHASES = {"final", "preflight"}
 
 
 def _optional_phase1_summary() -> tuple[dict[str, Any], dict[str, Any]]:
@@ -893,6 +894,7 @@ def run_quality_gate(
     baseline_report: Mapping[str, Any] | None = None,
     baseline_error: str | None = None,
     ci_evidence_error: str | None = None,
+    phase: str = "final",
     runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     """Run fixed local checks while preserving evidence boundaries.
@@ -919,6 +921,10 @@ def run_quality_gate(
         configuration_errors.append(baseline_error)
     if ci_evidence_error:
         configuration_errors.append(ci_evidence_error)
+    if phase not in QUALITY_GATE_PHASES:
+        configuration_errors.append("invalid_quality_gate_phase")
+    if phase == "preflight" and ci_result is not None:
+        configuration_errors.append("preflight_ci_evidence_forbidden")
 
     checks = [
         _check_command("compile", [sys.executable, "-m", "compileall", "-q", "."], root=root, execute=execute, runner=runner),
@@ -956,17 +962,28 @@ def run_quality_gate(
 
     statuses = {check["status"] for check in checks}
     if configuration_errors:
-        status, exit_code = "configuration_error", EXIT_CONFIGURATION
+        local_status, local_exit_code = "configuration_error", EXIT_CONFIGURATION
     elif not execute:
-        status, exit_code = "not_run", EXIT_UNAVAILABLE
-    elif {"failed", "timed_out", "collection_failed"} & statuses or "blocked" in statuses or ci["status"] == "failed":
-        status, exit_code = "failed", EXIT_FAILED
-    elif "unavailable" in statuses or ci["status"] == "unavailable":
-        status, exit_code = "unavailable", EXIT_UNAVAILABLE
+        local_status, local_exit_code = "not_run", EXIT_UNAVAILABLE
+    elif {"failed", "timed_out", "collection_failed"} & statuses or "blocked" in statuses:
+        local_status, local_exit_code = "failed", EXIT_FAILED
+    elif "unavailable" in statuses:
+        local_status, local_exit_code = "unavailable", EXIT_UNAVAILABLE
     elif warnings:
-        status, exit_code = "passed_with_warnings", EXIT_PASSED
+        local_status, local_exit_code = "passed_with_warnings", EXIT_PASSED
     else:
-        status, exit_code = "passed", EXIT_PASSED
+        local_status, local_exit_code = "passed", EXIT_PASSED
+
+    if configuration_errors:
+        status, final_exit_code = "configuration_error", EXIT_CONFIGURATION
+    elif not execute:
+        status, final_exit_code = "not_run", EXIT_UNAVAILABLE
+    elif local_status == "failed" or ci["status"] == "failed":
+        status, final_exit_code = "failed", EXIT_FAILED
+    elif local_status == "unavailable" or ci["status"] == "unavailable":
+        status, final_exit_code = "unavailable", EXIT_UNAVAILABLE
+    else:
+        status, final_exit_code = local_status, local_exit_code
 
     if configuration_errors:
         classification = CLASS_MALFORMED_CONFIGURATION
@@ -986,17 +1003,28 @@ def run_quality_gate(
             classification = next((value for value in priority if value in failure_classes), failure_classes[0])
     else:
         classification = CLASS_PASS
-    ready = execute and status == "passed" and git["status"] == "clean" and ci["status"] == "passed"
+    ready = (
+        phase == "final" and execute and status == "passed" and git["status"] == "clean"
+        and ci["status"] == "passed"
+    )
+    preflight = {
+        "status": local_status,
+        "exit_code": local_exit_code,
+        "ready_for_supervised_use": False,
+    }
+    exit_code = local_exit_code if phase == "preflight" else final_exit_code
     return {
         "schema": QUALITY_GATE_SCHEMA,
         "generated_at": generated_at,
         "timestamp_injected": timestamp_injected,
-        "mode": "real_execution" if execute else "dry_run",
+        "mode": "preflight_execution" if execute and phase == "preflight" else "real_execution" if execute else "dry_run",
+        "phase": phase,
         "status": status,
         "classification": classification,
         "failure_classes": failure_classes,
         "exit_code": exit_code,
         "ready_for_supervised_use": ready,
+        "preflight": preflight,
         "changed_files": paths,
         "toolchain": toolchain,
         "dependencies": dependencies,
@@ -1016,7 +1044,13 @@ def run_quality_gate(
             "environment_values_persisted": False, "automatic_repair": False,
             "merge_or_publish": False,
         },
-        "operator_action": "run with --execute and an injected timezone-aware --generated-at after resolving unavailable or failed checks" if not ready else "human review may proceed; inspect the report and CI evidence before merging",
+        "operator_action": (
+            "supply complete sanitized CIEvidence.v1 to run final attestation; preflight success is not merge evidence"
+            if phase == "preflight" and local_exit_code == EXIT_PASSED
+            else "run with --execute and an injected timezone-aware --generated-at after resolving unavailable or failed checks"
+            if not ready
+            else "human review may proceed; inspect the report and CI evidence before merging"
+        ),
     }
 
 
@@ -1028,6 +1062,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--branch", default="local")
     parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--execute", action="store_true", help="run fixed local checks instead of only reporting their plan")
+    parser.add_argument("--phase", choices=("final", "preflight"), default="final", help="final attestation or local preflight")
     parser.add_argument("--generated-at", help="timezone-aware ISO timestamp injected by the caller")
     parser.add_argument("--ci-status", choices=("success", "failure", "unavailable"), help="optional external CI result; never queried by this tool")
     parser.add_argument("--ci-steps", type=int, default=0, help="executed-step count accompanying --ci-status")
@@ -1039,6 +1074,10 @@ def main(argv: list[str] | None = None) -> int:
     paths = list(args.changed_file) + (changed_from_git(args.repository) if args.from_git else [])
     if args.ci_status is not None and args.ci_evidence_file is not None:
         parser.error("choose --ci-status or --ci-evidence-file")
+    if args.phase == "preflight" and not args.execute:
+        parser.error("--phase preflight requires --execute")
+    if args.phase == "preflight" and (args.ci_status is not None or args.ci_evidence_file is not None):
+        parser.error("--phase preflight does not accept final CI evidence")
     ci_evidence_error = None
     if args.ci_evidence_file is not None:
         ci_result, ci_evidence_error = load_ci_evidence(args.ci_evidence_file)
@@ -1063,6 +1102,7 @@ def main(argv: list[str] | None = None) -> int:
         baseline_report=baseline_report,
         baseline_error=baseline_error,
         ci_evidence_error=ci_evidence_error,
+        phase=args.phase,
     )
     report["planning_summary"] = run(paths, diff_text=_diff_text(args.diff_file, args.repository), branch=args.branch)
     content = render_json_or_markdown(report, markdown=args.markdown, title="MarketOS local quality gate")
