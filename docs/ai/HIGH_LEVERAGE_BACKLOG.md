@@ -9,7 +9,7 @@ Updated: 2026-09-01
 3. **Learning Ledger Recovery:** Restore deterministic training signal mechanisms.
 4. **Frontend/API:** Consolidate the frontend reproducible boundary (#213) and dev environments (#214).
 5. **SerpApi:** Consolidate SerpApi organic request adapter (#220) and commerce projection (#222) ensuring strictly isolated, dry-run only, offline integration without DataForSEO double-counting.
-6. **Future External Capability Adoption:** Must prove provenance, license, credentials, cost, timeout, retry, dry-run, health, evidence, and failure contracts before adoption.
+6. **Future External Capability Adoption:** Must prove provenance, license, credentials, cost, timeout, retry, dry-run, health, evidence, and failure contracts before adoption by fully filling out `docs/ai/EXTERNAL_CAPABILITY_INTEGRATION_TEMPLATE.md` and adhering to `docs/ai/INTEGRATION_ACCEPTANCE_STANDARD.md`.
 
 ## Architectural Governance
 - Prevent future duplicate routers, registries, schedulers, providers, and gates by extending singular root authorities (one event spine, one provider registry, one model-routing authority).
