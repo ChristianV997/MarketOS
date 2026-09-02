@@ -27,7 +27,9 @@ param(
     [switch] $AllowPublicNetwork,
     [switch] $WriteSupabase,
     [switch] $UseLiveProvider,
-    [switch] $UseModelInference
+    [switch] $UseModelInference,
+    [switch] $ClaimLiveExecution,
+    [switch] $LiveValidated
 )
 
 Set-StrictMode -Version Latest
@@ -47,7 +49,9 @@ $Script:BlockedSwitches = @(
     "AllowPublicNetwork",
     "WriteSupabase",
     "UseLiveProvider",
-    "UseModelInference"
+    "UseModelInference",
+    "ClaimLiveExecution",
+    "LiveValidated"
 )
 
 function Stop-Operator {
@@ -178,27 +182,53 @@ function Invoke-PythonStage {
     return [int]$LASTEXITCODE
 }
 
+function Get-SuccessEvidenceClass {
+    param([string] $Mode)
+    if ($Mode -eq "manual_import") { return "simulated" }
+    return "fixture"
+}
+
 function Get-StageClassification {
     param(
         [int] $ExitCode,
-        [string] $EvidenceClass = "simulated"
+        [string] $EvidenceClass = "fixture"
     )
     if ($EvidenceClass -eq "not_run") { return "not_run" }
     if ($EvidenceClass -eq "blocked") { return "blocked" }
     if ($EvidenceClass -eq "unavailable") { return "unavailable" }
+    if ($EvidenceClass -eq "fixture") { return "fixture" }
     if ($EvidenceClass -eq "simulated") { return "simulated" }
-    if ($ExitCode -eq 0) { return "simulated" }
+    if ($EvidenceClass -eq "actual") { return "actual" }
+    if ($ExitCode -eq 0) { return "fixture" }
     return "failed"
 }
 
 function Get-StageEvidenceClass {
     param(
         [int] $ExitCode,
-        [string] $Preset = ""
+        [string] $Preset = "",
+        [string] $Mode = "fixture_demo"
     )
     if ($Preset) { return $Preset }
-    if ($ExitCode -eq 0) { return "simulated" }
+    if ($ExitCode -eq 0) { return (Get-SuccessEvidenceClass -Mode $Mode) }
     return "failed"
+}
+
+function Resolve-OverallEvidenceClass {
+    param(
+        [int] $OverallExitCode,
+        [string] $EvidenceMode,
+        [string] $Requested = "",
+        [array] $Stages = @()
+    )
+    if ($Requested) { return $Requested }
+    if ($OverallExitCode -ne 0) { return "failed" }
+    foreach ($stage in $Stages) {
+        if ($stage.evidence_class -in @("blocked", "unavailable", "failed", "not_run")) {
+            return $stage.evidence_class
+        }
+    }
+    return (Get-SuccessEvidenceClass -Mode $EvidenceMode)
 }
 
 function Write-DeterministicSummary {
@@ -219,9 +249,15 @@ function Write-DeterministicSummary {
     }
     $outputValue = if ($OutputDir) { "`"$($OutputDir.Replace('\','\\'))`"" } else { "null" }
     $pythonValue = if ($PythonCommand) { "`"$($PythonCommand.Replace('\','\\'))`"" } else { "null" }
-    $overallEvidenceClass = if ($OverallEvidenceClass) { $OverallEvidenceClass } else { (Get-StageEvidenceClass -ExitCode $OverallExitCode) }
+    $overallEvidenceClass = Resolve-OverallEvidenceClass -OverallExitCode $OverallExitCode -EvidenceMode $EvidenceMode -Requested $OverallEvidenceClass -Stages $Stages
+    if ($overallEvidenceClass -eq "actual") {
+        $overallEvidenceClass = (Get-SuccessEvidenceClass -Mode $EvidenceMode)
+    }
     $overallClassification = Get-StageClassification -ExitCode $OverallExitCode -EvidenceClass $overallEvidenceClass
-    $summary = "{`"authoritative`":false,`"evidence_authority`":`"offline_planning_only`",`"evidence_mode`":`"$EvidenceMode`",`"fixture_only`":true,`"lane_id`":`"WINDOWS-FIRST-PHASE-RUNNER-03`",`"live_validated`":false,`"max_candidates`":$MaxCandidates,`"max_sources_per_candidate`":$MaxSourcesPerCandidate,`"mutated`":false,`"network_calls`":false,`"output_directory`":$outputValue,`"overall_classification`":`"$overallClassification`",`"overall_evidence_class`":`"$overallEvidenceClass`",`"overall_exit_code`":$OverallExitCode,`"python_command`":$pythonValue,`"read_only`":true,`"stages`":[$($stageJson -join ',')]}"
+    if ($overallClassification -eq "actual") {
+        $overallClassification = $overallEvidenceClass
+    }
+    $summary = "{`"authoritative`":false,`"evidence_authority`":`"offline_planning_only`",`"evidence_mode`":`"$EvidenceMode`",`"fixture_only`":true,`"lane_id`":`"WINDOWS-FIRST-PHASE-EVIDENCE-TRUTH-04`",`"live_validated`":false,`"max_candidates`":$MaxCandidates,`"max_sources_per_candidate`":$MaxSourcesPerCandidate,`"mutated`":false,`"network_calls`":false,`"output_directory`":$outputValue,`"overall_classification`":`"$overallClassification`",`"overall_evidence_class`":`"$overallEvidenceClass`",`"overall_exit_code`":$OverallExitCode,`"python_command`":$pythonValue,`"read_only`":true,`"stages`":[$($stageJson -join ',')]}"
     Write-Output $summary
 }
 
@@ -264,7 +300,8 @@ $consumerImport = Test-InputPath -PathValue $ConsumerAttentionImport -Label "Con
 $supplierSeed = Test-InputPath -PathValue $SupplierFeasibilitySeed -Label "SupplierFeasibilitySeed"
 $supplierImport = Test-InputPath -PathValue $SupplierFeasibilityImport -Label "SupplierFeasibilityImport"
 
-$evidenceMode = if ($marketImport -or $consumerImport -or $supplierImport) { "manual_import" } else { "fixture_demo" }
+$script:evidenceMode = if ($marketImport -or $consumerImport -or $supplierImport) { "manual_import" } else { "fixture_demo" }
+$evidenceMode = $script:evidenceMode
 $python = Resolve-RepoPython
 $pythonCommand = $python.Command
 if ($python.PrefixArgs.Count -gt 0) {
@@ -280,7 +317,7 @@ function Add-StageResult {
         [string] $EvidenceClass = "",
         [string] $Authority = "composed_cli"
     )
-    $resolvedEvidenceClass = Get-StageEvidenceClass -ExitCode $ExitCode -Preset $EvidenceClass
+    $resolvedEvidenceClass = Get-StageEvidenceClass -ExitCode $ExitCode -Preset $EvidenceClass -Mode $script:evidenceMode
     $script:stages.Add([pscustomobject]@{
             id             = $Id
             exit_code      = $ExitCode
@@ -395,5 +432,5 @@ $commerceExit = Invoke-PythonStage -Python $python -ScriptRelativePath "scripts/
 Add-StageResult -Id "commerce_mvp" -ExitCode $commerceExit -Authority "delegated_commerce_mvp_cli"
 if ($overallExit -ne 0) { Complete-FailedRun -FailedStageId "commerce_mvp" -EvidenceMode $evidenceMode -OutputDir $safeOutput -PythonCommand $pythonCommand }
 
-Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode 0 -OutputDir $safeOutput -PythonCommand $pythonCommand -OverallEvidenceClass "simulated"
+Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode 0 -OutputDir $safeOutput -PythonCommand $pythonCommand
 exit 0

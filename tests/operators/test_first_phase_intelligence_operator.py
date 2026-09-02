@@ -49,21 +49,23 @@ def test_default_offline_behavior_is_fixture_first():
     assert result.returncode == 0, result.stderr
     summary = _summary_from_output(result.stdout)
     assert summary["evidence_mode"] == "fixture_demo"
-    assert summary["overall_classification"] == "simulated"
-    assert summary["overall_evidence_class"] == "simulated"
+    assert summary["overall_classification"] == "fixture"
+    assert summary["overall_evidence_class"] == "fixture"
     assert summary["authoritative"] is False
     assert summary["fixture_only"] is True
     assert summary["live_validated"] is False
     assert summary["evidence_authority"] == "offline_planning_only"
-    assert summary["lane_id"] == "WINDOWS-FIRST-PHASE-RUNNER-03"
+    assert summary["lane_id"] == "WINDOWS-FIRST-PHASE-EVIDENCE-TRUTH-04"
     assert summary["read_only"] is True
     assert summary["network_calls"] is False
     assert summary["mutated"] is False
     assert summary["output_directory"] is None
     assert summary["python_command"]
-    assert [stage["classification"] for stage in summary["stages"]] == ["simulated"] * 8
-    assert [stage["evidence_class"] for stage in summary["stages"]] == ["simulated"] * 8
-    assert "actual" not in json.dumps(summary)
+    assert [stage["classification"] for stage in summary["stages"]] == ["fixture"] * 8
+    assert [stage["evidence_class"] for stage in summary["stages"]] == ["fixture"] * 8
+    serialized = json.dumps(summary)
+    assert '"classification":"actual"' not in serialized.replace(" ", "")
+    assert '"evidence_class":"actual"' not in serialized.replace(" ", "")
     assert summary["stages"][5]["authority"] == "delegated_governor_cli"
     assert summary["stages"][6]["authority"] == "delegated_trustos_cli"
 
@@ -110,12 +112,13 @@ def test_malformed_input_is_rejected_before_stages(tmp_path: Path):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
 def test_blocked_live_flags_are_rejected():
-    result = _run_operator("-AllowNetwork")
-    assert result.returncode == 4
-    assert "blocked live/network/provider/model flag" in result.stderr
-    summary = _summary_from_output(result.stdout)
-    assert summary["overall_evidence_class"] == "blocked"
-    assert summary["stages"][0]["classification"] == "blocked"
+    for flag in ("-AllowNetwork", "-ClaimLiveExecution", "-LiveValidated"):
+        result = _run_operator(flag)
+        assert result.returncode == 4, flag
+        assert "blocked live/network/provider/model flag" in result.stderr
+        summary = _summary_from_output(result.stdout)
+        assert summary["overall_evidence_class"] == "blocked"
+        assert summary["stages"][0]["classification"] == "blocked"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
@@ -266,4 +269,33 @@ def test_fixture_success_is_never_classified_as_actual_live_execution():
     serialized = json.dumps(summary)
     assert '"classification":"actual"' not in serialized.replace(" ", "")
     assert '"evidence_class":"actual"' not in serialized.replace(" ", "")
-    assert summary["overall_classification"] == "simulated"
+    assert summary["overall_classification"] == "fixture"
+    assert summary["overall_evidence_class"] == "fixture"
+    assert summary["fixture_only"] is True
+    assert summary["live_validated"] is False
+    assert summary["authoritative"] is False
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
+def test_mixed_unavailable_stage_prevents_fixture_success_claim(tmp_path: Path):
+    missing = tmp_path / "missing-python.exe"
+    result = _run_operator("-PythonPath", str(missing))
+    assert result.returncode == 3
+    summary = _summary_from_output(result.stdout)
+    assert summary["overall_evidence_class"] == "unavailable"
+    assert summary["overall_classification"] == "unavailable"
+    assert summary["fixture_only"] is True
+    assert summary["live_validated"] is False
+    assert summary["overall_evidence_class"] != "fixture"
+    assert summary["overall_evidence_class"] != "actual"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
+def test_fixture_only_summary_never_contradicts_live_authority():
+    summary = _summary_from_output(_run_operator("-MaxCandidates", "2").stdout)
+    assert summary["fixture_only"] is True
+    assert summary["live_validated"] is False
+    assert summary["authoritative"] is False
+    assert summary["overall_evidence_class"] in {"fixture", "simulated", "failed", "blocked", "unavailable", "not_run"}
+    assert summary["overall_evidence_class"] not in {"actual"}
+    assert summary["overall_classification"] not in {"actual"}
