@@ -4,13 +4,9 @@ Updated: 2026-09-01
 
 ## Sequencing
 
-1. **Baseline/Quality Recovery:** Fix `main` test-health, SBOM dependencies, and quality-gate CI semantics (#221).
-2. **Artifact Security:** Implement artifact-store path traversal and identity binding security (#211).
-3. **Learning Ledger Recovery:** Restore deterministic training signal mechanisms.
-4. **Frontend/API:** Consolidate the frontend reproducible boundary (#213) and dev environments (#214).
-5. **SerpApi:** Consolidate SerpApi organic request adapter (#220) and commerce projection (#222) ensuring strictly isolated, dry-run only, offline integration without DataForSEO double-counting.
-6. **Future External Capability Adoption:** Must prove provenance, license, credentials, cost, timeout, retry, dry-run, health, evidence, and failure contracts before adoption by fully filling out `docs/ai/EXTERNAL_CAPABILITY_INTEGRATION_TEMPLATE.md` and adhering to `docs/ai/INTEGRATION_ACCEPTANCE_STANDARD.md`.
+All active PR merges and integration efforts must adhere strictly to the order defined in `docs/ai/PR_DEPENDENCY_RELEASE_TRAIN.md` and pass the 16-point checklist in `docs/ai/INTEGRATION_RELEASE_CONTRACT.md`.
 
+For future capability adoption, ensure you complete `docs/ai/EXTERNAL_CAPABILITY_INTEGRATION_TEMPLATE.md` and adhere to `docs/ai/INTEGRATION_ACCEPTANCE_STANDARD.md` before joining the release train.
 ## Architectural Governance
 - Prevent future duplicate routers, registries, schedulers, providers, and gates by extending singular root authorities (one event spine, one provider registry, one model-routing authority).
 

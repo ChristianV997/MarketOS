@@ -12,23 +12,13 @@ All agent workflows must execute the following strict sequence:
 6. **commit**
 7. **push**
 8. **PR evidence**
-
-## State Classifications
-- **passed**: Deterministic success.
-- **failed**: Executed failure (cannot be bypassed).
-- **unavailable**: Resource not present.
-- **timed_out**: Execution exceeded bounds.
-- **not_run**: Skipped or omitted.
-- **collection_failed**: Evidence gathering error.
-- **blocked**: Upstream dependency unmet.
-- **malformed**: Invalid syntax/structure.
-- **ci_unavailable**: Zero-step runner outage (requires explicit manual override with local evidence to bypass).
+## Release and Integration State
+For explicit definitions of CI states (passed, failed, unavailable, timed_out, etc.) and the 16-point release criteria, refer to `docs/ai/INTEGRATION_RELEASE_CONTRACT.md`.
 
 ## Agentic Quality Gate
 The Agentic Quality Gate **must not** self-report final CI readiness before sanitized `CIEvidence` is available and deterministically processed.
 
 ## Integration Rules
-Preserve strict offline, dry-run, no-credentials, and no-mutation rules for all new capability adapters.
-
+Preserve strict offline, dry-run, no-credentials, and no-mutation rules for all new capability adapters. All capability integrations must adhere to the `docs/ai/INTEGRATION_ACCEPTANCE_STANDARD.md` and use the `docs/ai/EXTERNAL_CAPABILITY_INTEGRATION_TEMPLATE.md`.
 ## Historical Directions
 *(Note: Older Phase-1 supplier-validation states, CJ Dropshipping probes, and crawl4ai fallbacks detailed in previous handoffs are preserved in Git history as historical context, but do not dictate the current CI baseline or active merge train.)*
