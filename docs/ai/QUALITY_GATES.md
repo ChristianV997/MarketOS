@@ -82,6 +82,13 @@ The delta status itself uses the existing gate vocabulary and is included in
 the readiness blockers. Its `fingerprint` is derived only from canonical
 statuses and classifications, excluding timestamps and raw output, so equal
 inputs produce equal attribution.
+The CLI passes this same result into the existing PR-readiness authority. It
+is exposed at `planning_summary.pr_readiness.quality_gate`, where
+`baseline_delta.introduced_failures`, `inherited_failures`,
+`resolved_failures`, `newly_available_passes`, `unavailable_in_both`, and
+`candidate_executed_failure` remain separate. Failed, incomplete, malformed,
+or `ci_unavailable` gate context changes PR readiness to `blocked`; no report
+field grants merge or deployment authority.
 Malformed scanner output is malformed evidence. A security scanner that exits
 zero while returning findings remains a security failure. The readiness field
 stays false while any blocker exists, while the repository is dirty, or while

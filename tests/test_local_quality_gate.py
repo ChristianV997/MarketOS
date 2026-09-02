@@ -71,6 +71,36 @@ def test_result_is_deterministic_for_explicit_inputs():
     assert first == gate.run(["scripts/ai/select_tests.py"], diff_text="", branch="codex/example")
 
 
+def test_planning_summary_uses_existing_pr_readiness_with_quality_gate_context():
+    quality_gate = {
+        "phase": "final",
+        "status": "unavailable",
+        "classification": gate.CLASS_CI_UNAVAILABLE,
+        "ready_for_supervised_use": False,
+        "ci": {"status": "unavailable", "classification": gate.CLASS_CI_UNAVAILABLE},
+        "checks": [],
+        "baseline_delta": {
+            "status": "unavailable",
+            "classification": gate.BASELINE_DELTA_CANDIDATE_INCOMPLETE,
+            "classifications": [gate.BASELINE_DELTA_CANDIDATE_INCOMPLETE],
+            "baseline_available": True,
+            "controls": [{
+                "name": "ci",
+                "baseline_status": "passed",
+                "candidate_status": "unavailable",
+                "classification": gate.BASELINE_DELTA_CANDIDATE_INCOMPLETE,
+            }],
+            "fingerprint": "b" * 64,
+        },
+    }
+
+    summary = gate.run(["scripts/ai/run_local_quality_gate.py"], quality_gate_report=quality_gate)
+
+    assert summary["pr_merge_readiness"] == "blocked"
+    assert summary["pr_readiness"]["quality_gate"]["ci_classification"] == gate.CLASS_CI_UNAVAILABLE
+    assert summary["pr_readiness"]["quality_gate"]["baseline_delta"]["candidate_incomplete"] == ["ci"]
+
+
 def test_doc_mutation_language_does_not_block_a_mixed_implementation_diff():
     diff = """diff --git a/docs/guide.md b/docs/guide.md
 +create_order is forbidden

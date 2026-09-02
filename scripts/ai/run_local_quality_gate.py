@@ -162,20 +162,35 @@ def _implementation_diff(paths: list[str], diff_text: str) -> str:
     return "".join(kept)
 
 
-def run(paths: list[str], *, diff_text: str = "", branch: str = "local") -> dict[str, Any]:
+def run(
+    paths: list[str],
+    *,
+    diff_text: str = "",
+    branch: str = "local",
+    quality_gate_report: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Compose existing planning functions; no network, writes, or subprocess tests."""
     paths = normal_paths(paths)
     implementation_diff = _implementation_diff(paths, diff_text)
-    readiness = pr_readiness_report.report(paths, diff_text, branch=branch, mutation_diff=implementation_diff)
+    readiness = pr_readiness_report.report(
+        paths,
+        diff_text,
+        branch=branch,
+        mutation_diff=implementation_diff,
+        quality_gate=quality_gate_report,
+    )
     phase = phase_gate.check(paths, implementation_diff)
     selected = select_tests.select(paths)
     ci_plan = ci_matrix_plan.plan(paths)
     phase1_readiness, benchmark = _optional_phase1_summary()
     impact = impact_planner.plan(impact_planner.DEFAULT_BACKLOG, phase1_readiness)
-    blocked = phase["status"] == "blocked" or readiness["risk_category"] == "blocked"
+    blocked = phase["status"] == "blocked" or readiness["risk_category"] == "blocked" or readiness["merge_readiness"] == "blocked"
+    quality_gate_blocked = readiness["merge_readiness"] == "blocked" and phase["status"] != "blocked" and readiness["risk_category"] != "blocked"
     status = "blocked" if blocked else "clear" if not paths else "advisory"
     flags = readiness["detections"]
     next_action = (
+        "resolve quality-gate failures or unavailable evidence before continuing"
+        if quality_gate_blocked else
         "remove credentials, generated artifacts, or blocked mutation work before continuing"
         if blocked else "no changed files; choose one unblocked task from the impact backlog"
         if not paths else "run the recommended focused tests, then session_finish and PR readiness before opening a PR"
@@ -187,6 +202,12 @@ def run(paths: list[str], *, diff_text: str = "", branch: str = "local") -> dict
         "mutation_flags": {"provider_mutation_like_detected": flags["provider_mutation_like_detected"]},
         "recommended_tests": selected["recommended_commands"], "recommended_ci_lanes": ci_plan["recommended_lanes"],
         "pr_merge_readiness": readiness["merge_readiness"],
+        "pr_readiness": {
+            "merge_readiness": readiness["merge_readiness"],
+            "risk_category": readiness["risk_category"],
+            "blocking_warnings": readiness["blocking_warnings"],
+            "quality_gate": readiness["quality_gate"],
+        },
         "impact_top_task": impact["ranked_backlog"][0]["task"], "recommended_next_action": next_action,
         "phase1_readiness": {"overall_status": phase1_readiness["overall_status"], "overall_score": phase1_readiness["overall_score"], "next_best_action": phase1_readiness["next_best_action"], "blocking_gates": phase1_readiness["blocking_gates"]},
         "benchmark_matrix": {"status": benchmark.get("status", "unavailable"), "evidence_mode": benchmark.get("evidence_mode", "unavailable"), "top_candidate_id": benchmark.get("top_candidate_id"), "next_best_action": benchmark.get("next_best_action", "install the optional evaluation profile to include benchmark context")},
@@ -1422,7 +1443,12 @@ def main(argv: list[str] | None = None) -> int:
         ci_evidence_error=ci_evidence_error,
         phase=args.phase,
     )
-    report["planning_summary"] = run(paths, diff_text=_diff_text(args.diff_file, args.repository), branch=args.branch)
+    report["planning_summary"] = run(
+        paths,
+        diff_text=_diff_text(args.diff_file, args.repository),
+        branch=args.branch,
+        quality_gate_report=report,
+    )
     content = render_json_or_markdown(report, markdown=args.markdown, title="MarketOS local quality gate")
     write_optional_output(content, args.output); print(content, end="")
     return int(report["exit_code"])

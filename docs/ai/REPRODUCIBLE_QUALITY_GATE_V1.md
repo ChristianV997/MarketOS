@@ -77,6 +77,13 @@ or candidate-incomplete evidence. Missing baseline input is unavailable and
 malformed baseline input is malformed; neither can produce final readiness.
 The delta is advisory attribution within the existing authority, not a second
 readiness decision. Its stable fingerprint excludes timestamps and raw output.
+When invoked through the local gate CLI, the same sanitized projection is
+passed to the existing PR-readiness report at
+`planning_summary.pr_readiness.quality_gate`. That projection keeps
+introduced, inherited, resolved, newly available, unavailable-in-both, and
+candidate-executed failures separately visible. Failed, incomplete, malformed,
+or `ci_unavailable` quality evidence makes PR readiness `blocked`; it never
+creates merge or deployment authority.
 
 CI is an explicit input only. The local gate never queries GitHub. A missing
 CI input is `ci_unavailable`, and a reported CI failure with zero executed
