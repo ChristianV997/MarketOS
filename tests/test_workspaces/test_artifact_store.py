@@ -84,6 +84,13 @@ def test_rejects_unknown_and_forged_workspace_principals(workspaces):
         ArtifactStore(forged, registry)
 
 
+@pytest.mark.parametrize("raw_principal", ["workspace-alpha", {"workspace_id": "workspace-alpha"}, None])
+def test_rejects_raw_workspace_principals(workspaces, raw_principal):
+    registry, _, _ = workspaces
+    with pytest.raises(ValueError, match="invalid workspace identity"):
+        ArtifactStore(raw_principal, registry)
+
+
 def test_rejects_artifact_workspace_mismatch(workspaces):
     registry, alpha, beta = workspaces
     store = ArtifactStore(alpha, registry)
