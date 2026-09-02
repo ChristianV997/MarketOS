@@ -30,9 +30,19 @@ test("api base URL normalization is deterministic", () => {
   assert.equal(resolveApiBaseUrl(undefined, undefined), "");
   assert.equal(resolveApiBaseUrl("https://api.example.com/", undefined), "https://api.example.com");
   assert.equal(resolveApiBaseUrl(undefined, "https://legacy.example.com/"), "https://legacy.example.com");
+  assert.equal(
+    resolveApiBaseUrl("https://primary.example.com/", "https://legacy.example.com/"),
+    "https://primary.example.com",
+  );
   assert.equal(joinApiPath("", "/metrics"), "/metrics");
   assert.equal(joinApiPath("https://api.example.com", "metrics"), "https://api.example.com/metrics");
   assert.equal(joinApiPath("https://api.example.com", "/api/events/readiness"), "https://api.example.com/api/events/readiness");
+});
+
+test("api base source honors VITE_API_BASE_URL before VITE_API_URL", () => {
+  const primary = apiBaseSource.indexOf("VITE_API_BASE_URL");
+  const legacy = apiBaseSource.indexOf("VITE_API_URL");
+  assert.ok(primary >= 0 && legacy > primary);
 });
 
 test("canonical and dashboard clients do not embed provider credentials", async () => {
