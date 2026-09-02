@@ -384,7 +384,9 @@ def test_happy_plan_only_path_is_offline():
 def test_product_validation_is_called_after_synthesis_before_launch():
     report = cycle().to_dict()
     validation = report["product_validation"]
-    assert validation["scoring_authority"].endswith("product_validation_report.generate")
+    assert validation["presentation_builder"].endswith("product_validation_report.generate")
+    assert "scoring_authority" not in validation
+    assert report["synthesis"]["scoring_authority"].endswith("build_product_opportunity_synthesis")
     assert validation["source_reports"]["opportunity_synthesis"] == "supplied"
     assert validation["source_reports"]["launch_draft_pack"] == "missing"
     assert validation["source_reports"]["site_draft_pack"] == "missing"
@@ -495,3 +497,29 @@ def test_cycle_source_does_not_call_provider_registry():
         source = path.read_text(encoding="utf8")
         assert "build_provider_registry" not in source
         assert "build_companyos_registry_report" not in source
+
+
+def test_product_validation_does_not_run_phase1_path_builders(monkeypatch):
+    import evaluation.commerce.product_validation_report as product_validation_report
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("phase-1 path builder must not run from the commerce operations cycle")
+
+    monkeypatch.setattr(product_validation_report, "build_benchmark_from_paths", _forbidden)
+    monkeypatch.setattr(product_validation_report, "build_from_paths", _forbidden)
+    monkeypatch.setattr(product_validation_report, "build_readiness", _forbidden)
+    report = cycle().to_dict()
+    validation = report["product_validation"]
+    sources = validation["source_reports"]
+    assert validation["status"] != "unavailable"
+    assert sources["benchmark"] == "supplied"
+    assert sources["readiness"] == "supplied"
+    assert sources["benchmark"] != "structural_fixture"
+    assert sources["readiness"] != "structural_fixture"
+    assert "scoring_authority" not in validation
+    assert report["synthesis"]["scoring_authority"].endswith("build_product_opportunity_synthesis")
+    cycle_source = (ROOT / "evaluation" / "commerce" / "commerce_operations_cycle.py").read_text(encoding="utf8")
+    assert "evaluation.commerce.readiness" not in cycle_source
+    assert "backend.deployment.readiness" not in cycle_source
+    assert "build_benchmark_from_paths" not in cycle_source
+    assert "build_from_paths" not in cycle_source

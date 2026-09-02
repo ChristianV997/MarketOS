@@ -345,30 +345,44 @@ def _product_validation_section(
     synthesis_data: Mapping[str, Any],
     synthesis_section: Mapping[str, Any],
 ) -> dict[str, Any]:
-    authority = "evaluation.commerce.product_validation_report.generate"
+    builder = "evaluation.commerce.product_validation_report.generate"
+    # Truthy stubs: generate() treats None and {} as missing and would run path builders.
+    blocked_benchmark = {"candidates": [], "evidence_mode": "fixture_demo"}
+    blocked_readiness = {
+        "overall_status": "blocked",
+        "supplier_readiness": {"status": "unknown"},
+        "blocking_gates": ["cycle_supplied_blocked_readiness"],
+        "next_best_action": "expand_supplier_research",
+    }
+    blocked_deployment = {"overall_status": "blocked"}
     if str(synthesis_section.get("status") or "") == "unavailable":
         return _section(
             status="unavailable",
             evidence_class="unavailable",
             blockers=("product_validation_requires_synthesis",),
-            evidence_references=(authority,),
+            evidence_references=(builder,),
             next_action="restore_synthesis_authority",
             owner_department="commerce",
             required_approval_or_gate="none",
             client_visible_projection_state="internal_only",
-            scoring_authority=authority,
+            presentation_builder=builder,
             live_go=False,
         )
     report, error = _call(
         "product_validation_report",
         generate_product_validation_report,
+        benchmark=blocked_benchmark,
+        readiness=blocked_readiness,
+        deployment=blocked_deployment,
         marketplace_trends=marketplace,
         supplier_feasibility=supplier,
         consumer_attention=consumer,
         opportunity_synthesis=synthesis_data or None,
     )
     if error or report is None:
-        return _unavailable(authority, error or "product_validation_report_unavailable")
+        unavailable = _unavailable(builder, error or "product_validation_report_unavailable")
+        unavailable["presentation_builder"] = builder
+        return unavailable
     data = report.to_dict() if hasattr(report, "to_dict") else dict(report)
     recommendation = _text(data.get("overall_recommendation"), 80)
     reasons: list[str] = []
@@ -383,12 +397,12 @@ def _product_validation_section(
         status="plan_only",
         evidence_class="plan_only",
         blockers=reasons,
-        evidence_references=(authority,),
+        evidence_references=(builder,),
         next_action=next_action,
         owner_department="commerce",
         required_approval_or_gate="none",
         client_visible_projection_state="internal_only",
-        scoring_authority=authority,
+        presentation_builder=builder,
         overall_recommendation=recommendation,
         evidence_mode=data.get("evidence_mode"),
         risk_flags=list(data.get("risk_flags") or [])[:8],
@@ -912,7 +926,7 @@ class CommerceOperationsCycleReport:
             "",
             "## Product Validation",
             "",
-            f"Builder: `{validation.get('scoring_authority') or 'unavailable'}` (called, not recopied)",
+            f"Builder: `{validation.get('presentation_builder') or 'unavailable'}` (presentation only; not a scoring authority)",
             f"Recommendation: `{validation.get('overall_recommendation') or 'unavailable'}`",
             f"Evidence mode: `{validation.get('evidence_mode') or 'unavailable'}`",
             f"Launch/site packs supplied: `{((validation.get('source_reports') or {}).get('launch_draft_pack') or 'missing')}` / `{((validation.get('source_reports') or {}).get('site_draft_pack') or 'missing')}`",

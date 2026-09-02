@@ -13,7 +13,9 @@ Product validation is a later stage. After synthesis and before launch-draft
 readiness, the cycle calls
 `evaluation.commerce.product_validation_report.generate` with the three pillar
 reports plus the synthesis dict. It does not pass launch or site packs, does
-not copy scoring, and projects only compact metadata.
+not copy scoring, and projects only compact metadata. `generate()` is called
+with truthy blocked stubs for benchmark, readiness, and deployment so the
+Phase-1 CJ path builders do not run.
 
 ## What it composes
 
