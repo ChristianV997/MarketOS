@@ -150,3 +150,57 @@ def test_valid_local_evidence_override():
     payload = load_fixture("valid_local_evidence_override")
     result = validate_release_contract(payload)
     assert result["decision"] == "MERGE"
+
+
+def test_independent_pr():
+    payload = load_fixture("independent_pr")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
+
+
+def test_stacked_pr_valid():
+    payload = load_fixture("stacked_pr_valid")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
+
+
+def test_draft_pr():
+    payload = load_fixture("draft_pr")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "draft"
+
+
+def test_missing_review():
+    payload = load_fixture("missing_review")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "needs_review"
+
+
+def test_missing_rollback_reference():
+    payload = load_fixture("missing_rollback_reference")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "missing_rollback"
+
+
+def test_pending_approval_ledger():
+    payload = load_fixture("pending_approval_ledger")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "approval_ledger_pending"
+
+
+def test_trustos_blocked():
+    payload = load_fixture("trustos_blocked")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "trustos_blocked"
+
+
+def test_live_activation_claim():
+    payload = load_fixture("live_activation_claim")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "live_activation_unsupported"
