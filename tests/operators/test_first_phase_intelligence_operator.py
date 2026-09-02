@@ -50,11 +50,20 @@ def test_default_offline_behavior_is_fixture_first():
     summary = _summary_from_output(result.stdout)
     assert summary["evidence_mode"] == "fixture_demo"
     assert summary["overall_classification"] == "actual"
+    assert summary["overall_evidence_class"] == "actual"
+    assert summary["authoritative"] is False
+    assert summary["fixture_only"] is True
+    assert summary["live_validated"] is False
+    assert summary["evidence_authority"] == "offline_planning_only"
+    assert summary["lane_id"] == "WINDOWS-FIRST-PHASE-RUNNER-02"
     assert summary["read_only"] is True
     assert summary["network_calls"] is False
     assert summary["mutated"] is False
     assert summary["output_directory"] is None
+    assert summary["python_command"]
     assert [stage["classification"] for stage in summary["stages"]] == ["actual"] * 8
+    assert summary["stages"][5]["authority"] == "delegated_governor_cli"
+    assert summary["stages"][6]["authority"] == "delegated_trustos_cli"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
@@ -99,6 +108,9 @@ def test_blocked_live_flags_are_rejected():
     result = _run_operator("-AllowNetwork")
     assert result.returncode == 4
     assert "blocked live/network/provider/model flag" in result.stderr
+    summary = _summary_from_output(result.stdout)
+    assert summary["overall_evidence_class"] == "blocked"
+    assert summary["stages"][0]["classification"] == "blocked"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
@@ -119,8 +131,11 @@ def test_stage_failure_propagates_and_stops_pipeline(tmp_path: Path):
     summary = _summary_from_output(result.stdout)
     stage_ids = [stage["id"] for stage in summary["stages"]]
     assert "marketplace_trend" in stage_ids
-    assert "commerce_mvp" not in stage_ids
+    assert summary["stages"][-1]["id"] == "commerce_mvp"
+    assert summary["stages"][-1]["classification"] == "not_run"
+    assert any(stage["classification"] == "not_run" for stage in summary["stages"])
     assert summary["overall_classification"] == "failed"
+    assert summary["overall_evidence_class"] == "failed"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
@@ -130,8 +145,40 @@ def test_repeated_invocation_is_deterministic():
     assert first.returncode == 0 and second.returncode == 0
     summary_first = _summary_from_output(first.stdout)
     summary_second = _summary_from_output(second.stdout)
-    assert summary_first["stages"] == summary_second["stages"]
-    assert summary_first["evidence_mode"] == summary_second["evidence_mode"]
+    for key in ("stages", "evidence_mode", "overall_classification", "overall_evidence_class", "authoritative", "fixture_only"):
+        assert summary_first[key] == summary_second[key]
+    assert summary_first["python_command"] == summary_second["python_command"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
+def test_stable_summary_fingerprint_matches_across_runs():
+    first = _summary_from_output(_run_operator("-MaxCandidates", "2").stdout)
+    second = _summary_from_output(_run_operator("-MaxCandidates", "2").stdout)
+    fingerprint_keys = (
+        "authoritative",
+        "evidence_authority",
+        "evidence_mode",
+        "fixture_only",
+        "lane_id",
+        "live_validated",
+        "max_candidates",
+        "max_sources_per_candidate",
+        "mutated",
+        "network_calls",
+        "overall_classification",
+        "overall_evidence_class",
+        "read_only",
+        "stages",
+    )
+    assert {key: first[key] for key in fingerprint_keys} == {key: second[key] for key in fingerprint_keys}
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
+def test_output_traversal_paths_are_rejected(tmp_path: Path):
+    traversal = tmp_path / ".." / "escape-out"
+    result = _run_operator("-OutputDirectory", str(traversal))
+    assert result.returncode == 2
+    assert "traversal" in result.stderr.lower()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")

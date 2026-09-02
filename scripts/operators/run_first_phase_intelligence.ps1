@@ -63,6 +63,13 @@ function Test-BlockedLiveFlags {
     foreach ($name in $Script:BlockedSwitches) {
         $value = (Get-Variable -Name $name -Scope Script -ErrorAction SilentlyContinue).Value
         if ($value) {
+            $blockedStage = [pscustomobject]@{
+                id             = "preflight"
+                exit_code      = 4
+                evidence_class = "blocked"
+                authority      = "operator_wrapper"
+            }
+            Write-DeterministicSummary -Stages @($blockedStage) -EvidenceMode "fixture_demo" -OverallExitCode 4 -OutputDir $null -PythonCommand "" -OverallEvidenceClass "blocked"
             Stop-Operator -Code 4 -Message "blocked live/network/provider/model flag: -$name"
         }
     }
@@ -160,7 +167,23 @@ function Invoke-PythonStage {
 }
 
 function Get-StageClassification {
-    param([int] $ExitCode)
+    param(
+        [int] $ExitCode,
+        [string] $EvidenceClass = "actual"
+    )
+    if ($EvidenceClass -eq "not_run") { return "not_run" }
+    if ($EvidenceClass -eq "blocked") { return "blocked" }
+    if ($EvidenceClass -eq "unavailable") { return "unavailable" }
+    if ($ExitCode -eq 0) { return "actual" }
+    return "failed"
+}
+
+function Get-StageEvidenceClass {
+    param(
+        [int] $ExitCode,
+        [string] $Preset = ""
+    )
+    if ($Preset) { return $Preset }
     if ($ExitCode -eq 0) { return "actual" }
     return "failed"
 }
@@ -170,15 +193,52 @@ function Write-DeterministicSummary {
         [array] $Stages,
         [string] $EvidenceMode,
         [int] $OverallExitCode,
-        [string] $OutputDir
+        [string] $OutputDir,
+        [string] $PythonCommand,
+        [string] $OverallEvidenceClass = ""
     )
     $stageJson = @()
     foreach ($stage in $Stages) {
-        $stageJson += "{`"id`":`"$($stage.id)`",`"exit_code`":$($stage.exit_code),`"classification`":`"$($stage.classification)`"}"
+        $evidenceClass = if ($stage.evidence_class) { $stage.evidence_class } else { Get-StageEvidenceClass -ExitCode $stage.exit_code }
+        $classification = Get-StageClassification -ExitCode $stage.exit_code -EvidenceClass $evidenceClass
+        $authority = if ($stage.authority) { $stage.authority } else { "composed_cli" }
+        $stageJson += "{`"id`":`"$($stage.id)`",`"exit_code`":$($stage.exit_code),`"classification`":`"$classification`",`"evidence_class`":`"$evidenceClass`",`"authority`":`"$authority`"}"
     }
     $outputValue = if ($OutputDir) { "`"$($OutputDir.Replace('\','\\'))`"" } else { "null" }
-    $summary = "{`"evidence_mode`":`"$EvidenceMode`",`"lane_id`":`"WINDOWS-FIRST-PHASE-RUNNER-01`",`"max_candidates`":$MaxCandidates,`"max_sources_per_candidate`":$MaxSourcesPerCandidate,`"mutated`":false,`"network_calls`":false,`"output_directory`":$outputValue,`"overall_classification`":`"$(Get-StageClassification $OverallExitCode)`",`"overall_exit_code`":$OverallExitCode,`"read_only`":true,`"stages`":[$($stageJson -join ',')]}"
+    $pythonValue = if ($PythonCommand) { "`"$($PythonCommand.Replace('\','\\'))`"" } else { "null" }
+    $overallEvidenceClass = if ($OverallEvidenceClass) { $OverallEvidenceClass } else { (Get-StageEvidenceClass -ExitCode $OverallExitCode) }
+    $overallClassification = Get-StageClassification -ExitCode $OverallExitCode -EvidenceClass $overallEvidenceClass
+    $summary = "{`"authoritative`":false,`"evidence_authority`":`"offline_planning_only`",`"evidence_mode`":`"$EvidenceMode`",`"fixture_only`":true,`"lane_id`":`"WINDOWS-FIRST-PHASE-RUNNER-02`",`"live_validated`":false,`"max_candidates`":$MaxCandidates,`"max_sources_per_candidate`":$MaxSourcesPerCandidate,`"mutated`":false,`"network_calls`":false,`"output_directory`":$outputValue,`"overall_classification`":`"$overallClassification`",`"overall_evidence_class`":`"$overallEvidenceClass`",`"overall_exit_code`":$OverallExitCode,`"python_command`":$pythonValue,`"read_only`":true,`"stages`":[$($stageJson -join ',')]}"
     Write-Output $summary
+}
+
+function Add-NotRunStages {
+    param([string[]] $StageIds)
+    foreach ($stageId in $StageIds) {
+        Add-StageResult -Id $stageId -ExitCode 0 -EvidenceClass "not_run" -Authority "composed_cli"
+    }
+}
+
+$Script:StageOrder = @(
+    "marketplace_trend",
+    "consumer_attention",
+    "supplier_feasibility",
+    "opportunity_synthesis",
+    "product_validation",
+    "resource_governor",
+    "trustos_control_plane",
+    "commerce_mvp"
+)
+
+function Get-RemainingStageIds {
+    param([string] $FailedStageId)
+    $seen = $false
+    $remaining = New-Object System.Collections.Generic.List[string]
+    foreach ($stageId in $Script:StageOrder) {
+        if ($seen) { $remaining.Add($stageId) | Out-Null }
+        if ($stageId -eq $FailedStageId) { $seen = $true }
+    }
+    return ,$remaining.ToArray()
 }
 
 Test-BlockedLiveFlags
@@ -193,22 +253,43 @@ $supplierImport = Test-InputPath -PathValue $SupplierFeasibilityImport -Label "S
 
 $evidenceMode = if ($marketImport -or $consumerImport -or $supplierImport) { "manual_import" } else { "fixture_demo" }
 $python = Resolve-RepoPython
+$pythonCommand = $python.Command
+if ($python.PrefixArgs.Count -gt 0) {
+    $pythonCommand = "$($python.Command) $($python.PrefixArgs -join ' ')"
+}
 $stages = New-Object System.Collections.Generic.List[object]
 $overallExit = 0
 
 function Add-StageResult {
     param(
         [string] $Id,
-        [int] $ExitCode
+        [int] $ExitCode,
+        [string] $EvidenceClass = "",
+        [string] $Authority = "composed_cli"
     )
+    $resolvedEvidenceClass = Get-StageEvidenceClass -ExitCode $ExitCode -Preset $EvidenceClass
     $script:stages.Add([pscustomobject]@{
             id             = $Id
             exit_code      = $ExitCode
-            classification = (Get-StageClassification -ExitCode $ExitCode)
+            evidence_class = $resolvedEvidenceClass
+            authority      = $Authority
+            classification = (Get-StageClassification -ExitCode $ExitCode -EvidenceClass $resolvedEvidenceClass)
         }) | Out-Null
     if ($ExitCode -ne 0 -and $script:overallExit -eq 0) {
         $script:overallExit = $ExitCode
     }
+}
+
+function Complete-FailedRun {
+    param(
+        [string] $FailedStageId,
+        [string] $EvidenceMode,
+        [string] $OutputDir,
+        [string] $PythonCommand
+    )
+    Add-NotRunStages -StageIds (Get-RemainingStageIds -FailedStageId $FailedStageId)
+    Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode $overallExit -OutputDir $OutputDir -PythonCommand $PythonCommand -OverallEvidenceClass "failed"
+    exit $overallExit
 }
 
 function Get-StageOutputPath {
@@ -227,10 +308,7 @@ $marketOut = Get-StageOutputPath -Name "marketplace_trend"
 if ($marketOut) { $marketArgs += @("--output", $marketOut) }
 $marketExit = Invoke-PythonStage -Python $python -ScriptRelativePath "scripts/run_marketplace_trend_intelligence.py" -Arguments $marketArgs -StageId "marketplace_trend"
 Add-StageResult -Id "marketplace_trend" -ExitCode $marketExit
-if ($overallExit -ne 0) {
-    Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode $overallExit -OutputDir $safeOutput
-    exit $overallExit
-}
+if ($overallExit -ne 0) { Complete-FailedRun -FailedStageId "marketplace_trend" -EvidenceMode $evidenceMode -OutputDir $safeOutput -PythonCommand $pythonCommand }
 
 # 2) Consumer attention intelligence
 $consumerArgs = @("--json", "--max-candidates", "$MaxCandidates")
@@ -240,10 +318,7 @@ $consumerOut = Get-StageOutputPath -Name "consumer_attention"
 if ($consumerOut) { $consumerArgs += @("--output", $consumerOut) }
 $consumerExit = Invoke-PythonStage -Python $python -ScriptRelativePath "scripts/run_consumer_attention_intelligence.py" -Arguments $consumerArgs -StageId "consumer_attention"
 Add-StageResult -Id "consumer_attention" -ExitCode $consumerExit
-if ($overallExit -ne 0) {
-    Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode $overallExit -OutputDir $safeOutput
-    exit $overallExit
-}
+if ($overallExit -ne 0) { Complete-FailedRun -FailedStageId "consumer_attention" -EvidenceMode $evidenceMode -OutputDir $safeOutput -PythonCommand $pythonCommand }
 
 # 3) Supplier feasibility intelligence
 $supplierArgs = @("--json", "--max-candidates", "$MaxCandidates")
@@ -253,10 +328,7 @@ $supplierOut = Get-StageOutputPath -Name "supplier_feasibility"
 if ($supplierOut) { $supplierArgs += @("--output", $supplierOut) }
 $supplierExit = Invoke-PythonStage -Python $python -ScriptRelativePath "scripts/run_supplier_feasibility_intelligence.py" -Arguments $supplierArgs -StageId "supplier_feasibility"
 Add-StageResult -Id "supplier_feasibility" -ExitCode $supplierExit
-if ($overallExit -ne 0) {
-    Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode $overallExit -OutputDir $safeOutput
-    exit $overallExit
-}
+if ($overallExit -ne 0) { Complete-FailedRun -FailedStageId "supplier_feasibility" -EvidenceMode $evidenceMode -OutputDir $safeOutput -PythonCommand $pythonCommand }
 
 # 4) Product opportunity synthesis
 $synthesisArgs = @("--json")
@@ -267,10 +339,7 @@ $synthesisOut = Get-StageOutputPath -Name "opportunity_synthesis"
 if ($synthesisOut) { $synthesisArgs += @("--output", $synthesisOut) }
 $synthesisExit = Invoke-PythonStage -Python $python -ScriptRelativePath "scripts/run_product_opportunity_synthesis.py" -Arguments $synthesisArgs -StageId "opportunity_synthesis"
 Add-StageResult -Id "opportunity_synthesis" -ExitCode $synthesisExit
-if ($overallExit -ne 0) {
-    Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode $overallExit -OutputDir $safeOutput
-    exit $overallExit
-}
+if ($overallExit -ne 0) { Complete-FailedRun -FailedStageId "opportunity_synthesis" -EvidenceMode $evidenceMode -OutputDir $safeOutput -PythonCommand $pythonCommand }
 
 # 5) Product validation report
 $validationArgs = @("--json")
@@ -283,32 +352,23 @@ $validationOut = Get-StageOutputPath -Name "product_validation"
 if ($validationOut) { $validationArgs += @("--output", $validationOut) }
 $validationExit = Invoke-PythonStage -Python $python -ScriptRelativePath "scripts/generate_product_validation_report.py" -Arguments $validationArgs -StageId "product_validation"
 Add-StageResult -Id "product_validation" -ExitCode $validationExit
-if ($overallExit -ne 0) {
-    Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode $overallExit -OutputDir $safeOutput
-    exit $overallExit
-}
+if ($overallExit -ne 0) { Complete-FailedRun -FailedStageId "product_validation" -EvidenceMode $evidenceMode -OutputDir $safeOutput -PythonCommand $pythonCommand }
 
 # 6) Resource execution governor (offline scenario)
 $governorArgs = @("--json", "--scenario", "product_to_launch_pipeline")
 $governorOut = Get-StageOutputPath -Name "resource_governor"
 if ($governorOut) { $governorArgs += @("--output", $governorOut) }
 $governorExit = Invoke-PythonStage -Python $python -ScriptRelativePath "scripts/run_resource_execution_governor.py" -Arguments $governorArgs -StageId "resource_governor"
-Add-StageResult -Id "resource_governor" -ExitCode $governorExit
-if ($overallExit -ne 0) {
-    Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode $overallExit -OutputDir $safeOutput
-    exit $overallExit
-}
+Add-StageResult -Id "resource_governor" -ExitCode $governorExit -Authority "delegated_governor_cli"
+if ($overallExit -ne 0) { Complete-FailedRun -FailedStageId "resource_governor" -EvidenceMode $evidenceMode -OutputDir $safeOutput -PythonCommand $pythonCommand }
 
 # 7) TrustOS control plane (offline defaults)
 $trustArgs = @("--json")
 $trustOut = Get-StageOutputPath -Name "trustos_control_plane"
 if ($trustOut) { $trustArgs += @("--output", $trustOut) }
 $trustExit = Invoke-PythonStage -Python $python -ScriptRelativePath "scripts/run_trustos_control_plane.py" -Arguments $trustArgs -StageId "trustos_control_plane"
-Add-StageResult -Id "trustos_control_plane" -ExitCode $trustExit
-if ($overallExit -ne 0) {
-    Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode $overallExit -OutputDir $safeOutput
-    exit $overallExit
-}
+Add-StageResult -Id "trustos_control_plane" -ExitCode $trustExit -Authority "delegated_trustos_cli"
+if ($overallExit -ne 0) { Complete-FailedRun -FailedStageId "trustos_control_plane" -EvidenceMode $evidenceMode -OutputDir $safeOutput -PythonCommand $pythonCommand }
 
 # 8) Commerce MVP slice (fixture-only advisory packet)
 $commerceArgs = @(
@@ -319,11 +379,8 @@ $commerceArgs = @(
     "--json"
 )
 $commerceExit = Invoke-PythonStage -Python $python -ScriptRelativePath "scripts/run_commerce_mvp_slice.py" -Arguments $commerceArgs -StageId "commerce_mvp"
-Add-StageResult -Id "commerce_mvp" -ExitCode $commerceExit
-if ($overallExit -ne 0) {
-    Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode $overallExit -OutputDir $safeOutput
-    exit $overallExit
-}
+Add-StageResult -Id "commerce_mvp" -ExitCode $commerceExit -Authority "delegated_commerce_mvp_cli"
+if ($overallExit -ne 0) { Complete-FailedRun -FailedStageId "commerce_mvp" -EvidenceMode $evidenceMode -OutputDir $safeOutput -PythonCommand $pythonCommand }
 
-Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode 0 -OutputDir $safeOutput
+Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode 0 -OutputDir $safeOutput -PythonCommand $pythonCommand -OverallEvidenceClass "actual"
 exit 0
