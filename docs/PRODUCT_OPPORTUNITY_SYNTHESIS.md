@@ -56,6 +56,15 @@ and a single fixture/manual pillar caps the grade at `C_fixture_or_partial`
 even when another pillar claims live evidence. Genuinely all-live evidence
 still reaches `A_live_validated`; the grade was tightened, not disabled.
 
+**Evidence-label consistency (found during a follow-up review):** the first
+pass only checked the *candidate's* embedded evidence/offer `evidence_mode`,
+never the pillar *report's own* top-level `evidence_mode` field -- so a
+report that labeled itself `fixture_demo` at the top level while an embedded
+evidence item claimed `live_readonly` (or the reverse) still graded as
+`A_live_validated`, an internally self-contradictory result. The grade now
+requires the pillar report's top-level label to agree with its own evidence
+items before counting as live.
+
 **SYN-ALIAS-NO-COLLAPSE fix:** two candidates in the same pillar report that
 share both `query` and an evidence/offer `source_family` (an existing
 provenance field, not a new one) are now collapsed into a single scored

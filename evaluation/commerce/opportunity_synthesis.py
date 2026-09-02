@@ -114,7 +114,7 @@ def _mode(report: Mapping[str, Any] | None, candidate: Mapping[str, Any] | None)
 LIVE_EVIDENCE_MODES = frozenset({"live_readonly", "public_live", "authenticated_live"})
 
 
-def _grade(market: Mapping[str, Any] | None, supplier: Mapping[str, Any] | None, consumer: Mapping[str, Any] | None, scores: tuple[float, float, float], recommendation: str) -> str:
+def _grade(market: Mapping[str, Any] | None, supplier: Mapping[str, Any] | None, consumer: Mapping[str, Any] | None, scores: tuple[float, float, float], recommendation: str, market_report: Mapping[str, Any] | None = None, supplier_report: Mapping[str, Any] | None = None, consumer_report: Mapping[str, Any] | None = None) -> str:
     """SYN-GRADE-LIVE-LABEL fix: `A_live_validated` used to require only
     that *any one* of the three supplied pillars carry a live-looking
     evidence_mode -- so one live-labeled pillar mixed with two fixture/
@@ -123,13 +123,24 @@ def _grade(market: Mapping[str, Any] | None, supplier: Mapping[str, Any] | None,
     (`all(...)`, not `any(...)`): three populated pillars alone is never
     sufficient, and a single fixture/manual pillar caps the grade at
     C_fixture_or_partial even when another pillar claims live evidence.
+
+    Evidence-label consistency: `market`/`supplier`/`consumer` are the
+    per-candidate evidence entries, which never carry the pillar
+    *report's own* top-level `evidence_mode`. A candidate whose embedded
+    evidence/offer items claim `live_readonly` while the pillar report
+    that contained it is itself labeled `fixture_demo` (or the reverse)
+    is an internally inconsistent label, not a live attestation --
+    `market_report`/`supplier_report`/`consumer_report` (the original
+    top-level report dicts, optional for backward compatibility) are
+    checked too, and a live grade requires the top-level label to agree.
     """
     if recommendation.startswith("reject") or not any(scores):
         return "F_reject_or_missing"
-    supplied_reports = [report for report in (market, supplier, consumer) if report]
-    supplied = len(supplied_reports)
-    modes = [_mode(None, report) for report in supplied_reports]
-    if supplied == 3 and all(mode in LIVE_EVIDENCE_MODES for mode in modes):
+    pillars = [(candidate, report) for candidate, report in ((market, market_report), (supplier, supplier_report), (consumer, consumer_report)) if candidate]
+    supplied = len(pillars)
+    modes = [_mode(None, candidate) for candidate, _ in pillars]
+    top_level_modes = [str((report or {}).get("evidence_mode", "")) for _, report in pillars]
+    if supplied == 3 and all(mode in LIVE_EVIDENCE_MODES for mode in modes) and all(mode in LIVE_EVIDENCE_MODES for mode in top_level_modes):
         return "A_live_validated"
     if supplied == 3 and set(modes) <= {"manual_import"}:
         return "B_multi_source_manual"
@@ -434,14 +445,14 @@ def _plan(candidate_id: str, recommendation: str) -> ProductOpportunityActionPla
     return ProductOpportunityActionPlan(candidate_id, recommendation, tuple({"window": window, "focus": focus, "task": task, "read_only": True} for window, task in days), ("Confirm evidence provenance.", "Confirm supplier proof status.", "Review assumptions and thresholds.", "Approve the next bounded validation step."))
 
 
-def _candidate(candidate_id: str, market: Mapping[str, Any] | None, supplier: Mapping[str, Any] | None, consumer: Mapping[str, Any] | None, *, use_consumer_weight: bool = True) -> tuple[ProductOpportunityCandidate, ProductOpportunityActionPlan]:
+def _candidate(candidate_id: str, market: Mapping[str, Any] | None, supplier: Mapping[str, Any] | None, consumer: Mapping[str, Any] | None, *, use_consumer_weight: bool = True, market_report: Mapping[str, Any] | None = None, supplier_report: Mapping[str, Any] | None = None, consumer_report: Mapping[str, Any] | None = None) -> tuple[ProductOpportunityCandidate, ProductOpportunityActionPlan]:
     market_score, supplier_score, consumer_score = _score(market), _score(supplier), _score(consumer)
     m, s, c = _bounded(market_score.get("overall_marketplace_opportunity")), _bounded(supplier_score.get("overall_supplier_feasibility")), _bounded(consumer_score.get("overall_consumer_attention"))
     combined = round(m * 0.4 + s * 0.35 + c * 0.25, 4) if use_consumer_weight else round(m * 0.55 + s * 0.45, 4)
     risk = _risks(market, supplier, consumer)
     recommendation = _recommendation(market, supplier, consumer, combined, risk)
     confidence = round((m + s + c) / 3, 4)
-    grade = _grade(market, supplier, consumer, (m, s, c), recommendation.code)
+    grade = _grade(market, supplier, consumer, (m, s, c), recommendation.code, market_report, supplier_report, consumer_report)
     thresholds = _thresholds(market, supplier)
     economics = _economics(supplier)
     consumer_voc = consumer_score.get("voice_of_customer", {}) if isinstance(consumer_score.get("voice_of_customer", {}), Mapping) else {}
@@ -472,7 +483,7 @@ def build_product_opportunity_synthesis(
     candidates: list[ProductOpportunityCandidate] = []
     plans: dict[str, ProductOpportunityActionPlan] = {}
     for candidate_id in sorted(set(market) | set(supplier) | set(consumer)):
-        item, plan = _candidate(candidate_id, market.get(candidate_id), supplier.get(candidate_id), consumer.get(candidate_id), use_consumer_weight=consumer_report is not None)
+        item, plan = _candidate(candidate_id, market.get(candidate_id), supplier.get(candidate_id), consumer.get(candidate_id), use_consumer_weight=consumer_report is not None, market_report=marketplace_report, supplier_report=supplier_report, consumer_report=consumer_report)
         candidates.append(item)
         plans[candidate_id] = plan
     candidates.sort(key=lambda item: (-item.score.combined_opportunity_score, item.candidate_id))

@@ -285,6 +285,33 @@ def test_valid_live_attestation_on_every_pillar_reaches_live_validated():
     assert result["confidence_grade"] == "A_live_validated"
 
 
+def test_internally_inconsistent_evidence_labels_are_never_live_validated():
+    """Evidence labels must remain internally consistent: a pillar report
+    that labels itself fixture_demo at the top level while an embedded
+    evidence/offer item claims live_readonly (or the reverse) is a
+    mislabeled report, not a live attestation, and must never reach
+    A_live_validated."""
+    def mismatched(top_level_mode: str, item_mode: str) -> dict:
+        return {
+            "evidence_mode": top_level_mode,
+            "candidates": [
+                {
+                    "candidate_id": "x",
+                    "query": "x",
+                    "evidence": [{"evidence_mode": item_mode}],
+                    "offers": [{"evidence_mode": item_mode}],
+                    "score": {"overall_marketplace_opportunity": .8, "overall_supplier_feasibility": .8, "overall_consumer_attention": .8, "saturation_score": .1, "recommendation": "hold_for_manual_review", "economics": {"gross_margin_percent": .5}, "voice_of_customer": {}},
+                }
+            ],
+        }
+    top_says_fixture_item_says_live = mismatched("fixture_demo", "live_readonly")
+    result = build_product_opportunity_synthesis(top_says_fixture_item_says_live, top_says_fixture_item_says_live, top_says_fixture_item_says_live).to_dict()
+    assert result["confidence_grade"] != "A_live_validated"
+    top_says_live_item_says_fixture = mismatched("live_readonly", "fixture")
+    result2 = build_product_opportunity_synthesis(top_says_live_item_says_fixture, top_says_live_item_says_fixture, top_says_live_item_says_fixture).to_dict()
+    assert result2["confidence_grade"] != "A_live_validated"
+
+
 def test_stale_evidence_is_not_live_validated():
     market, supplier, consumer = reports()
     market["generated_at"] = "2019-01-01T00:00:00Z"
