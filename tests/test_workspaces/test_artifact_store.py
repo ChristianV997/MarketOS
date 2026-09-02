@@ -79,9 +79,9 @@ def test_rejects_unknown_and_forged_workspace_principals(workspaces):
     unknown = ClientWorkspace(name="unknown")
     forged = ClientWorkspace(workspace_id=alpha.workspace_id, name="forged-name")
     with pytest.raises(ValueError, match="not registered"):
-        ArtifactStore(unknown, registry).path_for("exp-1", "result.json")
+        ArtifactStore(unknown, registry)
     with pytest.raises(ValueError, match="not registered"):
-        ArtifactStore(forged, registry).path_for("exp-1", "result.json")
+        ArtifactStore(forged, registry)
 
 
 def test_rejects_artifact_workspace_mismatch(workspaces):
@@ -160,11 +160,13 @@ def test_json_logs_do_not_reflect_filesystem_paths_or_errors(caplog, workspaces,
 def test_secret_shaped_values_are_redacted(workspaces):
     registry, alpha, _ = workspaces
     store = ArtifactStore(alpha, registry)
-    secret = "sk-test-" + "abcdefghijklmnopqrstuvwxyz"
-    assert store.save("exp-1", "creds.json", {"api_key": secret, "note": secret})
+    redaction_fixture = "sk-test-" + "abcdefghijklmnopqrstuvwxyz"
+    assert store.save(
+        "exp-1", "creds.json", {"api_key": redaction_fixture, "note": (redaction_fixture,)}
+    )
     loaded = store.load("exp-1", "creds.json")
-    assert loaded == {"api_key": "[redacted]", "note": "[redacted]"}
-    assert secret not in Path(store.path_for("exp-1", "creds.json")).read_text(encoding="utf-8")
+    assert loaded == {"api_key": "[redacted]", "note": ["[redacted]"]}
+    assert redaction_fixture not in Path(store.path_for("exp-1", "creds.json")).read_text(encoding="utf-8")
 
 
 def test_malformed_json_returns_default(workspaces):

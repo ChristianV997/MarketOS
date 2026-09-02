@@ -108,6 +108,8 @@ def _redact_secret_shaped(data: Any) -> Any:
         return redacted
     if isinstance(data, list):
         return [_redact_secret_shaped(item) for item in data]
+    if isinstance(data, tuple):
+        return tuple(_redact_secret_shaped(item) for item in data)
     if isinstance(data, str) and _SECRET_SHAPED_VALUE.search(data):
         return _REDACTED
     return data
@@ -156,6 +158,7 @@ class ArtifactStore:
         _reject_unsafe_component(workspace.workspace_id, "workspace_id")
         self._workspace = workspace
         self._registry = registry or get_workspace_registry()
+        self._canonical_workspace()
 
     @property
     def workspace(self) -> ClientWorkspace:
