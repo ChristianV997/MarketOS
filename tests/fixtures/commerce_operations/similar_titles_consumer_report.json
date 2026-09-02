@@ -3,7 +3,7 @@
   "evidence_mode": "fixture_demo",
   "candidates": [
     {
-      "candidate_id": "desk-lamp-alpha",
+      "candidate_id": "lamp-alpha",
       "query": "Desk lamp",
       "evidence": [{"platform": "tiktok", "hook": "desk lamp hook", "evidence_mode": "fixture"}],
       "score": {
@@ -17,7 +17,7 @@
       }
     },
     {
-      "candidate_id": "desk-lamp-beta",
+      "candidate_id": "lamp-beta",
       "query": "Desk Lamp",
       "evidence": [{"platform": "tiktok", "hook": "desk lamp hook", "evidence_mode": "fixture"}],
       "score": {

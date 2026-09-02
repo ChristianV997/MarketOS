@@ -676,7 +676,7 @@ def test_similar_titles_with_different_ids_are_not_collapsed():
     expected_ids = [item["candidate_id"] for item in expected["candidates"]]
     ids = [item["candidate_id"] for item in report["ranking"]["candidates"]]
     assert ids == expected_ids
-    assert ids == ["desk-lamp-alpha", "desk-lamp-beta"]
+    assert ids == ["lamp-alpha", "lamp-beta"]
     assert report["ranking"]["candidate_count"] == 2
     assert expected["candidate_count"] == 2
     titles = [item["title"] for item in report["ranking"]["candidates"]]

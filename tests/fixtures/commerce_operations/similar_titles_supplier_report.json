@@ -3,7 +3,7 @@
   "evidence_mode": "fixture_demo",
   "candidates": [
     {
-      "candidate_id": "desk-lamp-alpha",
+      "candidate_id": "lamp-alpha",
       "query": "Desk lamp",
       "offers": [{"supplier": "cj", "unit_cost": 6.0, "shipping_cost": 2.0, "estimated_landed_cost": 8.0, "delivery_max_days": 10, "evidence_mode": "fixture"}],
       "score": {
@@ -23,7 +23,7 @@
       }
     },
     {
-      "candidate_id": "desk-lamp-beta",
+      "candidate_id": "lamp-beta",
       "query": "Desk Lamp",
       "offers": [{"supplier": "cj", "unit_cost": 7.0, "shipping_cost": 2.5, "estimated_landed_cost": 9.5, "delivery_max_days": 12, "evidence_mode": "fixture"}],
       "score": {

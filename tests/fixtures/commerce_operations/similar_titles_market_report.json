@@ -3,13 +3,13 @@
   "evidence_mode": "fixture_demo",
   "candidates": [
     {
-      "candidate_id": "desk-lamp-alpha",
+      "candidate_id": "lamp-alpha",
       "query": "Desk lamp",
       "evidence": [{"marketplace": "amazon", "price": 24.99, "source_confidence": 0.8, "evidence_mode": "fixture"}],
       "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.82, "saturation_score": 0.2, "price_confidence": 0.8, "recommendation": "validate_supplier_first"}
     },
     {
-      "candidate_id": "desk-lamp-beta",
+      "candidate_id": "lamp-beta",
       "query": "Desk Lamp",
       "evidence": [{"marketplace": "amazon", "price": 25.49, "source_confidence": 0.7, "evidence_mode": "fixture"}],
       "score": {"overall_marketplace_opportunity": 0.62, "demand_proxy_score": 0.64, "saturation_score": 0.28, "price_confidence": 0.7, "recommendation": "validate_supplier_first"}
