@@ -12,6 +12,8 @@ from backend.mvp_commerce.opportunity import OpportunityCandidate
 from backend.mvp_commerce.product_research import build_research_candidates
 from evaluation.commerce.commerce_operations_cycle import (
     EVIDENCE_CLASSES,
+    PROOF_SEPARATION_BLOCKERS,
+    PROVENANCE_VOCAB,
     STAGE_ORDER,
     UNIFORM_STAGE_KEYS,
     build_commerce_operations_cycle,
@@ -236,6 +238,10 @@ def test_new_modules_have_no_live_clients():
         assert "openai" not in source
         assert "anthropic" not in source
         assert "build_provider_registry" not in source
+        assert "rank_opportunities" not in source
+        assert "score_opportunity" not in source
+        assert "opportunity_scoring_events" not in source
+        assert "run_commerce_mvp_slice" not in source
 
 
 def test_build_research_candidates_unchanged_without_this_cycle():
@@ -393,7 +399,8 @@ def test_product_validation_is_called_after_synthesis_before_launch():
     assert "executive_summary" not in validation
     assert "top_candidates" not in validation
     assert validation["overall_recommendation"] == report["synthesis"]["overall_recommendation"]
-    assert list(STAGE_ORDER).index("product_validation") == list(STAGE_ORDER).index("synthesis") + 1
+    assert list(STAGE_ORDER).index("ranking") == list(STAGE_ORDER).index("synthesis") + 1
+    assert list(STAGE_ORDER).index("product_validation") == list(STAGE_ORDER).index("ranking") + 1
     assert list(STAGE_ORDER).index("launch_draft_readiness") > list(STAGE_ORDER).index("product_validation")
 
 
@@ -497,6 +504,8 @@ def test_cycle_source_does_not_call_provider_registry():
         source = path.read_text(encoding="utf8")
         assert "build_provider_registry" not in source
         assert "build_companyos_registry_report" not in source
+        assert "rank_opportunities" not in source
+        assert "run_commerce_mvp_slice" not in source
 
 
 def test_product_validation_does_not_run_phase1_path_builders(monkeypatch):
@@ -523,3 +532,202 @@ def test_product_validation_does_not_run_phase1_path_builders(monkeypatch):
     assert "backend.deployment.readiness" not in cycle_source
     assert "build_benchmark_from_paths" not in cycle_source
     assert "build_from_paths" not in cycle_source
+
+
+def test_ranking_is_synthesis_order_not_rescored():
+    market, supplier, consumer = pillars()
+    expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    report = cycle().to_dict()
+    ranking = report["ranking"]
+    assert ranking["scoring_authority"].endswith("build_product_opportunity_synthesis")
+    assert ranking["re_ranked"] is False
+    assert ranking["duplicate_collapse"] == "last_wins"
+    assert ranking["live_go"] is False
+    assert ranking["confidence_claim"] == "not_live_validated"
+    ids = [item["candidate_id"] for item in ranking["candidates"]]
+    expected_ids = [item["candidate_id"] for item in expected["candidates"]]
+    assert ids == expected_ids
+    assert [item["combined_opportunity"] for item in ranking["candidates"]] == [
+        item["combined_opportunity"] for item in expected["candidates"]
+    ]
+    assert ranking["top_candidate_id"] == expected["top_candidate_id"]
+    for key in PROOF_SEPARATION_BLOCKERS:
+        assert key in ranking["blocking_reasons"]
+        assert ranking[key] is True
+    for item in ranking["candidates"]:
+        assert item["pillars"]["marketplace"]["provenance"] in PROVENANCE_VOCAB
+        assert item["pillars"]["supplier"]["provenance"] in PROVENANCE_VOCAB
+        assert item["pillars"]["consumer"]["provenance"] in PROVENANCE_VOCAB
+        assert "A_live_validated" not in json.dumps(item)
+
+
+def test_winner_loser_ranking_uses_synthesis_reject_reasons():
+    report = cycle().to_dict()
+    rows = report["ranking"]["candidates"]
+    assert len(rows) >= 2
+    assert rows[0]["rank"] == 1
+    assert rows[0]["candidate_id"] == report["synthesis"]["top_candidate_id"]
+    losers = [item for item in rows if item["reject_reason"]]
+    assert losers
+    assert all(str(item["reject_reason"]).startswith("reject") for item in losers)
+    assert rows[0]["combined_opportunity"] >= rows[-1]["combined_opportunity"]
+
+
+def test_strong_market_weak_supplier_next_action_is_supplier():
+    report = build_commerce_operations_cycle(
+        load("strong_market_report.json"),
+        load("insufficient_supplier_report.json"),
+        load("strong_market_consumer_report.json"),
+    ).to_dict()
+    expected = build_product_opportunity_synthesis(
+        load("strong_market_report.json"),
+        load("insufficient_supplier_report.json"),
+        load("strong_market_consumer_report.json"),
+    ).to_dict()
+    assert report["synthesis"]["overall_recommendation"] == expected["overall_recommendation"]
+    assert expected["overall_recommendation"] in {"validate_supplier_first", "expand_supplier_research"}
+    action = f"{report['ranking']['next_action']} {report['next_best_action']} {expected['next_best_action']}"
+    assert "supplier" in action.lower()
+    assert "marketplace_is_not_supplier_proof" in report["blockers"]
+    assert report["governor"].get("live_go") is not True
+
+
+def test_strong_attention_weak_economics_uses_unit_economics_summary_only():
+    market = load("strong_attention_market_report.json")
+    supplier = load("weak_economics_supplier_report.json")
+    consumer = load("strong_attention_consumer_report.json")
+    expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    assert report["synthesis"]["overall_recommendation"] == expected["overall_recommendation"]
+    assert expected["overall_recommendation"] == "reject_poor_margin"
+    economics = report["synthesis"]["unit_economics_summary"]
+    assert economics["gross_margin_percent"] == expected["unit_economics_summary"]["gross_margin_percent"]
+    assert economics["gross_margin_percent"] == supplier["candidates"][0]["score"]["economics"]["gross_margin_percent"]
+    decision = report["governor"]["decisions"][0]
+    assert decision["unit_economics_source"] == "synthesis.unit_economics_summary"
+    assert decision["unit_economics_score"] == max(0.0, min(1.0, float(economics["gross_margin_percent"])))
+    assert "consumer_attention_is_not_ad_performance" in report["blockers"]
+    assert report["governor"]["live_go"] is False
+
+
+def test_strong_supplier_weak_demand_deprioritizes_without_fulfillment_proof():
+    report = build_commerce_operations_cycle(
+        load("weak_demand_market_report.json"),
+        load("strong_supplier_report.json"),
+        load("weak_demand_consumer_report.json"),
+    ).to_dict()
+    expected = build_product_opportunity_synthesis(
+        load("weak_demand_market_report.json"),
+        load("strong_supplier_report.json"),
+        load("weak_demand_consumer_report.json"),
+    ).to_dict()
+    assert report["ranking"]["candidates"][0]["combined_recommendation"] == expected["overall_recommendation"]
+    assert expected["overall_recommendation"] in {"reject_oversaturated", "expand_marketplace_research", "hold_for_manual_review"}
+    assert "supplier_feasibility_is_not_fulfillment_proof" in report["blockers"]
+    assert report["governor"].get("live_go") is not True
+
+
+def test_conflicting_pillars_keep_named_blockers_without_silent_drop():
+    report = build_commerce_operations_cycle(
+        load("conflicting_market_report.json"),
+        load("conflicting_supplier_report.json"),
+        load("conflicting_consumer_report.json"),
+    ).to_dict()
+    expected = build_product_opportunity_synthesis(
+        load("conflicting_market_report.json"),
+        load("conflicting_supplier_report.json"),
+        load("conflicting_consumer_report.json"),
+    ).to_dict()
+    assert report["ranking"]["candidate_count"] == expected["candidate_count"] == 1
+    row = report["ranking"]["candidates"][0]
+    assert row["blockers"]
+    assert "low_margin_proxy" in row["blockers"] or "reject_poor_margin" in str(row["combined_recommendation"])
+    assert report["synthesis"]["overall_recommendation"] == expected["overall_recommendation"]
+    blob = json.dumps(report["ranking"])
+    assert "conflict-widget" in blob
+    assert report["live_validated"] is False
+
+
+def test_duplicate_ids_collapse_last_wins_without_double_count():
+    market = load("duplicate_ids_market_report.json")
+    supplier = load("duplicate_ids_supplier_report.json")
+    consumer = load("duplicate_ids_consumer_report.json")
+    expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    ids = [item["candidate_id"] for item in report["ranking"]["candidates"]]
+    assert ids == ["dup-widget"]
+    assert report["ranking"]["candidate_count"] == 1
+    assert expected["candidate_count"] == 1
+    assert report["ranking"]["candidates"][0]["title"] == expected["candidates"][0]["title"]
+    assert "first duplicate should lose" not in report["ranking"]["candidates"][0]["title"]
+
+
+def test_stale_evidence_is_named_provenance_and_blocker():
+    report = build_commerce_operations_cycle(
+        load("stale_market_report.json"),
+        load("stale_supplier_report.json"),
+        load("stale_consumer_report.json"),
+    ).to_dict()
+    row = report["ranking"]["candidates"][0]
+    assert row["pillars"]["marketplace"]["provenance"] == "stale"
+    assert "stale_evidence:marketplace" in row["blockers"]
+    assert "stale_evidence:marketplace" in report["blockers"]
+    assert report["confidence_claim"] == "not_live_validated"
+    assert report["governor"].get("live_go") is not True
+
+
+def test_governor_uses_synthesis_unit_economics_instead_of_zero_when_present():
+    report = cycle().to_dict()
+    expected = build_product_opportunity_synthesis(*pillars()).to_dict()
+    margin = expected["unit_economics_summary"]["gross_margin_percent"]
+    assert margin not in {None, 0, 0.0}
+    for decision in report["governor"]["decisions"]:
+        assert decision["unit_economics_source"] == "synthesis.unit_economics_summary"
+        assert decision["unit_economics_score"] == max(0.0, min(1.0, float(margin)))
+        assert decision["unit_economics_score"] != 0.0
+        assert decision.get("workspace_decision") == "allow"
+    assert report["governor"]["workspace_decision_authorizes_live"] is False
+    assert report["governor"]["live_go"] is False
+
+
+def test_trustos_and_governor_blockers_passthrough_keep_live_go_false():
+    report = cycle().to_dict()
+    assert report["governor"]["live_go"] is False
+    assert report["trustos"]["professional_conclusion"] is False
+    trustos_blockers = [item for item in report["blockers"] if str(item).startswith("trustos_")]
+    governor_blockers = [item for item in report["blockers"] if str(item).startswith("governor_")]
+    assert trustos_blockers
+    assert governor_blockers
+    for decision in report["governor"]["decisions"]:
+        assert "TrustOS gate is blocked" in decision["blockers"] or decision["trustos_decision"] == "hard_block"
+        assert decision.get("budget_checks") is not None
+
+
+def test_governor_budget_limited_passthrough_keeps_live_go_false(monkeypatch):
+    from dataclasses import replace
+
+    import evaluation.commerce.commerce_operations_cycle as cycle_mod
+
+    real = cycle_mod.evaluate_execution_request
+
+    def limited(request, **kwargs):
+        return real(replace(request, requested_amount=10_000.0, resource_type="ad_spend"), **kwargs)
+
+    monkeypatch.setattr(cycle_mod, "evaluate_execution_request", limited)
+    report = cycle().to_dict()
+    assert report["governor"]["live_go"] is False
+    reasons = " ".join(
+        f"{item.get('reason')} {' '.join(str(check.get('reason') or '') for check in item.get('budget_checks') or [])} {' '.join(item.get('blockers') or [])}"
+        for item in report["governor"]["decisions"]
+    ).lower()
+    assert "cap" in reasons or "budget" in reasons
+    assert report["confidence_claim"] != "A_live_validated"
+
+
+def test_provider_blocked_without_registry_clone():
+    report = cycle().to_dict()
+    assert report["approval_ledger"].get("registry_loaded") is False
+    assert report["governor"]["live_go"] is False
+    blob = json.dumps(report)
+    assert "build_provider_registry" not in blob
+    assert report["trustos"].get("provider_activation_decision")

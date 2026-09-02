@@ -130,6 +130,7 @@ STAGE_ORDER = (
     "supplier",
     "consumer_attention",
     "synthesis",
+    "ranking",
     "product_validation",
     "trustos",
     "governor",
@@ -137,6 +138,29 @@ STAGE_ORDER = (
     "launch_draft_readiness",
     "site_draft_readiness",
     "client_workspace",
+)
+PROVENANCE_VOCAB = (
+    "observed",
+    "derived",
+    "assumed",
+    "unavailable",
+    "stale",
+    "simulated",
+    "fixture",
+)
+PROOF_SEPARATION_BLOCKERS = (
+    "marketplace_is_not_supplier_proof",
+    "consumer_attention_is_not_ad_performance",
+    "supplier_feasibility_is_not_fulfillment_proof",
+)
+UNIT_ECONOMICS_KEYS = (
+    "target_sell_price",
+    "estimated_landed_cost",
+    "gross_margin_percent",
+    "profit_per_order_before_ad_spend",
+    "break_even_cpa",
+    "break_even_roas",
+    "assumptions",
 )
 
 
@@ -293,6 +317,173 @@ def _pillar(name: str, report: Mapping[str, Any] | None) -> dict[str, Any]:
     )
 
 
+def _provenance(mode: str) -> str:
+    normalized = _text(mode, 40)
+    if normalized == "stale":
+        return "stale"
+    if normalized in {"fixture", "fixture_demo"}:
+        return "fixture"
+    if normalized == "manual_import":
+        return "derived"
+    if normalized in LIVE_MODES:
+        return "observed"
+    if normalized in {"simulated", "dry_run"}:
+        return "simulated"
+    if normalized in {"assumed", "assumption"}:
+        return "assumed"
+    if not normalized or normalized in {"missing", "unavailable"}:
+        return "unavailable"
+    return "derived"
+
+
+def _compact_unit_economics(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping) or not value:
+        return None
+    compact = {key: value.get(key) for key in UNIT_ECONOMICS_KEYS if key in value}
+    return compact or None
+
+
+def _unit_economics_score(synthesis: Mapping[str, Any]) -> tuple[float, str, list[str]]:
+    """Governor input from synthesis unit_economics_summary only. Never market/attention."""
+    summary = _compact_unit_economics(synthesis.get("unit_economics_summary"))
+    if summary is None:
+        return 0.0, "unavailable", ["unit_economics_unavailable"]
+    margin = summary.get("gross_margin_percent")
+    if margin is None:
+        return 0.0, "unavailable", ["unit_economics_unavailable"]
+    try:
+        return max(0.0, min(1.0, float(margin))), "synthesis.unit_economics_summary", []
+    except (TypeError, ValueError):
+        return 0.0, "unavailable", ["unit_economics_unavailable"]
+
+
+def _raw_pillar_mode(report: Mapping[str, Any] | None, candidate_id: str) -> str:
+    if report is None:
+        return "unavailable"
+    mode = _text(report.get("evidence_mode") or "", 40)
+    last = mode
+    for item in report.get("candidates") or []:
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("candidate_id") or "") != candidate_id:
+            continue
+        last = _text(item.get("evidence_mode") or mode or "", 40) or last
+        for packet in list(item.get("evidence") or []) + list(item.get("offers") or []):
+            if isinstance(packet, Mapping) and packet.get("evidence_mode"):
+                last = _text(packet.get("evidence_mode"), 40)
+    return last or "unavailable"
+
+
+def _ranking_section(
+    synthesis_data: Mapping[str, Any],
+    synthesis_section: Mapping[str, Any],
+    marketplace: Mapping[str, Any] | None,
+    supplier: Mapping[str, Any] | None,
+    consumer: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    authority = "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis"
+    if str(synthesis_section.get("status") or "") == "unavailable":
+        return _section(
+            status="unavailable",
+            evidence_class="unavailable",
+            blockers=("ranking_requires_synthesis",),
+            evidence_references=(authority,),
+            next_action="restore_synthesis_authority",
+            owner_department="commerce",
+            required_approval_or_gate="none",
+            client_visible_projection_state="internal_only",
+            scoring_authority=authority,
+            re_ranked=False,
+            candidates=[],
+            live_go=False,
+        )
+    rows: list[dict[str, Any]] = []
+    blockers = list(PROOF_SEPARATION_BLOCKERS)
+    synthesis_blockers = list(synthesis_section.get("blocking_reasons") or synthesis_section.get("blockers") or [])
+    blockers.extend(synthesis_blockers)
+    raw_candidates = list(synthesis_data.get("candidates") or [])
+    for index, item in enumerate(raw_candidates, start=1):
+        if not isinstance(item, Mapping):
+            blockers.append("ranking_candidate_malformed")
+            continue
+        candidate_id = _text(item.get("candidate_id"), 80)
+        matrix = item.get("evidence_matrix") if isinstance(item.get("evidence_matrix"), Mapping) else {}
+        pillar_blockers: list[str] = []
+        pillars: dict[str, Any] = {}
+        for name, report in (("marketplace", marketplace), ("supplier", supplier), ("consumer", consumer)):
+            matrix_item = matrix.get("marketplace" if name == "marketplace" else "supplier" if name == "supplier" else "consumer")
+            matrix_item = matrix_item if isinstance(matrix_item, Mapping) else {}
+            raw_mode = _raw_pillar_mode(report, candidate_id)
+            matrix_mode = _text(matrix_item.get("mode") or "", 40)
+            provenance = _provenance(raw_mode if raw_mode not in {"", "missing"} else matrix_mode)
+            status = _text(matrix_item.get("status") or ("supplied" if report else "missing"), 40)
+            if status == "missing" or provenance == "unavailable":
+                pillar_blockers.append(f"{name}_evidence_missing")
+            if provenance == "stale":
+                pillar_blockers.append(f"stale_evidence:{name}")
+            pillars[name] = {
+                "status": status,
+                "mode": raw_mode or matrix_mode or "unavailable",
+                "provenance": provenance,
+                "score": matrix_item.get("score"),
+            }
+        economics = _compact_unit_economics(item.get("unit_economics_summary"))
+        if economics is None:
+            pillar_blockers.append("unit_economics_unavailable")
+        recommendation = _text(item.get("combined_recommendation") or "", 80)
+        grade = _text(item.get("score", {}).get("confidence_grade") if isinstance(item.get("score"), Mapping) else item.get("confidence_grade"), 40)
+        candidate_blockers = list(dict.fromkeys([
+            *list(item.get("top_supplier_risks") or []),
+            *list(item.get("top_marketplace_risks") or []),
+            *list(item.get("top_consumer_risks") or []),
+            *pillar_blockers,
+            *PROOF_SEPARATION_BLOCKERS,
+        ]))
+        blockers.extend(pillar_blockers)
+        rows.append(
+            {
+                "rank": index,
+                "candidate_id": candidate_id,
+                "title": _text(item.get("title") or item.get("query") or candidate_id, 120),
+                "combined_opportunity": item.get("combined_opportunity"),
+                "combined_recommendation": recommendation,
+                "next_best_action": _text(item.get("next_best_action") or "", 240),
+                "confidence_grade": grade,
+                "unit_economics_summary": economics,
+                "pillars": pillars,
+                "blockers": candidate_blockers,
+                "reject_reason": recommendation if recommendation.startswith("reject") else None,
+            }
+        )
+    next_action = _text(synthesis_section.get("next_best_action") or synthesis_section.get("next_action") or "review_synthesis_ranking_offline", 240)
+    if any("supplier" in item and "missing" in item for item in blockers) or str(synthesis_section.get("overall_recommendation") or "").startswith("validate_supplier"):
+        next_action = _text(synthesis_section.get("next_best_action") or "run_readonly_supplier_validation", 240)
+    return _section(
+        status="plan_only",
+        evidence_class="plan_only",
+        blockers=list(dict.fromkeys(blockers)),
+        evidence_references=(authority,),
+        next_action=next_action,
+        owner_department="commerce",
+        required_approval_or_gate="none",
+        client_visible_projection_state="internal_only",
+        scoring_authority=authority,
+        ranking_authority=authority,
+        re_ranked=False,
+        duplicate_collapse="last_wins",
+        sort="(-combined_opportunity_score, candidate_id)",
+        top_candidate_id=synthesis_data.get("top_candidate_id"),
+        candidate_count=len(rows),
+        candidates=rows,
+        confidence_claim="not_live_validated",
+        live_validated=False,
+        live_go=False,
+        marketplace_is_not_supplier_proof=True,
+        consumer_attention_is_not_ad_performance=True,
+        supplier_feasibility_is_not_fulfillment_proof=True,
+    )
+
+
 def _synthesis_section(
     marketplace: Mapping[str, Any] | None,
     supplier: Mapping[str, Any] | None,
@@ -333,6 +524,7 @@ def _synthesis_section(
         next_best_action=_text(data.get("next_best_action") or "review_synthesis_offline", 240),
         source_reports=dict(data.get("source_reports") or {}),
         candidate_count=data.get("candidate_count", 0),
+        unit_economics_summary=_compact_unit_economics(data.get("unit_economics_summary")),
         live_validated=False,
         scoring_authority=authority,
     )
@@ -454,8 +646,9 @@ def _governor_section(
     actions = list(GOVERNOR_ACTIONS)
     if not supplier_present:
         actions.append(("request_supplier_proof", "supplier", "supplier", "report_generation_quota"))
+    economics_score, economics_source, economics_blockers = _unit_economics_score(synthesis)
     decisions: list[dict[str, Any]] = []
-    blockers: list[str] = []
+    blockers: list[str] = list(economics_blockers)
     for action, domain, owner, resource in actions:
         trustos_decision = _trustos_decision_for(action, trustos_by_action, trustos_status=trustos_status)
         request = ExecutionDecisionRequest(
@@ -471,7 +664,7 @@ def _governor_section(
             supplier_score=_score(synthesis, "supplier_feasibility"),
             attention_score=_score(synthesis, "consumer_attention"),
             evidence_score=_score(synthesis, "evidence_confidence"),
-            unit_economics_score=0.0,
+            unit_economics_score=economics_score,
             supplier_proof=False,
             approval_state="not_requested",
             trustos_decision=trustos_decision,
@@ -497,9 +690,21 @@ def _governor_section(
                 for item in payload.get("approvals") or []
                 if isinstance(item, Mapping)
             ],
+            "budget_checks": [
+                {
+                    "resource_type": item.get("resource_type"),
+                    "status": item.get("status"),
+                    "reason": item.get("reason"),
+                }
+                for item in payload.get("budget_checks") or []
+                if isinstance(item, Mapping)
+            ],
             "simulated_only": True,
             "trustos_decision": trustos_decision,
             "trustos_action": GOVERNOR_TRUSTOS_ACTION.get(action, "public_beta_launch"),
+            "unit_economics_score": economics_score,
+            "unit_economics_source": economics_source,
+            "workspace_decision": "allow",
         }
         decisions.append(compact)
         blockers.extend(compact["blockers"])
@@ -522,6 +727,10 @@ def _governor_section(
         simulated_only=True,
         live_go=False,
         decisions=decisions,
+        unit_economics_score=economics_score,
+        unit_economics_source=economics_source,
+        workspace_decision="allow",
+        workspace_decision_authorizes_live=False,
     )
 
 
@@ -819,6 +1028,7 @@ class CommerceOperationsCycleReport:
     supplier: dict[str, Any]
     consumer_attention: dict[str, Any]
     synthesis: dict[str, Any]
+    ranking: dict[str, Any]
     product_validation: dict[str, Any]
     trustos: dict[str, Any]
     governor: dict[str, Any]
@@ -851,6 +1061,7 @@ class CommerceOperationsCycleReport:
             "supplier": dict(self.supplier),
             "consumer_attention": dict(self.consumer_attention),
             "synthesis": dict(self.synthesis),
+            "ranking": dict(self.ranking),
             "product_validation": dict(self.product_validation),
             "trustos": dict(self.trustos),
             "governor": dict(self.governor),
@@ -866,6 +1077,7 @@ class CommerceOperationsCycleReport:
                         "supplier": self.supplier,
                         "consumer_attention": self.consumer_attention,
                         "synthesis": self.synthesis,
+                        "ranking": self.ranking,
                         "product_validation": self.product_validation,
                         "trustos": self.trustos,
                         "governor": self.governor,
@@ -924,6 +1136,15 @@ class CommerceOperationsCycleReport:
             f"Combined opportunity: {synthesis.get('combined_opportunity_score')}",
             f"Top candidate: `{synthesis.get('top_candidate_id') or 'none'}`",
             "",
+            "## Ranking",
+            "",
+            f"Ranking authority: `{data['ranking'].get('ranking_authority') or data['ranking'].get('scoring_authority') or 'unavailable'}` (synthesis order, not re-ranked)",
+            f"Candidates: {data['ranking'].get('candidate_count', 0)}",
+            f"Duplicate collapse: `{data['ranking'].get('duplicate_collapse') or 'last_wins'}`",
+            f"Market is not supplier proof: `{data['ranking'].get('marketplace_is_not_supplier_proof')}`",
+            f"Attention is not ad performance: `{data['ranking'].get('consumer_attention_is_not_ad_performance')}`",
+            f"Supplier feasibility is not fulfillment proof: `{data['ranking'].get('supplier_feasibility_is_not_fulfillment_proof')}`",
+            "",
             "## Product Validation",
             "",
             f"Builder: `{validation.get('presentation_builder') or 'unavailable'}` (presentation only; not a scoring authority)",
@@ -974,6 +1195,7 @@ def build_commerce_operations_cycle(
     supplier_section = _pillar("supplier", supplier)
     consumer_section = _pillar("consumer", consumer)
     synthesis_data, synthesis_section = _synthesis_section(marketplace, supplier, consumer)
+    ranking = _ranking_section(synthesis_data, synthesis_section, marketplace, supplier, consumer)
     product_validation = _product_validation_section(
         marketplace,
         supplier,
@@ -998,6 +1220,7 @@ def build_commerce_operations_cycle(
         supplier_section,
         consumer_section,
         synthesis_section,
+        ranking,
         product_validation,
         trustos,
         governor,
@@ -1053,6 +1276,7 @@ def build_commerce_operations_cycle(
         supplier_section,
         consumer_section,
         synthesis_section,
+        ranking,
         product_validation,
         trustos,
         governor,
@@ -1086,6 +1310,7 @@ def build_commerce_operations_cycle(
         report.supplier,
         report.consumer_attention,
         report.synthesis,
+        report.ranking,
         report.product_validation,
         report.trustos,
         report.governor,
@@ -1118,6 +1343,7 @@ def markdown(report: Mapping[str, Any] | CommerceOperationsCycleReport) -> str:
         supplier=dict(report.get("supplier") or {}),
         consumer_attention=dict(report.get("consumer_attention") or {}),
         synthesis=dict(report.get("synthesis") or {}),
+        ranking=dict(report.get("ranking") or {}),
         product_validation=dict(report.get("product_validation") or {}),
         trustos=dict(report.get("trustos") or {}),
         governor=dict(report.get("governor") or {}),
@@ -1140,6 +1366,8 @@ __all__ = [
     "EVIDENCE_CLASSES",
     "STAGE_ORDER",
     "UNIFORM_STAGE_KEYS",
+    "PROVENANCE_VOCAB",
+    "PROOF_SEPARATION_BLOCKERS",
     "CommerceOperationsCycleReport",
     "build_commerce_operations_cycle",
     "markdown",

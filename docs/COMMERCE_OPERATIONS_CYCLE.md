@@ -5,9 +5,21 @@ consulting entrypoints into one deterministic readiness cycle. It is not a
 live operator, a second orchestrator, a second scoring system, or a
 publishing/spend path.
 
-Product Opportunity Synthesis remains the scoring authority. This cycle calls
+Product Opportunity Synthesis remains the scoring and ranking authority. This
+cycle calls
 `evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis`
-and does not recopy weights or grades.
+and does not recopy weights or grades. Ranking is the existing synthesis
+candidate list (`last-wins` identity collapse, sort `(-combined, id)`). The
+cycle does not re-rank and does not call `opportunity_scoring`.
+
+Governor `unit_economics_score` is taken from synthesis
+`unit_economics_summary.gross_margin_percent` when present. Missing economics
+are fail-closed as `0.0` with `unit_economics_unavailable`. Economics are never
+derived from marketplace or attention signals.
+
+Marketplace evidence is not supplier proof. Consumer-attention is not ad
+performance or ad authority. Supplier feasibility is not fulfillment or order
+proof. Those are named blockers on the ranking projection.
 
 Product validation is a later stage. After synthesis and before launch-draft
 readiness, the cycle calls
@@ -22,17 +34,18 @@ Phase-1 CJ path builders do not run.
 1. Marketplace or research evidence (existing fixture importers + `build_report`)
 2. Supplier feasibility (same)
 3. Consumer-attention (same)
-4. Product-opportunity synthesis (existing builder only)
-5. Product validation (`generate`, compact projection only)
-6. TrustOS status (`evaluate_action` / combined report, metadata only)
-7. Resource & Execution Governor (`evaluate_execution_request`), with the
+4. Product-opportunity synthesis (existing builder only; canonical ranking)
+5. Ranking projection of the synthesis candidate list (no second scorer)
+6. Product validation (`generate`, compact projection only)
+7. TrustOS status (`evaluate_action` / combined report, metadata only)
+8. Resource & Execution Governor (`evaluate_execution_request`), with the
    existing TrustOS `evaluate_action` result passed through as
    `trustos_decision` (no cycle-local gate)
-8. Approval Ledger status (`simulate_action` / `build_approval_ledger` with an
+9. Approval Ledger status (`simulate_action` / `build_approval_ledger` with an
    empty `registry_report`, so this cycle does not call `build_provider_registry`)
-9. Launch and site draft **readiness** (plan-only; packs are not written unless `--output` is set, and even then only the cycle report is written)
-10. Client-workspace-safe projection metadata (existing isolation plan; no tenant creation)
-11. `next_best_action` plus explicit blockers
+10. Launch and site draft **readiness** (plan-only; packs are not written unless `--output` is set, and even then only the cycle report is written)
+11. Client-workspace-safe projection metadata (existing isolation plan; no tenant creation)
+12. `next_best_action` plus explicit blockers
 
 ## Uniform stage schema
 
@@ -47,7 +60,7 @@ Every stage is projected onto the same dict keys (plus stage-specific extras):
 - `client_visible_projection_state`
 
 Top-level `stages` holds the compact form of marketplace, supplier,
-consumer_attention, synthesis, product_validation, trustos, governor,
+consumer_attention, synthesis, ranking, product_validation, trustos, governor,
 approval_ledger, launch_draft_readiness, site_draft_readiness, and
 client_workspace. This mapping does not add a second scorer or a second
 TrustOS gate.
