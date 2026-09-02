@@ -9,10 +9,12 @@ import pytest
 
 from evaluation.trustos.control_plane import ACTION_CATEGORIES
 from evaluation.trustos.client_workspace_isolation import (
-    ACCESS_MODES, CLONE_TYPES, DATA_CLASSES, LEAKAGE_STATUSES, SERVICE_PACKAGES, WORKSPACE_STATUSES, WORKSPACE_TYPES,
-    ClientWorkspaceCloneManifest, ClientWorkspaceDataClass, ClientWorkspaceExportPolicy, ClientWorkspaceIsolationReport,
-    ClientWorkspaceLeakageCheck, ClientWorkspaceManifest, ClientWorkspacePermission, ClientWorkspaceRedactionPolicy,
+    ACCESS_MODES, CLIENT_EXPORT_FIELDS, CLONE_TYPES, DATA_CLASSES, LEAKAGE_STATUSES, MAX_CLIENT_EVIDENCE_EXPORT_BYTES,
+    SERVICE_PACKAGES, WORKSPACE_STATUSES, WORKSPACE_TYPES, ClientWorkspaceCloneManifest, ClientWorkspaceDataClass,
+    ClientWorkspaceEvidenceExport, ClientWorkspaceIsolationReport, ClientWorkspaceLeakageCheck,
+    ClientWorkspaceManifest, ClientWorkspacePermission,
     ClientWorkspaceSafetySummary, ClientWorkspaceVisibilityRule, build_client_workspace_isolation_report, check_workspace_leakage,
+    export_client_evidence,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -612,3 +614,157 @@ def test_boundary_allows_only_safe_projection_classes():
 
 def test_report_markdown_mentions_projection_not_fork():
     assert "curated projections" in build_client_workspace_isolation_report().to_markdown()
+
+
+def test_client_evidence_export_preserves_safe_metadata_and_fingerprint():
+    payload = {
+        "workspace_id": "client-alpha",
+        "status": "present",
+        "blockers": [],
+        "evidence_required": ["synthetic evidence review"],
+        "approvals_required": ["human review"],
+        "next_actions": ["review evidence from the approved source"],
+    }
+    exported = export_client_evidence(
+        workspace_id="client-alpha",
+        provenance="fixture://client-safe",
+        evidence_state="present",
+        payload=payload,
+    )
+    assert isinstance(exported, ClientWorkspaceEvidenceExport)
+    assert exported.workspace_id == "client-alpha"
+    assert exported.provenance == "fixture://client-safe"
+    assert exported.evidence_state == "present"
+    assert exported.payload == payload
+    assert set(exported.payload) <= CLIENT_EXPORT_FIELDS
+    assert exported.redaction_status == "validated_no_sensitive_fields"
+    assert exported.redaction_policy_id == "client-workspace-redaction-v1"
+    assert exported.redacted_fields == ()
+    assert len(exported.fingerprint) == 64
+    assert exported.payload_size_bytes <= MAX_CLIENT_EVIDENCE_EXPORT_BYTES
+
+
+def test_client_evidence_export_fingerprint_is_canonical():
+    first = export_client_evidence(
+        workspace_id="client-alpha",
+        provenance="fixture://client-safe",
+        evidence_state="present",
+        payload={"status": "present", "next_actions": ["review"], "blockers": []},
+    )
+    second = export_client_evidence(
+        workspace_id="client-alpha",
+        provenance="fixture://client-safe",
+        evidence_state="present",
+        payload={"blockers": [], "next_actions": ["review"], "status": "present"},
+    )
+    assert first.fingerprint == second.fingerprint
+    assert first.to_dict() == second.to_dict()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"internal_prompt": "synthetic internal prompt"},
+        {"internal_scoring_formula": "synthetic formula"},
+        {"internal_heuristic": "synthetic heuristic"},
+        {"source_code": "synthetic source"},
+        {"cross_client_data": "synthetic other_client record"},
+        {"client_private_data": "synthetic private tenant data"},
+        {"credentials": "synthetic credential"},
+        {"cookie": "synthetic cookie"},
+        {"token": "synthetic token"},
+        {"raw_provider_payload": {"value": "synthetic provider response"}},
+        {"next_actions": [{"raw_provider_payload": "synthetic nested provider response"}]},
+        {"next_actions": ["def internal_helper():"]},
+    ],
+)
+def test_client_evidence_export_rejects_forbidden_content(payload):
+    with pytest.raises(ValueError, match="client evidence export rejected") as error:
+        export_client_evidence(
+            workspace_id="client-alpha",
+            provenance="fixture://unsafe",
+            evidence_state="present",
+            payload=payload,
+        )
+    assert "synthetic" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "internal_prompt",
+        "internal_scoring_formula",
+        "internal_heuristic",
+        "source_code",
+        "cross_client_data",
+        "client_private_data",
+        "credentials",
+        "cookie",
+        "token",
+        "raw_provider_payload",
+    ],
+)
+def test_leakage_check_blocks_forbidden_export_classes(key):
+    findings = check_workspace_leakage({key: "synthetic forbidden value"})
+    assert findings
+    assert any(item.status == "hard_block" for item in findings)
+
+
+def test_client_evidence_export_rejects_workspace_mismatch():
+    with pytest.raises(ValueError, match="client evidence export rejected"):
+        export_client_evidence(
+            workspace_id="client-alpha",
+            provenance="fixture://mismatch",
+            evidence_state="present",
+            payload={"workspace_id": "client-beta", "status": "present"},
+        )
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"workspace_id": "", "provenance": "fixture://safe", "evidence_state": "present", "payload": {}},
+        {"workspace_id": "client-alpha", "provenance": "", "evidence_state": "present", "payload": {}},
+        {"workspace_id": "client-alpha", "provenance": "fixture://safe", "evidence_state": "unknown", "payload": {}},
+        {"workspace_id": "client-alpha", "provenance": "fixture://safe", "evidence_state": "present", "payload": []},
+    ],
+)
+def test_client_evidence_export_rejects_invalid_metadata(kwargs):
+    with pytest.raises(ValueError, match="invalid client evidence export"):
+        export_client_evidence(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"workspace_id": "client/alpha", "provenance": "fixture://safe", "evidence_state": "present", "payload": {}},
+        {"workspace_id": "client-alpha", "provenance": "file://synthetic/private/path", "evidence_state": "present", "payload": {}},
+        {"workspace_id": "client-alpha", "provenance": "fixture://../private", "evidence_state": "present", "payload": {}},
+        {"workspace_id": "client-alpha", "provenance": "fixture://safe", "evidence_state": "present", "payload": {"status": {"unsafe": object()}}},
+    ],
+)
+def test_client_evidence_export_rejects_unsafe_identity_or_value(kwargs):
+    with pytest.raises(ValueError, match="invalid client evidence export"):
+        export_client_evidence(**kwargs)
+
+
+def test_client_evidence_export_rejects_oversized_payload():
+    with pytest.raises(ValueError, match="client evidence export exceeds size limit"):
+        export_client_evidence(
+            workspace_id="client-alpha",
+            provenance="fixture://safe",
+            evidence_state="present",
+            payload={"status": "x" * 128},
+            max_payload_bytes=32,
+        )
+
+
+def test_client_evidence_export_rejects_unbounded_limit():
+    with pytest.raises(ValueError, match="invalid client evidence export"):
+        export_client_evidence(
+            workspace_id="client-alpha",
+            provenance="fixture://safe",
+            evidence_state="present",
+            payload={"status": "present"},
+            max_payload_bytes=MAX_CLIENT_EVIDENCE_EXPORT_BYTES + 1,
+        )
