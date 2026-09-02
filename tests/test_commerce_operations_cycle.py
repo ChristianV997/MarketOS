@@ -174,6 +174,7 @@ def test_malformed_root_is_rejected():
 @pytest.mark.parametrize("name,needle", [
     ("secret_like_api_key.json", "api_key"),
     ("secret_like_token.json", "token"),
+    ("nested_secret_report.json", "api_key"),
     ("raw_html_rejected.json", "html"),
     ("raw_payload_rejected.json", "raw_payload"),
 ])
@@ -317,6 +318,7 @@ def test_cli_live_is_blocked(capsys):
     "malformed_cycle_input.json",
     "secret_like_api_key.json",
     "secret_like_token.json",
+    "nested_secret_report.json",
     "raw_html_rejected.json",
     "raw_payload_rejected.json",
 ])
@@ -561,6 +563,8 @@ def test_ranking_is_synthesis_order_not_rescored():
             assert pillar["provenance"] != "observed"
             assert raw_mode != "observed"
         assert "A_live_validated" not in json.dumps(item)
+        assert "fingerprint" not in item
+        assert "source_family" not in json.dumps(item["pillars"])
 
 
 def test_winner_loser_ranking_uses_synthesis_reject_reasons():
@@ -648,6 +652,76 @@ def test_conflicting_pillars_keep_named_blockers_without_silent_drop():
     blob = json.dumps(report["ranking"])
     assert "conflict-widget" in blob
     assert report["live_validated"] is False
+
+
+def test_nested_secret_in_object_array_is_rejected():
+    payload = load("nested_secret_report.json")
+    assert payload["imports"][0]["credentials"]["api_key"] == "synthetic-secret-must-not-be-imported"
+    with pytest.raises(ValueError, match="secret-like or raw payload"):
+        reject_unsafe_input(payload, label="fixture")
+    with pytest.raises(ValueError, match="secret-like or raw payload"):
+        build_commerce_operations_cycle(payload, None, None)
+    try:
+        build_commerce_operations_cycle(payload, None, None)
+    except ValueError as exc:
+        assert "synthetic-secret-must-not-be-imported" not in str(exc)
+
+
+def test_similar_titles_with_different_ids_are_not_collapsed():
+    market = load("similar_titles_market_report.json")
+    supplier = load("similar_titles_supplier_report.json")
+    consumer = load("similar_titles_consumer_report.json")
+    expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    expected_ids = [item["candidate_id"] for item in expected["candidates"]]
+    ids = [item["candidate_id"] for item in report["ranking"]["candidates"]]
+    assert ids == expected_ids
+    assert ids == ["desk-lamp-alpha", "desk-lamp-beta"]
+    assert report["ranking"]["candidate_count"] == 2
+    assert expected["candidate_count"] == 2
+    titles = [item["title"] for item in report["ranking"]["candidates"]]
+    assert titles == [item["title"] for item in expected["candidates"]]
+    assert "desk lamp" in {item.casefold() for item in titles}
+    assert "fingerprint" not in report["ranking"]["candidates"][0]
+
+
+def test_ranking_pillar_labels_are_raw_pass_through():
+    market = load("labeled_marketplace_report.json")
+    supplier = load("labeled_supplier_report.json")
+    consumer = load("labeled_attention_report.json")
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    row = report["ranking"]["candidates"][0]
+    marketplace = row["pillars"]["marketplace"]
+    supplier_pillar = row["pillars"]["supplier"]
+    consumer_pillar = row["pillars"]["consumer"]
+    assert marketplace["source_type"] == "amazon_product_snapshot"
+    assert marketplace["source_url"] == "https://example.test/listing/labeled-widget"
+    assert marketplace["observed_at"] == "deterministic"
+    assert marketplace["field_provenance"] == {"price": "observed", "review_count": "derived"}
+    assert supplier_pillar["source_type"] == "cj_validation_pack_report"
+    assert supplier_pillar["source_url"] == "https://example.test/supplier/CJ-LABELED-001"
+    assert supplier_pillar["observed_at"] == "deterministic"
+    assert supplier_pillar["field_provenance"] == {"unit_cost": "fixture", "shipping_cost": "observed"}
+    assert supplier_pillar["supplier_product_id"] == "CJ-LABELED-001"
+    assert supplier_pillar["sku"] == "SKU-LABELED-1"
+    assert supplier_pillar["supplier_sku"] == "SKU-LABELED-1"
+    assert consumer_pillar["source_type"] == "tiktok_creative_center_snapshot"
+    assert consumer_pillar["source_url"] == "https://example.test/attention/labeled-widget"
+    assert consumer_pillar["observed_at"] == "deterministic"
+    assert consumer_pillar["field_provenance"] == {"hook": "manual_import"}
+    assert "source_family" not in marketplace
+    assert "source_family" not in supplier_pillar
+    assert "source_family" not in consumer_pillar
+    assert "fingerprint" not in row
+    assert row["references"] == [
+        "https://example.test/listing/labeled-widget",
+        "https://example.test/supplier/CJ-LABELED-001",
+        "CJ-LABELED-001",
+        "https://example.test/attention/labeled-widget",
+    ]
+    markdown = build_commerce_operations_cycle(market, supplier, consumer).to_markdown()
+    assert "amazon_product_snapshot" in markdown
+    assert "CJ-LABELED-001" in markdown
 
 
 def test_duplicate_ids_collapse_last_wins_without_double_count():

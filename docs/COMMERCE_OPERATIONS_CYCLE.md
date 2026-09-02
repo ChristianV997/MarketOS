@@ -12,7 +12,10 @@ and does not recopy weights or grades. Ranking is the existing synthesis
 candidate list (`last-wins` identity collapse, sort `(-combined, id)`). The
 cycle does not re-rank and does not call `opportunity_scoring`. Ranking
 `provenance` is the raw pillar `evidence_mode` string passed through
-unchanged — not an `observed`/`derived` translation.
+unchanged — not an `observed`/`derived` translation. Ranking labels
+(`source_type`, `source_url`, `observed_at`, `field_provenance`,
+`supplier_product_id`, `sku`) are pillar pass-through; there is no alias
+collapse and no fingerprint.
 
 Governor `unit_economics_score` is taken from synthesis
 `unit_economics_summary.gross_margin_percent` when present. Missing economics

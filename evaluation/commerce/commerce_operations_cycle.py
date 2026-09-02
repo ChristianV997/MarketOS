@@ -329,21 +329,101 @@ def _unit_economics_score(synthesis: Mapping[str, Any]) -> tuple[float, str, lis
         return 0.0, "unavailable", ["unit_economics_unavailable"]
 
 
-def _raw_pillar_mode(report: Mapping[str, Any] | None, candidate_id: str) -> str:
+PILLAR_PASS_THROUGH_KEYS = (
+    "source_type",
+    "source_url",
+    "observed_at",
+    "field_provenance",
+)
+SUPPLIER_PASS_THROUGH_KEYS = (
+    "supplier_product_id",
+    "sku",
+    "supplier_sku",
+)
+
+
+def _last_wins_candidate(report: Mapping[str, Any] | None, candidate_id: str) -> Mapping[str, Any] | None:
     if report is None:
-        return "unavailable"
-    mode = _text(report.get("evidence_mode") or "", 40)
-    last = mode
+        return None
+    last = None
     for item in report.get("candidates") or []:
         if not isinstance(item, Mapping):
             continue
         if str(item.get("candidate_id") or "") != candidate_id:
             continue
-        last = _text(item.get("evidence_mode") or mode or "", 40) or last
-        for packet in list(item.get("evidence") or []) + list(item.get("offers") or []):
-            if isinstance(packet, Mapping) and packet.get("evidence_mode"):
-                last = _text(packet.get("evidence_mode"), 40)
+        last = item
+    return last
+
+
+def _last_wins_packet(candidate: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    if candidate is None:
+        return None
+    last = None
+    for packet in list(candidate.get("evidence") or []) + list(candidate.get("offers") or []):
+        if isinstance(packet, Mapping):
+            last = packet
+    return last
+
+
+def _copy_pass_through(dest: dict[str, Any], source: Mapping[str, Any], keys: tuple[str, ...]) -> None:
+    for key in keys:
+        if key not in source:
+            continue
+        value = source[key]
+        if key == "field_provenance":
+            if isinstance(value, Mapping):
+                dest[key] = dict(value)
+            continue
+        dest[key] = value
+
+
+def _pillar_pass_through(
+    report: Mapping[str, Any] | None,
+    candidate_id: str,
+    *,
+    supplier: bool = False,
+) -> dict[str, Any]:
+    """Copy existing pillar labels only. No remapping, freshness, source_family, or fingerprint."""
+    labels: dict[str, Any] = {}
+    keys = PILLAR_PASS_THROUGH_KEYS + (SUPPLIER_PASS_THROUGH_KEYS if supplier else ())
+    if report is None:
+        return labels
+    _copy_pass_through(labels, report, keys)
+    candidate = _last_wins_candidate(report, candidate_id)
+    if candidate is not None:
+        _copy_pass_through(labels, candidate, keys)
+        packet = _last_wins_packet(candidate)
+        if packet is not None:
+            _copy_pass_through(labels, packet, keys)
+    if "observed_at" not in labels:
+        labels["observed_at"] = "deterministic"
+    return labels
+
+
+def _raw_pillar_mode(report: Mapping[str, Any] | None, candidate_id: str) -> str:
+    if report is None:
+        return "unavailable"
+    mode = _text(report.get("evidence_mode") or "", 40)
+    last = mode
+    candidate = _last_wins_candidate(report, candidate_id)
+    if candidate is not None:
+        last = _text(candidate.get("evidence_mode") or mode or "", 40) or last
+        packet = _last_wins_packet(candidate)
+        if packet is not None and packet.get("evidence_mode"):
+            last = _text(packet.get("evidence_mode"), 40)
     return last or "unavailable"
+
+
+def _citation_references(*pillars: Mapping[str, Any]) -> list[str]:
+    refs: list[str] = []
+    for pillar in pillars:
+        url = pillar.get("source_url")
+        if url not in (None, ""):
+            refs.append(str(url))
+        product_id = pillar.get("supplier_product_id")
+        if product_id not in (None, ""):
+            refs.append(str(product_id))
+    return list(dict.fromkeys(refs))
 
 
 def _ranking_section(
@@ -396,6 +476,7 @@ def _ranking_section(
                 "mode": raw_mode,
                 "provenance": raw_mode,
                 "score": matrix_item.get("score"),
+                **_pillar_pass_through(report, candidate_id, supplier=name == "supplier"),
             }
         economics = _compact_unit_economics(item.get("unit_economics_summary"))
         if economics is None:
@@ -421,6 +502,7 @@ def _ranking_section(
                 "confidence_grade": grade,
                 "unit_economics_summary": economics,
                 "pillars": pillars,
+                "references": _citation_references(*pillars.values()),
                 "blockers": candidate_blockers,
                 "reject_reason": recommendation if recommendation.startswith("reject") else None,
             }
@@ -1114,6 +1196,34 @@ class CommerceOperationsCycleReport:
             f"Market is not supplier proof: `{data['ranking'].get('marketplace_is_not_supplier_proof')}`",
             f"Attention is not ad performance: `{data['ranking'].get('consumer_attention_is_not_ad_performance')}`",
             f"Supplier feasibility is not fulfillment proof: `{data['ranking'].get('supplier_feasibility_is_not_fulfillment_proof')}`",
+            "",
+        ]
+        for item in data["ranking"].get("candidates") or []:
+            pillars = item.get("pillars") if isinstance(item.get("pillars"), Mapping) else {}
+            label_bits: list[str] = []
+            for name in ("marketplace", "supplier", "consumer"):
+                pillar = pillars.get(name) if isinstance(pillars.get(name), Mapping) else {}
+                present = [
+                    f"{key}={pillar[key]}"
+                    for key in (
+                        "source_type",
+                        "source_url",
+                        "observed_at",
+                        "field_provenance",
+                        "supplier_product_id",
+                        "sku",
+                        "supplier_sku",
+                    )
+                    if key in pillar
+                ]
+                if present:
+                    label_bits.append(f"{name} ({'; '.join(present)})")
+            refs = item.get("references") or []
+            extra = f" references: {', '.join(str(ref) for ref in refs)}" if refs else ""
+            lines.append(
+                f"- `{item.get('candidate_id')}` {item.get('title')}: {'; '.join(label_bits) or 'no pillar labels'}{extra}"
+            )
+        lines += [
             "",
             "## Product Validation",
             "",

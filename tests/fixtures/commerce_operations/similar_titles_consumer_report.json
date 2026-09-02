@@ -1,0 +1,37 @@
+{
+  "report_version": "consumer-attention-v1",
+  "evidence_mode": "fixture_demo",
+  "candidates": [
+    {
+      "candidate_id": "desk-lamp-alpha",
+      "query": "Desk lamp",
+      "evidence": [{"platform": "tiktok", "hook": "desk lamp hook", "evidence_mode": "fixture"}],
+      "score": {
+        "overall_consumer_attention": 0.8,
+        "source_diversity": 0.7,
+        "objection_density": 0.1,
+        "recommended_ad_angles": ["demo"],
+        "creative_hooks": [{"hook": "desk lamp hook"}],
+        "voice_of_customer": {"pain_points": ["glare"], "desired_outcomes": ["better light"], "objections": []},
+        "recommendation": "validate_supplier_first"
+      }
+    },
+    {
+      "candidate_id": "desk-lamp-beta",
+      "query": "Desk Lamp",
+      "evidence": [{"platform": "tiktok", "hook": "desk lamp hook", "evidence_mode": "fixture"}],
+      "score": {
+        "overall_consumer_attention": 0.72,
+        "source_diversity": 0.6,
+        "objection_density": 0.15,
+        "recommended_ad_angles": ["demo"],
+        "creative_hooks": [{"hook": "desk lamp hook"}],
+        "voice_of_customer": {"pain_points": ["glare"], "desired_outcomes": ["better light"], "objections": []},
+        "recommendation": "validate_supplier_first"
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}
