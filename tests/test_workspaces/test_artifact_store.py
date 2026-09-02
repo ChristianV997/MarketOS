@@ -1,6 +1,7 @@
 """Security regression tests for workspace-bound artifact persistence."""
 from __future__ import annotations
 
+import ast
 import logging
 import os
 from pathlib import Path
@@ -11,6 +12,19 @@ import pytest
 from backend.workspaces.artifact_store import ArtifactStore
 from backend.workspaces.client_workspace import ClientWorkspace
 from backend.workspaces.registry import WorkspaceRegistry
+
+_EXPECTED_PRODUCTION_CALLERS = frozenset(
+    {
+        "services/creative_growth/plan.py",
+        "services/customer_intelligence/sprint.py",
+        "services/digital_products/plan.py",
+        "services/ecommerce_operator/contribution_profit.py",
+        "services/product_research/audit.py",
+        "services/profit_stack_advisor/advisor.py",
+        "services/sales_automation/simulate.py",
+        "services/unit_economics/analyzer.py",
+    }
+)
 
 
 @pytest.fixture(autouse=True)
@@ -89,6 +103,74 @@ def test_rejects_raw_workspace_principals(workspaces, raw_principal):
     registry, _, _ = workspaces
     with pytest.raises(ValueError, match="invalid workspace identity"):
         ArtifactStore(raw_principal, registry)
+
+
+def test_production_artifact_callers_use_registered_workspace_contract():
+    root = Path(__file__).resolve().parents[2]
+    constructor_calls: dict[str, list[tuple[ast.Call, ast.AST, ast.AST]]] = {}
+
+    def is_registry_access(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"get", "register"}
+            and isinstance(node.func.value, ast.Call)
+            and isinstance(node.func.value.func, ast.Name)
+            and node.func.value.func.id == "get_workspace_registry"
+        )
+
+    def is_approved_binding_call(node: ast.AST) -> bool:
+        if is_registry_access(node):
+            return True
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "run_unit_economics"
+            and any(
+                keyword.arg == "workspace"
+                and isinstance(keyword.value, ast.Name)
+                and keyword.value.id == "workspace"
+                for keyword in node.keywords
+            )
+        )
+
+    for production_root in (root / "api", root / "backend", root / "services"):
+        for path in production_root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            parents = {
+                child: parent
+                for parent in ast.walk(tree)
+                for child in ast.iter_child_nodes(parent)
+            }
+            for node in ast.walk(tree):
+                is_constructor = (
+                    isinstance(node, ast.Call)
+                    and (
+                        (isinstance(node.func, ast.Name) and node.func.id == "ArtifactStore")
+                        or (isinstance(node.func, ast.Attribute) and node.func.attr == "ArtifactStore")
+                    )
+                )
+                if not is_constructor:
+                    continue
+                scope = parents.get(node)
+                while scope is not None and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    scope = parents.get(scope)
+                assert scope is not None, f"ArtifactStore construction outside a function: {path}"
+                constructor_calls.setdefault(path.relative_to(root).as_posix(), []).append(
+                    (node, scope, tree)
+                )
+
+    assert set(constructor_calls) == _EXPECTED_PRODUCTION_CALLERS
+    for path, calls in constructor_calls.items():
+        for node, scope, _ in calls:
+            assert node.args and isinstance(node.args[0], ast.Name)
+            assert node.args[0].id == "workspace", f"unbound ArtifactStore construction in {path}"
+            assert any(
+                is_approved_binding_call(candidate) and candidate.lineno < node.lineno
+                for candidate in ast.walk(scope)
+            ), f"ArtifactStore construction is not preceded by registry access in {path}"
 
 
 def test_rejects_artifact_workspace_mismatch(workspaces):
