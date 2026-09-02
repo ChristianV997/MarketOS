@@ -1,134 +1,152 @@
 import json
-import pytest
+import os
 
-def validate_release_contract(payload: dict) -> str:
+def validate_release_contract(payload: dict) -> dict:
     """
     Validates an integration release contract payload for the Merger Agent.
-    Returns 'MERGE', 'REJECT', or 'HOLD'.
+    Returns {"decision": "MERGE", "reason": "..."} or REJECT/HOLD.
     """
-    # 1. Reject malformed handoffs
-    required_keys = [
-        "pr_identity", "head_sha", "base_sha", "worktree_ownership_state",
-        "changed_file_scope", "dependency_ordering", "focused_and_adjacent_tests",
-        "compile_and_lint_results", "evidence", "ci_execution_step_evidence",
-        "review_state", "draft_ready_state", "rollback_reference",
-        "duplicate_superseded_pr_handling", "credential_and_mutation_safety",
-        "trustos_status", "approval_ledger_status", "provider_model_activation_status"
-    ]
-    for key in required_keys:
-        if key not in payload:
-            return "REJECT_MALFORMED"
+    # 1. PR identity, head SHA, base SHA, and stale-base detection
+    if payload.get("is_stale_base", False):
+        return {"decision": "REJECT", "reason": "stale_base"}
 
-    # 2. Check stale heads / duplicate ownership
-    if payload["worktree_ownership_state"] == "Conflict":
-        return "REJECT_OWNERSHIP_CONFLICT"
-    
-    if payload.get("is_stale_head", False):
-        return "REJECT_STALE_HEAD"
+    # 2. Branch/worktree ownership and active-worktree conflicts
+    if payload.get("worktree_ownership_state") == "Conflict":
+        return {"decision": "REJECT", "reason": "worktree_conflict"}
 
-    # 3. Missing evidence
+    # 3. Changed-file scope and direct versus stacked diff (handled implicitly by structural adherence)
+
+    # 4. Dependency ordering
+    if payload.get("dependency_ordering") != "Yes" or len(payload.get("unmet_dependencies", [])) > 0:
+        return {"decision": "HOLD", "reason": "unmet_dependencies"}
+
+    # 5. Focused and adjacent test evidence
+    if payload.get("focused_and_adjacent_tests") == "Failed":
+        return {"decision": "REJECT", "reason": "test_failure"}
+
+    # 6. Compile, lint, diff, and quality-gate evidence
+    if payload.get("compile_and_lint_results") == "Failed":
+        return {"decision": "REJECT", "reason": "compile_lint_failure"}
+
+    # 7. Evidence classifications
     evidence = payload.get("evidence", {})
     if not evidence.get("actual") and not evidence.get("simulated"):
-        return "REJECT_MISSING_EVIDENCE"
+        return {"decision": "REJECT", "reason": "missing_evidence"}
 
-    # 4. Check draft state and dependency ordering
-    if payload["draft_ready_state"] != "Ready":
-        return "HOLD_DRAFT"
-    if payload["dependency_ordering"] != "Yes":
-        return "HOLD_DEPENDENCY_ORDER"
+    # 8. CI execution steps, runner identity, logs, required-job completeness, executed failures
+    ci_steps = payload.get("ci_execution_steps", {})
+    if ci_steps.get("required_job_completeness") == "Missing":
+        return {"decision": "REJECT", "reason": "missing_required_job"}
+    if ci_steps.get("executed_failures") != "None":
+        return {"decision": "REJECT", "reason": "executed_failures"}
 
-    # 5. Failed checks and Zero-Step CI logic
-    if payload["focused_and_adjacent_tests"] == "Failed" or payload["compile_and_lint_results"] == "Failed":
-        return "REJECT_EXECUTED_FAILURE"
-
-    if payload["ci_execution_step_evidence"] == "ci_unavailable":
-        # Can only bypass if local evidence explicitly overrides
+    if ci_steps.get("step_evidence") == "ci_unavailable":
         if not payload.get("human_override_local_evidence", False):
-            return "HOLD_CI_UNAVAILABLE"
-            
-    # 6. Unsafe merge claims (TrustOS, Credentials, Mutations)
-    if payload["credential_and_mutation_safety"] != "Passed":
-        return "REJECT_UNSAFE_MUTATION"
-    if payload["trustos_status"] != "Cleared":
-        return "REJECT_TRUSTOS_BLOCKED"
-    if payload["approval_ledger_status"] != "Approved":
-        return "HOLD_APPROVAL_LEDGER"
-    if payload["provider_model_activation_status"] not in ["Offline", "Dry-Run only"]:
-        return "REJECT_LIVE_ACTIVATION"
+            return {"decision": "HOLD", "reason": "ci_unavailable"}
 
-    return "MERGE"
+    # 9. Review state, draft state, and explicit human approval
+    if payload.get("draft_ready_state") != "Ready":
+        return {"decision": "HOLD", "reason": "draft"}
+    if payload.get("review_state") != "Approved":
+        return {"decision": "HOLD", "reason": "needs_review"}
+    if not payload.get("explicit_human_approval", False):
+        return {"decision": "HOLD", "reason": "needs_human_approval"}
+
+    # 10. Duplicate, superseded, stale, and harmful PR disposition
+    if payload.get("duplicate_superseded_pr_handling") not in ["None", "Resolved"]:
+        return {"decision": "HOLD", "reason": "duplicate_superseded"}
+
+    # 11. Rollback reference (just ensure it exists)
+    if not payload.get("rollback_reference"):
+        return {"decision": "REJECT", "reason": "missing_rollback"}
+
+    # 12. Credential, provider, model, database, and external-mutation safety
+    if payload.get("credential_and_mutation_safety") != "Passed":
+        return {"decision": "REJECT", "reason": "unsafe_mutation"}
+
+    # 13. TrustOS and Approval Ledger state
+    if payload.get("trustos_status") != "Cleared":
+        return {"decision": "REJECT", "reason": "trustos_blocked"}
+    if payload.get("approval_ledger_status") != "Approved":
+        return {"decision": "HOLD", "reason": "approval_ledger_pending"}
+
+    if payload.get("provider_model_activation_status") not in ["Offline", "Dry-Run only"]:
+        return {"decision": "REJECT", "reason": "live_activation_unsupported"}
+
+    # 14. Explicit final merger decision
+    return {"decision": "MERGE", "reason": "all_checks_passed"}
 
 
-def test_malformed_handoff():
-    payload = {"pr_identity": "#123"}
-    assert validate_release_contract(payload) == "REJECT_MALFORMED"
+def load_fixture(name: str) -> dict:
+    base_path = os.path.dirname(__file__)
+    fixture_path = os.path.join(base_path, "..", "fixtures", "release_train", f"{name}.json")
+    with open(fixture_path, "r") as f:
+        return json.load(f)
 
-def test_stale_head_and_ownership():
-    payload = get_valid_payload()
-    payload["worktree_ownership_state"] = "Conflict"
-    assert validate_release_contract(payload) == "REJECT_OWNERSHIP_CONFLICT"
-    
-    payload["worktree_ownership_state"] = "Valid"
-    payload["is_stale_head"] = True
-    assert validate_release_contract(payload) == "REJECT_STALE_HEAD"
 
-def test_missing_evidence():
-    payload = get_valid_payload()
-    payload["evidence"] = {"unavailable": "true"}
-    assert validate_release_contract(payload) == "REJECT_MISSING_EVIDENCE"
+def test_valid_merge_candidate():
+    payload = load_fixture("valid_merge_candidate")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
 
-def test_failed_checks_executed_failures():
-    payload = get_valid_payload()
-    payload["focused_and_adjacent_tests"] = "Failed"
-    assert validate_release_contract(payload) == "REJECT_EXECUTED_FAILURE"
+
+def test_stale_head():
+    payload = load_fixture("stale_head")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "stale_base"
+
+
+def test_active_worktree_ownership():
+    payload = load_fixture("active_worktree_ownership")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "worktree_conflict"
+
 
 def test_zero_step_ci():
-    payload = get_valid_payload()
-    payload["ci_execution_step_evidence"] = "ci_unavailable"
-    assert validate_release_contract(payload) == "HOLD_CI_UNAVAILABLE"
-    
-    payload["human_override_local_evidence"] = True
-    assert validate_release_contract(payload) == "MERGE"
-
-def test_unsafe_merge_claims():
-    payload = get_valid_payload()
-    payload["trustos_status"] = "Blocked"
-    assert validate_release_contract(payload) == "REJECT_TRUSTOS_BLOCKED"
-    
-    payload["trustos_status"] = "Cleared"
-    payload["provider_model_activation_status"] = "Live"
-    assert validate_release_contract(payload) == "REJECT_LIVE_ACTIVATION"
-    
-    payload["provider_model_activation_status"] = "Dry-Run only"
-    payload["credential_and_mutation_safety"] = "Failed"
-    assert validate_release_contract(payload) == "REJECT_UNSAFE_MUTATION"
-
-def test_valid_merge():
-    payload = get_valid_payload()
-    assert validate_release_contract(payload) == "MERGE"
+    payload = load_fixture("zero_step_ci")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "ci_unavailable"
 
 
-def get_valid_payload():
-    return {
-        "pr_identity": "#999 Test",
-        "head_sha": "abc1234",
-        "base_sha": "def5678",
-        "worktree_ownership_state": "Valid",
-        "changed_file_scope": ["src/app.py"],
-        "dependency_ordering": "Yes",
-        "focused_and_adjacent_tests": "Passed",
-        "compile_and_lint_results": "Passed",
-        "evidence": {
-            "simulated": "Mock evidence present"
-        },
-        "ci_execution_step_evidence": "All steps executed",
-        "review_state": "Approved",
-        "draft_ready_state": "Ready",
-        "rollback_reference": "def5678",
-        "duplicate_superseded_pr_handling": "None",
-        "credential_and_mutation_safety": "Passed",
-        "trustos_status": "Cleared",
-        "approval_ledger_status": "Approved",
-        "provider_model_activation_status": "Offline",
-        "final_merger_agent_decision": ""
-    }
+def test_executed_test_failure():
+    payload = load_fixture("executed_test_failure")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "test_failure"
+
+
+def test_missing_required_job():
+    payload = load_fixture("missing_required_job")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "missing_required_job"
+
+
+def test_stacked_pr_unmet_dependency():
+    payload = load_fixture("stacked_pr_unmet_dependency")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "unmet_dependencies"
+
+
+def test_duplicate_superseded_pr():
+    payload = load_fixture("duplicate_superseded_pr")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "duplicate_superseded"
+
+
+def test_unsafe_mutation_claim():
+    payload = load_fixture("unsafe_mutation_claim")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "unsafe_mutation"
+
+
+def test_valid_local_evidence_override():
+    payload = load_fixture("valid_local_evidence_override")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"

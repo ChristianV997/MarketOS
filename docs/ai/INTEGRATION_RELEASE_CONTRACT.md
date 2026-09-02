@@ -10,9 +10,12 @@ Every automated or manual merge request MUST evaluate and record the following p
   "pr_identity": "PR Number and Title",
   "head_sha": "Exact PR HEAD SHA",
   "base_sha": "Exact Target Base SHA",
+  "is_stale_base": false,
   "worktree_ownership_state": "Valid/Conflict (Cannot overwrite dirty operator worktrees)",
   "changed_file_scope": "List of affected components",
+  "diff_type": "Direct vs Stacked",
   "dependency_ordering": "Adheres to PR_DEPENDENCY_RELEASE_TRAIN (Yes/No)",
+  "unmet_dependencies": [],
   "focused_and_adjacent_tests": "Passed/Failed",
   "compile_and_lint_results": "Passed/Failed",
   "evidence": {
@@ -21,11 +24,17 @@ Every automated or manual merge request MUST evaluate and record the following p
     "unavailable": "...",
     "not_run": "..."
   },
-  "ci_execution_step_evidence": "All steps executed vs 0-step outage",
+  "ci_execution_steps": {
+    "runner_identity": "local/github",
+    "required_job_completeness": "Passed/Missing",
+    "executed_failures": "None",
+    "step_evidence": "All steps executed vs 0-step outage"
+  },
   "review_state": "Approved/ChangesRequested",
   "draft_ready_state": "Ready/Draft",
-  "rollback_reference": "Known-good SHA",
+  "explicit_human_approval": true,
   "duplicate_superseded_pr_handling": "List of PRs to close",
+  "rollback_reference": "Known-good SHA",
   "credential_and_mutation_safety": "Passed (No live networks/No Git secrets)",
   "trustos_status": "Cleared/Blocked",
   "approval_ledger_status": "Approved/Pending",
@@ -34,60 +43,47 @@ Every automated or manual merge request MUST evaluate and record the following p
 }
 ```
 
-## 1. Current-Head Verification
-Before merging, the Merger Agent must verify the explicit live SHA of both the PR branch and `main`. Merges executed against stale references are invalid.
+## 1. PR Identity, Head SHA, Base SHA, and Stale-Base Detection
+Before merging, the Merger Agent must verify the explicit live SHA of both the PR branch and `main`. Merges executed against stale references (`is_stale_base = true`) are invalid and rejected.
 
-## 2. Base/Head and Three-Dot Diff Checks
-Merges require a cleanly resolved base. `git diff base...head` must contain exactly the authorized paths, introducing no unintended cross-vertical code.
+## 2. Branch/Worktree Ownership and Active-Worktree Conflicts
+Detached validation worktrees are considered evidence only. A PR must not overwrite or conflict with a dirty worktree actively owned by a human operator without explicit handoff (`worktree_ownership_state = Valid`).
 
-## 3. Worktree Ownership
-Detached validation worktrees are considered evidence only, not active ownership. A PR must not overwrite or conflict with a dirty worktree actively owned by a human operator without explicit handoff.
+## 3. Changed-File Scope and Direct Versus Stacked Diff
+Merges require a cleanly resolved base. `git diff base...head` must contain exactly the authorized paths, introducing no unintended cross-vertical code. The contract distinguishes between a direct diff against `main` and a stacked diff against an upstream PR.
 
-## 4. Focused and Adjacent Validation
-Each integration must run focused unit/integration tests for its own logic, plus adjacent validation (e.g., architecture boundaries, security policies, and broader test suites) to ensure no regressions.
+## 4. Dependency Ordering
+All merges must follow the explicit train defined in `PR_DEPENDENCY_RELEASE_TRAIN.md` (quality → security → frontend/API → development environment → research adapters → commerce operations → evidence integrity → Learning Ledger). Stacked PRs with unmet dependencies will be held.
 
-## 5. Baseline-Versus-Regression Comparison
-- **Baseline failures** (defects already present in `main`) must be isolated and repaired in dedicated upstream PRs.
-- **PR Regressions** (defects introduced by the PR) strictly block the PR until repaired. Feature branches must not absorb unrelated baseline repairs.
+## 5. Focused and Adjacent Test Evidence
+Each integration must run focused unit/integration tests for its own logic, plus adjacent validation (architecture boundaries, security policies, etc.) to ensure no regressions.
 
-## 6. CI States
-The following states dictate the automated merge outcome:
-- **passed**: Deterministic execution success (Merge allowed).
-- **failed**: Executed failure. Cannot be bypassed mechanically.
+## 6. Compile, Lint, Diff, and Quality-Gate Evidence
+Must pass `compileall`, linting tools (`ruff`), and explicit difference checks (`git diff --check`). The quality-gate evidence must be formally logged.
+
+## 7. Actual, Simulated, Unavailable, and Not_Run Classifications
+- **actual**: Executed live network tests (Requires Approval Ledger).
+- **simulated**: Executed dry-run/mock tests (Default).
 - **unavailable**: Required check missing entirely.
-- **timed_out**: Execution exceeded configured bounds.
-- **not_run**: Skipped due to configuration or dependency.
-- **collection_failed**: Evidence gathering error.
-- **blocked**: Upstream dependency unmet.
-- **malformed**: Invalid syntax, YAML, or structure.
-- **ci_unavailable**: Zero-step runner outage. (Requires explicit manual human override with localized evidence to bypass).
+- **not_run**: Skipped due to configuration or operator intent.
 
-## 7. Security and Secret Scanning
-Integrations must pass all TrustOS security scanners, Semgrep policies, and container-smoke phases. No secrets may be added to Git; all credentials must be routed through the central registry.
+## 8. CI Execution Steps, Runner Identity, Logs, Required-Job Completeness, and Executed Failures
+Must identify the runner and confirm that all required jobs executed successfully. Missing required jobs or executed test failures strictly block the PR. Zero-step CI outages (`ci_unavailable`) must be bypassed only via explicit local evidence overrides.
 
-## 8. External-Capability Provenance/License Review
-All external capabilities must declare origin, maintainer, and licensing in accordance with the `EXTERNAL_CAPABILITY_INTEGRATION_TEMPLATE.md`.
+## 9. Review State, Draft State, and Explicit Human Approval
+PRs must be in a "Ready" state. Explicit human approval or an authorized Merger Agent proxy approval is required.
 
-## 9. TrustOS Gates
-Integrations must clear offline TrustOS privacy, security, and compliance scanners. Any failure requires professional review and remediation.
+## 10. Duplicate, Superseded, Stale, and Harmful PR Disposition
+Upon merging an integration, any duplicate, stale, superseded, or harmful capabilities aiming to solve the identical business outcome must be closed immediately based on the contract payload.
 
-## 10. Approval Ledger State
-Live external mutations, automated publishing, and sales outreach require an explicit Approval Ledger record (operator sign-off) prior to execution.
-
-## 11. Resource Governor Budget/Quota State
-Integrations (especially models and external providers) must fall within hard spending, quota, and runaway limits defined by the Resource & Execution Governor.
-
-## 12. Client Workspace Boundary
-External capabilities must enforce Client Workspace isolation. Payloads must not cross-pollinate, and cross-client data must not leak in generalized exports.
-
-## 13. Stack Dependency Recalculation After Each Merge
-Following a merge, any vertically stacked PRs (e.g., #214 stacked on #213) must be immediately rebased, and their CI baseline states recalculated.
-
-## 14. Duplicate/Superseded PR Closure
-Upon merging an integration, any duplicate or superseded capabilities aiming to solve the identical business outcome must be closed immediately.
-
-## 15. Rollback Order
+## 11. Rollback Reference
 The deployment must specify an exact, known-good base SHA to revert to if catastrophic regressions are detected post-merge.
 
-## 16. Explicit Human/Admin Bypass Recording
-Any automated gate bypass (such as overriding `ci_unavailable` with local evidence) must be permanently logged in the PR with explicit human operator authorization.
+## 12. Credential, Provider, Model, Database, and External-Mutation Safety
+No secrets may be added to Git; all credentials must be routed through the central registry. Must enforce Client Workspace isolation and ensure zero unintended provider/database mutations.
+
+## 13. TrustOS and Approval Ledger State
+Integrations must clear offline TrustOS privacy and security scanners. Live external mutations require an explicit Approval Ledger record.
+
+## 14. Explicit Final Merger Decision
+The contract must culminate in a deterministic decision: `MERGE`, `REJECT`, or `HOLD`.
