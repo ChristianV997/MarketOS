@@ -743,3 +743,82 @@ def test_cli_output_rejects_path_traversal():
     result = run_cli("--output", "../../tmp/learning-ledger-escape", "--json")
     assert result.returncode != 0
     assert "path traversal is not accepted" in (result.stdout + result.stderr)
+
+
+# --- named do-not-repeat / iteration-recommendation categories (recovery pass 2) --
+
+
+def test_invalid_test_design_has_specific_rule_and_recommendation_text():
+    """Regression: `invalid_test_design` (incomplete ad experiment design)
+    previously fell through to the generic 'the same failure reason
+    recurs' fallback in both the do-not-repeat rule and the iteration
+    recommendation."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["invalid_test_design"], "action_taken": "launch_ad_experiment"}]})
+    assert "hypothesis" in report.do_not_repeat_rules[0].condition
+    assert "hypothesis" in report.iteration_recommendations[0].recommendation
+
+
+def test_poor_offer_has_specific_iteration_recommendation():
+    """Regression: `poor_offer` had no entry in the iteration-recommendation
+    mapping at all, despite being a valid FAILURE_REASONS value -- it fell
+    through to the generic fallback text."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "product_validation", "outcome": "loss", "failure_reasons": ["poor_offer"], "action_taken": "generate_site_draft"}]})
+    assert report.iteration_recommendations[0].action_type == "iterate_offer_draft"
+    assert "offer" in report.iteration_recommendations[0].expected_learning.lower()
+
+
+def test_poor_margin_has_specific_iteration_recommendation():
+    """Regression: `poor_margin` had a do-not-repeat rule but no
+    iteration-recommendation entry -- economics failures fell through to
+    the generic fallback recommendation text."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "product_validation", "outcome": "loss", "failure_reasons": ["poor_margin"], "action_taken": "promote_product_candidate"}]})
+    assert report.iteration_recommendations[0].action_type == "run_unit_economics_review"
+
+
+def test_trust_blocker_has_specific_iteration_recommendation():
+    """Regression: `trust_blocker` had a do-not-repeat rule but no
+    iteration-recommendation entry."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "client_export_review", "outcome": "blocked", "failure_reasons": ["trust_blocker"], "action_taken": "generate_client_export"}]})
+    assert report.iteration_recommendations[0].action_type == "run_trustos_control_plane"
+    assert "trustos" in report.iteration_recommendations[0].recommendation.lower()
+
+
+def test_absorbable_new_website_do_not_repeat_rule():
+    """Regression: there was no do-not-repeat rule at all for 'an existing
+    brand/category can absorb this opportunity without a new site' --
+    action_taken='create_new_website' fell through to the generic
+    fallback regardless of failure reason."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "portfolio_decision", "outcome": "loss", "failure_reasons": ["weak_demand"], "action_taken": "create_new_website"}]})
+    rule = report.do_not_repeat_rules[0]
+    assert "absorb" in rule.condition
+    assert "create_new_website" in rule.applies_to_action_types
+
+
+def test_scale_without_evidence_is_hard_blocked():
+    """Regression: there was no do-not-repeat rule for scaling without
+    sufficient evidence -- action_taken='scale_ad_budget' with
+    insufficient_sample fell through to the generic fallback."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "scale_decision", "outcome": "blocked", "failure_reasons": ["insufficient_sample"], "action_taken": "scale_ad_budget"}]})
+    rule = report.do_not_repeat_rules[0]
+    assert "sample size" in rule.condition or "evidence" in rule.condition
+    assert rule.recommended_block_behavior == "hard_block"
+
+
+def test_provider_retry_cap_violation_has_specific_condition():
+    """Regression: a provider-specific retry-cap violation
+    (runaway_guard_triggered + action_taken=run_provider_data_pull) was
+    indistinguishable from the generic 'workflow exceeds retry, agent, or
+    step limits' rule that applies to any runaway workflow."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "provider_run", "outcome": "blocked", "failure_reasons": ["runaway_guard_triggered"], "action_taken": "run_provider_data_pull"}]})
+    rule = report.do_not_repeat_rules[0]
+    assert "provider retry cap" in rule.condition
+    assert rule.recommended_block_behavior == "hard_block"
+
+
+def test_generic_runaway_guard_rule_is_unaffected_by_provider_special_case():
+    """The provider-specific retry-cap branch must not swallow the
+    existing, still-valid generic runaway_guard_triggered rule for
+    non-provider actions."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "runaway_guard_event", "outcome": "blocked", "failure_reasons": ["runaway_guard_triggered"], "action_taken": "spawn_agent_workflow"}]})
+    rule = report.do_not_repeat_rules[0]
+    assert rule.condition == "workflow exceeds retry, agent, or step limits"
