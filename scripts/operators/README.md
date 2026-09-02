@@ -9,7 +9,8 @@ PowerShell entry point: `scripts/operators/run_first_phase_intelligence.ps1`
 - No network, credentials, providers, models, or external mutation by default.
 - Writes only when `-OutputDirectory` points to a safe non-forbidden path.
 - Emits one deterministic JSON summary on stdout with per-stage evidence classes:
-  `actual`, `failed`, `not_run`, `blocked`, `unavailable`.
+  `simulated`, `failed`, `not_run`, `blocked`, `unavailable`.
+- Successful fixture or manual-import stages are always classified as `simulated`, never as live `actual` execution.
 - Governor and TrustOS stages delegate to their existing offline CLIs; this wrapper does not recreate those authorities.
 - Commerce stage uses `run_commerce_mvp_slice.py` on `main`. PR #225 `run_commerce_operations_cycle.py` remains a separate public contract and is `not_run` here.
 

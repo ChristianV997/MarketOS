@@ -126,10 +126,22 @@ function Test-SafeOutputDirectory {
     return $resolved
 }
 
+function Exit-UnavailablePython {
+    param([string] $Message)
+    $unavailableStage = [pscustomobject]@{
+        id             = "python_runtime"
+        exit_code      = 3
+        evidence_class = "unavailable"
+        authority      = "operator_wrapper"
+    }
+    Write-DeterministicSummary -Stages @($unavailableStage) -EvidenceMode "fixture_demo" -OverallExitCode 3 -OutputDir $null -PythonCommand "" -OverallEvidenceClass "unavailable"
+    Stop-Operator -Code 3 -Message $Message
+}
+
 function Resolve-RepoPython {
     if ($PythonPath) {
         if (-not (Test-Path -LiteralPath $PythonPath)) {
-            Stop-Operator -Code 3 -Message "python interpreter not found: $PythonPath"
+            Exit-UnavailablePython -Message "python interpreter not found: $PythonPath"
         }
         return @{ Command = $PythonPath; PrefixArgs = @() }
     }
@@ -141,7 +153,7 @@ function Resolve-RepoPython {
     if ($py) {
         return @{ Command = $py.Source; PrefixArgs = @("-3.12") }
     }
-    Stop-Operator -Code 3 -Message "no supported python interpreter found (python or py -3.12)"
+    Exit-UnavailablePython -Message "no supported python interpreter found (python or py -3.12)"
 }
 
 function Invoke-PythonStage {
@@ -169,12 +181,13 @@ function Invoke-PythonStage {
 function Get-StageClassification {
     param(
         [int] $ExitCode,
-        [string] $EvidenceClass = "actual"
+        [string] $EvidenceClass = "simulated"
     )
     if ($EvidenceClass -eq "not_run") { return "not_run" }
     if ($EvidenceClass -eq "blocked") { return "blocked" }
     if ($EvidenceClass -eq "unavailable") { return "unavailable" }
-    if ($ExitCode -eq 0) { return "actual" }
+    if ($EvidenceClass -eq "simulated") { return "simulated" }
+    if ($ExitCode -eq 0) { return "simulated" }
     return "failed"
 }
 
@@ -184,7 +197,7 @@ function Get-StageEvidenceClass {
         [string] $Preset = ""
     )
     if ($Preset) { return $Preset }
-    if ($ExitCode -eq 0) { return "actual" }
+    if ($ExitCode -eq 0) { return "simulated" }
     return "failed"
 }
 
@@ -208,7 +221,7 @@ function Write-DeterministicSummary {
     $pythonValue = if ($PythonCommand) { "`"$($PythonCommand.Replace('\','\\'))`"" } else { "null" }
     $overallEvidenceClass = if ($OverallEvidenceClass) { $OverallEvidenceClass } else { (Get-StageEvidenceClass -ExitCode $OverallExitCode) }
     $overallClassification = Get-StageClassification -ExitCode $OverallExitCode -EvidenceClass $overallEvidenceClass
-    $summary = "{`"authoritative`":false,`"evidence_authority`":`"offline_planning_only`",`"evidence_mode`":`"$EvidenceMode`",`"fixture_only`":true,`"lane_id`":`"WINDOWS-FIRST-PHASE-RUNNER-02`",`"live_validated`":false,`"max_candidates`":$MaxCandidates,`"max_sources_per_candidate`":$MaxSourcesPerCandidate,`"mutated`":false,`"network_calls`":false,`"output_directory`":$outputValue,`"overall_classification`":`"$overallClassification`",`"overall_evidence_class`":`"$overallEvidenceClass`",`"overall_exit_code`":$OverallExitCode,`"python_command`":$pythonValue,`"read_only`":true,`"stages`":[$($stageJson -join ',')]}"
+    $summary = "{`"authoritative`":false,`"evidence_authority`":`"offline_planning_only`",`"evidence_mode`":`"$EvidenceMode`",`"fixture_only`":true,`"lane_id`":`"WINDOWS-FIRST-PHASE-RUNNER-03`",`"live_validated`":false,`"max_candidates`":$MaxCandidates,`"max_sources_per_candidate`":$MaxSourcesPerCandidate,`"mutated`":false,`"network_calls`":false,`"output_directory`":$outputValue,`"overall_classification`":`"$overallClassification`",`"overall_evidence_class`":`"$overallEvidenceClass`",`"overall_exit_code`":$OverallExitCode,`"python_command`":$pythonValue,`"read_only`":true,`"stages`":[$($stageJson -join ',')]}"
     Write-Output $summary
 }
 
@@ -382,5 +395,5 @@ $commerceExit = Invoke-PythonStage -Python $python -ScriptRelativePath "scripts/
 Add-StageResult -Id "commerce_mvp" -ExitCode $commerceExit -Authority "delegated_commerce_mvp_cli"
 if ($overallExit -ne 0) { Complete-FailedRun -FailedStageId "commerce_mvp" -EvidenceMode $evidenceMode -OutputDir $safeOutput -PythonCommand $pythonCommand }
 
-Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode 0 -OutputDir $safeOutput -PythonCommand $pythonCommand -OverallEvidenceClass "actual"
+Write-DeterministicSummary -Stages $stages -EvidenceMode $evidenceMode -OverallExitCode 0 -OutputDir $safeOutput -PythonCommand $pythonCommand -OverallEvidenceClass "simulated"
 exit 0

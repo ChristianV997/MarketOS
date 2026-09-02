@@ -49,19 +49,21 @@ def test_default_offline_behavior_is_fixture_first():
     assert result.returncode == 0, result.stderr
     summary = _summary_from_output(result.stdout)
     assert summary["evidence_mode"] == "fixture_demo"
-    assert summary["overall_classification"] == "actual"
-    assert summary["overall_evidence_class"] == "actual"
+    assert summary["overall_classification"] == "simulated"
+    assert summary["overall_evidence_class"] == "simulated"
     assert summary["authoritative"] is False
     assert summary["fixture_only"] is True
     assert summary["live_validated"] is False
     assert summary["evidence_authority"] == "offline_planning_only"
-    assert summary["lane_id"] == "WINDOWS-FIRST-PHASE-RUNNER-02"
+    assert summary["lane_id"] == "WINDOWS-FIRST-PHASE-RUNNER-03"
     assert summary["read_only"] is True
     assert summary["network_calls"] is False
     assert summary["mutated"] is False
     assert summary["output_directory"] is None
     assert summary["python_command"]
-    assert [stage["classification"] for stage in summary["stages"]] == ["actual"] * 8
+    assert [stage["classification"] for stage in summary["stages"]] == ["simulated"] * 8
+    assert [stage["evidence_class"] for stage in summary["stages"]] == ["simulated"] * 8
+    assert "actual" not in json.dumps(summary)
     assert summary["stages"][5]["authority"] == "delegated_governor_cli"
     assert summary["stages"][6]["authority"] == "delegated_trustos_cli"
 
@@ -93,6 +95,9 @@ def test_missing_python_exits_with_unavailable_code(tmp_path: Path):
     result = _run_operator("-PythonPath", str(missing))
     assert result.returncode == 3
     assert "python interpreter not found" in result.stderr
+    summary = _summary_from_output(result.stdout)
+    assert summary["overall_evidence_class"] == "unavailable"
+    assert summary["stages"][0]["classification"] == "unavailable"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
@@ -217,6 +222,8 @@ def test_powershell_quoting_and_path_normalization(tmp_path: Path):
     assert result.returncode == 0, result.stderr
     summary = _summary_from_output(result.stdout)
     assert summary["evidence_mode"] == "manual_import"
+    assert summary["overall_evidence_class"] == "simulated"
+    assert all(stage["evidence_class"] == "simulated" for stage in summary["stages"] if stage["classification"] != "not_run")
     report = json.loads((output_dir / "marketplace_trend" / "marketplace_trend_report.json").read_text(encoding="utf-8"))
     assert report["evidence_mode"] == "manual_import"
 
@@ -229,3 +236,34 @@ def test_manual_import_mode_classifies_evidence(tmp_path: Path):
     assert result.returncode == 0, result.stderr
     summary = _summary_from_output(result.stdout)
     assert summary["evidence_mode"] == "manual_import"
+    assert summary["overall_evidence_class"] == "simulated"
+    assert all(stage["evidence_class"] == "simulated" for stage in summary["stages"] if stage["classification"] != "not_run")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
+def test_unknown_flags_are_rejected_by_powershell():
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(SCRIPT),
+            "-TotallyUnknownFlag",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode != 0
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
+def test_fixture_success_is_never_classified_as_actual_live_execution():
+    summary = _summary_from_output(_run_operator("-MaxCandidates", "2").stdout)
+    serialized = json.dumps(summary)
+    assert '"classification":"actual"' not in serialized.replace(" ", "")
+    assert '"evidence_class":"actual"' not in serialized.replace(" ", "")
+    assert summary["overall_classification"] == "simulated"
