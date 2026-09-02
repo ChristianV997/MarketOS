@@ -43,8 +43,11 @@ process exits:
 
 ## CI preflight and final attestation
 
-The existing workflow runs `--phase preflight`: it proves only that bounded
-local checks executed successfully. A preflight report always keeps
+The existing workflow runs `--phase preflight`: it proves only that the
+quality-gate authority's bounded compile, focused regression tests, focused
+Ruff checks, and diff check executed successfully. Full repository tests,
+Semgrep, and container validation remain owned by their existing CI jobs. A
+preflight report always keeps
 `ready_for_supervised_use` false and retains absent CI evidence as
 `ci_unavailable`; its zero exit code is not final merge evidence. Final
 attestation uses the default `final` phase with complete sanitized

@@ -107,9 +107,11 @@ step. Human review remains required. Planning output never authorizes
 deployment, publishing, provider calls, supplier calls, commerce mutation,
 repair, merge, or credential use.
 
-Preflight has a deliberately narrower exit contract: it exits zero only when
-the local checks pass, but it always reports `ready_for_supervised_use: false`
-and does not turn missing final CI evidence into success. Supply complete
+Preflight has a deliberately narrower check scope and exit contract: it runs
+only compile, the quality-gate regression tests, focused Ruff checks, and the
+diff check. Full repository tests and security/container jobs remain separate
+CI evidence. It exits zero only when its local checks pass, but it always
+reports `ready_for_supervised_use: false` and does not turn missing final CI evidence into success. Supply complete
 sanitized `MarketOS.CIEvidence.v1` to the default final phase after required
 jobs finish to obtain final attestation. If a local check fails before that
 evidence exists, its failure classification remains visible instead of being

@@ -48,6 +48,7 @@ CLASS_TIMEOUT = "timeout"
 CLASS_MALFORMED_CONFIGURATION = "malformed"
 
 CHECK_ORDER = ("compile", "pytest", "ruff", "typed", "frontend", "security", "diff_check")
+PREFLIGHT_CHECK_ORDER = ("compile", "pytest", "ruff", "diff_check")
 FRONTEND_CHECK_ORDER = ("lint", "typecheck", "test", "build")
 KNOWN_LOCKFILES = (
     "uv.lock", "poetry.lock", "Pipfile.lock", "package-lock.json", "pnpm-lock.yaml",
@@ -926,15 +927,26 @@ def run_quality_gate(
     if phase == "preflight" and ci_result is not None:
         configuration_errors.append("preflight_ci_evidence_forbidden")
 
-    checks = [
-        _check_command("compile", [sys.executable, "-m", "compileall", "-q", "."], root=root, execute=execute, runner=runner),
-        _check_command("pytest", [sys.executable, "-m", "pytest", "-q"], root=root, execute=execute, runner=runner),
-        _check_command("ruff", ["ruff", "check", "."], root=root, execute=execute, tool="ruff", runner=runner),
-        _typed_check(root, typed, execute=execute, runner=runner),
-        _frontend_check(root, execute=execute, runner=runner),
-        _security_check(root, execute=execute, runner=runner),
-        _check_command("diff_check", ["git", "diff", "--check"], root=root, execute=execute, runner=runner),
-    ]
+    if phase == "preflight":
+        checks = [
+            _check_command("compile", [sys.executable, "-m", "compileall", "-q", "scripts", "tests"], root=root, execute=execute, runner=runner),
+            _check_command("pytest", [sys.executable, "-m", "pytest", "-q", "tests/test_local_quality_gate.py"], root=root, execute=execute, runner=runner),
+            _check_command(
+                "ruff", ["ruff", "check", "scripts/ai/run_local_quality_gate.py", "tests/test_local_quality_gate.py"],
+                root=root, execute=execute, tool="ruff", runner=runner,
+            ),
+            _check_command("diff_check", ["git", "diff", "--check"], root=root, execute=execute, runner=runner),
+        ]
+    else:
+        checks = [
+            _check_command("compile", [sys.executable, "-m", "compileall", "-q", "."], root=root, execute=execute, runner=runner),
+            _check_command("pytest", [sys.executable, "-m", "pytest", "-q"], root=root, execute=execute, runner=runner),
+            _check_command("ruff", ["ruff", "check", "."], root=root, execute=execute, tool="ruff", runner=runner),
+            _typed_check(root, typed, execute=execute, runner=runner),
+            _frontend_check(root, execute=execute, runner=runner),
+            _security_check(root, execute=execute, runner=runner),
+            _check_command("diff_check", ["git", "diff", "--check"], root=root, execute=execute, runner=runner),
+        ]
     for item in checks:
         if item.get("status") == "malformed":
             configuration_errors.append(f"malformed:{item.get('name')}")
@@ -1033,7 +1045,7 @@ def run_quality_gate(
         "dependencies": dependencies,
         "typed_analysis": typed,
         "checks": checks,
-        "check_order": list(CHECK_ORDER),
+        "check_order": list(PREFLIGHT_CHECK_ORDER if phase == "preflight" else CHECK_ORDER),
         "status_taxonomy": list(CHECK_STATUS_TAXONOMY),
         "frontend_check_order": list(FRONTEND_CHECK_ORDER),
         "ci": ci,

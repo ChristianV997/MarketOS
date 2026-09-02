@@ -298,6 +298,8 @@ def test_preflight_succeeds_locally_without_claiming_final_readiness(monkeypatch
 
     assert report["phase"] == "preflight"
     assert report["mode"] == "preflight_execution"
+    assert report["check_order"] == list(gate.PREFLIGHT_CHECK_ORDER)
+    assert [check["name"] for check in report["checks"]] == list(gate.PREFLIGHT_CHECK_ORDER)
     assert report["status"] == "unavailable"
     assert report["classification"] == gate.CLASS_CI_UNAVAILABLE
     assert report["preflight"]["status"] in {"passed", "passed_with_warnings"}
