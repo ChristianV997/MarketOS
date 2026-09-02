@@ -724,6 +724,27 @@ def test_ranking_pillar_labels_are_raw_pass_through():
     assert "CJ-LABELED-001" in markdown
 
 
+def test_absent_observed_at_is_omitted_not_invented():
+    market = load("absent_observed_at_marketplace_report.json")
+    supplier = load("absent_observed_at_supplier_report.json")
+    consumer = load("absent_observed_at_consumer_report.json")
+    assert "observed_at" not in json.dumps(market)
+    assert "observed_at" not in json.dumps(supplier)
+    assert "observed_at" not in json.dumps(consumer)
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    row = report["ranking"]["candidates"][0]
+    for name, pillar in row["pillars"].items():
+        assert "observed_at" not in pillar, name
+        assert pillar.get("observed_at") != "deterministic"
+        assert "source_type" not in pillar
+        assert "source_url" not in pillar
+        assert "field_provenance" not in pillar
+        assert "supplier_product_id" not in pillar
+        assert "sku" not in pillar
+        assert "supplier_sku" not in pillar
+    assert "observed_at" not in json.dumps(row["pillars"])
+
+
 def test_duplicate_ids_collapse_last_wins_without_double_count():
     market = load("duplicate_ids_market_report.json")
     supplier = load("duplicate_ids_supplier_report.json")

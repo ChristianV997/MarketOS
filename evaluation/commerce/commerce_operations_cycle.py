@@ -383,7 +383,7 @@ def _pillar_pass_through(
     *,
     supplier: bool = False,
 ) -> dict[str, Any]:
-    """Copy existing pillar labels only. No remapping, freshness, source_family, or fingerprint."""
+    """Copy existing pillar keys only. Omit absent keys; do not invent observed_at."""
     labels: dict[str, Any] = {}
     keys = PILLAR_PASS_THROUGH_KEYS + (SUPPLIER_PASS_THROUGH_KEYS if supplier else ())
     if report is None:
@@ -395,8 +395,6 @@ def _pillar_pass_through(
         packet = _last_wins_packet(candidate)
         if packet is not None:
             _copy_pass_through(labels, packet, keys)
-    if "observed_at" not in labels:
-        labels["observed_at"] = "deterministic"
     return labels
 
 

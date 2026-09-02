@@ -15,7 +15,8 @@ cycle does not re-rank and does not call `opportunity_scoring`. Ranking
 unchanged — not an `observed`/`derived` translation. Ranking labels
 (`source_type`, `source_url`, `observed_at`, `field_provenance`,
 `supplier_product_id`, `sku`) are pillar pass-through; there is no alias
-collapse and no fingerprint.
+collapse and no fingerprint. Absent pillar keys are omitted; the cycle
+does not invent `observed_at`.
 
 Governor `unit_economics_score` is taken from synthesis
 `unit_economics_summary.gross_margin_percent` when present. Missing economics
