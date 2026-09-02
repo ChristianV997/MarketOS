@@ -45,8 +45,54 @@ def _text(value: Any, limit: int = 240) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
-def _candidate_map(report: Mapping[str, Any] | None) -> dict[str, Mapping[str, Any]]:
-    return {str(item.get("candidate_id")): item for item in (report or {}).get("candidates", []) if item.get("candidate_id")}
+def _identity_key(candidate: Mapping[str, Any]) -> str:
+    """SYN-ALIAS-NO-COLLAPSE: a conservative correlated-alias signal built
+    only from fields the existing evidence/offers contract already
+    carries -- `source_family` provenance plus the candidate's own
+    `query` -- not a new identity registry or source-family authority.
+
+    Requires an explicit `source_family` on at least one evidence/offer
+    item before two candidates can ever be considered aliases: `query`
+    text alone is too weak and generic to safely collapse two
+    candidates (many genuinely distinct products share a plain search
+    query), so query-only matches are left as separate, distinct
+    candidates.
+    """
+    source_families = sorted({str(item.get("source_family")) for item in _evidence(candidate, "evidence") + _evidence(candidate, "offers") if item.get("source_family")})
+    if not source_families:
+        return ""
+    query = _text(candidate.get("query") or "", 160).lower()
+    return f"{query}|{','.join(source_families)}"
+
+
+def _candidate_map(report: Mapping[str, Any] | None) -> tuple[dict[str, Mapping[str, Any]], tuple[str, ...]]:
+    """Builds the candidate_id -> candidate map for one pillar report,
+    collapsing correlated aliases (same query + source_family, different
+    candidate_id) so the same product/source family is never scored and
+    ranked twice. A literal duplicate candidate_id still collapses via
+    plain dict-key overwrite, as before. Ambiguity is never silently
+    dropped: every collapse is recorded in the returned notes tuple, and
+    a score mismatch between the kept candidate and its alias is called
+    out explicitly rather than picked arbitrarily."""
+    result: dict[str, Mapping[str, Any]] = {}
+    seen_identity: dict[str, tuple[str, Mapping[str, Any]]] = {}
+    notes: list[str] = []
+    for item in (report or {}).get("candidates", []):
+        if not item.get("candidate_id"):
+            continue
+        candidate_id = str(item.get("candidate_id"))
+        identity = _identity_key(item)
+        if identity and identity in seen_identity:
+            kept_id, kept_item = seen_identity[identity]
+            if _score(item) != _score(kept_item):
+                notes.append(f"correlated alias '{candidate_id}' of '{kept_id}' shares query/source_family but reported conflicting scores; kept '{kept_id}' and excluded '{candidate_id}' from ranking")
+            else:
+                notes.append(f"correlated alias '{candidate_id}' collapsed into '{kept_id}' (same query and source_family)")
+            continue
+        if identity:
+            seen_identity[identity] = (candidate_id, item)
+        result[candidate_id] = item
+    return result, tuple(notes)
 
 
 def _score(candidate: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -65,14 +111,27 @@ def _mode(report: Mapping[str, Any] | None, candidate: Mapping[str, Any] | None)
     return next((item for item in modes if item in {"live_readonly", "public_live", "authenticated_live"}), next((item for item in modes if item in {"manual_import", "fixture_demo", "fixture"}), "missing"))
 
 
+LIVE_EVIDENCE_MODES = frozenset({"live_readonly", "public_live", "authenticated_live"})
+
+
 def _grade(market: Mapping[str, Any] | None, supplier: Mapping[str, Any] | None, consumer: Mapping[str, Any] | None, scores: tuple[float, float, float], recommendation: str) -> str:
+    """SYN-GRADE-LIVE-LABEL fix: `A_live_validated` used to require only
+    that *any one* of the three supplied pillars carry a live-looking
+    evidence_mode -- so one live-labeled pillar mixed with two fixture/
+    manual ones still graded as professionally live-validated. It now
+    requires an explicit live attestation on *every* supplied pillar
+    (`all(...)`, not `any(...)`): three populated pillars alone is never
+    sufficient, and a single fixture/manual pillar caps the grade at
+    C_fixture_or_partial even when another pillar claims live evidence.
+    """
     if recommendation.startswith("reject") or not any(scores):
         return "F_reject_or_missing"
-    supplied = sum(bool(item) for item in (market, supplier, consumer))
-    modes = {_mode(None, report) for report in (market, supplier, consumer) if report}
-    if supplied == 3 and ("live_readonly" in modes or "authenticated_live" in modes):
+    supplied_reports = [report for report in (market, supplier, consumer) if report]
+    supplied = len(supplied_reports)
+    modes = [_mode(None, report) for report in supplied_reports]
+    if supplied == 3 and all(mode in LIVE_EVIDENCE_MODES for mode in modes):
         return "A_live_validated"
-    if supplied == 3 and modes <= {"manual_import"}:
+    if supplied == 3 and set(modes) <= {"manual_import"}:
         return "B_multi_source_manual"
     if supplied >= 2:
         return "C_fixture_or_partial"
@@ -291,10 +350,11 @@ class ProductOpportunitySynthesisReport:
     read_only: bool = True
     network_calls: bool = False
     mutated: bool = False
+    alias_notes: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
-        for key in ("top_hooks", "top_pain_points", "top_objections", "top_ad_angles", "top_supplier_risks", "top_marketplace_risks", "top_consumer_risks"):
+        for key in ("top_hooks", "top_pain_points", "top_objections", "top_ad_angles", "top_supplier_risks", "top_marketplace_risks", "top_consumer_risks", "alias_notes"):
             result[key] = list(getattr(self, key))
         result["fourteen_day_validation_plan"] = [dict(item) for item in self.fourteen_day_validation_plan]
         result["candidates"] = [candidate.to_dict() for candidate in self.candidates]
@@ -407,7 +467,8 @@ def build_product_opportunity_synthesis(
     product_validation_report: Mapping[str, Any] | None = None,
     client_context: Mapping[str, Any] | None = None,
 ) -> ProductOpportunitySynthesisReport:
-    market, supplier, consumer = _candidate_map(marketplace_report), _candidate_map(supplier_report), _candidate_map(consumer_report)
+    (market, market_alias_notes), (supplier, supplier_alias_notes), (consumer, consumer_alias_notes) = _candidate_map(marketplace_report), _candidate_map(supplier_report), _candidate_map(consumer_report)
+    alias_notes = tuple(market_alias_notes + supplier_alias_notes + consumer_alias_notes)
     candidates: list[ProductOpportunityCandidate] = []
     plans: dict[str, ProductOpportunityActionPlan] = {}
     for candidate_id in sorted(set(market) | set(supplier) | set(consumer)):
@@ -425,7 +486,7 @@ def build_product_opportunity_synthesis(
         client = f"{top.title} is the leading candidate at {top.score.combined_opportunity_score:.0%} combined opportunity. Recommendation: {rec.code}. This is validation guidance, not a profit guarantee or launch authorization."
         operator = f"Next action: {rec.next_action}. Confidence: {top.score.confidence_grade}. Risks: {', '.join(top.score.risk_profile.blockers) or 'none recorded'}."
         band = {"min": top.decision_thresholds.recommended_price_band_min, "max": top.decision_thresholds.recommended_price_band_max, "currency": "USD", "status": "observed_or_derived" if top.decision_thresholds.recommended_price_band_min is not None else "unavailable"}
-        return ProductOpportunitySynthesisReport("product-opportunity-synthesis-v1", "deterministic", mode, len(candidates), top.candidate_id, top.title, rec.code, top.score.combined_opportunity_score, top.score.marketplace_opportunity, top.score.supplier_feasibility, top.score.consumer_attention, top.unit_economics_summary, top.score.evidence_confidence, top.score.confidence_grade, top.score.risk_profile.to_dict(), top.decision_thresholds.to_dict(), {"kill_if_cpa_above": top.decision_thresholds.kill_if_cpa_above, "scale_if_cpa_below": top.decision_thresholds.scale_if_cpa_below, "kill_if_ctr_below": top.decision_thresholds.kill_if_ctr_below, "kill_if_add_to_cart_below": top.decision_thresholds.kill_if_add_to_cart_below, "scale_if_margin_above": top.decision_thresholds.scale_if_margin_above}, band, top.decision_thresholds.break_even_cpa, top.decision_thresholds.break_even_roas, top.top_hooks, top.top_pain_points, top.top_objections, top.top_ad_angles, top.top_supplier_risks, top.top_marketplace_risks, top.top_consumer_risks, rec.next_action, plan.days, client, operator, tuple(candidates), source_reports)
+        return ProductOpportunitySynthesisReport("product-opportunity-synthesis-v1", "deterministic", mode, len(candidates), top.candidate_id, top.title, rec.code, top.score.combined_opportunity_score, top.score.marketplace_opportunity, top.score.supplier_feasibility, top.score.consumer_attention, top.unit_economics_summary, top.score.evidence_confidence, top.score.confidence_grade, top.score.risk_profile.to_dict(), top.decision_thresholds.to_dict(), {"kill_if_cpa_above": top.decision_thresholds.kill_if_cpa_above, "scale_if_cpa_below": top.decision_thresholds.scale_if_cpa_below, "kill_if_ctr_below": top.decision_thresholds.kill_if_ctr_below, "kill_if_add_to_cart_below": top.decision_thresholds.kill_if_add_to_cart_below, "scale_if_margin_above": top.decision_thresholds.scale_if_margin_above}, band, top.decision_thresholds.break_even_cpa, top.decision_thresholds.break_even_roas, top.top_hooks, top.top_pain_points, top.top_objections, top.top_ad_angles, top.top_supplier_risks, top.top_marketplace_risks, top.top_consumer_risks, rec.next_action, plan.days, client, operator, tuple(candidates), source_reports, alias_notes=alias_notes)
     return ProductOpportunitySynthesisReport(
         report_version="product-opportunity-synthesis-v1",
         generated_at="deterministic",
@@ -460,6 +521,7 @@ def build_product_opportunity_synthesis(
         operator_summary="Supply at least one sanitized evidence report.",
         candidates=(),
         source_reports=source_reports,
+        alias_notes=alias_notes,
     )
 
 

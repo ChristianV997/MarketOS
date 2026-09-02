@@ -227,3 +227,174 @@ def test_scenario_fixtures_are_sanitized(name):
     else:
         assert "CJ_API_KEY" not in json.dumps(payload)
         assert "Bearer " not in json.dumps(payload)
+
+
+# --- SYN-GRADE-LIVE-LABEL regressions ---
+
+
+def _pillar(mode: str, *, opportunity: float = 0.8, saturation: float = 0.1, supplier: float = 0.8, attention: float = 0.8, margin: float = 0.5) -> dict:
+    return {
+        "evidence_mode": mode,
+        "candidates": [
+            {
+                "candidate_id": "x",
+                "query": "x",
+                "evidence": [{"evidence_mode": mode}],
+                "offers": [{"evidence_mode": mode}],
+                "score": {
+                    "overall_marketplace_opportunity": opportunity,
+                    "saturation_score": saturation,
+                    "overall_supplier_feasibility": supplier,
+                    "recommendation": "hold_for_manual_review",
+                    "economics": {"gross_margin_percent": margin},
+                    "overall_consumer_attention": attention,
+                    "voice_of_customer": {},
+                },
+            }
+        ],
+    }
+
+
+def test_fixture_demo_three_pillar_evidence_is_never_live_validated():
+    """Required scenario: fixture/demo three-pillar evidence must never
+    produce professional live authorization, even with all three pillars
+    supplied."""
+    market, supplier, consumer = _pillar("fixture_demo"), _pillar("fixture_demo"), _pillar("fixture_demo")
+    result = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    assert result["confidence_grade"] != "A_live_validated"
+
+
+def test_mixing_one_live_pillar_with_fixture_pillars_is_never_live_validated():
+    """The exact SYN-GRADE-LIVE-LABEL reproduction: one live_readonly
+    pillar mixed with fixture pillars must not be graded as live-validated
+    -- three populated pillars alone (or a single live-looking one) is
+    never sufficient."""
+    market = _pillar("live_readonly")
+    _, supplier, consumer = reports()
+    result = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    assert result["confidence_grade"] != "A_live_validated"
+
+
+def test_valid_live_attestation_on_every_pillar_reaches_live_validated():
+    """Required scenario: a valid live attestation. A_live_validated must
+    remain reachable when every supplied pillar carries an explicit,
+    consistent live evidence_mode -- the fix tightens the check, it does
+    not make the grade permanently unreachable."""
+    market, supplier, consumer = _pillar("live_readonly"), _pillar("authenticated_live"), _pillar("public_live")
+    result = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    assert result["confidence_grade"] == "A_live_validated"
+
+
+def test_stale_evidence_is_not_live_validated():
+    market, supplier, consumer = reports()
+    market["generated_at"] = "2019-01-01T00:00:00Z"
+    market["candidates"][0]["evidence_class"] = "stale"
+    result = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    assert result["confidence_grade"] != "A_live_validated"
+    assert result["evidence_mode"] == "fixture_demo"
+
+
+# --- SYN-ALIAS-NO-COLLAPSE regressions ---
+
+
+def _aligned_pillar_candidate(candidate_id: str, source_family: str | None) -> dict:
+    evidence = {"price": 29.99, "evidence_mode": "fixture"}
+    if source_family:
+        evidence["source_family"] = source_family
+    return {"candidate_id": candidate_id, "query": "desk clamp lamp", "evidence": [evidence], "score": {"overall_marketplace_opportunity": 0.7, "saturation_score": 0.3}}
+
+
+def _aligned_supplier_consumer() -> tuple[dict, dict]:
+    supplier = {"evidence_mode": "fixture_demo", "candidates": [{"candidate_id": "desk-clamp-lamp", "query": "desk clamp lamp", "offers": [{"evidence_mode": "fixture"}], "score": {"overall_supplier_feasibility": 0.71, "recommendation": "validate_live_supplier_first", "economics": {"gross_margin_percent": 0.57}}}]}
+    consumer = {"evidence_mode": "fixture_demo", "candidates": [{"candidate_id": "desk-clamp-lamp", "query": "desk clamp lamp", "evidence": [{"evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.64, "recommendation": "test_creative_offline", "voice_of_customer": {}}}]}
+    return supplier, consumer
+
+
+def test_correlated_alias_same_query_and_source_family_collapses_to_one_candidate():
+    """Required scenario: correlated aliases. Two marketplace candidates
+    sharing query and source_family but different candidate_id must not
+    be scored and ranked twice."""
+    market = {"evidence_mode": "fixture_demo", "candidates": [_aligned_pillar_candidate("desk-clamp-lamp", "amazon_serp"), _aligned_pillar_candidate("desk-clamp-lamp-amazon-mirror", "amazon_serp")]}
+    supplier, consumer = _aligned_supplier_consumer()
+    result = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    assert result["candidate_count"] == 1
+    assert [item["candidate_id"] for item in result["candidates"]] == ["desk-clamp-lamp"]
+    assert result["alias_notes"]
+    assert "desk-clamp-lamp-amazon-mirror" in result["alias_notes"][0]
+
+
+def test_correlated_alias_with_conflicting_scores_is_flagged_not_silently_picked():
+    market = {
+        "evidence_mode": "fixture_demo",
+        "candidates": [
+            _aligned_pillar_candidate("desk-clamp-lamp", "amazon_serp"),
+            {**_aligned_pillar_candidate("desk-clamp-lamp-amazon-mirror", "amazon_serp"), "score": {"overall_marketplace_opportunity": 0.95, "saturation_score": 0.05}},
+        ],
+    }
+    supplier, consumer = _aligned_supplier_consumer()
+    result = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    assert result["candidate_count"] == 1
+    assert any("conflicting scores" in note for note in result["alias_notes"])
+
+
+def test_distinct_legitimate_products_sharing_only_a_query_are_not_collapsed():
+    """Required scenario: distinct legitimate products. A shared, generic
+    query with no matching source_family provenance must never collapse
+    two genuinely different products."""
+    market = {
+        "evidence_mode": "fixture_demo",
+        "candidates": [
+            {"candidate_id": "product-a", "query": "desk lamp", "evidence": [{"price": 19.99, "evidence_mode": "fixture"}], "score": {"overall_marketplace_opportunity": 0.5, "saturation_score": 0.2}},
+            {"candidate_id": "product-b", "query": "desk lamp", "evidence": [{"price": 39.99, "evidence_mode": "fixture"}], "score": {"overall_marketplace_opportunity": 0.6, "saturation_score": 0.3}},
+        ],
+    }
+    result = build_product_opportunity_synthesis(market, None, None).to_dict()
+    assert result["candidate_count"] == 2
+    assert result["alias_notes"] == []
+
+
+def test_distinct_legitimate_products_with_different_source_families_are_not_collapsed():
+    market = {
+        "evidence_mode": "fixture_demo",
+        "candidates": [
+            _aligned_pillar_candidate("product-c", "amazon_serp"),
+            _aligned_pillar_candidate("product-d", "ebay_serp"),
+        ],
+    }
+    result = build_product_opportunity_synthesis(market, None, None).to_dict()
+    assert result["candidate_count"] == 2
+
+
+def test_alias_collapse_does_not_create_a_second_identity_or_scoring_authority():
+    """Do not create a second identity registry, second scorer, or new
+    independent source-family authority: the fix must stay inside this
+    module's existing per-pillar candidate map."""
+    source = (Path(__file__).resolve().parents[1] / "evaluation" / "commerce" / "opportunity_synthesis.py").read_text(encoding="utf-8")
+    assert "class " not in source.split("def _identity_key")[1].split("def _candidate_map")[0]
+    for forbidden in ("sqlite3", "requests", "httpx", "socket"):
+        assert forbidden not in source
+
+
+# --- deterministic ordering / fingerprint ---
+
+
+def test_synthesis_report_fingerprint_is_stable_across_repeated_runs():
+    """Required scenario: deterministic ordering and fingerprint."""
+    market = {"evidence_mode": "fixture_demo", "candidates": [_aligned_pillar_candidate("desk-clamp-lamp", "amazon_serp"), _aligned_pillar_candidate("desk-clamp-lamp-amazon-mirror", "amazon_serp")]}
+    supplier, consumer = _aligned_supplier_consumer()
+    first = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    second = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    third = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    blob_first, blob_second, blob_third = (json.dumps(item, sort_keys=True, default=str) for item in (first, second, third))
+    assert blob_first == blob_second == blob_third
+    assert first["generated_at"] == "deterministic"
+
+
+def test_no_credential_provider_or_network_behavior_after_fixes():
+    result = build_product_opportunity_synthesis(*reports()).to_dict()
+    assert result["read_only"] is True
+    assert result["network_calls"] is False
+    assert result["mutated"] is False
+    blob = json.dumps(result).lower()
+    assert "sk-" not in blob
+    assert "bearer " not in blob

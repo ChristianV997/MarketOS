@@ -46,6 +46,26 @@ Confidence grades communicate evidence quality rather than business certainty:
 recommend validation or a launch draft for human review, but never authorizes
 launch, ad spend, posting, orders, payments, or provider mutations.
 
+**SYN-GRADE-LIVE-LABEL fix:** `A_live_validated` used to require only that
+*any one* of the three supplied pillars carried a live-looking `evidence_mode`
+-- so a single live-labeled pillar mixed with two fixture/manual pillars still
+graded as professionally live-validated. It now requires an explicit live
+attestation (`live_readonly`, `public_live`, or `authenticated_live`) on
+*every* supplied pillar. Three populated pillars alone is never sufficient,
+and a single fixture/manual pillar caps the grade at `C_fixture_or_partial`
+even when another pillar claims live evidence. Genuinely all-live evidence
+still reaches `A_live_validated`; the grade was tightened, not disabled.
+
+**SYN-ALIAS-NO-COLLAPSE fix:** two candidates in the same pillar report that
+share both `query` and an evidence/offer `source_family` (an existing
+provenance field, not a new one) are now collapsed into a single scored
+candidate, so a correlated alias of the same product/source family is never
+ranked twice. `query` text alone never triggers a collapse -- many distinct
+products share a plain search query -- so this cannot merge genuinely
+different candidates. Every collapse is recorded in a new `alias_notes` field
+on the report; a score mismatch between the kept candidate and its alias is
+called out explicitly there rather than picked silently.
+
 ## Decision rules
 
 Poor margin, high saturation, and low or objection-heavy attention take
