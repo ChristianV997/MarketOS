@@ -1,12 +1,10 @@
 """Client-ready presentation layer over existing Phase 1 evidence reports."""
 from __future__ import annotations
-import json, re
+import re
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any, Mapping
 from .benchmark_matrix import build_benchmark_from_paths
-from .readiness import build_from_paths, load_sanitized_artifact
-from .public_market_benchmark import build_public_market_benchmark, load_public_market_seed
+from .readiness import build_from_paths
 from backend.deployment.readiness import build_readiness
 
 VERSION="product-validation-report-v1"
