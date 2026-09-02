@@ -33,6 +33,10 @@ def validate_release_contract(payload: dict) -> dict:
     if not evidence.get("actual") and not evidence.get("simulated"):
         return {"decision": "REJECT", "reason": "missing_evidence"}
 
+    actual_evidence = str(evidence.get("actual", "")).lower()
+    if any(k in actual_evidence for k in ["fixture", "mock", "simulated", "dry-run"]):
+        return {"decision": "REJECT", "reason": "mislabeled_actual_evidence"}
+
     # 8. CI execution steps, runner identity, logs, required-job completeness, executed failures
     ci_steps = payload.get("ci_execution_steps", {})
     if ci_steps.get("required_job_completeness") == "Missing":
@@ -269,3 +273,14 @@ def test_combo_falsely_claims_live_activation():
     result = validate_release_contract(payload)
     assert result["decision"] == "REJECT"
     assert result["reason"] == "live_activation_unsupported"
+
+def test_combo_runner_mislabeled_evidence():
+    payload = load_fixture("combo_runner_mislabeled_evidence")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "mislabeled_actual_evidence"
+
+def test_combo_learning_ledger_complete_local():
+    payload = load_fixture("combo_learning_ledger_complete_local")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
