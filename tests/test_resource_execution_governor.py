@@ -687,3 +687,89 @@ def test_apply_learning_influence_output_stays_a_valid_execution_decision_reques
     updated = apply_learning_influence(request, {"do_not_repeat_blocked": True})
     assert isinstance(updated, ExecutionDecisionRequest)
     assert updated.action_type == request.action_type
+
+
+def test_clean_positive_learning_with_sufficient_budget_is_allowed():
+    """Required scenario: successful learning plus sufficient budget --
+    learning must not block a request the Governor's own gates would
+    already allow, and a genuinely clean, repeated win is allowed to
+    actually reach the 'scale' outcome once budgets/quotas/thresholds are
+    satisfied."""
+    from evaluation.companyos.learning_ledger import build_learning_ledger_report, derive_governor_influence
+    events = [
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "clean-scale-candidate"},
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "clean-scale-candidate"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="scale_ad_budget", candidate_id="clean-scale-candidate")
+    assert influence.supports_scale is True
+    request = base("scale_ad_budget", requested_amount=20.0, resource_type="ad_spend", metric_value=.06, scale_threshold=.05, approval_state="approved")
+    influenced_request = apply_learning_influence(request, influence.to_governor_context())
+    result = evaluate_execution_request(influenced_request)
+    assert result.outcome == "scale"
+    assert not result.blockers
+
+
+def test_apply_learning_influence_kill_forces_learning_required_blocker():
+    """Required scenario: a kill decision must prevent automatic
+    resumption of the same action, even without repetition -- unlike
+    hold_or_avoid, a single kill is enough."""
+    request = base("kill_ad_experiment", learning_captured=False)
+    plain = evaluate_execution_request(request)
+    assert "required learning has not been captured" not in plain.blockers
+    influenced = apply_learning_influence(request, {"kill_blocks_resumption": True})
+    result = evaluate_execution_request(influenced)
+    assert "required learning has not been captured" in result.blockers
+
+
+def test_apply_learning_influence_provider_lesson_is_opt_in_only():
+    """Required scenario: provider lesson affecting provider selection
+    without live routing -- only switches away from a provider the
+    influence itself flags as blocked, and only when the caller opts in."""
+    request = base("run_provider_data_pull", resource_type="data_provider_budget", provider_id="dataforseo")
+    influence = {"recommended_provider_id": "manual_import", "avoid_provider_ids": ("dataforseo",)}
+    default_call = apply_learning_influence(request, influence)
+    assert default_call.provider_id == "dataforseo"
+    opted_in = apply_learning_influence(request, influence, apply_provider_routing_lessons=True)
+    assert opted_in.provider_id == "manual_import"
+
+
+def test_apply_learning_influence_never_switches_a_provider_not_flagged_avoid():
+    """The bridge must never second-guess a provider the influence did not
+    itself flag as blocked for this action."""
+    request = base("run_provider_data_pull", resource_type="data_provider_budget", provider_id="serpapi")
+    influence = {"recommended_provider_id": "manual_import", "avoid_provider_ids": ("dataforseo",)}
+    updated = apply_learning_influence(request, influence, apply_provider_routing_lessons=True)
+    assert updated.provider_id == "serpapi"
+
+
+def test_provider_lesson_switches_selection_without_live_routing():
+    """Integration form of the provider-lesson scenario: a real,
+    ledger-derived influence switches provider_id in planning only -- no
+    live call is made, and the Governor's own provider readiness gates
+    still apply in full to whichever provider ends up selected."""
+    from evaluation.companyos.learning_ledger import build_learning_ledger_report, derive_governor_influence
+    events = [
+        {"event_type": "provider_run", "outcome": "blocked", "failure_reasons": ["provider_blocker"], "action_taken": "run_provider_data_pull", "provider_id": "dataforseo", "candidate_id": "provider-integration"},
+        {"event_type": "provider_run", "outcome": "win", "success_reasons": ["provider_ready"], "action_taken": "run_provider_data_pull", "provider_id": "manual_import", "candidate_id": "provider-integration"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="run_provider_data_pull", candidate_id="provider-integration")
+    request = base("run_provider_data_pull", resource_type="data_provider_budget", provider_id="dataforseo", registered_provider=True, terms_privacy_complete=True, output_contract_tested=True, approval_state="approved")
+    updated = apply_learning_influence(request, influence.to_governor_context(), apply_provider_routing_lessons=True)
+    assert updated.provider_id == "manual_import"
+    result = evaluate_execution_request(updated)
+    assert result.simulated_only is True
+
+
+def test_apply_learning_influence_never_touches_provider_readiness_flags():
+    """The provider opt-in must never move `registered_provider`,
+    `terms_privacy_complete`, or `output_contract_tested` -- switching
+    which provider is planned is not the same as declaring it ready."""
+    request = base("run_provider_data_pull", resource_type="data_provider_budget", provider_id="dataforseo", registered_provider=False, terms_privacy_complete=False, output_contract_tested=False)
+    influence = {"recommended_provider_id": "manual_import", "avoid_provider_ids": ("dataforseo",)}
+    updated = apply_learning_influence(request, influence, apply_provider_routing_lessons=True)
+    assert updated.provider_id == "manual_import"
+    assert updated.registered_provider is False
+    assert updated.terms_privacy_complete is False
+    assert updated.output_contract_tested is False

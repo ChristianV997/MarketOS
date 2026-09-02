@@ -938,9 +938,10 @@ def test_derive_governor_influence_to_governor_context_is_narrow():
     report = build_learning_ledger_report()
     influence = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="portable-espresso-maker")
     context = influence.to_governor_context()
-    assert set(context) == {"do_not_repeat_blocked", "hold_or_avoid", "trustos_recurrence_blocked", "recommended_model_tier"}
+    assert set(context) == {"do_not_repeat_blocked", "hold_or_avoid", "trustos_recurrence_blocked", "kill_blocks_resumption", "recommended_model_tier", "recommended_provider_id", "avoid_provider_ids"}
     assert "candidate_id" not in context
     assert "provenance" not in context
+    assert "iteration_recommendation" not in context
 
 
 def test_learning_governor_influence_rejects_invalid_evidence_mode():
@@ -956,3 +957,152 @@ def test_learning_ledger_still_imports_no_governor_module():
     source = (ROOT / "evaluation" / "companyos" / "learning_ledger.py").read_text(encoding="utf-8")
     assert "resource_execution_governor" not in source
     assert "import evaluation" not in source
+
+
+def test_default_provider_events_carry_provider_id():
+    """Regression: `_event()` accepted a `provider` keyword but never
+    stored it -- `event-provider-blocked`/`event-provider-dry-run` looked
+    provider-specific (both pass `provider="dataforseo"`) but their
+    `provider_id` was always empty. Fixed as part of wiring provider
+    lessons into `derive_governor_influence`."""
+    report = build_learning_ledger_report()
+    by_id = {event.learning_event_id: event for event in report.events}
+    assert by_id["event-provider-blocked"].provider_id == "dataforseo"
+    assert by_id["event-provider-dry-run"].provider_id == "dataforseo"
+
+
+def test_derive_governor_influence_kill_blocks_resumption_from_single_event():
+    """Required scenario: a kill decision must prevent automatic
+    resumption -- unlike hold_or_avoid, a single kill is definitive and
+    needs no repetition."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "kill_decision", "outcome": "killed", "failure_reasons": ["low_click_through"], "action_taken": "kill_ad_experiment", "candidate_id": "killed-candidate"}]})
+    influence = derive_governor_influence(report, action_type="kill_ad_experiment", candidate_id="killed-candidate")
+    assert influence.kill_blocks_resumption is True
+    assert influence.hold_or_avoid is False
+    assert influence.supports_scale is False
+
+
+def test_derive_governor_influence_iteration_recommendation_surfaces_next_plan():
+    """Required scenario: an iteration recommendation must be available to
+    change the next plan, not just live unused in the report's own list."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "security_scan", "outcome": "needs_more_evidence", "failure_reasons": ["insufficient_sample"], "action_taken": "run_security_scan", "candidate_id": "scan-candidate"}]})
+    influence = derive_governor_influence(report, action_type="run_security_scan", candidate_id="scan-candidate")
+    assert influence.iteration_recommendation
+    assert "bounded sample" in influence.iteration_recommendation
+
+
+def test_derive_governor_influence_provider_lesson_flags_blocked_and_ready_providers():
+    """Required scenario: provider lesson affecting provider selection --
+    a blocked provider is flagged to avoid and a ready alternate provider
+    is recommended, both as planning metadata only."""
+    events = [
+        {"event_type": "provider_run", "outcome": "blocked", "failure_reasons": ["provider_blocker"], "action_taken": "run_provider_data_pull", "provider_id": "dataforseo", "candidate_id": "provider-candidate"},
+        {"event_type": "provider_run", "outcome": "win", "success_reasons": ["provider_ready"], "action_taken": "run_provider_data_pull", "provider_id": "manual_import", "candidate_id": "provider-candidate"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="run_provider_data_pull", candidate_id="provider-candidate")
+    assert influence.avoid_provider_ids == ("dataforseo",)
+    assert influence.recommended_provider_id == "manual_import"
+
+
+def test_derive_governor_influence_conflicting_evidence_blocks_scale():
+    """Required scenario: conflicting learning context (both wins and
+    losses recorded for the same action/candidate) must never authorize
+    scale."""
+    events = [
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "mixed-candidate"},
+        {"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "scale_ad_budget", "candidate_id": "mixed-candidate"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="scale_ad_budget", candidate_id="mixed-candidate")
+    assert influence.conflicting_evidence is True
+    assert influence.supports_scale is False
+
+
+def test_derive_governor_influence_stale_events_are_excluded_from_evidence():
+    """Required scenario: stale learning context cannot authorize scale --
+    a caller-declared-stale win must not count toward win_count or
+    supports_scale, and excluding it (rather than merely flagging it)
+    keeps stale evidence from shaping the result at all."""
+    events = [
+        {"learning_event_id": "stale-win-1", "event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "stale-candidate"},
+        {"learning_event_id": "stale-win-2", "event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "stale-candidate"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    fresh = derive_governor_influence(report, action_type="scale_ad_budget", candidate_id="stale-candidate")
+    assert fresh.supports_scale is True
+    staled = derive_governor_influence(report, action_type="scale_ad_budget", candidate_id="stale-candidate", stale_event_ids=("stale-win-1", "stale-win-2"))
+    assert staled.evidence_mode == "not_run"
+    assert staled.supports_scale is False
+    assert staled.excluded_stale_event_ids == ("stale-win-1", "stale-win-2")
+
+
+def test_derive_governor_influence_matching_events_are_bounded():
+    """Bounded context size: however much history a candidate/action pair
+    accumulates, the influence record only ever reflects the most recent
+    `_MAX_MATCHING_EVENTS`."""
+    events = [{"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "bulk-candidate", "learning_event_id": f"bulk-{i}"} for i in range(40)]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="bulk-candidate")
+    assert len(influence.provenance) <= 25
+
+
+def test_derive_governor_influence_fingerprint_is_deterministic_and_sensitive():
+    """Required scenario: deterministic fingerprint and stable reasons."""
+    report = build_learning_ledger_report()
+    first = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="portable-espresso-maker")
+    second = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="portable-espresso-maker")
+    assert first.fingerprint == second.fingerprint
+    assert first.fingerprint
+    assert first.rationale == second.rationale
+    different_candidate = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="mini-thermal-printer")
+    assert different_candidate.fingerprint != first.fingerprint
+
+
+def test_derive_governor_influence_does_not_leak_across_workspaces():
+    """Required scenario: no cross-client leakage -- a repeated failure
+    recorded under one workspace must not influence a decision for the
+    same action/candidate under a different workspace, even when the
+    candidate_id string coincides."""
+    events = [
+        {"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "shared-name", "workspace_id": "client-a"},
+        {"event_type": "ad_experiment", "outcome": "killed", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "shared-name", "workspace_id": "client-a"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    client_a = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="shared-name", workspace_id="client-a")
+    client_b = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="shared-name", workspace_id="client-b")
+    assert client_a.hold_or_avoid is True
+    assert client_b.evidence_mode == "not_run"
+    assert client_b.hold_or_avoid is False
+    assert client_b.provenance == ()
+
+
+def test_derive_governor_influence_trustos_recurrence_does_not_leak_across_workspaces():
+    """No cross-client leakage: the aggregated, ledger-wide TrustOS impact
+    counter must never be used to flag a per-workspace recurrence -- two
+    different workspaces each with exactly one trust_blocker event must
+    not individually see trustos_recurrence_blocked=True, even though the
+    ledger-wide aggregate legitimately shows 2 occurrences."""
+    events = [
+        {"event_type": "trustos_review", "outcome": "blocked", "failure_reasons": ["trust_blocker"], "action_taken": "generate_client_export", "candidate_id": "export-a", "workspace_id": "client-a"},
+        {"event_type": "trustos_review", "outcome": "blocked", "failure_reasons": ["trust_blocker"], "action_taken": "generate_client_export", "candidate_id": "export-b", "workspace_id": "client-b"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    assert sum(impact.occurrences for impact in report.trustos_impacts if impact.blocker == "missing client isolation") == 2
+    client_a = derive_governor_influence(report, action_type="generate_client_export", candidate_id="export-a", workspace_id="client-a")
+    client_b = derive_governor_influence(report, action_type="generate_client_export", candidate_id="export-b", workspace_id="client-b")
+    assert client_a.trustos_recurrence_blocked is False
+    assert client_b.trustos_recurrence_blocked is False
+
+
+def test_derive_governor_influence_do_not_repeat_rules_do_not_leak_across_workspaces():
+    """No cross-client leakage: a do-not-repeat rule generated from one
+    workspace's event must not block the same action/candidate string in
+    another workspace."""
+    events = [{"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "shared-name", "workspace_id": "client-a"}]
+    report = build_learning_ledger_report(context={"events": events})
+    client_a = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="shared-name", workspace_id="client-a")
+    client_b = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="shared-name", workspace_id="client-b")
+    assert client_a.do_not_repeat_blocked is True
+    assert client_b.do_not_repeat_blocked is False
+    assert client_b.do_not_repeat_rule_ids == ()
