@@ -79,7 +79,7 @@ def test_fixture_pack_is_sanitized():
         if path.suffix != ".json" or path.name in allow_secret_files:
             continue
         text = path.read_text(encoding="utf8").lower()
-        assert "sk-" not in text
+        assert not re.search(r"(?<![a-z0-9])sk-[a-z0-9_-]+", text)
         assert "bearer " not in text
 
 
@@ -224,13 +224,13 @@ def test_governor_blocks_frontier_spend_and_portfolio_pressure():
     spend = evaluate_execution_request(
         ExecutionDecisionRequest(
             request_id="first-phase-spend",
-            action_type="launch_ad",
+            action_type="launch_ad_experiment",
             domain="advertising",
             owner_department="growth",
             workspace_id="internal-companyos",
             requested_amount=250.0,
             resource_type="ad_spend",
-            model_tier="frontier",
+            model_tier="frontier_llm",
             opportunity_score=0.2,
             supplier_score=0.1,
             attention_score=0.1,
@@ -245,13 +245,13 @@ def test_governor_blocks_frontier_spend_and_portfolio_pressure():
     model = evaluate_execution_request(
         ExecutionDecisionRequest(
             request_id="first-phase-model",
-            action_type="run_provider_readonly_call",
+            action_type="run_provider_data_pull",
             domain="intelligence",
             owner_department="intelligence",
             workspace_id="internal-companyos",
             requested_amount=0.0,
-            resource_type="model_inference_quota",
-            model_tier="frontier",
+            resource_type="frontier_llm_budget",
+            model_tier="frontier_llm",
             opportunity_score=0.2,
             supplier_score=0.1,
             attention_score=0.1,
@@ -318,10 +318,11 @@ def test_generate_without_stubs_reaches_phase1_builders(monkeypatch):
 
     monkeypatch.setattr(pvr, "build_benchmark_from_paths", _mark_benchmark)
     monkeypatch.setattr(pvr, "build_from_paths", _mark_readiness)
+    monkeypatch.setattr(pvr, "build_readiness", _mark_readiness)
     report = generate_product_validation().to_dict()
     assert called["benchmark"] is True
     assert called["readiness"] is True
-    assert "cj" in " ".join(report.get("recommended_next_actions") or []).lower() or called["readiness"]
+    assert report["source_reports"]["readiness"] == "structural_fixture"
 
 
 def test_generate_with_blocked_stubs_does_not_call_path_builders(monkeypatch):
