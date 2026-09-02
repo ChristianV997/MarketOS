@@ -73,6 +73,9 @@ def validate_release_contract(payload: dict) -> dict:
     if payload.get("provider_model_activation_status") not in ["Offline", "Dry-Run only"]:
         return {"decision": "REJECT", "reason": "live_activation_unsupported"}
 
+    if not payload.get("provenance_and_license_verified", True):
+        return {"decision": "REJECT", "reason": "unverified_provenance"}
+
     # 14. Explicit final merger decision
     return {"decision": "MERGE", "reason": "all_checks_passed"}
 
@@ -201,6 +204,68 @@ def test_trustos_blocked():
 
 def test_live_activation_claim():
     payload = load_fixture("live_activation_claim")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "live_activation_unsupported"
+
+def test_combo_green_independent_quality():
+    payload = load_fixture("combo_green_independent_quality")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
+
+def test_combo_security_unavailable_symlink():
+    payload = load_fixture("combo_security_unavailable_symlink")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "ci_unavailable"
+
+def test_combo_stacked_frontend_environment():
+    payload = load_fixture("combo_stacked_frontend_environment")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "unmet_dependencies"
+
+def test_combo_commerce_failed_agentic_checks():
+    payload = load_fixture("combo_commerce_failed_agentic_checks")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+
+def test_combo_learning_ledger_missing_trustos():
+    payload = load_fixture("combo_learning_ledger_missing_trustos")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "trustos_blocked"
+
+def test_combo_test_only_exposing_defects():
+    payload = load_fixture("combo_test_only_exposing_defects")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+
+def test_combo_capability_unverified_licensing():
+    payload = load_fixture("combo_capability_unverified_licensing")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "unverified_provenance"
+
+def test_combo_duplicate_serpapi():
+    payload = load_fixture("combo_duplicate_serpapi")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "duplicate_superseded"
+
+def test_combo_executed_failure_and_unavailable():
+    payload = load_fixture("combo_executed_failure_and_unavailable")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "executed_failures"
+
+def test_combo_valid_local_evidence_no_ci():
+    payload = load_fixture("combo_valid_local_evidence_no_ci")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
+
+def test_combo_falsely_claims_live_activation():
+    payload = load_fixture("combo_falsely_claims_live_activation")
     result = validate_release_contract(payload)
     assert result["decision"] == "REJECT"
     assert result["reason"] == "live_activation_unsupported"
