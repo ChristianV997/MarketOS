@@ -1,7 +1,7 @@
 """Deterministic, offline resource and execution governance for CompanyOS."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping, Sequence
 
 from .model_router import MODEL_TIERS
@@ -544,4 +544,45 @@ def request_from_mapping(payload: Mapping[str, Any]) -> ExecutionDecisionRequest
     return ExecutionDecisionRequest(**{key: value for key, value in payload.items() if key in allowed})
 
 
-__all__ = ["ACTION_TYPES", "RESOURCE_TYPES", "DOMAINS", "OUTCOMES", "MODEL_POLICY_TIERS", "ExecutionActionType", "ExecutionResourceType", "ResourceBudget", "ResourceQuota", "BudgetCheckResult", "QuotaCheckResult", "ModelSpendPolicy", "ProviderSpendPolicy", "DepartmentCapacityPolicy", "PortfolioPolicy", "KillScaleRule", "ExperimentPolicy", "RunawayGuardPolicy", "LearningCaptureRequirement", "CrossDepartmentDependency", "ExecutionPriorityScore", "ExecutionRiskScore", "ExecutionApprovalRequirement", "ExecutionDecisionRequest", "ExecutionDecisionResult", "ExecutionGovernorSafetySummary", "ResourceExecutionGovernorReport", "evaluate_execution_request", "build_resource_execution_governor_report", "request_from_mapping"]
+def apply_learning_influence(request: ExecutionDecisionRequest, influence: Mapping[str, Any] | None = None, *, apply_model_routing_lessons: bool = False) -> ExecutionDecisionRequest:
+    """Fold an optional, externally-derived learning signal into the
+    inputs `evaluate_execution_request` already consumes, without changing
+    that function at all.
+
+    `influence` is a plain `Mapping` -- e.g. the dict returned by
+    `evaluation.companyos.learning_ledger.LearningGovernorInfluence.to_governor_context()`
+    -- rather than a typed import, so this module never depends on the
+    Learning Ledger's types and the Learning Ledger never depends on this
+    module's types. Only three keys are read: `do_not_repeat_blocked`,
+    `hold_or_avoid`, and `trustos_recurrence_blocked` (any of these can
+    only ever *tighten* the request, by reusing the existing
+    `previous_learning_required` gate `evaluate_execution_request` already
+    enforces at line-level as "required learning has not been captured");
+    and, only when the caller opts in with `apply_model_routing_lessons`,
+    `recommended_model_tier` (planning metadata -- ignored unless it is
+    already one of `MODEL_POLICY_TIERS`).
+
+    This function never touches `trustos_decision`, `workspace_decision`,
+    `approval_state`, budgets, or quotas: those hard gates stay under
+    `evaluate_execution_request`'s exclusive, unmodified control, so a
+    positive learning signal -- never even read here -- cannot bypass
+    them, and a negative one can only ever ask for more learning capture,
+    never execute or approve anything itself.
+
+    Absent or empty `influence` returns `request` unchanged, so existing
+    callers that never pass a learning context see no behavior change.
+    """
+    if not influence: return request
+    do_not_repeat_blocked = bool(influence.get("do_not_repeat_blocked", False))
+    hold_or_avoid = bool(influence.get("hold_or_avoid", False))
+    trustos_recurrence_blocked = bool(influence.get("trustos_recurrence_blocked", False))
+    previous_learning_required = request.previous_learning_required or do_not_repeat_blocked or hold_or_avoid or trustos_recurrence_blocked
+    model_tier = request.model_tier
+    if apply_model_routing_lessons:
+        recommended_model_tier = str(influence.get("recommended_model_tier", "") or "")
+        if recommended_model_tier in MODEL_POLICY_TIERS: model_tier = recommended_model_tier
+    if previous_learning_required == request.previous_learning_required and model_tier == request.model_tier: return request
+    return replace(request, previous_learning_required=previous_learning_required, model_tier=model_tier)
+
+
+__all__ = ["ACTION_TYPES", "RESOURCE_TYPES", "DOMAINS", "OUTCOMES", "MODEL_POLICY_TIERS", "ExecutionActionType", "ExecutionResourceType", "ResourceBudget", "ResourceQuota", "BudgetCheckResult", "QuotaCheckResult", "ModelSpendPolicy", "ProviderSpendPolicy", "DepartmentCapacityPolicy", "PortfolioPolicy", "KillScaleRule", "ExperimentPolicy", "RunawayGuardPolicy", "LearningCaptureRequirement", "CrossDepartmentDependency", "ExecutionPriorityScore", "ExecutionRiskScore", "ExecutionApprovalRequirement", "ExecutionDecisionRequest", "ExecutionDecisionResult", "ExecutionGovernorSafetySummary", "ResourceExecutionGovernorReport", "evaluate_execution_request", "build_resource_execution_governor_report", "request_from_mapping", "apply_learning_influence"]

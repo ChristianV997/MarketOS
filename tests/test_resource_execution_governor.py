@@ -12,7 +12,7 @@ from evaluation.companyos.resource_execution_governor import (
     ACTION_TYPES, DOMAINS, MODEL_POLICY_TIERS, OUTCOMES, RESOURCE_TYPES,
     BudgetCheckResult, ExecutionActionType, ExecutionDecisionRequest,
     ExecutionGovernorSafetySummary, ExecutionResourceType, LearningCaptureRequirement,
-    ResourceBudget, ResourceQuota, build_resource_execution_governor_report,
+    ResourceBudget, ResourceQuota, apply_learning_influence, build_resource_execution_governor_report,
     evaluate_execution_request, request_from_mapping,
 )
 
@@ -566,3 +566,124 @@ def test_report_has_no_secret_fixture_values():
     rendered = json.dumps(build_resource_execution_governor_report().to_dict())
     for marker in ("synthetic-secret-value", "BEGIN PRIVATE KEY", "client@example.com", "real account"):
         assert marker not in rendered
+
+
+def test_apply_learning_influence_without_context_returns_same_object():
+    """Required scenario: existing callers that do not provide learning
+    context must behave compatibly -- literally the same object, not just
+    an equal one, and identically under evaluate_execution_request."""
+    request = base("launch_ad_experiment")
+    assert apply_learning_influence(request) is request
+    assert apply_learning_influence(request, None) is request
+    assert apply_learning_influence(request, {}) == request
+
+
+def test_absent_learning_context_preserves_existing_behavior():
+    for action in ("screen_product_opportunities", "launch_ad_experiment", "run_provider_data_pull", "scale_ad_budget"):
+        request = base(action)
+        assert apply_learning_influence(request) is request
+        assert evaluate_execution_request(apply_learning_influence(request)) == evaluate_execution_request(request)
+
+
+def test_apply_learning_influence_never_touches_hard_gate_fields():
+    """The bridge must never move budgets, quotas, TrustOS/workspace
+    decisions, or approval state -- only previous_learning_required and
+    (opt-in) model_tier."""
+    request = base("generate_client_export", trustos_decision="hard_block", workspace_decision="hard_block", approval_state="not_requested", requested_amount=999.0, resource_type="client_export_quota")
+    influence = {"do_not_repeat_blocked": True, "hold_or_avoid": True, "trustos_recurrence_blocked": True, "recommended_model_tier": "cheap_llm"}
+    updated = apply_learning_influence(request, influence, apply_model_routing_lessons=True)
+    assert updated.trustos_decision == request.trustos_decision
+    assert updated.workspace_decision == request.workspace_decision
+    assert updated.approval_state == request.approval_state
+    assert updated.requested_amount == request.requested_amount
+    assert updated.resource_type == request.resource_type
+    assert updated.previous_learning_required is True
+
+
+def test_apply_learning_influence_do_not_repeat_forces_learning_required_blocker():
+    """Requirement: do-not-repeat rules must prevent the Governor from
+    recommending the same known-bad action -- realized through the
+    existing 'required learning has not been captured' blocker rather than
+    a new outcome value."""
+    request = base("launch_ad_experiment", requested_amount=10.0, resource_type="ad_spend", hypothesis="h", success_metric="m", kill_threshold=.02, learning_captured=False)
+    plain = evaluate_execution_request(request)
+    assert "required learning has not been captured" not in plain.blockers
+    influenced = apply_learning_influence(request, {"do_not_repeat_blocked": True})
+    result = evaluate_execution_request(influenced)
+    assert "required learning has not been captured" in result.blockers
+
+
+def test_apply_learning_influence_hold_or_avoid_also_forces_blocker():
+    """Required scenario: repeated failure produces a hold/avoid signal
+    that must actually change the Governor's decision, not just be
+    reported."""
+    request = base("scale_ad_budget", requested_amount=10.0, resource_type="ad_spend", metric_value=.06, scale_threshold=.05, approval_state="approved", learning_captured=False)
+    plain = evaluate_execution_request(request)
+    assert plain.outcome == "scale"
+    influenced = apply_learning_influence(request, {"hold_or_avoid": True})
+    result = evaluate_execution_request(influenced)
+    assert "required learning has not been captured" in result.blockers
+    assert result.outcome != "scale"
+
+
+def test_apply_learning_influence_model_routing_lesson_is_opt_in_only():
+    """Requirement: provider/model lessons influence routing tier as
+    planning metadata only -- never applied unless the caller opts in."""
+    request = base("run_frontier_llm_synthesis", resource_type="frontier_llm_budget", model_tier="frontier_llm")
+    influence = {"recommended_model_tier": "cheap_llm"}
+    default_call = apply_learning_influence(request, influence)
+    assert default_call.model_tier == "frontier_llm"
+    opted_in = apply_learning_influence(request, influence, apply_model_routing_lessons=True)
+    assert opted_in.model_tier == "cheap_llm"
+
+
+def test_apply_learning_influence_ignores_invalid_model_tier():
+    request = base("run_frontier_llm_synthesis", resource_type="frontier_llm_budget", model_tier="frontier_llm")
+    updated = apply_learning_influence(request, {"recommended_model_tier": "not_a_real_tier"}, apply_model_routing_lessons=True)
+    assert updated.model_tier == "frontier_llm"
+
+
+def test_positive_learning_cannot_bypass_budget_hard_block():
+    """Required scenario: repeated successful experiment evidence may
+    support a scale recommendation only when Governor budgets, quotas,
+    portfolio caps, experiment thresholds, and TrustOS gates also pass.
+    Derive a genuinely positive (repeated-win) influence from a real
+    Learning Ledger report and confirm applying it leaves a
+    budget-exceeding request exactly as blocked as before."""
+    from evaluation.companyos.learning_ledger import build_learning_ledger_report, derive_governor_influence
+    events = [
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "over-budget-candidate"},
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "over-budget-candidate"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="scale_ad_budget", candidate_id="over-budget-candidate")
+    assert influence.supports_scale is True
+    request = base("scale_ad_budget", requested_amount=500.0, resource_type="ad_spend", metric_value=.06, scale_threshold=.05, approval_state="approved")
+    plain = evaluate_execution_request(request)
+    assert plain.outcome == "soft_block"
+    assert any("hard cap" in item or "budget" in item for item in plain.blockers)
+    influenced_request = apply_learning_influence(request, influence.to_governor_context())
+    influenced_result = evaluate_execution_request(influenced_request)
+    assert influenced_result.outcome == "soft_block"
+    assert influenced_result.blockers == plain.blockers
+
+
+def test_trustos_recurrence_remains_hard_blocked_despite_positive_learning():
+    """Required scenario: recurring TrustOS/security blockers must remain
+    hard blockers and must never be overridden by positive learning."""
+    request = base("generate_client_export", resource_type="client_export_quota", trustos_decision="hard_block", workspace_decision="allow")
+    plain = evaluate_execution_request(request)
+    assert "TrustOS gate is blocked" in plain.blockers
+    assert plain.outcome == "hard_block"
+    influence = {"do_not_repeat_blocked": False, "hold_or_avoid": False, "trustos_recurrence_blocked": False, "recommended_model_tier": ""}
+    influenced_request = apply_learning_influence(request, influence)
+    influenced_result = evaluate_execution_request(influenced_request)
+    assert "TrustOS gate is blocked" in influenced_result.blockers
+    assert influenced_result.outcome == "hard_block"
+
+
+def test_apply_learning_influence_output_stays_a_valid_execution_decision_request():
+    request = base("launch_ad_experiment", requested_amount=10.0, resource_type="ad_spend", hypothesis="h", success_metric="m", kill_threshold=.02)
+    updated = apply_learning_influence(request, {"do_not_repeat_blocked": True})
+    assert isinstance(updated, ExecutionDecisionRequest)
+    assert updated.action_type == request.action_type

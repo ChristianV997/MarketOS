@@ -26,6 +26,7 @@ FAILURE_REASONS = ("weak_demand", "weak_supplier_feasibility", "poor_margin", "h
 SUCCESS_REASONS = ("strong_demand", "strong_supplier_fit", "strong_attention_signal", "clear_pain_point", "strong_hook", "high_margin", "fast_shipping", "low_competition", "good_offer_market_fit", "good_creative_market_fit", "good_landing_page_fit", "low_cpa_projection", "strong_portfolio_fit", "trustos_ready", "provider_ready", "budget_efficient")
 BLOCK_BEHAVIORS = ("warn", "soft_block", "hard_block", "requires_approval")
 LEARNING_TYPES = ("product_validation", "supplier_validation", "creative_test", "ad_experiment", "landing_page_test", "sales_outreach", "provider_run", "model_routing", "security_scan", "trustos_review")
+GOVERNOR_EVIDENCE_MODES = ("actual", "simulated", "unavailable", "not_run")
 
 
 def _clean(value: Any) -> Any:
@@ -187,6 +188,55 @@ class LearningDecisionInfluence:
     recommended_decision_modifier: str
     recommended_next_action: str
     def to_dict(self) -> dict[str, Any]: return _clean(self)
+
+
+@dataclass(frozen=True)
+class LearningGovernorInfluence:
+    """Self-contained handoff record for `derive_governor_influence`.
+
+    This is deliberately a second, narrower contract than
+    `LearningDecisionInfluence` (which is fixed sample data, independent of
+    `events`): every field here is derived from the actual events and
+    do-not-repeat rules in the report that was passed in. It carries plain
+    strings/floats/tuples only, so the Resource & Execution Governor can
+    consume it (via `to_governor_context()`) without this module importing
+    Governor types, and without the Governor importing this module's
+    types.
+
+    `supports_scale` is informational only -- nothing in this module or in
+    `apply_learning_influence` ever reads it to unlock an outcome. Only the
+    negative signals (`do_not_repeat_blocked`, `hold_or_avoid`,
+    `trustos_recurrence_blocked`) are wired to actually tighten a Governor
+    request, and only by requiring learning capture -- never by touching
+    budgets, quotas, TrustOS/workspace decisions, or approval state.
+    """
+    action_type: str
+    candidate_id: str
+    workspace_id: str
+    evidence_mode: str
+    confidence: float
+    recency_label: str
+    provenance: tuple[str, ...]
+    win_count: int
+    loss_count: int
+    supports_scale: bool
+    hold_or_avoid: bool
+    do_not_repeat_blocked: bool
+    do_not_repeat_overridden: bool
+    do_not_repeat_rule_ids: tuple[str, ...]
+    trustos_recurrence_blocked: bool
+    recommended_model_tier: str
+    deprioritize: bool
+    rationale: tuple[str, ...]
+    def __post_init__(self) -> None:
+        if self.evidence_mode not in GOVERNOR_EVIDENCE_MODES: raise ValueError("invalid governor evidence mode")
+    def to_dict(self) -> dict[str, Any]: return _clean(self)
+    def to_governor_context(self) -> dict[str, Any]:
+        """The narrow subset `apply_learning_influence` actually reads.
+        Kept smaller than `to_dict()` on purpose: candidate_id, provenance,
+        confidence, and rationale stay ledger-side observability, not
+        Governor-side inputs."""
+        return {"do_not_repeat_blocked": self.do_not_repeat_blocked, "hold_or_avoid": self.hold_or_avoid, "trustos_recurrence_blocked": self.trustos_recurrence_blocked, "recommended_model_tier": self.recommended_model_tier}
 
 
 @dataclass(frozen=True)
@@ -417,6 +467,69 @@ def _influences(events: Sequence[LearningEvent], rules: Sequence[LearningDoNotRe
     return (build("launch_ad_experiment", "portable-espresso-maker", 0.1, .9, ("previous poor creative angle and weak click-through",), ("previous learning capture",), "soft_block_until_learning_captured", "record a changed hypothesis and creative lesson"), build("generate_creative_batch", "portable-espresso-maker", .1, .85, ("missing learning capture",), ("prior iteration lesson",), "requires_learning_capture", "capture the losing angle and do-not-repeat rule"), build("run_frontier_llm_synthesis", "candidate-placeholder", .1, .9, ("frontier model waste on low-evidence work",), ("evidence threshold",), "hard_block_or_route_cheaper", "use algorithmic/local/cheap route unless evidence improves"), build("create_new_website", "portable-espresso-maker", .2, .7, ("prior landing-page fit is inconclusive",), ("page learning",), "soft_block_until_page_learning", "run one bounded page/offer iteration"), build("request_supplier_proof", "portable-espresso-maker", .75, .1, (), (), "prioritize_supplier_validation", "obtain supplier and shipping evidence"), build("scale_ad_budget", "mini-thermal-printer", .9, .1, (), (), "allow_controlled_scale", "scale within the approved increment and keep measuring"), build("generate_client_export", "candidate-placeholder", .4, .6, ("client isolation and redaction evidence required",), ("workspace review",), "requires_workspace_review", "complete leakage check and TrustOS approval"))
 
 
+def derive_governor_influence(report: "LearningLedgerReport", *, action_type: str, candidate_id: str = "candidate-placeholder", workspace_id: str = "internal-companyos", proposed_hypothesis: str = "") -> LearningGovernorInfluence:
+    """Derive a `LearningGovernorInfluence` for one action/candidate pair
+    from a real, already-built `LearningLedgerReport` -- the events and
+    do-not-repeat rules the report actually contains, not the fixed sample
+    scenarios in `_influences()`/`_model_impacts()`/`_provider_impacts()`.
+
+    Matching prefers events for this exact `candidate_id`; if none exist,
+    it falls back to every event sharing `action_type` (a general,
+    not-candidate-specific lesson) and records that in `recency_label`.
+    No matching event at all yields `evidence_mode="not_run"` and every
+    boolean signal `False` -- a caller with nothing on record gets no
+    influence, by construction.
+
+    Positive evidence (`supports_scale`) is computed but never consumed by
+    `apply_learning_influence`: only repeated failure, an unresolved
+    do-not-repeat rule, or a recurring TrustOS/security blocker ever
+    tighten a Governor request, and only via the existing
+    `previous_learning_required` gate `evaluate_execution_request` already
+    enforces.
+    """
+    candidate_events = tuple(event for event in report.events if event.action_taken == action_type and event.candidate_id == candidate_id)
+    matching_events = candidate_events or tuple(event for event in report.events if event.action_taken == action_type)
+    if not matching_events:
+        return LearningGovernorInfluence(action_type, candidate_id, workspace_id, "not_run", 0.0, "no_matching_event", (), 0, 0, False, False, False, False, (), False, "", False, ("no learning event references this action",))
+    outcomes = [event.outcome for event in matching_events]
+    wins = outcomes.count("win")
+    losses = sum(1 for outcome in outcomes if outcome in {"loss", "blocked", "killed"})
+    ambiguous_only = all(outcome in {"inconclusive", "needs_more_evidence", "invalid_test"} for outcome in outcomes)
+    evidence_mode = "unavailable" if ambiguous_only else "simulated"
+    confidence = round(sum(event.confidence for event in matching_events) / len(matching_events), 4)
+    provenance = tuple(event.learning_event_id for event in matching_events)
+    recency_label = "current_fixture_cycle" if candidate_events else "action_type_only_match"
+
+    matching_rules = tuple(rule for rule in report.do_not_repeat_rules if action_type in rule.applies_to_action_types)
+    do_not_repeat_present = bool(matching_rules)
+    do_not_repeat_overridden = do_not_repeat_present and bool(proposed_hypothesis.strip())
+    do_not_repeat_blocked = do_not_repeat_present and not do_not_repeat_overridden
+
+    trustos_blocker_event = any(event.outcome == "blocked" and "trust_blocker" in event.failure_reasons for event in matching_events)
+    trustos_recurring_impact = any(impact.occurrences >= 2 for impact in report.trustos_impacts if impact.blocker == "missing client isolation")
+    trustos_recurrence_blocked = trustos_blocker_event and (losses >= 2 or trustos_recurring_impact)
+
+    hold_or_avoid = losses >= 2
+    supports_scale = wins >= 2 and losses == 0 and not trustos_recurrence_blocked and not do_not_repeat_blocked
+
+    recommended_model_tier = ""; deprioritize = False
+    if action_type == "run_frontier_llm_synthesis" and any("model_cost_too_high" in event.failure_reasons for event in matching_events):
+        recommended_model_tier = "cheap_llm"; deprioritize = True
+    elif action_type == "run_cheap_llm_task" and wins and not losses:
+        recommended_model_tier = "cheap_llm"
+
+    rationale: list[str] = []
+    if do_not_repeat_blocked: rationale.append(f"{len(matching_rules)} do-not-repeat rule(s) apply to {action_type} and no new hypothesis was supplied")
+    if do_not_repeat_overridden: rationale.append(f"{len(matching_rules)} do-not-repeat rule(s) matched but were overridden by an explicit new hypothesis")
+    if hold_or_avoid: rationale.append(f"{losses} matching failed/blocked/killed event(s) recorded for {action_type}")
+    if trustos_recurrence_blocked: rationale.append("a recurring TrustOS/security blocker was recorded for this action and remains a hard blocker")
+    if supports_scale: rationale.append(f"{wins} matching win(s) recorded with no offsetting failure")
+    if recommended_model_tier: rationale.append(f"model/provider lesson recommends the {recommended_model_tier} tier as planning metadata only")
+    if not rationale: rationale.append("no actionable learning signal beyond the matched evidence")
+
+    return LearningGovernorInfluence(action_type, candidate_id, workspace_id, evidence_mode, confidence, recency_label, provenance, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in matching_rules), bool(trustos_recurrence_blocked), recommended_model_tier, deprioritize, tuple(rationale))
+
+
 def _from_mapping(item: Mapping[str, Any], index: int) -> LearningEvent:
     event_type = str(item.get("event_type", "companyos_review")); outcome = str(item.get("outcome", "inconclusive")); failures = tuple(str(x) for x in item.get("failure_reasons", ())); successes = tuple(str(x) for x in item.get("success_reasons", ()))
     return _event(str(item.get("learning_event_id", f"fixture-event-{index}")), event_type, outcome, candidate=str(item.get("candidate_id", "candidate-placeholder")), failures=failures, successes=successes, action=str(item.get("action_taken", event_type)), cost=float(item.get("cost_estimate", 0.0)), confidence=float(item.get("confidence", .7)), visibility=str(item.get("client_visibility", "internal_only")), department=str(item.get("owner_department", "management")), statement=str(item.get("hypothesis", "Sanitized fixture hypothesis.")), influence=str(item.get("resource_governor_influence", "Record the result before the next decision.")))
@@ -453,7 +566,7 @@ def build_learning_ledger_report(*, generated_at: str = "offline-deterministic",
     return LearningLedgerReport("learning-ledger-v1", generated_at, raw, experiments, results, tuple(LearningLesson(f"lesson-{item.learning_event_id}", f"{item.event_type} lesson", "success" if item.outcome == "win" else "failure" if item.outcome in {"loss", "blocked", "killed"} else "iteration", item.resource_governor_influence, item.input_evidence_refs, item.confidence, item.client_visibility) for item in raw), rules, recommendations, _portfolio_impacts(raw), _model_impacts(raw), _provider_impacts(raw), _trustos_impacts(raw), _influences(raw, rules), summary, LearningLedgerSafetySummary(), "Attach captured lessons to the next Resource Governor decision; do not repeat blocked patterns without new evidence.")
 
 
-__all__ = ["EVENT_TYPES", "OUTCOMES", "VISIBILITY", "FAILURE_REASONS", "SUCCESS_REASONS", "BLOCK_BEHAVIORS", "LearningLedgerReport", "LearningEvent", "LearningExperiment", "LearningHypothesis", "LearningMetric", "LearningResult", "LearningOutcome", "LearningAttribution", "LearningLesson", "LearningDoNotRepeatRule", "LearningIterationRecommendation", "LearningPortfolioImpact", "LearningModelRoutingImpact", "LearningProviderImpact", "LearningTrustOSImpact", "LearningDecisionInfluence", "LearningLedgerSummary", "LearningLedgerSafetySummary", "build_learning_ledger_report"]
+__all__ = ["EVENT_TYPES", "OUTCOMES", "VISIBILITY", "FAILURE_REASONS", "SUCCESS_REASONS", "BLOCK_BEHAVIORS", "GOVERNOR_EVIDENCE_MODES", "LearningLedgerReport", "LearningEvent", "LearningExperiment", "LearningHypothesis", "LearningMetric", "LearningResult", "LearningOutcome", "LearningAttribution", "LearningLesson", "LearningDoNotRepeatRule", "LearningIterationRecommendation", "LearningPortfolioImpact", "LearningModelRoutingImpact", "LearningProviderImpact", "LearningTrustOSImpact", "LearningDecisionInfluence", "LearningGovernorInfluence", "derive_governor_influence", "LearningLedgerSummary", "LearningLedgerSafetySummary", "build_learning_ledger_report"]
 
 
 @dataclass(frozen=True)

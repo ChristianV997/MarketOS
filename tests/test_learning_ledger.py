@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 from evaluation.companyos.learning_ledger import (
-    BLOCK_BEHAVIORS, EVENT_TYPES, FAILURE_REASONS, OUTCOMES, SUCCESS_REASONS, VISIBILITY,
-    LearningAttribution, LearningHypothesis, LearningLedgerSafetySummary,
-    LearningMetric, LearningOutcome, LearningResult, build_learning_ledger_report,
+    BLOCK_BEHAVIORS, EVENT_TYPES, FAILURE_REASONS, GOVERNOR_EVIDENCE_MODES, OUTCOMES, SUCCESS_REASONS, VISIBILITY,
+    LearningAttribution, LearningGovernorInfluence, LearningHypothesis, LearningLedgerSafetySummary,
+    LearningMetric, LearningOutcome, LearningResult, build_learning_ledger_report, derive_governor_influence,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -822,3 +822,137 @@ def test_generic_runaway_guard_rule_is_unaffected_by_provider_special_case():
     report = build_learning_ledger_report(context={"events": [{"event_type": "runaway_guard_event", "outcome": "blocked", "failure_reasons": ["runaway_guard_triggered"], "action_taken": "spawn_agent_workflow"}]})
     rule = report.do_not_repeat_rules[0]
     assert rule.condition == "workflow exceeds retry, agent, or step limits"
+
+
+def test_governor_evidence_modes_vocabulary_is_bounded():
+    assert GOVERNOR_EVIDENCE_MODES == ("actual", "simulated", "unavailable", "not_run")
+
+
+def test_derive_governor_influence_absent_evidence_is_not_run():
+    """Required scenario: absent learning context (no matching event at
+    all) must never invent a signal -- every boolean stays False and
+    evidence_mode is the explicit 'not_run' vocabulary member."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "product_validation", "outcome": "win", "success_reasons": ["strong_demand"], "action_taken": "deep_validate_product"}]})
+    influence = derive_governor_influence(report, action_type="run_frontier_llm_synthesis", candidate_id="never-seen-candidate")
+    assert influence.evidence_mode == "not_run"
+    assert influence.provenance == ()
+    assert influence.supports_scale is False
+    assert influence.hold_or_avoid is False
+    assert influence.do_not_repeat_blocked is False
+    assert influence.trustos_recurrence_blocked is False
+    assert influence.recommended_model_tier == ""
+
+
+def test_derive_governor_influence_repeated_failure_creates_hold_or_avoid():
+    """Required scenario: repeated failed/killed experiments create a
+    deterministic hold/avoid recommendation for the matching action."""
+    events = [
+        {"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "repeat-offender"},
+        {"event_type": "ad_experiment", "outcome": "killed", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "repeat-offender"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="repeat-offender")
+    assert influence.hold_or_avoid is True
+    assert influence.loss_count == 2
+    assert influence.evidence_mode == "simulated"
+    assert len(influence.provenance) == 2
+
+
+def test_derive_governor_influence_single_failure_does_not_hold():
+    """A single matching failure is not 'repeated' -- hold_or_avoid must
+    stay False until the pattern actually recurs."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "one-off"}]})
+    influence = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="one-off")
+    assert influence.hold_or_avoid is False
+
+
+def test_derive_governor_influence_do_not_repeat_blocks_without_new_hypothesis():
+    """Required scenario / requirement: do-not-repeat rules must prevent
+    the Governor from recommending the same known-bad action unless a new
+    explicit hypothesis or override is present."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "blocked-candidate"}]})
+    blocked = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="blocked-candidate")
+    assert blocked.do_not_repeat_blocked is True
+    assert blocked.do_not_repeat_overridden is False
+    assert blocked.do_not_repeat_rule_ids
+
+
+def test_derive_governor_influence_do_not_repeat_override_with_new_hypothesis():
+    report = build_learning_ledger_report(context={"events": [{"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "blocked-candidate"}]})
+    overridden = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="blocked-candidate", proposed_hypothesis="A new, changed creative hook targeting a different audience segment.")
+    assert overridden.do_not_repeat_blocked is False
+    assert overridden.do_not_repeat_overridden is True
+    assert overridden.do_not_repeat_rule_ids
+
+
+def test_derive_governor_influence_trustos_recurrence_is_flagged():
+    """Required scenario / requirement: recurring TrustOS or security
+    blockers must remain hard blockers. This records the signal only;
+    `apply_learning_influence` (tested in
+    test_resource_execution_governor.py) never uses a positive signal to
+    lift the Governor's own trustos_decision gate."""
+    events = [
+        {"event_type": "trustos_review", "outcome": "blocked", "failure_reasons": ["trust_blocker"], "action_taken": "generate_client_export", "candidate_id": "export-candidate"},
+        {"event_type": "trustos_review", "outcome": "blocked", "failure_reasons": ["trust_blocker"], "action_taken": "generate_client_export", "candidate_id": "export-candidate"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="generate_client_export", candidate_id="export-candidate")
+    assert influence.trustos_recurrence_blocked is True
+    assert influence.supports_scale is False
+
+
+def test_derive_governor_influence_model_routing_lesson_is_planning_metadata():
+    """Required scenario / requirement: provider/model lessons influence
+    routing tier as planning metadata only."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "model_routing_decision", "outcome": "loss", "failure_reasons": ["model_cost_too_high"], "action_taken": "run_frontier_llm_synthesis"}]})
+    influence = derive_governor_influence(report, action_type="run_frontier_llm_synthesis")
+    assert influence.recommended_model_tier == "cheap_llm"
+    assert influence.deprioritize is True
+
+
+def test_derive_governor_influence_positive_evidence_supports_scale_only_when_repeated_and_clean():
+    report = build_learning_ledger_report(context={"events": [
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "clean-winner"},
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "clean-winner"},
+    ]})
+    influence = derive_governor_influence(report, action_type="scale_ad_budget", candidate_id="clean-winner")
+    assert influence.supports_scale is True
+    assert influence.win_count == 2
+
+
+def test_derive_governor_influence_falls_back_to_action_type_when_no_candidate_match():
+    report = build_learning_ledger_report(context={"events": [{"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "someone-else"}]})
+    influence = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="unrelated-candidate")
+    assert influence.recency_label == "action_type_only_match"
+    assert influence.loss_count == 1
+
+
+def test_derive_governor_influence_is_deterministic():
+    report = build_learning_ledger_report()
+    first = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="portable-espresso-maker")
+    second = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="portable-espresso-maker")
+    assert first == second
+
+
+def test_derive_governor_influence_to_governor_context_is_narrow():
+    report = build_learning_ledger_report()
+    influence = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="portable-espresso-maker")
+    context = influence.to_governor_context()
+    assert set(context) == {"do_not_repeat_blocked", "hold_or_avoid", "trustos_recurrence_blocked", "recommended_model_tier"}
+    assert "candidate_id" not in context
+    assert "provenance" not in context
+
+
+def test_learning_governor_influence_rejects_invalid_evidence_mode():
+    with pytest.raises(ValueError):
+        LearningGovernorInfluence("launch_ad_experiment", "candidate", "internal-companyos", "not-a-real-mode", 0.0, "unknown", (), 0, 0, False, False, False, False, (), False, "", False, ())
+
+
+def test_learning_ledger_still_imports_no_governor_module():
+    """The stdlib-only invariant this PR's body already documents must
+    survive the new bridge: the ledger must not import the Resource &
+    Execution Governor, even though it now produces a record the Governor
+    can consume."""
+    source = (ROOT / "evaluation" / "companyos" / "learning_ledger.py").read_text(encoding="utf-8")
+    assert "resource_execution_governor" not in source
+    assert "import evaluation" not in source
