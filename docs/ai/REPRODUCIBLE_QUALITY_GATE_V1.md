@@ -59,6 +59,25 @@ baseline is `changed_scope_failure`. If the baseline does not prove either
 origin, the result is `failure_origin_unverified`; the gate does not infer
 ownership from history or from a green-looking summary.
 
+For deterministic baseline attribution, pass a bounded local gate report or
+sanitized `MarketOS.CIEvidence.v1` file as `--baseline-file` alongside the
+candidate's `--ci-evidence-file`:
+
+```powershell
+python scripts/ai/run_local_quality_gate.py --from-git --execute `
+  --generated-at 2026-08-29T12:00:00+00:00 `
+  --baseline-file baseline.json --ci-evidence-file candidate-ci.json --json
+```
+
+The report adds one `baseline_delta` object to the existing gate output. Its
+sorted controls compare baseline and candidate statuses and classify
+`introduced_failure`, `inherited_failure`, `resolved_failure`,
+`newly_available_pass`, `unavailable_in_both`, `failure_origin_unverified`,
+or candidate-incomplete evidence. Missing baseline input is unavailable and
+malformed baseline input is malformed; neither can produce final readiness.
+The delta is advisory attribution within the existing authority, not a second
+readiness decision. Its stable fingerprint excludes timestamps and raw output.
+
 CI is an explicit input only. The local gate never queries GitHub. A missing
 CI input is `ci_unavailable`, and a reported CI failure with zero executed
 steps is also `ci_unavailable`, not a pass. A real failure with executed steps

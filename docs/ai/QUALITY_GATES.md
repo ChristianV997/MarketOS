@@ -28,8 +28,11 @@ fixed check order `compile`, `pytest`, `ruff`, `typed`, `frontend`, `security`,
 and `diff_check`; with `--execute` it runs only those repository-local checks.
 It never installs dependencies, queries CI, calls providers, or publishes
 raw command output. Use `--generated-at` to make the report timestamp an
-explicit input, and use `--baseline-file` only for an operator-supplied
-baseline whose check statuses are classified separately from the current run.
+explicit input. `--baseline-file` accepts a bounded local gate report or the
+same sanitized `MarketOS.CIEvidence.v1` input used by `--ci-evidence-file`.
+Its statuses are classified separately from the current run and are exposed
+as the advisory `baseline_delta` field; this attribution never authorizes a
+merge or changes the final readiness conditions.
 
 The structured report uses schema `MarketOS.LocalQualityGate.v2` and these
 process exits:
@@ -69,6 +72,16 @@ availability, and required-check status. Unknown fields, including raw logs,
 are malformed. A required job missing from the observed jobs is synthetic
 `ci_unavailable` evidence. A missing runner, zero steps, incomplete job, or
 unavailable logs is `ci_unavailable`; it cannot become a pass.
+When a baseline is supplied, `baseline_delta.controls` compares stable check
+and CI-job names in sorted order. It can classify an `introduced_failure`,
+`inherited_failure`, `resolved_failure`, `newly_available_pass`,
+`unavailable_in_both`, `failure_origin_unverified`, `candidate_incomplete`,
+`baseline_missing`, or malformed baseline. A missing baseline file produces
+an unavailable delta; malformed baseline data produces a malformed delta.
+The delta status itself uses the existing gate vocabulary and is included in
+the readiness blockers. Its `fingerprint` is derived only from canonical
+statuses and classifications, excluding timestamps and raw output, so equal
+inputs produce equal attribution.
 Malformed scanner output is malformed evidence. A security scanner that exits
 zero while returning findings remains a security failure. The readiness field
 stays false while any blocker exists, while the repository is dirty, or while

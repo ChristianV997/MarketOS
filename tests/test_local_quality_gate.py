@@ -544,6 +544,179 @@ def test_changed_and_pre_existing_failures_require_baseline_evidence(monkeypatch
     assert report["baseline"]["check_statuses"] == {"pytest": "passed", "ruff": "failed"}
 
 
+def _delta_report(baseline_statuses, candidate_statuses, *, candidate_ci=None):
+    baseline = {"checks": dict(baseline_statuses), "ci": {"status": "passed"}}
+    checks = [{"name": name, "status": status, "checks": []} for name, status in candidate_statuses.items()]
+    return gate._baseline_delta(
+        baseline,
+        baseline_error=None,
+        checks=checks,
+        ci_result=candidate_ci or {"status": "success", "executed_steps": 1},
+    )
+
+
+def _delta_classes(report):
+    return {item["name"]: item["classification"] for item in report["controls"]}
+
+
+def test_baseline_delta_identical_reports_are_unchanged_and_fingerprinted():
+    first = _delta_report({"pytest": "passed"}, {"pytest": "passed"})
+    second = _delta_report({"pytest": "passed"}, {"pytest": "passed"})
+
+    assert first["status"] == "passed"
+    assert first["classification"] == gate.BASELINE_DELTA_UNCHANGED
+    assert _delta_classes(first)["pytest"] == gate.BASELINE_DELTA_UNCHANGED
+    assert first["fingerprint"] == second["fingerprint"]
+
+
+def test_baseline_delta_distinguishes_introduced_inherited_resolved_and_new_passes():
+    introduced = _delta_report({"pytest": "passed"}, {"pytest": "failed"})
+    inherited = _delta_report({"pytest": "failed"}, {"pytest": "failed"})
+    resolved = _delta_report({"pytest": "failed"}, {"pytest": "passed"})
+    newly_available = _delta_report({"pytest": "unavailable"}, {"pytest": "passed"})
+
+    assert _delta_classes(introduced)["pytest"] == gate.BASELINE_DELTA_INTRODUCED_FAILURE
+    assert _delta_classes(inherited)["pytest"] == gate.BASELINE_DELTA_INHERITED_FAILURE
+    assert _delta_classes(resolved)["pytest"] == gate.BASELINE_DELTA_RESOLVED_FAILURE
+    assert _delta_classes(newly_available)["pytest"] == gate.BASELINE_DELTA_NEWLY_AVAILABLE_PASS
+
+
+def test_baseline_delta_reports_unavailable_in_both_and_mixed_failure():
+    unavailable = _delta_report({"pytest": "unavailable"}, {"pytest": "unavailable"})
+    mixed = _delta_report(
+        {"pytest": "passed", "ruff": "passed"},
+        {"pytest": "failed", "ruff": "unavailable"},
+    )
+
+    assert _delta_classes(unavailable)["pytest"] == gate.BASELINE_DELTA_UNAVAILABLE_IN_BOTH
+    assert unavailable["status"] == "unavailable"
+    assert _delta_classes(mixed)["pytest"] == gate.BASELINE_DELTA_INTRODUCED_FAILURE
+    assert _delta_classes(mixed)["ruff"] == gate.BASELINE_DELTA_CANDIDATE_INCOMPLETE
+    assert mixed["status"] == "failed"
+
+
+def test_baseline_delta_missing_and_malformed_evidence_are_not_passes():
+    checks = [{"name": "pytest", "status": "passed", "checks": []}]
+    missing = gate._baseline_delta(None, baseline_error=gate.CLASS_BASELINE_MISSING, checks=checks, ci_result={"status": "success", "executed_steps": 1})
+    malformed = gate._baseline_delta(None, baseline_error=gate.CLASS_BASELINE_MALFORMED, checks=checks, ci_result={"status": "success", "executed_steps": 1})
+
+    assert missing["status"] == "unavailable"
+    assert missing["classification"] == gate.CLASS_BASELINE_MISSING
+    assert malformed["status"] == "malformed"
+    assert malformed["classification"] == gate.CLASS_BASELINE_MALFORMED
+
+
+def test_baseline_delta_marks_incomplete_and_zero_step_candidate_ci():
+    report = _delta_report(
+        {"pytest": "passed"},
+        {"pytest": "passed"},
+        candidate_ci={"status": "success", "executed_steps": 0},
+    )
+
+    assert _delta_classes(report)["ci"] == gate.BASELINE_DELTA_CANDIDATE_INCOMPLETE
+    assert report["status"] == "unavailable"
+
+
+def test_baseline_delta_preserves_legacy_ci_status_input():
+    report = _delta_report(
+        {"ci": "passed", "pytest": "passed"},
+        {"pytest": "passed"},
+        candidate_ci={"status": "failure", "executed_steps": 1},
+    )
+
+    assert _delta_classes(report)["ci"] == gate.BASELINE_DELTA_INTRODUCED_FAILURE
+    assert report["status"] == "failed"
+
+
+def test_baseline_delta_compares_sanitized_ci_job_evidence(tmp_path):
+    baseline_path = _write_ci_evidence(tmp_path)
+    baseline, baseline_error = gate.load_baseline_evidence(baseline_path)
+    assert baseline_error is None
+
+    candidate_payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+    candidate_payload["run"]["conclusion"] = "failure"
+    candidate_payload["jobs"][0]["conclusion"] = "failure"
+    candidate_payload["jobs"][0]["required_check_status"] = "failure"
+    candidate_path = tmp_path / "candidate-ci-evidence.json"
+    candidate_path.write_text(json.dumps(candidate_payload), encoding="utf-8")
+    candidate, candidate_error = gate.load_ci_evidence(candidate_path)
+    assert candidate_error is None
+
+    report = gate._baseline_delta(baseline, baseline_error=None, checks=[], ci_result=candidate)
+
+    assert _delta_classes(report)["ci"] == gate.BASELINE_DELTA_INTRODUCED_FAILURE
+    assert _delta_classes(report)["ci:agentic-quality-gate"] == gate.BASELINE_DELTA_INTRODUCED_FAILURE
+    assert report["status"] == "failed"
+
+
+def test_baseline_delta_compares_nested_local_checks():
+    baseline = {
+        "schema": gate.QUALITY_GATE_SCHEMA,
+        "checks": [{
+            "name": "frontend",
+            "status": "passed",
+            "checks": [{"name": "frontend:lint", "status": "passed"}],
+        }],
+        "ci": {"status": "passed"},
+    }
+    candidate_checks = [{
+        "name": "frontend",
+        "status": "passed",
+        "checks": [{"name": "frontend:lint", "status": "passed"}],
+    }]
+
+    report = gate._baseline_delta(baseline, baseline_error=None, checks=candidate_checks, ci_result={"status": "success", "executed_steps": 1})
+
+    assert _delta_classes(report)["frontend:lint"] == gate.BASELINE_DELTA_UNCHANGED
+    assert report["status"] == "passed"
+
+
+def test_baseline_file_rejects_malformed_local_report(tmp_path):
+    malformed_path = tmp_path / "malformed-baseline.json"
+    malformed_path.write_text(json.dumps({"schema": gate.QUALITY_GATE_SCHEMA, "checks": "not-a-check-list"}), encoding="utf-8")
+
+    baseline, error = gate.load_baseline_evidence(malformed_path)
+
+    assert baseline is None
+    assert error == gate.CLASS_BASELINE_MALFORMED
+
+
+def test_baseline_file_rejects_raw_fields_and_oversized_input(tmp_path):
+    raw_path = _write_ci_evidence(tmp_path)
+    raw_payload = json.loads(raw_path.read_text(encoding="utf-8"))
+    raw_payload["raw_logs"] = "not retained"
+    raw_path.write_text(json.dumps(raw_payload), encoding="utf-8")
+
+    baseline, error = gate.load_baseline_evidence(raw_path)
+    assert baseline is None
+    assert error == gate.CLASS_BASELINE_MALFORMED
+
+    oversized_path = tmp_path / "oversized-baseline.json"
+    oversized_path.write_bytes(b"{" + b" " * gate.CI_EVIDENCE_MAX_BYTES + b"}")
+    baseline, error = gate.load_baseline_evidence(oversized_path)
+    assert baseline is None
+    assert error == "baseline_too_large"
+
+
+def test_baseline_ci_evidence_reuses_strict_loader_and_rejects_duplicates(tmp_path):
+    evidence_path = _write_ci_evidence(tmp_path)
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    evidence["jobs"].append(dict(evidence["jobs"][0]))
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    baseline, error = gate.load_baseline_evidence(evidence_path)
+
+    assert baseline is None
+    assert error == gate.CLASS_BASELINE_MALFORMED
+
+
+def test_baseline_file_missing_is_explicitly_unavailable(tmp_path):
+    baseline, error = gate.load_baseline_evidence(tmp_path / "missing-baseline.json")
+
+    assert baseline is None
+    assert error == gate.CLASS_BASELINE_MISSING
+
+
 def test_unrelated_changed_paths_do_not_prove_changed_scope(monkeypatch, tmp_path):
     _all_tools_available(monkeypatch)
 

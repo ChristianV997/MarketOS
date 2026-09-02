@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -46,6 +47,8 @@ CLASS_DIFF_FAILURE = "diff_failure"
 CLASS_COLLECTION_FAILED = "collection_failed"
 CLASS_TIMEOUT = "timeout"
 CLASS_MALFORMED_CONFIGURATION = "malformed"
+CLASS_BASELINE_MISSING = "baseline_missing"
+CLASS_BASELINE_MALFORMED = "malformed_baseline"
 
 CHECK_ORDER = ("compile", "pytest", "ruff", "typed", "frontend", "security", "diff_check")
 PREFLIGHT_CHECK_ORDER = ("compile", "pytest", "ruff", "diff_check")
@@ -94,6 +97,16 @@ CI_EVIDENCE_CHECK_STATUSES = {"success", "failure", "neutral", "cancelled", "ski
 CI_EVIDENCE_MAX_BYTES = 64 * 1024
 CI_EVIDENCE_MAX_JOBS = 100
 QUALITY_GATE_PHASES = {"final", "preflight"}
+BASELINE_FORBIDDEN_FIELDS = {"stdout", "stderr", "raw_logs", "raw_stdout", "raw_stderr", "environment", "credentials"}
+BASELINE_DELTA_UNCHANGED = "unchanged"
+BASELINE_DELTA_INTRODUCED_FAILURE = "introduced_failure"
+BASELINE_DELTA_INHERITED_FAILURE = "inherited_failure"
+BASELINE_DELTA_RESOLVED_FAILURE = "resolved_failure"
+BASELINE_DELTA_NEWLY_AVAILABLE_PASS = "newly_available_pass"
+BASELINE_DELTA_UNAVAILABLE_IN_BOTH = "unavailable_in_both"
+BASELINE_DELTA_FAILURE_ORIGIN_UNVERIFIED = CLASS_FAILURE_ORIGIN_UNVERIFIED
+BASELINE_DELTA_CANDIDATE_INCOMPLETE = "candidate_incomplete"
+BASELINE_DELTA_CANDIDATE_MALFORMED = "candidate_malformed"
 
 
 def _optional_phase1_summary() -> tuple[dict[str, Any], dict[str, Any]]:
@@ -789,25 +802,304 @@ def _timestamp_status(generated_at: str | None) -> tuple[bool, str | None]:
     return parsed.tzinfo is not None, None if parsed.tzinfo is not None else "generated_at_requires_timezone"
 
 
+def _contains_forbidden_baseline_fields(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        if any(field in value for field in BASELINE_FORBIDDEN_FIELDS):
+            return True
+        return any(_contains_forbidden_baseline_fields(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_forbidden_baseline_fields(child) for child in value)
+    return False
+
+
+def _baseline_status_value(value: Any) -> str | None:
+    status = value if isinstance(value, str) else value.get("status") if isinstance(value, Mapping) else None
+    return status if isinstance(status, str) and status in CHECK_STATUS_TAXONOMY else None
+
+
+def _valid_local_baseline_payload(payload: Mapping[str, Any]) -> bool:
+    if _contains_forbidden_baseline_fields(payload):
+        return False
+
+    checks = payload.get("checks")
+    has_control = False
+    if checks is not None:
+        if isinstance(checks, Mapping):
+            if not checks:
+                return False
+            for name, value in checks.items():
+                if not isinstance(name, str) or not name.strip() or _baseline_status_value(value) is None:
+                    return False
+                has_control = True
+        elif isinstance(checks, list):
+            if not checks:
+                return False
+            names: set[str] = set()
+            for item in checks:
+                if not isinstance(item, Mapping) or not isinstance(item.get("name"), str) or not item["name"].strip():
+                    return False
+                name = item["name"].strip()
+                if name in names or _baseline_status_value(item) is None:
+                    return False
+                names.add(name)
+                has_control = True
+        else:
+            return False
+    else:
+        for name, value in payload.items():
+            if name in {"schema", "ci"}:
+                continue
+            if not isinstance(name, str) or not name.strip() or _baseline_status_value(value) is None:
+                return False
+            has_control = True
+
+    ci = payload.get("ci")
+    if ci is not None:
+        if not isinstance(ci, Mapping):
+            return False
+        if "status" in ci and _baseline_status_value(ci) is None:
+            return False
+        jobs = ci.get("jobs", [])
+        if not isinstance(jobs, list):
+            return False
+        names: set[str] = set()
+        for job in jobs:
+            if not isinstance(job, Mapping) or not isinstance(job.get("name"), str) or not job["name"].strip():
+                return False
+            name = job["name"].strip()
+            if name in names or _baseline_status_value(job) is None:
+                return False
+            names.add(name)
+            has_control = True
+        if "status" not in ci and not jobs:
+            return False
+    return has_control
+
+
+def load_baseline_evidence(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Load a bounded local baseline report or the existing sanitized CI schema."""
+    try:
+        if path.stat().st_size > CI_EVIDENCE_MAX_BYTES:
+            return None, "baseline_too_large"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, CLASS_BASELINE_MISSING
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None, CLASS_BASELINE_MALFORMED
+    if not isinstance(payload, Mapping):
+        return None, CLASS_BASELINE_MALFORMED
+    if payload.get("schema") == CI_EVIDENCE_SCHEMA:
+        evidence, error = load_ci_evidence(path)
+        return (None, CLASS_BASELINE_MALFORMED) if error else (evidence, None)
+    if payload.get("schema") not in {None, QUALITY_GATE_SCHEMA}:
+        return None, CLASS_BASELINE_MALFORMED
+    if not _valid_local_baseline_payload(payload):
+        return None, CLASS_BASELINE_MALFORMED
+    return dict(payload), None
+
+
 def _baseline_statuses(baseline_report: Mapping[str, Any] | None) -> dict[str, str]:
     """Extract only check statuses from an operator-supplied baseline report."""
     if not isinstance(baseline_report, Mapping):
         return {}
-    raw_checks = baseline_report.get("checks", baseline_report)
-    if isinstance(raw_checks, list):
-        entries = ((item.get("name"), item) for item in raw_checks if isinstance(item, Mapping))
-    elif isinstance(raw_checks, Mapping):
-        entries = raw_checks.items()
-    else:
-        return {}
+    if baseline_report.get("evidence_format") == CI_EVIDENCE_SCHEMA:
+        snapshot = _ci_evidence_snapshot(baseline_report)
+        statuses = {
+            f"ci:{job['name']}": job["status"]
+            for job in snapshot.get("jobs", [])
+            if isinstance(job, Mapping) and isinstance(job.get("name"), str)
+        }
+        if isinstance(snapshot.get("status"), str):
+            statuses["ci"] = snapshot["status"]
+        return statuses
     statuses: dict[str, str] = {}
-    for name, value in entries:
+    def record(name: Any, value: Any) -> None:
         if not isinstance(name, str):
-            continue
+            return
         status = value if isinstance(value, str) else value.get("status") if isinstance(value, Mapping) else None
         if isinstance(status, str) and status:
             statuses[name] = status
+        if isinstance(value, Mapping):
+            for child_key in ("checks", "subchecks"):
+                children = value.get(child_key)
+                if isinstance(children, list):
+                    for child in children:
+                        if isinstance(child, Mapping):
+                            record(child.get("name"), child)
+                elif isinstance(children, Mapping):
+                    for child_name, child_value in children.items():
+                        record(child_name, child_value)
+
+    raw_checks = baseline_report.get("checks", baseline_report)
+    if isinstance(raw_checks, list):
+        for item in raw_checks:
+            if isinstance(item, Mapping):
+                record(item.get("name"), item)
+    elif isinstance(raw_checks, Mapping):
+        for name, value in raw_checks.items():
+            record(name, value)
+    else:
+        return {}
+    ci = baseline_report.get("ci")
+    if isinstance(ci, Mapping):
+        status = ci.get("status")
+        if isinstance(status, str) and status:
+            statuses["ci"] = status
+        for job in ci.get("jobs", []):
+            if isinstance(job, Mapping) and isinstance(job.get("name"), str) and isinstance(job.get("status"), str):
+                statuses[f"ci:{job['name']}"] = job["status"]
     return statuses
+
+
+def _candidate_statuses(checks: list[dict[str, Any]], ci_result: Mapping[str, Any]) -> dict[str, str]:
+    statuses: dict[str, str] = {}
+    for item in checks:
+        if isinstance(item.get("name"), str) and isinstance(item.get("status"), str):
+            statuses[item["name"]] = item["status"]
+        for child_key in ("checks", "subchecks"):
+            children = item.get(child_key, [])
+            if isinstance(children, list):
+                entries = ((child.get("name"), child) for child in children if isinstance(child, Mapping))
+            elif isinstance(children, Mapping):
+                entries = children.items()
+            else:
+                entries = ()
+            for name, child in entries:
+                if isinstance(name, str) and isinstance(child, Mapping) and isinstance(child.get("status"), str):
+                    statuses[name] = child["status"]
+    ci = _ci_snapshot(ci_result)
+    statuses["ci"] = str(ci.get("status", "unavailable"))
+    for job in ci.get("jobs", []):
+        if isinstance(job, Mapping) and isinstance(job.get("name"), str) and isinstance(job.get("status"), str):
+            statuses[f"ci:{job['name']}"] = job["status"]
+    return statuses
+
+
+def _status_bucket(status: str | None) -> str:
+    if status == "passed":
+        return "pass"
+    if status in {"failed", "timed_out", "collection_failed", "blocked"}:
+        return "failure"
+    if status in {"unavailable", "ci_unavailable", "not_run", "not_configured"}:
+        return "unavailable"
+    if status == "malformed":
+        return "malformed"
+    return "unknown"
+
+
+def _baseline_delta_classification(baseline_status: str | None, candidate_status: str | None) -> str:
+    if baseline_status is None:
+        if _status_bucket(candidate_status) == "failure":
+            return BASELINE_DELTA_FAILURE_ORIGIN_UNVERIFIED
+        return CLASS_BASELINE_MISSING
+    baseline_bucket = _status_bucket(baseline_status)
+    candidate_bucket = _status_bucket(candidate_status)
+    if baseline_bucket == "malformed":
+        return CLASS_BASELINE_MALFORMED
+    if candidate_bucket == "malformed":
+        return BASELINE_DELTA_CANDIDATE_MALFORMED
+    if candidate_bucket == "pass":
+        if baseline_bucket == "pass":
+            return BASELINE_DELTA_UNCHANGED
+        if baseline_bucket == "failure":
+            return BASELINE_DELTA_RESOLVED_FAILURE
+        if baseline_bucket == "unavailable":
+            return BASELINE_DELTA_NEWLY_AVAILABLE_PASS
+    if candidate_bucket == "failure":
+        if baseline_bucket == "pass":
+            return BASELINE_DELTA_INTRODUCED_FAILURE
+        if baseline_bucket == "failure":
+            return BASELINE_DELTA_INHERITED_FAILURE
+        return BASELINE_DELTA_FAILURE_ORIGIN_UNVERIFIED
+    if candidate_bucket == "unavailable":
+        if baseline_bucket == "unavailable":
+            return BASELINE_DELTA_UNAVAILABLE_IN_BOTH
+        return BASELINE_DELTA_CANDIDATE_INCOMPLETE
+    return BASELINE_DELTA_CANDIDATE_MALFORMED
+
+
+def _stable_fingerprint(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _baseline_delta(
+    baseline_report: Mapping[str, Any] | None,
+    *,
+    baseline_error: str | None,
+    checks: list[dict[str, Any]],
+    ci_result: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if baseline_error == CLASS_BASELINE_MISSING:
+        return {
+            "status": "unavailable",
+            "classification": CLASS_BASELINE_MISSING,
+            "classifications": [CLASS_BASELINE_MISSING],
+            "baseline_available": False,
+            "controls": [],
+            "summary": {CLASS_BASELINE_MISSING: 1},
+            "fingerprint": _stable_fingerprint({"error": CLASS_BASELINE_MISSING}),
+        }
+    if baseline_error:
+        return {
+            "status": "malformed",
+            "classification": CLASS_BASELINE_MALFORMED,
+            "classifications": [CLASS_BASELINE_MALFORMED],
+            "baseline_available": False,
+            "controls": [],
+            "summary": {CLASS_BASELINE_MALFORMED: 1},
+            "fingerprint": _stable_fingerprint({"error": CLASS_BASELINE_MALFORMED}),
+        }
+    if baseline_report is None:
+        return {
+            "status": "not_run",
+            "classification": "not_run",
+            "classifications": ["not_run"],
+            "baseline_available": False,
+            "controls": [],
+            "summary": {"not_run": 1},
+            "fingerprint": _stable_fingerprint({"status": "not_run"}),
+        }
+    baseline_statuses = _baseline_statuses(baseline_report)
+    candidate_statuses = _candidate_statuses(checks, ci_result or {})
+    controls: list[dict[str, Any]] = []
+    for name in sorted(set(baseline_statuses) | set(candidate_statuses)):
+        baseline_status = baseline_statuses.get(name)
+        candidate_status = candidate_statuses.get(name)
+        controls.append({
+            "name": name,
+            "baseline_status": baseline_status,
+            "candidate_status": candidate_status,
+            "classification": _baseline_delta_classification(baseline_status, candidate_status),
+        })
+    summary: dict[str, int] = {}
+    for control in controls:
+        classification = control["classification"]
+        summary[classification] = summary.get(classification, 0) + 1
+    classifications = sorted(summary)
+    if any(item in summary for item in {CLASS_BASELINE_MALFORMED, BASELINE_DELTA_CANDIDATE_MALFORMED}):
+        status = "malformed"
+    elif any(item in summary for item in {BASELINE_DELTA_INTRODUCED_FAILURE, BASELINE_DELTA_INHERITED_FAILURE, BASELINE_DELTA_FAILURE_ORIGIN_UNVERIFIED}):
+        status = "failed"
+    elif any(item in summary for item in {CLASS_BASELINE_MISSING, BASELINE_DELTA_CANDIDATE_INCOMPLETE, BASELINE_DELTA_UNAVAILABLE_IN_BOTH}):
+        status = "unavailable"
+    else:
+        status = "passed"
+    primary = classifications[0] if len(classifications) == 1 else "mixed"
+    fingerprint_input = {
+        "baseline_statuses": dict(sorted(baseline_statuses.items())),
+        "candidate_statuses": dict(sorted(candidate_statuses.items())),
+        "controls": controls,
+    }
+    return {
+        "status": status,
+        "classification": primary,
+        "classifications": classifications,
+        "baseline_available": True,
+        "controls": controls,
+        "summary": dict(sorted(summary.items())),
+        "fingerprint": _stable_fingerprint(fingerprint_input),
+    }
 
 
 def _classify_check(item: dict[str, Any], *, baseline_statuses: Mapping[str, str], changed_paths: list[str]) -> str:
@@ -918,7 +1210,7 @@ def run_quality_gate(
         configuration_errors.append(timestamp_error)
     if execute and not timestamp_injected:
         configuration_errors.append("timestamp_not_injected")
-    if baseline_error:
+    if baseline_error and baseline_error != CLASS_BASELINE_MISSING:
         configuration_errors.append(baseline_error)
     if ci_evidence_error:
         configuration_errors.append(ci_evidence_error)
@@ -956,10 +1248,20 @@ def run_quality_gate(
         value for value in check_classes if value not in {CLASS_PASS, "not_configured", "not_run"}
     }
     ci = _ci_snapshot(ci_result)
+    baseline_delta = _baseline_delta(
+        baseline_report,
+        baseline_error=baseline_error,
+        checks=checks,
+        ci_result=ci_result,
+    )
     failure_classes = set(local_failure_classes)
     failure_classes.update(ci.get("failure_classes", []))
     if ci["classification"] != CLASS_PASS:
         failure_classes.add(ci["classification"])
+    if baseline_delta["status"] == "unavailable":
+        failure_classes.add(baseline_delta["classification"])
+    elif baseline_delta["status"] == "malformed":
+        failure_classes.add(CLASS_MALFORMED_CONFIGURATION)
     failure_classes = sorted(failure_classes)
     git = _git_state(root)
     warnings = list(toolchain["findings"])
@@ -993,7 +1295,7 @@ def run_quality_gate(
         status, final_exit_code = "not_run", EXIT_UNAVAILABLE
     elif local_status == "failed" or ci["status"] == "failed":
         status, final_exit_code = "failed", EXIT_FAILED
-    elif local_status == "unavailable" or ci["status"] == "unavailable":
+    elif local_status == "unavailable" or ci["status"] == "unavailable" or baseline_delta["status"] == "unavailable":
         status, final_exit_code = "unavailable", EXIT_UNAVAILABLE
     else:
         status, final_exit_code = local_status, local_exit_code
@@ -1014,6 +1316,8 @@ def run_quality_gate(
             classification = next((value for value in priority if value in local_failure_classes), sorted(local_failure_classes)[0])
         elif ci["classification"] == CLASS_CI_UNAVAILABLE:
             classification = CLASS_CI_UNAVAILABLE
+        elif baseline_delta["classification"] in {CLASS_BASELINE_MISSING, CLASS_BASELINE_MALFORMED}:
+            classification = baseline_delta["classification"]
         else:
             classification = next((value for value in priority if value in failure_classes), sorted(failure_classes)[0])
     else:
@@ -1021,6 +1325,7 @@ def run_quality_gate(
     ready = (
         phase == "final" and execute and status == "passed" and git["status"] == "clean"
         and ci["status"] == "passed"
+        and baseline_delta["status"] not in {"unavailable", "malformed"}
     )
     preflight = {
         "status": local_status,
@@ -1050,6 +1355,7 @@ def run_quality_gate(
         "frontend_check_order": list(FRONTEND_CHECK_ORDER),
         "ci": ci,
         "baseline": {"provided": baseline_report is not None, "check_statuses": dict(sorted(baseline_statuses.items()))},
+        "baseline_delta": baseline_delta,
         "git_state": git,
         "warnings": warnings,
         "configuration_errors": sorted(set(configuration_errors)),
@@ -1082,7 +1388,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ci-status", choices=("success", "failure", "unavailable"), help="optional external CI result; never queried by this tool")
     parser.add_argument("--ci-steps", type=int, default=0, help="executed-step count accompanying --ci-status")
     parser.add_argument("--ci-evidence-file", type=Path, help="local sanitized CI metadata JSON; never queries GitHub or reads logs")
-    parser.add_argument("--baseline-file", help="optional JSON baseline report used to classify pre-existing failures")
+    parser.add_argument(
+        "--baseline-file", type=Path,
+        help="optional bounded baseline report or MarketOS.CIEvidence.v1 file for deterministic delta attribution",
+    )
     parser.add_argument("--json", action="store_true"); parser.add_argument("--markdown", action="store_true"); parser.add_argument("--output")
     args = parser.parse_args(argv)
     if args.json and args.markdown: parser.error("choose --json or --markdown")
@@ -1101,13 +1410,7 @@ def main(argv: list[str] | None = None) -> int:
     baseline_report = None
     baseline_error = None
     if args.baseline_file:
-        try:
-            baseline_report = json.loads(Path(args.baseline_file).read_text(encoding="utf-8"))
-            if not isinstance(baseline_report, Mapping):
-                baseline_report = None
-                baseline_error = "malformed_baseline"
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            baseline_error = "malformed_baseline"
+        baseline_report, baseline_error = load_baseline_evidence(args.baseline_file)
     report = run_quality_gate(
         args.repository,
         generated_at=args.generated_at,
