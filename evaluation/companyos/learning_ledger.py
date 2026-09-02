@@ -215,6 +215,13 @@ class LearningGovernorInfluence:
     `recommended_model_tier` are read only when the Governor caller
     explicitly opts in, and even then only ever move planning *away* from
     a flagged-bad choice -- never toward an unverified one.
+
+    `supports_scale` additionally requires average `confidence` at or
+    above `MIN_SCALE_CONFIDENCE` (`low_confidence_evidence` reports when
+    that threshold was the reason it was withheld) and a real
+    `candidate_id` rather than the `PLACEHOLDER_CANDIDATE_ID` sentinel
+    (`fixture_only_evidence`) -- repeated wins for an unspecified,
+    fixture-only candidate are not evidence about any real decision.
     """
     action_type: str
     candidate_id: str
@@ -241,6 +248,8 @@ class LearningGovernorInfluence:
     iteration_recommendation: str = ""
     excluded_stale_event_ids: tuple[str, ...] = ()
     fingerprint: str = ""
+    low_confidence_evidence: bool = False
+    fixture_only_evidence: bool = False
     def __post_init__(self) -> None:
         if self.evidence_mode not in GOVERNOR_EVIDENCE_MODES: raise ValueError("invalid governor evidence mode")
     def to_dict(self) -> dict[str, Any]: return _clean(self)
@@ -482,6 +491,8 @@ def _influences(events: Sequence[LearningEvent], rules: Sequence[LearningDoNotRe
 
 
 _MAX_MATCHING_EVENTS = 25
+MIN_SCALE_CONFIDENCE = 0.6
+PLACEHOLDER_CANDIDATE_ID = "candidate-placeholder"
 
 
 def _governor_influence_fingerprint(*parts: Any) -> str:
@@ -555,7 +566,10 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
 
     kill_blocks_resumption = any(event.outcome == "killed" for event in matching_events)
     hold_or_avoid = losses >= 2
-    supports_scale = wins >= 2 and losses == 0 and not conflicting_evidence and not trustos_recurrence_blocked and not do_not_repeat_blocked and not kill_blocks_resumption
+    clean_repeated_wins = wins >= 2 and losses == 0 and not conflicting_evidence and not trustos_recurrence_blocked and not do_not_repeat_blocked and not kill_blocks_resumption
+    low_confidence_evidence = confidence < MIN_SCALE_CONFIDENCE
+    fixture_only_evidence = candidate_id == PLACEHOLDER_CANDIDATE_ID
+    supports_scale = clean_repeated_wins and not low_confidence_evidence and not fixture_only_evidence
 
     recommended_model_tier = ""; deprioritize = False
     if action_type == "run_frontier_llm_synthesis" and any("model_cost_too_high" in event.failure_reasons for event in matching_events):
@@ -578,6 +592,8 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     if hold_or_avoid: rationale.append(f"{losses} matching failed/blocked/killed event(s) recorded for {action_type}")
     if conflicting_evidence: rationale.append(f"{wins} win(s) and {losses} failure(s) recorded for the same action/candidate -- treated as inconclusive, not scale-supporting")
     if trustos_recurrence_blocked: rationale.append("a recurring TrustOS/security blocker was recorded for this action and remains a hard blocker")
+    if clean_repeated_wins and low_confidence_evidence: rationale.append(f"{wins} matching win(s) recorded but average confidence {confidence} is below the {MIN_SCALE_CONFIDENCE} scale-authorization threshold")
+    if clean_repeated_wins and fixture_only_evidence: rationale.append("matching evidence is only for the placeholder candidate, not a specific candidate -- scale is withheld")
     if supports_scale: rationale.append(f"{wins} matching win(s) recorded with no offsetting failure")
     if recommended_model_tier: rationale.append(f"model lesson recommends the {recommended_model_tier} tier as planning metadata only")
     if avoid_provider_ids: rationale.append(f"provider lesson flags {', '.join(avoid_provider_ids)} to avoid as planning metadata only")
@@ -585,8 +601,8 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     if excluded_stale_event_ids: rationale.append(f"{len(excluded_stale_event_ids)} caller-declared stale event(s) were excluded from this evidence")
     if not rationale: rationale.append("no actionable learning signal beyond the matched evidence")
 
-    fingerprint = _governor_influence_fingerprint(action_type, candidate_id, workspace_id, evidence_mode, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in matching_rules), trustos_recurrence_blocked, kill_blocks_resumption, conflicting_evidence, recommended_model_tier, recommended_provider_id, avoid_provider_ids, excluded_stale_event_ids)
-    return LearningGovernorInfluence(action_type, candidate_id, workspace_id, evidence_mode, confidence, recency_label, provenance, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in matching_rules), bool(trustos_recurrence_blocked), recommended_model_tier, deprioritize, tuple(rationale), kill_blocks_resumption=kill_blocks_resumption, conflicting_evidence=conflicting_evidence, recommended_provider_id=recommended_provider_id, avoid_provider_ids=avoid_provider_ids, iteration_recommendation=iteration_recommendation, excluded_stale_event_ids=excluded_stale_event_ids, fingerprint=fingerprint)
+    fingerprint = _governor_influence_fingerprint(action_type, candidate_id, workspace_id, evidence_mode, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in matching_rules), trustos_recurrence_blocked, kill_blocks_resumption, conflicting_evidence, low_confidence_evidence, fixture_only_evidence, recommended_model_tier, recommended_provider_id, avoid_provider_ids, excluded_stale_event_ids)
+    return LearningGovernorInfluence(action_type, candidate_id, workspace_id, evidence_mode, confidence, recency_label, provenance, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in matching_rules), bool(trustos_recurrence_blocked), recommended_model_tier, deprioritize, tuple(rationale), kill_blocks_resumption=kill_blocks_resumption, conflicting_evidence=conflicting_evidence, recommended_provider_id=recommended_provider_id, avoid_provider_ids=avoid_provider_ids, iteration_recommendation=iteration_recommendation, excluded_stale_event_ids=excluded_stale_event_ids, fingerprint=fingerprint, low_confidence_evidence=low_confidence_evidence, fixture_only_evidence=fixture_only_evidence)
 
 
 def _from_mapping(item: Mapping[str, Any], index: int) -> LearningEvent:
@@ -625,7 +641,7 @@ def build_learning_ledger_report(*, generated_at: str = "offline-deterministic",
     return LearningLedgerReport("learning-ledger-v1", generated_at, raw, experiments, results, tuple(LearningLesson(f"lesson-{item.learning_event_id}", f"{item.event_type} lesson", "success" if item.outcome == "win" else "failure" if item.outcome in {"loss", "blocked", "killed"} else "iteration", item.resource_governor_influence, item.input_evidence_refs, item.confidence, item.client_visibility) for item in raw), rules, recommendations, _portfolio_impacts(raw), _model_impacts(raw), _provider_impacts(raw), _trustos_impacts(raw), _influences(raw, rules), summary, LearningLedgerSafetySummary(), "Attach captured lessons to the next Resource Governor decision; do not repeat blocked patterns without new evidence.")
 
 
-__all__ = ["EVENT_TYPES", "OUTCOMES", "VISIBILITY", "FAILURE_REASONS", "SUCCESS_REASONS", "BLOCK_BEHAVIORS", "GOVERNOR_EVIDENCE_MODES", "LearningLedgerReport", "LearningEvent", "LearningExperiment", "LearningHypothesis", "LearningMetric", "LearningResult", "LearningOutcome", "LearningAttribution", "LearningLesson", "LearningDoNotRepeatRule", "LearningIterationRecommendation", "LearningPortfolioImpact", "LearningModelRoutingImpact", "LearningProviderImpact", "LearningTrustOSImpact", "LearningDecisionInfluence", "LearningGovernorInfluence", "derive_governor_influence", "LearningLedgerSummary", "LearningLedgerSafetySummary", "build_learning_ledger_report"]
+__all__ = ["EVENT_TYPES", "OUTCOMES", "VISIBILITY", "FAILURE_REASONS", "SUCCESS_REASONS", "BLOCK_BEHAVIORS", "GOVERNOR_EVIDENCE_MODES", "MIN_SCALE_CONFIDENCE", "PLACEHOLDER_CANDIDATE_ID", "LearningLedgerReport", "LearningEvent", "LearningExperiment", "LearningHypothesis", "LearningMetric", "LearningResult", "LearningOutcome", "LearningAttribution", "LearningLesson", "LearningDoNotRepeatRule", "LearningIterationRecommendation", "LearningPortfolioImpact", "LearningModelRoutingImpact", "LearningProviderImpact", "LearningTrustOSImpact", "LearningDecisionInfluence", "LearningGovernorInfluence", "derive_governor_influence", "LearningLedgerSummary", "LearningLedgerSafetySummary", "build_learning_ledger_report"]
 
 
 @dataclass(frozen=True)

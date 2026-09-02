@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from evaluation.companyos.learning_ledger import (
-    BLOCK_BEHAVIORS, EVENT_TYPES, FAILURE_REASONS, GOVERNOR_EVIDENCE_MODES, OUTCOMES, SUCCESS_REASONS, VISIBILITY,
+    BLOCK_BEHAVIORS, EVENT_TYPES, FAILURE_REASONS, GOVERNOR_EVIDENCE_MODES, MIN_SCALE_CONFIDENCE,
+    OUTCOMES, PLACEHOLDER_CANDIDATE_ID, SUCCESS_REASONS, VISIBILITY,
     LearningAttribution, LearningGovernorInfluence, LearningHypothesis, LearningLedgerSafetySummary,
     LearningMetric, LearningOutcome, LearningResult, build_learning_ledger_report, derive_governor_influence,
 )
@@ -1106,3 +1107,46 @@ def test_derive_governor_influence_do_not_repeat_rules_do_not_leak_across_worksp
     assert client_a.do_not_repeat_blocked is True
     assert client_b.do_not_repeat_blocked is False
     assert client_b.do_not_repeat_rule_ids == ()
+
+
+def test_derive_governor_influence_low_confidence_evidence_cannot_authorize_scale():
+    """Required scenario: low-confidence evidence must never authorize
+    scale, even when it is otherwise a clean, repeated win."""
+    events = [
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "shaky-candidate", "confidence": 0.2},
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "shaky-candidate", "confidence": 0.2},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="scale_ad_budget", candidate_id="shaky-candidate")
+    assert influence.win_count == 2
+    assert influence.confidence < MIN_SCALE_CONFIDENCE
+    assert influence.low_confidence_evidence is True
+    assert influence.supports_scale is False
+    assert any("confidence" in reason for reason in influence.rationale)
+
+
+def test_derive_governor_influence_fixture_only_candidate_cannot_authorize_scale():
+    """Required scenario: fixture-only evidence (the unspecified
+    placeholder candidate) must never authorize scale -- repeated wins
+    with no real candidate attached are not evidence about any actual
+    decision."""
+    events = [
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget"},
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="scale_ad_budget", candidate_id=PLACEHOLDER_CANDIDATE_ID)
+    assert influence.win_count == 2
+    assert influence.fixture_only_evidence is True
+    assert influence.supports_scale is False
+    assert any("placeholder" in reason for reason in influence.rationale)
+
+
+def test_derive_governor_influence_malformed_evidence_never_reaches_the_bridge():
+    """Required scenario: malformed learning evidence must never authorize
+    scale. `LearningEvent.__post_init__` already fails closed on an
+    invalid event_type/outcome, so a malformed event can never survive
+    construction into a `LearningLedgerReport` -- it never becomes
+    `evidence` `derive_governor_influence` could act on at all."""
+    with pytest.raises(ValueError):
+        build_learning_ledger_report(context={"events": [{"event_type": "not-a-real-event", "outcome": "not-a-real-outcome", "action_taken": "scale_ad_budget"}]})
