@@ -80,6 +80,20 @@ def validate_release_contract(payload: dict) -> dict:
     if not payload.get("provenance_and_license_verified", True):
         return {"decision": "REJECT", "reason": "unverified_provenance"}
 
+    if payload.get("credential_boundary_status") == "Missing":
+        return {"decision": "REJECT", "reason": "missing_credential_boundary"}
+
+    if payload.get("export_safety") == "Unsafe":
+        return {"decision": "REJECT", "reason": "unsafe_export"}
+
+    if payload.get("learning_evidence_status") == "Incomplete":
+        return {"decision": "REJECT", "reason": "incomplete_learning_evidence"}
+
+    lifecycle = payload.get("capability_promotion_lifecycle")
+    if lifecycle:
+        if not lifecycle.get("approved_for_future_activation", False):
+            return {"decision": "REJECT", "reason": "capability_not_approved"}
+
     # 14. Explicit final merger decision
     return {"decision": "MERGE", "reason": "all_checks_passed"}
 
@@ -282,5 +296,28 @@ def test_combo_runner_mislabeled_evidence():
 
 def test_combo_learning_ledger_complete_local():
     payload = load_fixture("combo_learning_ledger_complete_local")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
+
+def test_combo_missing_credential_boundary():
+    payload = load_fixture("combo_missing_credential_boundary")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "missing_credential_boundary"
+
+def test_combo_unsafe_export_claim():
+    payload = load_fixture("combo_unsafe_export_claim")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "unsafe_export"
+
+def test_combo_incomplete_learning_evidence():
+    payload = load_fixture("combo_incomplete_learning_evidence")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "incomplete_learning_evidence"
+
+def test_combo_capability_promotion_lifecycle_valid():
+    payload = load_fixture("combo_capability_promotion_lifecycle_valid")
     result = validate_release_contract(payload)
     assert result["decision"] == "MERGE"
