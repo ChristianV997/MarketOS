@@ -13,7 +13,6 @@ from backend.mvp_commerce.product_research import build_research_candidates
 from evaluation.commerce.commerce_operations_cycle import (
     EVIDENCE_CLASSES,
     PROOF_SEPARATION_BLOCKERS,
-    PROVENANCE_VOCAB,
     STAGE_ORDER,
     UNIFORM_STAGE_KEYS,
     build_commerce_operations_cycle,
@@ -555,9 +554,12 @@ def test_ranking_is_synthesis_order_not_rescored():
         assert key in ranking["blocking_reasons"]
         assert ranking[key] is True
     for item in ranking["candidates"]:
-        assert item["pillars"]["marketplace"]["provenance"] in PROVENANCE_VOCAB
-        assert item["pillars"]["supplier"]["provenance"] in PROVENANCE_VOCAB
-        assert item["pillars"]["consumer"]["provenance"] in PROVENANCE_VOCAB
+        for pillar in item["pillars"].values():
+            raw_mode = pillar["mode"]
+            assert pillar["provenance"] == raw_mode
+            assert raw_mode == "fixture"
+            assert pillar["provenance"] != "observed"
+            assert raw_mode != "observed"
         assert "A_live_validated" not in json.dumps(item)
 
 
@@ -669,11 +671,32 @@ def test_stale_evidence_is_named_provenance_and_blocker():
         load("stale_consumer_report.json"),
     ).to_dict()
     row = report["ranking"]["candidates"][0]
+    assert row["pillars"]["marketplace"]["mode"] == "stale"
     assert row["pillars"]["marketplace"]["provenance"] == "stale"
     assert "stale_evidence:marketplace" in row["blockers"]
     assert "stale_evidence:marketplace" in report["blockers"]
     assert report["confidence_claim"] == "not_live_validated"
     assert report["governor"].get("live_go") is not True
+
+
+def test_live_readonly_mode_stays_raw_never_observed():
+    market = load("live_readonly_marketplace_report.json")
+    supplier = load("live_readonly_supplier_report.json")
+    consumer = load("live_readonly_attention_report.json")
+    synthesis = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    assert synthesis["confidence_grade"] == "A_live_validated"
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    assert report["confidence_claim"] == "not_live_validated"
+    assert report["governor"]["live_go"] is False
+    row = report["ranking"]["candidates"][0]
+    for name, pillar in row["pillars"].items():
+        assert pillar["mode"] == "live_readonly", name
+        assert pillar["provenance"] == "live_readonly", name
+        assert pillar["provenance"] != "observed"
+        assert pillar["mode"] != "observed"
+    assert report["marketplace"]["evidence_mode"] == "live_readonly"
+    assert report["supplier"]["evidence_mode"] == "live_readonly"
+    assert report["consumer_attention"]["evidence_mode"] == "live_readonly"
 
 
 def test_governor_uses_synthesis_unit_economics_instead_of_zero_when_present():

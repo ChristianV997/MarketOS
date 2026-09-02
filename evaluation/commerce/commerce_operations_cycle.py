@@ -139,15 +139,6 @@ STAGE_ORDER = (
     "site_draft_readiness",
     "client_workspace",
 )
-PROVENANCE_VOCAB = (
-    "observed",
-    "derived",
-    "assumed",
-    "unavailable",
-    "stale",
-    "simulated",
-    "fixture",
-)
 PROOF_SEPARATION_BLOCKERS = (
     "marketplace_is_not_supplier_proof",
     "consumer_attention_is_not_ad_performance",
@@ -317,25 +308,6 @@ def _pillar(name: str, report: Mapping[str, Any] | None) -> dict[str, Any]:
     )
 
 
-def _provenance(mode: str) -> str:
-    normalized = _text(mode, 40)
-    if normalized == "stale":
-        return "stale"
-    if normalized in {"fixture", "fixture_demo"}:
-        return "fixture"
-    if normalized == "manual_import":
-        return "derived"
-    if normalized in LIVE_MODES:
-        return "observed"
-    if normalized in {"simulated", "dry_run"}:
-        return "simulated"
-    if normalized in {"assumed", "assumption"}:
-        return "assumed"
-    if not normalized or normalized in {"missing", "unavailable"}:
-        return "unavailable"
-    return "derived"
-
-
 def _compact_unit_economics(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, Mapping) or not value:
         return None
@@ -414,17 +386,15 @@ def _ranking_section(
             matrix_item = matrix.get("marketplace" if name == "marketplace" else "supplier" if name == "supplier" else "consumer")
             matrix_item = matrix_item if isinstance(matrix_item, Mapping) else {}
             raw_mode = _raw_pillar_mode(report, candidate_id)
-            matrix_mode = _text(matrix_item.get("mode") or "", 40)
-            provenance = _provenance(raw_mode if raw_mode not in {"", "missing"} else matrix_mode)
             status = _text(matrix_item.get("status") or ("supplied" if report else "missing"), 40)
-            if status == "missing" or provenance == "unavailable":
+            if status == "missing" or raw_mode in {"", "unavailable"}:
                 pillar_blockers.append(f"{name}_evidence_missing")
-            if provenance == "stale":
+            if raw_mode == "stale":
                 pillar_blockers.append(f"stale_evidence:{name}")
             pillars[name] = {
                 "status": status,
-                "mode": raw_mode or matrix_mode or "unavailable",
-                "provenance": provenance,
+                "mode": raw_mode,
+                "provenance": raw_mode,
                 "score": matrix_item.get("score"),
             }
         economics = _compact_unit_economics(item.get("unit_economics_summary"))
@@ -1366,7 +1336,6 @@ __all__ = [
     "EVIDENCE_CLASSES",
     "STAGE_ORDER",
     "UNIFORM_STAGE_KEYS",
-    "PROVENANCE_VOCAB",
     "PROOF_SEPARATION_BLOCKERS",
     "CommerceOperationsCycleReport",
     "build_commerce_operations_cycle",

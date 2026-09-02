@@ -10,7 +10,9 @@ cycle calls
 `evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis`
 and does not recopy weights or grades. Ranking is the existing synthesis
 candidate list (`last-wins` identity collapse, sort `(-combined, id)`). The
-cycle does not re-rank and does not call `opportunity_scoring`.
+cycle does not re-rank and does not call `opportunity_scoring`. Ranking
+`provenance` is the raw pillar `evidence_mode` string passed through
+unchanged — not an `observed`/`derived` translation.
 
 Governor `unit_economics_score` is taken from synthesis
 `unit_economics_summary.gross_margin_percent` when present. Missing economics
