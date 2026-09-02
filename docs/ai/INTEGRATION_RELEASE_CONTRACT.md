@@ -2,6 +2,38 @@
 
 This release contract defines the exact governance conditions required before integrating external capabilities and merging dependent MarketOS vertical feature branches.
 
+## Explicit Acceptance Fields
+Every automated or manual merge request MUST evaluate and record the following payload of contract fields:
+
+```json
+{
+  "pr_identity": "PR Number and Title",
+  "head_sha": "Exact PR HEAD SHA",
+  "base_sha": "Exact Target Base SHA",
+  "worktree_ownership_state": "Valid/Conflict (Cannot overwrite dirty operator worktrees)",
+  "changed_file_scope": "List of affected components",
+  "dependency_ordering": "Adheres to PR_DEPENDENCY_RELEASE_TRAIN (Yes/No)",
+  "focused_and_adjacent_tests": "Passed/Failed",
+  "compile_and_lint_results": "Passed/Failed",
+  "evidence": {
+    "actual": "...",
+    "simulated": "...",
+    "unavailable": "...",
+    "not_run": "..."
+  },
+  "ci_execution_step_evidence": "All steps executed vs 0-step outage",
+  "review_state": "Approved/ChangesRequested",
+  "draft_ready_state": "Ready/Draft",
+  "rollback_reference": "Known-good SHA",
+  "duplicate_superseded_pr_handling": "List of PRs to close",
+  "credential_and_mutation_safety": "Passed (No live networks/No Git secrets)",
+  "trustos_status": "Cleared/Blocked",
+  "approval_ledger_status": "Approved/Pending",
+  "provider_model_activation_status": "Offline/Dry-Run only",
+  "final_merger_agent_decision": "MERGE / REJECT / HOLD"
+}
+```
+
 ## 1. Current-Head Verification
 Before merging, the Merger Agent must verify the explicit live SHA of both the PR branch and `main`. Merges executed against stale references are invalid.
 
