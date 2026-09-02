@@ -69,10 +69,10 @@ default `true`) *and* require real credentials — see the README's
 - `OLLAMA_MODEL` defaults to `mistral:7b` (primary — best reasoning/creative
   balance per `backend/ollama_manager.py`'s `RECOMMENDED_MODELS` sizing
   table: ~2GB VRAM / 4GB RAM).
-- `OLLAMA_AUTO_START=true` makes `InferenceRouter` construction call
-  `OllamaManager.ensure_running()`, which attempts `ollama serve` if the
-  daemon isn't already up — set by the daemon install script; off by default
-  otherwise so tests and ad-hoc runs never spawn a subprocess unasked.
+- `OLLAMA_AUTO_START=true` affects only an explicit
+  `OllamaManager.ensure_running()` call. `InferenceRouter` construction does
+  not probe, start, or pull Ollama models, so tests and ad-hoc runs remain
+  offline unless an operator explicitly invokes the bounded lifecycle method.
 - `PREFER_LOCAL_INFERENCE=true` (default) makes `RoutingPolicy` rank the
   fallback chain cheapest-first so Ollama wins over paid cloud providers
   whenever both are available, regardless of `INFERENCE_PROVIDERS` order.
