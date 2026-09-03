@@ -15,7 +15,32 @@ export type EvidenceMode =
   | "live_readonly"
   | "unknown";
 
-export type ControlPlaneStatus = "unavailable" | "fixture" | "live_readonly";
+export type ControlPlaneStatus =
+  | "unavailable"
+  | "fixture"
+  | "simulated"
+  | "stale"
+  | "live_readonly"
+  | "blocked";
+
+export type PillarId =
+  | "market_evidence"
+  | "consumer_attention"
+  | "supplier_feasibility"
+  | "economics"
+  | "provenance"
+  | "freshness";
+
+export type CandidateRiskFilter = "all" | "high" | "medium" | "low" | "unknown";
+export type CandidateDecisionFilter = "all" | string;
+
+export interface CandidatePillarCell {
+  pillarId: PillarId;
+  label: string;
+  score: number | null;
+  status: "available" | "partial" | "unavailable" | "blocked";
+  detail: string | null;
+}
 
 export interface RankedCandidateRow {
   candidateId: string;
@@ -25,25 +50,27 @@ export interface RankedCandidateRow {
   supplierScore: number | null;
   competitionScore: number | null;
   economicsLabel: string | null;
+  assumptionRatio: number | null;
   commercialDecision: string | null;
   nextBestAction: string | null;
   riskLevel: string | null;
+  validationPriority: string | null;
+  validationTarget: string | null;
+  sourceFamily: string | null;
+  evidenceMode: EvidenceMode;
   isTopCandidate: boolean;
+  pillarCells: CandidatePillarCell[];
 }
 
 export interface EvidencePillar {
-  id:
-    | "market_evidence"
-    | "consumer_attention"
-    | "supplier_feasibility"
-    | "economics"
-    | "provenance"
-    | "freshness";
+  id: PillarId;
   label: string;
   status: "available" | "partial" | "unavailable" | "blocked";
   summary: string;
   provenance: string | null;
   freshness: string | null;
+  sourceFamily: string | null;
+  evidenceMode: EvidenceMode | null;
   blockedReasons: string[];
 }
 
@@ -52,6 +79,7 @@ export interface ControlPlaneSlot {
   label: string;
   status: ControlPlaneStatus;
   outcome: string | null;
+  nextBestAction: string | null;
   blockedReasons: string[];
   notes: string[];
 }
@@ -63,6 +91,9 @@ export interface RunFingerprint {
   readOnly: boolean;
   networkCalls: boolean;
   sourceLabels: string[];
+  sourceFamilies: string[];
+  reportVersion: string | null;
+  generatedAt: string | null;
 }
 
 export interface FirstPhaseEvidencePacket {
@@ -76,7 +107,59 @@ export interface FirstPhaseEvidencePacket {
   warnings: string[];
 }
 
-/** Future backend contract (not merged): GET /api/phase1/evidence-cockpit */
+export interface CandidateFilterState {
+  query: string;
+  risk: CandidateRiskFilter;
+  decision: CandidateDecisionFilter;
+  topOnly: boolean;
+}
+
+export interface ClientSafeCockpitExport {
+  export_version: "first-phase-cockpit-client-safe-v1";
+  exported_at: string;
+  read_only: true;
+  mutated: false;
+  network_calls: false;
+  state: EvidenceState;
+  evidence_mode: EvidenceMode;
+  overall_status: string | null;
+  next_best_action: string | null;
+  source_labels: string[];
+  source_families: string[];
+  ranked_candidates: Array<{
+    candidate_id: string;
+    title: string;
+    rank_index: number;
+    evidence_completeness: number | null;
+    supplier_score: number | null;
+    competition_score: number | null;
+    economics_label: string | null;
+    commercial_decision: string | null;
+    next_best_action: string | null;
+    risk_level: string | null;
+    is_top_candidate: boolean;
+  }>;
+  pillars: Array<{
+    pillar_id: PillarId;
+    status: EvidencePillar["status"];
+    summary: string;
+    blocked_reasons: string[];
+  }>;
+  control_planes: Array<{
+    id: ControlPlaneSlot["id"];
+    status: ControlPlaneStatus;
+    outcome: string | null;
+    blocked_reasons: string[];
+  }>;
+  warnings: string[];
+  blocked_reasons: string[];
+  unavailable_reasons: string[];
+}
+
+/**
+ * Future backend contract (not merged): GET /api/phase1/evidence-cockpit
+ * Aligns to existing Phase1/TrustOS/Governor `to_dict` / client_safe projections.
+ */
 export interface FirstPhaseEvidenceCockpitApiContract {
   report_version: string;
   generated_at: string;
@@ -86,45 +169,65 @@ export interface FirstPhaseEvidenceCockpitApiContract {
     candidate_id: string;
     title: string;
     rank_index: number;
-    evidence_completeness: number;
-    supplier_score: number;
-    competition_score: number;
-    economics_label: string;
-    commercial_decision: string;
-    next_best_action: string;
-    risk_level: string;
+    evidence_completeness: number | null;
+    supplier_score: number | null;
+    competition_score: number | null;
+    economics_label: string | null;
+    assumption_ratio: number | null;
+    commercial_decision: string | null;
+    next_best_action: string | null;
+    risk_level: string | null;
+    validation_priority: string | null;
+    validation_target: string | null;
+    source_family: string | null;
     is_top_candidate: boolean;
+    pillar_cells?: Array<{
+      pillar_id: PillarId;
+      score: number | null;
+      status: CandidatePillarCell["status"];
+      detail: string | null;
+    }>;
   }>;
   pillars: Array<{
-    pillar_id: EvidencePillar["id"];
+    pillar_id: PillarId;
     status: EvidencePillar["status"];
     summary: string;
     provenance: string | null;
     freshness: string | null;
+    source_family: string | null;
+    evidence_mode: EvidenceMode | null;
     blocked_reasons: string[];
   }>;
   trustos: {
     status: ControlPlaneStatus;
     outcome: string | null;
+    next_best_action: string | null;
     blocked_reasons: string[];
+    public_launch_decision?: string | null;
   };
   governor: {
     status: ControlPlaneStatus;
     outcome: string | null;
+    next_best_action: string | null;
     blocked_reasons: string[];
   };
   approval_ledger: {
     status: ControlPlaneStatus;
     outcome: string | null;
+    next_best_action: string | null;
     blocked_reasons: string[];
   };
   fingerprint: {
     read_only: boolean;
     network_calls: boolean;
     source_labels: string[];
+    source_families: string[];
+    report_version: string | null;
+    generated_at: string | null;
   };
   warnings: string[];
   blocked_reasons: string[];
+  unavailable_reasons?: string[];
   read_only: true;
   mutated: false;
   network_calls: boolean;

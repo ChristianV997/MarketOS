@@ -10,10 +10,17 @@ const STATUS_STYLE: Record<EvidencePillar["status"], string> = {
 export function EvidencePillarsPanel({ pillars }: { pillars: EvidencePillar[] }) {
   return (
     <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4" aria-label="Evidence pillars">
-      <h3 className="text-sm font-medium text-zinc-100">Evidence pillars</h3>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <h3 className="text-sm font-medium text-zinc-100" id="evidence-pillars-heading">
+        Evidence pillars
+      </h3>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3" role="list">
         {pillars.map((pillar) => (
-          <article key={pillar.id} className="rounded border border-zinc-800 bg-zinc-950/40 p-3">
+          <article
+            key={pillar.id}
+            role="listitem"
+            className="rounded border border-zinc-800 bg-zinc-950/40 p-3"
+            aria-label={`${pillar.label} ${pillar.status}`}
+          >
             <div className="flex items-center justify-between gap-2">
               <h4 className="text-xs font-medium text-zinc-200">{pillar.label}</h4>
               <span className={`rounded border px-1.5 py-0.5 text-[10px] ${STATUS_STYLE[pillar.status]}`}>
@@ -22,10 +29,22 @@ export function EvidencePillarsPanel({ pillars }: { pillars: EvidencePillar[] })
             </div>
             <p className="mt-2 text-xs text-zinc-400">{pillar.summary}</p>
             {pillar.provenance && (
-              <p className="mt-1 text-[11px] text-zinc-500">Provenance: {pillar.provenance.replace(/_/g, " ")}</p>
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Provenance: {pillar.provenance.replace(/_/g, " ")}
+              </p>
             )}
             {pillar.freshness && (
               <p className="mt-1 text-[11px] text-zinc-500">Freshness: {pillar.freshness}</p>
+            )}
+            {pillar.sourceFamily && (
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Source family: {pillar.sourceFamily.replace(/_/g, " ")}
+              </p>
+            )}
+            {pillar.evidenceMode && (
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Evidence mode: {pillar.evidenceMode.replace(/_/g, " ")}
+              </p>
             )}
             {pillar.blockedReasons.length > 0 && (
               <p className="mt-2 text-[11px] text-amber-200">

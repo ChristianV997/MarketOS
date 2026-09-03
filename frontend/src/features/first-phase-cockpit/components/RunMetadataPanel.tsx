@@ -14,7 +14,7 @@ export function RunMetadataPanel({
   return (
     <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4" aria-label="Run metadata">
       <h3 className="text-sm font-medium text-zinc-100">Deterministic run metadata</h3>
-      <div className="mt-3 grid gap-2 text-xs text-zinc-300 md:grid-cols-4">
+      <div className="mt-3 grid gap-2 text-xs text-zinc-300 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <span className="rounded bg-zinc-950/50 p-2">
           Evidence mode: <b>{fingerprint.evidenceMode.replace(/_/g, " ")}</b>
         </span>
@@ -26,6 +26,18 @@ export function RunMetadataPanel({
         </span>
         <span className="rounded bg-zinc-950/50 p-2">
           Sources: <b>{fingerprint.sourceLabels.join(", ") || "none"}</b>
+        </span>
+        <span className="rounded bg-zinc-950/50 p-2">
+          Source families: <b>{fingerprint.sourceFamilies.join(", ") || "none"}</b>
+        </span>
+        <span className="rounded bg-zinc-950/50 p-2">
+          Report version: <b>{fingerprint.reportVersion ?? "composed-live"}</b>
+        </span>
+        <span className="rounded bg-zinc-950/50 p-2">
+          Generated at: <b>{fingerprint.generatedAt ?? "not provided"}</b>
+        </span>
+        <span className="rounded bg-zinc-950/50 p-2">
+          Next action: <b>{fingerprint.nextBestAction?.replace(/_/g, " ") ?? "none"}</b>
         </span>
       </div>
       {warnings.length > 0 && (
