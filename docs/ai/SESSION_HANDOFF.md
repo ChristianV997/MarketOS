@@ -20,5 +20,4 @@ The Agentic Quality Gate **must not** self-report final CI readiness before sani
 
 ## Integration Rules
 Preserve strict offline, dry-run, no-credentials, and no-mutation rules for all new capability adapters. All capability integrations must adhere to the `docs/ai/INTEGRATION_ACCEPTANCE_STANDARD.md` and use the `docs/ai/EXTERNAL_CAPABILITY_INTEGRATION_TEMPLATE.md`.
-## Historical Directions
-*(Note: Older Phase-1 supplier-validation states, CJ Dropshipping probes, and crawl4ai fallbacks detailed in previous handoffs are preserved in Git history as historical context, but do not dictate the current CI baseline or active merge train.)*
+
