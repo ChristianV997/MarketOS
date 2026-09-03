@@ -1,11 +1,11 @@
 {
-  "pr_identity": "PR #223",
+  "pr_identity": "PR #225",
   "head_sha": "a898dc3",
   "base_sha": "5a533d4",
-  "is_stale_base": false,
+  "is_stale_base": true,
   "worktree_ownership_state": "Valid",
   "changed_file_scope": [
-    "docs/ai/INTEGRATION_RELEASE_CONTRACT.md"
+    "commerce/operations"
   ],
   "diff_type": "Direct",
   "dependency_ordering": "Yes",

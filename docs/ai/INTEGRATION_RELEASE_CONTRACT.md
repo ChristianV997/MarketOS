@@ -74,7 +74,7 @@ Detached validation worktrees are considered evidence only. A PR must not overwr
 Merges require a cleanly resolved base. `git diff base...head` must contain exactly the authorized paths, introducing no unintended cross-vertical code. The contract distinguishes between a direct diff against `main` and a stacked diff against an upstream PR.
 
 ## 4. Dependency Ordering
-All merges must follow the explicit train defined in `PR_DEPENDENCY_RELEASE_TRAIN.md` (quality → security → frontend/API → development environment → research adapters → commerce operations → evidence integrity → Learning Ledger). Stacked PRs with unmet dependencies will be held.
+All merges must follow the explicit train defined in `PR_DEPENDENCY_RELEASE_TRAIN.md` (quality -> security & governance -> production repairs & stacked features -> frontend/API -> research & supplier surfaces -> commerce operations -> Learning Ledger -> adversarial evidence & validation). Stacked PRs with unmet dependencies will be held.
 
 ## 5. Focused and Adjacent Test Evidence
 Each integration must run focused unit/integration tests for its own logic, plus adjacent validation (architecture boundaries, security policies, etc.) to ensure no regressions.

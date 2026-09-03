@@ -1,15 +1,17 @@
 {
-  "pr_identity": "PR #223",
-  "head_sha": "a898dc3",
+  "pr_identity": "PR #230",
+  "head_sha": "c345de6",
   "base_sha": "5a533d4",
-  "is_stale_base": true,
+  "is_stale_base": false,
   "worktree_ownership_state": "Valid",
   "changed_file_scope": [
-    "docs/ai/INTEGRATION_RELEASE_CONTRACT.md"
+    "docs/ai"
   ],
-  "diff_type": "Direct",
-  "dependency_ordering": "Yes",
-  "unmet_dependencies": [],
+  "diff_type": "Stacked",
+  "dependency_ordering": "No",
+  "unmet_dependencies": [
+    "#229"
+  ],
   "focused_and_adjacent_tests": "Passed",
   "compile_and_lint_results": "Passed",
   "evidence": {
@@ -19,7 +21,7 @@
     "runner_identity": "local",
     "required_job_completeness": "Passed",
     "executed_failures": "None",
-    "step_evidence": "All steps executed"
+    "step_evidence": "ci_unavailable"
   },
   "review_state": "Approved",
   "draft_ready_state": "Ready",
@@ -30,5 +32,5 @@
   "trustos_status": "Cleared",
   "approval_ledger_status": "Approved",
   "provider_model_activation_status": "Offline",
-  "human_override_local_evidence": false
+  "human_override_local_evidence": true
 }
