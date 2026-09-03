@@ -1,0 +1,35 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "candidate_count": 4,
+  "marketplaces_observed": ["amazon"],
+  "top_candidate_id": "mini-thermal-printer",
+  "candidates": [
+    {
+      "candidate_id": "mini-thermal-printer",
+      "query": "mini thermal printer",
+      "evidence": [
+        {
+          "marketplace": "amazon",
+          "price": 29.99,
+          "review_count": 2400,
+          "source_confidence": 0.78,
+          "evidence_mode": "fixture"
+        }
+      ],
+      "score": {
+        "overall_marketplace_opportunity": 0.72,
+        "demand_proxy_score": 0.8,
+        "saturation_score": 0.22,
+        "price_confidence": 0.78,
+        "recommendation": "validate_supplier_first"
+      }
+    },
+    "not-an-object",
+    42,
+    null
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

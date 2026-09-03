@@ -126,3 +126,32 @@ load credentials. `scripts/run_commerce_cycle.py` and
 combined here into dual-proof.
 
 Rollback is revert of this composition vertical only.
+
+## QA notes
+
+Adversarial acceptance tests live in `tests/test_commerce_operations_cycle.py` plus
+`tests/fixtures/commerce_operations/`. They are mutation locks, not a test-count
+exercise. A developer reintroducing any of the following should fail that suite:
+
+- live clients (`urllib` / `httpx` / `requests` / `openai` / `subprocess`) or
+  CJ path builders (`build_from_paths`, `build_benchmark_from_paths`,
+  `build_readiness`)
+- a second scorer (`rank_opportunities`) or a second packet / fingerprint /
+  `source_family` identity authority
+- remapping `fixture` / `manual_import` / `simulated` / `live_readonly` to
+  `observed`, or inventing `observed_at`
+- treating marketplace as supplier proof, attention as ads, or supplier as
+  fulfillment
+- nested malformed candidate records producing fake scores
+- `api_key` / `token` / `html` / `raw_payload` on `to_dict` or
+  `client_safe_projection.json`
+- `A_live_validated` or `live_go: true` at the cycle layer
+- Approval Ledger live approval, registry load, or auto-allow
+- dropping named terms/privacy blockers (`policies_present`,
+  `privacy_terms_approved`, `lawyer_review`) on the dry-run path
+
+The on-disk packet is the existing `to_dict()` plus
+`client_safe_projection.json`. There is no second schema. Two identical calls
+must be byte-equal. License is not a cycle-native field; unverified terms stay
+blocked through TrustOS `policies_present` / `lawyer_review` and site-draft
+`privacy_terms_approved`.

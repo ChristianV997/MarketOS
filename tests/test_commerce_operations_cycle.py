@@ -39,9 +39,54 @@ FORBIDDEN_IMPORTS = {
     "apify",
     "socket",
     "aiohttp",
+    "urllib",
     "urllib3",
+    "subprocess",
     "boto3",
 }
+FORBIDDEN_IMPORT_NAMES = {
+    "rank_opportunities",
+    "score_opportunity",
+    "build_from_paths",
+    "build_benchmark_from_paths",
+    "build_readiness",
+    "build_provider_registry",
+    "run_commerce_mvp_slice",
+}
+SECRET_EXPORT_KEYS = frozenset(
+    {
+        "api_key",
+        "token",
+        "html",
+        "raw_payload",
+        "raw_html",
+        "password",
+        "authorization",
+    }
+)
+IDENTITY_AUTHORITY_KEYS = frozenset({"fingerprint", "source_family"})
+CLIENT_SAFE_PROJECTION_KEYS = frozenset(
+    {
+        "report_version",
+        "generated_at",
+        "overall_status",
+        "cycle_mode",
+        "evidence_class",
+        "confidence_claim",
+        "live_validated",
+        "top_candidate_id",
+        "overall_recommendation",
+        "confidence_grade",
+        "blockers",
+        "evidence_required",
+        "approvals_required",
+        "next_best_action",
+        "launch_authorized",
+        "publishing_authorized",
+    }
+)
+EVIDENCE_MODE_LABELS = ("fixture", "manual_import", "simulated", "live_readonly")
+REMAPPED_PROVENANCE = frozenset({"observed", "derived", "A_live_validated"})
 
 
 def load(name: str, folder: Path = FIXTURES) -> dict:
@@ -104,6 +149,9 @@ def test_default_cycle_is_deterministic():
     first = cycle().to_dict()
     second = cycle().to_dict()
     assert first == second
+    assert json.dumps(first, sort_keys=True, separators=(",", ":")) == json.dumps(
+        second, sort_keys=True, separators=(",", ":")
+    )
 
 
 def test_default_cycle_is_offline_and_not_live_validated():
@@ -226,22 +274,31 @@ def test_new_modules_have_no_live_clients():
     for path in MODULE_PATHS:
         tree = ast.parse(path.read_text(encoding="utf8"), filename=str(path))
         imported = set()
+        imported_names = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 imported.update(alias.name.split(".")[0] for alias in node.names)
+                imported_names.update(alias.name.split(".")[-1] for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported.add(node.module.split(".")[0])
+                imported_names.update(alias.name for alias in node.names)
         assert imported.isdisjoint(FORBIDDEN_IMPORTS), path
+        assert imported_names.isdisjoint(FORBIDDEN_IMPORT_NAMES), path
         source = path.read_text(encoding="utf8")
         assert "requests.get" not in source
         assert "httpx" not in source
         assert "openai" not in source
         assert "anthropic" not in source
+        assert "urllib.request" not in source
+        assert "urllib.parse" not in source
         assert "build_provider_registry" not in source
         assert "rank_opportunities" not in source
         assert "score_opportunity" not in source
         assert "opportunity_scoring_events" not in source
         assert "run_commerce_mvp_slice" not in source
+        assert "build_from_paths" not in source
+        assert "build_benchmark_from_paths" not in source
+        assert "build_readiness" not in source
 
 
 def test_build_research_candidates_unchanged_without_this_cycle():
@@ -273,6 +330,7 @@ def test_cli_default_json_is_deterministic():
     second = run_cli("--json")
     assert first.returncode == 0
     assert second.returncode == 0
+    assert first.stdout == second.stdout
     assert json.loads(first.stdout) == json.loads(second.stdout)
 
 
@@ -347,6 +405,39 @@ def test_cli_missing_pillar_from_partial_inputs(capsys):
     assert "consumer_pillar_missing" in report["blockers"]
     assert report["synthesis"]["confidence_grade"] != "A_live_validated"
     assert report["governor"].get("live_go") is not True
+
+
+def _collect_keys(value) -> set[str]:
+    keys: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            keys.add(str(key))
+            keys.update(_collect_keys(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            keys.update(_collect_keys(item))
+    return keys
+
+
+def _assert_never_live_go(report: dict) -> None:
+    assert report["overall_status"] in {"plan_only", "blocked", "unavailable"}
+    assert report["live_validated"] is False
+    assert report["confidence_claim"] == "not_live_validated"
+    assert report["evidence_class"] not in {"A_live_validated", "live_validated"}
+    assert report.get("governor", {}).get("live_go") is not True
+    assert report.get("ranking", {}).get("live_go") is not True
+    assert report.get("product_validation", {}).get("live_go") is not True
+    assert report.get("approval_ledger", {}).get("live_approval_granted") is not True
+    compact = json.dumps(report, separators=(",", ":"))
+    assert '"live_go":true' not in compact
+
+
+def _assert_no_identity_authority(report: dict) -> None:
+    keys = _collect_keys(report)
+    assert keys.isdisjoint(IDENTITY_AUTHORITY_KEYS)
+    blob = json.dumps(report)
+    assert "fingerprint" not in blob
+    assert "source_family" not in blob
 
 
 def _assert_uniform_stage(section: dict, *, blockers_alias: bool = False) -> None:
@@ -849,3 +940,211 @@ def test_provider_blocked_without_registry_clone():
     blob = json.dumps(report)
     assert "build_provider_registry" not in blob
     assert report["trustos"].get("provider_activation_decision")
+
+
+def test_unverified_terms_and_policies_are_named_blocked_not_go():
+    report = cycle().to_dict()
+    blockers = [str(item) for item in report["blockers"]]
+    trustos_blockers = [str(item) for item in report["trustos"].get("blocking_reasons") or []]
+    site_blockers = [str(item) for item in report["site_draft_readiness"].get("blocking_reasons") or []]
+    named = " ".join(blockers + trustos_blockers + site_blockers)
+    assert "policies_present required" in named
+    assert "lawyer_review required" in named
+    assert "privacy_terms_approved" in named
+    assert report["trustos"]["public_launch_decision"] == "blocked_for_public_beta"
+    assert report["trustos"]["provider_activation_decision"] == "blocked_for_live_provider_activation"
+    assert report["site_draft_readiness"]["publishing_authorized"] is False
+    assert report["launch_draft_readiness"].get("launch_authorized") is not True
+    _assert_never_live_go(report)
+
+
+def test_terms_privacy_blockers_remain_named_on_dry_run_path():
+    report = cycle().to_dict()
+    assert report["cycle_mode"] == "dry_run"
+    blob = json.dumps(report).lower()
+    assert "privacy" in blob
+    assert "terms" in blob
+    assert any("policies_present" in str(item) for item in report["trustos"].get("blocking_reasons") or [])
+    assert any("privacy_terms_approved" in str(item) for item in report["site_draft_readiness"].get("blocking_reasons") or [])
+    assert report["governor"]["live_go"] is False
+    assert report["overall_status"] != "go"
+    _assert_never_live_go(report)
+
+
+@pytest.mark.parametrize("mode", EVIDENCE_MODE_LABELS)
+def test_evidence_mode_labels_pass_through_and_are_never_remapped(mode):
+    pack = load("evidence_mode_pass_through.json")
+    group = pack[mode]
+    report = build_commerce_operations_cycle(group["marketplace"], group["supplier"], group["consumer"]).to_dict()
+    assert report["marketplace"]["evidence_mode"] == mode
+    assert report["supplier"]["evidence_mode"] == mode
+    assert report["consumer_attention"]["evidence_mode"] == mode
+    rows = report["ranking"]["candidates"]
+    assert rows
+    for row in rows:
+        for name, pillar in row["pillars"].items():
+            assert pillar["mode"] == mode, name
+            assert pillar["provenance"] == mode, name
+            assert pillar["mode"] not in REMAPPED_PROVENANCE
+            assert pillar["provenance"] not in REMAPPED_PROVENANCE
+            assert pillar["provenance"] != "observed"
+            assert "fingerprint" not in pillar
+            assert "source_family" not in pillar
+    _assert_never_live_go(report)
+    _assert_no_identity_authority(report)
+
+
+def test_malformed_nested_non_object_fail_closes_without_fake_scores():
+    _market, supplier, consumer = pillars()
+    market = load("malformed_nested_non_object_marketplace.json")
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    assert report["overall_status"] == "unavailable"
+    assert report["synthesis"]["status"] == "unavailable"
+    assert report["synthesis"].get("combined_opportunity_score") in {None, 0, 0.0}
+    assert report["synthesis"].get("confidence_grade") not in {"A_live_validated", "C_fixture_or_partial"}
+    assert "product_opportunity_synthesis_unavailable" in report["blockers"]
+    assert report["ranking"]["status"] == "unavailable"
+    assert report["ranking"].get("candidates") in (None, [], ())
+    assert report["governor"].get("live_go") is not True
+    _assert_never_live_go(report)
+    _assert_uniform_stage(report["synthesis"], blockers_alias=True)
+    _assert_uniform_stage(report["ranking"], blockers_alias=True)
+
+
+def test_malformed_missing_id_record_is_not_scored():
+    market = load("malformed_missing_id_marketplace.json")
+    _, supplier, consumer = pillars()
+    expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    ids = [item["candidate_id"] for item in report["ranking"]["candidates"]]
+    assert ids == [item["candidate_id"] for item in expected["candidates"]]
+    assert "ghost-row-must-not-be-scored" not in ids
+    assert None not in ids
+    assert "" not in ids
+    assert report["ranking"]["candidate_count"] == expected["candidate_count"] == 2
+    assert report["synthesis"]["combined_opportunity_score"] == expected["combined_opportunity_score"]
+    _assert_never_live_go(report)
+
+
+def test_happy_path_to_dict_and_projection_omit_secret_and_raw_keys():
+    report = cycle().to_dict()
+    projection = report["client_safe_projection"]
+    keys = _collect_keys(report)
+    assert keys.isdisjoint(SECRET_EXPORT_KEYS)
+    assert _collect_keys(projection).isdisjoint(SECRET_EXPORT_KEYS)
+    blob = json.dumps({"report": report, "projection": projection}).lower()
+    for forbidden in ("api_key", "raw_payload", "raw_html", "<html", "sk-", "authorization"):
+        assert forbidden not in blob
+    assert '"token"' not in blob
+    _assert_never_live_go(report)
+
+
+def test_cli_packet_is_existing_to_dict_plus_client_safe_projection(tmp_path, capsys):
+    assert main(["--output", str(tmp_path), "--json"]) == 0
+    printed = json.loads(capsys.readouterr().out)
+    names = {path.name for path in tmp_path.iterdir()}
+    assert names == {
+        "commerce_operations_cycle_report.json",
+        "commerce_operations_cycle_report.md",
+        "client_safe_projection.json",
+    }
+    packet = json.loads((tmp_path / "commerce_operations_cycle_report.json").read_text(encoding="utf8"))
+    projection = json.loads((tmp_path / "client_safe_projection.json").read_text(encoding="utf8"))
+    assert packet == printed
+    assert projection == packet["client_safe_projection"]
+    assert set(projection) == CLIENT_SAFE_PROJECTION_KEYS
+    assert set(packet) == set(printed)
+    _assert_no_identity_authority(packet)
+    _assert_no_identity_authority(projection)
+    assert packet["artifacts_written"] is True
+    in_memory = cycle().to_dict()
+    in_memory["artifacts_written"] = True
+    in_memory["safety_summary"] = dict(in_memory["safety_summary"])
+    in_memory["safety_summary"]["artifacts_written"] = True
+    assert set(packet) == set(in_memory)
+    assert "packet.json" not in names
+    assert "fingerprint" not in names
+    for path in tmp_path.iterdir():
+        if path.suffix == ".json":
+            blob = path.read_text(encoding="utf8")
+            assert "fingerprint" not in blob
+            assert "source_family" not in blob
+            assert "api_key" not in blob.lower()
+            assert "raw_payload" not in blob.lower()
+
+
+def test_approval_ledger_unavailable_is_fail_closed_simulate_only(monkeypatch):
+    import evaluation.commerce.commerce_operations_cycle as cycle_mod
+
+    monkeypatch.setattr(cycle_mod, "simulate_action", None)
+    monkeypatch.setattr(cycle_mod, "build_approval_ledger", None)
+    report = cycle().to_dict()
+    ledger = report["approval_ledger"]
+    assert ledger["status"] == "unavailable"
+    assert ledger["evidence_class"] == "unavailable"
+    assert ledger.get("live_approval_granted") is not True
+    assert ledger.get("live_go") is not True
+    assert "approval_ledger_unavailable" in (ledger.get("blocking_reasons") or ledger.get("blockers") or [])
+    _assert_uniform_stage(ledger, blockers_alias=True)
+    _assert_never_live_go(report)
+
+
+def test_approval_simulations_are_simulate_only_and_cannot_approve_now():
+    report = cycle().to_dict()
+    ledger = report["approval_ledger"]
+    assert ledger["metadata_only"] is True
+    assert ledger["registry_loaded"] is False
+    assert ledger["live_approval_granted"] is False
+    assert ledger["required_approval_or_gate"] == "Approval Ledger simulate_action"
+    sims = ledger.get("simulations") or []
+    assert {item["action"] for item in sims} == {"site_publish", "ad_launch", "supplier_order", "payment_creation"}
+    for item in sims:
+        assert item.get("can_be_approved_now") is False
+        assert item.get("result") not in {"approved", "allow", "would_auto_allow"}
+        assert item.get("status") in {"blocked", "requires_approval", "unavailable"}
+        assert "live" not in str(item.get("result") or "")
+    _assert_never_live_go(report)
+
+
+def test_uniform_schema_holds_on_blocked_and_missing_pillar_paths():
+    reports = (
+        cycle(live_requested=True).to_dict(),
+        build_commerce_operations_cycle(None, None, None).to_dict(),
+    )
+    for report in reports:
+        assert list(report["stages"]) == list(STAGE_ORDER)
+        for name in STAGE_ORDER:
+            _assert_uniform_stage(report[name], blockers_alias=True)
+            _assert_uniform_stage(report["stages"][name])
+            assert report["stages"][name]["status"] == report[name]["status"]
+        _assert_never_live_go(report)
+
+
+def test_scoring_authority_stays_on_synthesis_generate_is_presentation_only():
+    report = cycle().to_dict()
+    owners = []
+    for name in STAGE_ORDER:
+        section = report[name]
+        if "scoring_authority" in section:
+            owners.append((name, section["scoring_authority"]))
+    assert [name for name, _ in owners] == ["synthesis", "ranking"]
+    assert all(auth.endswith("build_product_opportunity_synthesis") for _, auth in owners)
+    validation = report["product_validation"]
+    assert "scoring_authority" not in validation
+    assert validation["presentation_builder"].endswith("product_validation_report.generate")
+    assert report["ranking"]["re_ranked"] is False
+
+
+def test_ranking_has_no_second_packet_or_identity_authority():
+    report = cycle().to_dict()
+    _assert_no_identity_authority(report)
+    for row in report["ranking"]["candidates"]:
+        assert "fingerprint" not in row
+        assert "source_family" not in row
+        assert "alias" not in row
+        assert set(row["pillars"]) == {"marketplace", "supplier", "consumer"}
+        for pillar in row["pillars"].values():
+            assert "fingerprint" not in pillar
+            assert "source_family" not in pillar
+    assert set(report["client_safe_projection"]) == CLIENT_SAFE_PROJECTION_KEYS
+    assert report["report_version"] == "commerce-operations-cycle-v1"
