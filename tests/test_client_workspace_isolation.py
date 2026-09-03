@@ -13,7 +13,7 @@ from evaluation.trustos.control_plane import ACTION_CATEGORIES
 from evaluation.trustos.client_workspace_isolation import (
     ACCESS_MODES, CLIENT_EXPORT_FIELDS, CLONE_TYPES, DATA_CLASSES, LEAKAGE_STATUSES, MAX_CLIENT_EVIDENCE_EXPORT_BYTES,
     SERVICE_PACKAGES, WORKSPACE_STATUSES, WORKSPACE_TYPES, ClientWorkspaceCloneManifest, ClientWorkspaceDataClass,
-    ClientWorkspaceEvidenceExport, ClientWorkspaceIsolationReport, ClientWorkspaceLeakageCheck,
+    ClientWorkspaceEvidenceExport, ClientWorkspaceExportError, ClientWorkspaceIsolationReport, ClientWorkspaceLeakageCheck,
     ClientWorkspaceManifest, ClientWorkspacePermission,
     ClientWorkspaceSafetySummary, ClientWorkspaceVisibilityRule, build_client_workspace_isolation_report, check_workspace_leakage,
     export_client_evidence,
@@ -736,6 +736,44 @@ def test_client_evidence_export_rejects_forbidden_content(payload, export_contex
             payload=payload,
         )
     assert "synthetic" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"status": "actual"},
+        {"status": "live_validated"},
+        {"status": "fixture evidence is live"},
+        {"next_actions": [r"C:\\synthetic\\private\\report.json"]},
+        {"next_actions": ["/synthetic/private/report.json"]},
+        {"next_actions": ["file:///synthetic/private/report.json"]},
+    ],
+)
+def test_client_evidence_export_rejects_non_authoritative_claims_and_paths(payload, export_context):
+    workspace, registry = export_context
+    with pytest.raises(ClientWorkspaceExportError) as error:
+        export_client_evidence(
+            workspace=workspace,
+            registry=registry,
+            provenance="fixture://unsafe",
+            evidence_state="present",
+            payload=payload,
+        )
+    assert error.value.code == "content_rejected"
+    assert "synthetic" not in str(error.value)
+
+
+def test_client_evidence_export_rejects_control_characters(export_context):
+    workspace, registry = export_context
+    with pytest.raises(ClientWorkspaceExportError) as error:
+        export_client_evidence(
+            workspace=workspace,
+            registry=registry,
+            provenance="fixture://unsafe",
+            evidence_state="present",
+            payload={"next_actions": ["review\nsecret"]},
+        )
+    assert error.value.code == "invalid_metadata"
 
 
 @pytest.mark.parametrize(

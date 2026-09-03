@@ -16,10 +16,13 @@ a filesystem path or raw external payload.
 
 The boundary fails closed for internal prompts, formulas, heuristics, strategy
 or pricing notes, source code, cross-client or private-tenant data, credentials,
-cookies, tokens, raw provider payloads, and secret-shaped values. Rejections
-use fixed messages and do not reflect attacker values. Accepted envelopes use
-canonical JSON for deterministic SHA-256 fingerprints and contain no sensitive
-fields; this is validation, not a claim that sensitive data was safely scrubbed.
+cookies, tokens, raw provider payloads, secret-shaped values, filesystem paths,
+control characters, and fixture/simulated evidence presented as live or actual.
+Rejections use a stable `ClientWorkspaceExportError.code` (`invalid_metadata`,
+`identity_rejected`, `content_rejected`, or `size_exceeded`) with fixed messages
+and do not reflect attacker values. Accepted envelopes use canonical JSON for
+deterministic SHA-256 fingerprints and contain no sensitive fields; this is
+validation, not a claim that sensitive data was safely scrubbed.
 
 The implementation is fixture-backed and offline. It does not read credentials,
 client data, private artifacts, provider responses, or generated files, and it

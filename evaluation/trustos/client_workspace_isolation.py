@@ -28,11 +28,19 @@ SECRET_KEYS = {"api_key", "private_key", "password", "raw_payload", "raw_html", 
 _FORBIDDEN_KEY_MARKERS = ("prompt", "formula", "heuristic", "strategy", "pricing", "upsell", "agent_instruction", "source_code", "cross_client", "other_client", "private_tenant", "client_private_data", "provider_payload", "raw_payload", "provider_response", "raw_response", "credential", "secret", "password", "api_key", "access_token", "refresh_token", "authorization", "cookie", "token")
 _FORBIDDEN_VALUE_MARKERS = ("sk-", "ghp_", "github_pat_", "-----begin", "bearer ", "cookie=", "session=", "<html", "other_client", "cross_client", "prompt", "formula", "heuristic", "strategy", "credential", "token", "cookie", "source code", "provider response", "raw payload")
 _SOURCE_CODE_VALUE = re.compile(r"(?im)^\s*(?:def|class|import|from)\s+\w+")
+_FILESYSTEM_PATH_VALUE = re.compile(r"(?i)(?:^|[\s=(\[{,:])(?:file://|[a-z]:[\\/]|\\\\|/(?!/)|[^\\/\s]+\\[^\\/\s]+)")
+_NON_AUTHORITATIVE_CLAIM_MARKERS = ("actual", "live", "live_validated", "verified_live", "production")
 _SAFE_WORKSPACE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SAFE_PROVENANCE = re.compile(r"^[a-z][a-z0-9+.-]{1,15}://[A-Za-z0-9._/-]{1,192}$")
 _ALLOWED_PROVENANCE_SCHEMES = frozenset({"derived", "fixture", "manual", "offline"})
 CLIENT_EXPORT_FIELDS = frozenset({"workspace_id", "status", "blockers", "evidence_required", "approvals_required", "next_actions"})
 MAX_CLIENT_EVIDENCE_EXPORT_BYTES = 64_000
+_EXPORT_ERROR_MESSAGES = {
+    "invalid_metadata": "invalid client evidence export",
+    "identity_rejected": "client workspace identity rejected",
+    "content_rejected": "client evidence export rejected",
+    "size_exceeded": "client evidence export exceeds size limit",
+}
 
 
 @dataclass(frozen=True)
@@ -333,6 +341,7 @@ def check_workspace_leakage(payload: Mapping[str, Any], *, client_safe: bool = T
                     or data_class in INTERNAL_KEYS
                     or (client_safe and data_class in {"client_private_data", "global_provider_intelligence"})
                     or any(marker in key_text for marker in _FORBIDDEN_KEY_MARKERS)
+                    or _contains_filesystem_path(str(key))
                 )
                 if forbidden_key:
                     cls = data_class or "client_private_data"
@@ -342,7 +351,7 @@ def check_workspace_leakage(payload: Mapping[str, Any], *, client_safe: bool = T
                 walk(child, f"{path}.{key}".strip("."))
         elif isinstance(value, (list, tuple)):
             for index, child in enumerate(value): walk(child, f"{path}[{index}]")
-        elif isinstance(value, str) and _contains_forbidden_value(value):
+        elif isinstance(value, str) and (_contains_forbidden_value(value) or _contains_filesystem_path(value)):
             findings.append(ClientWorkspaceLeakageCheck(f"leak-{len(findings)+1}", "client_private_data", path, "secret or cross-client value detected", "critical", "reject value and request a sanitized replacement", False, True, "hard_block"))
     walk(payload)
     return tuple(findings)
@@ -351,6 +360,18 @@ def check_workspace_leakage(payload: Mapping[str, Any], *, client_safe: bool = T
 def _contains_forbidden_value(value: str) -> bool:
     lowered = value.lower()
     return any(marker in lowered for marker in _FORBIDDEN_VALUE_MARKERS) or _SOURCE_CODE_VALUE.search(value) is not None
+
+
+def _contains_filesystem_path(value: str) -> bool:
+    return _FILESYSTEM_PATH_VALUE.search(value) is not None
+
+
+class ClientWorkspaceExportError(ValueError):
+    """Stable, non-reflective failure for rejected client evidence exports."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(_EXPORT_ERROR_MESSAGES[code])
 
 
 @dataclass(frozen=True)
@@ -387,8 +408,10 @@ def _validate_provenance(value: Any) -> bool:
 
 
 def _is_export_value(value: Any) -> bool:
-    if value is None or isinstance(value, (bool, int, str)):
+    if value is None or isinstance(value, (bool, int)):
         return True
+    if isinstance(value, str):
+        return value.isprintable()
     if isinstance(value, float):
         return value == value and abs(value) != float("inf")
     if isinstance(value, Mapping):
@@ -413,37 +436,41 @@ def export_client_evidence(
 ) -> ClientWorkspaceEvidenceExport:
     """Create one bounded, canonical client-safe evidence projection."""
     if not isinstance(workspace, ClientWorkspace) or (registry is not None and not isinstance(registry, WorkspaceRegistry)):
-        raise ValueError("invalid client evidence export")
+        raise ClientWorkspaceExportError("invalid_metadata")
     try:
         registered = (registry or get_workspace_registry()).get(workspace.workspace_id)
     except Exception:
-        raise ValueError("client workspace identity rejected") from None
+        raise ClientWorkspaceExportError("identity_rejected") from None
     if registered is None or registered.to_dict() != workspace.to_dict():
-        raise ValueError("client workspace identity rejected")
+        raise ClientWorkspaceExportError("identity_rejected")
     if (
         not _validate_workspace_id(registered.workspace_id)
         or not _validate_provenance(provenance)
         or evidence_state not in EVIDENCE_STATUSES
         or not isinstance(payload, Mapping)
         or not _is_export_value(payload)
+        or ("status" in payload and not isinstance(payload["status"], str))
         or not isinstance(max_payload_bytes, int)
         or isinstance(max_payload_bytes, bool)
         or max_payload_bytes <= 0
         or max_payload_bytes > MAX_CLIENT_EVIDENCE_EXPORT_BYTES
     ):
-        raise ValueError("invalid client evidence export")
+        raise ClientWorkspaceExportError("invalid_metadata")
     try:
         if any(not isinstance(key, str) or key not in CLIENT_EXPORT_FIELDS for key in payload):
-            raise ValueError("client evidence export rejected")
+            raise ClientWorkspaceExportError("content_rejected")
         claimed_workspace_id = payload.get("workspace_id")
         if claimed_workspace_id is not None and claimed_workspace_id != registered.workspace_id:
-            raise ValueError("client evidence export rejected")
+            raise ClientWorkspaceExportError("content_rejected")
         if check_workspace_leakage(payload, client_safe=True):
-            raise ValueError("client evidence export rejected")
+            raise ClientWorkspaceExportError("content_rejected")
+        status_claim = str(payload.get("status", "")).casefold().replace("-", "_").replace(" ", "_")
+        if any(marker in status_claim.split("_") for marker in _NON_AUTHORITATIVE_CLAIM_MARKERS):
+            raise ClientWorkspaceExportError("content_rejected")
         safe_payload = _clean(dict(payload))
         payload_bytes = _canonical_export_bytes(safe_payload)
         if len(payload_bytes) > max_payload_bytes:
-            raise ValueError("client evidence export exceeds size limit")
+            raise ClientWorkspaceExportError("size_exceeded")
         canonical = _canonical_export_bytes({
             "workspace_id": registered.workspace_id,
             "provenance": provenance,
@@ -453,7 +480,7 @@ def export_client_evidence(
     except ValueError:
         raise
     except Exception:
-        raise ValueError("client evidence export rejected") from None
+        raise ClientWorkspaceExportError("content_rejected") from None
     return ClientWorkspaceEvidenceExport(
         "client-workspace-evidence-export-v1",
         registered.workspace_id,
@@ -489,4 +516,4 @@ def build_client_workspace_isolation_report(*, generated_at: str = "offline-dete
     return ClientWorkspaceIsolationReport("client-workspace-isolation-v1", generated_at, manifests, _data_classes(), tuple(ClientWorkspaceVisibilityRule(f"visibility-{item}", item, DEFAULT_ACCESS[item], "default policy", "hard_block" if DEFAULT_ACCESS[item] == "internal_only" else "redact_or_allow") for item in DATA_CLASSES), clones, policies, ClientWorkspaceRedactionPolicy("client-workspace-redaction-v1", tuple(sorted(INTERNAL_KEYS | {"global_provider_intelligence", "client_private_data"})), tuple(sorted(SECRET_KEYS | {"cross_client", "raw_payload", "source_code"})), True, "Client-safe fields only; professional packets require review."), leakage, tuple(gates), risks, _service_mappings(), ClientWorkspaceSafetySummary(), "Keep client exports as curated projections; internal prompts remain internal; next implement reviewed auth/database/RLS separately.")
 
 
-__all__ = ["WORKSPACE_TYPES", "WORKSPACE_STATUSES", "DATA_CLASSES", "ACCESS_MODES", "CLONE_TYPES", "SERVICE_PACKAGES", "CLIENT_EXPORT_FIELDS", "MAX_CLIENT_EVIDENCE_EXPORT_BYTES", "ClientWorkspaceIsolationReport", "ClientWorkspaceManifest", "ClientWorkspaceScope", "ClientWorkspaceRole", "ClientWorkspacePermission", "ClientWorkspacePolicy", "ClientWorkspaceBoundary", "ClientWorkspaceDataClass", "ClientWorkspaceVisibilityRule", "ClientWorkspaceExportPolicy", "ClientWorkspaceCloneManifest", "ClientWorkspaceRedactionPolicy", "ClientWorkspaceLeakageCheck", "ClientWorkspaceGateResult", "ClientWorkspaceRiskItem", "ClientWorkspaceSafetySummary", "ClientWorkspaceEvidenceExport", "check_workspace_leakage", "export_client_evidence", "build_client_workspace_isolation_report"]
+__all__ = ["WORKSPACE_TYPES", "WORKSPACE_STATUSES", "DATA_CLASSES", "ACCESS_MODES", "CLONE_TYPES", "SERVICE_PACKAGES", "CLIENT_EXPORT_FIELDS", "MAX_CLIENT_EVIDENCE_EXPORT_BYTES", "ClientWorkspaceIsolationReport", "ClientWorkspaceManifest", "ClientWorkspaceScope", "ClientWorkspaceRole", "ClientWorkspacePermission", "ClientWorkspacePolicy", "ClientWorkspaceBoundary", "ClientWorkspaceDataClass", "ClientWorkspaceVisibilityRule", "ClientWorkspaceExportPolicy", "ClientWorkspaceCloneManifest", "ClientWorkspaceRedactionPolicy", "ClientWorkspaceLeakageCheck", "ClientWorkspaceGateResult", "ClientWorkspaceRiskItem", "ClientWorkspaceSafetySummary", "ClientWorkspaceEvidenceExport", "ClientWorkspaceExportError", "check_workspace_leakage", "export_client_evidence", "build_client_workspace_isolation_report"]
