@@ -6,6 +6,7 @@ fixtures and seller-provided CSV snapshots into the shared feasibility model.
 from __future__ import annotations
 
 import csv
+import io
 import json
 import re
 from pathlib import Path
@@ -25,6 +26,7 @@ from evaluation.commerce.supplier_feasibility import (
 
 SECRET_KEY = re.compile(r"(token|secret|password|api[_-]?key|authorization|cookie|private[_-]?key)", re.I)
 SECRET_VALUE = re.compile(r"(bearer\s+|sk_live_|sk_test_|ghp_|xox[baprs]-|-----BEGIN)", re.I)
+HTML_MARKERS = re.compile(r"<(?:!DOCTYPE\s+html|html|body|script)\b", re.I)
 
 
 class SupplierImportError(ValueError):
@@ -48,6 +50,35 @@ def contains_secret(value: Any) -> bool:
     if isinstance(value, (list, tuple)):
         return any(contains_secret(item) for item in value)
     return bool(SECRET_VALUE.search(str(value))) if value is not None else False
+
+
+def contains_html(value: Any) -> bool:
+    """Detect raw HTML document/script markers. A lone '<' is not HTML."""
+    if isinstance(value, Mapping):
+        return any(contains_html(key) or contains_html(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(contains_html(item) for item in value)
+    if value is None:
+        return False
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        text = bytes(value).decode("utf-8", errors="replace")
+    else:
+        text = str(value)
+    return bool(HTML_MARKERS.search(text))
+
+
+def _reject_raw_html(value: Any) -> None:
+    if contains_html(value):
+        raise SupplierImportError("raw HTML is not allowed")
+
+
+def _read_import_text(path: str | Path, *, encoding: str = "utf-8") -> str:
+    target = validate_input_path(path)
+    raw_bytes = target.read_bytes()
+    _reject_raw_html(raw_bytes)
+    text = raw_bytes.decode(encoding)
+    _reject_raw_html(text)
+    return text
 
 
 def _clean(value: Any) -> Any:
@@ -102,7 +133,10 @@ def normalize_record(
     default_source_type: str = "fixture_demo",
     mode: str = "fixture",
 ) -> SupplierFeasibilityEvidence | None:
-    if not isinstance(row, Mapping) or contains_secret(row):
+    if not isinstance(row, Mapping):
+        return None
+    _reject_raw_html(row)
+    if contains_secret(row):
         return None
     row = _clean(row)
     nested = row.get("product") if isinstance(row.get("product"), Mapping) else {}
@@ -134,13 +168,16 @@ def normalize_record(
         warnings.append("shipping_cost_unavailable")
     quantity = integer(_value(merged, "inventory_quantity", "stock", "inventory"))
     inventory = normalize_inventory_status(_value(merged, "inventory_status", "stock_status", "availability"), quantity)
+    raw_evidence_mode = _value(merged, "evidence_mode")
+    evidence_mode = str(raw_evidence_mode) if raw_evidence_mode is not None else mode
+    observed = _value(merged, "observed_at", "captured_at")
     return SupplierFeasibilityEvidence(
         candidate_id=candidate_id,
         query=str(_value(merged, "query", "supplier_title", "title") or candidate_id),
         supplier=supplier,
         source_type=source_type,
         source_url=str(_value(merged, "source_url", "url") or ""),
-        evidence_mode=mode,
+        evidence_mode=evidence_mode,
         supplier_product_id=str(_value(merged, "supplier_product_id", "product_id", "item_id") or ""),
         supplier_title=str(_value(merged, "supplier_title", "title", "product_title") or ""),
         supplier_brand=str(_value(merged, "supplier_brand", "brand") or ""),
@@ -168,13 +205,12 @@ def normalize_record(
         source_confidence=max(0.0, min(1.0, number(_value(merged, "source_confidence", "confidence")) or (0.7 if mode == "manual_import" else 0.55))),
         field_provenance=_provenance(merged, mode),
         warnings=tuple(sorted(set(warnings))),
-        observed_at=str(_value(merged, "observed_at", "captured_at") or "deterministic"),
+        observed_at="" if observed is None else str(observed),
     )
 
 
 def _rows_from_json(path: str | Path) -> list[Mapping[str, Any]]:
-    target = validate_input_path(path)
-    raw = json.loads(target.read_text(encoding="utf8"))
+    raw = json.loads(_read_import_text(path))
     if isinstance(raw, list):
         return [item for item in raw if isinstance(item, Mapping)]
     if isinstance(raw, Mapping):
@@ -193,9 +229,7 @@ def import_json(path: str | Path, *, supplier: str = "cj", source_type: str = "f
 
 
 def import_csv(path: str | Path, *, supplier: str = "manual", source_type: str = "manual_csv_import") -> list[SupplierFeasibilityEvidence]:
-    target = validate_input_path(path)
-    with target.open(newline="", encoding="utf-8-sig") as handle:
-        rows = list(csv.DictReader(handle))
+    rows = list(csv.DictReader(io.StringIO(_read_import_text(path, encoding="utf-8-sig"))))
     return collapse_duplicates(item for row in rows if (item := normalize_record(row, default_supplier=str(row.get("supplier") or supplier), default_source_type=str(row.get("source_type") or source_type), mode="manual_import")))
 
 

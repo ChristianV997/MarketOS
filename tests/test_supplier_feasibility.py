@@ -8,6 +8,7 @@ import pytest
 
 from backend.adapters.research.supplier_feasibility import (
     SupplierImportError,
+    contains_html,
     contains_secret,
     import_alibaba,
     import_aliexpress,
@@ -152,6 +153,86 @@ def test_secret_detection_catches_forbidden_keys(payload):
 
 def test_secret_detection_does_not_flag_normal_product_values():
     assert not contains_secret({"candidate_id": "x", "supplier_title": "Safe product", "unit_cost": 4})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "<html><body>x</body></html>",
+        "<!DOCTYPE html><html></html>",
+        "<body>",
+        "<script>alert(1)</script>",
+        {"supplier_title": "<HTML lang='en'>"},
+        b"<!doctype html>",
+    ],
+)
+def test_html_detection_catches_document_markers(payload):
+    assert contains_html(payload)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "Widget size < 10cm",
+        "a < b",
+        {"supplier_title": "Price < $12"},
+        {"candidate_id": "x", "unit_cost": 4},
+        None,
+    ],
+)
+def test_html_detection_does_not_flag_lone_less_than(payload):
+    assert not contains_html(payload)
+
+
+def test_html_json_import_is_rejected():
+    with pytest.raises(SupplierImportError, match="raw HTML"):
+        import_json(fixture("html_supplier_import_rejected.json"), supplier="cj")
+
+
+def test_html_csv_import_is_rejected():
+    with pytest.raises(SupplierImportError, match="raw HTML"):
+        import_csv(fixture("html_supplier_import_rejected.csv"))
+
+
+def test_html_in_record_raises():
+    with pytest.raises(SupplierImportError, match="raw HTML"):
+        normalize_record({"candidate_id": "x", "supplier": "cj", "supplier_title": "<html><body>raw</body></html>", "unit_cost": 5})
+
+
+def test_less_than_in_title_is_not_html():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "supplier_title": "Widget size < 10cm", "unit_cost": 5})
+    assert row is not None
+    assert row.supplier_title == "Widget size < 10cm"
+
+
+def test_raw_html_file_is_rejected_before_json_parse(tmp_path):
+    target = tmp_path / "dump.json"
+    target.write_text("<!DOCTYPE html><html><body></body></html>", encoding="utf8")
+    with pytest.raises(SupplierImportError, match="raw HTML"):
+        import_json(target)
+
+
+def test_missing_observed_at_is_not_invented():
+    rows = import_cj_validation_pack(fixture("cj_validation_pack_success.json"))
+    assert rows[0].observed_at == ""
+
+
+def test_observed_at_is_preserved_when_present():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "unit_cost": 5, "observed_at": "2026-09-01T12:00:00Z"})
+    assert row is not None
+    assert row.observed_at == "2026-09-01T12:00:00Z"
+
+
+def test_stale_evidence_mode_survives_normalize_record():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "unit_cost": 5, "evidence_mode": "stale"})
+    assert row is not None
+    assert row.evidence_mode == "stale"
+
+
+def test_stale_evidence_mode_survives_import_json():
+    rows = import_json(fixture("stale_evidence_mode.json"), supplier="cj")
+    assert len(rows) == 1
+    assert rows[0].evidence_mode == "stale"
 
 
 def test_path_traversal_is_rejected():
