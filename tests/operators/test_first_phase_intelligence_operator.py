@@ -55,7 +55,13 @@ def test_default_offline_behavior_is_fixture_first():
     assert summary["fixture_only"] is True
     assert summary["live_validated"] is False
     assert summary["evidence_authority"] == "offline_planning_only"
-    assert summary["lane_id"] == "WINDOWS-FIRST-PHASE-EVIDENCE-TRUTH-04"
+    assert summary["lane_id"] == "WINDOWS-FIRST-PHASE-EVIDENCE-PACKET-01"
+    assert summary["schema"] == "MarketOS.FirstPhaseOperatorSummary.v1"
+    assert summary["execution_evidence"]["schema"] == "MarketOS.FirstPhaseExecutionEvidence.v1"
+    assert summary["execution_evidence"]["run_mode"] == "fixture_demo"
+    assert summary["execution_evidence"]["evidence_label"] == "fixture"
+    assert summary["fingerprint"]
+    assert summary["fingerprint"] == summary["execution_evidence"]["fingerprint"]
     assert summary["read_only"] is True
     assert summary["network_calls"] is False
     assert summary["mutated"] is False
@@ -63,6 +69,11 @@ def test_default_offline_behavior_is_fixture_first():
     assert summary["python_command"]
     assert [stage["classification"] for stage in summary["stages"]] == ["fixture"] * 8
     assert [stage["evidence_class"] for stage in summary["stages"]] == ["fixture"] * 8
+    assert all(stage["status"] == "completed" for stage in summary["stages"])
+    assert summary["decision_packet"]["present"] is True
+    assert summary["decision_packet"]["operations_cycle"] == "not_run"
+    assert summary["governor_result"]["present"] is True
+    assert summary["trustos_result"]["present"] is True
     serialized = json.dumps(summary)
     assert '"classification":"actual"' not in serialized.replace(" ", "")
     assert '"evidence_class":"actual"' not in serialized.replace(" ", "")
@@ -87,6 +98,10 @@ def test_explicit_output_directory_writes_stage_artifacts(tmp_path: Path):
     assert validation.is_file()
     assert governor.is_file()
     assert trustos.is_file()
+    manifest = output_dir / "first_phase_execution_evidence.json"
+    assert manifest.is_file()
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["fingerprint"] == summary["fingerprint"]
     report = json.loads(marketplace.read_text(encoding="utf-8"))
     assert report["candidate_count"] <= 2
 
@@ -166,7 +181,9 @@ def test_stable_summary_fingerprint_matches_across_runs():
         "authoritative",
         "evidence_authority",
         "evidence_mode",
+        "execution_evidence",
         "fixture_only",
+        "fingerprint",
         "lane_id",
         "live_validated",
         "max_candidates",
@@ -177,6 +194,9 @@ def test_stable_summary_fingerprint_matches_across_runs():
         "overall_evidence_class",
         "read_only",
         "stages",
+        "governor_result",
+        "trustos_result",
+        "decision_packet",
     )
     assert {key: first[key] for key in fingerprint_keys} == {key: second[key] for key in fingerprint_keys}
 
@@ -288,6 +308,27 @@ def test_mixed_unavailable_stage_prevents_fixture_success_claim(tmp_path: Path):
     assert summary["live_validated"] is False
     assert summary["overall_evidence_class"] != "fixture"
     assert summary["overall_evidence_class"] != "actual"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
+def test_stage_failure_leaves_decision_packet_absent(tmp_path: Path):
+    bad_json = tmp_path / "bad.json"
+    bad_json.write_text("{not-json", encoding="utf-8")
+    summary = _summary_from_output(_run_operator("-MarketplaceTrendSeed", str(bad_json)).stdout)
+    assert summary["decision_packet"]["present"] is False
+    assert summary["governor_result"]["present"] is False
+    assert summary["trustos_result"]["present"] is False
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
+def test_execution_evidence_manifest_fields_are_bounded():
+    summary = _summary_from_output(_run_operator("-MaxCandidates", "2").stdout)
+    stage = summary["stages"][0]
+    for key in ("id", "status", "classification", "evidence_class", "evidence_label", "input_fixture_identity", "provenance", "freshness", "authority"):
+        assert key in stage
+    assert stage["input_fixture_identity"] == "builtin_fixture_demo"
+    assert summary["execution_evidence"]["freshness"] == "not_observed"
+    assert summary["execution_evidence"]["provenance"] == "offline_composed_cli"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell operator wrapper is Windows-only")
