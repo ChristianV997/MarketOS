@@ -1,19 +1,69 @@
-import type { KeyboardEvent } from "react";
-import type { RankedCandidateRow } from "../contracts/firstPhaseEvidencePacket";
+import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
+import {
+  CANDIDATE_WINDOW_SIZE,
+  type RankedCandidateRow,
+} from "../contracts/firstPhaseEvidencePacket";
+import {
+  ensureSelectionInWindow,
+  nextWindowStart,
+  windowCandidates,
+} from "../lib/windowCandidates";
 
 function formatPct(value: number | null): string {
   return value !== null ? `${(value * 100).toFixed(0)}%` : "—";
+}
+
+function pillarLookup(candidate: RankedCandidateRow) {
+  let market = null;
+  let supplier = null;
+  let economics = null;
+  let attention = null;
+  for (const cell of candidate.pillarCells) {
+    if (cell.pillarId === "market_evidence") market = cell;
+    else if (cell.pillarId === "supplier_feasibility") supplier = cell;
+    else if (cell.pillarId === "economics") economics = cell;
+    else if (cell.pillarId === "consumer_attention") attention = cell;
+  }
+  return { market, supplier, economics, attention };
 }
 
 export function RankedCandidatesPanel({
   candidates,
   selectedId,
   onSelect,
+  windowStart,
+  onWindowStartChange,
 }: {
   candidates: RankedCandidateRow[];
   selectedId: string | null;
   onSelect: (candidateId: string) => void;
+  windowStart: number;
+  onWindowStartChange: (start: number) => void;
 }) {
+  const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  const detailFocusRequested = useRef(false);
+
+  const alignedStart = useMemo(
+    () => ensureSelectionInWindow(candidates, selectedId, windowStart, CANDIDATE_WINDOW_SIZE),
+    [candidates, selectedId, windowStart],
+  );
+
+  useEffect(() => {
+    if (alignedStart !== windowStart) onWindowStartChange(alignedStart);
+  }, [alignedStart, windowStart, onWindowStartChange]);
+
+  const windowed = useMemo(
+    () => windowCandidates(candidates, alignedStart, CANDIDATE_WINDOW_SIZE),
+    [candidates, alignedStart],
+  );
+
+  useEffect(() => {
+    if (!selectedId || !detailFocusRequested.current) return;
+    detailFocusRequested.current = false;
+    const detail = document.getElementById("candidate-detail-panel");
+    detail?.focus();
+  }, [selectedId]);
+
   if (!candidates.length) {
     return (
       <section
@@ -29,26 +79,56 @@ export function RankedCandidatesPanel({
     );
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>, index: number) {
+  function focusRow(absoluteIndex: number) {
+    const relative = absoluteIndex - windowed.windowStart;
+    const row = tbodyRef.current?.children[relative] as HTMLElement | undefined;
+    row?.focus();
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>, absoluteIndex: number) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      onSelect(candidates[index].candidateId);
+      detailFocusRequested.current = true;
+      onSelect(candidates[absoluteIndex].candidateId);
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      onSelect(candidates[0].candidateId);
+      onWindowStartChange(0);
+      queueMicrotask(() => focusRow(0));
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      const last = candidates.length - 1;
+      onSelect(candidates[last].candidateId);
+      onWindowStartChange(Math.max(0, last - CANDIDATE_WINDOW_SIZE + 1));
+      queueMicrotask(() => focusRow(last));
       return;
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      const next = candidates[Math.min(index + 1, candidates.length - 1)];
-      onSelect(next.candidateId);
-      (event.currentTarget.parentElement?.children[index + 1] as HTMLElement | undefined)?.focus();
+      const nextIndex = Math.min(absoluteIndex + 1, candidates.length - 1);
+      onSelect(candidates[nextIndex].candidateId);
+      if (nextIndex >= windowed.windowStart + windowed.windowSize) {
+        onWindowStartChange(nextWindowStart(windowed, "forward"));
+      }
+      queueMicrotask(() => focusRow(nextIndex));
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      const prev = candidates[Math.max(index - 1, 0)];
-      onSelect(prev.candidateId);
-      (event.currentTarget.parentElement?.children[index - 1] as HTMLElement | undefined)?.focus();
+      const prevIndex = Math.max(absoluteIndex - 1, 0);
+      onSelect(candidates[prevIndex].candidateId);
+      if (prevIndex < windowed.windowStart) {
+        onWindowStartChange(nextWindowStart(windowed, "back"));
+      }
+      queueMicrotask(() => focusRow(prevIndex));
     }
   }
+
+  const activeId = selectedId ?? windowed.visible[0]?.candidateId ?? null;
 
   return (
     <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4" aria-label="Ranked candidates">
@@ -56,16 +136,87 @@ export function RankedCandidatesPanel({
         <h3 className="text-sm font-medium text-zinc-100" id="ranked-candidates-heading">
           Ranked candidates (server order)
         </h3>
-        <p className="text-[11px] text-zinc-500">Use arrow keys to move · Enter to open detail</p>
+        <p className="text-[11px] text-zinc-500">
+          Arrow keys · Home/End · Enter opens detail · window {windowed.windowStart + 1}–
+          {Math.min(windowed.windowStart + windowed.visible.length, windowed.total)} of {windowed.total}
+        </p>
       </div>
-      <div className="mt-3 overflow-x-auto">
+
+      {(windowed.hasMoreBefore || windowed.hasMoreAfter) && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={!windowed.hasMoreBefore}
+            onClick={() => onWindowStartChange(nextWindowStart(windowed, "back"))}
+            className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 enabled:hover:border-zinc-500 disabled:opacity-40"
+          >
+            Previous {CANDIDATE_WINDOW_SIZE}
+          </button>
+          <button
+            type="button"
+            disabled={!windowed.hasMoreAfter}
+            onClick={() => onWindowStartChange(nextWindowStart(windowed, "forward"))}
+            className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 enabled:hover:border-zinc-500 disabled:opacity-40"
+          >
+            Next {CANDIDATE_WINDOW_SIZE}
+          </button>
+        </div>
+      )}
+
+      {/* Mobile card list */}
+      <ul className="mt-3 space-y-2 md:hidden" aria-labelledby="ranked-candidates-heading">
+        {windowed.visible.map((candidate, relativeIndex) => {
+          const absoluteIndex = windowed.windowStart + relativeIndex;
+          const selected = candidate.candidateId === selectedId;
+          const { market, supplier } = pillarLookup(candidate);
+          return (
+            <li key={candidate.candidateId}>
+              <button
+                type="button"
+                aria-selected={selected}
+                onClick={() => {
+                  detailFocusRequested.current = true;
+                  onSelect(candidate.candidateId);
+                }}
+                className={`w-full rounded border p-3 text-left text-xs ${
+                  selected
+                    ? "border-indigo-500/40 bg-indigo-500/10"
+                    : "border-zinc-800 bg-zinc-950/40"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-zinc-100">
+                    #{candidate.rankIndex + 1} {candidate.title}
+                  </span>
+                  <span className="text-zinc-500">{candidate.riskLevel ?? "—"}</span>
+                </div>
+                <p className="mt-1 text-zinc-400">
+                  Evidence {formatPct(candidate.evidenceCompleteness)} · Market{" "}
+                  {formatPct(market?.score ?? candidate.competitionScore)} · Supplier{" "}
+                  {formatPct(supplier?.score ?? candidate.supplierScore)}
+                </p>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  {candidate.evidenceMode.replace(/_/g, " ")} ·{" "}
+                  {candidate.nextBestAction?.replace(/_/g, " ") ?? "no next action"}
+                </p>
+                <span className="sr-only">Absolute index {absoluteIndex}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="mt-3 hidden overflow-x-auto md:block">
         <table
           id="ranked-candidates-table"
           className="min-w-full text-left text-xs"
           aria-labelledby="ranked-candidates-heading"
+          role="grid"
+          aria-rowcount={candidates.length}
         >
           <caption className="sr-only">
             Server-ordered first-phase candidates with pillar-level evidence scores. Selection is read-only.
+            Showing a bounded window of {CANDIDATE_WINDOW_SIZE} rows for performance.
           </caption>
           <thead className="text-zinc-500">
             <tr>
@@ -88,20 +239,23 @@ export function RankedCandidatesPanel({
               ))}
             </tr>
           </thead>
-          <tbody>
-            {candidates.map((candidate, index) => {
+          <tbody ref={tbodyRef}>
+            {windowed.visible.map((candidate, relativeIndex) => {
+              const absoluteIndex = windowed.windowStart + relativeIndex;
               const selected = candidate.candidateId === selectedId;
-              const market = candidate.pillarCells.find((cell) => cell.pillarId === "market_evidence");
-              const supplier = candidate.pillarCells.find((cell) => cell.pillarId === "supplier_feasibility");
-              const economics = candidate.pillarCells.find((cell) => cell.pillarId === "economics");
-              const attention = candidate.pillarCells.find((cell) => cell.pillarId === "consumer_attention");
+              const { market, supplier, economics, attention } = pillarLookup(candidate);
+              const tabIndex = candidate.candidateId === activeId ? 0 : -1;
               return (
                 <tr
                   key={candidate.candidateId}
-                  tabIndex={0}
+                  tabIndex={tabIndex}
                   aria-selected={selected}
-                  onClick={() => onSelect(candidate.candidateId)}
-                  onKeyDown={(event) => handleKeyDown(event, index)}
+                  aria-rowindex={candidate.rankIndex + 1}
+                  onClick={() => {
+                    detailFocusRequested.current = true;
+                    onSelect(candidate.candidateId);
+                  }}
+                  onKeyDown={(event) => handleKeyDown(event, absoluteIndex)}
                   className={`cursor-pointer border-t border-zinc-800 text-zinc-300 outline-none focus-visible:bg-indigo-500/10 focus-visible:ring-1 focus-visible:ring-indigo-400 ${
                     selected ? "bg-indigo-500/10" : "hover:bg-zinc-800/40"
                   }`}
@@ -118,10 +272,14 @@ export function RankedCandidatesPanel({
                   </td>
                   <td className="px-2 py-2">{formatPct(candidate.evidenceCompleteness)}</td>
                   <td className="px-2 py-2">
-                    <span title={market?.detail ?? undefined}>{formatPct(market?.score ?? candidate.competitionScore)}</span>
+                    <span title={market?.detail ?? undefined}>
+                      {formatPct(market?.score ?? candidate.competitionScore)}
+                    </span>
                   </td>
                   <td className="px-2 py-2">
-                    <span title={supplier?.detail ?? undefined}>{formatPct(supplier?.score ?? candidate.supplierScore)}</span>
+                    <span title={supplier?.detail ?? undefined}>
+                      {formatPct(supplier?.score ?? candidate.supplierScore)}
+                    </span>
                   </td>
                   <td className="px-2 py-2">
                     <span title={economics?.detail ?? undefined}>{candidate.economicsLabel ?? "—"}</span>

@@ -31,6 +31,12 @@ export function RunMetadataPanel({
           Source families: <b>{fingerprint.sourceFamilies.join(", ") || "none"}</b>
         </span>
         <span className="rounded bg-zinc-950/50 p-2">
+          Schema: <b>{fingerprint.schemaVersion ?? "composed-live"}</b>
+        </span>
+        <span className="rounded bg-zinc-950/50 p-2">
+          Freshness: <b>{fingerprint.freshnessLabel ?? "not provided"}</b>
+        </span>
+        <span className="rounded bg-zinc-950/50 p-2">
           Report version: <b>{fingerprint.reportVersion ?? "composed-live"}</b>
         </span>
         <span className="rounded bg-zinc-950/50 p-2">

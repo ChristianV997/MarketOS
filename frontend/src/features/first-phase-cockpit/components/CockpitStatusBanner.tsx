@@ -6,6 +6,7 @@ const STATE_STYLES: Record<EvidenceState, string> = {
   blocked: "border-red-500/30 bg-red-500/10 text-red-200",
   unavailable: "border-amber-500/30 bg-amber-500/10 text-amber-200",
   stale: "border-orange-500/30 bg-orange-500/10 text-orange-200",
+  partial: "border-sky-500/30 bg-sky-500/10 text-sky-200",
   success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
 };
 
@@ -15,6 +16,7 @@ const STATE_HINTS: Record<EvidenceState, string> = {
   blocked: "Hard blockers prevent advancement. Review blocked reasons before any operator action.",
   unavailable: "Required Phase 1 endpoints are unavailable. Partial or empty evidence only.",
   stale: "Readiness reports degraded/stale evidence. Treat rankings as advisory and dated.",
+  partial: "Some endpoints or readiness stages are incomplete. Review unavailable markers before acting.",
   success: "Evidence packet composed successfully. Ranking and launch authority remain server-side.",
 };
 

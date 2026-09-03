@@ -2,7 +2,7 @@ import type { FirstPhaseEvidencePacket } from "../contracts/firstPhaseEvidencePa
 
 /** Deterministic fixture for tests and offline UI review. */
 export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
-  state: "success",
+  state: "partial",
   rankedCandidates: [
     {
       candidateId: "cand-espresso-01",
@@ -163,7 +163,9 @@ export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
     sourceLabels: ["phase1-readiness", "benchmark-matrix", "public-market-benchmark"],
     sourceFamilies: ["phase1_readiness", "benchmark_matrix", "public_market_benchmark"],
     reportVersion: "demo-fixture-v1",
+    schemaVersion: "composed-live",
     generatedAt: "2026-09-02T00:00:00Z",
+    freshnessLabel: "age_1d",
   },
   blockedReasons: ["credential_missing"],
   unavailableReasons: ["consumer_attention_api_unavailable"],

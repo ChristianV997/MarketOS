@@ -20,7 +20,9 @@ export function CandidateDetailPanel({
 
   return (
     <section
-      className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-4"
+      id="candidate-detail-panel"
+      tabIndex={-1}
+      className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-4 outline-none focus-visible:ring-1 focus-visible:ring-indigo-400"
       aria-label={`Candidate detail ${candidate.title}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">

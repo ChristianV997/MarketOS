@@ -1,12 +1,15 @@
-import type {
-  ControlPlaneStatus,
-  EvidenceMode,
-  FirstPhaseEvidenceCockpitApiContract,
-  FirstPhaseEvidencePacket,
-  PillarId,
+import {
+  EVIDENCE_COCKPIT_SCHEMA_VERSION,
+  SUPPORTED_EVIDENCE_COCKPIT_SCHEMA_VERSIONS,
+  type ControlPlaneStatus,
+  type EvidenceMode,
+  type FirstPhaseEvidenceCockpitApiContract,
+  type FirstPhaseEvidencePacket,
+  type PillarId,
 } from "../contracts/firstPhaseEvidencePacket";
 import { containsSecretShapedValue } from "./exportClientSafeReport";
 import { normalizeEvidenceMode } from "./composeCockpitViewModel";
+import { formatFreshnessLabel, isStaleFreshness } from "./freshness";
 
 const PILLAR_IDS = new Set<PillarId>([
   "market_evidence",
@@ -33,6 +36,7 @@ export type PacketValidationResult =
 /**
  * Reject malformed future evidence-cockpit API payloads fail-closed.
  * Does not invent rankings or fill missing candidates.
+ * Does not claim the endpoint exists — only validates a packet if one is supplied.
  */
 export function validateEvidenceCockpitApiPacket(raw: unknown): PacketValidationResult {
   if (!raw || typeof raw !== "object") {
@@ -41,6 +45,15 @@ export function validateEvidenceCockpitApiPacket(raw: unknown): PacketValidation
   const packet = raw as Record<string, unknown>;
   if (packet.read_only !== true) return { ok: false, reason: "read_only_required" };
   if (packet.mutated !== false) return { ok: false, reason: "mutated_must_be_false" };
+
+  const schemaVersion = packet.schema_version;
+  if (typeof schemaVersion !== "string" || !schemaVersion) {
+    return { ok: false, reason: "schema_version_required" };
+  }
+  if (!SUPPORTED_EVIDENCE_COCKPIT_SCHEMA_VERSIONS.has(schemaVersion)) {
+    return { ok: false, reason: "schema_version_unsupported" };
+  }
+
   if (typeof packet.report_version !== "string" || !packet.report_version) {
     return { ok: false, reason: "report_version_required" };
   }
@@ -53,6 +66,8 @@ export function validateEvidenceCockpitApiPacket(raw: unknown): PacketValidation
   if (!Array.isArray(packet.pillars)) {
     return { ok: false, reason: "pillars_required" };
   }
+
+  let previousRank = -1;
   for (const candidate of packet.ranked_candidates) {
     if (!candidate || typeof candidate !== "object") {
       return { ok: false, reason: "candidate_malformed" };
@@ -64,6 +79,11 @@ export function validateEvidenceCockpitApiPacket(raw: unknown): PacketValidation
     if (typeof row.rank_index !== "number" || !Number.isInteger(row.rank_index) || row.rank_index < 0) {
       return { ok: false, reason: "candidate_rank_index_invalid" };
     }
+    // Reject out-of-order rank_index sequences without re-sorting.
+    if (row.rank_index < previousRank) {
+      return { ok: false, reason: "candidate_rank_index_out_of_order" };
+    }
+    previousRank = row.rank_index;
   }
   for (const pillar of packet.pillars) {
     if (!pillar || typeof pillar !== "object") return { ok: false, reason: "pillar_malformed" };
@@ -80,6 +100,9 @@ export function validateEvidenceCockpitApiPacket(raw: unknown): PacketValidation
       return { ok: false, reason: `${key}_status_invalid` };
     }
   }
+  if (!packet.fingerprint || typeof packet.fingerprint !== "object") {
+    return { ok: false, reason: "fingerprint_required" };
+  }
   if (containsSecretShapedValue(packet)) {
     return { ok: false, reason: "secret_shaped_value_rejected" };
   }
@@ -89,8 +112,10 @@ export function validateEvidenceCockpitApiPacket(raw: unknown): PacketValidation
 /** Map a validated future API packet into the cockpit view model without re-ranking. */
 export function mapApiPacketToViewModel(
   api: FirstPhaseEvidenceCockpitApiContract,
+  nowMs: number = Date.now(),
 ): FirstPhaseEvidencePacket {
   const evidenceMode: EvidenceMode = normalizeEvidenceMode(api.evidence_mode);
+  const freshnessLabel = formatFreshnessLabel(api.generated_at, nowMs);
   const rankedCandidates = api.ranked_candidates.map((candidate) => ({
     candidateId: candidate.candidate_id,
     title: candidate.title,
@@ -117,14 +142,15 @@ export function mapApiPacketToViewModel(
     })),
   }));
 
+  let state: FirstPhaseEvidencePacket["state"] = rankedCandidates.length ? "success" : "empty";
+  if (api.overall_status === "blocked") state = "blocked";
+  else if (api.overall_status === "degraded" || isStaleFreshness(freshnessLabel)) state = "stale";
+  else if (api.overall_status === "partially_ready" || (api.unavailable_reasons?.length ?? 0) > 0) {
+    state = "partial";
+  }
+
   return {
-    state: api.overall_status === "blocked"
-      ? "blocked"
-      : api.overall_status === "degraded"
-        ? "stale"
-        : rankedCandidates.length
-          ? "success"
-          : "empty",
+    state,
     rankedCandidates,
     pillars: api.pillars.map((pillar) => ({
       id: pillar.pillar_id,
@@ -176,7 +202,9 @@ export function mapApiPacketToViewModel(
       sourceLabels: api.fingerprint.source_labels,
       sourceFamilies: api.fingerprint.source_families,
       reportVersion: api.fingerprint.report_version ?? api.report_version,
+      schemaVersion: api.schema_version ?? EVIDENCE_COCKPIT_SCHEMA_VERSION,
       generatedAt: api.fingerprint.generated_at ?? api.generated_at,
+      freshnessLabel,
     },
     blockedReasons: api.blocked_reasons,
     unavailableReasons: api.unavailable_reasons ?? [],

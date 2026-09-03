@@ -1,11 +1,24 @@
 /** Read-only first-phase evidence cockpit contract (frontend view model). */
 
+/** Future GET /api/phase1/evidence-cockpit schema id. Composed live view uses composed-live. */
+export const EVIDENCE_COCKPIT_SCHEMA_VERSION = "phase1-evidence-cockpit-v1" as const;
+
+export const SUPPORTED_EVIDENCE_COCKPIT_SCHEMA_VERSIONS = new Set<string>([
+  EVIDENCE_COCKPIT_SCHEMA_VERSION,
+]);
+
+export const CLIENT_SAFE_EXPORT_VERSION = "first-phase-cockpit-client-safe-v1" as const;
+
+/** Default visible row window for large ranked sets (no virtualization dependency). */
+export const CANDIDATE_WINDOW_SIZE = 50;
+
 export type EvidenceState =
   | "loading"
   | "empty"
   | "blocked"
   | "unavailable"
   | "stale"
+  | "partial"
   | "success";
 
 export type EvidenceMode =
@@ -93,7 +106,9 @@ export interface RunFingerprint {
   sourceLabels: string[];
   sourceFamilies: string[];
   reportVersion: string | null;
+  schemaVersion: string | null;
   generatedAt: string | null;
+  freshnessLabel: string | null;
 }
 
 export interface FirstPhaseEvidencePacket {
@@ -115,7 +130,8 @@ export interface CandidateFilterState {
 }
 
 export interface ClientSafeCockpitExport {
-  export_version: "first-phase-cockpit-client-safe-v1";
+  export_version: typeof CLIENT_SAFE_EXPORT_VERSION;
+  schema_version: typeof EVIDENCE_COCKPIT_SCHEMA_VERSION | "composed-live";
   exported_at: string;
   read_only: true;
   mutated: false;
@@ -159,8 +175,10 @@ export interface ClientSafeCockpitExport {
 /**
  * Future backend contract (not merged): GET /api/phase1/evidence-cockpit
  * Aligns to existing Phase1/TrustOS/Governor `to_dict` / client_safe projections.
+ * Requires schema_version in SUPPORTED_EVIDENCE_COCKPIT_SCHEMA_VERSIONS.
  */
 export interface FirstPhaseEvidenceCockpitApiContract {
+  schema_version: typeof EVIDENCE_COCKPIT_SCHEMA_VERSION;
   report_version: string;
   generated_at: string;
   evidence_mode: EvidenceMode;

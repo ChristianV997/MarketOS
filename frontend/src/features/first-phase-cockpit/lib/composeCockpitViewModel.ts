@@ -13,6 +13,7 @@ import type {
   FirstPhaseEvidencePacket,
   RankedCandidateRow,
 } from "../contracts/firstPhaseEvidencePacket";
+import { formatFreshnessLabel } from "./freshness";
 
 export interface ComposeCockpitInput {
   phase1Readiness: Phase1Readiness | null;
@@ -47,6 +48,14 @@ export function deriveState(input: ComposeCockpitInput): EvidenceState {
   }
   if (input.phase1Readiness?.overall_status === "blocked") return "blocked";
   if (input.phase1Readiness?.overall_status === "degraded") return "stale";
+  const partialEndpoint =
+    input.readinessError
+    || input.benchmarkError
+    || input.publicMarketError
+    || input.researchError;
+  if (partialEndpoint || input.phase1Readiness?.overall_status === "partially_ready") {
+    return "partial";
+  }
   return "success";
 }
 
@@ -324,7 +333,7 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
         ?? input.phase1Readiness?.next_best_action
         ?? null,
       readOnly: Boolean(
-        input.phase1Readiness?.read_only
+        (input.phase1Readiness?.read_only ?? true)
         && (input.benchmark?.read_only ?? true)
         && (input.publicMarket?.read_only ?? true),
       ),
@@ -335,7 +344,9 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
       sourceLabels,
       sourceFamilies,
       reportVersion: null,
+      schemaVersion: "composed-live",
       generatedAt: null,
+      freshnessLabel: formatFreshnessLabel(null, Date.now()),
     },
     blockedReasons,
     unavailableReasons,

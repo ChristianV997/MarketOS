@@ -1,6 +1,8 @@
-import type {
-  ClientSafeCockpitExport,
-  FirstPhaseEvidencePacket,
+import {
+  CLIENT_SAFE_EXPORT_VERSION,
+  EVIDENCE_COCKPIT_SCHEMA_VERSION,
+  type ClientSafeCockpitExport,
+  type FirstPhaseEvidencePacket,
 } from "../contracts/firstPhaseEvidencePacket";
 
 const SECRET_SHAPED = /sk-live-|sk-test-|ghp_|github_pat_|AKIA[0-9A-Z]{16}|bearer\s+[a-z0-9._-]{10,}|-----begin (?:rsa |ec |dsa |openssh )?private key-----/i;
@@ -36,8 +38,14 @@ export function buildClientSafeExport(
   packet: FirstPhaseEvidencePacket,
   exportedAt: string,
 ): ClientSafeCockpitExport {
+  const schemaVersion =
+    packet.fingerprint.schemaVersion === EVIDENCE_COCKPIT_SCHEMA_VERSION
+      ? EVIDENCE_COCKPIT_SCHEMA_VERSION
+      : "composed-live";
+
   const payload: ClientSafeCockpitExport = {
-    export_version: "first-phase-cockpit-client-safe-v1",
+    export_version: CLIENT_SAFE_EXPORT_VERSION,
+    schema_version: schemaVersion,
     exported_at: exportedAt,
     read_only: true,
     mutated: false,

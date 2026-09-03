@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 import { CandidateDetailPanel } from "@/features/first-phase-cockpit/components/CandidateDetailPanel";
 import { CockpitStatusBanner } from "@/features/first-phase-cockpit/components/CockpitStatusBanner";
 import { CockpitToolbar } from "@/features/first-phase-cockpit/components/CockpitToolbar";
@@ -22,17 +22,30 @@ export default function FirstPhaseEvidenceCockpitPage() {
   const { packet, isLoading, hasErrors } = useFirstPhaseEvidenceCockpit();
   const [filter, setFilter] = useState<CandidateFilterState>(DEFAULT_CANDIDATE_FILTER);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [windowStart, setWindowStart] = useState(0);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [, startFilterTransition] = useTransition();
+  const deferredFilter = useDeferredValue(filter);
 
   const filteredCandidates = useMemo(
-    () => filterCandidates(packet.rankedCandidates, filter),
-    [packet.rankedCandidates, filter],
+    () => filterCandidates(packet.rankedCandidates, deferredFilter),
+    [packet.rankedCandidates, deferredFilter],
   );
+
+  useEffect(() => {
+    setWindowStart(0);
+  }, [deferredFilter.query, deferredFilter.risk, deferredFilter.decision, deferredFilter.topOnly]);
 
   const selectedCandidate =
     filteredCandidates.find((candidate) => candidate.candidateId === selectedId)
     ?? packet.rankedCandidates.find((candidate) => candidate.candidateId === selectedId)
     ?? null;
+
+  function handleFilterChange(next: CandidateFilterState) {
+    startFilterTransition(() => {
+      setFilter(next);
+    });
+  }
 
   function handleExport() {
     try {
@@ -104,7 +117,7 @@ export default function FirstPhaseEvidenceCockpitPage() {
         filter={filter}
         candidates={packet.rankedCandidates}
         filteredCount={filteredCandidates.length}
-        onFilterChange={setFilter}
+        onFilterChange={handleFilterChange}
         onExport={handleExport}
         exportDisabled={packet.state === "loading" || packet.rankedCandidates.length === 0}
       />
@@ -119,6 +132,8 @@ export default function FirstPhaseEvidenceCockpitPage() {
         candidates={filteredCandidates}
         selectedId={selectedId}
         onSelect={setSelectedId}
+        windowStart={windowStart}
+        onWindowStartChange={setWindowStart}
       />
       <CandidateDetailPanel candidate={selectedCandidate} onClear={() => setSelectedId(null)} />
       <EvidencePillarsPanel pillars={packet.pillars} />
