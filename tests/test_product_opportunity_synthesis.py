@@ -312,6 +312,54 @@ def test_internally_inconsistent_evidence_labels_are_never_live_validated():
     assert result2["confidence_grade"] != "A_live_validated"
 
 
+def test_stale_evidence_mode_from_sibling_adapters_cannot_promote_grade():
+    """Forward-compatibility regression: a sibling adapter (the supplier
+    feasibility importer) can pass an explicit `evidence_mode: "stale"`
+    value through unmodified, rather than always overwriting it with the
+    import mode. `"stale"` is not in `LIVE_EVIDENCE_MODES` and not
+    `"manual_import"`, so it must fall through to the same
+    C_fixture_or_partial treatment as any other unlabeled evidence --
+    never A_live_validated or B_multi_source_manual."""
+    def stale_pillar() -> dict:
+        return {
+            "evidence_mode": "stale",
+            "candidates": [
+                {
+                    "candidate_id": "x",
+                    "query": "x",
+                    "evidence": [{"evidence_mode": "stale"}],
+                    "offers": [{"evidence_mode": "stale"}],
+                    "score": {"overall_marketplace_opportunity": .8, "overall_supplier_feasibility": .8, "overall_consumer_attention": .8, "saturation_score": .1, "recommendation": "hold_for_manual_review", "economics": {"gross_margin_percent": .5}, "voice_of_customer": {}},
+                }
+            ],
+        }
+    market, supplier, consumer = stale_pillar(), stale_pillar(), stale_pillar()
+    result = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    assert result["confidence_grade"] not in {"A_live_validated", "B_multi_source_manual"}
+
+
+def test_alias_collapse_does_not_leak_a_discarded_aliass_live_label_into_the_kept_grade():
+    """Interaction check between the two fixes: when a correlated alias
+    that gets discarded during collapse happens to carry a live-looking
+    evidence_mode while the kept candidate is fixture-labeled, the
+    discarded alias's label must never leak into the kept candidate's
+    grade -- collapse must happen before grading, on the kept candidate's
+    own evidence only."""
+    market = {
+        "evidence_mode": "fixture_demo",
+        "candidates": [
+            {"candidate_id": "kept-fixture", "query": "desk clamp lamp", "evidence": [{"price": 29.99, "evidence_mode": "fixture", "source_family": "amazon_serp"}], "score": {"overall_marketplace_opportunity": .7, "saturation_score": .3}},
+            {"candidate_id": "alias-claims-live", "query": "desk clamp lamp", "evidence": [{"price": 29.99, "evidence_mode": "live_readonly", "source_family": "amazon_serp"}], "score": {"overall_marketplace_opportunity": .7, "saturation_score": .3}},
+        ],
+    }
+    supplier = {"evidence_mode": "fixture_demo", "candidates": [{"candidate_id": "kept-fixture", "query": "desk clamp lamp", "offers": [{"evidence_mode": "fixture"}], "score": {"overall_supplier_feasibility": .71, "recommendation": "validate_live_supplier_first", "economics": {"gross_margin_percent": .57}}}]}
+    consumer = {"evidence_mode": "fixture_demo", "candidates": [{"candidate_id": "kept-fixture", "query": "desk clamp lamp", "evidence": [{"evidence_mode": "fixture"}], "score": {"overall_consumer_attention": .64, "recommendation": "test_creative_offline", "voice_of_customer": {}}}]}
+    result = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["candidate_id"] == "kept-fixture"
+    assert result["confidence_grade"] != "A_live_validated"
+
+
 def test_stale_evidence_is_not_live_validated():
     market, supplier, consumer = reports()
     market["generated_at"] = "2019-01-01T00:00:00Z"

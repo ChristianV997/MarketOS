@@ -85,7 +85,23 @@ provenance fields* idea (`source_family`) rather than inventing a new
 correlation ID or fuzzy-matching engine. Evidently-style reference/current
 drift comparison and Great Expectations-style declarative "expectations" were
 reviewed but not adopted here -- both assume more state (a reference window,
-a rule engine) than this thin decision layer is meant to hold.
+a rule engine) than this thin decision layer is meant to hold. OPA/Rego's
+"collect every denial reason into one set, default-deny" pattern was reviewed
+against `_grade()`/`derive_governor_influence` and found already present:
+`_grade()`'s tiers are a deliberate fail-closed ladder ending in
+`D_low_confidence`/`F_reject_or_missing`, not an open-ended allow, and the
+Learning Ledger's `LearningGovernorInfluence.rationale` already accumulates
+every contributing signal rather than stopping at the first one -- confirmed
+by adversarial testing rather than changed further.
+
+**Independent re-verification (found no new production defect, confirmed by
+direct testing):** a correlated alias that gets discarded during collapse
+cannot leak its own evidence_mode into the kept candidate's grade -- collapse
+runs before grading, on the kept candidate's evidence only. A sibling
+adapter's `evidence_mode: "stale"` value (not `A_live_validated`-eligible, not
+`"manual_import"`) falls through to the same `C_fixture_or_partial` treatment
+as any other unlabeled evidence, confirmed with `stale_pillar()`-style
+fixtures rather than assumed.
 
 ## Decision rules
 
