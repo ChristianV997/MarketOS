@@ -250,6 +250,7 @@ class LearningGovernorInfluence:
     fingerprint: str = ""
     low_confidence_evidence: bool = False
     fixture_only_evidence: bool = False
+    advisory_rule_ids: tuple[str, ...] = ()
     def __post_init__(self) -> None:
         if self.evidence_mode not in GOVERNOR_EVIDENCE_MODES: raise ValueError("invalid governor evidence mode")
     def to_dict(self) -> dict[str, Any]: return _clean(self)
@@ -557,7 +558,15 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
 
     events_by_id = {event.learning_event_id: event for event in workspace_events}
     matching_rules = tuple(rule for rule in report.do_not_repeat_rules if action_type in rule.applies_to_action_types and rule.source_event_id in events_by_id)
-    do_not_repeat_present = bool(matching_rules)
+    # Severity-aware, matching this contract's own BLOCK_BEHAVIORS ladder
+    # (warn < soft_block/hard_block/requires_approval): a "warn"-severity
+    # rule is recorded and surfaced, but -- unlike the others -- never
+    # forces previous_learning_required on its own. No rule in this
+    # module's own fixtures currently reaches "warn", but the field is
+    # part of the existing contract's vocabulary and a future one might.
+    blocking_rules = tuple(rule for rule in matching_rules if rule.recommended_block_behavior != "warn")
+    advisory_rules = tuple(rule for rule in matching_rules if rule.recommended_block_behavior == "warn")
+    do_not_repeat_present = bool(blocking_rules)
     do_not_repeat_overridden = do_not_repeat_present and bool(proposed_hypothesis.strip())
     do_not_repeat_blocked = do_not_repeat_present and not do_not_repeat_overridden
 
@@ -586,8 +595,9 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     iteration_recommendation = matching_recommendations[0].recommendation if matching_recommendations else ""
 
     rationale: list[str] = []
-    if do_not_repeat_blocked: rationale.append(f"{len(matching_rules)} do-not-repeat rule(s) apply to {action_type} and no new hypothesis was supplied")
-    if do_not_repeat_overridden: rationale.append(f"{len(matching_rules)} do-not-repeat rule(s) matched but were overridden by an explicit new hypothesis")
+    if do_not_repeat_blocked: rationale.append(f"{len(blocking_rules)} do-not-repeat rule(s) apply to {action_type} and no new hypothesis was supplied")
+    if do_not_repeat_overridden: rationale.append(f"{len(blocking_rules)} do-not-repeat rule(s) matched but were overridden by an explicit new hypothesis")
+    if advisory_rules: rationale.append(f"{len(advisory_rules)} warn-severity do-not-repeat rule(s) apply to {action_type} but do not force learning capture")
     if kill_blocks_resumption: rationale.append(f"a kill decision was recorded for {action_type} and blocks automatic resumption")
     if hold_or_avoid: rationale.append(f"{losses} matching failed/blocked/killed event(s) recorded for {action_type}")
     if conflicting_evidence: rationale.append(f"{wins} win(s) and {losses} failure(s) recorded for the same action/candidate -- treated as inconclusive, not scale-supporting")
@@ -601,8 +611,9 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     if excluded_stale_event_ids: rationale.append(f"{len(excluded_stale_event_ids)} caller-declared stale event(s) were excluded from this evidence")
     if not rationale: rationale.append("no actionable learning signal beyond the matched evidence")
 
-    fingerprint = _governor_influence_fingerprint(action_type, candidate_id, workspace_id, evidence_mode, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in matching_rules), trustos_recurrence_blocked, kill_blocks_resumption, conflicting_evidence, low_confidence_evidence, fixture_only_evidence, recommended_model_tier, recommended_provider_id, avoid_provider_ids, excluded_stale_event_ids)
-    return LearningGovernorInfluence(action_type, candidate_id, workspace_id, evidence_mode, confidence, recency_label, provenance, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in matching_rules), bool(trustos_recurrence_blocked), recommended_model_tier, deprioritize, tuple(rationale), kill_blocks_resumption=kill_blocks_resumption, conflicting_evidence=conflicting_evidence, recommended_provider_id=recommended_provider_id, avoid_provider_ids=avoid_provider_ids, iteration_recommendation=iteration_recommendation, excluded_stale_event_ids=excluded_stale_event_ids, fingerprint=fingerprint, low_confidence_evidence=low_confidence_evidence, fixture_only_evidence=fixture_only_evidence)
+    advisory_rule_ids = tuple(rule.rule_id for rule in advisory_rules)
+    fingerprint = _governor_influence_fingerprint(action_type, candidate_id, workspace_id, evidence_mode, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in blocking_rules), advisory_rule_ids, trustos_recurrence_blocked, kill_blocks_resumption, conflicting_evidence, low_confidence_evidence, fixture_only_evidence, recommended_model_tier, recommended_provider_id, avoid_provider_ids, excluded_stale_event_ids)
+    return LearningGovernorInfluence(action_type, candidate_id, workspace_id, evidence_mode, confidence, recency_label, provenance, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in blocking_rules), bool(trustos_recurrence_blocked), recommended_model_tier, deprioritize, tuple(rationale), kill_blocks_resumption=kill_blocks_resumption, conflicting_evidence=conflicting_evidence, recommended_provider_id=recommended_provider_id, avoid_provider_ids=avoid_provider_ids, iteration_recommendation=iteration_recommendation, excluded_stale_event_ids=excluded_stale_event_ids, fingerprint=fingerprint, low_confidence_evidence=low_confidence_evidence, fixture_only_evidence=fixture_only_evidence, advisory_rule_ids=advisory_rule_ids)
 
 
 def _from_mapping(item: Mapping[str, Any], index: int) -> LearningEvent:

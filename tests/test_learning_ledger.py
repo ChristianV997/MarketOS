@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ import pytest
 from evaluation.companyos.learning_ledger import (
     BLOCK_BEHAVIORS, EVENT_TYPES, FAILURE_REASONS, GOVERNOR_EVIDENCE_MODES, MIN_SCALE_CONFIDENCE,
     OUTCOMES, PLACEHOLDER_CANDIDATE_ID, SUCCESS_REASONS, VISIBILITY,
-    LearningAttribution, LearningGovernorInfluence, LearningHypothesis, LearningLedgerSafetySummary,
+    LearningAttribution, LearningDoNotRepeatRule, LearningGovernorInfluence, LearningHypothesis, LearningLedgerSafetySummary,
     LearningMetric, LearningOutcome, LearningResult, build_learning_ledger_report, derive_governor_influence,
 )
 
@@ -1150,3 +1151,24 @@ def test_derive_governor_influence_malformed_evidence_never_reaches_the_bridge()
     `evidence` `derive_governor_influence` could act on at all."""
     with pytest.raises(ValueError):
         build_learning_ledger_report(context={"events": [{"event_type": "not-a-real-event", "outcome": "not-a-real-outcome", "action_taken": "scale_ad_budget"}]})
+
+
+def test_derive_governor_influence_warn_severity_rule_does_not_force_learning_required():
+    """Severity-aware do-not-repeat handling (informed by Dagster's
+    WARN-vs-ERROR asset-check severity pattern): a matching rule whose
+    `recommended_block_behavior` is the weakest tier in this contract's
+    own `BLOCK_BEHAVIORS` vocabulary ("warn") is recorded and surfaced,
+    but must not force `previous_learning_required` the way a
+    soft_block/hard_block/requires_approval rule does. No fixture in this
+    ledger currently produces a "warn"-severity rule, so this is
+    exercised by injecting one directly onto an existing rule (a report,
+    not a second registry)."""
+    report = build_learning_ledger_report(context={"events": [{"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "warn-only-candidate"}]})
+    original_rule = report.do_not_repeat_rules[0]
+    warn_only_rule = LearningDoNotRepeatRule(original_rule.rule_id, original_rule.source_event_id, original_rule.applies_to_action_types, original_rule.applies_to_departments, original_rule.condition, "low", "warn", original_rule.expiry_or_review_period, original_rule.client_visible)
+    warn_only_report = replace(report, do_not_repeat_rules=(warn_only_rule,))
+    influence = derive_governor_influence(warn_only_report, action_type="launch_ad_experiment", candidate_id="warn-only-candidate")
+    assert influence.do_not_repeat_blocked is False
+    assert influence.do_not_repeat_rule_ids == ()
+    assert influence.advisory_rule_ids == (original_rule.rule_id,)
+    assert any("warn-severity" in reason for reason in influence.rationale)
