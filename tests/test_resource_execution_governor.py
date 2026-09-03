@@ -773,3 +773,32 @@ def test_apply_learning_influence_never_touches_provider_readiness_flags():
     assert updated.registered_provider is False
     assert updated.terms_privacy_complete is False
     assert updated.output_contract_tested is False
+
+
+def test_stacked_negative_learning_signals_coexist_and_hard_gate_still_independently_blocks():
+    """Independent re-verification: stack every negative learning signal
+    (repeated failure, a kill, a do-not-repeat rule, TrustOS recurrence)
+    on one candidate at once and confirm apply_learning_influence combines
+    them without any surprising interaction, while a real, independent
+    Governor hard gate (trustos_decision) still blocks on its own terms
+    regardless of what the learning signal says."""
+    from evaluation.companyos.learning_ledger import build_learning_ledger_report, derive_governor_influence
+    events = [
+        {"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "stacked-candidate"},
+        {"event_type": "ad_experiment", "outcome": "killed", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "stacked-candidate"},
+        {"event_type": "trustos_review", "outcome": "blocked", "failure_reasons": ["trust_blocker"], "action_taken": "launch_ad_experiment", "candidate_id": "stacked-candidate"},
+        {"event_type": "trustos_review", "outcome": "blocked", "failure_reasons": ["trust_blocker"], "action_taken": "launch_ad_experiment", "candidate_id": "stacked-candidate"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="stacked-candidate")
+    assert influence.hold_or_avoid is True
+    assert influence.kill_blocks_resumption is True
+    assert influence.do_not_repeat_blocked is True
+    assert influence.trustos_recurrence_blocked is True
+    assert influence.supports_scale is False
+    request = base("launch_ad_experiment", requested_amount=25.0, resource_type="ad_spend", hypothesis="h", success_metric="m", kill_threshold=.02, learning_captured=False, trustos_decision="hard_block")
+    updated = apply_learning_influence(request, influence.to_governor_context())
+    result = evaluate_execution_request(updated)
+    assert "TrustOS gate is blocked" in result.blockers
+    assert "required learning has not been captured" in result.blockers
+    assert result.outcome == "hard_block"
