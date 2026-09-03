@@ -149,6 +149,15 @@ exercise. A developer reintroducing any of the following should fail that suite:
 - Approval Ledger live approval, registry load, or auto-allow
 - dropping named terms/privacy blockers (`policies_present`,
   `privacy_terms_approved`, `lawyer_review`) on the dry-run path
+- mixing marketplace, supplier, and attention streams, or adding a second
+  scorer when one candidate has multiple named sources
+- treating `unit_economics_summary.assumptions` as observed/live proof, or
+  treating missing economics `0.0` as proof rather than unavailable
+- remapping mixed stale+fresh pillars, inventing `evidence_mode` as
+  `observed` / `derived` / `A_live_validated`, or authorizing launch from
+  fixture/partial/simulated confidence
+- skipping governor / TrustOS / client-safe projection after an early
+  blocked stage, or leaking candidate ids across fixture packs in one process
 
 The on-disk packet is the existing `to_dict()` plus
 `client_safe_projection.json`. There is no second schema. Two identical calls

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import subprocess
 import sys
@@ -1148,3 +1149,274 @@ def test_ranking_has_no_second_packet_or_identity_authority():
             assert "source_family" not in pillar
     assert set(report["client_safe_projection"]) == CLIENT_SAFE_PROJECTION_KEYS
     assert report["report_version"] == "commerce-operations-cycle-v1"
+
+
+INVENTED_PROVENANCE = frozenset({"observed", "derived", "deterministic", "A_live_validated"})
+
+
+def _strip_key(value, key: str):
+    if isinstance(value, dict):
+        return {item_key: _strip_key(item, key) for item_key, item in value.items() if item_key != key}
+    if isinstance(value, list):
+        return [_strip_key(item, key) for item in value]
+    return value
+
+
+def _dump(value) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _assert_not_authorized(report: dict) -> None:
+    assert report.get("launch_draft_readiness", {}).get("launch_authorized") is not True
+    assert report.get("site_draft_readiness", {}).get("publishing_authorized") is not True
+    projection = report.get("client_safe_projection") or {}
+    assert projection.get("launch_authorized") is not True
+    assert projection.get("publishing_authorized") is not True
+    assert projection.get("confidence_claim") == "not_live_validated"
+    _assert_never_live_go(report)
+    _assert_no_identity_authority(report)
+
+
+def test_multi_stream_candidate_keeps_named_unmixed_streams():
+    pack = load("multi_stream_candidate.json")
+    market, supplier, consumer = pack["marketplace"], pack["supplier"], pack["consumer"]
+    assert {item["marketplace"] for item in market["candidates"][0]["evidence"]} >= {"amazon", "shopify"}
+    assert {item["supplier"] for item in supplier["candidates"][0]["offers"]} >= {"cj", "alibaba"}
+    assert {item["platform"] for item in consumer["candidates"][0]["evidence"]} >= {"tiktok", "reddit"}
+    expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    ranking = report["ranking"]
+    assert ranking["re_ranked"] is False
+    assert ranking["scoring_authority"].endswith("build_product_opportunity_synthesis")
+    ids = [item["candidate_id"] for item in ranking["candidates"]]
+    assert ids == [item["candidate_id"] for item in expected["candidates"]]
+    assert ids == ["multi-stream-widget"]
+    row = ranking["candidates"][0]
+    assert set(row["pillars"]) == {"marketplace", "supplier", "consumer"}
+    marketplace = row["pillars"]["marketplace"]
+    supplier_pillar = row["pillars"]["supplier"]
+    consumer_pillar = row["pillars"]["consumer"]
+    market_blob = json.dumps(marketplace)
+    supplier_blob = json.dumps(supplier_pillar)
+    consumer_blob = json.dumps(consumer_pillar)
+    assert "example.test/marketplace/" in market_blob
+    assert "example.test/supplier/" not in market_blob
+    assert "example.test/attention/" not in market_blob
+    assert "example.test/supplier/" in supplier_blob
+    assert "example.test/marketplace/" not in supplier_blob
+    assert "example.test/attention/" not in supplier_blob
+    assert "example.test/attention/" in consumer_blob
+    assert "example.test/marketplace/" not in consumer_blob
+    assert "example.test/supplier/" not in consumer_blob
+    assert "CJ-MULTI-001" in supplier_blob or "ALI-MULTI-002" in supplier_blob
+    assert "CJ-MULTI-001" not in market_blob
+    assert "ALI-MULTI-002" not in market_blob
+    for key in PROOF_SEPARATION_BLOCKERS:
+        assert key in ranking["blocking_reasons"]
+        assert ranking[key] is True
+        assert key in report["blockers"]
+    assert "fingerprint" not in row
+    assert "source_family" not in json.dumps(row)
+    _assert_not_authorized(report)
+
+
+def test_unit_economics_assumptions_stay_labeled_not_observed_proof():
+    market = load("strong_attention_market_report.json")
+    supplier = load("weak_economics_supplier_report.json")
+    consumer = load("strong_attention_consumer_report.json")
+    fixture_assumptions = supplier["candidates"][0]["score"]["economics"]["assumptions"]
+    assert fixture_assumptions
+    expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    economics = report["synthesis"]["unit_economics_summary"]
+    assert economics["assumptions"] == expected["unit_economics_summary"]["assumptions"]
+    assert economics["assumptions"] == fixture_assumptions
+    for item in economics["assumptions"]:
+        assert isinstance(item, str) and item
+        assert item not in INVENTED_PROVENANCE
+        assert not item.startswith("observed")
+        assert "A_live_validated" not in item
+    assert any("assumption" in item for item in economics["assumptions"])
+    assert economics["gross_margin_percent"] == expected["unit_economics_summary"]["gross_margin_percent"]
+    decision = report["governor"]["decisions"][0]
+    assert decision["unit_economics_source"] == "synthesis.unit_economics_summary"
+    assert decision["unit_economics_score"] == max(0.0, min(1.0, float(economics["gross_margin_percent"])))
+    assert report["governor"]["live_go"] is False
+    assert report["synthesis"]["confidence_grade"] != "A_live_validated"
+    _assert_not_authorized(report)
+
+
+def test_missing_unit_economics_is_unavailable_not_zero_as_proof():
+    market = load("strong_attention_market_report.json")
+    supplier = copy.deepcopy(load("weak_economics_supplier_report.json"))
+    consumer = load("strong_attention_consumer_report.json")
+    supplier["candidates"][0]["score"].pop("economics", None)
+    expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    compact = report["synthesis"].get("unit_economics_summary")
+    assert compact in (None, {}, [])
+    assert expected.get("unit_economics_summary") in (None, {}, [])
+    governor = report["governor"]
+    assert governor["unit_economics_source"] == "unavailable"
+    assert "unit_economics_unavailable" in (governor.get("blocking_reasons") or governor.get("blockers") or [])
+    assert governor["unit_economics_score"] == 0.0
+    assert governor["live_go"] is False
+    for decision in governor.get("decisions") or []:
+        assert decision["unit_economics_source"] == "unavailable"
+        assert decision["unit_economics_score"] == 0.0
+        assert decision.get("unit_economics_score_is_observed_proof") is not True
+    ranking_econ = (report["ranking"]["candidates"] or [{}])[0].get("unit_economics_summary")
+    assert ranking_econ in (None, {}, [])
+    _assert_not_authorized(report)
+
+
+def test_mixed_stale_and_fresh_pillars_keep_named_provenance():
+    market = load("stale_market_report.json")
+    supplier = load("stale_supplier_report.json")
+    consumer = load("stale_consumer_report.json")
+    assert market["evidence_mode"] == "stale"
+    assert supplier["candidates"][0]["offers"][0]["evidence_mode"] == "fixture"
+    assert consumer["candidates"][0]["evidence"][0]["evidence_mode"] == "fixture"
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    assert report["ranking"]["candidate_count"] >= 1
+    row = report["ranking"]["candidates"][0]
+    assert row["candidate_id"] == "stale-widget"
+    marketplace = row["pillars"]["marketplace"]
+    supplier_pillar = row["pillars"]["supplier"]
+    consumer_pillar = row["pillars"]["consumer"]
+    assert marketplace["mode"] == marketplace["provenance"] == "stale"
+    assert supplier_pillar["mode"] == supplier_pillar["provenance"] == "fixture"
+    assert consumer_pillar["mode"] == consumer_pillar["provenance"] == "fixture"
+    assert marketplace["mode"] not in REMAPPED_PROVENANCE
+    assert supplier_pillar["mode"] not in REMAPPED_PROVENANCE
+    assert consumer_pillar["mode"] not in REMAPPED_PROVENANCE
+    assert "stale_evidence:marketplace" in row["blockers"]
+    assert "stale_evidence:marketplace" in report["blockers"]
+    assert "stale_evidence:supplier" not in row["blockers"]
+    assert "stale_evidence:consumer" not in row["blockers"]
+    assert set(row["pillars"]) == {"marketplace", "supplier", "consumer"}
+    assert report["governor"]["live_go"] is False
+    _assert_not_authorized(report)
+
+
+def test_missing_evidence_mode_is_omitted_not_invented():
+    market = _strip_key(load("absent_observed_at_marketplace_report.json"), "evidence_mode")
+    supplier = _strip_key(load("absent_observed_at_supplier_report.json"), "evidence_mode")
+    consumer = _strip_key(load("absent_observed_at_consumer_report.json"), "evidence_mode")
+    assert "evidence_mode" not in json.dumps(market)
+    assert "evidence_mode" not in json.dumps(supplier)
+    assert "evidence_mode" not in json.dumps(consumer)
+    report = build_commerce_operations_cycle(market, supplier, consumer).to_dict()
+    row = report["ranking"]["candidates"][0]
+    for name, pillar in row["pillars"].items():
+        assert pillar["mode"] == pillar["provenance"], name
+        assert pillar["mode"] not in INVENTED_PROVENANCE, name
+        assert pillar["provenance"] not in INVENTED_PROVENANCE, name
+        assert pillar["mode"] in {"", "unavailable", "missing"}, name
+        assert "observed_at" not in pillar, name
+    for section_name in ("marketplace", "supplier", "consumer_attention"):
+        mode = report[section_name].get("evidence_mode")
+        assert mode not in INVENTED_PROVENANCE
+    assert report["synthesis"]["confidence_grade"] != "A_live_validated"
+    assert report["confidence_claim"] == "not_live_validated"
+    _assert_not_authorized(report)
+
+
+def test_partial_and_simulated_confidence_cannot_authorize_launch():
+    simulated = load("evidence_mode_pass_through.json")["simulated"]
+    expected = build_product_opportunity_synthesis(
+        simulated["marketplace"], simulated["supplier"], simulated["consumer"]
+    ).to_dict()
+    report = build_commerce_operations_cycle(
+        simulated["marketplace"], simulated["supplier"], simulated["consumer"]
+    ).to_dict()
+    assert report["confidence_claim"] == "not_live_validated"
+    assert report["synthesis"]["confidence_grade"] == expected["confidence_grade"]
+    assert expected["confidence_grade"] != "A_live_validated"
+    assert report["client_safe_projection"]["confidence_grade"] == expected["confidence_grade"]
+    assert report["client_safe_projection"]["confidence_claim"] == "not_live_validated"
+    _assert_not_authorized(report)
+
+    partial_expected = build_product_opportunity_synthesis(simulated["marketplace"], None, None).to_dict()
+    partial = build_commerce_operations_cycle(simulated["marketplace"], None, None).to_dict()
+    assert partial["confidence_claim"] == "not_live_validated"
+    assert partial["synthesis"]["confidence_grade"] == partial_expected["confidence_grade"]
+    assert partial["synthesis"]["confidence_grade"] in {"C_fixture_or_partial", "D_low_confidence", "F_reject_or_missing"}
+    assert partial["synthesis"]["confidence_grade"] != "A_live_validated"
+    assert partial["client_safe_projection"]["confidence_grade"] == partial_expected["confidence_grade"]
+    _assert_not_authorized(partial)
+
+
+def test_partial_stage_recovery_keeps_later_stages_and_projection():
+    _market, supplier, consumer = pillars()
+    reports = (
+        cycle(live_requested=True).to_dict(),
+        build_commerce_operations_cycle(None, None, None).to_dict(),
+        build_commerce_operations_cycle(
+            load("malformed_nested_non_object_marketplace.json"),
+            supplier,
+            consumer,
+        ).to_dict(),
+    )
+    later = ("trustos", "governor", "approval_ledger", "launch_draft_readiness", "site_draft_readiness", "client_workspace")
+    for report in reports:
+        assert list(report["stages"]) == list(STAGE_ORDER)
+        for name in STAGE_ORDER:
+            _assert_uniform_stage(report[name], blockers_alias=True)
+            _assert_uniform_stage(report["stages"][name])
+        for name in later:
+            assert name in report
+            assert report[name].get("status")
+            _assert_uniform_stage(report[name], blockers_alias=True)
+        assert report["overall_status"] != "go"
+        assert report["governor"].get("live_go") is not True
+        projection = report["client_safe_projection"]
+        blob = json.dumps(projection).lower()
+        for forbidden in ("api_key", "token", "password", "raw_payload", "raw_html", "<html", "sk-", "authorization"):
+            assert forbidden not in blob
+        assert set(projection) == CLIENT_SAFE_PROJECTION_KEYS
+        _assert_not_authorized(report)
+
+
+def _batch_pack(name: str):
+    if name == "default":
+        return pillars()
+    if name == "similar":
+        return (
+            load("similar_titles_market_report.json"),
+            load("similar_titles_supplier_report.json"),
+            load("similar_titles_consumer_report.json"),
+        )
+    if name == "labeled":
+        return (
+            load("labeled_marketplace_report.json"),
+            load("labeled_supplier_report.json"),
+            load("labeled_attention_report.json"),
+        )
+    raise AssertionError(f"unknown batch pack {name}")
+
+
+def test_deterministic_batch_replay_does_not_cross_contaminate():
+    names = ("default", "similar", "labeled")
+    first_dumps: dict[str, str] = {}
+    first_ids: dict[str, set[str]] = {}
+    for name in names:
+        report = build_commerce_operations_cycle(*_batch_pack(name)).to_dict()
+        first_dumps[name] = _dump(report)
+        first_ids[name] = {item["candidate_id"] for item in report["ranking"]["candidates"]}
+        _assert_never_live_go(report)
+        _assert_no_identity_authority(report)
+    assert first_ids["default"].isdisjoint(first_ids["similar"])
+    assert first_ids["default"].isdisjoint(first_ids["labeled"])
+    assert first_ids["similar"].isdisjoint(first_ids["labeled"])
+    for name in names:
+        second = build_commerce_operations_cycle(*_batch_pack(name)).to_dict()
+        assert _dump(second) == first_dumps[name]
+        second_ids = {item["candidate_id"] for item in second["ranking"]["candidates"]}
+        assert second_ids == first_ids[name]
+        leaked = set().union(*(ids for other, ids in first_ids.items() if other != name))
+        blob = first_dumps[name]
+        for candidate_id in leaked:
+            assert candidate_id not in blob
+            assert candidate_id not in _dump(second)
+        _assert_not_authorized(second)
