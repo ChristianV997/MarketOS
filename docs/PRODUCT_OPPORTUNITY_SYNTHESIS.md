@@ -75,6 +75,18 @@ different candidates. Every collapse is recorded in a new `alias_notes` field
 on the report; a score mismatch between the kept candidate and its alias is
 called out explicitly there rather than picked silently.
 
+**Bounded public patterns mined for these fixes:** no new dependency or scoring
+framework was adopted. The evidence-label-consistency fix mirrors an
+*independent attestation* idea common to data-quality tools (e.g. requiring
+two separately-recorded signals to agree, rather than trusting either one
+alone) -- here, the pillar's own top-level label and its embedded evidence
+items. The alias-collapse fix mirrors OpenLineage's *identity via existing
+provenance fields* idea (`source_family`) rather than inventing a new
+correlation ID or fuzzy-matching engine. Evidently-style reference/current
+drift comparison and Great Expectations-style declarative "expectations" were
+reviewed but not adopted here -- both assume more state (a reference window,
+a rule engine) than this thin decision layer is meant to hold.
+
 ## Decision rules
 
 Poor margin, high saturation, and low or objection-heavy attention take
