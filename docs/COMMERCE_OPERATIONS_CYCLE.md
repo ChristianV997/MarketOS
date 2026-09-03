@@ -155,3 +155,10 @@ The on-disk packet is the existing `to_dict()` plus
 must be byte-equal. License is not a cycle-native field; unverified terms stay
 blocked through TrustOS `policies_present` / `lawyer_review` and site-draft
 `privacy_terms_approved`.
+
+## Operator release packet
+
+The cycle `to_dict()` **is** the operator/release packet. Operator-facing
+mapping (manifest, provenance, freshness, limitations, client-safe export,
+rollback) lives in `docs/commerce_operations/OPERATOR_RELEASE_PACKET.md`.
+Do not invent a second packet schema or builder.
