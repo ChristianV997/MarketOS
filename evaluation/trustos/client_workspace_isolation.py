@@ -7,6 +7,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import WorkspaceRegistry, get_workspace_registry
+
 from .control_plane import ACTION_CATEGORIES, EVIDENCE_STATUSES, _clean
 from .gate_runner import evaluate_action
 
@@ -401,15 +404,24 @@ def _canonical_export_bytes(value: Any) -> bytes:
 
 def export_client_evidence(
     *,
-    workspace_id: str,
+    workspace: ClientWorkspace,
+    registry: WorkspaceRegistry | None = None,
     provenance: str,
     evidence_state: str,
     payload: Mapping[str, Any],
     max_payload_bytes: int = MAX_CLIENT_EVIDENCE_EXPORT_BYTES,
 ) -> ClientWorkspaceEvidenceExport:
     """Create one bounded, canonical client-safe evidence projection."""
+    if not isinstance(workspace, ClientWorkspace) or (registry is not None and not isinstance(registry, WorkspaceRegistry)):
+        raise ValueError("invalid client evidence export")
+    try:
+        registered = (registry or get_workspace_registry()).get(workspace.workspace_id)
+    except Exception:
+        raise ValueError("client workspace identity rejected") from None
+    if registered is None or registered.to_dict() != workspace.to_dict():
+        raise ValueError("client workspace identity rejected")
     if (
-        not _validate_workspace_id(workspace_id)
+        not _validate_workspace_id(registered.workspace_id)
         or not _validate_provenance(provenance)
         or evidence_state not in EVIDENCE_STATUSES
         or not isinstance(payload, Mapping)
@@ -424,7 +436,7 @@ def export_client_evidence(
         if any(not isinstance(key, str) or key not in CLIENT_EXPORT_FIELDS for key in payload):
             raise ValueError("client evidence export rejected")
         claimed_workspace_id = payload.get("workspace_id")
-        if claimed_workspace_id is not None and claimed_workspace_id != workspace_id:
+        if claimed_workspace_id is not None and claimed_workspace_id != registered.workspace_id:
             raise ValueError("client evidence export rejected")
         if check_workspace_leakage(payload, client_safe=True):
             raise ValueError("client evidence export rejected")
@@ -433,7 +445,7 @@ def export_client_evidence(
         if len(payload_bytes) > max_payload_bytes:
             raise ValueError("client evidence export exceeds size limit")
         canonical = _canonical_export_bytes({
-            "workspace_id": workspace_id,
+            "workspace_id": registered.workspace_id,
             "provenance": provenance,
             "evidence_state": evidence_state,
             "payload": safe_payload,
@@ -444,7 +456,7 @@ def export_client_evidence(
         raise ValueError("client evidence export rejected") from None
     return ClientWorkspaceEvidenceExport(
         "client-workspace-evidence-export-v1",
-        workspace_id,
+        registered.workspace_id,
         provenance,
         evidence_state,
         safe_payload,

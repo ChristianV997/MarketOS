@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import WorkspaceRegistry
 from evaluation.trustos.control_plane import ACTION_CATEGORIES
 from evaluation.trustos.client_workspace_isolation import (
     ACCESS_MODES, CLIENT_EXPORT_FIELDS, CLONE_TYPES, DATA_CLASSES, LEAKAGE_STATUSES, MAX_CLIENT_EVIDENCE_EXPORT_BYTES,
@@ -24,6 +26,13 @@ CLI = ROOT / "scripts" / "run_client_workspace_isolation.py"
 
 def load(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def export_context(tmp_path):
+    registry = WorkspaceRegistry(str(tmp_path / "workspaces.json"))
+    workspace = registry.register(ClientWorkspace(workspace_id="client-alpha", name="client-alpha"))
+    return workspace, registry
 
 
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
@@ -616,7 +625,8 @@ def test_report_markdown_mentions_projection_not_fork():
     assert "curated projections" in build_client_workspace_isolation_report().to_markdown()
 
 
-def test_client_evidence_export_preserves_safe_metadata_and_fingerprint():
+def test_client_evidence_export_preserves_safe_metadata_and_fingerprint(export_context):
+    workspace, registry = export_context
     payload = {
         "workspace_id": "client-alpha",
         "status": "present",
@@ -626,7 +636,8 @@ def test_client_evidence_export_preserves_safe_metadata_and_fingerprint():
         "next_actions": ["review evidence from the approved source"],
     }
     exported = export_client_evidence(
-        workspace_id="client-alpha",
+        workspace=workspace,
+        registry=registry,
         provenance="fixture://client-safe",
         evidence_state="present",
         payload=payload,
@@ -644,21 +655,57 @@ def test_client_evidence_export_preserves_safe_metadata_and_fingerprint():
     assert exported.payload_size_bytes <= MAX_CLIENT_EVIDENCE_EXPORT_BYTES
 
 
-def test_client_evidence_export_fingerprint_is_canonical():
+def test_client_evidence_export_fingerprint_is_canonical(export_context):
+    workspace, registry = export_context
     first = export_client_evidence(
-        workspace_id="client-alpha",
+        workspace=workspace,
+        registry=registry,
         provenance="fixture://client-safe",
         evidence_state="present",
         payload={"status": "present", "next_actions": ["review"], "blockers": []},
     )
     second = export_client_evidence(
-        workspace_id="client-alpha",
+        workspace=workspace,
+        registry=registry,
         provenance="fixture://client-safe",
         evidence_state="present",
         payload={"blockers": [], "next_actions": ["review"], "status": "present"},
     )
     assert first.fingerprint == second.fingerprint
     assert first.to_dict() == second.to_dict()
+
+
+@pytest.mark.parametrize("candidate", ["client-alpha", {"workspace_id": "client-alpha"}, None])
+def test_client_evidence_export_rejects_raw_workspace_principals(candidate, export_context):
+    _, registry = export_context
+    with pytest.raises(ValueError, match="invalid client evidence export"):
+        export_client_evidence(
+            workspace=candidate,
+            registry=registry,
+            provenance="fixture://safe",
+            evidence_state="present",
+            payload={},
+        )
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        ClientWorkspace(workspace_id="client-unknown", name="unknown"),
+        ClientWorkspace(workspace_id="client-alpha", name="forged"),
+    ],
+)
+def test_client_evidence_export_rejects_unknown_or_forged_workspace(candidate, export_context):
+    _, registry = export_context
+    with pytest.raises(ValueError, match="client workspace identity rejected") as error:
+        export_client_evidence(
+            workspace=candidate,
+            registry=registry,
+            provenance="fixture://safe",
+            evidence_state="present",
+            payload={},
+        )
+    assert "client-" not in str(error.value)
 
 
 @pytest.mark.parametrize(
@@ -678,10 +725,12 @@ def test_client_evidence_export_fingerprint_is_canonical():
         {"next_actions": ["def internal_helper():"]},
     ],
 )
-def test_client_evidence_export_rejects_forbidden_content(payload):
+def test_client_evidence_export_rejects_forbidden_content(payload, export_context):
+    workspace, registry = export_context
     with pytest.raises(ValueError, match="client evidence export rejected") as error:
         export_client_evidence(
-            workspace_id="client-alpha",
+            workspace=workspace,
+            registry=registry,
             provenance="fixture://unsafe",
             evidence_state="present",
             payload=payload,
@@ -710,10 +759,12 @@ def test_leakage_check_blocks_forbidden_export_classes(key):
     assert any(item.status == "hard_block" for item in findings)
 
 
-def test_client_evidence_export_rejects_workspace_mismatch():
+def test_client_evidence_export_rejects_workspace_mismatch(export_context):
+    workspace, registry = export_context
     with pytest.raises(ValueError, match="client evidence export rejected"):
         export_client_evidence(
-            workspace_id="client-alpha",
+            workspace=workspace,
+            registry=registry,
             provenance="fixture://mismatch",
             evidence_state="present",
             payload={"workspace_id": "client-beta", "status": "present"},
@@ -723,35 +774,50 @@ def test_client_evidence_export_rejects_workspace_mismatch():
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"workspace_id": "", "provenance": "fixture://safe", "evidence_state": "present", "payload": {}},
-        {"workspace_id": "client-alpha", "provenance": "", "evidence_state": "present", "payload": {}},
-        {"workspace_id": "client-alpha", "provenance": "fixture://safe", "evidence_state": "unknown", "payload": {}},
-        {"workspace_id": "client-alpha", "provenance": "fixture://safe", "evidence_state": "present", "payload": []},
+        {"provenance": "", "evidence_state": "present", "payload": {}},
+        {"provenance": "fixture://safe", "evidence_state": "unknown", "payload": {}},
+        {"provenance": "fixture://safe", "evidence_state": "present", "payload": []},
     ],
 )
-def test_client_evidence_export_rejects_invalid_metadata(kwargs):
+def test_client_evidence_export_rejects_invalid_metadata(kwargs, export_context):
+    workspace, registry = export_context
     with pytest.raises(ValueError, match="invalid client evidence export"):
-        export_client_evidence(**kwargs)
+        export_client_evidence(workspace=workspace, registry=registry, **kwargs)
+
+
+def test_client_evidence_export_rejects_unsafe_registered_workspace_id(export_context):
+    _, registry = export_context
+    unsafe = registry.register(ClientWorkspace(workspace_id="client/alpha", name="unsafe"))
+    with pytest.raises(ValueError, match="invalid client evidence export"):
+        export_client_evidence(
+            workspace=unsafe,
+            registry=registry,
+            provenance="fixture://safe",
+            evidence_state="present",
+            payload={},
+        )
 
 
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"workspace_id": "client/alpha", "provenance": "fixture://safe", "evidence_state": "present", "payload": {}},
-        {"workspace_id": "client-alpha", "provenance": "file://synthetic/private/path", "evidence_state": "present", "payload": {}},
-        {"workspace_id": "client-alpha", "provenance": "fixture://../private", "evidence_state": "present", "payload": {}},
-        {"workspace_id": "client-alpha", "provenance": "fixture://safe", "evidence_state": "present", "payload": {"status": {"unsafe": object()}}},
+        {"provenance": "file://synthetic/private/path", "evidence_state": "present", "payload": {}},
+        {"provenance": "fixture://../private", "evidence_state": "present", "payload": {}},
+        {"provenance": "fixture://safe", "evidence_state": "present", "payload": {"status": {"unsafe": object()}}},
     ],
 )
-def test_client_evidence_export_rejects_unsafe_identity_or_value(kwargs):
+def test_client_evidence_export_rejects_unsafe_identity_or_value(kwargs, export_context):
+    workspace, registry = export_context
     with pytest.raises(ValueError, match="invalid client evidence export"):
-        export_client_evidence(**kwargs)
+        export_client_evidence(workspace=workspace, registry=registry, **kwargs)
 
 
-def test_client_evidence_export_rejects_oversized_payload():
+def test_client_evidence_export_rejects_oversized_payload(export_context):
+    workspace, registry = export_context
     with pytest.raises(ValueError, match="client evidence export exceeds size limit"):
         export_client_evidence(
-            workspace_id="client-alpha",
+            workspace=workspace,
+            registry=registry,
             provenance="fixture://safe",
             evidence_state="present",
             payload={"status": "x" * 128},
@@ -759,10 +825,12 @@ def test_client_evidence_export_rejects_oversized_payload():
         )
 
 
-def test_client_evidence_export_rejects_unbounded_limit():
+def test_client_evidence_export_rejects_unbounded_limit(export_context):
+    workspace, registry = export_context
     with pytest.raises(ValueError, match="invalid client evidence export"):
         export_client_evidence(
-            workspace_id="client-alpha",
+            workspace=workspace,
+            registry=registry,
             provenance="fixture://safe",
             evidence_state="present",
             payload={"status": "present"},

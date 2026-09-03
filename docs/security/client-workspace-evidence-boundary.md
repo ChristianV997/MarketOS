@@ -2,8 +2,10 @@
 
 `evaluation.trustos.client_workspace_isolation.export_client_evidence` is the
 canonical offline boundary for a client-safe evidence projection. Callers must
-provide an already authorized workspace context; this contract does not
-implement authentication, tenant authorization, a database, or RLS.
+provide a `ClientWorkspace` and the existing `WorkspaceRegistry`. The boundary
+compares the supplied workspace with the durable registry record and derives
+the exported identity from that record. This proves registry identity, but it
+does not implement authentication, tenant authorization, a database, or RLS.
 
 The export is deliberately a curated projection. Only the fields in
 `CLIENT_EXPORT_FIELDS` are accepted, and the payload is capped at
