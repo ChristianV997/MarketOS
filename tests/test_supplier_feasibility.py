@@ -10,8 +10,6 @@ from backend.adapters.research.supplier_feasibility import (
     SupplierImportError,
     contains_html,
     contains_secret,
-    import_alibaba,
-    import_aliexpress,
     import_csv,
     import_cj_validation_pack,
     import_json,
