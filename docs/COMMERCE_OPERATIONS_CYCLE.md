@@ -103,6 +103,8 @@ imported or raises, that section is `unavailable`. The cycle never fakes a go.
 python scripts/run_commerce_operations_cycle.py --json
 python scripts/run_commerce_operations_cycle.py --markdown
 python scripts/run_commerce_operations_cycle.py --output /tmp/commerce-operations-cycle --json
+python scripts/run_commerce_operations_cycle.py --manifest tests/fixtures/commerce_operations/cli_batch/valid_manifest.json --json
+python scripts/run_commerce_operations_cycle.py --manifest path/to/jobs.json --output /tmp/commerce-operations-batch --json
 ```
 
 `--json` and `--markdown` are mutually exclusive. Default stdout is JSON.
@@ -116,6 +118,58 @@ payment, or messaging calls.
 
 Default inputs are the same sanitized fixtures used by
 `scripts/run_product_opportunity_synthesis.py`.
+
+## Operator batch input
+
+`--manifest PATH.json` is bounded CLI I/O over the **existing** cycle. It does
+not add a second runner, scorer, packet schema, fingerprint, `source_family`,
+or alias matcher. Each job is one local triple of the same three report flags.
+The cycle still multi-candidate-ranks inside a single triple.
+
+`--manifest` cannot be combined with `--marketplace-trend-report`,
+`--supplier-feasibility-report`, or `--consumer-attention-report`. The single
+triple remains the default path when `--manifest` is absent.
+
+The manifest is a local JSON object, `.json` only, with no path traversal:
+
+```json
+{
+  "jobs": [
+    {
+      "id": "job-alpha",
+      "marketplace_trend_report": "path/to/marketplace.json",
+      "supplier_feasibility_report": "path/to/supplier.json",
+      "consumer_attention_report": "path/to/consumer.json"
+    }
+  ]
+}
+```
+
+Hard maximum: 8 jobs. Duplicate job ids fail closed (the whole manifest is
+rejected). Missing files, malformed job JSON, secret-like keys, HTML, and
+`raw_payload` are classified **per job** as `malformed`, `blocked`,
+`unavailable`, or `failed` and do not abort the rest (partial results).
+`--live` with a manifest still fail-closes live as `blocked` inside the existing
+cycle; no providers are called.
+
+Without `--output`, stdout is the batch summary only. With `--output`, the CLI
+writes `batch_summary.json` plus one subdirectory per admitted job using the
+existing three filenames (`commerce_operations_cycle_report.json`,
+`commerce_operations_cycle_report.md`, `client_safe_projection.json`). No extra
+packet type is written.
+
+Per-job summary fields: `id`, `status`, `blockers`, `evidence_class`,
+`overall_status` (the last two from existing `to_dict()` when the job is
+admitted). Two identical runs are byte-equal for summary and stdout
+(`generated_at` is already frozen on the cycle).
+
+Exit codes:
+
+- `0` — every job admitted (the cycle ran; `--live` may still be `blocked`)
+- `1` — manifest was valid but at least one job was `malformed`, `blocked`,
+  `unavailable`, or `failed` (partial results are still printed / written)
+- `2` — manifest path, JSON, schema, secret-like content, traversal, duplicate
+  ids, or over-max job count; also the existing single-triple error path
 
 ## Safety
 
