@@ -8,6 +8,7 @@ import pytest
 
 from backend.adapters.research.supplier_feasibility import (
     SupplierImportError,
+    client_safe_offer,
     contains_html,
     contains_secret,
     import_csv,
@@ -422,3 +423,95 @@ def test_missing_credentials_remains_a_warning_not_a_live_success():
 def test_supplier_feasibility_never_claims_supplier_authorization():
     report = build_report(import_cj_validation_pack(fixture("cj_validation_pack_success.json"))).to_dict()
     assert "authorization" in " ".join(report["warnings"])
+
+
+def test_nested_variants_flatten_to_one_row_each():
+    rows = import_json(fixture("shopify_woo_nested_variants.json"), supplier="manual")
+    assert len(rows) == 2
+    assert {row.supplier_sku for row in rows} == {"HOOD-S", "HOOD-M"}
+    assert {row.supplier_product_id for row in rows} == {"var-s", "var-m"}
+    assert {row.unit_cost for row in rows} == {12.0, 13.5}
+    assert {row.inventory_quantity for row in rows} == {10, 6}
+    assert all(row.variant_count == 2 for row in rows)
+    assert all(row.candidate_id == "cotton-hoodie" for row in rows)
+    assert all(row.shipping_cost == 4.0 for row in rows)
+
+
+def test_integer_variants_still_sets_variant_count():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "variants": 3, "unit_cost": 5})
+    assert row is not None
+    assert row.variant_count == 3
+
+
+def test_cj_dump_keys_map_onto_existing_fields():
+    rows = import_json(fixture("cj_dump_key_aliases.json"), supplier="cj", source_type="cj_validation_pack_report")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.candidate_id == "CJ-PID-THERMAL-001"
+    assert row.supplier_product_id == "CJ-PID-THERMAL-001"
+    assert row.supplier_title == "Mini Bluetooth Thermal Printer"
+    assert row.unit_cost == 8.5
+    assert row.moq == 1
+    assert (row.delivery_min_days, row.delivery_max_days) == (7, 12)
+    assert row.inventory_quantity == 420
+    assert row.warehouse_region == "CN"
+    assert row.destination_region == "US"
+    assert row.supplier_sku == "THERMAL-001"
+
+
+def test_mixed_currency_is_not_converted():
+    rows = import_json(fixture("mixed_currency_eur.json"), supplier="cj")
+    assert len(rows) == 1
+    assert rows[0].unit_cost == 9.5
+    assert rows[0].currency == "EUR"
+    assert rows[0].estimated_landed_cost == 11.5
+    assert "currency_assumed_usd" not in rows[0].warnings
+
+
+def test_conflicting_unit_cost_marks_kept_row():
+    rows = import_json(fixture("conflicting_unit_cost.json"), supplier="cj")
+    assert len(rows) == 1
+    assert rows[0].unit_cost == 12
+    assert "conflicting_supplier_offer" in rows[0].warnings
+
+
+def test_similar_titles_with_different_product_ids_do_not_collapse():
+    rows = import_json(fixture("alias_titles_do_not_collapse.json"), supplier="cj")
+    assert len(rows) == 2
+    assert {row.supplier_product_id for row in rows} == {"A-1", "B-2"}
+    assert {row.supplier_title for row in rows} == {"Mini Thermal Printer"}
+
+
+def test_missing_cost_fields_emit_assumption_warnings():
+    rows = import_json(fixture("missing_fields.json"), supplier="cj")
+    assert len(rows) == 1
+    assert rows[0].unit_cost is None
+    assert rows[0].shipping_cost is None
+    assert rows[0].currency == "USD"
+    assert rows[0].source_confidence == 0.55
+    assert "unit_cost_unavailable" in rows[0].warnings
+    assert "shipping_cost_unavailable" in rows[0].warnings
+    assert "currency_assumed_usd" in rows[0].warnings
+    assert "source_confidence_defaulted" in rows[0].warnings
+
+
+def test_derived_landed_cost_adds_warning():
+    row = import_cj_validation_pack(fixture("cj_validation_pack_success.json"))[0]
+    assert row.field_provenance["estimated_landed_cost"] == "derived"
+    assert "landed_cost_derived" in row.warnings
+
+
+def test_client_safe_offer_strips_nested_secret_and_html():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "unit_cost": 5, "supplier_title": "Safe product"})
+    assert row is not None
+    payload = row.to_dict()
+    payload["nested"] = {"api_key": "synthetic-secret", "ok": "keep"}
+    payload["note"] = "<html><body>raw</body></html>"
+    safe = client_safe_offer(payload)
+    blob = json.dumps(safe).lower()
+    assert "api_key" not in blob
+    assert "synthetic-secret" not in blob
+    assert "<html" not in blob
+    assert safe["nested"]["ok"] == "keep"
+    assert "note" not in safe
+    assert client_safe_offer(row)["candidate_id"] == "x"
