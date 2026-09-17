@@ -1,3 +1,92 @@
-"""Small, dependency-light security helpers for the Phase 1 MVP API."""
+"""MarketOS security, authentication, authorization, and deployment hardening."""
+from __future__ import annotations
 
-__all__ = []
+from backend.security.auth import (
+    AuthenticatedActor,
+    authenticate_token,
+    clear_test_tokens,
+    explain_auth_status,
+    get_current_actor,
+    is_auth_disabled_in_dev,
+    is_production_mode,
+    register_test_token,
+    require_authenticated,
+    require_operator,
+    resolve_authorized_workspace,
+)
+from backend.security.cors import (
+    DEFAULT_LOCAL_ORIGINS,
+    explain_cors_readiness,
+    get_effective_allowed_origins,
+    is_production_cors_policy,
+    parse_allowed_origins,
+    validate_allowed_origins,
+    validate_cors_for_startup,
+)
+from backend.security.credentials import (
+    ALLOWED_CREDENTIAL_KEYS,
+    diagnose_credential_safety,
+    is_token_shaped,
+    is_valid_credential_key,
+    mask_secret,
+)
+from backend.security.deployment_validation import validate_production_deployment
+from backend.security.live_action_gate import (
+    LIVE_ACTION_SCOPES,
+    LiveActionRequest,
+    LiveActionVerdict,
+    evaluate_live_action_gate,
+    get_live_budget_ceiling_usd,
+    is_kill_switch_active,
+)
+from backend.security.webhooks import (
+    MAX_WEBHOOK_PAYLOAD_BYTES,
+    WEBHOOK_TIMESTAMP_TOLERANCE_S,
+    get_webhook_ledger,
+    parse_safe_webhook_json,
+    read_and_validate_webhook_body,
+    verify_generic_hmac,
+    verify_shopify_signature,
+    verify_stripe_signature,
+)
+
+__all__ = [
+    "ALLOWED_CREDENTIAL_KEYS",
+    "AuthenticatedActor",
+    "DEFAULT_LOCAL_ORIGINS",
+    "LIVE_ACTION_SCOPES",
+    "LiveActionRequest",
+    "LiveActionVerdict",
+    "MAX_WEBHOOK_PAYLOAD_BYTES",
+    "WEBHOOK_TIMESTAMP_TOLERANCE_S",
+    "authenticate_token",
+    "clear_test_tokens",
+    "diagnose_credential_safety",
+    "evaluate_live_action_gate",
+    "explain_auth_status",
+    "explain_cors_readiness",
+    "get_current_actor",
+    "get_effective_allowed_origins",
+    "get_live_budget_ceiling_usd",
+    "get_webhook_ledger",
+    "is_auth_disabled_in_dev",
+    "is_kill_switch_active",
+    "is_production_cors_policy",
+    "is_production_mode",
+    "is_token_shaped",
+    "is_valid_credential_key",
+    "mask_secret",
+    "parse_allowed_origins",
+    "parse_safe_webhook_json",
+    "read_and_validate_webhook_body",
+    "register_test_token",
+    "require_authenticated",
+    "require_operator",
+    "resolve_authorized_workspace",
+    "validate_allowed_origins",
+    "validate_cors_for_startup",
+    "validate_production_deployment",
+    "verify_generic_hmac",
+    "verify_shopify_signature",
+    "verify_stripe_signature",
+]

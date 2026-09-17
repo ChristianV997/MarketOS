@@ -1,46 +1,60 @@
 """api.routes.services — thin route wrappers over all 8 services.* modules.
-Every route is pure/stateless, or (ecommerce_operator, sales_automation)
-produces a decision/readiness verdict or a local simulation without
-executing anything live itself (see docs/LIVE_MODE_SAFETY.md,
-docs/SALES_AUTOMATION_MODULE.md). Real auth/billing/multi-tenant
-onboarding is still future SaaS-lite work — see docs/SERVICE_MODULES.md.
+
+Secured with workspace authorization: callers cannot impersonate or access arbitrary
+workspaces without explicit authorization.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 
+from backend.security.auth import (
+    AuthenticatedActor,
+    require_authenticated,
+    resolve_authorized_workspace,
+)
 from services.reporting import json_safe
 
 router = APIRouter(prefix="/api/services")
 
 
-def _resolve_workspace(name: str | None):
+def _resolve_workspace(name: str | None, actor: AuthenticatedActor):
     from backend.workspaces.client_workspace import ClientWorkspace
     from backend.workspaces.registry import get_workspace_registry
 
-    if not name:
-        return ClientWorkspace(name="api-default", workspace_type="internal")
+    safe_name = resolve_authorized_workspace(name, actor)
+    if not safe_name or safe_name == "default":
+        safe_name = "api-default" if actor.is_operator else next(iter(actor.workspaces), "api-default")
+
     registry = get_workspace_registry()
-    ws = registry.by_name(name)
+    ws = registry.by_name(safe_name)
     if ws is None:
-        ws = ClientWorkspace(name=name, workspace_type="internal")
+        ws_type = "client" if actor.role == "client" else "internal"
+        ws = ClientWorkspace(name=safe_name, workspace_type=ws_type)
         registry.register(ws)
     return ws
 
 
 @router.post("/product-audit")
-def product_audit(product: str, category: str = "general", price: float | None = None, workspace: str | None = None):
-    """Product & category opportunity audit. Never raises — the underlying
-    service function is itself never-raise; any unexpected failure here
-    surfaces as a structured error dict, not a 500 with a stack trace."""
+def product_audit(
+    product: str,
+    category: str = "general",
+    price: float | None = None,
+    workspace: str | None = None,
+    actor: AuthenticatedActor = Depends(require_authenticated),
+):
+    """Product & category opportunity audit."""
     from services.product_research.audit import run_product_audit
+
     try:
+        ws = _resolve_workspace(workspace, actor)
         result, envelope = run_product_audit(
-            product, category=category, retail_price=price, workspace=_resolve_workspace(workspace),
+            product, category=category, retail_price=price, workspace=ws,
         )
-        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id, "workspace": ws.name})
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
@@ -59,25 +73,26 @@ def ecommerce_operator(
     proposed_scale_amount: float = 0.0,
     live_action: bool = False,
     workspace: str | None = None,
+    actor: AuthenticatedActor = Depends(require_authenticated),
 ):
-    """Launch readiness + ledger-derived contribution profit + kill/scale
-    decision for one product, delegating to the same functions
-    marketos.cli's `services ecommerce-operator` subcommand calls — one
-    code path, not two. Never raises for the same reason as the routes
-    above: this only produces a decision/readiness verdict (see
-    docs/LIVE_MODE_SAFETY.md) and doesn't execute anything live itself."""
+    """Launch readiness + ledger-derived contribution profit + kill/scale decision."""
+    from services.ecommerce_operator.contribution_profit import from_ledger
     from services.ecommerce_operator.experiment import create_commerce_experiment
     from services.ecommerce_operator.launch_guard import evaluate_launch_readiness
-    from services.ecommerce_operator.contribution_profit import from_ledger
     from services.ecommerce_operator.scale_decision import make_kill_scale_decision
 
     try:
-        ws = _resolve_workspace(workspace)
+        ws = _resolve_workspace(workspace, actor)
         envelope = create_commerce_experiment(
-            product, validation=validation, unit_economics=unit_economics,
-            supplier_assumptions=supplier_assumptions, budget_ceiling=budget_ceiling,
-            kill_criteria=kill_criteria, attribution_method=attribution_method,
-            category=category, workspace=ws,
+            product,
+            validation=validation,
+            unit_economics=unit_economics,
+            supplier_assumptions=supplier_assumptions,
+            budget_ceiling=budget_ceiling,
+            kill_criteria=kill_criteria,
+            attribution_method=attribution_method,
+            category=category,
+            workspace=ws,
         )
         readiness = evaluate_launch_readiness(
             envelope, workspace=ws, live_action_requested=live_action,
@@ -91,104 +106,164 @@ def ecommerce_operator(
             "contribution": contribution.to_dict(),
             "decision": decision.to_dict(),
             "experiment_id": envelope.experiment_id,
+            "workspace": ws.name,
         })
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
 
 @router.post("/unit-economics")
 def unit_economics(
-    product: str, cost: float, price: float, shipping: float = 0.0,
-    category: str = "general", geo: str | None = None, workspace: str | None = None,
+    product: str,
+    cost: float,
+    price: float,
+    shipping: float = 0.0,
+    category: str = "general",
+    geo: str | None = None,
+    workspace: str | None = None,
+    actor: AuthenticatedActor = Depends(require_authenticated),
 ):
-    """Unit economics diagnostic. Never raises for the same reason as
-    product_audit above."""
+    """Unit economics diagnostic."""
     from services.unit_economics.analyzer import run_unit_economics
+
     try:
+        ws = _resolve_workspace(workspace, actor)
         result, envelope = run_unit_economics(
-            product, supplier_cost=cost, retail_price=price, shipping_cost=shipping,
-            category=category, geo=geo, workspace=_resolve_workspace(workspace),
+            product,
+            supplier_cost=cost,
+            retail_price=price,
+            shipping_cost=shipping,
+            category=category,
+            geo=geo,
+            workspace=ws,
         )
-        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id, "workspace": ws.name})
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
 
 @router.post("/creative-growth")
-def creative_growth(product: str, category: str = "general", workspace: str | None = None):
-    """Ad angles/hooks + fatigue analysis + next-batch recommendation. Never
-    raises for the same reason as the routes above."""
+def creative_growth(
+    product: str,
+    category: str = "general",
+    workspace: str | None = None,
+    actor: AuthenticatedActor = Depends(require_authenticated),
+):
+    """Ad angles/hooks + fatigue analysis + next-batch recommendation."""
     from services.creative_growth.plan import build_creative_growth_plan
+
     try:
+        ws = _resolve_workspace(workspace, actor)
         result, envelope = build_creative_growth_plan(
-            product, category=category, workspace=_resolve_workspace(workspace),
+            product, category=category, workspace=ws,
         )
-        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id, "workspace": ws.name})
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
 
 @router.post("/customer-intelligence")
 def customer_intelligence(
-    business_type: str, vertical: str | None = None, target_geo: str = "MX",
-    category: str = "general", workspace: str | None = None,
+    business_type: str,
+    vertical: str | None = None,
+    target_geo: str = "MX",
+    category: str = "general",
+    workspace: str | None = None,
+    actor: AuthenticatedActor = Depends(require_authenticated),
 ):
-    """ICP, segments, lead strategy, publicity plan, vertical playbook. Never
-    raises for the same reason as the routes above."""
+    """ICP, segments, lead strategy, publicity plan, vertical playbook."""
     from services.customer_intelligence.sprint import build_customer_intelligence_sprint
+
     try:
+        ws = _resolve_workspace(workspace, actor)
         result, envelope = build_customer_intelligence_sprint(
-            business_type, vertical=vertical, target_geo=target_geo,
-            category=category, workspace=_resolve_workspace(workspace),
+            business_type,
+            vertical=vertical,
+            target_geo=target_geo,
+            category=category,
+            workspace=ws,
         )
-        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id, "workspace": ws.name})
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
 
 @router.post("/digital-product")
 def digital_product(
-    offer_name: str, product_type: str = "playbook", target_customer: str = "",
-    transformation_promised: str = "", price: float = 0.0, target_buyers: int = 10,
-    has_existing_audience: bool = False, workspace: str | None = None,
+    offer_name: str,
+    product_type: str = "playbook",
+    target_customer: str = "",
+    transformation_promised: str = "",
+    price: float = 0.0,
+    target_buyers: int = 10,
+    has_existing_audience: bool = False,
+    workspace: str | None = None,
+    actor: AuthenticatedActor = Depends(require_authenticated),
 ):
-    """Offer/funnel/content-plan/validation/margin/launch checklist for a
-    digital product. Never raises for the same reason as the routes above."""
+    """Offer/funnel/content-plan/validation/margin/launch checklist for a digital product."""
     from services.digital_products.plan import build_digital_product_plan
+
     try:
+        ws = _resolve_workspace(workspace, actor)
         result, envelope = build_digital_product_plan(
-            offer_name, product_type=product_type, target_customer=target_customer,
-            transformation_promised=transformation_promised, price=price,
-            target_buyers=target_buyers, has_existing_audience=has_existing_audience,
-            workspace=_resolve_workspace(workspace),
+            offer_name,
+            product_type=product_type,
+            target_customer=target_customer,
+            transformation_promised=transformation_promised,
+            price=price,
+            target_buyers=target_buyers,
+            has_existing_audience=has_existing_audience,
+            workspace=ws,
         )
-        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id, "workspace": ws.name})
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
 
 @router.post("/sales-automation")
 def sales_automation(
-    vertical: str, messages: list[str] | None = None, workspace: str | None = None,
+    vertical: str,
+    messages: list[str] | None = None,
+    workspace: str | None = None,
     attempt_real_handoff: bool = False,
+    actor: AuthenticatedActor = Depends(require_authenticated),
 ):
     """Run qualification locally, with an optional explicit Chatwoot draft path."""
     from services.sales_automation.simulate import run_sales_bot_simulation
+
     try:
+        ws = _resolve_workspace(workspace, actor)
         scripted = messages or [
             "Hi, I'm interested and looking to get started soon",
             "My budget is around $2,000 and I'm located nearby",
         ]
         session, handoff, flow, envelope = run_sales_bot_simulation(
-            vertical, scripted, workspace=_resolve_workspace(workspace),
+            vertical,
+            scripted,
+            workspace=ws,
             attempt_real_handoff=attempt_real_handoff,
         )
         return json_safe({
-            "session": session.to_dict(), "handoff": handoff.to_dict(),
-            "qualification_flow": flow, "experiment_id": envelope.experiment_id,
+            "session": session.to_dict(),
+            "handoff": handoff.to_dict(),
+            "qualification_flow": flow,
+            "experiment_id": envelope.experiment_id,
             "real_handoff": envelope.outputs.get("real_handoff"),
             "commercial_status": envelope.outputs.get("commercial_status"),
+            "workspace": ws.name,
         })
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
 
@@ -207,19 +282,29 @@ def profit_stack_advisor(
     supplier_cost: float = 0.0,
     retail_price: float = 0.0,
     workspace: str | None = None,
+    actor: AuthenticatedActor = Depends(require_authenticated),
 ):
-    """Cost-aware commerce/payment stack recommendation + margin/break-even
-    report (backend.stack_planner + backend.costs). Never raises for the
-    same reason as the routes above."""
+    """Cost-aware commerce/payment stack recommendation + margin/break-even report."""
     from services.profit_stack_advisor.advisor import run_profit_stack_advisor
+
     try:
+        ws = _resolve_workspace(workspace, actor)
         result, envelope = run_profit_stack_advisor(
-            business_name, business_model=business_model, target_geo=target_geo,
-            expected_monthly_revenue=expected_monthly_revenue, expected_monthly_orders=expected_monthly_orders,
-            margin_sensitivity=margin_sensitivity, is_white_labeled_client_facing=is_white_labeled_client_facing,
-            postiz_legal_approval=postiz_legal_approval, category=category,
-            supplier_cost=supplier_cost, retail_price=retail_price, workspace=_resolve_workspace(workspace),
+            business_name,
+            business_model=business_model,
+            target_geo=target_geo,
+            expected_monthly_revenue=expected_monthly_revenue,
+            expected_monthly_orders=expected_monthly_orders,
+            margin_sensitivity=margin_sensitivity,
+            is_white_labeled_client_facing=is_white_labeled_client_facing,
+            postiz_legal_approval=postiz_legal_approval,
+            category=category,
+            supplier_cost=supplier_cost,
+            retail_price=retail_price,
+            workspace=ws,
         )
-        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
+        return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id, "workspace": ws.name})
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}

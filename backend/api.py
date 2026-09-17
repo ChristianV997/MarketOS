@@ -29,11 +29,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-import numpy as np
-from fastapi import Body, FastAPI, Header, Query
+from fastapi import Body, Depends, FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
-from backend.security.cors import parse_allowed_origins
+from fastapi.responses import JSONResponse
+from backend.security.auth import AuthenticatedActor, require_operator
+from backend.security.cors import validate_cors_for_startup
+from backend.security.live_action_gate import LiveActionRequest, evaluate_live_action_gate
 from backend.security.request_context import RequestContextMiddleware
 
 # ── structured logging ────────────────────────────────────────────────────────
@@ -204,9 +205,10 @@ try:
 except Exception:
     logging.getLogger(__name__).exception("optimization routes unavailable")
 
+_effective_cors_origins = validate_cors_for_startup()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=parse_allowed_origins(os.getenv("ALLOWED_ORIGINS")),
+    allow_origins=_effective_cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -435,9 +437,9 @@ def _cac_estimate() -> float | None:
 # ── Step 52: Production Hardening + Agent Hierarchy singletons ───────────────
 # (used by api.routes.agents_risk and api.routes.decisions via _core.<name>)
 
-from core.risk.global_risk_engine import global_risk_engine as _global_risk_engine
-from backend.agents.agent_metrics import agent_metrics_registry as _agent_metrics
-from backend.learning.world_model_calibration import world_model_calibrator as _wm_calibrator
+from core.risk.global_risk_engine import global_risk_engine as _global_risk_engine  # noqa: F401
+from backend.agents.agent_metrics import agent_metrics_registry as _agent_metrics  # noqa: F401
+from backend.learning.world_model_calibration import world_model_calibrator as _wm_calibrator  # noqa: F401
 from agents.hierarchy import ScalingAgent, GeoAgent, AudienceAgent, RiskAgent
 
 _scaling_agent = ScalingAgent()
@@ -450,7 +452,7 @@ def _current_peak_capital() -> float:
     return getattr(_state, "_peak_capital", _state.capital)
 
 @app.get("/integrations/health")
-def integrations_health():
+def integrations_health(actor: AuthenticatedActor = Depends(require_operator)):
     """Expose optional OSS adapter health without making any adapter mandatory."""
     return {"integrations": _integration_health_snapshot(force=True)}
 
@@ -748,7 +750,7 @@ except ImportError:
 # ── commerce evaluation (vendor-neutral, read-only) ──────────────────────────
 
 @app.post("/evaluation/product")
-def evaluation_product(payload: dict[str, Any] = Body(...)):
+def evaluation_product(payload: dict[str, Any] = Body(...), actor: AuthenticatedActor = Depends(require_operator)):
     """Evaluate product economics and launch readiness from normalized records."""
     try:
         from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
@@ -768,7 +770,7 @@ def evaluation_product(payload: dict[str, Any] = Body(...)):
 
 
 @app.post("/commerce/cycle")
-def commerce_cycle(payload: dict[str, Any] | None = Body(default=None)):
+def commerce_cycle(payload: dict[str, Any] | None = Body(default=None), actor: AuthenticatedActor = Depends(require_operator)):
     """Run the complementary commerce loop from signal to feedback.
 
     Live platform execution requires an explicit JSON ``confirm_live: true``
@@ -829,7 +831,7 @@ def commerce_cycle(payload: dict[str, Any] | None = Body(default=None)):
 
 
 @app.post("/commerce/provider-cycle")
-def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None)):
+def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None), actor: AuthenticatedActor = Depends(require_operator)):
     """Run the canonical loop from allowlisted research URLs.
 
     This endpoint is dry-run by default and delegates all ranking, QA, launch,
@@ -929,7 +931,10 @@ def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webh
 
 
 @app.post("/commerce/publish")
-def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
+def commerce_publish(
+    payload: dict[str, Any] | None = Body(default=None),
+    actor: AuthenticatedActor = Depends(require_operator),
+):
     """Publish one canonical CreativeBundle through the publishing adapter."""
     try:
         data = payload or {}
@@ -937,10 +942,28 @@ def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
         dry_run = raw_dry_run if isinstance(raw_dry_run, bool) else str(raw_dry_run).lower() not in {"false", "0", "no", "off"}
         if not dry_run and data.get("confirm_live") is not True:
             return {"published": False, "reasons": ["live_publishing_requires_confirm_live"]}
+
+        if not dry_run:
+            verdict = evaluate_live_action_gate(
+                LiveActionRequest(
+                    action_type="creative_publish",
+                    workspace_id=str(data.get("workspace_id", "default")),
+                    actor=actor,
+                    idempotency_key=str(data.get("idempotency_key", "")),
+                    approval_id=data.get("approval_id"),
+                    dry_run=False,
+                )
+            )
+            if not verdict.allowed:
+                return {
+                    "published": False,
+                    "reasons": list(verdict.blockers),
+                    "audit_event_id": verdict.audit_event_id,
+                }
+
         bundle_data = data.get("bundle") if isinstance(data.get("bundle"), dict) else data
         from backend.commerce.contracts import CreativeBundle
         from backend.commerce.loop import CommerceLoop
-        from backend.contracts.adapters import SidecarContext
         bundle = CreativeBundle(**{key: value for key, value in bundle_data.items() if key in CreativeBundle.__dataclass_fields__})
         records = CommerceLoop().publish_creatives(
             [bundle], dry_run=dry_run,
@@ -952,7 +975,10 @@ def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
 
 
 @app.post("/integrations/postiz/analytics/reconcile")
-def reconcile_postiz_analytics(payload: dict[str, Any] = Body(...)):
+def reconcile_postiz_analytics(
+    payload: dict[str, Any] = Body(...),
+    actor: AuthenticatedActor = Depends(require_operator),
+):
     """Fetch one Postiz post's analytics and store canonical feedback evidence."""
     post_id = str(payload.get("post_id") or "").strip()
     campaign_id = str(payload.get("campaign_id") or "").strip()
@@ -978,7 +1004,10 @@ def reconcile_postiz_analytics(payload: dict[str, Any] = Body(...)):
 
 
 @app.post("/evaluation/campaign")
-def evaluation_campaign(payload: dict[str, Any] = Body(...)):
+def evaluation_campaign(
+    payload: dict[str, Any] = Body(...),
+    actor: AuthenticatedActor = Depends(require_operator),
+):
     """Evaluate campaign observations without changing campaign state."""
     try:
         from evaluation.contracts import CampaignCandidate, CampaignObservation, DataQuality
