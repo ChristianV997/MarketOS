@@ -8,9 +8,29 @@ from .benchmark_matrix import build_benchmark_from_paths
 from .readiness import build_from_paths, load_sanitized_artifact
 from .public_market_benchmark import build_public_market_benchmark, load_public_market_seed
 from backend.deployment.readiness import build_readiness
+from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
 
 VERSION="product-validation-report-v1"
 def clean(v: Any, limit=120)->str:return re.sub(r"[\r\n]+"," ",str(v or ""))[:limit]
+
+_LEAK_MARKERS = ("sk-", "-----begin", "<html", "other_client", "cross_client")
+
+def _redact_client_leakage(value: Any) -> Any:
+    # Upstream evidence pillars (marketplace/supplier/consumer reports) are
+    # free-text and not guaranteed to be pre-sanitized before reaching this
+    # client-facing report: a scraped review, ad hook, or objection string
+    # can carry a copy-pasted credential or cross-client fragment straight
+    # through the pass-through fields (hooks, pain points, risk flags).
+    # Reuse the existing TrustOS client-workspace leakage detector (the
+    # canonical export boundary, not a second one) rather than re-inventing
+    # secret detection here.
+    if isinstance(value, Mapping):
+        return {key: _redact_client_leakage(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_client_leakage(item) for item in value]
+    if isinstance(value, str) and any(marker in value.lower() for marker in _LEAK_MARKERS):
+        return "[redacted: client-unsafe value removed]"
+    return value
 @dataclass(frozen=True)
 class ProductValidationReport:
  report_version:str; report_id:str; generated_at:str; client_name_optional:str; prepared_by:str; evidence_mode:str; overall_recommendation:str; executive_summary:Mapping[str,Any]; top_candidates:tuple[Mapping[str,Any],...]; candidate_rankings:tuple[Mapping[str,Any],...]; supplier_evidence:Mapping[str,Any]; competition_evidence:Mapping[str,Any]; economics:Mapping[str,Any]; risk_flags:tuple[str,...]; launch_readiness:Mapping[str,Any]; recommended_next_actions:tuple[str,...]; pricing_guidance:Mapping[str,Any]; ad_angle_hints:tuple[str,...]; landing_page_hints:tuple[str,...]; open_questions:tuple[str,...]; operator_disclaimer:str; appendix:Mapping[str,Any]; source_reports:Mapping[str,str]; read_only:bool=True; network_calls:bool=False; mutated:bool=False
@@ -41,7 +61,10 @@ def generate(*, client_name="", benchmark:Mapping[str,Any]|None=None, public_mar
   summary["site_draft_pack"]={"status":site_draft_pack.get("deployment_readiness",{}).get("overall_status","partially_ready"),"site_type":site_draft_pack.get("site_type"),"routes":len((site_draft_pack.get("route_manifest") or {}).get("routes",[])),"top_pages":[item.get("route") for item in (site_draft_pack.get("pages") or [])[:5]],"cms_models":len((site_draft_pack.get("cms_content_model") or {}).get("models",[])),"platform_payloads":sorted((site_draft_pack.get("platform_payloads") or {}).keys()),"seo_status":"supplied" if site_draft_pack.get("seo_plan") else "missing","analytics_status":"supplied" if site_draft_pack.get("analytics_plan") else "missing","conversion_tests":len((site_draft_pack.get("conversion_test_plan") or {}).get("tests",[])),"deployment_blockers":site_draft_pack.get("deployment_readiness",{}).get("blockers",[]),"approval_blockers":site_draft_pack.get("approval_checklist",{}).get("blockers",[])}
  if syn:
   summary.update({"executive_decision":syn.get("client_summary",""),"evidence_confidence_matrix":syn.get("risk_profile",{}),"unit_economics_thresholds":syn.get("decision_thresholds",{}),"kill_scale_rules":syn.get("kill_scale_rules",{}),"fourteen_day_validation_plan":syn.get("fourteen_day_validation_plan",[]),"client_action_checklist":["Confirm evidence provenance","Review economics assumptions","Approve the next bounded validation gate"]})
- return ProductValidationReport(VERSION,"deterministic-product-validation", "deterministic",clean(client_name),"MarketOS",mode,recommendation,summary,tuple(top),tuple(candidates),supplier_data,economics_data,{"margin_quality":(leader.get("economics") or {}).get("margin_quality","unknown"),"assumption_ratio":leader.get("assumption_ratio")},risks,{"status":r.get("overall_status","blocked"),"deployment":d.get("overall_status","blocked")},(syn.get("next_best_action") or r.get("next_best_action","set_cj_credentials_and_run_validation_pack"),),{"suggested_report_range_usd":"$500-$1,000" if syn else "$250-$750","upsell":"credential-safe live supplier validation and launch-draft pack"},("Lead with observed competitor price positioning, not profit claims.",), ("Show evidence provenance and clarify remaining assumptions.",), ("Observed supplier price, inventory, shipping, and delivery remain required.",),"This report is validation guidance, not a profit guarantee, launch authorization, or provider instruction.",{"public_market_status":p.get("evidence_mode","not_supplied"),"deployment_status":d.get("overall_status","blocked"),"marketplace_trend_status":market_section["status"],"supplier_feasibility_status":supplier_section["status"],"consumer_attention_status":attention_section["status"],"opportunity_synthesis_status":"supplied" if syn else "opportunity_synthesis_not_supplied","launch_draft_pack_status":"supplied" if launch_draft_pack else "launch_draft_pack_not_supplied","site_draft_pack_status":"supplied" if site_draft_pack else "site_draft_pack_not_supplied"},{"benchmark":"supplied" if benchmark else "structural_fixture","readiness":"supplied" if readiness else "structural_fixture","marketplace_trends":market_section["status"],"supplier_feasibility":supplier_section["status"],"consumer_attention":attention_section["status"],"opportunity_synthesis":"supplied" if syn else "missing","launch_draft_pack":"supplied" if launch_draft_pack else "missing","site_draft_pack":"supplied" if site_draft_pack else "missing"})
+ leakage_findings=check_workspace_leakage(summary, client_safe=True)
+ if leakage_findings: summary=_redact_client_leakage(summary)
+ appendix={"public_market_status":p.get("evidence_mode","not_supplied"),"deployment_status":d.get("overall_status","blocked"),"marketplace_trend_status":market_section["status"],"supplier_feasibility_status":supplier_section["status"],"consumer_attention_status":attention_section["status"],"opportunity_synthesis_status":"supplied" if syn else "opportunity_synthesis_not_supplied","launch_draft_pack_status":"supplied" if launch_draft_pack else "launch_draft_pack_not_supplied","site_draft_pack_status":"supplied" if site_draft_pack else "site_draft_pack_not_supplied","client_safety_leakage_findings":len(leakage_findings)}
+ return ProductValidationReport(VERSION,"deterministic-product-validation", "deterministic",clean(client_name),"MarketOS",mode,recommendation,summary,tuple(top),tuple(candidates),supplier_data,economics_data,{"margin_quality":(leader.get("economics") or {}).get("margin_quality","unknown"),"assumption_ratio":leader.get("assumption_ratio")},risks,{"status":r.get("overall_status","blocked"),"deployment":d.get("overall_status","blocked")},(syn.get("next_best_action") or r.get("next_best_action","set_cj_credentials_and_run_validation_pack"),),{"suggested_report_range_usd":"$500-$1,000" if syn else "$250-$750","upsell":"credential-safe live supplier validation and launch-draft pack"},("Lead with observed competitor price positioning, not profit claims.",), ("Show evidence provenance and clarify remaining assumptions.",), ("Observed supplier price, inventory, shipping, and delivery remain required.",),"This report is validation guidance, not a profit guarantee, launch authorization, or provider instruction.",appendix,{"benchmark":"supplied" if benchmark else "structural_fixture","readiness":"supplied" if readiness else "structural_fixture","marketplace_trends":market_section["status"],"supplier_feasibility":supplier_section["status"],"consumer_attention":attention_section["status"],"opportunity_synthesis":"supplied" if syn else "missing","launch_draft_pack":"supplied" if launch_draft_pack else "missing","site_draft_pack":"supplied" if site_draft_pack else "missing"})
 
 def markdown(report:Mapping[str,Any])->str:
  market=report.get('executive_summary',{}).get('marketplace_demand_signals',{}) or {}

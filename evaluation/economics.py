@@ -24,6 +24,14 @@ def calculate_unit_economics(product: ProductCandidate, offer: SupplierOffer | N
     revenue = round(max(product.selling_price, 0.0) * (1.0 - max(refund_rate, 0.0)), 4)
     if offer is None:
         return UnitEconomics(product.currency, revenue, 0.0, 0.0, 0.0, None, 0.0, None, False, ("missing_supplier_offer",))
+    if offer.currency != product.currency:
+        # Cross-currency contribution math is meaningless, not merely
+        # imprecise: mixing e.g. an MXN supplier quote with a USD selling
+        # price without conversion silently produces a wrong-by-an-order-
+        # of-magnitude number that still looks like a valid figure. Fail
+        # closed with an explicit reason rather than compute anything --
+        # this module does no FX conversion, so it must never guess.
+        return UnitEconomics(product.currency, revenue, 0.0, 0.0, 0.0, None, 0.0, None, False, ("currency_mismatch",))
     if offer.unit_cost < 0 or offer.shipping_cost < 0:
         reasons.append("invalid_supplier_cost")
     reasons.extend(quality_reasons(offer.quality))

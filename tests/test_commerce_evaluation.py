@@ -12,6 +12,31 @@ def test_unit_economics_calculates_break_even_roas():
     economics = calculate_unit_economics(ProductCandidate("p1", "Widget", selling_price=100), SupplierOffer("s1", "p1", unit_cost=30, shipping_cost=10))
     assert economics.contribution_before_ads > 0 and economics.break_even_roas is not None and economics.max_cac == economics.contribution_before_ads
 
+def test_mismatched_supplier_currency_is_never_silently_mixed():
+    """A Mexican-peso supplier quote against a USD selling price must never
+    be treated as apples-to-apples: mixing them silently produced a
+    landed_cost of 200 (180 MXN + 20 MXN read as if USD) against a $25 USD
+    price, an order-of-magnitude-wrong contribution with no signal that
+    anything was off. It must fail closed with an explicit reason and
+    zeroed, non-computed figures instead -- this module does no FX
+    conversion and must never guess one currency is another."""
+    product = ProductCandidate("p1", "Hydroponics kit", currency="USD", selling_price=25.0)
+    mxn_offer = SupplierOffer("s1", "p1", unit_cost=180.0, shipping_cost=20.0, currency="MXN")
+    economics = calculate_unit_economics(product, mxn_offer)
+    assert economics.eligible is False
+    assert economics.reasons == ("currency_mismatch",)
+    assert economics.landed_cost == 0.0
+    assert economics.contribution_before_ads == 0.0
+    assert economics.margin_rate is None
+    assert economics.currency == "USD"
+
+def test_matching_supplier_currency_is_unaffected_by_the_mismatch_guard():
+    product = ProductCandidate("p1", "Hydroponics kit", currency="USD", selling_price=25.0)
+    usd_offer = SupplierOffer("s1", "p1", unit_cost=8.0, shipping_cost=2.0, currency="USD")
+    economics = calculate_unit_economics(product, usd_offer)
+    assert "currency_mismatch" not in economics.reasons
+    assert economics.landed_cost == 10.0
+
 def test_synthetic_observations_cannot_be_winners():
     quality = DataQuality(provenance="simulated", attribution="attributed")
     rows = [CampaignObservation(str(i), "c1", creative_id="v1", spend=10, revenue=30, conversions=3, quality=quality) for i in range(3)]
