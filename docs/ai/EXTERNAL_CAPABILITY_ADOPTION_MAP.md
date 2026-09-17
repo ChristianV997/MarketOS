@@ -52,7 +52,7 @@ flowchart LR
 
 ---
 
-## Evaluated Public Repository Candidates (16 Candidates)
+## Evaluated Public Repository Candidates (19 Candidates)
 
 | Candidate | Pinned Commit / Release | License | Intended MarketOS Seam | Decision | Classification | Rationale & Architectural Seam |
 |---|---|---|---|---|---|---|
@@ -61,16 +61,19 @@ flowchart LR
 | **dlt** | `3d9f1c7` (1.8.0) | Apache-2.0 | `data.ingestion.schema_normalizer` | **Adapt** | Studied / Adapt | Evaluate schema inference and staging pipeline; do not add dependency until compatibility proof and concrete need exist. |
 | **DuckDB** | `a5c2f8e` (v1.2.0) | MIT | `backend.analytics.embedded_query_engine` | **Adapt** | Studied / Adapt | In-process analytical SQL querying over parquet/jsonl evidence fixtures; zero-server local analytics. |
 | **Polars** | `f4b8c2d` (py-polars-1.24.0) | MIT | `backend.analytics.dataframe_engine` | **Emulate** | Studied | Reference tabular query expression syntax; rely on native structures until data volumes demand Rust extension. |
-| **OpenLineage** | `8e7d6c5` (1.28.0) | Apache-2.0 | `backend.observability.lineage` | **Emulate** | Studied | Adopt OpenLineage Run/Dataset/Job facet schema patterns for evidence traceability; reject heavy runtime client. |
+| **OpenLineage** | `8e7d6c5` (1.28.0) | Apache-2.0 | `backend.observability.lineage_facets` | **Emulate** | Studied | Adopt OpenLineage Run/Dataset/Job facet schema patterns for evidence traceability; reject heavy runtime client. |
 | **Open Policy Agent** | `9a8b7c6` (v1.2.0) | Apache-2.0 | `evaluation.trustos.policy_gate` | **Emulate** | Studied | Emulate declarative policy grammar in native Python; reject running external Go daemon sidecar. |
-| **Great Expectations** | `1c2d3e4` (1.3.0) | Apache-2.0 | `evaluation.data_quality.expectations` | **Emulate** | Studied | Emulate expectation assertion DSL for fixture contracts; reject 50+ transitive dependency framework bloat. |
+| **Great Expectations** | `1c2d3e4` (1.3.0) | Apache-2.0 | `evaluation.quality_certification` | **Emulate** | Studied | Emulate expectation assertion DSL for fixture contracts; reject 50+ transitive dependency framework bloat. |
 | **OpenTelemetry Python** | `5e6f7a8` (v1.30.0) | Apache-2.0 | `backend.observability.tracing` | **Adapt** | Wrapped | Adopt OTel-compatible trace context and span data models; keep network exporters disabled/offline by default. |
 | **Chatwoot** | `7f8a9b0` (v3.15.0) | AGPL-3.0 | `backend.messaging.chatwoot_boundary` | **Reject** | Studied | **CRITICAL AGPL-3.0 COPYLEFT RISK**: strictly prohibited from in-tree vendoring or library linking. Isolated external HTTP webhooks only. |
 | **Medusa** | `2b3c4d5` (v2.5.0) | MIT | `backend.commerce.medusa_adapter` | **Adapt** | Studied / Adapt | Adapt product import/export JSON payload schema; keep output at `status: draft`; do not import Node.js server. |
 | **Saleor** | `4d5e6f7` (3.20.0) | BSD-3-Clause | `backend.commerce.saleor_adapter` | **Adapt** | Studied / Adapt | Adapt product attribute & multi-channel pricing schema; do not embed Django core into MarketOS. |
-| **Firecrawl** | `6f7a8b9` (v1.8.0) | AGPL-3.0 | `backend.scouting.firecrawl_boundary` | **Reject** | Studied | **AGPL-3.0 COPYLEFT**: reject runtime and vendoring. Crawl4AI is already the canonical permissive extraction engine. |
+| **Temporal** | `1b2c3d4` (v1.26.2) | BSL-1.1 / MIT | `backend.observability.replay` | **Reject** | Studied | **REJECT ORCHESTRATOR DUPLICATION**: non-permissive BSL-1.1 server; duplicates MarketOS native event spine. Emulate activity replay metadata only. |
+| **Prefect** | `2c3d4e5` (3.2.3) | Apache-2.0 | `backend.execution.task_states` | **Reject** | Studied | **REJECT ORCHESTRATOR DUPLICATION**: heavy workflow engine duplicates MarketOS single event spine. Emulate task transition states only. |
+| **Dagster** | `3d4e5f6` (1.9.10) | Apache-2.0 | `backend.observability.lineage_facets` | **Emulate** | Studied | Emulate software-defined asset (SDA) lineage and materialization records; reject heavy Dagit/daemon runtime. |
 | **Airbyte** | `1a2b3c4` (v0.64.0) | ELv2 / BSL | `data.ingestion.connectors` | **Reject** | Studied | Non-permissive license (ELv2/BSL) + heavy Docker/Java container orchestrator. Duplicates MarketOS singular architecture. |
 | **n8n** | `3c4d5e6` (n8n@1.80.0) | Sustainable Use | `backend.automation.n8n_boundary` | **Reject** | Studied | Non-permissive commercial restriction + visual DAG engine. Duplicates MarketOS single native event spine. |
+| **Firecrawl** | `6f7a8b9` (v1.8.0) | AGPL-3.0 | `backend.scouting.firecrawl_boundary` | **Reject** | Studied | **AGPL-3.0 COPYLEFT**: reject runtime and vendoring. Crawl4AI is already the canonical permissive extraction engine. |
 | **Vendure** | `5a6b7c8` (v3.1.0) | MIT | `backend.commerce.vendure_adapter` | **Adapt** | Studied / Adapt | Adapt product option/facet taxonomy; generate draft blueprints only; do not import NestJS runtime. |
 
 ---
