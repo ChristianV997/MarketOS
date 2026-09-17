@@ -209,7 +209,24 @@ def cmd_product_validation(client_name: str, output: str | None) -> dict[str, An
 
 def cmd_commerce_cycle(fixture: str, output: str | None) -> dict[str, Any]:
     src = require_safe_input(ROOT, fixture, label="fixture")
-    extra = ["--fixture", str(src), "--json", "--max-candidates", "3"]
+    try:
+        fixture_payload = json.loads(src.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OperatorSafetyError(f"commerce fixture could not be read: {src}") from exc
+    records = fixture_payload if isinstance(fixture_payload, list) else [fixture_payload]
+    query = next(
+        (
+            str(record["query"]).strip()
+            for record in records
+            if isinstance(record, dict)
+            and isinstance(record.get("query"), str)
+            and record["query"].strip()
+        ),
+        "",
+    )
+    if not query:
+        raise OperatorSafetyError("commerce fixture must contain a non-empty query")
+    extra = ["--fixture", str(src), "--query", query, "--json", "--max-candidates", "3"]
     dest = require_safe_output_dir(ROOT, output) if output else None
     result = _run_cli("scripts/run_commerce_mvp_slice.py", extra)
     operations = ROOT / "scripts/run_commerce_operations_cycle.py"

@@ -171,6 +171,8 @@ def test_commerce_cycle_is_fixture_or_unavailable():
     body = _payload(proc)
     assert proc.returncode in {0, 3}
     assert body["evidence_class"] in {"fixture", "unavailable"}
+    if body["details"]["mvp_slice"]["available"]:
+        assert body["details"]["mvp_slice"]["exit_code"] == 0
     assert body["details"]["operations_cycle"] in {"not_run", "present_not_invoked_default"}
 
 
