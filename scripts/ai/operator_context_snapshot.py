@@ -1,7 +1,8 @@
 """Read-only bounded AI-chat repository context snapshot.
 
 Reuses existing MarketOS AI scripts. Does not recreate quality-gate,
-phase-1, or PR-readiness logic. Default is dry-run / read-only.
+phase-1, PR-readiness, CoderOS, cockpit, or deployment-engine logic.
+Default is dry-run / read-only.
 """
 from __future__ import annotations
 
@@ -22,6 +23,27 @@ SCHEMA = "MarketOS.AIContext.v1"
 DEFAULT_TIMEOUT_S = 45.0
 MAX_OUTPUT_BYTES = 200_000
 MAX_CHANGED_FILES = 80
+MAX_WORKTREES = 20
+MAX_OPEN_PRS = 10
+
+REQUIRED_KEYS = (
+    "schema",
+    "repository",
+    "branch",
+    "HEAD",
+    "origin_main",
+    "worktree",
+    "changed_paths",
+    "open_prs",
+    "selected_tests",
+    "phase1_readiness",
+    "local_quality_gate",
+    "development_stack",
+    "deployment_readiness",
+    "blockers",
+    "next_best_action",
+    "evidence_classifications",
+)
 
 SECRET_SHAPED = re.compile(
     r"(?is)("
@@ -53,10 +75,18 @@ EXCLUDED_PATH_MARKERS = (
 ALLOWED_GIT = {
     ("rev-parse", "HEAD"),
     ("rev-parse", "origin/main"),
+    ("rev-parse", "--show-toplevel"),
     ("branch", "--show-current"),
     ("status", "--porcelain"),
     ("remote", "get-url", "origin"),
+    ("worktree", "list", "--porcelain"),
+    ("merge-base", "origin/main", "HEAD"),
 }
+ALLOWED_GH = {
+    ("pr", "view", "--json", "number,title,state,isDraft,url,headRefOid,baseRefName"),
+    ("pr", "list", "--state", "open", "--limit", "10", "--json", "number,title,state,isDraft,headRefName,url"),
+}
+ACTUAL_LOCAL_CHECKS = frozenset({"session_start", "development_stack"})
 EVIDENCE_CLASSES = ("actual", "simulated", "unavailable", "not_run", "failed", "malformed", "blocked")
 
 
@@ -99,6 +129,30 @@ def _excluded_path(path: str) -> bool:
     if lowered.endswith(".env") or "/.env." in lowered:
         return True
     return any(marker in lowered for marker in EXCLUDED_PATH_MARKERS)
+
+
+def _validate_root(root: Path) -> tuple[Path | None, str | None]:
+    raw = str(root)
+    if ".." in Path(raw).parts or ".." in raw.replace("\\", "/"):
+        return None, "path_traversal"
+    try:
+        resolved = root.expanduser().resolve()
+    except OSError:
+        return None, "unresolvable_path"
+    if not resolved.exists() or not resolved.is_dir():
+        return None, "not_a_directory"
+    if not (resolved / "AGENTS.md").is_file():
+        return None, "missing_agents_md"
+    if not (resolved / "scripts" / "ai").is_dir():
+        return None, "missing_scripts_ai"
+    if not (resolved / ".git").exists():
+        return None, "not_a_git_worktree"
+    return resolved, None
+
+
+def _is_canonical_checkout(path: Path) -> bool:
+    text = str(path).replace("\\", "/").rstrip("/")
+    return text.endswith("/MarketOS") and ".worktrees" not in text and ".validation" not in text
 
 
 def _run_allowlisted(
@@ -168,7 +222,12 @@ def _run_allowlisted(
         return result
     result["parsed"] = _redact(parsed)
     if completed.returncode == 0:
-        result["classification"] = "simulated" if "--execute" not in argv else "actual"
+        if classification_name in ACTUAL_LOCAL_CHECKS:
+            result["classification"] = "actual"
+        elif "--execute" in argv:
+            result["classification"] = "actual"
+        else:
+            result["classification"] = "simulated"
     elif completed.returncode == 2:
         result["classification"] = "unavailable"
     else:
@@ -178,9 +237,9 @@ def _run_allowlisted(
 
 def _git(root: Path, *args: str, timeout_s: float = 15.0) -> dict[str, Any]:
     key = tuple(args)
-    allowed = key in ALLOWED_GIT or (len(args) >= 2 and args[0] == "rev-parse")
+    allowed = key in ALLOWED_GIT or (len(args) >= 1 and args[0] == "rev-parse")
     if not allowed:
-        return {"classification": "blocked", "reason": "git_argv_not_allowlisted", "stdout": ""}
+        return {"classification": "blocked", "reason": "git_argv_not_allowlisted", "stdout": "", "exit_code": 4}
     try:
         completed = subprocess.run(
             ["git", "-C", str(root), *args],
@@ -193,12 +252,54 @@ def _git(root: Path, *args: str, timeout_s: float = 15.0) -> dict[str, Any]:
             shell=False,
         )
     except FileNotFoundError:
-        return {"classification": "unavailable", "reason": "git_missing", "stdout": ""}
+        return {"classification": "unavailable", "reason": "git_missing", "stdout": "", "exit_code": None}
     except subprocess.TimeoutExpired:
-        return {"classification": "unavailable", "reason": "git_timed_out", "stdout": ""}
-    stdout = (completed.stdout or "").strip()
+        return {"classification": "unavailable", "reason": "git_timed_out", "stdout": "", "exit_code": None}
+    stdout = completed.stdout or ""
+    if len(stdout.encode("utf-8", errors="replace")) > MAX_OUTPUT_BYTES:
+        return {
+            "classification": "malformed",
+            "reason": "output_exceeds_cap",
+            "stdout": "",
+            "exit_code": completed.returncode,
+        }
     classification = "actual" if completed.returncode == 0 else "unavailable"
-    return {"classification": classification, "exit_code": completed.returncode, "stdout": stdout}
+    return {"classification": classification, "exit_code": completed.returncode, "stdout": stdout.strip()}
+
+
+def _gh(root: Path, *args: str, timeout_s: float = 20.0) -> dict[str, Any]:
+    if tuple(args) not in ALLOWED_GH:
+        return {"classification": "blocked", "reason": "gh_argv_not_allowlisted", "parsed": None, "exit_code": 4}
+    try:
+        completed = subprocess.run(
+            ["gh", *args],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_s,
+            check=False,
+            shell=False,
+        )
+    except FileNotFoundError:
+        return {"classification": "unavailable", "reason": "gh_missing", "parsed": None, "exit_code": None}
+    except subprocess.TimeoutExpired:
+        return {"classification": "unavailable", "reason": "github_network_or_cli", "parsed": None, "exit_code": None}
+    if completed.returncode != 0:
+        return {
+            "classification": "unavailable",
+            "reason": "no_pr_or_network_unavailable",
+            "parsed": None,
+            "exit_code": completed.returncode,
+        }
+    try:
+        parsed = json.loads(completed.stdout or "null")
+    except json.JSONDecodeError:
+        return {"classification": "malformed", "reason": "gh_json", "parsed": None, "exit_code": completed.returncode}
+    if _secret_like(parsed):
+        return {"classification": "blocked", "reason": "secret_shaped_output", "parsed": None, "exit_code": completed.returncode}
+    return {"classification": "actual", "reason": None, "parsed": _redact(parsed), "exit_code": 0}
 
 
 def _python() -> str:
@@ -219,6 +320,124 @@ def _safe_changed_paths(raw: list[str]) -> list[str]:
     return cleaned
 
 
+def _parse_worktrees(raw: str) -> list[dict[str, str | None]]:
+    listed: list[dict[str, str | None]] = []
+    current: dict[str, str | None] = {}
+    for line in (raw or "").splitlines():
+        if not line.strip():
+            if current.get("path"):
+                listed.append(current)
+                if len(listed) >= MAX_WORKTREES:
+                    return listed
+            current = {}
+            continue
+        if line.startswith("worktree "):
+            if current.get("path"):
+                listed.append(current)
+                if len(listed) >= MAX_WORKTREES:
+                    return listed
+            current = {"path": line[len("worktree ") :].strip(), "head": None, "branch": None}
+        elif line.startswith("HEAD "):
+            current["head"] = line[5:].strip()
+        elif line.startswith("branch "):
+            current["branch"] = line[len("branch ") :].replace("refs/heads/", "").strip()
+        elif line.strip() == "detached":
+            current["branch"] = "detached"
+    if current.get("path") and len(listed) < MAX_WORKTREES:
+        listed.append(current)
+    return listed
+
+
+def _classify_drift(head: str | None, origin_main: str | None, merge_base: str | None) -> str:
+    if not head or not origin_main or not merge_base:
+        return "unavailable"
+    if head == origin_main:
+        return "aligned"
+    if merge_base == origin_main:
+        return "ahead"
+    if merge_base == head:
+        return "behind"
+    return "diverged"
+
+
+def _coderos_status() -> dict[str, Any]:
+    try:
+        from backend.adapters.coderos_readonly import CoderOSAdapterConfig, health, probe
+    except Exception:
+        return {
+            "classification": "unavailable",
+            "reason": "adapter_import_failed",
+            "mode": "plan_only",
+            "would_execute": False,
+        }
+    summary = health()
+    report = probe(CoderOSAdapterConfig(mode="plan_only"))
+    state = getattr(getattr(report, "result", None), "state", "not_run")
+    return {
+        "classification": "not_run" if state == "not_run" else "unavailable",
+        "reason": "plan_only_default",
+        "mode": "plan_only",
+        "would_execute": False,
+        "adapter": summary.get("name"),
+        "reachable": False,
+        "detail": summary.get("detail"),
+        "state": state,
+    }
+
+
+def _blocked_document(reason: str) -> dict[str, Any]:
+    empty_worktree = {
+        "path": None,
+        "branch": None,
+        "head": None,
+        "clean": False,
+        "canonical_checkout": False,
+        "listed": [],
+        "drift": {"merge_base": None, "vs_origin_main": "unavailable"},
+        "ownership_note": "edits must stay in an exclusive worktree; this snapshot is read-only",
+    }
+    return {
+        "schema": SCHEMA,
+        "read_only": True,
+        "mutated": False,
+        "network_calls": False,
+        "repository": {"name": None, "path": None, "remote": None},
+        "branch": None,
+        "HEAD": None,
+        "origin_main": None,
+        "worktree": empty_worktree,
+        "changed_paths": [],
+        "open_prs": {"classification": "not_run", "items": []},
+        "selected_tests": [],
+        "phase1_readiness": {},
+        "local_quality_gate": {},
+        "development_stack": {"classification": "not_run", "tools": {}},
+        "deployment_readiness": {
+            "classification": "unavailable",
+            "local_checks_are_not_production_proof": True,
+            "status": None,
+        },
+        "blockers": [reason, "deployment_not_proven_from_local_checks"],
+        "next_best_action": "repair_repository_path_and_rerun_snapshot",
+        "evidence_classifications": {"repository_path": "blocked"},
+        "repository_name": None,
+        "current_branch": None,
+        "head_sha": None,
+        "origin_main_sha": None,
+        "worktree_clean": False,
+        "changed_file_paths": [],
+        "active_pr": None,
+        "selected_test_paths": [],
+        "phase1_readiness_summary": {},
+        "current_blockers": [reason, "deployment_not_proven_from_local_checks"],
+        "recommended_next_action": "repair_repository_path_and_rerun_snapshot",
+        "evidence_classification": {"repository_path": "blocked"},
+        "frontend_status": {"classification": "not_run"},
+        "tools": {},
+        "notes": ["Repository path was rejected; no subprocesses ran."],
+    }
+
+
 def build_snapshot(
     root: Path,
     *,
@@ -226,12 +445,19 @@ def build_snapshot(
     include_github: bool = True,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> tuple[dict[str, Any], int]:
+    validated, path_reason = _validate_root(root)
+    if validated is None:
+        return _blocked_document(path_reason or "invalid_repository_path"), 2
+
     python = _python()
-    head = _git(root, "rev-parse", "HEAD")
-    branch = _git(root, "branch", "--show-current")
-    origin_main = _git(root, "rev-parse", "origin/main")
-    status = _git(root, "status", "--porcelain")
-    remote = _git(root, "remote", "get-url", "origin")
+    head = _git(validated, "rev-parse", "HEAD")
+    branch = _git(validated, "branch", "--show-current")
+    origin_main = _git(validated, "rev-parse", "origin/main")
+    status = _git(validated, "status", "--porcelain")
+    remote = _git(validated, "remote", "get-url", "origin")
+    toplevel = _git(validated, "rev-parse", "--show-toplevel")
+    worktree_list = _git(validated, "worktree", "list", "--porcelain")
+    merge_base = _git(validated, "merge-base", "origin/main", "HEAD")
     dirty = bool(status.get("stdout"))
     changed: list[str] = []
     for line in (status.get("stdout") or "").splitlines():
@@ -240,83 +466,95 @@ def build_snapshot(
         path = line[3:].split(" -> ")[-1]
         changed.append(path)
     changed = _safe_changed_paths(changed)
+    listed = _parse_worktrees(worktree_list.get("stdout") or "")
+    worktree_path = toplevel.get("stdout") or str(validated)
+    drift = _classify_drift(head.get("stdout"), origin_main.get("stdout"), merge_base.get("stdout"))
 
     tools = {
         name: {"available": bool(shutil.which(name)), "classification": "actual" if shutil.which(name) else "unavailable"}
-        for name in ("python", "git", "gh", "node", "npm", "uv", "ollama", "semgrep")
+        for name in ("python", "git", "gh", "node", "npm", "uv", "ollama", "semgrep", "coderos")
     }
 
     session = _run_allowlisted(
-        [python, str(root / "scripts" / "ai" / "session_start.py"), "--json"],
-        cwd=root,
+        [python, str(validated / "scripts" / "ai" / "session_start.py"), "--json"],
+        cwd=validated,
         timeout_s=timeout_s,
         classification_name="session_start",
     )
     selected = _run_allowlisted(
-        [python, str(root / "scripts" / "ai" / "select_tests.py"), "--from-git", "--json"],
-        cwd=root,
+        [python, str(validated / "scripts" / "ai" / "select_tests.py"), "--from-git", "--json"],
+        cwd=validated,
         timeout_s=timeout_s,
         classification_name="select_tests",
     )
     phase1 = _run_allowlisted(
-        [python, str(root / "scripts" / "phase1_readiness_report.py"), "--json"],
-        cwd=root,
+        [python, str(validated / "scripts" / "phase1_readiness_report.py"), "--json"],
+        cwd=validated,
         timeout_s=timeout_s,
         classification_name="phase1_readiness",
     )
     quality = _run_allowlisted(
-        [python, str(root / "scripts" / "ai" / "run_local_quality_gate.py"), "--from-git", "--json"],
-        cwd=root,
+        [python, str(validated / "scripts" / "ai" / "run_local_quality_gate.py"), "--from-git", "--json"],
+        cwd=validated,
         timeout_s=min(timeout_s, 60.0),
         classification_name="local_quality_gate",
     )
     pr_ready = _run_allowlisted(
-        [python, str(root / "scripts" / "ai" / "pr_readiness_report.py"), "--from-git", "--json"],
-        cwd=root,
+        [python, str(validated / "scripts" / "ai" / "pr_readiness_report.py"), "--from-git", "--json"],
+        cwd=validated,
         timeout_s=timeout_s,
         classification_name="pr_readiness",
     )
+    dev_stack = _run_allowlisted(
+        [python, str(validated / "scripts" / "ai" / "check_dev_stack.py"), "--json"],
+        cwd=validated,
+        timeout_s=min(timeout_s, 30.0),
+        classification_name="development_stack",
+    )
+    coderos = _coderos_status()
 
-    github: dict[str, Any] = {
+    github_view: dict[str, Any] = {
         "classification": "not_run",
         "reason": "not_requested" if not include_github else None,
         "summary": None,
+        "exit_code": None,
+    }
+    github_list: dict[str, Any] = {
+        "classification": "not_run",
+        "reason": "not_requested" if not include_github else None,
+        "items": [],
+        "exit_code": None,
     }
     if include_github:
         if not tools["gh"]["available"]:
-            github = {"classification": "unavailable", "reason": "gh_missing", "summary": None}
+            github_view = {"classification": "unavailable", "reason": "gh_missing", "summary": None, "exit_code": None}
+            github_list = {"classification": "unavailable", "reason": "gh_missing", "items": [], "exit_code": None}
         else:
-            try:
-                completed = subprocess.run(
-                    ["gh", "pr", "view", "--json", "number,title,state,isDraft,url,headRefOid,baseRefName"],
-                    cwd=str(root),
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=20,
-                    check=False,
-                    shell=False,
-                )
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                github = {"classification": "unavailable", "reason": "github_network_or_cli", "summary": None}
-            else:
-                if completed.returncode != 0:
-                    github = {
-                        "classification": "unavailable",
-                        "reason": "no_pr_or_network_unavailable",
-                        "summary": None,
-                    }
-                else:
-                    try:
-                        parsed = json.loads(completed.stdout or "{}")
-                    except json.JSONDecodeError:
-                        github = {"classification": "malformed", "reason": "gh_json", "summary": None}
-                    else:
-                        if _secret_like(parsed):
-                            github = {"classification": "blocked", "reason": "secret_shaped_output", "summary": None}
-                        else:
-                            github = {"classification": "actual", "reason": None, "summary": _redact(parsed)}
+            viewed = _gh(validated, "pr", "view", "--json", "number,title,state,isDraft,url,headRefOid,baseRefName")
+            github_view = {
+                "classification": viewed["classification"],
+                "reason": viewed.get("reason"),
+                "summary": viewed.get("parsed") if isinstance(viewed.get("parsed"), dict) else None,
+                "exit_code": viewed.get("exit_code"),
+            }
+            listed_prs = _gh(
+                validated,
+                "pr",
+                "list",
+                "--state",
+                "open",
+                "--limit",
+                "10",
+                "--json",
+                "number,title,state,isDraft,headRefName,url",
+            )
+            items = listed_prs.get("parsed") if isinstance(listed_prs.get("parsed"), list) else []
+            github_list = {
+                "classification": listed_prs["classification"],
+                "reason": listed_prs.get("reason"),
+                "items": items[:MAX_OPEN_PRS],
+                "exit_code": listed_prs.get("exit_code"),
+            }
 
     frontend: dict[str, Any] = {
         "classification": "not_run",
@@ -328,10 +566,16 @@ def build_snapshot(
     if include_frontend:
         npm = shutil.which("npm")
         if not npm:
-            frontend = {"classification": "unavailable", "reason": "npm_missing", "test": "unavailable", "typecheck": "unavailable", "build": "unavailable"}
-        else:
             frontend = {
                 "classification": "unavailable",
+                "reason": "npm_missing",
+                "test": "unavailable",
+                "typecheck": "unavailable",
+                "build": "unavailable",
+            }
+        else:
+            frontend = {
+                "classification": "not_run",
                 "reason": "frontend_status_not_executed_by_default_snapshot",
                 "test": "not_run",
                 "typecheck": "not_run",
@@ -357,13 +601,37 @@ def build_snapshot(
             "ready_for_supervised_use": quality["parsed"].get("ready_for_supervised_use"),
         }
 
+    stack_tools: dict[str, Any] = {}
+    if isinstance(dev_stack.get("parsed"), dict):
+        raw_tools = dev_stack["parsed"].get("tools") or {}
+        if isinstance(raw_tools, dict):
+            stack_tools = {str(name): bool(value) for name, value in raw_tools.items()}
+
+    development_stack = {
+        "classification": dev_stack["classification"],
+        "python": (dev_stack.get("parsed") or {}).get("python") if isinstance(dev_stack.get("parsed"), dict) else None,
+        "platform": (dev_stack.get("parsed") or {}).get("platform") if isinstance(dev_stack.get("parsed"), dict) else None,
+        "tools": stack_tools,
+        "exit_code": dev_stack.get("exit_code"),
+        "reason": dev_stack.get("reason"),
+    }
+
     deployment_classification = "unavailable"
-    if phase1_summary.get("deployment_readiness"):
-        deployment_classification = "simulated" if phase1_summary["deployment_readiness"] != "ready" else "unavailable"
+    phase1_deploy = phase1_summary.get("deployment_readiness")
+    if phase1_deploy:
+        deployment_classification = "simulated"
+    deployment_readiness = {
+        "classification": deployment_classification,
+        "status": phase1_deploy,
+        "local_checks_are_not_production_proof": True,
+        "authority": "scripts/phase1_readiness_report.py plus PR #249 dry-run deploy path; this snapshot never executes deployment",
+    }
 
     blockers: list[str] = []
     if dirty:
         blockers.append("worktree_dirty")
+    if _is_canonical_checkout(Path(worktree_path)):
+        blockers.append("canonical_checkout_do_not_edit")
     if isinstance(phase1_summary.get("blocking_gates"), list):
         blockers.extend(str(item) for item in phase1_summary["blocking_gates"])
     if quality_summary.get("ready_for_supervised_use") is False:
@@ -371,7 +639,10 @@ def build_snapshot(
     blockers.append("deployment_not_proven_from_local_checks")
 
     next_action = phase1_summary.get("next_best_action") or "refresh_origin_and_inspect_open_prs"
-    repo_name = (remote.get("stdout") or "").rstrip("/").split("/")[-1].removesuffix(".git") or root.name
+    repo_name = (remote.get("stdout") or "").rstrip("/").split("/")[-1].removesuffix(".git") or validated.name
+    selected_commands = (
+        (selected.get("parsed") or {}).get("recommended_commands") if isinstance(selected.get("parsed"), dict) else []
+    )
 
     checks = {
         "session_start": session["classification"],
@@ -379,45 +650,95 @@ def build_snapshot(
         "phase1_readiness": phase1["classification"],
         "local_quality_gate": quality["classification"],
         "pr_readiness": pr_ready["classification"],
-        "github": github["classification"],
+        "development_stack": development_stack["classification"],
+        "github": github_view["classification"] if github_view["classification"] != "not_run" else github_list["classification"],
         "frontend": frontend["classification"],
         "git_head": head["classification"],
         "git_origin_main": origin_main["classification"],
+        "worktree_list": worktree_list["classification"],
+        "coderos": coderos["classification"],
     }
 
     incomplete = any(
         value in {"unavailable", "failed", "malformed", "blocked"}
         for key, value in checks.items()
-        if key not in {"frontend"}
+        if key not in {"frontend", "coderos"}
     )
     unsafe = dirty and any(_excluded_path(path) is False and path.endswith(".env") for path in changed)
     exit_code = 2 if incomplete or unsafe else 0
+
+    worktree = {
+        "path": worktree_path,
+        "branch": branch.get("stdout") or "detached",
+        "head": head.get("stdout") or None,
+        "clean": not dirty,
+        "canonical_checkout": _is_canonical_checkout(Path(worktree_path)),
+        "listed": listed,
+        "drift": {
+            "merge_base": merge_base.get("stdout") or None,
+            "vs_origin_main": drift,
+            "classification": merge_base.get("classification"),
+        },
+        "ownership_note": "edits must stay in this exclusive worktree; never modify the canonical dirty checkout",
+    }
 
     document = {
         "schema": SCHEMA,
         "read_only": True,
         "mutated": False,
-        "network_calls": include_github and github["classification"] == "actual",
+        "network_calls": include_github and "actual" in {github_view["classification"], github_list["classification"]},
+        "repository": {
+            "name": repo_name,
+            "path": worktree_path,
+            "remote": remote.get("stdout") or None,
+        },
+        "branch": branch.get("stdout") or "detached",
+        "HEAD": head.get("stdout") or None,
+        "origin_main": origin_main.get("stdout") or None,
+        "worktree": worktree,
+        "changed_paths": changed,
+        "open_prs": github_list,
+        "selected_tests": selected_commands if isinstance(selected_commands, list) else [],
+        "phase1_readiness": phase1_summary,
+        "local_quality_gate": quality_summary,
+        "development_stack": development_stack,
+        "deployment_readiness": deployment_readiness,
+        "blockers": blockers,
+        "next_best_action": next_action,
+        "evidence_classifications": checks,
+        "coderos": coderos,
+        "exit_codes": {
+            "session_start": session.get("exit_code"),
+            "select_tests": selected.get("exit_code"),
+            "phase1_readiness": phase1.get("exit_code"),
+            "local_quality_gate": quality.get("exit_code"),
+            "pr_readiness": pr_ready.get("exit_code"),
+            "development_stack": dev_stack.get("exit_code"),
+            "github_view": github_view.get("exit_code"),
+            "github_list": github_list.get("exit_code"),
+        },
         "repository_name": repo_name,
         "current_branch": branch.get("stdout") or "detached",
         "head_sha": head.get("stdout") or None,
         "origin_main_sha": origin_main.get("stdout") or None,
         "worktree_clean": not dirty,
         "changed_file_paths": changed,
-        "active_pr": github.get("summary"),
-        "selected_test_paths": (selected.get("parsed") or {}).get("recommended_commands") if isinstance(selected.get("parsed"), dict) else [],
+        "active_pr": github_view.get("summary"),
+        "selected_test_paths": selected_commands if isinstance(selected_commands, list) else [],
         "phase1_readiness_summary": phase1_summary,
-        "local_quality_gate": quality_summary,
-        "deployment_readiness_classification": deployment_classification,
         "frontend_status": frontend,
         "tools": tools,
         "current_blockers": blockers,
         "recommended_next_action": next_action,
         "evidence_classification": checks,
+        "deployment_readiness_classification": deployment_classification,
         "notes": [
-            "Local quality-gate and phase1 reports are not live deployment proof.",
+            "Local quality-gate, phase1, and deployment fields are not live production proof.",
             "GitHub access is classified unavailable when gh or network is absent.",
-            "This snapshot never includes artifacts/, .env files, or raw provider payloads.",
+            "CoderOS stays plan_only / not_run unless a future operator opts into probe mode.",
+            "This snapshot never includes artifacts/, .env files, caches, browser traces, or raw provider payloads.",
+            "PR #246 Invoke-MarketOSOperator.ps1 remains the Product Validation sprint authority; this snapshot does not replace it.",
+            "PR #230 cockpit and PR #213 frontend/API remain the UI/API authorities; this snapshot does not call those endpoints.",
         ],
     }
     return document, exit_code
@@ -431,11 +752,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-github", action="store_true")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S)
     args = parser.parse_args(argv)
-    root = args.repository.resolve()
     if args.timeout <= 0:
         parser.error("timeout must be positive")
     document, exit_code = build_snapshot(
-        root,
+        args.repository,
         include_frontend=args.include_frontend,
         include_github=not args.no_github,
         timeout_s=args.timeout,
