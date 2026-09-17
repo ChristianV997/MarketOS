@@ -2,21 +2,44 @@ version: '3.9'
 services:
   api:
     build: .
+    restart: unless-stopped
     command: uvicorn backend.api:app --host 0.0.0.0 --port 3000
     ports:
       - "3000:3000"
+    environment:
+      MARKETOS_ENVIRONMENT: production
+      MARKETOS_PUBLIC_COMMERCE_RUNS: "0"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-marketos}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-marketos}
+      REDIS_URL: redis://redis:6379/0
     depends_on:
-      - redis
-      - db
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
   # Redis and Postgres are provisioned for a future persistence layer; the
   # current backend/api.py path does not wire them yet (see README Known gaps).
   redis:
     image: redis:7
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
   db:
     image: postgres:15
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: upos
-      POSTGRES_PASSWORD: upos
-      POSTGRES_DB: upos
-    ports:
-      - "5432:5432"
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marketos} -d ${POSTGRES_DB:-marketos}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

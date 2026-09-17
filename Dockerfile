@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.source="https://github.com/ChristianV997/MarketOS" \
@@ -27,5 +27,7 @@ EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
+
+STOPSIGNAL SIGINT
 
 CMD ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]

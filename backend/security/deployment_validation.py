@@ -21,13 +21,16 @@ def validate_production_deployment(environ: Mapping[str, str] | None = None) -> 
     client_tokens = env.get("MARKETOS_CLIENT_TOKENS") or env.get("MARKETOS_CLIENT_TOKEN")
     auth_disabled = env.get("MARKETOS_AUTH_DISABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 
+    has_operator_auth = bool(op_token)
+    has_client_auth = bool(client_tokens)
+
     if prod:
         if auth_disabled:
             blockers.append("auth_disabled_forbidden_in_production")
-        if not op_token and not client_tokens:
+        if not has_operator_auth and not has_client_auth:
             blockers.append("operator_token_required_in_production")
     else:
-        if not op_token and not auth_disabled:
+        if not has_operator_auth and not auth_disabled:
             warnings.append("local_auth_unconfigured_set_MARKETOS_OPERATOR_TOKEN_or_MARKETOS_AUTH_DISABLED")
 
     # 2. Check CORS Configuration
@@ -41,13 +44,26 @@ def validate_production_deployment(environ: Mapping[str, str] | None = None) -> 
 
     # 3. Check Live Actions & Spend Protection
     live_enabled = env.get("MARKETOS_ENABLE_LIVE_ACTIONS", "false").strip().lower() in {"1", "true", "yes", "on"}
-    if live_enabled and not op_token:
+    if live_enabled and not has_operator_auth:
         blockers.append("live_actions_enabled_without_operator_token")
 
     # 4. Check Webhook Secrets Configuration
     stripe_configured = bool(env.get("STRIPE_WEBHOOK_SECRET"))
     shopify_configured = bool(env.get("SHOPIFY_WEBHOOK_SECRET"))
     cj_configured = bool(env.get("CJ_WEBHOOK_SECRET"))
+
+    # 5. Check Database Credentials Safety
+    db_url = env.get("DATABASE_URL", "")
+    pg_pass = env.get("POSTGRES_PASSWORD", "")
+    insecure_passwords = {"upos", "postgres", "admin", "password", "root", "123456"}
+    has_insecure_db_pass = False
+    if prod:
+        if pg_pass and pg_pass.lower() in insecure_passwords:
+            blockers.append("insecure_default_database_password")
+            has_insecure_db_pass = True
+        if any(f":{p}@" in db_url.lower() for p in insecure_passwords):
+            blockers.append("insecure_default_database_password_in_url")
+            has_insecure_db_pass = True
 
     ready = len(blockers) == 0
 
@@ -77,6 +93,11 @@ def validate_production_deployment(environ: Mapping[str, str] | None = None) -> 
             "live_safety": {
                 "live_actions_enabled": live_enabled,
                 "dry_run_default": True,
+            },
+            "database": {
+                "configured": bool(db_url or pg_pass),
+                "has_insecure_password": has_insecure_db_pass,
+                "status": "fail" if has_insecure_db_pass else "pass",
             },
         },
     }
