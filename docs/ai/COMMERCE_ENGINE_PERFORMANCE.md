@@ -1,7 +1,7 @@
 # Commercial-engine performance and reliability
 
-Lane: `grok/marketos-commerce-engine-perf-v1`  
-Base: `origin/main` `df59a0609897907c1565d7d5f78e20959095d430`  
+Lane: `grok/marketos-commerce-engine-perf-v1`
+Base: `origin/main` `df59a0609897907c1565d7d5f78e20959095d430`
 Posture: fixture-only, no live providers, no merge.
 
 ## Why this exists
