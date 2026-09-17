@@ -7,9 +7,12 @@ fulfillment action, or provider write.
 """
 from __future__ import annotations
 
-import statistics
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal
 from typing import Any, Iterable, Mapping
+
+from backend.economics import MarketLane, Money, UnitEconomicsAssumptions
+from backend.economics import calculate_unit_economics as calculate_canonical_unit_economics
 
 PROVENANCE = frozenset(
     {
@@ -167,8 +170,10 @@ def calculate_unit_economics(
     estimated_landed_cost: Any = None,
     payment_fee_rate: float = 0.029,
     platform_fee_rate: float = 0.05,
+    lane: MarketLane | None = None,
+    currency: str | None = None,
 ) -> UnitEconomicsScenario:
-    """Calculate a conservative scenario without inventing missing cost inputs."""
+    """Compatibility adapter over the canonical Decimal economics model."""
     sell = number(target_sell_price)
     cost = number(unit_cost)
     shipping = number(shipping_cost)
@@ -182,11 +187,37 @@ def calculate_unit_economics(
             landed = cost
     if sell is None or landed is None:
         return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, None, None, None, None, None, tuple(assumptions + ["sell_price_or_landed_cost_missing"]))
-    fees = sell * (payment_fee_rate + platform_fee_rate)
-    profit = sell - landed - fees
-    margin_percent = profit / sell if sell else None
-    cpa = max(0.0, profit) if profit is not None else None
-    roas = sell / cpa if cpa and cpa > 0 else None
+    resolved_currency = lane.currency if lane else (currency or "USD")
+    if lane and currency and currency.upper() != lane.currency:
+        return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, None, None, None, None, None, tuple(assumptions + ["currency_mismatch"]))
+    try:
+        canonical = calculate_canonical_unit_economics(
+            Money(sell, resolved_currency, source="supplier_feasibility", provenance="assumed"),
+            Money(cost, resolved_currency, source="supplier_feasibility", provenance="assumed"),
+            lane=lane,
+            assumptions=UnitEconomicsAssumptions(
+                supplier_shipping=Money(shipping, resolved_currency, source="supplier_feasibility", provenance="assumed") if shipping is not None else None,
+                payment_fee_rate=None if lane and lane.payment_fee_rate is not None else Decimal(str(payment_fee_rate)),
+                platform_fee_rate=None if lane and lane.platform_fee_rate is not None else Decimal(str(platform_fee_rate)),
+                tax_rate=None if lane else Decimal("0"),
+                duty_rate=None if lane else Decimal("0"),
+                return_rate=Decimal("0"),
+                defect_rate=Decimal("0"),
+                warranty_rate=Decimal("0"),
+                support_reserve_rate=Decimal("0"),
+                chargeback_rate=Decimal("0"),
+                fx_reserve_rate=Decimal("0"),
+                discount_rate=Decimal("0"),
+                affiliate_fee_rate=Decimal("0"),
+                marketplace_fee_rate=Decimal("0"),
+            ),
+        )
+    except (TypeError, ValueError):
+        return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, None, None, None, None, None, tuple(assumptions + ["invalid_economics_input"]))
+    profit = float(canonical.contribution_before_cac.amount)
+    margin_percent = float(canonical.contribution_margin) if canonical.contribution_margin is not None else None
+    cpa = float(canonical.break_even_cac.amount)
+    roas = float(canonical.break_even_roas) if canonical.break_even_roas is not None else None
     return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, profit, margin_percent, cpa, roas, profit, tuple(assumptions))
 
 
@@ -385,7 +416,7 @@ def score_candidate(
     costs = _confidence(best, "unit_cost")
     landed = _confidence(best, "estimated_landed_cost")
     inventory = _confidence(best, "inventory_status")
-    min_days, max_days = best.delivery_min_days, best.delivery_max_days
+    max_days = best.delivery_max_days
     speed = 0.9 if max_days is not None and max_days <= 7 else 0.75 if max_days is not None and max_days <= 14 else 0.5 if max_days is not None and max_days <= 30 else 0.2 if max_days is not None else 0.0
     delivery_risk = 1.0 - speed if max_days is not None else 0.8
     reliability = bounded((best.supplier_rating or 0) / 5) * (0.5 + bounded((best.supplier_review_count or 0) / 1000) * 0.5)
