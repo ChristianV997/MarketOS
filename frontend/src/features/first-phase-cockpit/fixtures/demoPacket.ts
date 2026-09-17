@@ -1,4 +1,17 @@
-import type { FirstPhaseEvidencePacket } from "../contracts/firstPhaseEvidencePacket";
+import type { CandidatePillarCell, FirstPhaseEvidencePacket } from "../contracts/firstPhaseEvidencePacket";
+
+const fixtureCells = (
+  market: number,
+  supplier: number,
+  economicsDetail: string,
+): CandidatePillarCell[] => [
+  { pillarId: "market_evidence", label: "Market", score: market, status: "partial", detail: `competition score ${Math.round(market * 100)}%`, evidenceClass: "fixture" },
+  { pillarId: "supplier_feasibility", label: "Supplier", score: supplier, status: "partial", detail: `supplier score ${Math.round(supplier * 100)}%`, evidenceClass: "fixture" },
+  { pillarId: "economics", label: "Economics", score: null, status: "partial", detail: economicsDetail, evidenceClass: "assumption" },
+  { pillarId: "provenance", label: "Provenance", score: null, status: "available", detail: "fixture_only", evidenceClass: "derived" },
+  { pillarId: "freshness", label: "Freshness", score: null, status: "partial", detail: "portfolio freshness when available", evidenceClass: "derived" },
+  { pillarId: "consumer_attention", label: "Attention", score: null, status: "unavailable", detail: "consumer_attention_api_unavailable", evidenceClass: "unavailable" },
+];
 
 /** Deterministic fixture for tests and offline UI review. */
 export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
@@ -20,15 +33,9 @@ export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
       validationTarget: "supplier",
       sourceFamily: "benchmark_matrix",
       evidenceMode: "fixture_only",
+      evidenceClass: "fixture",
       isTopCandidate: true,
-      pillarCells: [
-        { pillarId: "market_evidence", label: "Market", score: 0.58, status: "partial", detail: "competition score 58%" },
-        { pillarId: "supplier_feasibility", label: "Supplier", score: 0.61, status: "partial", detail: "supplier score 61%" },
-        { pillarId: "economics", label: "Economics", score: 0.78, status: "partial", detail: "margin medium" },
-        { pillarId: "provenance", label: "Provenance", score: null, status: "available", detail: "fixture_only" },
-        { pillarId: "freshness", label: "Freshness", score: null, status: "partial", detail: "portfolio freshness when available" },
-        { pillarId: "consumer_attention", label: "Attention", score: null, status: "unavailable", detail: "consumer_attention_api_unavailable" },
-      ],
+      pillarCells: fixtureCells(0.58, 0.61, "margin medium (assumption label, not a recast opportunity score)"),
     },
     {
       candidateId: "cand-bottle-02",
@@ -46,15 +53,9 @@ export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
       validationTarget: "economics",
       sourceFamily: "benchmark_matrix",
       evidenceMode: "fixture_only",
+      evidenceClass: "fixture",
       isTopCandidate: false,
-      pillarCells: [
-        { pillarId: "market_evidence", label: "Market", score: 0.66, status: "partial", detail: "competition score 66%" },
-        { pillarId: "supplier_feasibility", label: "Supplier", score: 0.42, status: "partial", detail: "supplier score 42%" },
-        { pillarId: "economics", label: "Economics", score: 0.59, status: "partial", detail: "margin low" },
-        { pillarId: "provenance", label: "Provenance", score: null, status: "available", detail: "fixture_only" },
-        { pillarId: "freshness", label: "Freshness", score: null, status: "partial", detail: "portfolio freshness when available" },
-        { pillarId: "consumer_attention", label: "Attention", score: null, status: "unavailable", detail: "consumer_attention_api_unavailable" },
-      ],
+      pillarCells: fixtureCells(0.66, 0.42, "margin low (assumption label, not a recast opportunity score)"),
     },
   ],
   pillars: [
@@ -67,6 +68,7 @@ export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
       freshness: "research_freshness_0.71",
       sourceFamily: "public_market_benchmark",
       evidenceMode: "fixture_only",
+      evidenceClass: "fixture",
       blockedReasons: [],
     },
     {
@@ -78,6 +80,7 @@ export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
       freshness: null,
       sourceFamily: null,
       evidenceMode: null,
+      evidenceClass: "unavailable",
       blockedReasons: ["consumer_attention_api_unavailable"],
     },
     {
@@ -89,6 +92,7 @@ export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
       freshness: null,
       sourceFamily: "phase1_readiness",
       evidenceMode: "fixture_only",
+      evidenceClass: "fixture",
       blockedReasons: ["credential_missing"],
     },
     {
@@ -100,6 +104,7 @@ export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
       freshness: null,
       sourceFamily: "phase1_readiness",
       evidenceMode: "simulated",
+      evidenceClass: "assumption",
       blockedReasons: [],
     },
     {
@@ -111,6 +116,7 @@ export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
       freshness: null,
       sourceFamily: "benchmark_matrix",
       evidenceMode: "fixture_only",
+      evidenceClass: "derived",
       blockedReasons: [],
     },
     {
@@ -122,6 +128,7 @@ export const DEMO_FIRST_PHASE_EVIDENCE_PACKET: FirstPhaseEvidencePacket = {
       freshness: "0.71",
       sourceFamily: "research_portfolio",
       evidenceMode: "fixture_only",
+      evidenceClass: "derived",
       blockedReasons: [],
     },
   ],

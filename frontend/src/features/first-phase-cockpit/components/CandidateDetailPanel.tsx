@@ -56,6 +56,10 @@ export function CandidateDetailPanel({
           <dd className="mt-1 text-zinc-200">{candidate.evidenceMode.replace(/_/g, " ")}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Evidence class</dt>
+          <dd className="mt-1 text-zinc-200">{candidate.evidenceClass.replace(/_/g, " ")}</dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
           <dt className="text-zinc-500">Source family</dt>
           <dd className="mt-1 text-zinc-200">{candidate.sourceFamily?.replace(/_/g, " ") ?? "—"}</dd>
         </div>
@@ -94,7 +98,7 @@ export function CandidateDetailPanel({
           <li key={cell.pillarId} className="rounded border border-zinc-800 bg-zinc-950/40 p-2 text-xs">
             <div className="flex items-center justify-between gap-2">
               <span className="text-zinc-200">{cell.label}</span>
-              <span className="text-[10px] text-zinc-500">{cell.status}</span>
+              <span className="text-[10px] text-zinc-500">{cell.status} · {cell.evidenceClass.replace(/_/g, " ")}</span>
             </div>
             <p className="mt-1 text-zinc-400">
               {cell.score !== null ? `${(cell.score * 100).toFixed(0)}%` : "—"}

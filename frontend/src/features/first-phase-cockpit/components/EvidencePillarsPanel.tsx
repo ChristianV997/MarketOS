@@ -46,6 +46,9 @@ export function EvidencePillarsPanel({ pillars }: { pillars: EvidencePillar[] })
                 Evidence mode: {pillar.evidenceMode.replace(/_/g, " ")}
               </p>
             )}
+            <p className="mt-1 text-[11px] text-zinc-500">
+              Evidence class: {pillar.evidenceClass.replace(/_/g, " ")}
+            </p>
             {pillar.blockedReasons.length > 0 && (
               <p className="mt-2 text-[11px] text-amber-200">
                 {pillar.blockedReasons.map((reason) => reason.replace(/_/g, " ")).join(" · ")}

@@ -540,6 +540,7 @@ test("source contracts: no client re-ranking and no API client duplication", asy
   const apiClientSource = await readFile(new URL("../src/lib/canonicalEventsApi.ts", import.meta.url), "utf8");
 
   assert.doesNotMatch(composeSource, /\.sort\(/);
+  assert.match(composeSource, /classifyEvidenceClass/);
   assert.doesNotMatch(filterSource, /\.sort\(/);
   assert.doesNotMatch(windowSource, /\.sort\(/);
   assert.match(windowSource, /slice\(/);
@@ -595,4 +596,41 @@ test("route wiring and api base authority remain unchanged", async () => {
   assert.match(hookSource, /usePhase1Readiness/);
   assert.match(hookSource, /useBenchmarkMatrix/);
   assert.match(apiBase, /VITE_API_BASE_URL/);
+});
+
+test("fixture and manual runs never classify as live proof", async () => {
+  const source = await readFile(new URL("lib/classifyEvidence.ts", featureRoot), "utf8");
+  assert.match(source, /LIVE_PROOF_EVIDENCE_CLASSES/);
+  assert.match(source, /sample_verified/);
+  assert.match(source, /live_order_verified/);
+  assert.match(source, /live_sales_validated/);
+  assert.match(source, /OFFLINE_MODES/);
+  const compose = await readFile(new URL("lib/composeCockpitViewModel.ts", featureRoot), "utf8");
+  assert.match(compose, /fixture-demo never becomes live_readonly/);
+  assert.doesNotMatch(compose, /1 - item\.economics\.assumption_ratio/);
+});
+
+test("demo fixture packet is not live-sales-validated", async () => {
+  const demo = await readFile(new URL("fixtures/demoPacket.ts", featureRoot), "utf8");
+  assert.match(demo, /evidenceClass: "fixture"/);
+  assert.doesNotMatch(demo, /live_sales_validated/);
+  assert.doesNotMatch(demo, /live_order_verified/);
+});
+
+test("unsupported schema versions stay rejected", () => {
+  const result = validateEvidenceCockpitApiPacket({
+    schema_version: "phase1-evidence-cockpit-v0",
+    report_version: "x",
+    generated_at: "2026-09-02T00:00:00Z",
+    read_only: true,
+    mutated: false,
+    ranked_candidates: [],
+    pillars: [],
+    trustos: { status: "unavailable" },
+    governor: { status: "unavailable" },
+    approval_ledger: { status: "unavailable" },
+    fingerprint: {},
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "schema_version_unsupported");
 });

@@ -7,6 +7,7 @@ import {
   type FirstPhaseEvidencePacket,
   type PillarId,
 } from "../contracts/firstPhaseEvidencePacket";
+import { classifyEvidenceClass } from "./classifyEvidence";
 import { containsSecretShapedValue } from "./exportClientSafeReport";
 import { normalizeEvidenceMode } from "./composeCockpitViewModel";
 import { formatFreshnessLabel, isStaleFreshness } from "./freshness";
@@ -132,6 +133,11 @@ export function mapApiPacketToViewModel(
     validationTarget: candidate.validation_target,
     sourceFamily: candidate.source_family,
     evidenceMode,
+    evidenceClass: classifyEvidenceClass({
+      evidenceMode,
+      sourceFamily: candidate.source_family,
+      declared: (candidate as { evidence_class?: string }).evidence_class ?? null,
+    }),
     isTopCandidate: candidate.is_top_candidate,
     pillarCells: (candidate.pillar_cells ?? []).map((cell) => ({
       pillarId: cell.pillar_id,
@@ -139,6 +145,12 @@ export function mapApiPacketToViewModel(
       score: cell.score,
       status: cell.status,
       detail: cell.detail,
+      evidenceClass: classifyEvidenceClass({
+        evidenceMode,
+        pillarId: cell.pillar_id,
+        status: cell.status,
+        sourceFamily: candidate.source_family,
+      }),
     })),
   }));
 
@@ -161,6 +173,12 @@ export function mapApiPacketToViewModel(
       freshness: pillar.freshness,
       sourceFamily: pillar.source_family,
       evidenceMode: pillar.evidence_mode,
+      evidenceClass: classifyEvidenceClass({
+        evidenceMode: pillar.evidence_mode ?? evidenceMode,
+        pillarId: pillar.pillar_id,
+        status: pillar.status,
+        sourceFamily: pillar.source_family,
+      }),
       blockedReasons: pillar.blocked_reasons,
     })),
     controlPlanes: [

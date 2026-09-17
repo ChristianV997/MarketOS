@@ -7,12 +7,15 @@ import type {
 import type {
   CandidatePillarCell,
   ControlPlaneSlot,
+  EvidenceClass,
   EvidenceMode,
   EvidencePillar,
   EvidenceState,
   FirstPhaseEvidencePacket,
+  PillarId,
   RankedCandidateRow,
 } from "../contracts/firstPhaseEvidencePacket";
+import { classifyEvidenceClass } from "./classifyEvidence";
 import { formatFreshnessLabel } from "./freshness";
 
 export interface ComposeCockpitInput {
@@ -30,10 +33,14 @@ export interface ComposeCockpitInput {
 export function normalizeEvidenceMode(value: string | null | undefined): EvidenceMode {
   if (!value) return "unknown";
   const lowered = value.toLowerCase();
+  // Fixture/manual/simulated win over "live" substrings so fixture-demo never becomes live_readonly.
   if (lowered.includes("fixture")) return "fixture_only";
   if (lowered.includes("manual")) return "manual";
   if (lowered.includes("simul")) return "simulated";
-  if (lowered.includes("live")) return "live_readonly";
+  if (lowered.includes("live_readonly") || lowered === "live") return "live_readonly";
+  if (lowered.includes("live") && !lowered.includes("validated") && !lowered.includes("order")) {
+    return "live_readonly";
+  }
   return "unknown";
 }
 
@@ -66,43 +73,59 @@ function scoreStatus(score: number | null | undefined): CandidatePillarCell["sta
   return "blocked";
 }
 
+function cellClass(
+  evidenceMode: EvidenceMode,
+  pillarId: PillarId,
+  status: CandidatePillarCell["status"],
+  sourceFamily: string | null,
+): EvidenceClass {
+  return classifyEvidenceClass({ evidenceMode, pillarId, status, sourceFamily });
+}
+
 function buildPillarCells(item: BenchmarkMatrixView["candidates"][number], evidenceMode: EvidenceMode): CandidatePillarCell[] {
+  const family = "benchmark_matrix";
+  const marketStatus = scoreStatus(item.competition_evidence?.score);
+  const supplierStatus = scoreStatus(item.supplier_evidence?.score);
+  const economicsStatus = item.economics?.margin_quality ? "partial" : "unavailable";
+  const provenanceStatus = evidenceMode === "unknown" ? "unavailable" : "available";
   return [
     {
       pillarId: "market_evidence",
       label: "Market",
       score: item.competition_evidence?.score ?? null,
-      status: scoreStatus(item.competition_evidence?.score),
+      status: marketStatus,
       detail: item.competition_evidence?.score !== undefined
         ? `competition score ${(item.competition_evidence.score * 100).toFixed(0)}%`
         : null,
+      evidenceClass: cellClass(evidenceMode, "market_evidence", marketStatus, family),
     },
     {
       pillarId: "supplier_feasibility",
       label: "Supplier",
       score: item.supplier_evidence?.score ?? null,
-      status: scoreStatus(item.supplier_evidence?.score),
+      status: supplierStatus,
       detail: item.supplier_evidence?.score !== undefined
         ? `supplier score ${(item.supplier_evidence.score * 100).toFixed(0)}%`
         : null,
+      evidenceClass: cellClass(evidenceMode, "supplier_feasibility", supplierStatus, family),
     },
     {
       pillarId: "economics",
       label: "Economics",
-      score: item.economics?.assumption_ratio !== undefined
-        ? Math.max(0, 1 - item.economics.assumption_ratio)
-        : null,
-      status: item.economics?.margin_quality ? "partial" : "unavailable",
+      score: null,
+      status: economicsStatus,
       detail: item.economics?.margin_quality
-        ? `margin ${item.economics.margin_quality}`
+        ? `margin ${item.economics.margin_quality} (assumption label, not a recast opportunity score)`
         : null,
+      evidenceClass: cellClass(evidenceMode, "economics", economicsStatus, family),
     },
     {
       pillarId: "provenance",
       label: "Provenance",
       score: null,
-      status: evidenceMode === "unknown" ? "unavailable" : "available",
+      status: provenanceStatus,
       detail: evidenceMode,
+      evidenceClass: cellClass(evidenceMode, "provenance", provenanceStatus, family),
     },
     {
       pillarId: "freshness",
@@ -110,6 +133,7 @@ function buildPillarCells(item: BenchmarkMatrixView["candidates"][number], evide
       score: null,
       status: "partial",
       detail: "portfolio freshness when available",
+      evidenceClass: cellClass(evidenceMode, "freshness", "partial", family),
     },
     {
       pillarId: "consumer_attention",
@@ -117,6 +141,7 @@ function buildPillarCells(item: BenchmarkMatrixView["candidates"][number], evide
       score: null,
       status: "unavailable",
       detail: "consumer_attention_api_unavailable",
+      evidenceClass: "unavailable",
     },
   ];
 }
@@ -143,6 +168,7 @@ function mapCandidates(
     validationTarget: item.validation_priority?.target ?? null,
     sourceFamily: "benchmark_matrix",
     evidenceMode,
+    evidenceClass: classifyEvidenceClass({ evidenceMode, sourceFamily: "benchmark_matrix" }),
     isTopCandidate: item.candidate.candidate_id === benchmark.top_candidate_id,
     pillarCells: buildPillarCells(item, evidenceMode),
   }));
@@ -168,6 +194,12 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
       freshness,
       sourceFamily: publicMarket ? "public_market_benchmark" : benchmark ? "benchmark_matrix" : null,
       evidenceMode,
+      evidenceClass: classifyEvidenceClass({
+        evidenceMode,
+        pillarId: "market_evidence",
+        sourceFamily: publicMarket ? "public_market_benchmark" : benchmark ? "benchmark_matrix" : null,
+        status: publicMarket || benchmark ? "available" : "unavailable",
+      }),
       blockedReasons: publicMarket?.remaining_supplier_blocker
         ? [publicMarket.remaining_supplier_blocker]
         : [],
@@ -181,6 +213,7 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
       freshness: null,
       sourceFamily: null,
       evidenceMode: null,
+      evidenceClass: "unavailable" as const,
       blockedReasons: ["consumer_attention_api_unavailable"],
     },
     {
@@ -198,6 +231,16 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
       freshness: null,
       sourceFamily: "phase1_readiness",
       evidenceMode,
+      evidenceClass: classifyEvidenceClass({
+        evidenceMode,
+        pillarId: "supplier_feasibility",
+        sourceFamily: "phase1_readiness",
+        status: readiness?.supplier_readiness?.status === "blocked"
+          ? "blocked"
+          : readiness?.supplier_readiness
+            ? "partial"
+            : "unavailable",
+      }),
       blockedReasons: readiness?.credential_readiness?.credentials_present === false
         ? ["credential_missing"]
         : [],
@@ -213,6 +256,7 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
       freshness: null,
       sourceFamily: "phase1_readiness",
       evidenceMode: "simulated",
+      evidenceClass: "assumption" as const,
       blockedReasons: [],
     },
     {
@@ -224,6 +268,7 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
       freshness: null,
       sourceFamily: "benchmark_matrix",
       evidenceMode,
+      evidenceClass: classifyEvidenceClass({ evidenceMode, pillarId: "provenance", sourceFamily: "benchmark_matrix" }),
       blockedReasons: [],
     },
     {
@@ -237,6 +282,12 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
       freshness,
       sourceFamily: researchPortfolio ? "research_portfolio" : null,
       evidenceMode: researchPortfolio ? evidenceMode : null,
+      evidenceClass: classifyEvidenceClass({
+        evidenceMode,
+        pillarId: "freshness",
+        sourceFamily: researchPortfolio ? "research_portfolio" : null,
+        status: freshness ? "available" : "partial",
+      }),
       blockedReasons: [],
     },
   ];

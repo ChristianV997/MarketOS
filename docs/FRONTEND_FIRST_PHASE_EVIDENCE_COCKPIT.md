@@ -13,7 +13,11 @@ Read-only operator surface stacked on PR #213 frontend/API authority.
 - Filters: search, risk, commercial decision, top-candidate only (`useDeferredValue` / `useTransition`)
 - Keyboard selection with roving tabindex (ArrowUp/Down, Home/End, Enter/Space) + detail focus handoff
 - Responsive mobile card list + desktop evidence grid
-- Evidence pillars: provenance, freshness, source family, evidence mode
+- Evidence pillars: provenance, freshness, source family, evidence mode, evidence class
+  (`fixture`, `assumption`, `derived`, `public_observed`, `supplier_claimed`,
+  `supplier_documented`, `sample_verified`, `live_order_verified`, `live_sales_validated`,
+  `unavailable`, `blocked`)
+- Fixture/manual/simulated success never becomes live proof
 - TrustOS / Governor / Approval Ledger panels (explicit unavailable until merged packet)
 - States: loading, empty, blocked, unavailable, stale, **partial**, success
 - Schema-version gated future packet validator (`phase1-evidence-cockpit-v1`) — endpoint not claimed to exist

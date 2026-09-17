@@ -68,6 +68,7 @@ export function buildClientSafeExport(
       next_best_action: candidate.nextBestAction,
       risk_level: candidate.riskLevel,
       is_top_candidate: candidate.isTopCandidate,
+      evidence_class: candidate.evidenceClass,
     })),
     pillars: packet.pillars.map((pillar) => ({
       pillar_id: pillar.id,

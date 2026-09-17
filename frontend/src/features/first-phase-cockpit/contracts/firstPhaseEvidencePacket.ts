@@ -28,6 +28,32 @@ export type EvidenceMode =
   | "live_readonly"
   | "unknown";
 
+/**
+ * Source-family evidence class. Distinct from run-mode (`EvidenceMode`).
+ * Live proof classes are never assigned from fixture/manual/simulated runs.
+ */
+export const EVIDENCE_CLASSES = [
+  "fixture",
+  "assumption",
+  "derived",
+  "public_observed",
+  "supplier_claimed",
+  "supplier_documented",
+  "sample_verified",
+  "live_order_verified",
+  "live_sales_validated",
+  "unavailable",
+  "blocked",
+] as const;
+
+export type EvidenceClass = (typeof EVIDENCE_CLASSES)[number];
+
+export const LIVE_PROOF_EVIDENCE_CLASSES = new Set<EvidenceClass>([
+  "sample_verified",
+  "live_order_verified",
+  "live_sales_validated",
+]);
+
 export type ControlPlaneStatus =
   | "unavailable"
   | "fixture"
@@ -53,6 +79,7 @@ export interface CandidatePillarCell {
   score: number | null;
   status: "available" | "partial" | "unavailable" | "blocked";
   detail: string | null;
+  evidenceClass: EvidenceClass;
 }
 
 export interface RankedCandidateRow {
@@ -71,6 +98,7 @@ export interface RankedCandidateRow {
   validationTarget: string | null;
   sourceFamily: string | null;
   evidenceMode: EvidenceMode;
+  evidenceClass: EvidenceClass;
   isTopCandidate: boolean;
   pillarCells: CandidatePillarCell[];
 }
@@ -84,6 +112,7 @@ export interface EvidencePillar {
   freshness: string | null;
   sourceFamily: string | null;
   evidenceMode: EvidenceMode | null;
+  evidenceClass: EvidenceClass;
   blockedReasons: string[];
 }
 
@@ -154,6 +183,7 @@ export interface ClientSafeCockpitExport {
     next_best_action: string | null;
     risk_level: string | null;
     is_top_candidate: boolean;
+    evidence_class: EvidenceClass;
   }>;
   pillars: Array<{
     pillar_id: PillarId;
