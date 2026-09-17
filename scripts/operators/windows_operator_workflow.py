@@ -102,14 +102,22 @@ def _run_cli(script_rel: str, extra: list[str]) -> dict[str, Any]:
     script = ROOT / script_rel
     if not script.is_file():
         return {"available": False, "exit_code": 3, "reason": f"missing_cli:{script_rel}", "stdout": ""}
-    proc = subprocess.run(
-        [_python(), str(script), *extra],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=60,
-    )
+    try:
+        proc = subprocess.run(
+            [_python(), str(script), *extra],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "available": False,
+            "exit_code": 3,
+            "reason": "cli_timeout",
+            "stdout": "",
+        }
     combined = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode != 0 and "ModuleNotFoundError" in combined:
         return {

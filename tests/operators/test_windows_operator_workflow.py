@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+import scripts.operators.windows_operator_workflow as workflow
+
 ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / "scripts/operators/windows_operator_workflow.py"
 PS1 = ROOT / "scripts/operators/Invoke-MarketOSOperator.ps1"
@@ -26,6 +28,21 @@ def _run(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
 
 def _payload(proc: subprocess.CompletedProcess[str]) -> dict:
     return json.loads(proc.stdout)
+
+
+def test_nested_cli_timeout_is_reported_as_unavailable(monkeypatch):
+    def _timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd="python", timeout=60)
+
+    monkeypatch.setattr(workflow.subprocess, "run", _timeout)
+    result = workflow._run_cli("scripts/generate_product_validation_report.py", ["--json"])
+
+    assert result == {
+        "available": False,
+        "exit_code": 3,
+        "reason": "cli_timeout",
+        "stdout": "",
+    }
 
 
 def test_preflight_is_read_only_and_never_actual():
