@@ -1,0 +1,10 @@
+{
+  "captured_at":"2026-09-16T09:04:00-06:00",
+  "client_name":"Fixture Client",
+  "lane":{"origin":"Shenzhen","destination":"Mexico","currency":"MXN"},
+  "candidates":[{"candidate_id":"walking-pad","title":"Walking pad","category":"fitness","lifecycle_state":"hold","target_sell_price":7000}],
+  "supplier_inputs":[],
+  "marketplace_inputs":[{"path":"all_marketplace.json","candidate_ids":["walking-pad"],"marketplace":"mercadolibre","label":"walking pad market observation"}],
+  "consumer_attention_inputs":[{"path":"all_attention.json","candidate_ids":["walking-pad"],"platform":"reddit","label":"walking pad social observation"}],
+  "observation_inputs":[]
+}

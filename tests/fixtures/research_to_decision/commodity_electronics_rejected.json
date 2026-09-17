@@ -1,0 +1,10 @@
+{
+  "captured_at":"2026-09-16T09:03:00-06:00",
+  "client_name":"Fixture Client",
+  "lane":{"origin":"Shenzhen","destination":"Mexico","currency":"MXN"},
+  "candidates":[{"candidate_id":"commodity-earbuds","title":"Commodity wireless earbuds","category":"electronics","lifecycle_state":"reject","target_sell_price":100}],
+  "supplier_inputs":[{"path":"all_supplier.json","candidate_ids":["commodity-earbuds"],"label":"commodity electronics supplier catalog"}],
+  "marketplace_inputs":[{"path":"all_marketplace.json","candidate_ids":["commodity-earbuds"],"marketplace":"mercadolibre","label":"commodity electronics market observation"}],
+  "consumer_attention_inputs":[{"path":"all_attention.json","candidate_ids":["commodity-earbuds"],"platform":"reddit","label":"commodity electronics review observation"}],
+  "observation_inputs":[]
+}

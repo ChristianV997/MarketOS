@@ -1,0 +1,10 @@
+{
+  "captured_at":"2026-09-16T09:02:00-06:00",
+  "client_name":"Fixture Client",
+  "lane":{"origin":"Shenzhen","destination":"Mexico","currency":"MXN"},
+  "candidates":[{"candidate_id":"solar-4g-camera","title":"Solar 4G camera","category":"security","lifecycle_state":"no_launch","target_sell_price":2300}],
+  "supplier_inputs":[{"path":"all_supplier.json","candidate_ids":["solar-4g-camera"],"label":"solar 4g supplier catalog"}],
+  "marketplace_inputs":[{"path":"all_marketplace.json","candidate_ids":["solar-4g-camera"],"marketplace":"mercadolibre","label":"solar 4g market observation"}],
+  "consumer_attention_inputs":[{"path":"all_attention.json","candidate_ids":["solar-4g-camera"],"platform":"reddit","label":"solar 4g support observation"}],
+  "observation_inputs":[]
+}

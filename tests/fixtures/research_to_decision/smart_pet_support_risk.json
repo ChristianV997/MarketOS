@@ -1,0 +1,10 @@
+{
+  "captured_at":"2026-09-16T09:01:00-06:00",
+  "client_name":"Fixture Client",
+  "lane":{"origin":"Shenzhen","destination":"Mexico","currency":"MXN"},
+  "candidates":[{"candidate_id":"smart-pet-feeder","title":"Smart pet feeder","category":"pet","lifecycle_state":"hold","target_sell_price":1200}],
+  "supplier_inputs":[{"path":"all_supplier.json","candidate_ids":["smart-pet-feeder"],"label":"smart pet supplier catalog"}],
+  "marketplace_inputs":[{"path":"all_marketplace.json","candidate_ids":["smart-pet-feeder"],"marketplace":"mercadolibre","label":"smart pet market observation"}],
+  "consumer_attention_inputs":[{"path":"all_attention.json","candidate_ids":["smart-pet-feeder"],"platform":"reddit","label":"smart pet support complaints"}],
+  "observation_inputs":[]
+}

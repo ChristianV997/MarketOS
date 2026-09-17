@@ -1,0 +1,10 @@
+{
+  "captured_at":"2026-09-16T09:05:00-06:00",
+  "client_name":"Fixture Client",
+  "lane":{"origin":"Shenzhen","destination":"Mexico","currency":"MXN"},
+  "candidates":[{"candidate_id":"b2b-packaging","title":"B2B packaging supply","category":"b2b","lifecycle_state":"candidate"}],
+  "supplier_inputs":[],
+  "marketplace_inputs":[],
+  "consumer_attention_inputs":[],
+  "observation_inputs":[]
+}
