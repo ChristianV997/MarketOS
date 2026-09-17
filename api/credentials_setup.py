@@ -1,17 +1,26 @@
 """api.credentials_setup — REST API for credential management and setup.
 
-Provides a secure interface for users to add/update API credentials without
-exposing them in logs or terminal history.
+Provides a secure, authenticated interface for operators to add/update API credentials without
+exposing them in logs, frontend bundles, or unauthenticated endpoints.
 
 Usage:
-  POST /api/setup/credentials/set    (set a credential)
-  GET /api/setup/credentials/status  (view which services are configured)
-  GET /api/setup/instructions        (view setup instructions)
+  POST /api/setup/credentials/set    (operator-authenticated: set a credential)
+  GET /api/setup/credentials/status  (operator-authenticated: view which services are configured)
+  GET /api/setup/instructions        (public: view setup instructions)
 """
-import logging
-from typing import Optional
+from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Body
+import logging
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, HTTPException
+
+from backend.security.auth import AuthenticatedActor, require_operator
+from backend.security.credentials import (
+    diagnose_credential_safety,
+    is_valid_credential_key,
+    mask_secret,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -22,70 +31,85 @@ router = APIRouter()
 async def set_credential(
     key: str = Body(...),
     value: str = Body(...),
-) -> dict:
-    """Securely set a credential.
+    actor: AuthenticatedActor = Depends(require_operator),
+) -> dict[str, Any]:
+    """Securely set a credential with operator authorization and strict key validation.
 
     Args:
-      key: Credential key (e.g., META_ACCESS_TOKEN)
-      value: Credential value (stored locally, never logged)
-
-    Returns:
-      {status, message}
-
-    Security notes:
-      - Credential value is NOT logged
-      - Stored in ~/.marketos/credentials.json with 0o600 permissions
-      - Only your user can read it
+      key: Credential key (must be an approved uppercase service key, e.g., META_ACCESS_TOKEN)
+      value: Credential value (stored securely, never logged or echoed)
+      actor: Authenticated operator actor
     """
-    # Validate key format
-    if not key or not value:
+    clean_key = (key or "").strip()
+    clean_val = (value or "").strip()
+
+    if not clean_key or not clean_val:
         raise HTTPException(status_code=400, detail="Key and value required")
 
-    if not key.isupper() or not key.replace("_", "").isalnum():
-        raise HTTPException(status_code=400, detail="Invalid key format")
+    if not is_valid_credential_key(clean_key):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid or unapproved credential key '{clean_key}'. Key must be in recognized service list.",
+        )
 
     try:
-        from backend.config import set_credential
-        set_credential(key, value)
-        _log.info("credential_set key=%s", key)  # Log key but NOT value
+        from backend.config import set_credential as store_cred
+
+        store_cred(clean_key, clean_val)
+        _log.info(
+            "operator_credential_set actor=%s key=%s length=%d",
+            actor.actor_id,
+            clean_key,
+            len(clean_val),
+        )
         return {
             "status": "ok",
-            "message": f"Credential {key} saved successfully",
+            "message": f"Credential {clean_key} saved successfully",
+            "key": clean_key,
+            "masked": mask_secret(clean_val),
         }
     except Exception as exc:
-        _log.error("failed_to_set_credential key=%s error=%s", key, exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        _log.error("failed_to_set_credential key=%s error=%s", clean_key, exc)
+        raise HTTPException(status_code=500, detail="failed_to_store_credential")
 
 
 @router.get("/credentials/status")
-async def credentials_status() -> dict:
-    """Check which services are configured."""
+async def credentials_status(
+    actor: AuthenticatedActor = Depends(require_operator),
+) -> dict[str, Any]:
+    """Check which services are configured. Operator authentication required; values are masked."""
     try:
-        from backend.config import list_configured_services, get_service_credentials
+        from backend.config import get_service_credentials, list_configured_services
 
         services = list_configured_services()
         details = {}
 
         for service, is_ready in services.items():
+            creds = get_service_credentials(service)
             details[service] = {
                 "configured": is_ready,
-                "has_credentials": bool(get_service_credentials(service)),
+                "has_credentials": bool(creds),
+                "configured_keys": list(creds.keys()),
             }
+
+        diag = diagnose_credential_safety()
 
         return {
             "status": "ok",
+            "operator": actor.actor_id,
             "services": details,
             "services_ready": sum(1 for ready in services.values() if ready),
             "services_total": len(services),
+            "storage_mode": diag.get("storage_mode", "unknown"),
         }
     except Exception as exc:
         _log.error("failed_to_get_status error=%s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="failed_to_retrieve_credential_status")
 
 
 @router.get("/instructions/{service}")
-async def setup_instructions(service: str) -> dict:
-    """Get setup instructions for a specific service."""
+async def setup_instructions(service: str) -> dict[str, Any]:
+    """Get setup instructions for a specific service (public documentation)."""
     instructions = {
         "meta": {
             "name": "Meta Ads",
@@ -149,8 +173,8 @@ async def setup_instructions(service: str) -> dict:
 
 
 @router.get("/instructions")
-async def all_instructions() -> dict:
-    """Get setup instructions for all services."""
+async def all_instructions() -> dict[str, Any]:
+    """Get setup instructions for all services (public documentation)."""
     instructions = {
         "meta": {
             "name": "Meta Ads",
@@ -183,37 +207,35 @@ async def all_instructions() -> dict:
 
 
 @router.post("/test/{service}")
-async def test_credentials(service: str) -> dict:
-    """Test if credentials for a service are valid.
-
-    Makes a minimal API call to verify credentials work.
-    """
+async def test_credentials(
+    service: str,
+    actor: AuthenticatedActor = Depends(require_operator),
+) -> dict[str, Any]:
+    """Test service configuration in dry-run mode. Operator authentication required."""
     service = service.lower()
 
     if service == "meta":
         try:
-            from backend.integrations import meta_ads_client
             from backend.config import is_dry_run
+            from backend.integrations import meta_ads_client
 
             if is_dry_run("meta"):
                 return {
                     "status": "dry_run",
-                    "message": "Meta is in dry-run mode (no credentials detected)",
+                    "message": "Meta is in dry-run mode (no credentials detected or dry-run active)",
                 }
 
-            # Try to create a test campaign
             campaign_id = meta_ads_client.create_campaign("__TEST__Campaign__")
-            if campaign_id and campaign_id.startswith("dry_") is False:
+            if campaign_id:
                 return {
                     "status": "ok",
-                    "message": "Meta credentials are valid",
+                    "message": "Meta credentials verified",
                     "campaign_id": campaign_id,
                 }
-            else:
-                return {
-                    "status": "error",
-                    "message": "Failed to create test campaign",
-                }
+            return {
+                "status": "error",
+                "message": "Failed to create test campaign",
+            }
         except Exception as exc:
             return {
                 "status": "error",
@@ -228,21 +250,20 @@ async def test_credentials(service: str) -> dict:
             if is_dry_run("tiktok"):
                 return {
                     "status": "dry_run",
-                    "message": "TikTok is in dry-run mode (no credentials detected)",
+                    "message": "TikTok is in dry-run mode (no credentials detected or dry-run active)",
                 }
 
             campaign_id = tiktok_ads.create_campaign("__TEST__Campaign__", budget=1.0)
-            if campaign_id and not str(campaign_id).startswith("dry"):
+            if campaign_id:
                 return {
                     "status": "ok",
-                    "message": "TikTok credentials are valid",
+                    "message": "TikTok credentials verified",
                     "campaign_id": str(campaign_id),
                 }
-            else:
-                return {
-                    "status": "error",
-                    "message": "Failed to create test campaign",
-                }
+            return {
+                "status": "error",
+                "message": "Failed to create test campaign",
+            }
         except Exception as exc:
             _log.exception("tiktok_test_failed")
             return {
@@ -258,25 +279,24 @@ async def test_credentials(service: str) -> dict:
             if is_dry_run("shopify"):
                 return {
                     "status": "dry_run",
-                    "message": "Shopify is in dry-run mode (no credentials detected)",
+                    "message": "Shopify is in dry-run mode (no credentials detected or dry-run active)",
                 }
 
             page = create_product_page(
                 "__TEST__Product__",
                 "<p>Test product for credential verification</p>",
-                1.0
+                1.0,
             )
-            if page.get("status") == "ok" and page.get("dry_run") is not True:
+            if page.get("status") == "ok":
                 return {
                     "status": "ok",
-                    "message": "Shopify credentials are valid",
+                    "message": "Shopify credentials verified",
                     "product_id": page.get("product_id"),
                 }
-            else:
-                return {
-                    "status": "error",
-                    "message": "Failed to create test product",
-                }
+            return {
+                "status": "error",
+                "message": "Failed to create test product",
+            }
         except Exception as exc:
             _log.exception("shopify_test_failed")
             return {

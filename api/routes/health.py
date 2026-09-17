@@ -28,6 +28,18 @@ def health():
 @router.get("/ready")
 def ready():
     """Readiness probe that waits for the application lifespan to initialize."""
+    from backend.security.deployment_validation import validate_production_deployment
+    deploy_check = validate_production_deployment()
+    if deploy_check.get("production_mode") and not deploy_check.get("ready"):
+        return JSONResponse(
+            {
+                "ready": False,
+                "reason": "production_security_preflight_failed",
+                "blockers": deploy_check.get("blockers"),
+                "mvp": _mvp_deployment_status(),
+            },
+            status_code=503,
+        )
     if not _core._bg_running or not _core._runtime_services_ready:
         return JSONResponse(
             {"ready": False, "reason": "runtime_services_initializing", "mvp": _mvp_deployment_status()},
@@ -41,7 +53,7 @@ def ready():
                 {"ready": False, "reason": "required_medusa_unavailable", "detail": medusa_health.detail, "mvp": _mvp_deployment_status()},
                 status_code=503,
             )
-    return {"ready": True, "mvp": _mvp_deployment_status()}
+    return {"ready": True, "mvp": _mvp_deployment_status(), "security": deploy_check}
 
 
 @router.get("/status")

@@ -92,6 +92,8 @@ async def stripe_webhook(
         raise HTTPException(status_code=503, detail="stripe_webhook_not_configured")
 
     body = await request.body()
+    if len(body) > 1_048_576:
+        raise HTTPException(status_code=413, detail="payload_too_large")
     if not stripe_signature or not _verify_stripe_signature(body, stripe_signature, secret):
         _journal_signature_failure("stripe")
         raise HTTPException(status_code=400, detail="invalid_signature")
@@ -220,6 +222,8 @@ async def shopify_webhook(
         raise HTTPException(status_code=503, detail="shopify_webhook_not_configured")
 
     body = await request.body()
+    if len(body) > 1_048_576:
+        raise HTTPException(status_code=413, detail="payload_too_large")
     if not x_shopify_hmac_sha256 or not _verify_shopify_signature(
         body, x_shopify_hmac_sha256, secret
     ):
@@ -283,3 +287,45 @@ async def shopify_webhook(
     if order_id:
         order_repository.mark_event_seen(dedupe_key, source="shopify")
     return result
+
+
+@router.post("/webhooks/cj")
+async def cj_webhook(
+    request: Request,
+    x_cj_signature: str = Header(default="", alias="X-CJ-Signature"),
+    x_webhook_signature: str = Header(default="", alias="X-Webhook-Signature"),
+):
+    """Receive supplier tracking and status events from CJ."""
+    shared_key: str = os.getenv("CJ_WEBHOOK_SECRET", "")
+    if not shared_key:
+        raise HTTPException(status_code=503, detail="cj_webhook_not_configured")
+
+    body = await request.body()
+    if len(body) > 1_048_576:
+        raise HTTPException(status_code=413, detail="payload_too_large")
+
+    sig = x_cj_signature or x_webhook_signature
+    from backend.security.webhooks import get_webhook_ledger, parse_safe_webhook_json, verify_generic_hmac
+
+    if not sig or not verify_generic_hmac(body, sig, shared_key):
+        _journal_signature_failure("cj")
+        raise HTTPException(status_code=400, detail="invalid_signature")
+
+    data = parse_safe_webhook_json(body)
+    event_id = str(data.get("orderId") or data.get("id") or data.get("event_id") or "")
+    if not event_id:
+        raise HTTPException(status_code=400, detail="missing_event_id")
+
+    ledger = get_webhook_ledger()
+    if not ledger.accept("cj", event_id):
+        return {"status": "ok", "duplicate": True}
+
+    try:
+        from backend.pubsub.broker import broker
+
+        broker.publish("cj.webhook", data, source="cj", correlation_id=event_id)
+        return {"status": "ok", "accepted": True, "event_id": event_id}
+    except Exception as exc:
+        ledger.release("cj", event_id)
+        _log.error("cj_webhook_failed event_id=%s error=%s", event_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="processing_failed")
