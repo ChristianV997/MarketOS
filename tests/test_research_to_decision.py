@@ -11,6 +11,28 @@ from scripts.research_to_decision import ResearchToDecisionError, build_research
 
 ROOT = Path(__file__).resolve().parent
 FIXTURES = ROOT / "fixtures" / "research_to_decision"
+LANE = {
+    "origin_country": "China",
+    "ship_from_country": "China",
+    "warehouse": "Shenzhen manual warehouse",
+    "destination_country": "Mexico",
+    "destination_state_region": "Mexico City",
+    "postal_code_assumption": "01000",
+    "currency": "MXN",
+    "tax_model": "destination VAT modeled as an assumption",
+    "duty_model": "unknown until broker quote",
+    "brokerage_model": "unknown until broker quote",
+    "shipping_model": "offer shipping included when observed",
+    "return_destination": "Mexico warehouse or supplier address unknown",
+    "return_cost_payer": "unknown",
+    "payment_method": "card with platform fee assumption",
+    "compliance_requirements": ["product-specific review required"],
+    "customer_support_language": ["es-MX"],
+    "marketplace_eligibility": ["Mercado Libre subject to approval"],
+    "delivery_promise": "supplier window only; not a customer promise",
+    "evidence_state": "fixture",
+    "confidence": 0.5,
+}
 SCENARIOS = (
     "hydroponics_promising.json",
     "smart_pet_support_risk.json",
@@ -52,6 +74,94 @@ def test_packet_is_deterministic_and_contains_ranked_evidence() -> None:
     assert "economics" in first["appendix"]["candidate_audit"][0]
 
 
+def test_market_lane_and_supplier_offer_are_explicit_and_bounded() -> None:
+    report = build_research_to_decision(load_fixture("hydroponics_promising.json"), base_dir=FIXTURES)
+    appendix = report["appendix"]
+    assert appendix["market_lane"]["destination_country"] == "Mexico"
+    assert appendix["market_lane"]["warehouse"] == "Shenzhen manual warehouse"
+    offer = appendix["supplier_offers"][0]
+    assert offer["exact_sku"] == "HYD-01"
+    assert offer["price"]["currency"] == "MXN"
+    assert offer["delivery"] == {"p50_days": 7.0, "p95_days": 12.0}
+    assert offer["evidence"]["state"] == "fixture"
+    assert offer["status"] == "accepted"
+    assert "no_launch_or_spend_authority" in appendix["candidate_audit"][0]["hard_gates"]
+
+
+def test_lane_and_supplier_identity_do_not_accept_implicit_global_defaults(tmp_path: Path) -> None:
+    manifest = load_fixture("b2b_insufficient_data.json")
+    manifest["lane"] = {"origin": "Shenzhen", "destination": "Mexico", "currency": "MXN"}
+    with pytest.raises(ResearchToDecisionError, match="lane is missing required fields"):
+        build_research_to_decision(manifest, base_dir=FIXTURES)
+
+    evidence = tmp_path / "malformed.json"
+    evidence.write_text(json.dumps({"candidate_id": "x", "offer_id": "offer-x", "supplier_sku": "SKU-X", "currency": "MXN", "destination_region": "Mexico", "unit_cost": {"amount": 1}}), encoding="utf-8")
+    manifest = {"captured_at": "2026-09-16T09:00:00-06:00", "lane": dict(LANE), "candidates": [{"candidate_id": "x", "lifecycle_state": "candidate"}], "supplier_inputs": [{"path": "malformed.json"}]}
+    with pytest.raises(ResearchToDecisionError, match="malformed nested"):
+        build_research_to_decision(manifest, base_dir=tmp_path)
+
+
+def test_stale_offer_is_quarantined_without_becoming_a_pass() -> None:
+    report = build_research_to_decision(load_fixture("stale_offer.json"), base_dir=FIXTURES)
+    offer = report["appendix"]["supplier_offers"][0]
+    assert offer["status"] == "quarantined"
+    assert "offer_expired" in offer["issues"]
+    assert report["appendix"]["validation"]["status"] == "hold_for_manual_review"
+
+
+def test_missing_return_address_is_preserved_as_a_supplier_gate() -> None:
+    report = build_research_to_decision(load_fixture("catalog_no_return_address.json"), base_dir=FIXTURES)
+    offer = report["appendix"]["supplier_offers"][0]
+    assert offer["returns"]["address"] == "unknown"
+    assert "return_address_missing" in offer["issues"]
+    assert offer["status"] == "quarantined"
+
+
+def test_conflicting_quotes_and_currency_mismatch_fail_closed() -> None:
+    with pytest.raises(ResearchToDecisionError, match="conflicting duplicate"):
+        build_research_to_decision(load_fixture("conflicting_quotes.json"), base_dir=FIXTURES)
+    with pytest.raises(ResearchToDecisionError, match="currency mismatch"):
+        build_research_to_decision(load_fixture("usd_quote.json"), base_dir=FIXTURES)
+
+
+def test_pdf_derived_manual_evidence_requires_terms_and_freshness(tmp_path: Path) -> None:
+    evidence = tmp_path / "quote.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "candidate_id": "pdf-candidate",
+                "source": "supplier-quote.pdf",
+                "captured_at": "2026-09-16T09:00:00-06:00",
+                "expires_at": "2027-01-01T00:00:00Z",
+                "evidence_state": "manual",
+                "confidence": 0.8,
+                "terms": "quote terms reviewed",
+                "returns": "return address pending",
+                "warranty": "warranty text reviewed",
+                "support": "support owner pending",
+                "delivery": "7-12 days",
+                "permissions": "dropshipping permission pending",
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = {"captured_at": "2026-09-16T09:00:00-06:00", "lane": dict(LANE), "candidates": [{"candidate_id": "pdf-candidate", "lifecycle_state": "candidate"}], "observation_inputs": [{"path": "quote.json", "kind": "pdf_derived"}]}
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    assert report["appendix"]["input_audit"][0]["kind"] == "pdf_derived"
+
+    evidence.write_text(json.dumps({"candidate_id": "pdf-candidate", "source": "supplier-quote.pdf"}), encoding="utf-8")
+    with pytest.raises(ResearchToDecisionError, match="pdf_derived evidence is missing"):
+        build_research_to_decision(manifest, base_dir=tmp_path)
+
+
+def test_consumer_attention_does_not_become_supplier_proof() -> None:
+    report = build_research_to_decision(load_fixture("b2b_insufficient_data.json"), base_dir=FIXTURES)
+    audit = report["appendix"]["candidate_audit"][0]
+    assert audit["supplier_offers"] == []
+    assert "supplier_offer_evidence_missing" in audit["hard_gates"]
+    assert "supplier_evidence_missing" in report["appendix"]["validation"]["warnings"]
+
+
 def test_missing_supplier_evidence_is_explicitly_hold_for_review() -> None:
     report = build_research_to_decision(load_fixture("b2b_insufficient_data.json"), base_dir=FIXTURES)
     validation = report["appendix"]["validation"]
@@ -65,7 +175,7 @@ def test_reviewed_url_observation_is_summarized_without_raw_url(tmp_path: Path) 
     observation.write_text(json.dumps({"candidate_id": "x", "url": "https://example.test/item?token=not-kept"}), encoding="utf-8")
     manifest = {
         "captured_at": "2026-09-16T09:00:00-06:00",
-        "lane": {"origin": "Shenzhen", "destination": "Mexico", "currency": "MXN"},
+        "lane": dict(LANE),
         "candidates": [{"candidate_id": "x"}],
         "observation_inputs": [{"path": "review.json", "kind": "reviewed_url"}],
     }
@@ -78,8 +188,8 @@ def test_reviewed_url_observation_is_summarized_without_raw_url(tmp_path: Path) 
     ("manifest_patch", "expected"),
     [
         ({"captured_at": "2026-09-16T09:00:00"}, "timezone"),
-        ({"lane": {"origin": "Shenzhen", "destination": "Mexico", "currency": "ZZZ"}}, "unsupported currency"),
-        ({"lane": {"origin": "Shenzhen", "destination": "unsupported", "currency": "MXN"}}, "unsupported"),
+        ({"lane": {**LANE, "currency": "ZZZ"}}, "unsupported currency"),
+        ({"lane": {**LANE, "destination_country": "unsupported"}}, "unsupported"),
     ],
 )
 def test_manifest_rejects_unsafe_lane_or_capture_time(manifest_patch: dict, expected: str) -> None:
@@ -94,7 +204,7 @@ def test_secret_html_duplicate_and_traversal_inputs_fail_closed(tmp_path: Path) 
     secret.write_text(json.dumps({"candidate_id": "x", "api_key": "sk_test_nope"}), encoding="utf-8")
     manifest = {
         "captured_at": "2026-09-16T09:00:00-06:00",
-        "lane": {"origin": "Shenzhen", "destination": "Mexico", "currency": "MXN"},
+        "lane": dict(LANE),
         "candidates": [{"candidate_id": "x"}],
         "supplier_inputs": [{"path": "secret.json"}],
     }
@@ -120,10 +230,10 @@ def test_secret_html_duplicate_and_traversal_inputs_fail_closed(tmp_path: Path) 
 
 def test_currency_and_destination_mismatch_fail_closed(tmp_path: Path) -> None:
     evidence = tmp_path / "supplier.json"
-    evidence.write_text(json.dumps({"candidate_id": "x", "supplier": "manual", "currency": "USD", "destination_region": "Canada"}), encoding="utf-8")
+    evidence.write_text(json.dumps({"candidate_id": "x", "supplier": "manual", "offer_id": "offer-x", "supplier_sku": "SKU-X", "currency": "USD", "destination_region": "Canada"}), encoding="utf-8")
     manifest = {
         "captured_at": "2026-09-16T09:00:00-06:00",
-        "lane": {"origin": "Shenzhen", "destination": "Mexico", "currency": "MXN"},
+        "lane": dict(LANE),
         "candidates": [{"candidate_id": "x"}],
         "supplier_inputs": [{"path": "supplier.json"}],
     }
@@ -134,12 +244,12 @@ def test_currency_and_destination_mismatch_fail_closed(tmp_path: Path) -> None:
 def test_conflicting_same_identity_across_inputs_fails_closed(tmp_path: Path) -> None:
     first = tmp_path / "first.json"
     second = tmp_path / "second.json"
-    base = {"candidate_id": "x", "supplier": "manual", "supplier_sku": "SKU-1", "currency": "MXN", "destination_region": "Mexico", "unit_cost": 10}
+    base = {"candidate_id": "x", "supplier": "manual", "offer_id": "offer-x", "supplier_sku": "SKU-1", "currency": "MXN", "destination_region": "Mexico", "unit_cost": 10}
     first.write_text(json.dumps(base), encoding="utf-8")
     second.write_text(json.dumps({**base, "unit_cost": 12}), encoding="utf-8")
     manifest = {
         "captured_at": "2026-09-16T09:00:00-06:00",
-        "lane": {"origin": "Shenzhen", "destination": "Mexico", "currency": "MXN"},
+        "lane": dict(LANE),
         "candidates": [{"candidate_id": "x"}],
         "supplier_inputs": [{"path": "first.json"}, {"path": "second.json"}],
     }

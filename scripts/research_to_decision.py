@@ -53,7 +53,109 @@ MAX_INPUT_FILES = 24
 MAX_TEXT = 240
 SUPPORTED_CURRENCIES = frozenset({"AUD", "CAD", "CNY", "EUR", "GBP", "JPY", "MXN", "USD"})
 LIFECYCLE_STATES = frozenset({"candidate", "evidence_collected", "research_ready", "hold", "reject", "no_launch"})
-OBSERVATION_KINDS = frozenset({"policy", "reviewed_url", "competition_observation", "social_observation", "catalog"})
+OFFER_APPROVAL_STATES = (
+    "candidate",
+    "contacted",
+    "information_received",
+    "quote_verified",
+    "terms_verified",
+    "sample_ordered",
+    "sample_passed",
+    "direct_ship_tested",
+    "RMA_tested",
+    "approved",
+    "suspended",
+    "rejected",
+)
+EVIDENCE_STATES = frozenset({"observed", "manual", "fixture", "assumed", "unavailable", "malformed", "blocked"})
+OBSERVATION_KINDS = frozenset({"policy", "reviewed_url", "competition_observation", "social_observation", "catalog", "pdf_derived", "form"})
+MARKET_LANE_FIELDS = (
+    "origin_country",
+    "ship_from_country",
+    "warehouse",
+    "destination_country",
+    "destination_state_region",
+    "postal_code_assumption",
+    "currency",
+    "tax_model",
+    "duty_model",
+    "brokerage_model",
+    "shipping_model",
+    "return_destination",
+    "return_cost_payer",
+    "payment_method",
+    "compliance_requirements",
+    "customer_support_language",
+    "marketplace_eligibility",
+    "delivery_promise",
+    "evidence_state",
+    "confidence",
+)
+OFFER_FIELDS = frozenset(
+    {
+        "offer_id",
+        "supplier_offer_id",
+        "candidate_id",
+        "supplier",
+        "supplier_product_id",
+        "supplier_sku",
+        "sku",
+        "variant",
+        "unit_cost",
+        "price",
+        "currency",
+        "price_valid_until",
+        "valid_until",
+        "inventory_status",
+        "inventory_quantity",
+        "stock",
+        "warehouse_region",
+        "warehouse",
+        "destination_region",
+        "destination_country",
+        "delivery_min_days",
+        "delivery_max_days",
+        "p50_delivery_days",
+        "p95_delivery_days",
+        "tracking_available",
+        "tracking",
+        "blind_shipping",
+        "packaging",
+        "return_address",
+        "return_cost_payer",
+        "warranty",
+        "rma_process",
+        "refund_sla_days",
+        "support_owner",
+        "support_response_sla_hours",
+        "dropshipping_permission",
+        "marketplace_permission",
+        "sample_state",
+        "contract_evidence",
+        "policy_evidence",
+        "backup_supplier",
+        "approval_state",
+        "evidence_state",
+        "source_type",
+        "source",
+        "source_url",
+        "captured_at",
+        "observed_at",
+        "expires_at",
+        "source_confidence",
+        "confidence",
+        "query",
+        "supplier_title",
+        "supplier_brand",
+        "variant_count",
+        "moq",
+        "shipping_cost",
+        "estimated_landed_cost",
+        "fulfillment_method",
+        "field_provenance",
+        "warnings",
+    }
+)
 SENSITIVE_KEY = re.compile(r"(api[_-]?key|authorization|body|cookie|header|html|password|payload|private[_-]?key|raw|secret|token|trace|log)", re.I)
 SENSITIVE_VALUE = re.compile(r"(bearer\s+|sk_(?:live|test)_|gh[pousr]_?|xox[baprs]-|-----BEGIN)", re.I)
 
@@ -97,6 +199,30 @@ def _parse_timezone(value: Any, field: str) -> str:
 
 def _parse_capture_time(value: Any) -> str:
     return _parse_timezone(value, "captured_at")
+
+
+def _number(value: Any, field: str, *, minimum: float | None = None, maximum: float | None = None) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ResearchToDecisionError(f"{field} must be numeric") from exc
+    if minimum is not None and result < minimum or maximum is not None and result > maximum:
+        raise ResearchToDecisionError(f"{field} is outside its allowed range")
+    return result
+
+
+def _text_list(value: Any, field: str, *, required: bool = False) -> list[str]:
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, list):
+        values = value
+    else:
+        values = []
+    if required and not values:
+        raise ResearchToDecisionError(f"{field} is required")
+    if len(values) > 12 or not all(isinstance(item, str) for item in values):
+        raise ResearchToDecisionError(f"{field} must be a bounded list of strings")
+    return [_text(item, field) for item in values]
 
 
 def _resolve(base_dir: Path, value: Any, *, label: str) -> Path:
@@ -167,15 +293,42 @@ def _currency(value: Any) -> str:
     return currency
 
 
-def _lane(manifest: Mapping[str, Any]) -> dict[str, str]:
+def _lane(manifest: Mapping[str, Any]) -> dict[str, Any]:
     lane = manifest.get("lane")
     if not isinstance(lane, Mapping):
         raise ResearchToDecisionError("lane is required")
-    origin = _text(lane.get("origin"), "lane.origin", required=True)
-    destination = _text(lane.get("destination"), "lane.destination", required=True)
+    missing = [field for field in MARKET_LANE_FIELDS if field not in lane]
+    if missing:
+        raise ResearchToDecisionError(f"lane is missing required fields: {', '.join(missing)}")
+    destination = _text(lane.get("destination_country"), "lane.destination_country", required=True)
     if destination.lower() in {"unknown", "unsupported", "n/a", "none"}:
         raise ResearchToDecisionError("lane.destination is unsupported")
-    return {"origin": origin, "destination": destination, "currency": _currency(lane.get("currency"))}
+    evidence_state = _text(lane.get("evidence_state"), "lane.evidence_state", required=True)
+    if evidence_state not in EVIDENCE_STATES:
+        raise ResearchToDecisionError(f"unsupported lane evidence_state: {evidence_state}")
+    result: dict[str, Any] = {
+        "origin_country": _text(lane.get("origin_country"), "lane.origin_country", required=True),
+        "ship_from_country": _text(lane.get("ship_from_country"), "lane.ship_from_country", required=True),
+        "warehouse": _text(lane.get("warehouse"), "lane.warehouse", required=True),
+        "destination_country": destination,
+        "destination_state_region": _text(lane.get("destination_state_region"), "lane.destination_state_region", required=True),
+        "postal_code_assumption": _text(lane.get("postal_code_assumption"), "lane.postal_code_assumption", required=True),
+        "currency": _currency(lane.get("currency")),
+        "tax_model": _text(lane.get("tax_model"), "lane.tax_model", required=True),
+        "duty_model": _text(lane.get("duty_model"), "lane.duty_model", required=True),
+        "brokerage_model": _text(lane.get("brokerage_model"), "lane.brokerage_model", required=True),
+        "shipping_model": _text(lane.get("shipping_model"), "lane.shipping_model", required=True),
+        "return_destination": _text(lane.get("return_destination"), "lane.return_destination", required=True),
+        "return_cost_payer": _text(lane.get("return_cost_payer"), "lane.return_cost_payer", required=True),
+        "payment_method": _text(lane.get("payment_method"), "lane.payment_method", required=True),
+        "compliance_requirements": _text_list(lane.get("compliance_requirements"), "lane.compliance_requirements", required=True),
+        "customer_support_language": _text_list(lane.get("customer_support_language"), "lane.customer_support_language", required=True),
+        "marketplace_eligibility": _text_list(lane.get("marketplace_eligibility"), "lane.marketplace_eligibility", required=True),
+        "delivery_promise": _text(lane.get("delivery_promise"), "lane.delivery_promise", required=True),
+        "evidence_state": evidence_state,
+        "confidence": _number(lane.get("confidence"), "lane.confidence", minimum=0.0, maximum=1.0),
+    }
+    return result
 
 
 def _metadata(manifest: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -232,14 +385,14 @@ def _input_entries(manifest: Mapping[str, Any], key: str) -> list[Mapping[str, A
     return result
 
 
-def _check_lane(records: list[Any], lane: Mapping[str, str], *, label: str) -> list[str]:
+def _check_lane(records: list[Any], lane: Mapping[str, Any], *, label: str) -> list[str]:
     warnings: list[str] = []
     for record in records:
         currency = str(getattr(record, "currency", "") or "").upper()
         if currency and currency != lane["currency"]:
             raise ResearchToDecisionError(f"currency mismatch in {label}: {currency} != {lane['currency']}")
         destination = str(getattr(record, "destination_region", "") or "").strip()
-        if destination and destination.lower() != lane["destination"].lower():
+        if destination and destination.lower() != lane["destination_country"].lower():
             raise ResearchToDecisionError(f"destination mismatch in {label}: {destination}")
         if not destination and hasattr(record, "destination_region"):
             warnings.append(f"destination_missing:{label}")
@@ -269,7 +422,108 @@ def _check_record_conflicts(records: list[Any], role: str, seen: dict[tuple[str,
         seen[key] = value
 
 
-def _load_import(path: Path, entry: Mapping[str, Any], role: str) -> tuple[list[Any], dict[str, Any]]:
+def _row_value(row: Mapping[str, Any], *names: str) -> Any:
+    for name in names:
+        value = row.get(name)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _offer_text(row: Mapping[str, Any], names: tuple[str, ...], field: str, issues: list[str]) -> str:
+    value = _row_value(row, *names)
+    if value in (None, ""):
+        issues.append(f"{field}_missing")
+        return "unknown"
+    return _text(value, f"supplier_offer.{field}")
+
+
+def _offer_number(row: Mapping[str, Any], names: tuple[str, ...], field: str, issues: list[str]) -> float | None:
+    value = _row_value(row, *names)
+    if value in (None, ""):
+        issues.append(f"{field}_missing")
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"unknown", "unavailable", "n/a", "none"}:
+        issues.append(f"{field}_unknown")
+        return None
+    return _number(value, f"supplier_offer.{field}", minimum=0.0)
+
+
+def _normalize_supplier_offer(row: Mapping[str, Any], *, lane: Mapping[str, Any], captured_at: str, source_label: str) -> dict[str, Any]:
+    candidate_id = _text(row.get("candidate_id"), "supplier_offer.candidate_id", required=True)
+    offer_id = _row_value(row, "offer_id", "supplier_offer_id", "supplier_product_id")
+    exact_sku = _row_value(row, "supplier_sku", "sku")
+    if not offer_id or not exact_sku:
+        raise ResearchToDecisionError("supplier offer identity requires offer_id and exact supplier_sku")
+    malformed_nested = [key for key, value in row.items() if key in OFFER_FIELDS - {"field_provenance", "warnings"} and isinstance(value, (Mapping, list, tuple))]
+    if malformed_nested:
+        raise ResearchToDecisionError(f"malformed nested supplier offer fields: {', '.join(sorted(malformed_nested))}")
+    issues: list[str] = []
+    currency = _currency(_row_value(row, "currency", "price_currency"))
+    if currency != lane["currency"]:
+        raise ResearchToDecisionError(f"currency mismatch in supplier offer: {currency} != {lane['currency']}")
+    destination = _offer_text(row, ("destination_region", "destination_country", "destination"), "destination", issues)
+    if destination != "unknown" and destination.lower() != lane["destination_country"].lower():
+        raise ResearchToDecisionError(f"destination mismatch in supplier offer: {destination}")
+    observed_at = _parse_timezone(_row_value(row, "captured_at", "observed_at") or captured_at, "supplier_offer.captured_at")
+    expires_value = _row_value(row, "price_valid_until", "valid_until", "expires_at")
+    expires_at = _parse_timezone(expires_value, "supplier_offer.expires_at") if expires_value else None
+    if expires_at and datetime.fromisoformat(expires_at.replace("Z", "+00:00")) < datetime.fromisoformat(observed_at.replace("Z", "+00:00")):
+        issues.append("offer_expired")
+    source = _offer_text(row, ("source_type", "source"), "source", issues) or source_label
+    evidence_state = _offer_text(row, ("evidence_state",), "evidence_state", issues)
+    if evidence_state != "unknown" and evidence_state not in EVIDENCE_STATES:
+        raise ResearchToDecisionError(f"unsupported supplier offer evidence_state: {evidence_state}")
+    confidence_value = _row_value(row, "confidence", "source_confidence")
+    confidence = 0.0 if confidence_value in (None, "") else _number(confidence_value, "supplier_offer.confidence", minimum=0.0, maximum=1.0)
+    if confidence_value in (None, ""):
+        issues.append("confidence_missing")
+    price = _offer_number(row, ("unit_cost", "price", "supplier_price"), "price", issues)
+    shipping_cost = _offer_number(row, ("shipping_cost", "shipping"), "shipping_cost", issues)
+    inventory = _offer_text(row, ("inventory_status", "stock_status", "availability"), "stock", issues)
+    p50 = _offer_number(row, ("p50_delivery_days", "delivery_min_days", "min_delivery_days"), "p50_delivery_days", issues)
+    p95 = _offer_number(row, ("p95_delivery_days", "delivery_max_days", "max_delivery_days"), "p95_delivery_days", issues)
+    approval_state = _offer_text(row, ("approval_state",), "approval_state", issues)
+    if approval_state != "unknown" and approval_state not in OFFER_APPROVAL_STATES:
+        raise ResearchToDecisionError(f"unsupported supplier offer approval_state: {approval_state}")
+    offer = {
+        "offer_id": _text(offer_id, "supplier_offer.offer_id", required=True),
+        "candidate_id": candidate_id,
+        "supplier": _offer_text(row, ("supplier", "provider"), "supplier", issues),
+        "exact_sku": _text(exact_sku, "supplier_offer.exact_sku", required=True),
+        "variant": _offer_text(row, ("variant", "variant_name"), "variant", issues),
+        "price": {"amount": price, "currency": currency, "valid_until": expires_at},
+        "shipping": {"cost": shipping_cost, "model": lane["shipping_model"]},
+        "stock": {"status": inventory, "quantity": _row_value(row, "inventory_quantity", "stock")},
+        "warehouse": _offer_text(row, ("warehouse_region", "warehouse"), "warehouse", issues),
+        "destination": destination,
+        "delivery": {"p50_days": p50, "p95_days": p95},
+        "tracking": _offer_text(row, ("tracking_available", "tracking"), "tracking", issues),
+        "blind_shipping": _offer_text(row, ("blind_shipping",), "blind_shipping", issues),
+        "packaging": _offer_text(row, ("packaging",), "packaging", issues),
+        "returns": {"address": _offer_text(row, ("return_address",), "return_address", issues), "cost_payer": _offer_text(row, ("return_cost_payer",), "return_cost_payer", issues)},
+        "warranty": _offer_text(row, ("warranty",), "warranty", issues),
+        "rma": _offer_text(row, ("rma_process", "rma"), "rma", issues),
+        "refund_sla_days": _offer_number(row, ("refund_sla_days",), "refund_sla_days", issues),
+        "support": {"owner": _offer_text(row, ("support_owner",), "support_owner", issues), "response_sla_hours": _offer_number(row, ("support_response_sla_hours",), "support_response_sla_hours", issues)},
+        "permissions": {"dropshipping": _offer_text(row, ("dropshipping_permission",), "dropshipping_permission", issues), "marketplace": _offer_text(row, ("marketplace_permission",), "marketplace_permission", issues)},
+        "sample_state": _offer_text(row, ("sample_state",), "sample_state", issues),
+        "terms_evidence": _offer_text(row, ("contract_evidence", "terms_evidence"), "terms_evidence", issues),
+        "policy_evidence": _offer_text(row, ("policy_evidence",), "policy_evidence", issues),
+        "backup_supplier": _offer_text(row, ("backup_supplier",), "backup_supplier", issues),
+        "approval_state": approval_state,
+        "evidence": {"captured_at": observed_at, "expires_at": expires_at, "source": source, "state": evidence_state, "confidence": confidence},
+        "unknown_fields": sorted(set(row) - OFFER_FIELDS),
+    }
+    if approval_state == "approved" and any(offer[key] in {"unknown", None} for key in ("sample_state", "rma")):
+        issues.append("approval_not_earned")
+        offer["approval_state"] = "candidate"
+    offer["status"] = "quarantined" if issues else "accepted"
+    offer["issues"] = sorted(set(issues))
+    return offer
+
+
+def _load_import(path: Path, entry: Mapping[str, Any], role: str, *, lane: Mapping[str, Any], captured_at: str) -> tuple[list[Any], dict[str, Any]]:
     rows, fmt = _raw_records(path)
     label = _text(entry.get("label") or path.name, f"{role}.label")
     _validate_rows(rows, label=label, role=role)
@@ -286,10 +540,26 @@ def _load_import(path: Path, entry: Mapping[str, Any], role: str) -> tuple[list[
         records = import_consumer_csv(path, platform=platform, source_type=source_type) if fmt == "csv" else import_consumer_json(path, platform=platform, source_type=source_type)
     else:
         raise ResearchToDecisionError(f"unsupported import role: {role}")
+    supplier_offers = []
+    if role == "supplier":
+        supplier_offers = [_normalize_supplier_offer(row, lane=lane, captured_at=captured_at, source_label=label) for row in rows]
     selected = set(entry.get("candidate_ids", []))
     if selected:
         records = [record for record in records if getattr(record, "candidate_id", "") in selected]
-    return records, {"label": label, "role": role, "format": fmt, "records_seen": len(rows), "records_accepted": len(records), "status": "accepted" if records else "needs_evidence"}
+        supplier_offers = [offer for offer in supplier_offers if offer["candidate_id"] in selected]
+    return records, {
+        "label": label,
+        "role": role,
+        "format": fmt,
+        "records_seen": len(rows),
+        "records_accepted": len(records),
+        "supplier_offers_seen": len(supplier_offers),
+        "supplier_offers_accepted": sum(offer["status"] == "accepted" for offer in supplier_offers),
+        "supplier_offers_quarantined": sum(offer["status"] == "quarantined" for offer in supplier_offers),
+        "supplier_offer_issues": sorted({issue for offer in supplier_offers for issue in offer["issues"]}),
+        "supplier_offers": supplier_offers,
+        "status": "accepted" if records else "needs_evidence",
+    }
 
 
 def _load_observation(path: Path, entry: Mapping[str, Any]) -> dict[str, Any]:
@@ -303,6 +573,17 @@ def _load_observation(path: Path, entry: Mapping[str, Any]) -> dict[str, Any]:
         url = row.get("url") or row.get("source_url")
         if kind == "reviewed_url" and (not isinstance(url, str) or urlparse(url).scheme not in {"http", "https"} or not urlparse(url).netloc):
             raise ResearchToDecisionError(f"reviewed_url requires an http(s) URL: {label}")
+        if kind in {"pdf_derived", "form"}:
+            required = ("source", "captured_at", "expires_at", "evidence_state", "confidence", "terms", "returns", "warranty", "support", "delivery", "permissions")
+            missing = [field for field in required if row.get(field) in (None, "")]
+            if missing:
+                raise ResearchToDecisionError(f"{kind} evidence is missing required fields: {', '.join(missing)}")
+            _parse_timezone(row.get("captured_at"), f"{kind}.captured_at")
+            _parse_timezone(row.get("expires_at"), f"{kind}.expires_at")
+            evidence_state = _text(row.get("evidence_state"), f"{kind}.evidence_state")
+            if evidence_state not in EVIDENCE_STATES:
+                raise ResearchToDecisionError(f"unsupported {kind} evidence_state: {evidence_state}")
+            _number(row.get("confidence"), f"{kind}.confidence", minimum=0.0, maximum=1.0)
     return {"label": label, "role": "observation", "kind": kind, "format": fmt, "records_seen": len(rows), "records_accepted": len(rows), "status": "accepted"}
 
 
@@ -346,7 +627,15 @@ def _benchmark_candidates(
     return values
 
 
-def _candidate_audit(candidate_ids: set[str], metadata: Mapping[str, Mapping[str, Any]], marketplace: Mapping[str, Any], supplier: Mapping[str, Any], synthesis: Mapping[str, Any], lane: Mapping[str, str]) -> list[dict[str, Any]]:
+def _candidate_audit(
+    candidate_ids: set[str],
+    metadata: Mapping[str, Mapping[str, Any]],
+    marketplace: Mapping[str, Any],
+    supplier: Mapping[str, Any],
+    synthesis: Mapping[str, Any],
+    lane: Mapping[str, Any],
+    supplier_offers: Mapping[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
     rows = []
     synthesis_items = {item.get("candidate_id"): item for item in synthesis.get("candidates", [])}
     for candidate_id in sorted(candidate_ids):
@@ -355,16 +644,29 @@ def _candidate_audit(candidate_ids: set[str], metadata: Mapping[str, Mapping[str
         supplier_score = supplier_item.get("score", {})
         market_score = market_item.get("score", {})
         meta = metadata.get(candidate_id, {})
+        offers = sorted(supplier_offers.get(candidate_id, []), key=lambda item: item["offer_id"])
+        offer_issues = sorted({issue for offer in offers for issue in offer["issues"]})
+        hard_gates = ["manual_evidence_is_not_live_supplier_proof", "no_launch_or_spend_authority"]
+        if not offers:
+            hard_gates.append("supplier_offer_evidence_missing")
+        if offer_issues:
+            hard_gates.extend(f"supplier_offer:{issue}" for issue in offer_issues)
         rows.append({
             "candidate_id": candidate_id,
             "lifecycle_state": meta.get("lifecycle_state", "evidence_collected"),
             "evidence_expiry": meta.get("evidence_expiry"),
-            "lane": {"destination": lane["destination"], "currency": lane["currency"]},
+            "lane": {"destination_country": lane["destination_country"], "currency": lane["currency"], "warehouse": lane["warehouse"]},
+            "supplier_offers": offers,
             "economics": supplier_score.get("economics") or {},
+            "observed_values": {"supplier_offer_count": len(offers), "marketplace_evidence_count": len(market_item.get("evidence", [])), "currency": lane["currency"], "destination_country": lane["destination_country"]},
             "assumptions": sorted({*supplier_score.get("reasons", []), *market_score.get("reasons", [])}),
             "missing_evidence": sorted({item for item in (supplier_score.get("reasons", []) + market_score.get("reasons", [])) if "missing" in item or "unknown" in item or "unavailable" in item}),
             "confidence": {"supplier": supplier_score.get("overall_supplier_feasibility", 0.0), "marketplace": market_score.get("overall_marketplace_opportunity", 0.0)},
+            "decision": (synthesis_items.get(candidate_id) or {}).get("next_best_action", "hold_for_manual_review"),
+            "next_action": (synthesis_items.get(candidate_id) or {}).get("next_best_action", "hold_for_manual_review"),
             "action": (synthesis_items.get(candidate_id) or {}).get("next_best_action", "hold_for_manual_review"),
+            "hard_gates": sorted(set(hard_gates)),
+            "safety_classification": "offline_manual_evidence_only",
             "retailer_penalty": meta.get("retailer_penalty"),
             "comparability": "comparable" if market_item and supplier_item else "incomplete",
         })
@@ -382,15 +684,26 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
     consumer_records: list[Any] = []
     seen_records: dict[tuple[str, ...], str] = {}
     input_audit: list[dict[str, Any]] = []
+    supplier_offers_by_candidate: dict[str, list[dict[str, Any]]] = {}
     warnings: list[str] = []
     candidate_ids = set(metadata)
     for key, role, destination in (("supplier_inputs", "supplier", supplier_records), ("marketplace_inputs", "marketplace", marketplace_records), ("consumer_attention_inputs", "consumer_attention", consumer_records)):
         for entry in _input_entries(manifest, key):
             path = _resolve(base, entry.get("path"), label=f"{key}.path")
-            records, audit = _load_import(path, entry, role)
-            destination.extend(records)
+            records, audit = _load_import(path, entry, role, lane=lane, captured_at=captured_at)
             _check_record_conflicts(records, role, seen_records)
+            if role == "supplier":
+                quarantined = {(offer["candidate_id"], offer["exact_sku"]) for offer in audit.get("supplier_offers", []) if offer["status"] == "quarantined"}
+                original_count = len(records)
+                records = [record for record in records if (getattr(record, "candidate_id", ""), getattr(record, "supplier_sku", "")) not in quarantined]
+                audit["records_accepted"] = len(records)
+                audit["records_quarantined"] = original_count - len(records)
+            destination.extend(records)
             candidate_ids.update(getattr(record, "candidate_id", "") for record in records)
+            if role == "supplier":
+                for offer in audit.get("supplier_offers", []):
+                    supplier_offers_by_candidate.setdefault(offer["candidate_id"], []).append(offer)
+                warnings.extend(f"supplier_offer:{issue}" for issue in audit.get("supplier_offer_issues", []))
             input_audit.append(audit)
             if not records:
                 warnings.append(f"no_accepted_records:{audit['label']}")
@@ -440,10 +753,12 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
     appendix = {
         "research_to_decision_version": "v1",
         "captured_at": captured_at,
+        "market_lane": lane,
         "lane": lane,
         "input_audit": sorted(input_audit, key=lambda item: (item["role"], item["label"])),
         "validation": {"status": "hold_for_manual_review" if validation_warnings else "ready_for_operator_review", "warnings": sorted(set(validation_warnings)), "read_only": True, "network_calls": False, "credentials_used": False, "provider_calls": False, "orders_or_spend": False},
-        "candidate_audit": _candidate_audit(candidate_ids, metadata, marketplace_report, supplier_report, synthesis_report, lane),
+        "supplier_offers": sorted((offer for offers in supplier_offers_by_candidate.values() for offer in offers), key=lambda item: (item["candidate_id"], item["offer_id"])),
+        "candidate_audit": _candidate_audit(candidate_ids, metadata, marketplace_report, supplier_report, synthesis_report, lane, supplier_offers_by_candidate),
         "source_authorities": {"supplier": "evaluation.commerce.supplier_feasibility", "marketplace": "evaluation.commerce.marketplace_trends", "consumer_attention": "evaluation.commerce.consumer_attention", "synthesis": "evaluation.commerce.opportunity_synthesis", "packet": "evaluation.commerce.product_validation_report"},
     }
     fingerprint_input = {"report": report, "appendix": appendix}

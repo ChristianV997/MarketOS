@@ -1,7 +1,7 @@
 {
   "captured_at":"2026-09-16T09:00:00-06:00",
   "client_name":"Fixture Client",
-  "lane":{"origin":"Shenzhen","destination":"Mexico","currency":"MXN"},
+  "lane":{"origin_country":"China","ship_from_country":"China","warehouse":"Shenzhen manual warehouse","destination_country":"Mexico","destination_state_region":"Mexico City","postal_code_assumption":"01000","currency":"MXN","tax_model":"destination VAT modeled as an assumption","duty_model":"unknown until broker quote","brokerage_model":"unknown until broker quote","shipping_model":"offer shipping included when observed","return_destination":"Mexico warehouse or supplier address unknown","return_cost_payer":"unknown","payment_method":"card with platform fee assumption","compliance_requirements":["product-specific review required"],"customer_support_language":["es-MX"],"marketplace_eligibility":["Mercado Libre subject to approval"],"delivery_promise":"supplier window only; not a customer promise","evidence_state":"fixture","confidence":0.5},
   "candidates":[{"candidate_id":"hydroponics-kit","title":"Compact hydroponics kit","category":"home","lifecycle_state":"research_ready","target_sell_price":500,"retailer_penalty":0.1}],
   "supplier_inputs":[{"path":"all_supplier.json","candidate_ids":["hydroponics-kit"],"label":"hydroponics supplier catalog"}],
   "marketplace_inputs":[{"path":"all_marketplace.json","candidate_ids":["hydroponics-kit"],"marketplace":"mercadolibre","label":"hydroponics market observation"}],
