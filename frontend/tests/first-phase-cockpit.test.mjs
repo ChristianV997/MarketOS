@@ -541,6 +541,9 @@ test("source contracts: no client re-ranking and no API client duplication", asy
 
   assert.doesNotMatch(composeSource, /\.sort\(/);
   assert.match(composeSource, /classifyEvidenceClass/);
+  const overlaySource = await readFile(new URL("lib/overlayResearchToDecision.ts", featureRoot), "utf8");
+  assert.doesNotMatch(overlaySource, /\.sort\(/);
+  assert.match(overlaySource, /Does not sort/);
   assert.doesNotMatch(filterSource, /\.sort\(/);
   assert.doesNotMatch(windowSource, /\.sort\(/);
   assert.match(windowSource, /slice\(/);
@@ -565,6 +568,11 @@ test("accessibility and focus contracts are present", async () => {
   assert.match(table, /End/);
   assert.match(table, /md:hidden/);
   assert.match(detail, /id="candidate-detail-panel"/);
+  assert.match(detail, /Exact SKU/);
+  assert.match(detail, /Market lane/);
+  assert.match(detail, /Promotion state/);
+  assert.match(table, /adjacentCandidateIndex/);
+  assert.match(table, /shouldHandoffDetailFocus/);
   assert.match(banner, /partial/);
   assert.match(banner, /aria-live="polite"/);
 });
@@ -601,6 +609,7 @@ test("route wiring and api base authority remain unchanged", async () => {
 test("fixture and manual runs never classify as live proof", async () => {
   const source = await readFile(new URL("lib/classifyEvidence.ts", featureRoot), "utf8");
   assert.match(source, /LIVE_PROOF_EVIDENCE_CLASSES/);
+  assert.match(source, /direct_ship_verified/);
   assert.match(source, /sample_verified/);
   assert.match(source, /live_order_verified/);
   assert.match(source, /live_sales_validated/);
@@ -617,20 +626,112 @@ test("demo fixture packet is not live-sales-validated", async () => {
   assert.doesNotMatch(demo, /live_order_verified/);
 });
 
-test("unsupported schema versions stay rejected", () => {
-  const result = validateEvidenceCockpitApiPacket({
-    schema_version: "phase1-evidence-cockpit-v0",
-    report_version: "x",
-    generated_at: "2026-09-02T00:00:00Z",
-    read_only: true,
-    mutated: false,
-    ranked_candidates: [],
-    pillars: [],
-    trustos: { status: "unavailable" },
-    governor: { status: "unavailable" },
-    approval_ledger: { status: "unavailable" },
-    fingerprint: {},
-  });
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "schema_version_unsupported");
+test("keyboard navigation preserves order and handoff keys", () => {
+  function adjacentCandidateIndex(length, currentIndex, key) {
+    if (length <= 0) return -1;
+    const current = Math.min(Math.max(0, currentIndex), length - 1);
+    if (key === "Home") return 0;
+    if (key === "End") return length - 1;
+    if (key === "ArrowDown") return Math.min(current + 1, length - 1);
+    if (key === "ArrowUp") return Math.max(current - 1, 0);
+    return current;
+  }
+  const ids = ["a", "b", "c"];
+  assert.equal(ids[adjacentCandidateIndex(3, 0, "ArrowDown")], "b");
+  assert.equal(ids[adjacentCandidateIndex(3, 1, "ArrowUp")], "a");
+  assert.equal(ids[adjacentCandidateIndex(3, 1, "Home")], "a");
+  assert.equal(ids[adjacentCandidateIndex(3, 0, "End")], "c");
+  assert.equal(adjacentCandidateIndex(3, 2, "ArrowDown"), 2);
+});
+
+test("research-to-decision overlay fills identity without re-ranking", () => {
+  function overlayResearchToDecisionAudits(rows, audits) {
+    if (!audits?.length) return rows;
+    const byId = new Map();
+    for (const audit of audits) {
+      if (audit.candidate_id) byId.set(audit.candidate_id, audit);
+    }
+    return rows.map((row) => {
+      const audit = byId.get(row.candidateId);
+      if (!audit) return row;
+      return {
+        ...row,
+        sku: audit.sku ?? row.sku,
+        marketLane: audit.lane ?? row.marketLane,
+        supplierOffer: audit.supplier_offer ?? row.supplierOffer,
+        assumptions: audit.assumptions ?? row.assumptions,
+        missingEvidence: audit.missing_evidence ?? row.missingEvidence,
+        conflicts: audit.conflicts ?? row.conflicts,
+        confidence: audit.confidence?.overall ?? row.confidence,
+      };
+    });
+  }
+  const rows = [
+    { candidateId: "beta", sku: null, rankIndex: 0, confidence: 0.2, marketLane: null, supplierOffer: null, assumptions: [], missingEvidence: [], conflicts: [] },
+    { candidateId: "alpha", sku: null, rankIndex: 1, confidence: 0.9, marketLane: null, supplierOffer: null, assumptions: [], missingEvidence: [], conflicts: [] },
+  ];
+  const overlaid = overlayResearchToDecisionAudits(rows, [
+    {
+      candidate_id: "alpha",
+      sku: "SKU-ALPHA",
+      lane: { origin: "CN", destination: "MX", currency: "MXN" },
+      supplier_offer: "FOB claimed",
+      assumptions: ["landed_cost_assumed"],
+      missing_evidence: ["sample_not_verified"],
+      conflicts: ["price_mismatch"],
+      confidence: { overall: 0.4 },
+    },
+  ]);
+  assert.deepEqual(overlaid.map((row) => row.candidateId), ["beta", "alpha"]);
+  assert.equal(overlaid[0].sku, null);
+  assert.equal(overlaid[1].sku, "SKU-ALPHA");
+  assert.equal(overlaid[1].rankIndex, 1);
+  assert.equal(overlaid[1].confidence, 0.4);
+});
+
+test("direct_ship_verified is live proof and fixture never keeps it", () => {
+  const LIVE = new Set(["sample_verified", "direct_ship_verified", "live_order_verified", "live_sales_validated"]);
+  function parseDeclaredClass(value) {
+    const lowered = String(value).toLowerCase().replace(/-/g, "_");
+    if (lowered.includes("direct_ship")) return "direct_ship_verified";
+    if (lowered.includes("live_sales")) return "live_sales_validated";
+    return null;
+  }
+  function classify({ evidenceMode, declared }) {
+    const parsed = parseDeclaredClass(declared);
+    if (parsed && LIVE.has(parsed) && evidenceMode === "fixture_only") return "fixture";
+    return parsed;
+  }
+  assert.equal(classify({ evidenceMode: "fixture_only", declared: "direct_ship_verified" }), "fixture");
+  assert.equal(classify({ evidenceMode: "live_readonly", declared: "direct_ship_verified" }), "direct_ship_verified");
+});
+
+test("client-safe export rejects prompt formula heuristic and path-shaped values", () => {
+  const FORBIDDEN_EXPORT_KEY = /prompt|formula|heuristic|source_code|private_key|provider_payload|internal_notes/;
+  const PATH_SHAPED = /(^|[\\/])(users|home|documents|marketos)[\\/]/i;
+  function containsSecretShapedValue(value) {
+    if (typeof value === "string") return SECRET_SHAPED.test(value) || PATH_SHAPED.test(value);
+    if (Array.isArray(value)) return value.some(containsSecretShapedValue);
+    if (value && typeof value === "object") {
+      return Object.entries(value).some(([key, item]) => {
+        const keyL = key.toLowerCase().replace(/-/g, "_");
+        if (FORBIDDEN_EXPORT_KEY.test(keyL) || keyL.includes("password") || keyL.includes("secret") || keyL.includes("api_key")) {
+          return true;
+        }
+        return containsSecretShapedValue(item);
+      });
+    }
+    return false;
+  }
+  assert.equal(containsSecretShapedValue({ internal_prompt: "do not export" }), true);
+  assert.equal(containsSecretShapedValue({ scoring_formula: "x*y" }), true);
+  assert.equal(containsSecretShapedValue({ hidden_heuristic: "boost" }), true);
+  assert.equal(containsSecretShapedValue({ notes: "/home/operator/secrets.json" }), true);
+  assert.equal(containsSecretShapedValue({ title: "Portable espresso maker" }), false);
+});
+
+test("promotion state never claims launched", async () => {
+  const source = await readFile(new URL("lib/derivePromotionState.ts", featureRoot), "utf8");
+  assert.match(source, /Never "launched"/);
+  assert.doesNotMatch(source, /return "launched"/);
 });

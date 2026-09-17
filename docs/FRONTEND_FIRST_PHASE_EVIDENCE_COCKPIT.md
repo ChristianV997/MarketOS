@@ -15,8 +15,13 @@ Read-only operator surface stacked on PR #213 frontend/API authority.
 - Responsive mobile card list + desktop evidence grid
 - Evidence pillars: provenance, freshness, source family, evidence mode, evidence class
   (`fixture`, `assumption`, `derived`, `public_observed`, `supplier_claimed`,
-  `supplier_documented`, `sample_verified`, `live_order_verified`, `live_sales_validated`,
-  `unavailable`, `blocked`)
+  `supplier_documented`, `sample_verified`, `direct_ship_verified`, `live_order_verified`,
+  `live_sales_validated`, `unavailable`, `blocked`)
+- Candidate identity, exact SKU (when present), market lane, supplier offer, economics,
+  competition, consumer attention, assumptions, missing evidence, conflicts, confidence,
+  promotion/risk, next-best action
+- Optional overlay of PR #247 `appendix.candidate_audit` onto existing server-ordered rows
+  (no second ranking schema; missing audits leave rows unchanged)
 - Fixture/manual/simulated success never becomes live proof
 - TrustOS / Governor / Approval Ledger panels (explicit unavailable until merged packet)
 - States: loading, empty, blocked, unavailable, stale, **partial**, success
@@ -61,4 +66,4 @@ Malformed / unsupported schema / out-of-order rank_index / secret-shaped values 
 - Read-only / advisory only
 - No credentials in browser
 - No ads, orders, payments, inventory, publishing, messaging, or provider controls
-- Export rejects secret-shaped values
+- Export rejects secret-shaped values, prompt/formula/heuristic keys, filesystem paths, and raw provider payloads

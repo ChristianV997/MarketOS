@@ -17,6 +17,7 @@ function parseDeclaredClass(value: string | null | undefined): EvidenceClass | n
   const lowered = value.toLowerCase().replace(/-/g, "_");
   if (lowered.includes("live_sales") || lowered.includes("sales_validated")) return "live_sales_validated";
   if (lowered.includes("live_order") || lowered.includes("order_verified")) return "live_order_verified";
+  if (lowered.includes("direct_ship")) return "direct_ship_verified";
   if (lowered.includes("sample_verified") || lowered.includes("sample")) return "sample_verified";
   if (lowered.includes("supplier_documented") || lowered.includes("documented")) return "supplier_documented";
   if (lowered.includes("supplier_claimed") || lowered.includes("claimed")) return "supplier_claimed";

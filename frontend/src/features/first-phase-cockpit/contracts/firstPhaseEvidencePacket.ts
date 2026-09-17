@@ -40,6 +40,7 @@ export const EVIDENCE_CLASSES = [
   "supplier_claimed",
   "supplier_documented",
   "sample_verified",
+  "direct_ship_verified",
   "live_order_verified",
   "live_sales_validated",
   "unavailable",
@@ -50,6 +51,7 @@ export type EvidenceClass = (typeof EVIDENCE_CLASSES)[number];
 
 export const LIVE_PROOF_EVIDENCE_CLASSES = new Set<EvidenceClass>([
   "sample_verified",
+  "direct_ship_verified",
   "live_order_verified",
   "live_sales_validated",
 ]);
@@ -82,9 +84,18 @@ export interface CandidatePillarCell {
   evidenceClass: EvidenceClass;
 }
 
+export type PromotionState = "hold" | "blocked" | "reject" | "defer" | "unavailable";
+
+export interface MarketLaneView {
+  origin: string | null;
+  destination: string | null;
+  currency: string | null;
+}
+
 export interface RankedCandidateRow {
   candidateId: string;
   title: string;
+  sku: string | null;
   rankIndex: number;
   evidenceCompleteness: number | null;
   supplierScore: number | null;
@@ -99,6 +110,13 @@ export interface RankedCandidateRow {
   sourceFamily: string | null;
   evidenceMode: EvidenceMode;
   evidenceClass: EvidenceClass;
+  promotionState: PromotionState;
+  marketLane: MarketLaneView | null;
+  supplierOffer: string | null;
+  confidence: number | null;
+  assumptions: string[];
+  missingEvidence: string[];
+  conflicts: string[];
   isTopCandidate: boolean;
   pillarCells: CandidatePillarCell[];
 }
@@ -184,6 +202,13 @@ export interface ClientSafeCockpitExport {
     risk_level: string | null;
     is_top_candidate: boolean;
     evidence_class: EvidenceClass;
+    sku: string | null;
+    promotion_state: PromotionState;
+    market_lane: MarketLaneView | null;
+    confidence: number | null;
+    assumptions: string[];
+    missing_evidence: string[];
+    conflicts: string[];
   }>;
   pillars: Array<{
     pillar_id: PillarId;
@@ -279,4 +304,27 @@ export interface FirstPhaseEvidenceCockpitApiContract {
   read_only: true;
   mutated: false;
   network_calls: boolean;
+  /** Optional PR #247 research-to-decision appendix; overlay only, never a second ranking. */
+  appendix?: {
+    candidate_audit?: Array<{
+      candidate_id?: string;
+      sku?: string | null;
+      supplier_sku?: string | null;
+      lifecycle_state?: string | null;
+      lane?: {
+        origin?: string | null;
+        destination?: string | null;
+        currency?: string | null;
+      } | null;
+      assumptions?: string[];
+      missing_evidence?: string[];
+      conflicts?: string[];
+      confidence?: {
+        supplier?: number;
+        marketplace?: number;
+        overall?: number;
+      } | null;
+      supplier_offer?: string | null;
+    }>;
+  };
 }

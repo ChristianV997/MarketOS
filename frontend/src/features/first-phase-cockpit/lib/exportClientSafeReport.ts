@@ -5,11 +5,15 @@ import {
   type FirstPhaseEvidencePacket,
 } from "../contracts/firstPhaseEvidencePacket";
 
-const SECRET_SHAPED = /sk-live-|sk-test-|ghp_|github_pat_|AKIA[0-9A-Z]{16}|bearer\s+[a-z0-9._-]{10,}|-----begin (?:rsa |ec |dsa |openssh )?private key-----/i;
+const SECRET_SHAPED = /sk-live-|sk-test-|ghp_|github_pat_|AKIA[0-9A-Z]{16}|bearer\s+[a-z0-9._-]{10,}/i;
+const FORBIDDEN_EXPORT_KEY = /prompt|formula|heuristic|source_code|private_key|provider_payload|internal_notes/;
+const PATH_SHAPED = /(^|[\\/])(users|home|documents|marketos)[\\/]/i;
 
 /** Reject strings that look like secrets before export or display. */
 export function containsSecretShapedValue(value: unknown): boolean {
-  if (typeof value === "string") return SECRET_SHAPED.test(value);
+  if (typeof value === "string") {
+    return SECRET_SHAPED.test(value) || PATH_SHAPED.test(value);
+  }
   if (Array.isArray(value)) return value.some(containsSecretShapedValue);
   if (value && typeof value === "object") {
     return Object.entries(value as Record<string, unknown>).some(([key, item]) => {
@@ -21,6 +25,7 @@ export function containsSecretShapedValue(value: unknown): boolean {
         || keyL.includes("authorization")
         || keyL.includes("private_key")
         || keyL.includes("access_token")
+        || FORBIDDEN_EXPORT_KEY.test(keyL)
       ) {
         return true;
       }
@@ -69,6 +74,13 @@ export function buildClientSafeExport(
       risk_level: candidate.riskLevel,
       is_top_candidate: candidate.isTopCandidate,
       evidence_class: candidate.evidenceClass,
+      sku: candidate.sku,
+      promotion_state: candidate.promotionState,
+      market_lane: candidate.marketLane,
+      confidence: candidate.confidence,
+      assumptions: [...candidate.assumptions],
+      missing_evidence: [...candidate.missingEvidence],
+      conflicts: [...candidate.conflicts],
     })),
     pillars: packet.pillars.map((pillar) => ({
       pillar_id: pillar.id,

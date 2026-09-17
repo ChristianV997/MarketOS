@@ -3,6 +3,7 @@ import {
   CANDIDATE_WINDOW_SIZE,
   type RankedCandidateRow,
 } from "../contracts/firstPhaseEvidencePacket";
+import { adjacentCandidateIndex, shouldHandoffDetailFocus } from "../lib/keyboardNav";
 import {
   ensureSelectionInWindow,
   nextWindowStart,
@@ -86,46 +87,25 @@ export function RankedCandidatesPanel({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>, absoluteIndex: number) {
-    if (event.key === "Enter" || event.key === " ") {
+    if (shouldHandoffDetailFocus(event.key)) {
       event.preventDefault();
       detailFocusRequested.current = true;
       onSelect(candidates[absoluteIndex].candidateId);
       return;
     }
-    if (event.key === "Home") {
-      event.preventDefault();
-      onSelect(candidates[0].candidateId);
-      onWindowStartChange(0);
-      queueMicrotask(() => focusRow(0));
-      return;
+    const nextIndex = adjacentCandidateIndex(candidates.length, absoluteIndex, event.key);
+    if (nextIndex === absoluteIndex || nextIndex < 0) return;
+    event.preventDefault();
+    onSelect(candidates[nextIndex].candidateId);
+    if (event.key === "Home") onWindowStartChange(0);
+    else if (event.key === "End") {
+      onWindowStartChange(Math.max(0, nextIndex - CANDIDATE_WINDOW_SIZE + 1));
+    } else if (nextIndex >= windowed.windowStart + windowed.windowSize) {
+      onWindowStartChange(nextWindowStart(windowed, "forward"));
+    } else if (nextIndex < windowed.windowStart) {
+      onWindowStartChange(nextWindowStart(windowed, "back"));
     }
-    if (event.key === "End") {
-      event.preventDefault();
-      const last = candidates.length - 1;
-      onSelect(candidates[last].candidateId);
-      onWindowStartChange(Math.max(0, last - CANDIDATE_WINDOW_SIZE + 1));
-      queueMicrotask(() => focusRow(last));
-      return;
-    }
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      const nextIndex = Math.min(absoluteIndex + 1, candidates.length - 1);
-      onSelect(candidates[nextIndex].candidateId);
-      if (nextIndex >= windowed.windowStart + windowed.windowSize) {
-        onWindowStartChange(nextWindowStart(windowed, "forward"));
-      }
-      queueMicrotask(() => focusRow(nextIndex));
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      const prevIndex = Math.max(absoluteIndex - 1, 0);
-      onSelect(candidates[prevIndex].candidateId);
-      if (prevIndex < windowed.windowStart) {
-        onWindowStartChange(nextWindowStart(windowed, "back"));
-      }
-      queueMicrotask(() => focusRow(prevIndex));
-    }
+    queueMicrotask(() => focusRow(nextIndex));
   }
 
   const activeId = selectedId ?? windowed.visible[0]?.candidateId ?? null;
@@ -178,7 +158,7 @@ export function RankedCandidatesPanel({
                   detailFocusRequested.current = true;
                   onSelect(candidate.candidateId);
                 }}
-                className={`w-full rounded border p-3 text-left text-xs ${
+                className={`w-full rounded border p-3 text-left text-xs outline-none focus-visible:ring-1 focus-visible:ring-indigo-400 ${
                   selected
                     ? "border-indigo-500/40 bg-indigo-500/10"
                     : "border-zinc-800 bg-zinc-950/40"
@@ -196,7 +176,8 @@ export function RankedCandidatesPanel({
                   {formatPct(supplier?.score ?? candidate.supplierScore)}
                 </p>
                 <p className="mt-1 text-[11px] text-zinc-500">
-                  {candidate.evidenceMode.replace(/_/g, " ")} ·{" "}
+                  {candidate.sku ?? "no sku"} · {candidate.evidenceClass.replace(/_/g, " ")} ·{" "}
+                  {candidate.promotionState.replace(/_/g, " ")} ·{" "}
                   {candidate.nextBestAction?.replace(/_/g, " ") ?? "no next action"}
                 </p>
                 <span className="sr-only">Absolute index {absoluteIndex}</span>
@@ -223,12 +204,14 @@ export function RankedCandidatesPanel({
               {[
                 "Rank",
                 "Candidate",
+                "SKU",
                 "Evidence",
                 "Market",
                 "Supplier",
                 "Economics",
                 "Attention",
-                "Mode",
+                "Class",
+                "Promotion",
                 "Next action",
                 "Decision",
                 "Risk",
@@ -270,6 +253,7 @@ export function RankedCandidatesPanel({
                     )}
                     <div className="text-[10px] text-zinc-500">{candidate.candidateId}</div>
                   </td>
+                  <td className="px-2 py-2 font-mono text-[11px] text-zinc-400">{candidate.sku ?? "—"}</td>
                   <td className="px-2 py-2">{formatPct(candidate.evidenceCompleteness)}</td>
                   <td className="px-2 py-2">
                     <span title={market?.detail ?? undefined}>
@@ -285,7 +269,8 @@ export function RankedCandidatesPanel({
                     <span title={economics?.detail ?? undefined}>{candidate.economicsLabel ?? "—"}</span>
                   </td>
                   <td className="px-2 py-2 text-zinc-500">{attention?.status ?? "unavailable"}</td>
-                  <td className="px-2 py-2">{candidate.evidenceMode.replace(/_/g, " ")}</td>
+                  <td className="px-2 py-2">{candidate.evidenceClass.replace(/_/g, " ")}</td>
+                  <td className="px-2 py-2">{candidate.promotionState.replace(/_/g, " ")}</td>
                   <td className="px-2 py-2">{candidate.nextBestAction?.replace(/_/g, " ") ?? "—"}</td>
                   <td className="px-2 py-2">{candidate.commercialDecision?.replace(/_/g, " ") ?? "—"}</td>
                   <td className="px-2 py-2">{candidate.riskLevel ?? "—"}</td>

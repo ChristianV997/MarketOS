@@ -16,6 +16,7 @@ import type {
   RankedCandidateRow,
 } from "../contracts/firstPhaseEvidencePacket";
 import { classifyEvidenceClass } from "./classifyEvidence";
+import { derivePromotionState } from "./derivePromotionState";
 import { formatFreshnessLabel } from "./freshness";
 
 export interface ComposeCockpitInput {
@@ -155,6 +156,7 @@ function mapCandidates(
   return benchmark.candidates.map((item, rankIndex) => ({
     candidateId: item.candidate.candidate_id,
     title: item.candidate.title,
+    sku: null,
     rankIndex,
     evidenceCompleteness: item.evidence_completeness ?? null,
     supplierScore: item.supplier_evidence?.score ?? null,
@@ -169,6 +171,15 @@ function mapCandidates(
     sourceFamily: "benchmark_matrix",
     evidenceMode,
     evidenceClass: classifyEvidenceClass({ evidenceMode, sourceFamily: "benchmark_matrix" }),
+    promotionState: derivePromotionState(item.commercial_decision),
+    marketLane: null,
+    supplierOffer: null,
+    confidence: item.evidence_completeness ?? null,
+    assumptions: item.economics?.assumption_ratio
+      ? [`assumption_ratio_${item.economics.assumption_ratio}`]
+      : [],
+    missingEvidence: item.validation_priority?.target ? [`validation_target_${item.validation_priority.target}`] : [],
+    conflicts: [],
     isTopCandidate: item.candidate.candidate_id === benchmark.top_candidate_id,
     pillarCells: buildPillarCells(item, evidenceMode),
   }));

@@ -33,9 +33,11 @@ export function filterCandidates(
       const haystack = [
         candidate.candidateId,
         candidate.title,
+        candidate.sku,
         candidate.commercialDecision,
         candidate.nextBestAction,
         candidate.riskLevel,
+        candidate.promotionState,
       ]
         .filter(Boolean)
         .join(" ")

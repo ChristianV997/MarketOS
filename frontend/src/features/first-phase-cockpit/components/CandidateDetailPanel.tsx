@@ -31,6 +31,7 @@ export function CandidateDetailPanel({
           <p className="mt-1 text-[11px] text-zinc-500">
             Rank {candidate.rankIndex + 1}
             {candidate.isTopCandidate ? " · top candidate" : ""} · {candidate.candidateId}
+            {candidate.sku ? ` · SKU ${candidate.sku}` : " · SKU unavailable"}
           </p>
         </div>
         <button
@@ -43,6 +44,32 @@ export function CandidateDetailPanel({
       </div>
 
       <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Exact SKU</dt>
+          <dd className="mt-1 font-mono text-zinc-200">{candidate.sku ?? "unavailable from current endpoints"}</dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Market lane</dt>
+          <dd className="mt-1 text-zinc-200">
+            {candidate.marketLane
+              ? `${candidate.marketLane.origin ?? "—"} → ${candidate.marketLane.destination ?? "—"} (${candidate.marketLane.currency ?? "—"})`
+              : "unavailable from current endpoints"}
+          </dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Supplier offer</dt>
+          <dd className="mt-1 text-zinc-200">{candidate.supplierOffer ?? "unavailable from current endpoints"}</dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Confidence</dt>
+          <dd className="mt-1 text-zinc-200">
+            {candidate.confidence !== null ? `${(candidate.confidence * 100).toFixed(0)}%` : "—"}
+          </dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Promotion state</dt>
+          <dd className="mt-1 text-zinc-200">{candidate.promotionState.replace(/_/g, " ")}</dd>
+        </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
           <dt className="text-zinc-500">Commercial decision</dt>
           <dd className="mt-1 text-zinc-200">{candidate.commercialDecision?.replace(/_/g, " ") ?? "—"}</dd>
@@ -91,6 +118,27 @@ export function CandidateDetailPanel({
           </dd>
         </div>
       </dl>
+
+      <div className="mt-4 grid gap-3 text-xs sm:grid-cols-3">
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <h4 className="text-zinc-500">Assumptions</h4>
+          <p className="mt-1 text-zinc-300">
+            {candidate.assumptions.length ? candidate.assumptions.join(" · ") : "none listed"}
+          </p>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <h4 className="text-zinc-500">Missing evidence</h4>
+          <p className="mt-1 text-zinc-300">
+            {candidate.missingEvidence.length ? candidate.missingEvidence.join(" · ") : "none listed"}
+          </p>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <h4 className="text-zinc-500">Conflicts</h4>
+          <p className="mt-1 text-zinc-300">
+            {candidate.conflicts.length ? candidate.conflicts.join(" · ") : "none listed"}
+          </p>
+        </div>
+      </div>
 
       <h4 className="mt-4 text-xs font-medium text-zinc-300">Pillar-level evidence</h4>
       <ul className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">

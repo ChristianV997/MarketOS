@@ -10,7 +10,9 @@ import {
 import { classifyEvidenceClass } from "./classifyEvidence";
 import { containsSecretShapedValue } from "./exportClientSafeReport";
 import { normalizeEvidenceMode } from "./composeCockpitViewModel";
+import { derivePromotionState } from "./derivePromotionState";
 import { formatFreshnessLabel, isStaleFreshness } from "./freshness";
+import { overlayResearchToDecisionAudits } from "./overlayResearchToDecision";
 
 const PILLAR_IDS = new Set<PillarId>([
   "market_evidence",
@@ -117,42 +119,53 @@ export function mapApiPacketToViewModel(
 ): FirstPhaseEvidencePacket {
   const evidenceMode: EvidenceMode = normalizeEvidenceMode(api.evidence_mode);
   const freshnessLabel = formatFreshnessLabel(api.generated_at, nowMs);
-  const rankedCandidates = api.ranked_candidates.map((candidate) => ({
-    candidateId: candidate.candidate_id,
-    title: candidate.title,
-    rankIndex: candidate.rank_index,
-    evidenceCompleteness: candidate.evidence_completeness,
-    supplierScore: candidate.supplier_score,
-    competitionScore: candidate.competition_score,
-    economicsLabel: candidate.economics_label,
-    assumptionRatio: candidate.assumption_ratio,
-    commercialDecision: candidate.commercial_decision,
-    nextBestAction: candidate.next_best_action,
-    riskLevel: candidate.risk_level,
-    validationPriority: candidate.validation_priority,
-    validationTarget: candidate.validation_target,
-    sourceFamily: candidate.source_family,
-    evidenceMode,
-    evidenceClass: classifyEvidenceClass({
-      evidenceMode,
+  const rankedCandidates = overlayResearchToDecisionAudits(
+    api.ranked_candidates.map((candidate) => ({
+      candidateId: candidate.candidate_id,
+      title: candidate.title,
+      sku: null,
+      rankIndex: candidate.rank_index,
+      evidenceCompleteness: candidate.evidence_completeness,
+      supplierScore: candidate.supplier_score,
+      competitionScore: candidate.competition_score,
+      economicsLabel: candidate.economics_label,
+      assumptionRatio: candidate.assumption_ratio,
+      commercialDecision: candidate.commercial_decision,
+      nextBestAction: candidate.next_best_action,
+      riskLevel: candidate.risk_level,
+      validationPriority: candidate.validation_priority,
+      validationTarget: candidate.validation_target,
       sourceFamily: candidate.source_family,
-      declared: (candidate as { evidence_class?: string }).evidence_class ?? null,
-    }),
-    isTopCandidate: candidate.is_top_candidate,
-    pillarCells: (candidate.pillar_cells ?? []).map((cell) => ({
-      pillarId: cell.pillar_id,
-      label: cell.pillar_id.replace(/_/g, " "),
-      score: cell.score,
-      status: cell.status,
-      detail: cell.detail,
+      evidenceMode,
       evidenceClass: classifyEvidenceClass({
         evidenceMode,
-        pillarId: cell.pillar_id,
-        status: cell.status,
         sourceFamily: candidate.source_family,
+        declared: (candidate as { evidence_class?: string }).evidence_class ?? null,
       }),
+      promotionState: derivePromotionState(candidate.commercial_decision),
+      marketLane: null,
+      supplierOffer: null,
+      confidence: candidate.evidence_completeness,
+      assumptions: [],
+      missingEvidence: [],
+      conflicts: [],
+      isTopCandidate: candidate.is_top_candidate,
+      pillarCells: (candidate.pillar_cells ?? []).map((cell) => ({
+        pillarId: cell.pillar_id,
+        label: cell.pillar_id.replace(/_/g, " "),
+        score: cell.score,
+        status: cell.status,
+        detail: cell.detail,
+        evidenceClass: classifyEvidenceClass({
+          evidenceMode,
+          pillarId: cell.pillar_id,
+          status: cell.status,
+          sourceFamily: candidate.source_family,
+        }),
+      })),
     })),
-  }));
+    api.appendix?.candidate_audit,
+  );
 
   let state: FirstPhaseEvidencePacket["state"] = rankedCandidates.length ? "success" : "empty";
   if (api.overall_status === "blocked") state = "blocked";
