@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
 from typing import Any, Mapping
 
 SCHEMA = "MarketOS.ExperimentDraft.v1"
