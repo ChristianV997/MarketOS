@@ -43,6 +43,36 @@ from evaluation.contracts import DataQuality
 EvidenceReference = EvidenceRef
 
 
+@dataclass(frozen=True)
+class SupplierOfferIdentity:
+    """Exact supplier offer identity required for a commerce packet."""
+
+    supplier_id: str
+    offer_id: str
+    supplier_sku: str
+    variant_id: str = ""
+    evidence_ref: EvidenceRef | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("supplier_id", "offer_id", "supplier_sku"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip() or any(ord(char) < 32 for char in value):
+                raise ValueError("supplier offer identity is invalid")
+        if self.variant_id and (not isinstance(self.variant_id, str) or any(ord(char) < 32 for char in self.variant_id)):
+            raise ValueError("supplier offer identity is invalid")
+        if self.evidence_ref is not None and not isinstance(self.evidence_ref, EvidenceRef):
+            raise ValueError("supplier offer evidence is invalid")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "supplier_id": self.supplier_id,
+            "offer_id": self.offer_id,
+            "supplier_sku": self.supplier_sku,
+            "variant_id": self.variant_id,
+            "evidence_ref": self.evidence_ref.to_dict() if self.evidence_ref else None,
+        }
+
+
 class BusinessModel(str, Enum):
     """How MarketOS is compensated for a given commercial Offer.
 
@@ -341,6 +371,7 @@ def launch_blockers_for_ownership(ownership: CommercialOwnership) -> tuple[str, 
 
 __all__ = [
     "EvidenceReference",
+    "SupplierOfferIdentity",
     "BusinessModel",
     "OWNERSHIP_ROLES",
     "OwnershipAssignment",
