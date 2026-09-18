@@ -22,6 +22,7 @@ store module.
 """
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 import pytest
@@ -47,6 +48,7 @@ from evaluation.companyos.service_engagement import build_service_engagement
 from evaluation.readiness import evaluate_product
 from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
 from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
+from scripts.run_commercial_replay_integration import run_consolidated_scenario
 
 _EXPECTED_STAGES = {
     "hydroponics_positive_candidate": "scale_candidate",
@@ -345,3 +347,71 @@ def test_artifact_store_path_escape_is_rejected(tmp_path):
     store = ArtifactStore(client, registry)
     with pytest.raises(ValueError, match="invalid experiment_id"):
         store.path_for("../../../../../../../../tmp", "escape.json")
+
+
+_CONSOLIDATED_REPLAY_FIXTURES = (
+    ("hydroponics_promising.json", "hydroponics_positive_candidate"),
+    ("smart_pet_support_risk.json", "smart_pet_support_burden_candidate"),
+    ("solar_4g_blocked.json", "solar_4g_security_blocked_candidate"),
+    ("commodity_electronics_rejected.json", "commodity_electronics_rejected_candidate"),
+    ("walking_pad_deferred.json", "high_ticket_deferred_candidate"),
+)
+
+
+@pytest.mark.parametrize("fixture_name,builder_name", _CONSOLIDATED_REPLAY_FIXTURES)
+def test_consolidated_replay_carries_research_through_mexico_fulfillment_and_safe_export(fixture_name, builder_name):
+    result = run_consolidated_scenario(fixture_name, builder_name)
+
+    assert result["research"]["market_lane"]["destination_country"] == "Mexico"
+    assert result["research"]["market_lane"]["currency"] == "MXN"
+    assert result["commerce"]["commerce_packet"]["dry_run"] is True
+    assert result["commerce"]["commerce_packet"]["live_actions_taken"] is False
+    assert result["fulfillment"]["state_path"][-1] == "contribution_reconciled"
+    assert {"return_requested", "rma_opened", "contribution_reconciled"} <= set(result["fulfillment"]["state_path"])
+    assert result["fulfillment"]["live_action_allowed"] is False
+    assert result["fulfillment"]["external_mutations"] is False
+    assert result["event_summary"]["sequence_issues"] == []
+    assert result["event_summary"]["live_authority_violations"] == []
+    assert result["second_append_idempotent_count"] == result["event_count"]
+    assert result["launch_authorized"] is False
+    assert result["provider_calls"] is False
+    assert result["credentials_used"] is False
+    assert result["database_writes"] is False
+    assert result["client_export"]["redaction_status"] == "validated_no_sensitive_fields"
+    assert set(result["client_export"]["payload"]) <= {
+        "workspace_id", "status", "blockers", "evidence_required", "approvals_required", "next_actions",
+    }
+
+
+def test_consolidated_replay_is_byte_identical_and_missing_supplier_proof_stays_blocked():
+    first = run_consolidated_scenario("walking_pad_deferred.json", "high_ticket_deferred_candidate")
+    second = run_consolidated_scenario("walking_pad_deferred.json", "high_ticket_deferred_candidate")
+
+    assert json.dumps(first, sort_keys=True, separators=(",", ":")) == json.dumps(second, sort_keys=True, separators=(",", ":"))
+    assert first["supplier_offer"] is None
+    assert "supplier_offer_evidence_missing" in first["research"]["blockers"]
+    assert first["commerce"]["promoted_to_launch"] is False
+
+
+def test_consolidated_export_rejects_unsafe_status_claim(tmp_path):
+    from backend.workspaces.client_workspace import ClientWorkspace
+    from backend.workspaces.registry import WorkspaceRegistry
+    from evaluation.trustos.client_workspace_isolation import ClientWorkspaceExportError, export_client_evidence
+
+    registry = WorkspaceRegistry(str(tmp_path / "workspaces.json"))
+    workspace = registry.register(ClientWorkspace(workspace_id="workspace_unsafe_fixture", name="unsafe-fixture", workspace_type="client_service"))
+    with pytest.raises(ClientWorkspaceExportError, match="client evidence export rejected"):
+        export_client_evidence(
+            workspace=workspace,
+            registry=registry,
+            provenance="fixture://commercial-replay/unsafe",
+            evidence_state="requires_review",
+            payload={
+                "workspace_id": workspace.workspace_id,
+                "status": "live_validated",
+                "blockers": [],
+                "evidence_required": [],
+                "approvals_required": [],
+                "next_actions": [],
+            },
+        )
