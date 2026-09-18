@@ -1,0 +1,25 @@
+{
+  "report_version": "consumer-attention-v1",
+  "evidence_mode": "fixture_demo",
+  "platforms_observed": ["google_trends"],
+  "top_candidate_id": "mini-thermal-printer",
+  "candidates": [
+    {
+      "candidate_id": "mini-thermal-printer",
+      "query": "mini thermal printer",
+      "evidence": [{"platform": "tiktok", "hook": "fixture-only weak attention", "evidence_mode": "fixture"}],
+      "score": {
+        "overall_consumer_attention": 0.2,
+        "source_diversity": 0.2,
+        "objection_density": 0.7,
+        "recommended_ad_angles": [],
+        "creative_hooks": [],
+        "voice_of_customer": {"pain_points": [], "desired_outcomes": [], "objections": ["too noisy"]},
+        "recommendation": "reject_low_attention"
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

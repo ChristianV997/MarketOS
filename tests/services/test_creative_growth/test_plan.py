@@ -43,10 +43,12 @@ class TestBuildCreativeGrowthPlan:
 
     def test_saved_to_artifact_store(self, monkeypatch):
         from backend.workspaces.artifact_store import ArtifactStore
+        from backend.workspaces.registry import get_workspace_registry
         monkeypatch.setattr("core.creative.selection.select_angles", lambda n, fallback: [])
         monkeypatch.setattr("core.creative.selection.select_hooks", lambda n, fallback: [])
 
         plan, envelope = build_creative_growth_plan("Widget")
-        store = ArtifactStore()
-        saved = store.load(envelope.workspace_id, envelope.experiment_id, "result.json")
+        workspace = get_workspace_registry().get(envelope.workspace_id)
+        assert workspace is not None
+        saved = ArtifactStore(workspace).load(envelope.experiment_id, "result.json")
         assert saved == plan.to_dict()
