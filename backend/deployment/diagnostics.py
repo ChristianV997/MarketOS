@@ -16,12 +16,11 @@ Covers 11 failure conditions:
 from __future__ import annotations
 
 import importlib
-import json
 import os
 import shutil
 import socket
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 

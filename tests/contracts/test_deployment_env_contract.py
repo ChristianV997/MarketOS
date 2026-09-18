@@ -32,10 +32,6 @@ def test_selected_platform_templates_are_present_and_secret_free():
 def test_environment_contract_loader_and_categories():
     from backend.deployment.environment_contract import (
         load_environment_contract,
-        MUTATION_FLAG_KEYS,
-        LIVE_PROVIDER_CREDENTIAL_KEYS,
-        DATABASE_KEYS,
-        CODEROS_AGENT_KEYS,
     )
     contract = load_environment_contract()
     assert contract.profile == "marketos-mvp-island"

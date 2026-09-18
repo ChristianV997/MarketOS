@@ -22,6 +22,7 @@ import json
 import sys
 import time
 from decimal import Decimal, ROUND_HALF_EVEN
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
@@ -496,9 +497,9 @@ def is_colab_available() -> dict[str, Any]:
     in_colab = False
     details = "Google Colab compute allocation is not connected or mounted in this local environment."
     try:
-        import google.colab  # type: ignore
-        in_colab = True
-        details = "Google Colab environment detected."
+        if find_spec("google.colab") is not None:
+            in_colab = True
+            details = "Google Colab environment detected."
     except ImportError:
         pass
     if Path("/content").is_dir():
