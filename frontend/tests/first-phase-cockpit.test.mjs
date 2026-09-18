@@ -17,7 +17,21 @@ function normalizeEvidenceMode(value) {
   return "unknown";
 }
 
-function deriveState(input) {
+const FATAL_PROJECTION_WARNINGS = new Set([
+  "schema_version_unsupported",
+  "projection_not_object",
+  "candidate_audit_malformed",
+  "client_safe_projection_malformed",
+  "projection_oversized",
+  "secret_shaped_value_rejected",
+  "candidate_identity_duplicate",
+  "candidate_identity_missing",
+  "launch_authorized_rejected",
+  "replay_identity_invalid",
+  "appendix_required",
+]);
+
+function deriveState(input, overlay) {
   if (input.isLoading) return "loading";
   const hasAnyData = Boolean(
     input.phase1Readiness || input.benchmark || input.publicMarket || input.researchPortfolio,
@@ -28,9 +42,19 @@ function deriveState(input) {
   }
   if (input.phase1Readiness?.overall_status === "blocked") return "blocked";
   if (input.phase1Readiness?.overall_status === "degraded") return "stale";
+  const warningToken = (overlay?.warning ?? "").split(",")[0];
+  if (overlay?.supplied && warningToken && FATAL_PROJECTION_WARNINGS.has(warningToken)) {
+    return "unavailable";
+  }
+  if (overlay && (overlay.unmatchedServerIds?.length || overlay.unmatchedProjectionIds?.length)) {
+    return "stale";
+  }
   const partialEndpoint =
     input.readinessError || input.benchmarkError || input.publicMarketError || input.researchError;
   if (partialEndpoint || input.phase1Readiness?.overall_status === "partially_ready") return "partial";
+  const rankedCount =
+    overlay?.rankedCount ?? (Array.isArray(input.benchmark?.candidates) ? input.benchmark.candidates.length : 0);
+  if (rankedCount === 0) return "empty";
   return "success";
 }
 
@@ -328,6 +352,29 @@ test("state transitions cover loading empty blocked unavailable stale partial su
     }),
     "success",
   );
+  assert.equal(
+    deriveState({
+      isLoading: false,
+      phase1Readiness: { overall_status: "ready" },
+      benchmark: { candidates: [] },
+      publicMarket: null,
+      researchPortfolio: null,
+    }),
+    "empty",
+  );
+  assert.equal(
+    deriveState(
+      {
+        isLoading: false,
+        phase1Readiness: { overall_status: "ready" },
+        benchmark: { candidates: [{}] },
+        publicMarket: null,
+        researchPortfolio: null,
+      },
+      { supplied: true, warning: "schema_version_unsupported", unmatchedServerIds: [], unmatchedProjectionIds: [], rankedCount: 1 },
+    ),
+    "unavailable",
+  );
 });
 
 test("compose preserves backend candidate order and never re-ranks", () => {
@@ -576,22 +623,34 @@ test("accessibility and focus contracts are present", async () => {
   const banner = await readFile(new URL("components/CockpitStatusBanner.tsx", featureRoot), "utf8");
 
   assert.match(page, /Skip to ranked candidates/);
+  assert.match(page, /Not live validated/);
+  assert.match(page, /No network mutations/);
+  assert.match(page, /overflow-x-hidden/);
+  assert.match(page, /Launch Draft Pack \/ Higgsfield/);
   assert.match(table, /aria-selected/);
   assert.match(table, /scope="col"/);
   assert.match(table, /role="grid"/);
+  assert.match(table, /role="gridcell"/);
+  assert.match(table, /role="listbox"/);
+  assert.match(table, /aria-rowcount=\{candidates\.length \+ 1\}/);
+  assert.match(table, /id="ranked-candidates-table"/);
   assert.match(table, /tabIndex=\{tabIndex\}/);
   assert.match(table, /Home/);
   assert.match(table, /End/);
   assert.match(table, /md:hidden/);
+  assert.match(table, /overflow-x-auto/);
+  assert.match(table, /focus-visible:ring-1/);
   assert.match(detail, /id="candidate-detail-panel"/);
   assert.match(detail, /Exact SKU/);
   assert.match(detail, /Market lane/);
   assert.match(detail, /Promotion state/);
+  assert.match(detail, /Next best action/);
   assert.match(table, /adjacentCandidateIndex/);
   assert.match(table, /shouldHandoffDetailFocus/);
   assert.match(banner, /partial/);
   assert.match(banner, /aria-live="polite"/);
   assert.match(banner, /Fixture evidence is screening-only/);
+  assert.match(banner, /not live validated/);
 });
 
 test("demo fixture and control planes avoid secrets and document unavailable slots", async () => {
@@ -781,4 +840,69 @@ test("promotion state never claims launched", async () => {
   const source = await readFile(new URL("lib/derivePromotionState.ts", featureRoot), "utf8");
   assert.match(source, /Never "launched"/);
   assert.doesNotMatch(source, /return "launched"/);
+});
+
+function asFilter(raw) {
+  return {
+    query: typeof raw?.query === "string" ? raw.query.slice(0, 120) : "",
+    risk: ["all", "high", "medium", "low", "unknown"].includes(raw?.risk) ? raw.risk : "all",
+    decision: typeof raw?.decision === "string" && raw.decision ? raw.decision.slice(0, 80) : "all",
+    topOnly: Boolean(raw?.topOnly),
+    topN: Boolean(raw?.topN),
+  };
+}
+
+function parseFilterSearch(search) {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  if (![...params.keys()].some((key) => ["q", "risk", "decision", "top", "topn"].includes(key))) {
+    return null;
+  }
+  return asFilter({
+    query: params.get("q") ?? "",
+    risk: params.get("risk") ?? "all",
+    decision: params.get("decision") ?? "all",
+    topOnly: params.get("top") === "1",
+    topN: params.get("topn") === "1",
+  });
+}
+
+function serializeFilterSearch(filter) {
+  const params = new URLSearchParams();
+  if (filter.query.trim()) params.set("q", filter.query.trim());
+  if (filter.risk !== "all") params.set("risk", filter.risk);
+  if (filter.decision !== "all") params.set("decision", filter.decision);
+  if (filter.topOnly) params.set("top", "1");
+  if (filter.topN) params.set("topn", "1");
+  const encoded = params.toString();
+  return encoded ? `?${encoded}` : "";
+}
+
+test("filter persistence round-trips URL state without re-ranking", async () => {
+  const filter = {
+    query: "espresso",
+    risk: "high",
+    decision: "hold",
+    topOnly: false,
+    topN: true,
+  };
+  const search = serializeFilterSearch(filter);
+  assert.equal(search, "?q=espresso&risk=high&decision=hold&topn=1");
+  assert.deepEqual(parseFilterSearch(search), filter);
+  assert.equal(parseFilterSearch(""), null);
+  assert.deepEqual(asFilter({ query: 12, risk: "secret", decision: null, topOnly: "yes" }), {
+    query: "",
+    risk: "all",
+    decision: "all",
+    topOnly: true,
+    topN: false,
+  });
+  const persistSource = await readFile(new URL("lib/persistFilters.ts", featureRoot), "utf8");
+  assert.match(persistSource, /FILTER_STORAGE_KEY/);
+  assert.match(persistSource, /sessionStorage/);
+  assert.match(persistSource, /JSON\.parse/);
+  const page = await readFile(new URL("../src/pages/FirstPhaseEvidenceCockpit.tsx", import.meta.url), "utf8");
+  assert.match(page, /writeStoredFilter/);
+  assert.match(page, /replaceState/);
+  const validateSource = await readFile(new URL("lib/validateEvidencePacket.ts", featureRoot), "utf8");
+  assert.match(validateSource, /!rankedCandidates\.accepted\) state = "unavailable"/);
 });

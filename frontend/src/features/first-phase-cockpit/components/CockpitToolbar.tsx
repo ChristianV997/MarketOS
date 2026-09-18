@@ -33,7 +33,7 @@ export function CockpitToolbar({
               value={filter.query}
               onChange={(event) => onFilterChange({ ...filter, query: event.target.value })}
               placeholder="Title, decision, action…"
-              className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
               aria-controls="ranked-candidates-table"
             />
           </label>
@@ -47,7 +47,7 @@ export function CockpitToolbar({
                   risk: event.target.value as CandidateFilterState["risk"],
                 })
               }
-              className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
             >
               <option value="all">All risks</option>
               <option value="high">High</option>
@@ -61,7 +61,7 @@ export function CockpitToolbar({
             <select
               value={filter.decision}
               onChange={(event) => onFilterChange({ ...filter, decision: event.target.value })}
-              className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
             >
               <option value="all">All decisions</option>
               {decisions.map((decision) => (
@@ -94,7 +94,7 @@ export function CockpitToolbar({
           type="button"
           onClick={onExport}
           disabled={exportDisabled}
-          className="rounded border border-zinc-600 bg-zinc-950 px-3 py-1.5 text-xs font-medium text-zinc-200 enabled:hover:border-indigo-500 enabled:hover:text-indigo-200 disabled:cursor-not-allowed disabled:opacity-40"
+          className="min-h-8 rounded border border-zinc-600 bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-200 enabled:hover:border-indigo-500 enabled:hover:text-indigo-200 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-indigo-400"
         >
           Export client-safe JSON
         </button>

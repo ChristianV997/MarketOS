@@ -8,11 +8,18 @@ import { RankedCandidatesPanel } from "@/features/first-phase-cockpit/components
 import { RunMetadataPanel } from "@/features/first-phase-cockpit/components/RunMetadataPanel";
 import { useFirstPhaseEvidenceCockpit } from "@/features/first-phase-cockpit/hooks/useFirstPhaseEvidenceCockpit";
 import type { CandidateFilterState } from "@/features/first-phase-cockpit/contracts/firstPhaseEvidencePacket";
-import { DEFAULT_CANDIDATE_FILTER, filterCandidates } from "@/features/first-phase-cockpit/lib/filterCandidates";
+import { filterCandidates } from "@/features/first-phase-cockpit/lib/filterCandidates";
 import { serializeClientSafeExport } from "@/features/first-phase-cockpit/lib/exportClientSafeReport";
+import {
+  initialFilter,
+  serializeFilterSearch,
+  writeStoredFilter,
+} from "@/features/first-phase-cockpit/lib/persistFilters";
 
 const SAFETY_BADGES = [
   ["Read-only", "border-sky-500/30 bg-sky-500/10 text-sky-300"],
+  ["Not live validated", "border-rose-500/30 bg-rose-500/10 text-rose-200"],
+  ["No network mutations", "border-zinc-500/30 bg-zinc-800 text-zinc-300"],
   ["Advisory", "border-violet-500/30 bg-violet-500/10 text-violet-300"],
   ["No launch authority", "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"],
   ["No credentials in browser", "border-amber-500/30 bg-amber-500/10 text-amber-300"],
@@ -20,7 +27,9 @@ const SAFETY_BADGES = [
 
 export default function FirstPhaseEvidenceCockpitPage() {
   const { packet, isLoading, hasErrors } = useFirstPhaseEvidenceCockpit();
-  const [filter, setFilter] = useState<CandidateFilterState>(DEFAULT_CANDIDATE_FILTER);
+  const [filter, setFilter] = useState<CandidateFilterState>(() =>
+    initialFilter(typeof window === "undefined" ? "" : window.location.search),
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [windowStart, setWindowStart] = useState(0);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
@@ -35,6 +44,14 @@ export default function FirstPhaseEvidenceCockpitPage() {
   useEffect(() => {
     setWindowStart(0);
   }, [deferredFilter.query, deferredFilter.risk, deferredFilter.decision, deferredFilter.topOnly, deferredFilter.topN]);
+
+  useEffect(() => {
+    writeStoredFilter(deferredFilter);
+    const nextSearch = serializeFilterSearch(deferredFilter);
+    if (typeof window === "undefined") return;
+    const url = `${window.location.pathname}${nextSearch}${window.location.hash}`;
+    window.history.replaceState(null, "", url);
+  }, [deferredFilter]);
 
   const selectedCandidate =
     filteredCandidates.find((candidate) => candidate.candidateId === selectedId)
@@ -67,7 +84,8 @@ export default function FirstPhaseEvidenceCockpitPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
+    <div className="mx-auto max-w-7xl space-y-5 overflow-x-hidden p-4 sm:p-6">
+      {/* Launch Draft Pack / Higgsfield creative assets: deferred. No frontend display adapter until a cockpit-owned read-only contract exists on this page. */}
       <a
         href="#ranked-candidates-table"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-100"
@@ -122,7 +140,11 @@ export default function FirstPhaseEvidenceCockpitPage() {
         filteredCount={filteredCandidates.length}
         onFilterChange={handleFilterChange}
         onExport={handleExport}
-        exportDisabled={packet.state === "loading" || packet.rankedCandidates.length === 0}
+        exportDisabled={
+          packet.state === "loading"
+          || packet.rankedCandidates.length === 0
+          || packet.state === "unavailable"
+        }
       />
 
       {exportMessage && (

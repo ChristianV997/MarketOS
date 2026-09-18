@@ -197,9 +197,18 @@ export function mapApiPacketToViewModel(
 
   let state: FirstPhaseEvidencePacket["state"] = overlayFallback.length ? "success" : "empty";
   if (api.overall_status === "blocked") state = "blocked";
-  else if (api.overall_status === "degraded" || isStaleFreshness(freshnessLabel)) state = "stale";
-  else if (api.overall_status === "partially_ready" || (api.unavailable_reasons?.length ?? 0) > 0) {
+  else if (!rankedCandidates.accepted) state = "unavailable";
+  else if (
+    rankedCandidates.unmatchedServerIds.length > 0
+    || rankedCandidates.unmatchedProjectionIds.length > 0
+    || api.overall_status === "degraded"
+    || isStaleFreshness(freshnessLabel)
+  ) {
+    state = "stale";
+  } else if (api.overall_status === "partially_ready" || (api.unavailable_reasons?.length ?? 0) > 0) {
     state = "partial";
+  } else if (overlayFallback.length === 0) {
+    state = "empty";
   }
 
   return {

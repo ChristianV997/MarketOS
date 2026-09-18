@@ -124,8 +124,8 @@ function indexUniqueAudits(
 ): { ok: true; byId: Map<string, (typeof audits)[number]> } | { ok: false; reason: string } {
   const byId = new Map<string, (typeof audits)[number]>();
   for (const audit of audits) {
-    if (!audit || typeof audit !== "object" || typeof audit.candidate_id !== "string" || !audit.candidate_id) {
-      continue;
+    if (!audit || typeof audit !== "object" || typeof audit.candidate_id !== "string" || !audit.candidate_id.trim()) {
+      return { ok: false, reason: "candidate_identity_missing" };
     }
     if (byId.has(audit.candidate_id)) {
       return { ok: false, reason: "candidate_identity_duplicate" };

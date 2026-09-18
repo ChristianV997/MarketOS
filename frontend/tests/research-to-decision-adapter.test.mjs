@@ -34,7 +34,9 @@ function optionalNumber(record, key) {
 function indexUnique(audits) {
   const byId = new Map();
   for (const audit of audits) {
-    if (!audit?.candidate_id) continue;
+    if (!audit || typeof audit.candidate_id !== "string" || !audit.candidate_id.trim()) {
+      return { ok: false, reason: "candidate_identity_missing" };
+    }
     if (byId.has(audit.candidate_id)) return { ok: false, reason: "candidate_identity_duplicate" };
     byId.set(audit.candidate_id, audit);
   }
@@ -135,6 +137,13 @@ test("projection matrix rejects unsupported, duplicate, secret, malformed, and l
   assert.equal((await validateProjection(await loadFixture("rejected-secret.json"))).reason, "secret_shaped_value_rejected");
   assert.equal((await validateProjection(await loadFixture("rejected-malformed.json"))).reason, "candidate_audit_malformed");
   assert.equal((await validateProjection(await loadFixture("rejected-launch-authorized.json"))).reason, "launch_authorized_rejected");
+  assert.equal(
+    validateProjection({
+      report_version: "product-validation-report-v1",
+      appendix: { research_to_decision_version: "v1", candidate_audit: [{ title: "missing-id" }] },
+    }).reason,
+    "candidate_identity_missing",
+  );
 });
 
 test("partial appendix is accepted and extra fields are ignored", async () => {
@@ -180,6 +189,7 @@ test("adapter source remains identity-preserving and fail-closed", async () => {
   const source = await readFile(new URL("lib/overlayResearchToDecision.ts", featureRoot), "utf8");
   assert.match(source, /adaptResearchToDecisionProjection/);
   assert.match(source, /candidate_identity_duplicate/);
+  assert.match(source, /candidate_identity_missing/);
   assert.match(source, /launch_authorized_rejected/);
   assert.match(source, /projection_oversized/);
   assert.match(source, /optionalNumber/);

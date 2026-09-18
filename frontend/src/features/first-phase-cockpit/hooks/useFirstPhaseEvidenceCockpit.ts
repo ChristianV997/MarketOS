@@ -4,7 +4,10 @@ import {
   usePublicMarketBenchmark,
   useResearchPortfolios,
 } from "@/hooks/useCanonicalEvents";
-import { composeCockpitViewModel } from "../lib/composeCockpitViewModel";
+import {
+  composeCockpitViewModel,
+  extractExistingResearchToDecisionProjection,
+} from "../lib/composeCockpitViewModel";
 import type { FirstPhaseEvidencePacket } from "../contracts/firstPhaseEvidencePacket";
 
 export function useFirstPhaseEvidenceCockpit(): {
@@ -23,16 +26,21 @@ export function useFirstPhaseEvidenceCockpit(): {
     || publicMarket.isLoading
     || research.isLoading;
 
+  const researchPortfolio = research.data?.portfolios?.[0] ?? null;
   const packet = composeCockpitViewModel({
     phase1Readiness: phase1Readiness.data ?? null,
     benchmark: benchmark.data ?? null,
     publicMarket: publicMarket.data ?? null,
-    researchPortfolio: research.data?.portfolios?.[0] ?? null,
+    researchPortfolio,
     readinessError: Boolean(phase1Readiness.error),
     benchmarkError: Boolean(benchmark.error),
     publicMarketError: Boolean(publicMarket.error),
     researchError: Boolean(research.error),
     isLoading,
+    researchToDecisionProjection: extractExistingResearchToDecisionProjection(
+      undefined,
+      researchPortfolio,
+    ),
   });
 
   return {

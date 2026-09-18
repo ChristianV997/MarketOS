@@ -37,7 +37,7 @@ export function CandidateDetailPanel({
         <button
           type="button"
           onClick={onClear}
-          className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-500"
+          className="min-h-8 rounded border border-zinc-700 px-3 py-2 text-[11px] text-zinc-300 hover:border-zinc-500 focus-visible:ring-2 focus-visible:ring-indigo-400"
         >
           Clear selection
         </button>

@@ -47,7 +47,47 @@ export function normalizeEvidenceMode(value: string | null | undefined): Evidenc
   return "unknown";
 }
 
-export function deriveState(input: ComposeCockpitInput): EvidenceState {
+const FATAL_PROJECTION_WARNINGS = new Set([
+  "schema_version_unsupported",
+  "projection_not_object",
+  "candidate_audit_malformed",
+  "client_safe_projection_malformed",
+  "projection_oversized",
+  "secret_shaped_value_rejected",
+  "candidate_identity_duplicate",
+  "candidate_identity_missing",
+  "launch_authorized_rejected",
+  "replay_identity_invalid",
+  "appendix_required",
+]);
+
+export interface OverlayDiagnostics {
+  supplied: boolean;
+  accepted: boolean;
+  warning: string | null;
+  unmatchedServerIds: string[];
+  unmatchedProjectionIds: string[];
+  rankedCount: number;
+}
+
+/** Prefer an explicit overlay; otherwise reuse extra report fields already on the #213 portfolio object. */
+export function extractExistingResearchToDecisionProjection(
+  explicit: unknown,
+  researchPortfolio: ResearchPortfolioSummaryView | null,
+): unknown {
+  if (explicit != null) return explicit;
+  if (!researchPortfolio || typeof researchPortfolio !== "object") return undefined;
+  const record = researchPortfolio as unknown as Record<string, unknown>;
+  if (record.report_version && record.appendix) {
+    return { report_version: record.report_version, appendix: record.appendix };
+  }
+  return undefined;
+}
+
+export function deriveState(
+  input: ComposeCockpitInput,
+  overlay?: OverlayDiagnostics,
+): EvidenceState {
   if (input.isLoading) return "loading";
   const hasAnyData = Boolean(
     input.phase1Readiness || input.benchmark || input.publicMarket || input.researchPortfolio,
@@ -58,6 +98,16 @@ export function deriveState(input: ComposeCockpitInput): EvidenceState {
   }
   if (input.phase1Readiness?.overall_status === "blocked") return "blocked";
   if (input.phase1Readiness?.overall_status === "degraded") return "stale";
+  const warningToken = (overlay?.warning ?? "").split(",")[0];
+  if (overlay?.supplied && warningToken && FATAL_PROJECTION_WARNINGS.has(warningToken)) {
+    return "unavailable";
+  }
+  if (
+    overlay
+    && (overlay.unmatchedServerIds.length > 0 || overlay.unmatchedProjectionIds.length > 0)
+  ) {
+    return "stale";
+  }
   const partialEndpoint =
     input.readinessError
     || input.benchmarkError
@@ -66,6 +116,10 @@ export function deriveState(input: ComposeCockpitInput): EvidenceState {
   if (partialEndpoint || input.phase1Readiness?.overall_status === "partially_ready") {
     return "partial";
   }
+  const rankedCount =
+    overlay?.rankedCount
+    ?? (Array.isArray(input.benchmark?.candidates) ? input.benchmark.candidates.length : 0);
+  if (rankedCount === 0) return "empty";
   return "success";
 }
 
@@ -362,14 +416,25 @@ function buildControlPlanes(): ControlPlaneSlot[] {
 }
 
 export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseEvidencePacket {
-  const state = deriveState(input);
   const evidenceMode = normalizeEvidenceMode(
     input.benchmark?.evidence_mode ?? input.publicMarket?.evidence_mode,
   );
+  const projection = extractExistingResearchToDecisionProjection(
+    input.researchToDecisionProjection,
+    input.researchPortfolio,
+  );
   const mapped = overlayResearchToDecisionProjection(
     mapCandidates(input.benchmark, evidenceMode),
-    input.researchToDecisionProjection,
+    projection,
   );
+  const state = deriveState(input, {
+    supplied: projection != null,
+    accepted: mapped.accepted,
+    warning: mapped.warning,
+    unmatchedServerIds: mapped.unmatchedServerIds,
+    unmatchedProjectionIds: mapped.unmatchedProjectionIds,
+    rankedCount: mapped.rows.length,
+  });
   const rankedCandidates = mapped.rows;
   const pillars = buildPillars(input, evidenceMode);
   const warnings = [
@@ -377,7 +442,7 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     ...(input.publicMarket?.warnings ?? []),
     ...(input.phase1Readiness?.advisory_warnings ?? []),
   ];
-  if (mapped.warning && input.researchToDecisionProjection != null) {
+  if (mapped.warning && projection != null) {
     warnings.push(`research_to_decision_${mapped.warning}`);
   }
   for (const id of mapped.unmatchedServerIds) warnings.push(`unmatched_server:${id}`);

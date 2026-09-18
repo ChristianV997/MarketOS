@@ -68,6 +68,7 @@ export function RankedCandidatesPanel({
   if (!candidates.length) {
     return (
       <section
+        id="ranked-candidates-table"
         className="rounded-lg border border-dashed border-zinc-700 bg-zinc-900/30 p-6 text-sm text-zinc-400"
         aria-label="Ranked candidates empty"
       >
@@ -111,7 +112,11 @@ export function RankedCandidatesPanel({
   const activeId = selectedId ?? windowed.visible[0]?.candidateId ?? null;
 
   return (
-    <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4" aria-label="Ranked candidates">
+    <section
+      id="ranked-candidates-table"
+      className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4"
+      aria-label="Ranked candidates"
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-sm font-medium text-zinc-100" id="ranked-candidates-heading">
           Ranked candidates (server order)
@@ -128,7 +133,7 @@ export function RankedCandidatesPanel({
             type="button"
             disabled={!windowed.hasMoreBefore}
             onClick={() => onWindowStartChange(nextWindowStart(windowed, "back"))}
-            className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 enabled:hover:border-zinc-500 disabled:opacity-40"
+            className="min-h-8 rounded border border-zinc-700 px-3 py-2 text-[11px] text-zinc-300 enabled:hover:border-zinc-500 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-indigo-400"
           >
             Previous {CANDIDATE_WINDOW_SIZE}
           </button>
@@ -136,7 +141,7 @@ export function RankedCandidatesPanel({
             type="button"
             disabled={!windowed.hasMoreAfter}
             onClick={() => onWindowStartChange(nextWindowStart(windowed, "forward"))}
-            className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 enabled:hover:border-zinc-500 disabled:opacity-40"
+            className="min-h-8 rounded border border-zinc-700 px-3 py-2 text-[11px] text-zinc-300 enabled:hover:border-zinc-500 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-indigo-400"
           >
             Next {CANDIDATE_WINDOW_SIZE}
           </button>
@@ -144,7 +149,12 @@ export function RankedCandidatesPanel({
       )}
 
       {/* Mobile card list */}
-      <ul className="mt-3 space-y-2 md:hidden" aria-labelledby="ranked-candidates-heading">
+      <ul
+        className="mt-3 space-y-2 md:hidden"
+        role="listbox"
+        aria-labelledby="ranked-candidates-heading"
+        aria-label="Ranked candidates mobile list"
+      >
         {windowed.visible.map((candidate, relativeIndex) => {
           const absoluteIndex = windowed.windowStart + relativeIndex;
           const selected = candidate.candidateId === selectedId;
@@ -153,6 +163,7 @@ export function RankedCandidatesPanel({
             <li key={candidate.candidateId}>
               <button
                 type="button"
+                role="option"
                 aria-selected={selected}
                 onClick={() => {
                   detailFocusRequested.current = true;
@@ -189,18 +200,18 @@ export function RankedCandidatesPanel({
 
       <div className="mt-3 hidden overflow-x-auto md:block">
         <table
-          id="ranked-candidates-table"
           className="min-w-full text-left text-xs"
           aria-labelledby="ranked-candidates-heading"
           role="grid"
-          aria-rowcount={candidates.length}
+          aria-colcount={13}
+          aria-rowcount={candidates.length + 1}
         >
           <caption className="sr-only">
             Server-ordered first-phase candidates with pillar-level evidence scores. Selection is read-only.
             Showing a bounded window of {CANDIDATE_WINDOW_SIZE} rows for performance.
           </caption>
           <thead className="text-zinc-500">
-            <tr>
+            <tr role="row">
               {[
                 "Rank",
                 "Candidate",
@@ -216,7 +227,7 @@ export function RankedCandidatesPanel({
                 "Decision",
                 "Risk",
               ].map((heading) => (
-                <th key={heading} scope="col" className="px-2 py-1.5 font-medium">
+                <th key={heading} scope="col" role="columnheader" className="px-2 py-1.5 font-medium">
                   {heading}
                 </th>
               ))}
@@ -231,9 +242,10 @@ export function RankedCandidatesPanel({
               return (
                 <tr
                   key={candidate.candidateId}
+                  role="row"
                   tabIndex={tabIndex}
                   aria-selected={selected}
-                  aria-rowindex={candidate.rankIndex + 1}
+                  aria-rowindex={absoluteIndex + 2}
                   onClick={() => {
                     detailFocusRequested.current = true;
                     onSelect(candidate.candidateId);
@@ -243,8 +255,8 @@ export function RankedCandidatesPanel({
                     selected ? "bg-indigo-500/10" : "hover:bg-zinc-800/40"
                   }`}
                 >
-                  <td className="px-2 py-2">{candidate.rankIndex + 1}</td>
-                  <td className="px-2 py-2">
+                  <td role="gridcell" className="px-2 py-2">{candidate.rankIndex + 1}</td>
+                  <td role="gridcell" className="px-2 py-2">
                     <span className="font-medium text-zinc-100">{candidate.title}</span>
                     {candidate.isTopCandidate && (
                       <span className="ml-2 rounded border border-indigo-500/30 px-1 text-[10px] text-indigo-300">
@@ -253,27 +265,27 @@ export function RankedCandidatesPanel({
                     )}
                     <div className="text-[10px] text-zinc-500">{candidate.candidateId}</div>
                   </td>
-                  <td className="px-2 py-2 font-mono text-[11px] text-zinc-400">{candidate.sku ?? "—"}</td>
-                  <td className="px-2 py-2">{formatPct(candidate.evidenceCompleteness)}</td>
-                  <td className="px-2 py-2">
+                  <td role="gridcell" className="px-2 py-2 font-mono text-[11px] text-zinc-400">{candidate.sku ?? "—"}</td>
+                  <td role="gridcell" className="px-2 py-2">{formatPct(candidate.evidenceCompleteness)}</td>
+                  <td role="gridcell" className="px-2 py-2">
                     <span title={market?.detail ?? undefined}>
                       {formatPct(market?.score ?? candidate.competitionScore)}
                     </span>
                   </td>
-                  <td className="px-2 py-2">
+                  <td role="gridcell" className="px-2 py-2">
                     <span title={supplier?.detail ?? undefined}>
                       {formatPct(supplier?.score ?? candidate.supplierScore)}
                     </span>
                   </td>
-                  <td className="px-2 py-2">
+                  <td role="gridcell" className="px-2 py-2">
                     <span title={economics?.detail ?? undefined}>{candidate.economicsLabel ?? "—"}</span>
                   </td>
-                  <td className="px-2 py-2 text-zinc-500">{attention?.status ?? "unavailable"}</td>
-                  <td className="px-2 py-2">{candidate.evidenceClass.replace(/_/g, " ")}</td>
-                  <td className="px-2 py-2">{candidate.promotionState.replace(/_/g, " ")}</td>
-                  <td className="px-2 py-2">{candidate.nextBestAction?.replace(/_/g, " ") ?? "—"}</td>
-                  <td className="px-2 py-2">{candidate.commercialDecision?.replace(/_/g, " ") ?? "—"}</td>
-                  <td className="px-2 py-2">{candidate.riskLevel ?? "—"}</td>
+                  <td role="gridcell" className="px-2 py-2 text-zinc-500">{attention?.status ?? "unavailable"}</td>
+                  <td role="gridcell" className="px-2 py-2">{candidate.evidenceClass.replace(/_/g, " ")}</td>
+                  <td role="gridcell" className="px-2 py-2">{candidate.promotionState.replace(/_/g, " ")}</td>
+                  <td role="gridcell" className="px-2 py-2">{candidate.nextBestAction?.replace(/_/g, " ") ?? "—"}</td>
+                  <td role="gridcell" className="px-2 py-2">{candidate.commercialDecision?.replace(/_/g, " ") ?? "—"}</td>
+                  <td role="gridcell" className="px-2 py-2">{candidate.riskLevel ?? "—"}</td>
                 </tr>
               );
             })}

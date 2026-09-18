@@ -17,11 +17,11 @@ const STATE_HINTS: Record<EvidenceState, string> = {
   unavailable: "Required Phase 1 endpoints are unavailable. Partial or empty evidence only.",
   stale: "Readiness reports degraded/stale evidence. Treat rankings as advisory and dated.",
   partial: "Some endpoints or readiness stages are incomplete. Review unavailable markers before acting.",
-  success: "Evidence packet composed successfully. Ranking and launch authority remain server-side.",
+  success: "Evidence packet composed without fatal errors. This is not live validated. Ranking and launch authority remain server-side.",
 };
 
 const MODE_EXPLANATIONS: Record<EvidenceMode, string> = {
-  fixture_only: "Fixture evidence is screening-only. It is not live supplier proof or commercial validation.",
+  fixture_only: "Fixture evidence is screening-only. It is not live validated, not live supplier proof, and not commercial validation.",
   manual: "Manual import is operator-supplied screening evidence. It does not authorize orders, spend, or launch.",
   simulated: "Simulated values are derived planning assumptions, not observed live results.",
   live_readonly: "Live-readonly means the backend reported a read-only live path. This cockpit still cannot mutate providers.",
