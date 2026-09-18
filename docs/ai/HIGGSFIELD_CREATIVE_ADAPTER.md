@@ -30,6 +30,17 @@ Creative quality is `draft_only`. Commercial validation is
 `not_commercially_validated`. Client export requires evidence ids and
 `approval_state=approved`.
 
+## Launch Draft Pack compatibility
+
+`evaluation.creative.production_compat` projects a draft onto existing
+Launch Draft Pack / Site Draft Builder field names only. It does not
+mutate those modules, authorize Shopify/Medusa publish, or create a
+second campaign system. Governor is budget-reference only.
+
+Brief types: creative_brief, content_angle, product_demonstration,
+marketplace_card, product_photoshoot_brief, video_explainer_brief,
+ugc_brief, thumbnail_asset_brief.
+
 ## Source governance
 
 Consumes PR #257 by reference only:
