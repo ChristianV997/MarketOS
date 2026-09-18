@@ -1,0 +1,16 @@
+{
+  "jobs": [
+    {
+      "id": "job-alpha",
+      "marketplace_trend_report": "tests/fixtures/commerce_operations/cli_batch/good_market.json",
+      "supplier_feasibility_report": "tests/fixtures/commerce_operations/cli_batch/good_supplier.json",
+      "consumer_attention_report": "tests/fixtures/commerce_operations/cli_batch/good_consumer.json"
+    },
+    {
+      "id": "job-beta",
+      "marketplace_trend_report": "tests/fixtures/commerce_operations/cli_batch/good_market.json",
+      "supplier_feasibility_report": "tests/fixtures/commerce_operations/cli_batch/good_supplier.json",
+      "consumer_attention_report": "tests/fixtures/commerce_operations/cli_batch/good_consumer.json"
+    }
+  ]
+}
