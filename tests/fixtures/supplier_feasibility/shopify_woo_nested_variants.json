@@ -1,0 +1,16 @@
+[
+  {
+    "candidate_id": "cotton-hoodie",
+    "supplier": "manual",
+    "source_type": "fixture_demo",
+    "name": "Cotton Hoodie",
+    "shipping_cost": 4.0,
+    "currency": "USD",
+    "warehouse_region": "CN",
+    "destination_region": "US",
+    "variants": [
+      {"id": "var-s", "sku": "HOOD-S", "price": 12.0, "inventoryQuantity": 10},
+      {"id": "var-m", "sku": "HOOD-M", "regular_price": 13.5, "stock_quantity": 6}
+    ]
+  }
+]

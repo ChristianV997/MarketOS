@@ -1,0 +1,18 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "candidates": [
+    {
+      "candidate_id": "desk-clamp-lamp",
+      "query": "desk clamp lamp first",
+      "evidence": [{"price": 19.99, "evidence_mode": "fixture"}],
+      "score": {"overall_marketplace_opportunity": 0.4, "saturation_score": 0.2}
+    },
+    {
+      "candidate_id": "desk-clamp-lamp",
+      "query": "desk clamp lamp duplicate",
+      "evidence": [{"price": 39.99, "evidence_mode": "fixture"}],
+      "score": {"overall_marketplace_opportunity": 0.9, "saturation_score": 0.2}
+    }
+  ]
+}

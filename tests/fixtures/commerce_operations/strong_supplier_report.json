@@ -1,0 +1,31 @@
+{
+  "report_version": "supplier-feasibility-v1",
+  "evidence_mode": "fixture_demo",
+  "suppliers_observed": ["cj"],
+  "top_candidate_id": "weak-demand-widget",
+  "candidates": [
+    {
+      "candidate_id": "weak-demand-widget",
+      "query": "weak demand widget",
+      "offers": [{"supplier": "cj", "unit_cost": 6.0, "shipping_cost": 2.0, "estimated_landed_cost": 8.0, "delivery_max_days": 10, "evidence_mode": "fixture"}],
+      "score": {
+        "overall_supplier_feasibility": 0.86,
+        "supplier_cost_confidence": 0.7,
+        "recommendation": "hold_for_manual_review",
+        "risk_flags": [],
+        "economics": {
+          "target_sell_price": 19.99,
+          "estimated_landed_cost": 8.0,
+          "gross_margin_percent": 0.52,
+          "profit_per_order_before_ad_spend": 10.4,
+          "break_even_cpa": 10.4,
+          "break_even_roas": 1.92,
+          "assumptions": []
+        }
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

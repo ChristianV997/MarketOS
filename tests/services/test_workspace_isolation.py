@@ -5,31 +5,43 @@ experiment IDs and non-colliding ArtifactStore paths — no module leaks
 data across tenants.
 """
 import backend.core.persistence as pers
+import backend.workspaces.registry as registry_module
 import pytest
 from backend.workspaces.artifact_store import ArtifactStore
 from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import get_workspace_registry
 
 
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(pers, "STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(registry_module, "_registry", None)
     from core.signals import signal_engine
     monkeypatch.setattr(signal_engine, "get", lambda force_refresh=False: [])
 
 
 def _two_workspaces():
-    return ClientWorkspace(name="tenant-a"), ClientWorkspace(name="tenant-b")
+    registry = get_workspace_registry()
+    return (
+        registry.register(ClientWorkspace(name="tenant-a")),
+        registry.register(ClientWorkspace(name="tenant-b")),
+    )
 
 
 def _assert_isolated(env_a, env_b):
     assert env_a.workspace_id != env_b.workspace_id
     assert env_a.experiment_id != env_b.experiment_id
-    store = ArtifactStore()
-    path_a = store.path_for(env_a.workspace_id, env_a.experiment_id, "result.json")
-    path_b = store.path_for(env_b.workspace_id, env_b.experiment_id, "result.json")
+    registry = get_workspace_registry()
+    workspace_a = registry.get(env_a.workspace_id)
+    workspace_b = registry.get(env_b.workspace_id)
+    assert workspace_a is not None and workspace_b is not None
+    store_a = ArtifactStore(workspace_a)
+    store_b = ArtifactStore(workspace_b)
+    path_a = store_a.path_for(env_a.experiment_id, "result.json")
+    path_b = store_b.path_for(env_b.experiment_id, "result.json")
     assert path_a != path_b
-    assert store.load(env_a.workspace_id, env_a.experiment_id, "result.json") is not None
-    assert store.load(env_b.workspace_id, env_b.experiment_id, "result.json") is not None
+    assert store_a.load(env_a.experiment_id, "result.json") is not None
+    assert store_b.load(env_b.experiment_id, "result.json") is not None
 
 
 def test_product_research_isolated_across_workspaces():

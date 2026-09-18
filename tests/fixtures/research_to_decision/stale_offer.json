@@ -1,0 +1,10 @@
+{
+  "captured_at":"2026-09-16T09:07:00-06:00",
+  "client_name":"Fixture Client",
+  "lane":{"origin_country":"China","ship_from_country":"China","warehouse":"Shenzhen manual warehouse","destination_country":"Mexico","destination_state_region":"Mexico City","postal_code_assumption":"01000","currency":"MXN","tax_model":"destination VAT modeled as an assumption","duty_model":"unknown until broker quote","brokerage_model":"unknown until broker quote","shipping_model":"offer shipping included when observed","return_destination":"Mexico warehouse or supplier address unknown","return_cost_payer":"unknown","payment_method":"card with platform fee assumption","compliance_requirements":["product-specific review required"],"customer_support_language":["es-MX"],"marketplace_eligibility":["Mercado Libre subject to approval"],"delivery_promise":"supplier window only; not a customer promise","evidence_state":"fixture","confidence":0.5},
+  "candidates":[{"candidate_id":"stale-offer","title":"Stale offer","category":"home","lifecycle_state":"hold"}],
+  "supplier_inputs":[{"path":"stale_offer_record.json","label":"expired supplier quote"}],
+  "marketplace_inputs":[],
+  "consumer_attention_inputs":[],
+  "observation_inputs":[]
+}

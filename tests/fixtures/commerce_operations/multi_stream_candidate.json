@@ -1,0 +1,149 @@
+{
+  "marketplace": {
+    "report_version": "marketplace-trends-v1",
+    "evidence_mode": "fixture_demo",
+    "marketplaces_observed": ["amazon", "shopify"],
+    "top_candidate_id": "multi-stream-widget",
+    "candidates": [
+      {
+        "candidate_id": "multi-stream-widget",
+        "query": "multi stream widget",
+        "evidence": [
+          {
+            "marketplace": "amazon",
+            "price": 24.99,
+            "review_count": 1200,
+            "source_confidence": 0.8,
+            "evidence_mode": "fixture",
+            "source_type": "amazon_product_snapshot",
+            "source_url": "https://example.test/marketplace/amazon/multi-stream-widget"
+          },
+          {
+            "marketplace": "shopify",
+            "price": 26.99,
+            "review_count": 400,
+            "source_confidence": 0.7,
+            "evidence_mode": "fixture",
+            "source_type": "shopify_store_snapshot",
+            "source_url": "https://example.test/marketplace/shopify/multi-stream-widget"
+          }
+        ],
+        "score": {
+          "overall_marketplace_opportunity": 0.78,
+          "demand_proxy_score": 0.8,
+          "saturation_score": 0.22,
+          "price_confidence": 0.75,
+          "recommendation": "validate_supplier_first"
+        }
+      }
+    ],
+    "read_only": true,
+    "network_calls": false,
+    "mutated": false
+  },
+  "supplier": {
+    "report_version": "supplier-feasibility-v1",
+    "evidence_mode": "fixture_demo",
+    "suppliers_observed": ["cj", "alibaba"],
+    "top_candidate_id": "multi-stream-widget",
+    "candidates": [
+      {
+        "candidate_id": "multi-stream-widget",
+        "query": "multi stream widget",
+        "offers": [
+          {
+            "supplier": "cj",
+            "unit_cost": 7.0,
+            "shipping_cost": 2.5,
+            "estimated_landed_cost": 9.5,
+            "delivery_max_days": 12,
+            "evidence_mode": "fixture",
+            "source_type": "cj_offer_snapshot",
+            "source_url": "https://example.test/supplier/cj/multi-stream-widget",
+            "supplier_product_id": "CJ-MULTI-001",
+            "sku": "SKU-MULTI-CJ",
+            "supplier_sku": "SKU-MULTI-CJ"
+          },
+          {
+            "supplier": "alibaba",
+            "unit_cost": 6.5,
+            "shipping_cost": 3.0,
+            "estimated_landed_cost": 9.5,
+            "delivery_max_days": 20,
+            "evidence_mode": "fixture",
+            "source_type": "alibaba_offer_snapshot",
+            "source_url": "https://example.test/supplier/alibaba/multi-stream-widget",
+            "supplier_product_id": "ALI-MULTI-002",
+            "sku": "SKU-MULTI-ALI",
+            "supplier_sku": "SKU-MULTI-ALI"
+          }
+        ],
+        "score": {
+          "overall_supplier_feasibility": 0.72,
+          "supplier_cost_confidence": 0.65,
+          "recommendation": "hold_for_manual_review",
+          "risk_flags": [],
+          "economics": {
+            "target_sell_price": 24.99,
+            "estimated_landed_cost": 9.5,
+            "gross_margin_percent": 0.54,
+            "profit_per_order_before_ad_spend": 12.0,
+            "break_even_cpa": 12.0,
+            "break_even_roas": 2.08,
+            "assumptions": [
+              "gross_margin_percent_is_a_planning_assumption",
+              "landed_cost_is_not_fulfillment_proof"
+            ]
+          }
+        }
+      }
+    ],
+    "read_only": true,
+    "network_calls": false,
+    "mutated": false
+  },
+  "consumer": {
+    "report_version": "consumer-attention-v1",
+    "evidence_mode": "fixture_demo",
+    "platforms_observed": ["tiktok", "reddit"],
+    "top_candidate_id": "multi-stream-widget",
+    "candidates": [
+      {
+        "candidate_id": "multi-stream-widget",
+        "query": "multi stream widget",
+        "evidence": [
+          {
+            "platform": "tiktok",
+            "hook": "sanitized multi-stream hook",
+            "evidence_mode": "fixture",
+            "source_type": "tiktok_creative_snapshot",
+            "source_url": "https://example.test/attention/tiktok/multi-stream-widget"
+          },
+          {
+            "platform": "reddit",
+            "hook": "sanitized multi-stream thread",
+            "evidence_mode": "fixture",
+            "source_type": "reddit_thread_snapshot",
+            "source_url": "https://example.test/attention/reddit/multi-stream-widget"
+          }
+        ],
+        "score": {
+          "overall_consumer_attention": 0.74,
+          "source_diversity": 0.8,
+          "objection_density": 0.15,
+          "recommended_ad_angles": ["demo"],
+          "creative_hooks": [{"hook": "sanitized multi-stream hook"}],
+          "voice_of_customer": {
+            "pain_points": ["cable clutter"],
+            "desired_outcomes": ["tidy desk"],
+            "objections": []
+          },
+          "recommendation": "validate_supplier_first"
+        }
+      }
+    ],
+    "read_only": true,
+    "network_calls": false,
+    "mutated": false
+  }
+}

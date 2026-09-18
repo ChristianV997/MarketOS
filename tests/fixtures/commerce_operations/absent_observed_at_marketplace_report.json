@@ -1,0 +1,15 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "candidates": [
+    {
+      "candidate_id": "unlabeled-widget",
+      "query": "unlabeled widget",
+      "evidence": [{"marketplace": "amazon", "price": 24.99, "source_confidence": 0.8, "evidence_mode": "fixture"}],
+      "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.82, "saturation_score": 0.2, "price_confidence": 0.8, "recommendation": "validate_supplier_first"}
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}
