@@ -41,6 +41,7 @@ EVIDENCE_STATES = frozenset({
     "simulated",
     "observed",
     "rejected",
+    "stale",
 })
 SECRET_MARKERS = (
     "api_key",
@@ -63,6 +64,7 @@ LIVE_MARKERS = (
     "deploy_website",
     "send_message",
 )
+SUPPORTED_MODELS = frozenset({"higgsfield.catalog.static"})
 
 
 class CreativeAdapterError(ValueError):
@@ -109,10 +111,23 @@ class CreativeJobRequest:
     approval_state: str = "not_requested"
     generated_at: str = "2026-09-17T00:00:00Z"
     expires_at: str = "2026-10-17T00:00:00Z"
+    sku_variant: str = ""
+    supplier_offer_id: str = ""
+    client_workspace_id: str = ""
+    language: str = ""
+    content_angle: str = ""
+    prohibited_claims: tuple[str, ...] = ()
+    assumptions: tuple[str, ...] = ()
+    missing_evidence: tuple[str, ...] = ()
+    business_model: str = "retail_margin"
+    evidence_freshness: str = "current"
+    source_governance_ref: str = "MarketOS.SourceGovernance.Higgsfield.v1-pending"
 
     def __post_init__(self) -> None:
         _text(self.request_id, "request_id")
         _text(self.workspace_id, "workspace_id")
+        if ".." in self.workspace_id or "/" in self.workspace_id or "\\" in self.workspace_id:
+            raise CreativeAdapterError("path traversal rejected")
         if self.lane not in LANES:
             raise CreativeAdapterError("invalid lane")
         _text(self.offer_id, "offer_id")
@@ -127,7 +142,11 @@ class CreativeJobRequest:
         if not isinstance(self.claims, tuple) or not isinstance(self.evidence_ids, tuple):
             raise CreativeAdapterError("invalid evidence")
         _text(self.prompt_metadata, "prompt_metadata", allow_empty=True, limit=400)
-        blob = " ".join((self.prompt_metadata, *self.claims, self.request_id)).lower()
+        if self.model_id not in SUPPORTED_MODELS:
+            raise CreativeAdapterError("unsupported model")
+        if self.evidence_freshness not in {"current", "stale"}:
+            raise CreativeAdapterError("invalid evidence freshness")
+        blob = " ".join((self.prompt_metadata, *self.claims, self.request_id, self.content_angle)).lower()
         if any(marker in blob for marker in SECRET_MARKERS):
             raise CreativeAdapterError("secret-shaped request rejected")
         if any(marker in blob for marker in HTML_MARKERS):
@@ -175,13 +194,23 @@ class CreativeJob:
             "lane": req.lane,
             "offer_id": req.offer_id,
             "product_id": req.product_id,
+            "sku_variant": req.sku_variant,
+            "supplier_offer_id": req.supplier_offer_id or req.offer_id,
+            "client_workspace_id": req.client_workspace_id or req.workspace_id,
             "market_lane": req.market_lane,
+            "business_model": req.business_model,
             "channel": req.channel,
             "creative_type": req.creative_type,
             "mode": req.mode,
             "locale": req.locale,
+            "language": req.language or req.locale,
+            "content_angle": req.content_angle,
             "claims": list(req.claims),
+            "prohibited_claims": list(req.prohibited_claims),
+            "assumptions": list(req.assumptions),
+            "missing_evidence": list(req.missing_evidence),
             "evidence_ids": list(req.evidence_ids),
+            "evidence_freshness": req.evidence_freshness,
             "prompt_metadata": req.prompt_metadata,
             "reference_asset_ids": list(req.reference_asset_ids),
             "model_id": req.model_id,
@@ -195,13 +224,17 @@ class CreativeJob:
             "generated_at": req.generated_at,
             "expires_at": req.expires_at,
             "replay_hash": self.replay,
+            "source_governance_ref": req.source_governance_ref,
             "live_attestation": False,
             "live_actions_taken": False,
             "published": False,
+            "generated": False,
             "errors": list(self.errors),
             "client_safe": self.client_safe,
             "record_kind": self.record_kind,
             "confidence": "planning_only",
+            "creative_quality": "draft_only",
+            "commercial_validation": "not_commercially_validated",
         }
 
     def client_projection(self) -> dict[str, Any]:
