@@ -13,9 +13,10 @@ economics authority.
 | Business-model dispatch | `evaluation.commerce.business_model_economics` (#250) |
 | Dry-run lifecycle | `evaluation.commerce.dry_run_lifecycle` (#250) |
 
-Kernel implementation files remaining on this branch are byte-identical to #248
+Kernel implementation files are inherited from the #248 parent and are absent
+from the #250-owned diff. Their blob remains byte-identical to #248
 (`backend/economics/kernel.py` SHA `4baba4be5bcddeab71d841d0d8f26f84a7c8bef3`).
-Do not edit them here. Merger rebases onto #248 and drops the copies.
+Do not edit them here.
 
 ## Contracts
 
@@ -50,5 +51,5 @@ No framework installed. No second event spine. No live provider/order/payment ex
 PR #256 (`56810fc`) bases on old #250 SHA `f48dfb1842719ecbbc2b6db2d7a858cadcfe5d20`
 and imports `DryRunLifecycleReport`, `run_dry_run_lifecycle`, `SCENARIO_BUILDERS`,
 `Money`, `build_service_engagement`, and `evaluate_promotion`. Those public
-signatures are unchanged. #256 was not edited. After #250 is rebased onto #248,
-#256 must be rebased onto the new #250 HEAD before merge.
+signatures are unchanged. #256 was not edited. It must be rebased onto the
+reconciled #250 HEAD before merge.

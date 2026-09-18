@@ -11,4 +11,3 @@ build/
 state/
 backend/state/
 data/*.db
-.claude/
