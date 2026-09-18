@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types tests/service-delivery-workbench*.test.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
