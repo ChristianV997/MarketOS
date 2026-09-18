@@ -89,8 +89,14 @@ def test_arbitration_report_records_owners_and_does_not_claim_optimization() -> 
     assert report["verdict"]["production_optimization_applied"] is False
     assert report["identity_arbitration"]["field_hash_is_canonical"] is False
     assert report["isolated_scale_note"]["survives_event_replay_hash"] is False
+    assert report["laboratory_280_readonly"]["touched_in_this_pr"] is False
+    assert report["evidence_classification"] in {"unavailable", "actual", "fixture"}
     if report["canonical"]["status"] == "unavailable":
         assert report["measures_real_commercial_replay"] is False
+        assert report["evidence_classification"] == "unavailable"
     else:
         assert report["measures_real_commercial_replay"] is True
         assert report["canonical"]["all_replay_stable"] is True
+        for row in report["canonical"]["scenarios"]:
+            assert "p95_ms" in row
+            assert "p99_ms" in row
