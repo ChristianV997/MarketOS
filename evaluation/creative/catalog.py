@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-SUPPORTED_LOCALES = frozenset({"en", "es", "en-US", "es-MX"})
+SUPPORTED_LOCALES = frozenset({"en", "es", "en-US", "es-MX", "en-CA"})
 
 
 @dataclass(frozen=True)
