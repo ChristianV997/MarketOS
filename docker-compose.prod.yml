@@ -1,22 +1,54 @@
-version: '3.9'
+version: "3.9"
+
+# Production-shaped compose for dry-run / private staging only.
+# This file does not enable live providers, public commerce runs, or auth.
+# Postgres/Redis remain provisioned for a future persistence layer; backend/api.py
+# does not wire them yet. Do not treat this stack as a public deployment.
+
 services:
   api:
     build: .
     command: uvicorn backend.api:app --host 0.0.0.0 --port 3000
     ports:
       - "3000:3000"
+    environment:
+      MARKETOS_MVP_MODE: "1"
+      MARKETOS_PUBLIC_COMMERCE_RUNS: "0"
+      MARKETOS_SUPABASE_CANONICAL_EVENTS: "0"
     depends_on:
-      - redis
-      - db
+      redis:
+        condition: service_started
+      db:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 15s
+    init: true
+
   # Redis and Postgres are provisioned for a future persistence layer; the
   # current backend/api.py path does not wire them yet (see README Known gaps).
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   db:
     image: postgres:15
     environment:
-      POSTGRES_USER: upos
-      POSTGRES_PASSWORD: upos
-      POSTGRES_DB: upos
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-upos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the environment}
+      POSTGRES_DB: ${POSTGRES_DB:-upos}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-upos} -d ${POSTGRES_DB:-upos}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Host publish of 5432 is intentionally omitted so the database is not
+    # exposed on the operator workstation by default.
