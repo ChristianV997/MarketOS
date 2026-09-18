@@ -4,7 +4,8 @@ Never publishes ads, spends money, mutates campaigns, messages customers,
 changes storefronts, places orders, or calls providers.
 """
 from evaluation.commerce.experiment_draft_build import build_experiment_draft, reset_registry
-from evaluation.commerce.experiment_draft_models import ExperimentDraft, SimulationReport
+from evaluation.commerce.experiment_draft_models import ExperimentDraft
+from evaluation.commerce.experiment_draft_report import SimulationReport
 from evaluation.commerce.experiment_draft_sim import client_safe_report, simulate_experiment_draft
 from evaluation.commerce.experiment_draft_types import ExperimentDraftError, SCHEMA, replay_hash
 
