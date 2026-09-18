@@ -142,3 +142,98 @@ def test_staged_paths_use_only_index_diff(monkeypatch):
 def test_pr_readiness_policy_labels_do_not_count_as_mutation_code():
     report = pr_readiness_report.report(["evaluation/commerce/readiness.py"], '+("supplier_mutation", "orders_payments_or_fulfillment")', branch="codex/test", mutation_diff="")
     assert report["detections"]["provider_mutation_like_detected"] is False
+
+
+def _quality_gate_report(*, status="failed", classification="failure_origin_unverified", ci_status="passed", ci_classification="pass", delta_status="failed", delta_classification="mixed", controls=None, ready=False):
+    return {
+        "phase": "final",
+        "status": status,
+        "classification": classification,
+        "ready_for_supervised_use": ready,
+        "ci": {"status": ci_status, "classification": ci_classification},
+        "checks": [
+            {"name": "pytest", "status": "failed", "execution_status": "executed", "checks": []},
+        ],
+        "baseline_delta": {
+            "status": delta_status,
+            "classification": delta_classification,
+            "classifications": sorted({delta_classification}),
+            "baseline_available": delta_classification != "baseline_missing",
+            "controls": controls or [],
+            "fingerprint": "a" * 64,
+        },
+    }
+
+
+def test_pr_readiness_separates_baseline_origins_and_executed_failures():
+    quality_gate = _quality_gate_report(
+        controls=[
+            {"name": "pytest", "baseline_status": "passed", "candidate_status": "failed", "classification": "introduced_failure"},
+            {"name": "ruff", "baseline_status": "failed", "candidate_status": "failed", "classification": "inherited_failure"},
+            {"name": "typed", "baseline_status": "failed", "candidate_status": "passed", "classification": "resolved_failure"},
+        ],
+    )
+
+    report = pr_readiness_report.report(["scripts/ai/run_local_quality_gate.py"], "", branch="codex/test", quality_gate=quality_gate)
+
+    delta = report["quality_gate"]["baseline_delta"]
+    assert delta["introduced_failures"] == ["pytest"]
+    assert delta["inherited_failures"] == ["ruff"]
+    assert delta["resolved_failures"] == ["typed"]
+    assert delta["candidate_executed_failure"] == ["pytest"]
+    assert report["quality_gate"]["blocking"] is True
+    assert report["merge_readiness"] == "blocked"
+
+
+def test_pr_readiness_preserves_ci_unavailable_and_incomplete_evidence():
+    quality_gate = _quality_gate_report(
+        status="unavailable",
+        classification="ci_unavailable",
+        ci_status="unavailable",
+        ci_classification="ci_unavailable",
+        delta_status="unavailable",
+        delta_classification="candidate_incomplete",
+        controls=[
+            {"name": "ci", "baseline_status": "passed", "candidate_status": "unavailable", "classification": "candidate_incomplete"},
+        ],
+    )
+
+    report = pr_readiness_report.report(["scripts/ai/run_local_quality_gate.py"], "", branch="codex/test", quality_gate=quality_gate)
+
+    assert report["quality_gate"]["ci_classification"] == "ci_unavailable"
+    assert report["quality_gate"]["baseline_delta"]["candidate_incomplete"] == ["ci"]
+    assert "ci:ci_unavailable" in report["blocking_warnings"]
+    assert report["merge_readiness"] == "blocked"
+    assert report["quality_gate"]["ready_for_supervised_use"] is False
+
+
+def test_pr_readiness_reports_missing_and_malformed_baselines_as_blockers():
+    missing = _quality_gate_report(status="unavailable", classification="baseline_missing", delta_status="unavailable", delta_classification="baseline_missing")
+    malformed = _quality_gate_report(status="configuration_error", classification="malformed", delta_status="malformed", delta_classification="malformed_baseline")
+
+    missing_report = pr_readiness_report.report(["tests/test_local_quality_gate.py"], "", branch="codex/test", quality_gate=missing)
+    malformed_report = pr_readiness_report.report(["tests/test_local_quality_gate.py"], "", branch="codex/test", quality_gate=malformed)
+
+    assert missing_report["quality_gate"]["baseline_delta"]["classification"] == "baseline_missing"
+    assert malformed_report["quality_gate"]["baseline_delta"]["classification"] == "malformed_baseline"
+    assert missing_report["merge_readiness"] == "blocked"
+    assert malformed_report["merge_readiness"] == "blocked"
+
+
+def test_pr_readiness_projection_is_deterministic_and_legacy_invocation_is_unchanged():
+    quality_gate = _quality_gate_report(
+        status="passed",
+        classification="pass",
+        delta_status="passed",
+        delta_classification="resolved_failure",
+        controls=[{"name": "pytest", "baseline_status": "failed", "candidate_status": "passed", "classification": "resolved_failure"}],
+        ready=True,
+    )
+    first = pr_readiness_report.report(["docs/ai/QUALITY_GATES.md"], "", branch="codex/test", quality_gate=quality_gate)
+    second = pr_readiness_report.report(["docs/ai/QUALITY_GATES.md"], "", branch="codex/test", quality_gate=quality_gate)
+    legacy = pr_readiness_report.report(["docs/ai/QUALITY_GATES.md"], "", branch="codex/test")
+
+    assert first == second
+    assert first["quality_gate"]["baseline_delta"]["resolved_failures"] == ["pytest"]
+    assert legacy["quality_gate"] == {"provided": False}
+    assert legacy["merge_readiness"] == "ready_for_review"
