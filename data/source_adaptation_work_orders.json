@@ -1,0 +1,1558 @@
+[
+  {
+    "work_order_id": "wo-airbyte",
+    "source_id": "src-airbyte",
+    "repository_url": "https://github.com/airbytehq/airbyte",
+    "commit_sha": "2fa9e2ec2098ef2e400d7e39fd1db4200209c628",
+    "version_tag": "v0.64.4",
+    "license": "ELv2",
+    "compatibility_status": "incompatible_license",
+    "inspected_paths": [
+      "airbyte-integrations/connectors",
+      "airbyte-config/models"
+    ],
+    "security_surface": {
+      "network_access": true,
+      "credential_exposure": "high_risk",
+      "code_execution": true,
+      "local_ipc": true,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Heavy container orchestration with secrets manager requirements."
+    },
+    "data_network_behavior": {
+      "network_mode": "sandboxed_egress",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "database"
+    },
+    "adaptation_mode": "reject",
+    "marketos_target_module": "",
+    "marketos_target_symbol": "",
+    "target_boundary_authority": "none",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Enforce negative regression test blocking src-airbyte"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes",
+      "do_not_vendor_src-airbyte"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Zero in-tree code footprint; keep prohibited from dependencies.",
+    "attribution_notice": "Not applicable (rejected source).",
+    "source_freshness_days": 0,
+    "review_state": "rejected",
+    "evidence_classification": "none",
+    "work_order_hash": "28613b8c7a873160776878a45fb6de72cffda79f4d8b51c7ce34b8097549fce9"
+  },
+  {
+    "work_order_id": "wo-chatwoot",
+    "source_id": "src-chatwoot",
+    "repository_url": "https://github.com/chatwoot/chatwoot",
+    "commit_sha": "9f920b549c14491a4e587687a3eed5d21c6ccc7d",
+    "version_tag": "v4.18.0",
+    "license": "AGPL-3.0",
+    "compatibility_status": "incompatible_license",
+    "inspected_paths": [
+      "app/models/conversation.rb",
+      "app/controllers/api/v1/widget"
+    ],
+    "security_surface": {
+      "network_access": true,
+      "credential_exposure": "high_risk",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Omnichannel customer messaging server with webhook triggers."
+    },
+    "data_network_behavior": {
+      "network_mode": "sandboxed_egress",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "database"
+    },
+    "adaptation_mode": "reject",
+    "marketos_target_module": "",
+    "marketos_target_symbol": "",
+    "target_boundary_authority": "none",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Enforce negative regression test blocking src-chatwoot"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes",
+      "do_not_vendor_src-chatwoot"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Zero in-tree code footprint; prohibited from in-tree linking or vendoring.",
+    "attribution_notice": "Not applicable (rejected source).",
+    "source_freshness_days": 0,
+    "review_state": "rejected",
+    "evidence_classification": "none",
+    "work_order_hash": "2309d59ef1485d94e51fc71ceba7e419844792d1337996c4956c662e7a292d0f"
+  },
+  {
+    "work_order_id": "wo-coderos",
+    "source_id": "src-coderos",
+    "repository_url": "https://github.com/ChristianV997/CoderOS",
+    "commit_sha": "e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4",
+    "version_tag": "frozen-control-plane",
+    "license": "Proprietary-Internal",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "docs/ai/CANONICAL_ARCHITECTURE.md",
+      "scripts/ai/validate_consumers.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Read-only development guidance and architecture conventions; strictly isolated from runtime."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "reference_only",
+    "marketos_target_module": "docs/ai.py",
+    "marketos_target_symbol": "standards",
+    "target_boundary_authority": "docs.ai.standards",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Document design pattern in docs/ai/ for operator guidance only"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "docs/ai/src-coderos_reference.md"
+    ],
+    "rollback_deactivation_strategy": "CoderOS is an external offline control plane; remove adapter scripts if decoupled.",
+    "attribution_notice": "Internal repository reference; no third-party copyright notice required.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "dry_run",
+    "work_order_hash": "963a71484fa4f443a51e11d0e288f0ae6a0fef0388e55e7b527531b82137b70c"
+  },
+  {
+    "work_order_id": "wo-crawl4ai",
+    "source_id": "src-crawl4ai",
+    "repository_url": "https://github.com/unclecode/crawl4ai",
+    "commit_sha": "b04ed9f3a941a96509272f3bc14be85f5767736a",
+    "version_tag": "v0.4.2",
+    "license": "Apache-2.0",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "crawl4ai/async_crawler.py",
+      "crawl4ai/extraction_strategy.py"
+    ],
+    "security_surface": {
+      "network_access": true,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Extraction engine; browser execution strictly gated behind offline fixtures."
+    },
+    "data_network_behavior": {
+      "network_mode": "fixture_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "disabled",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "integrate",
+    "marketos_target_module": "backend/scouting.py",
+    "marketos_target_symbol": "crawl4ai_client",
+    "target_boundary_authority": "backend.scouting.crawl4ai_client",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Delete backend/scouting/crawl4ai_client.py; fall back to static HTML parser.",
+    "attribution_notice": "Preserve Apache-2.0 copyright notices in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "deferred",
+    "evidence_classification": "none",
+    "work_order_hash": "2a5918117d35ac862101775ba6ec004bad92bff218c4236e55c4f310a3bbc110"
+  },
+  {
+    "work_order_id": "wo-dagster",
+    "source_id": "src-dagster",
+    "repository_url": "https://github.com/dagster-io/dagster",
+    "commit_sha": "21db4e55d3d1b723be3fdd90690fb9ca638744ac",
+    "version_tag": "1.9.10",
+    "license": "Apache-2.0",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "python_modules/dagster/dagster/_core/definitions/assets.py",
+      "python_modules/dagster/dagster/_core/definitions/asset_key.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Pattern study only; runtime daemon and web server rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "emulate",
+    "marketos_target_module": "backend/observability/lineage_facets.py",
+    "marketos_target_symbol": "AssetFacet",
+    "target_boundary_authority": "backend.observability.lineage_facets",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Emulate contract interface without vendoring external code"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "backend/observability/lineage_facets.py"
+    ],
+    "rollback_deactivation_strategy": "Bypass AssetFacet field in backend/observability/lineage_facets.py.",
+    "attribution_notice": "Attribution to Dagster contributors in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "ce4a7750e489476d68ea9ac0d8ca71b3b865268599e5cf30736ddb8cebc820b6"
+  },
+  {
+    "work_order_id": "wo-dlt",
+    "source_id": "src-dlt",
+    "repository_url": "https://github.com/dlt-hub/dlt",
+    "commit_sha": "5a608086b7f7c6735968911138cb449472f7a259",
+    "version_tag": "1.7.0",
+    "license": "Apache-2.0",
+    "compatibility_status": "conditionally_compatible",
+    "inspected_paths": [
+      "dlt/extract/source.py",
+      "dlt/normalize/normalizer.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Evaluated schema inference; dependency deferred."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "defer",
+    "marketos_target_module": "",
+    "marketos_target_symbol": "",
+    "target_boundary_authority": "none",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Maintain deferred status until required infrastructure is approved"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Zero in-tree code footprint; keep deferred.",
+    "attribution_notice": "Documented in THIRD_PARTY_NOTICES.md if adopted.",
+    "source_freshness_days": 0,
+    "review_state": "deferred",
+    "evidence_classification": "none",
+    "work_order_hash": "8cc4e4766b8b122c1ccbc931f1b321a46fd19043889761134baeae888f61245e"
+  },
+  {
+    "work_order_id": "wo-duckdb",
+    "source_id": "src-duckdb",
+    "repository_url": "https://github.com/duckdb/duckdb",
+    "commit_sha": "19864453f7d0ed095256d848b46e7b8630989bac",
+    "version_tag": "v1.1.3",
+    "license": "MIT",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "src/include/duckdb/main/connection.hpp",
+      "src/parser/parser.cpp"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "In-process analytical engine; local file and memory queries only."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "disabled",
+      "data_persistence": "memory_only"
+    },
+    "adaptation_mode": "emulate",
+    "marketos_target_module": "backend/analytics.py",
+    "marketos_target_symbol": "embedded_query_engine",
+    "target_boundary_authority": "backend.analytics.embedded_query_engine",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Emulate contract interface without vendoring external code"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "backend/analytics.py"
+    ],
+    "rollback_deactivation_strategy": "Fall back to standard Python sqlite3 / in-memory dict filtering.",
+    "attribution_notice": "Retain DuckDB Foundation MIT notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "dd78e23ca7840f0bbdbfe08e24cbed20d56983beac5b5926e0b1e0c98b9e8d4a"
+  },
+  {
+    "work_order_id": "wo-firecrawl",
+    "source_id": "src-firecrawl",
+    "repository_url": "https://github.com/mendableai/firecrawl",
+    "commit_sha": "2a71f0190a02544f1ae06f0e1ce0c050cc4fe36a",
+    "version_tag": "v2.11.359",
+    "license": "AGPL-3.0",
+    "compatibility_status": "incompatible_license",
+    "inspected_paths": [
+      "apps/api/src/services/crawler.ts",
+      "apps/api/src/scraper/WebScraper"
+    ],
+    "security_surface": {
+      "network_access": true,
+      "credential_exposure": "high_risk",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Scraper API with AGPL copyleft license risk."
+    },
+    "data_network_behavior": {
+      "network_mode": "sandboxed_egress",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "reject",
+    "marketos_target_module": "",
+    "marketos_target_symbol": "",
+    "target_boundary_authority": "none",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Enforce negative regression test blocking src-firecrawl"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes",
+      "do_not_vendor_src-firecrawl"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Zero in-tree code footprint; prohibited from in-tree linking.",
+    "attribution_notice": "Not applicable (rejected source).",
+    "source_freshness_days": 0,
+    "review_state": "rejected",
+    "evidence_classification": "none",
+    "work_order_hash": "1e3d9987ecb7816f5e69aa4d3d19908b40d2fedb3cfd6211ffeffc21f83b1701"
+  },
+  {
+    "work_order_id": "wo-great-expectations",
+    "source_id": "src-great-expectations",
+    "repository_url": "https://github.com/great-expectations/great_expectations",
+    "commit_sha": "883fd69e62d44fde0db8c61e300305a4f678b87f",
+    "version_tag": "1.3.0",
+    "license": "Apache-2.0",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "great_expectations/expectations/expectation.py",
+      "great_expectations/core/expectation_suite.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Pattern emulation; heavy framework runtime and external plugins rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "emulate",
+    "marketos_target_module": "evaluation/quality.py",
+    "marketos_target_symbol": "evaluate_quality",
+    "target_boundary_authority": "evaluation.quality",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Emulate contract interface without vendoring external code"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "evaluation/quality.py"
+    ],
+    "rollback_deactivation_strategy": "Fall back to baseline evaluation.quality.quality_reasons evaluator.",
+    "attribution_notice": "Apache-2.0 attribution notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "00047783c0942781e7e24e6ddf190826f685418590bac7098940fb2be695db24"
+  },
+  {
+    "work_order_id": "wo-gstack",
+    "source_id": "src-gstack",
+    "repository_url": "https://github.com/garrytan/gstack",
+    "commit_sha": "1a8b9c0d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b",
+    "version_tag": "main-pinned",
+    "license": "MIT",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "skills/qa-review/SKILL.md",
+      "benchmarks/benchmark_methodology.md"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Methodology guidelines for agent benchmarking and review."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "reference_only",
+    "marketos_target_module": "docs/ai.py",
+    "marketos_target_symbol": "standards",
+    "target_boundary_authority": "docs.ai.standards",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Document design pattern in docs/ai/ for operator guidance only"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "docs/ai/src-gstack_reference.md"
+    ],
+    "rollback_deactivation_strategy": "Offline reference documentation only; delete referenced guidelines if needed.",
+    "attribution_notice": "MIT license notice retained in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "dry_run",
+    "work_order_hash": "53a836bcf612a060b2cf26d060effc296af892d8c74921d9bca94f14744886df"
+  },
+  {
+    "work_order_id": "wo-hermes-ecc",
+    "source_id": "src-hermes-ecc",
+    "repository_url": "https://github.com/ecc/hermes-agent-spec",
+    "commit_sha": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+    "version_tag": "v1.2.0",
+    "license": "MIT",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "spec/contract_first.md",
+      "spec/architecture_decision_records.md"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Contract-first specifications and ADR conventions."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "reference_only",
+    "marketos_target_module": "docs/ai.py",
+    "marketos_target_symbol": "standards",
+    "target_boundary_authority": "docs.ai.standards",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Document design pattern in docs/ai/ for operator guidance only"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "docs/ai/src-hermes-ecc_reference.md"
+    ],
+    "rollback_deactivation_strategy": "Specification references only; remove documentation if decoupled.",
+    "attribution_notice": "MIT notice documented in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "dry_run",
+    "work_order_hash": "91a05db807fa7f526decc14999090f3bb1dff835899c2769ff3657e307b0e642"
+  },
+  {
+    "work_order_id": "wo-higgsfield-cli",
+    "source_id": "src-higgsfield-cli",
+    "repository_url": "https://github.com/higgsfield-ai/cli",
+    "commit_sha": "dc7e2d274bf7aa112ce8d76a085b3bc91aa08415",
+    "version_tag": "v0.3.1",
+    "license": "MIT",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "src/commands/job.rs",
+      "src/commands/deploy.rs"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "CLI ergonomics reference only; auth login and deploy commands rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "reference_only",
+    "marketos_target_module": "docs/ai.py",
+    "marketos_target_symbol": "standards",
+    "target_boundary_authority": "docs.ai.standards",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Document design pattern in docs/ai/ for operator guidance only"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "docs/ai/src-higgsfield-cli_reference.md"
+    ],
+    "rollback_deactivation_strategy": "Zero binary or code vendoring; retain documentation reference only.",
+    "attribution_notice": "Higgsfield AI MIT attribution in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "dry_run",
+    "work_order_hash": "e5b069fb6638755843aa14453ece3f6b0d7f8c0a33cbf515d94ae417e45af217"
+  },
+  {
+    "work_order_id": "wo-higgsfield-gpu-orchestration",
+    "source_id": "src-higgsfield-gpu-orchestration",
+    "repository_url": "https://github.com/higgsfield-ai/higgsfield",
+    "commit_sha": "f412895ea91054ee839f506bd419ec87fa094183",
+    "version_tag": "v0.0.4-rc",
+    "license": "Apache-2.0",
+    "compatibility_status": "incompatible_architecture",
+    "inspected_paths": [
+      "src/orchestrator/cluster.py",
+      "src/training/distributed.py"
+    ],
+    "security_surface": {
+      "network_access": true,
+      "credential_exposure": "high_risk",
+      "code_execution": true,
+      "local_ipc": true,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Multi-node GPU training and orchestration engine."
+    },
+    "data_network_behavior": {
+      "network_mode": "sandboxed_egress",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "defer",
+    "marketos_target_module": "",
+    "marketos_target_symbol": "",
+    "target_boundary_authority": "none",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Maintain deferred status until required infrastructure is approved"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Zero in-tree code footprint; keep deferred from MarketOS Phase 1 runtime.",
+    "attribution_notice": "Not applicable (deferred).",
+    "source_freshness_days": 0,
+    "review_state": "deferred",
+    "evidence_classification": "none",
+    "work_order_hash": "4b73e4833c91bf62a85d6064ae4511a29171fa9b6bbe61e241ca5c9f20226e25"
+  },
+  {
+    "work_order_id": "wo-higgsfield-mcp-bridge",
+    "source_id": "src-higgsfield-mcp-bridge",
+    "repository_url": "https://github.com/higgsfield-ai/fnf-local-pluging-bridge-mcp",
+    "commit_sha": "b671fa824901eeaa839f506bd419ec87fa094182",
+    "version_tag": "main-pinned",
+    "license": "MIT",
+    "compatibility_status": "rejected",
+    "inspected_paths": [
+      "src/server.ts",
+      "src/plugins/after_effects.ts"
+    ],
+    "security_surface": {
+      "network_access": true,
+      "credential_exposure": "high_risk",
+      "code_execution": true,
+      "local_ipc": true,
+      "desktop_control_risk": true,
+      "attack_surface_notes": "Drives After Effects and Blender via OS scripting and desktop IPC."
+    },
+    "data_network_behavior": {
+      "network_mode": "sandboxed_egress",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "reject",
+    "marketos_target_module": "",
+    "marketos_target_symbol": "",
+    "target_boundary_authority": "none",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Enforce negative regression test blocking src-higgsfield-mcp-bridge"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes",
+      "do_not_vendor_src-higgsfield-mcp-bridge"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Zero in-tree code footprint; prohibited from MCP bridge registration.",
+    "attribution_notice": "Not applicable (rejected source).",
+    "source_freshness_days": 0,
+    "review_state": "rejected",
+    "evidence_classification": "none",
+    "work_order_hash": "3773065aff600246427848178c071a52c8da1f54469ef6950698530fb82dd1db"
+  },
+  {
+    "work_order_id": "wo-higgsfield-python-sdk",
+    "source_id": "src-higgsfield-python-sdk",
+    "repository_url": "https://github.com/higgsfield-ai/higgsfield-client",
+    "commit_sha": "aefd1ca4288d45ba890f5926b4ea39ef67aa9211",
+    "version_tag": "0.1.0",
+    "license": "Apache-2.0",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "higgsfield_client/client.py",
+      "higgsfield_client/models.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "API contract and polling taxonomy reference only; live subscribe and submit rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "reference_only",
+    "marketos_target_module": "docs/ai.py",
+    "marketos_target_symbol": "standards",
+    "target_boundary_authority": "docs.ai.standards",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Document design pattern in docs/ai/ for operator guidance only"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "docs/ai/src-higgsfield-python-sdk_reference.md"
+    ],
+    "rollback_deactivation_strategy": "Metadata contracts only; remove schema definitions if decoupled.",
+    "attribution_notice": "Higgsfield AI Apache-2.0 notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "dry_run",
+    "work_order_hash": "67cb0e9c78c69382a0765026fa405966b65a7f37b26afea3909ba5a72aa56aaa"
+  },
+  {
+    "work_order_id": "wo-higgsfield-skills",
+    "source_id": "src-higgsfield-skills",
+    "repository_url": "https://github.com/higgsfield-ai/skills",
+    "commit_sha": "d0714066c6b41295b2ce0b3b4f69de7b76a08412",
+    "version_tag": "0.12.0",
+    "license": "MIT",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "skills/photoshoot/skill.yaml",
+      "skills/marketplace_cards/skill.yaml"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Workflow definitions studied for prompt/brief templates; skill installer rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "copy_pattern",
+    "marketos_target_module": "docs/ai.py",
+    "marketos_target_symbol": "skills",
+    "target_boundary_authority": "docs.ai.skills",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Adapt pattern from src-higgsfield-skills into in-tree module",
+      "Add attribution entry in THIRD_PARTY_NOTICES.md"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "docs/ai.py"
+    ],
+    "rollback_deactivation_strategy": "Delete draft brief templates; no runtime code dependency.",
+    "attribution_notice": "Higgsfield AI MIT copyright notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "d6867ec56f5cc6a740440185601fb9268ee246d49b46d08137fea62e76545d39"
+  },
+  {
+    "work_order_id": "wo-higgsfield-ts-sdk",
+    "source_id": "src-higgsfield-ts-sdk",
+    "repository_url": "https://github.com/higgsfield-ai/higgsfield-js",
+    "commit_sha": "e3f27429671eaef824ba953b6de984e76a084109",
+    "version_tag": "0.2.6",
+    "license": "MIT",
+    "compatibility_status": "incompatible_runtime",
+    "inspected_paths": [
+      "src/client.ts",
+      "src/types.ts"
+    ],
+    "security_surface": {
+      "network_access": true,
+      "credential_exposure": "read_only",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "TypeScript SDK with axios HTTP client."
+    },
+    "data_network_behavior": {
+      "network_mode": "sandboxed_egress",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "reject",
+    "marketos_target_module": "",
+    "marketos_target_symbol": "",
+    "target_boundary_authority": "none",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Enforce negative regression test blocking src-higgsfield-ts-sdk"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes",
+      "do_not_vendor_src-higgsfield-ts-sdk"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Zero in-tree code footprint; prohibited from Node/Python bridge.",
+    "attribution_notice": "Not applicable (rejected source).",
+    "source_freshness_days": 0,
+    "review_state": "rejected",
+    "evidence_classification": "none",
+    "work_order_hash": "8b7643ac59fa26486d0f2f30cc3aa198b074c2d8afee60fa4965614f07fb1424"
+  },
+  {
+    "work_order_id": "wo-medusa",
+    "source_id": "src-medusa",
+    "repository_url": "https://github.com/medusajs/medusa",
+    "commit_sha": "956a50e934fb0db6f55d5b9fa459a43abcee358b",
+    "version_tag": "v2.4.0",
+    "license": "MIT",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "packages/medusa/src/models/product.ts",
+      "packages/medusa/src/types/product.ts"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Pattern adaptation of JSON schema; Node.js server and database rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "copy_pattern",
+    "marketos_target_module": "backend/commerce.py",
+    "marketos_target_symbol": "medusa_adapter",
+    "target_boundary_authority": "backend.commerce.medusa_adapter",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Adapt pattern from src-medusa into in-tree module",
+      "Add attribution entry in THIRD_PARTY_NOTICES.md"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "backend/commerce.py"
+    ],
+    "rollback_deactivation_strategy": "Delete backend/commerce/medusa_adapter.py; fall back to standard JSON schema.",
+    "attribution_notice": "Medusa MIT copyright notice retained in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "65755b13f0dfa7d976b4150c67ac7cb1d8bed48def5d3487754781d920854f50"
+  },
+  {
+    "work_order_id": "wo-n8n",
+    "source_id": "src-n8n",
+    "repository_url": "https://github.com/n8n-io/n8n",
+    "commit_sha": "0e26f58ae66c2aaad05af24fd56c28c960bcdd9b",
+    "version_tag": "n8n@1.71.0",
+    "license": "Sustainable Use License",
+    "compatibility_status": "incompatible_license",
+    "inspected_paths": [
+      "packages/workflow/src/Workflow.ts",
+      "packages/core/src/NodeExecuteFunctions.ts"
+    ],
+    "security_surface": {
+      "network_access": true,
+      "credential_exposure": "high_risk",
+      "code_execution": true,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Visual workflow automation engine with third-party webhooks."
+    },
+    "data_network_behavior": {
+      "network_mode": "sandboxed_egress",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "database"
+    },
+    "adaptation_mode": "reject",
+    "marketos_target_module": "",
+    "marketos_target_symbol": "",
+    "target_boundary_authority": "none",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Enforce negative regression test blocking src-n8n"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes",
+      "do_not_vendor_src-n8n"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Zero in-tree code footprint; prohibited from in-tree linking.",
+    "attribution_notice": "Not applicable (rejected source).",
+    "source_freshness_days": 0,
+    "review_state": "rejected",
+    "evidence_classification": "none",
+    "work_order_hash": "16429c4f1b1d9d45b624c4396689c986da22178bbb987a6284ced1029c33ed2a"
+  },
+  {
+    "work_order_id": "wo-open-policy-agent",
+    "source_id": "src-open-policy-agent",
+    "repository_url": "https://github.com/open-policy-agent/opa",
+    "commit_sha": "b2c26708e9d55645d7f837db495031f7e4152594",
+    "version_tag": "v1.20.2",
+    "license": "Apache-2.0",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "ast/policy.go",
+      "topdown/eval.go"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Declarative policy grammar studied; external Go daemon sidecar rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "emulate",
+    "marketos_target_module": "evaluation/trustos.py",
+    "marketos_target_symbol": "policy_gate",
+    "target_boundary_authority": "evaluation.trustos.policy_gate",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Emulate contract interface without vendoring external code"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "evaluation/trustos.py"
+    ],
+    "rollback_deactivation_strategy": "Bypass policy gate helper; fall back to imperative rule evaluation.",
+    "attribution_notice": "Apache-2.0 notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "3736e40887034e5938aeeac7439024e9466173f58f17f497c345a4a164220f4d"
+  },
+  {
+    "work_order_id": "wo-openlineage",
+    "source_id": "src-openlineage",
+    "repository_url": "https://github.com/OpenLineage/OpenLineage",
+    "commit_sha": "e7a768ffef28b2dd011e2376d4c63267316b6584",
+    "version_tag": "1.28.0",
+    "license": "Apache-2.0",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "client/python/openlineage/client/facet.py",
+      "client/python/openlineage/client/run.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Facet schema emulation; heavy client and network transport rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "emulate",
+    "marketos_target_module": "backend/observability/lineage_facets.py",
+    "marketos_target_symbol": "EvidenceLineageFacet",
+    "target_boundary_authority": "backend.observability.lineage_facets",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Emulate contract interface without vendoring external code"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "backend/observability/lineage_facets.py"
+    ],
+    "rollback_deactivation_strategy": "Bypass attach_lineage_to_evidence; standard evidence models operate independently.",
+    "attribution_notice": "OpenLineage Apache-2.0 attribution notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "da89e32d6ab5e48f3111060b8c7d627ace26ab27e7730d62c1e3f43c8e881a99"
+  },
+  {
+    "work_order_id": "wo-opentelemetry-python",
+    "source_id": "src-opentelemetry-python",
+    "repository_url": "https://github.com/open-telemetry/opentelemetry-python",
+    "commit_sha": "74509a111acd486d195ec5ea8478c8ccbf1f93c1",
+    "version_tag": "v1.31.1",
+    "license": "Apache-2.0",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "opentelemetry-api/src/opentelemetry/trace/span.py",
+      "opentelemetry-api/src/opentelemetry/context/__init__.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Trace context data structures; network exporters disabled."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "copy_pattern",
+    "marketos_target_module": "backend/observability.py",
+    "marketos_target_symbol": "tracing",
+    "target_boundary_authority": "backend.observability.tracing",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Adapt pattern from src-opentelemetry-python into in-tree module",
+      "Add attribution entry in THIRD_PARTY_NOTICES.md"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "backend/observability.py"
+    ],
+    "rollback_deactivation_strategy": "Fall back to local logging.Logger context.",
+    "attribution_notice": "OpenTelemetry Apache-2.0 attribution notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "8a0b7bd4f5209fff9e5f2e6537f40c02472dc9747da5c5d1a4823c01775cfe3e"
+  },
+  {
+    "work_order_id": "wo-polars",
+    "source_id": "src-polars",
+    "repository_url": "https://github.com/pola-rs/polars",
+    "commit_sha": "87feed72585eff5acf3defb7f81029123d5cba68",
+    "version_tag": "py-1.17.1",
+    "license": "MIT",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "crates/polars-core/src/frame/mod.rs",
+      "py-polars/polars/dataframe/frame.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Tabular query expressions studied; native structures used."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "emulate",
+    "marketos_target_module": "backend/analytics.py",
+    "marketos_target_symbol": "dataframe_engine",
+    "target_boundary_authority": "backend.analytics.dataframe_engine",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Emulate contract interface without vendoring external code"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "backend/analytics.py"
+    ],
+    "rollback_deactivation_strategy": "Use standard python list-of-dicts comprehension.",
+    "attribution_notice": "MIT license notice retained in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "1e5cbb60b238e0e5a1fa5bdb279387f78bd2e91b2f94f0733cc8e7eb74eee0bf"
+  },
+  {
+    "work_order_id": "wo-prefect",
+    "source_id": "src-prefect",
+    "repository_url": "https://github.com/PrefectHQ/prefect",
+    "commit_sha": "c8986edebb2dde3e2a931adbe24d2eaefcb799cb",
+    "version_tag": "3.2.0",
+    "license": "Apache-2.0",
+    "compatibility_status": "incompatible_architecture",
+    "inspected_paths": [
+      "src/prefect/flows.py",
+      "src/prefect/tasks.py"
+    ],
+    "security_surface": {
+      "network_access": true,
+      "credential_exposure": "high_risk",
+      "code_execution": true,
+      "local_ipc": true,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Heavy workflow orchestration server."
+    },
+    "data_network_behavior": {
+      "network_mode": "sandboxed_egress",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "database"
+    },
+    "adaptation_mode": "reject",
+    "marketos_target_module": "",
+    "marketos_target_symbol": "",
+    "target_boundary_authority": "none",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Enforce negative regression test blocking src-prefect"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes",
+      "do_not_vendor_src-prefect"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Zero in-tree code footprint; prohibited from in-tree linking.",
+    "attribution_notice": "Not applicable (rejected source).",
+    "source_freshness_days": 0,
+    "review_state": "rejected",
+    "evidence_classification": "none",
+    "work_order_hash": "31041038b8c070857bb30c4be7d8e2fecaa5cd8b3d598d08268d8574d8125be2"
+  },
+  {
+    "work_order_id": "wo-pyperf",
+    "source_id": "src-pyperf",
+    "repository_url": "https://github.com/psf/pyperf",
+    "commit_sha": "c0e9eb8a78fd148f0746ba2b9cb030206dfd8478",
+    "version_tag": "2.8.1",
+    "license": "MIT",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "pyperf/_runner.py",
+      "pyperf/_benchmark.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Pure Python deterministic timing and calibration harness; no network or subprocess mutation."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "copy_pattern",
+    "marketos_target_module": "scripts/benchmarks/perf_engine.py",
+    "marketos_target_symbol": "run_benchmark",
+    "target_boundary_authority": "scripts.benchmarks.perf_engine",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Adapt pattern from src-pyperf into in-tree module",
+      "Add attribution entry in THIRD_PARTY_NOTICES.md"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "scripts/benchmarks/perf_engine.py"
+    ],
+    "rollback_deactivation_strategy": "Revert scripts/benchmarks/perf_engine.py; fall back to standard time.perf_counter loops.",
+    "attribution_notice": "Python Software Foundation pyperf MIT copyright notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "3bd17a96aa074e5b909a93d596d3f26dda9985e19e544285126f779a3c114bed"
+  },
+  {
+    "work_order_id": "wo-saleor",
+    "source_id": "src-saleor",
+    "repository_url": "https://github.com/saleor/saleor",
+    "commit_sha": "a2a04538ed9e64bfee844179e672645d4fd3f6a5",
+    "version_tag": "3.20.91",
+    "license": "BSD-3-Clause",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "saleor/product/models.py",
+      "saleor/graphql/product/types/products.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Product pricing and multi-channel schema studied; Django runtime rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "copy_pattern",
+    "marketos_target_module": "backend/commerce.py",
+    "marketos_target_symbol": "saleor_adapter",
+    "target_boundary_authority": "backend.commerce.saleor_adapter",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Adapt pattern from src-saleor into in-tree module",
+      "Add attribution entry in THIRD_PARTY_NOTICES.md"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "backend/commerce.py"
+    ],
+    "rollback_deactivation_strategy": "Delete backend/commerce/saleor_adapter.py; fall back to baseline price models.",
+    "attribution_notice": "Saleor BSD-3-Clause notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "e70545cc0493a5d92f01832e8064637d3dcf1aaaab6eddc6ff11b6c193870bb5"
+  },
+  {
+    "work_order_id": "wo-scrapy",
+    "source_id": "src-scrapy",
+    "repository_url": "https://github.com/scrapy/scrapy",
+    "commit_sha": "8c85937adef8279f12e35e0ee9a20c52ff6d1648",
+    "version_tag": "2.12.0",
+    "license": "BSD-3-Clause",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "scrapy/pipelines/item_pipeline.py",
+      "scrapy/item.py"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Item validation pipeline pattern emulated; Twisted network event loop rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "emulate",
+    "marketos_target_module": "backend/scouting.py",
+    "marketos_target_symbol": "item_pipeline",
+    "target_boundary_authority": "backend.scouting.item_pipeline",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Emulate contract interface without vendoring external code"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "backend/scouting.py"
+    ],
+    "rollback_deactivation_strategy": "Direct dictionary passing without pipeline validation stages.",
+    "attribution_notice": "Scrapy BSD-3-Clause attribution notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "bf63130ee319d33de04eca1bf699f1e5de09e3a7ab7e13d740f4067e978b34ae"
+  },
+  {
+    "work_order_id": "wo-temporal",
+    "source_id": "src-temporal",
+    "repository_url": "https://github.com/temporalio/temporal",
+    "commit_sha": "b16215104069f798b79592679d8a16dd3d702883",
+    "version_tag": "1.8.0",
+    "license": "BSL-1.1",
+    "compatibility_status": "incompatible_license",
+    "inspected_paths": [
+      "service/history/workflow/engine.go",
+      "common/persistence/data_interfaces.go"
+    ],
+    "security_surface": {
+      "network_access": true,
+      "credential_exposure": "high_risk",
+      "code_execution": true,
+      "local_ipc": true,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Distributed stateful orchestrator server."
+    },
+    "data_network_behavior": {
+      "network_mode": "sandboxed_egress",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "database"
+    },
+    "adaptation_mode": "reject",
+    "marketos_target_module": "",
+    "marketos_target_symbol": "",
+    "target_boundary_authority": "none",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Enforce negative regression test blocking src-temporal"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes",
+      "do_not_vendor_src-temporal"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [],
+    "rollback_deactivation_strategy": "Zero in-tree code footprint; prohibited from in-tree linking.",
+    "attribution_notice": "Not applicable (rejected source).",
+    "source_freshness_days": 0,
+    "review_state": "rejected",
+    "evidence_classification": "none",
+    "work_order_hash": "8efd534d3913b02df232836ebcb5037aa46a80c02f551a65b3f557359ce51c40"
+  },
+  {
+    "work_order_id": "wo-vendure",
+    "source_id": "src-vendure",
+    "repository_url": "https://github.com/vendure-ecommerce/vendure",
+    "commit_sha": "b3d79ebfe5fa490b025e9004badad2fe0fe08df2",
+    "version_tag": "v3.3.7",
+    "license": "MIT",
+    "compatibility_status": "compatible",
+    "inspected_paths": [
+      "packages/core/src/entity/product/product.entity.ts",
+      "packages/core/src/entity/facet-value/facet-value.entity.ts"
+    ],
+    "security_surface": {
+      "network_access": false,
+      "credential_exposure": "none",
+      "code_execution": false,
+      "local_ipc": false,
+      "desktop_control_risk": false,
+      "attack_surface_notes": "Product facet schema pattern studied; NestJS server rejected."
+    },
+    "data_network_behavior": {
+      "network_mode": "offline_only",
+      "outbound_calls_allowed": false,
+      "telemetry_mode": "none",
+      "data_persistence": "none"
+    },
+    "adaptation_mode": "copy_pattern",
+    "marketos_target_module": "backend/commerce.py",
+    "marketos_target_symbol": "vendure_adapter",
+    "target_boundary_authority": "backend.commerce.vendure_adapter",
+    "duplicate_authority_result": "passed_no_duplicate",
+    "required_changes": [
+      "Adapt pattern from src-vendure into in-tree module",
+      "Add attribution entry in THIRD_PARTY_NOTICES.md"
+    ],
+    "prohibited_changes": [
+      "do_not_enable_live_credentials",
+      "do_not_introduce_desktop_control_ipc",
+      "do_not_duplicate_event_spine_or_trustos",
+      "do_not_introduce_unapproved_runtimes"
+    ],
+    "verification_commands": [
+      "pytest tests/contracts/test_source_adaptation_governance.py",
+      "git diff --check"
+    ],
+    "expected_artifacts": [
+      "backend/commerce.py"
+    ],
+    "rollback_deactivation_strategy": "Delete backend/commerce/vendure_adapter.py; fall back to baseline product definitions.",
+    "attribution_notice": "Vendure MIT copyright notice in THIRD_PARTY_NOTICES.md.",
+    "source_freshness_days": 0,
+    "review_state": "approved",
+    "evidence_classification": "fixture_tested",
+    "work_order_hash": "989e04c0f4fe567561a1c57a157e818cedced8f55a9a92c69088d3b4ea971790"
+  }
+]

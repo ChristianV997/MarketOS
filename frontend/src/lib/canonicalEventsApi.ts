@@ -1,5 +1,7 @@
 /** Read-only browser client for the canonical-event operator routes. */
 
+import { joinApiPath, resolveApiBaseUrl } from "./apiBase";
+
 export type EventSource = "jsonl" | "supabase_staging";
 
 export interface EventQueryParams {
@@ -289,7 +291,7 @@ export interface PublicCommerceRunReport {
   competition_evidence_attempted?: boolean;
 }
 
-const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? (import.meta.env.VITE_API_URL as string | undefined) ?? "";
+const baseUrl = resolveApiBaseUrl();
 
 function queryString(params: EventQueryParams = {}): string {
   const query = new URLSearchParams();
@@ -302,13 +304,13 @@ function queryString(params: EventQueryParams = {}): string {
 }
 
 async function get<T>(path: string, params?: EventQueryParams): Promise<T> {
-  const response = await fetch(`${baseUrl}${path}${queryString(params)}`, { method: "GET" });
+  const response = await fetch(joinApiPath(baseUrl, `${path}${queryString(params)}`), { method: "GET" });
   if (!response.ok) throw new Error(`Unable to load operator events (${response.status}).`);
   return response.json() as Promise<T>;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await fetch(joinApiPath(baseUrl, path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

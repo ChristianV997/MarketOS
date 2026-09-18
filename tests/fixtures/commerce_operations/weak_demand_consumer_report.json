@@ -1,0 +1,25 @@
+{
+  "report_version": "consumer-attention-v1",
+  "evidence_mode": "fixture_demo",
+  "platforms_observed": ["reddit"],
+  "top_candidate_id": "weak-demand-widget",
+  "candidates": [
+    {
+      "candidate_id": "weak-demand-widget",
+      "query": "weak demand widget",
+      "evidence": [{"platform": "reddit", "hook": "fixture weak demand", "evidence_mode": "fixture"}],
+      "score": {
+        "overall_consumer_attention": 0.4,
+        "source_diversity": 0.3,
+        "objection_density": 0.2,
+        "recommended_ad_angles": ["comparison"],
+        "creative_hooks": [],
+        "voice_of_customer": {"pain_points": [], "desired_outcomes": [], "objections": []},
+        "recommendation": "expand_consumer_research"
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

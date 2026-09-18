@@ -1,0 +1,9 @@
+{
+  "report_version": "supplier-feasibility-v1",
+  "evidence_mode": "fixture_demo",
+  "suppliers_observed": [],
+  "candidates": [],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}
