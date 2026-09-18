@@ -14,6 +14,7 @@ import Risk from "./pages/Risk";
 import Replay from "./pages/Replay";
 import Services from "./pages/Services";
 import OperatorEventDashboard from "./pages/OperatorEventDashboard";
+import ServiceDeliveryWorkbench from "./pages/ServiceDeliveryWorkbench";
 import FirstPhaseEvidenceCockpitPage from "./pages/FirstPhaseEvidenceCockpit";
 import { initPosthog } from "./lib/posthog";
 
@@ -35,6 +36,7 @@ const router = createBrowserRouter([
       { path: "/replay", element: <Replay /> },
       { path: "/services", element: <Services /> },
       { path: "/operator/events", element: <OperatorEventDashboard /> },
+      { path: "/operator/services", element: <ServiceDeliveryWorkbench /> },
       { path: "/operator/first-phase", element: <FirstPhaseEvidenceCockpitPage /> },
     ],
   },
