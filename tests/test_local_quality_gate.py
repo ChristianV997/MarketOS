@@ -1038,6 +1038,56 @@ def test_malformed_legacy_ci_metadata_fails_closed(monkeypatch, tmp_path):
     assert report["exit_code"] == gate.EXIT_CONFIGURATION
 
 
+@pytest.mark.parametrize(
+    ("ci_status", "steps", "expected_status", "expected_classification"),
+    [
+        ("success", 0, "unavailable", gate.CLASS_CI_UNAVAILABLE),
+        ("failure", 0, "unavailable", gate.CLASS_CI_UNAVAILABLE),
+        ("unavailable", 4, "unavailable", gate.CLASS_CI_UNAVAILABLE),
+        ("failure", 4, "failed", gate.CLASS_FAILURE_ORIGIN_UNVERIFIED),
+        ("timed_out", 4, "timed_out", gate.CLASS_TIMEOUT),
+    ],
+)
+def test_legacy_ci_evidence_state_matrix(monkeypatch, tmp_path, ci_status, steps, expected_status, expected_classification):
+    _all_tools_available(monkeypatch)
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": ci_status, "executed_steps": steps},
+        runner=_passing_runner,
+    )
+
+    assert report["ci"]["status"] == expected_status
+    assert report["ci"]["classification"] == expected_classification
+
+
+@pytest.mark.parametrize(
+    ("status", "ci_status", "ci_classification", "ready", "blocking"),
+    [
+        ("passed", "passed", gate.CLASS_PASS, True, False),
+        ("failed", "failed", gate.CLASS_FAILURE_ORIGIN_UNVERIFIED, False, True),
+        ("timed_out", "timed_out", gate.CLASS_TIMEOUT, False, True),
+        ("unavailable", "unavailable", gate.CLASS_CI_UNAVAILABLE, False, True),
+        ("configuration_error", "malformed", gate.CLASS_MALFORMED_CONFIGURATION, False, True),
+    ],
+)
+def test_readiness_state_matrix_remains_fail_closed(status, ci_status, ci_classification, ready, blocking):
+    projection = pr_readiness_report._quality_gate_projection({
+        "schema": gate.QUALITY_GATE_SCHEMA,
+        "status": status,
+        "classification": ci_classification,
+        "ci": {"status": ci_status, "classification": ci_classification},
+        "baseline_delta": {"status": "passed", "controls": []},
+        "phase": "final",
+        "ready_for_supervised_use": ready,
+        "checks": [],
+    })
+
+    assert projection["blocking"] is blocking
+
+
 def test_readiness_surfaces_executed_ci_timeout():
     projection = pr_readiness_report._quality_gate_projection({
         "schema": gate.QUALITY_GATE_SCHEMA,

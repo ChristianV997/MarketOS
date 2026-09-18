@@ -815,6 +815,8 @@ def _ci_snapshot(ci_result: Mapping[str, Any] | None) -> dict[str, Any]:
         return {"status": "malformed", "reason": "malformed_ci_evidence", "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
     if status == "malformed":
         return {"status": "malformed", "reason": ci_result.get("reason", "malformed_ci_evidence"), "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
+    if status == "unavailable":
+        return {"status": "unavailable", "reason": "injected_ci_unavailable", "executed_steps": steps, "classification": CLASS_CI_UNAVAILABLE}
     if status == "success" and steps > 0:
         return {"status": "passed", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_PASS}
     if status == "failure" and steps > 0:
