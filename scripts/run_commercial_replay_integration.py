@@ -375,6 +375,7 @@ def _replay_scenario(
             "next_actions": ["review_fixture_evidence", "keep_external_actions_disabled"],
         },
     )
+    event_replay_hashes = list(summary["hash_sequence"])
     result = {
         "scenario": commerce.scenario_id,
         "candidate_id": candidate_id,
@@ -396,6 +397,11 @@ def _replay_scenario(
         "approval_ledger": _approval_ledger_cli_projection(approval_ledger),
         "client_export": export.to_dict(),
         "event_summary": summary,
+        "event_ids": [event.event_id for event in events],
+        "event_replay_hashes": event_replay_hashes,
+        # Derive this only from canonical event replay hashes; packet-level
+        # fingerprinting remains the CLI's existing authority.
+        "replay_hash": _canonical_fingerprint(event_replay_hashes),
         "event_count": len(events),
         "first_append_count": sum(item.appended for item in first_append),
         "second_append_idempotent_count": sum(item.idempotent for item in second_append),

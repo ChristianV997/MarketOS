@@ -393,8 +393,14 @@ def test_consolidated_replay_carries_research_through_mexico_fulfillment_and_saf
     assert result["event_summary"]["live_authority_violations"] == []
     assert result["event_count"] == result["event_summary"]["event_count"] == 37
     assert len(result["event_summary"]["hash_sequence"]) == 37
+    assert len(result["event_ids"]) == len(set(result["event_ids"])) == 37
+    assert result["event_replay_hashes"] == result["event_summary"]["hash_sequence"]
+    assert len(result["replay_hash"]) == 64
     assert result["second_append_idempotent_count"] == result["event_count"]
     assert result["first_append_count"] == result["event_count"]
+    assert result["governor"]["simulated_only"] is True
+    assert result["governor"]["outcome"] == "soft_block"
+    assert result["governor"]["approvals"][0]["approval_type"] == "approval_ledger"
     assert result["approval_ledger"]["report_version"] == "companyos-approval-ledger-v1"
     assert result["approval_ledger"]["simulation_count"] == 1
     assert result["approval_ledger"]["simulation_results"] == [{
@@ -428,9 +434,37 @@ def test_consolidated_replay_is_byte_identical_and_missing_supplier_proof_stays_
     second = run_consolidated_scenario("walking_pad_deferred.json", "high_ticket_deferred_candidate")
 
     assert json.dumps(first, sort_keys=True, separators=(",", ":")) == json.dumps(second, sort_keys=True, separators=(",", ":"))
+    assert first["event_ids"] == second["event_ids"]
+    assert first["event_replay_hashes"] == second["event_replay_hashes"]
+    assert first["replay_hash"] == second["replay_hash"]
     assert first["supplier_offer"] is None
     assert "supplier_offer_evidence_missing" in first["research"]["blockers"]
     assert first["commerce"]["promoted_to_launch"] is False
+
+
+_REQUIRED_EVIDENCE_BLOCKERS = (
+    ("smart_pet_support_risk.json", "smart_pet_support_burden_candidate", "support_owner"),
+    ("solar_4g_blocked.json", "solar_4g_security_blocked_candidate", "compliance"),
+    ("commodity_electronics_rejected.json", "commodity_electronics_rejected_candidate", "economics"),
+    ("walking_pad_deferred.json", "high_ticket_deferred_candidate", "supplier_offer_evidence_missing"),
+    ("walking_pad_deferred.json", "high_ticket_deferred_candidate", "return_route"),
+    ("walking_pad_deferred.json", "high_ticket_deferred_candidate", "warranty_route"),
+)
+
+
+@pytest.mark.parametrize("fixture_name,builder_name,required_blocker", _REQUIRED_EVIDENCE_BLOCKERS)
+def test_positive_signals_cannot_override_missing_required_commercial_evidence(
+    fixture_name, builder_name, required_blocker,
+):
+    result = run_consolidated_scenario(fixture_name, builder_name)
+    blockers = set(result["research"]["blockers"])
+    blockers.update(result["commerce"]["promotion"]["blockers"])
+    blockers.update(result["fulfillment"]["blockers"])
+
+    assert required_blocker in blockers
+    assert result["commerce"]["promoted_to_launch"] is False
+    assert result["launch_authorized"] is False
+    assert result["client_export"]["payload"]["status"] == "blocked"
 
 
 def test_consolidated_export_rejects_unsafe_status_claim(tmp_path):
