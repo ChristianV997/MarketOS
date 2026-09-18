@@ -1,0 +1,31 @@
+{
+  "report_version": "supplier-feasibility-v1",
+  "evidence_mode": "fixture_demo",
+  "candidates": [
+    {
+      "candidate_id": "desk-clamp-lamp",
+      "query": "desk clamp lamp",
+      "offers": [
+        {
+          "supplier": "public_catalog",
+          "unit_cost": 28.0,
+          "shipping_cost": 8.0,
+          "estimated_landed_cost": 36.0,
+          "evidence_mode": "fixture"
+        }
+      ],
+      "score": {
+        "overall_supplier_feasibility": 0.2,
+        "recommendation": "reject_poor_margin",
+        "risk_flags": [{"code": "low_margin_proxy", "severity": "blocker"}],
+        "economics": {
+          "target_sell_price": 29.99,
+          "estimated_landed_cost": 36.0,
+          "gross_margin_percent": 0.08,
+          "profit_per_order_before_ad_spend": -6.01,
+          "assumptions": ["landed_cost_conflicts_with_sell_price"]
+        }
+      }
+    }
+  ]
+}

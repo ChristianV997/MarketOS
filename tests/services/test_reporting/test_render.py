@@ -2,14 +2,18 @@
 import json
 
 import backend.core.persistence as pers
+import backend.workspaces.registry as registry_module
 import pytest
 from backend.workspaces.artifact_store import ArtifactStore
+from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import get_workspace_registry
 from services.reporting.render import json_safe, render_markdown_report, save_report_artifacts
 
 
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(pers, "STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(registry_module, "_registry", None)
 
 
 def test_dry_run_disclaimer_present_when_dry_run_true():
@@ -34,20 +38,22 @@ def test_renders_nested_dict_and_list_bodies():
 
 
 def test_save_report_artifacts_writes_both_files():
-    store = ArtifactStore()
-    result = save_report_artifacts(store, "ws-1", "exp-1", "# Report\n", {"score": 1})
+    workspace = get_workspace_registry().register(ClientWorkspace(name="report-test"))
+    store = ArtifactStore(workspace)
+    result = save_report_artifacts(store, "exp-1", "# Report\n", {"score": 1})
 
     assert result == {"report_md": True, "result_json": True}
-    assert store.load_text("ws-1", "exp-1", "report.md") == "# Report\n"
-    assert store.load("ws-1", "exp-1", "result.json") == {"score": 1}
+    assert store.load_text("exp-1", "report.md") == "# Report\n"
+    assert store.load("exp-1", "result.json") == {"score": 1}
 
 
 def test_save_report_artifacts_reflects_failure_without_raising(monkeypatch):
-    store = ArtifactStore()
+    workspace = get_workspace_registry().register(ClientWorkspace(name="report-failure"))
+    store = ArtifactStore(workspace)
     monkeypatch.setattr(store, "save_text", lambda *a, **k: False)
     monkeypatch.setattr(store, "save", lambda *a, **k: False)
 
-    result = save_report_artifacts(store, "ws-1", "exp-1", "# Report\n", {})
+    result = save_report_artifacts(store, "exp-1", "# Report\n", {})
 
     assert result == {"report_md": False, "result_json": False}
 

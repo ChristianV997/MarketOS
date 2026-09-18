@@ -1,0 +1,23 @@
+{
+  "report_version": "consumer-attention-v1",
+  "evidence_mode": "fixture_demo",
+  "candidates": [
+    {
+      "candidate_id": "stale-widget",
+      "query": "stale widget",
+      "evidence": [{"platform": "tiktok", "hook": "fixture stale pair", "evidence_mode": "fixture"}],
+      "score": {
+        "overall_consumer_attention": 0.55,
+        "source_diversity": 0.5,
+        "objection_density": 0.2,
+        "recommended_ad_angles": ["demo"],
+        "creative_hooks": [{"hook": "fixture stale pair"}],
+        "voice_of_customer": {"pain_points": [], "desired_outcomes": [], "objections": []},
+        "recommendation": "validate_supplier_first"
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

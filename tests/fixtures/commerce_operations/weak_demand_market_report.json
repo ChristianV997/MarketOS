@@ -1,0 +1,17 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "marketplaces_observed": ["shopify"],
+  "top_candidate_id": "weak-demand-widget",
+  "candidates": [
+    {
+      "candidate_id": "weak-demand-widget",
+      "query": "weak demand widget",
+      "evidence": [{"marketplace": "shopify", "price": 19.99, "source_confidence": 0.4, "evidence_mode": "fixture"}],
+      "score": {"overall_marketplace_opportunity": 0.22, "demand_proxy_score": 0.2, "saturation_score": 0.82, "price_confidence": 0.4, "recommendation": "reject_oversaturated"}
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}
