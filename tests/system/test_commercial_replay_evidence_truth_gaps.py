@@ -14,17 +14,24 @@ vocabulary or a second gate.
 """
 from __future__ import annotations
 
-import stat
+import sys
+from pathlib import Path
 
 from backend.adapters.coderos_readonly import CoderOSAdapterConfig, probe
 from evaluation.trustos.gate_runner import evaluate_action
 
 
-def _executable_script(tmp_path, body: str):
-    path = tmp_path / "coderos"
-    path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-    return path
+def _python_probe_config(tmp_path, body: str) -> CoderOSAdapterConfig:
+    """Use the current Python executable so the fixture is portable on Windows."""
+    path = tmp_path / "coderos_probe.py"
+    path.write_text(f"{body}\n", encoding="utf-8")
+    python_root = Path(sys.executable).resolve().parent
+    return CoderOSAdapterConfig(
+        coderos_root=str(python_root),
+        executable=str(sys.executable),
+        probe_args=(str(path),),
+        mode="probe",
+    )
 
 
 def test_missing_executable_is_unavailable_never_a_silent_pass(tmp_path):
@@ -35,8 +42,7 @@ def test_missing_executable_is_unavailable_never_a_silent_pass(tmp_path):
 
 
 def test_executed_failure_nonzero_exit_is_blocked_not_downgraded_to_unavailable(tmp_path):
-    _executable_script(tmp_path, "exit 1")
-    config = CoderOSAdapterConfig(coderos_root=str(tmp_path), mode="probe")
+    config = _python_probe_config(tmp_path, "raise SystemExit(1)")
     report = probe(config)
     # The probe genuinely ran and failed -- this is a stronger, more specific
     # claim than "we could not check at all", and must not be collapsed into
@@ -47,8 +53,7 @@ def test_executed_failure_nonzero_exit_is_blocked_not_downgraded_to_unavailable(
 
 
 def test_executed_failure_malformed_output_is_malformed_not_downgraded_to_unavailable(tmp_path):
-    _executable_script(tmp_path, "echo 'not json'")
-    config = CoderOSAdapterConfig(coderos_root=str(tmp_path), mode="probe")
+    config = _python_probe_config(tmp_path, "print('not json')")
     report = probe(config)
     assert report.probe_result.state == "malformed"
     assert report.probe_result.state != "unavailable"
@@ -56,8 +61,7 @@ def test_executed_failure_malformed_output_is_malformed_not_downgraded_to_unavai
 
 
 def test_a_clean_successful_probe_is_available_distinct_from_every_failure_state(tmp_path):
-    _executable_script(tmp_path, "echo '{}'")
-    config = CoderOSAdapterConfig(coderos_root=str(tmp_path), mode="probe")
+    config = _python_probe_config(tmp_path, "print('{}')")
     report = probe(config)
     assert report.probe_result.state == "available"
 
