@@ -23,6 +23,7 @@ from evaluation.companyos.service_delivery import (
     list_client_deliverables_for_workspace,
     new_engagement_id,
     transition_engagement,
+    verify_engagement_id,
 )
 
 
@@ -135,13 +136,13 @@ def test_price_is_classified_as_planning_assumption_not_a_hidden_validated_price
 # B. Client intake / engagement lifecycle
 # ---------------------------------------------------------------------------
 
-def test_engagement_lifecycle_starts_in_draft_and_advances_forward_only():
+def test_engagement_lifecycle_starts_in_intake_and_advances_forward_only():
     pkg = packages_by_id()["product-validation-sprint"]
     engagement = create_engagement(client_id="client-1", workspace=client_workspace(), package=pkg, scope="widget candidate")
-    assert engagement.lifecycle_state == "draft"
-    engagement = transition_engagement(engagement, "intake_requested")
-    engagement = transition_engagement(engagement, "intake_received")
-    assert engagement.history == ("draft", "intake_requested", "intake_received")
+    assert engagement.lifecycle_state == "intake"
+    engagement = transition_engagement(engagement, "screening")
+    engagement = transition_engagement(engagement, "eligible")
+    assert engagement.history == ("intake", "screening", "eligible")
 
 
 def test_invalid_engagement_transition_is_rejected():
@@ -151,13 +152,29 @@ def test_invalid_engagement_transition_is_rejected():
         transition_engagement(engagement, "delivered")
 
 
-def test_engagement_can_be_blocked_and_resumed():
+def test_engagement_can_be_paused_and_resumed():
     pkg = packages_by_id()["product-validation-sprint"]
     engagement = create_engagement(client_id="client-1", workspace=client_workspace(), package=pkg, scope="x")
-    engagement = transition_engagement(engagement, "intake_requested")
-    engagement = transition_engagement(engagement, "blocked")
-    engagement = transition_engagement(engagement, "intake_received")
-    assert engagement.lifecycle_state == "intake_received"
+    engagement = transition_engagement(engagement, "screening")
+    engagement = transition_engagement(engagement, "paused")
+    engagement = transition_engagement(engagement, "eligible")
+    assert engagement.lifecycle_state == "eligible"
+
+
+def test_data_inadequate_is_an_actionable_state_not_a_dead_end():
+    pkg = packages_by_id()["product-validation-sprint"]
+    engagement = create_engagement(client_id="client-1", workspace=client_workspace(), package=pkg, scope="x")
+    engagement = transition_engagement(engagement, "screening")
+    engagement = transition_engagement(engagement, "data_inadequate")
+    assert engagement.lifecycle_state == "data_inadequate"
+    # a real way forward: resume screening once more evidence arrives...
+    resumed = transition_engagement(engagement, "screening")
+    assert resumed.lifecycle_state == "screening"
+    # ...or a real way out.
+    rejected = transition_engagement(engagement, "rejected")
+    assert rejected.lifecycle_state == "rejected"
+    with pytest.raises(ValueError):
+        transition_engagement(engagement, "delivered")
 
 
 def test_engagement_requires_client_service_workspace():
@@ -315,24 +332,28 @@ def test_minimum_acceptable_value_multiple_is_distinguished_from_attractive():
 # Deliverable acceptance / revision state
 # ---------------------------------------------------------------------------
 
-def test_completed_deliverable_supports_the_full_delivered_accepted_path():
+def test_completed_deliverable_supports_the_full_delivered_approved_path():
     pkg = packages_by_id()["product-validation-sprint"]
     engagement = create_engagement(client_id="client-3", workspace=client_workspace("Bright Co"), package=pkg, scope="widget")
-    for state in ("intake_requested", "intake_received", "data_quality_assessed", "evidence_collection", "analysis_in_progress", "internal_review", "client_review", "delivered", "accepted"):
+    for state in ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "approved", "delivered"):
         engagement = transition_engagement(engagement, state)
-    assert engagement.lifecycle_state == "accepted"
+    assert engagement.lifecycle_state == "delivered"
+    renewed = transition_engagement(engagement, "renewal_candidate")
+    assert renewed.lifecycle_state == "renewal_candidate"
+    upsold = transition_engagement(engagement, "upsell_candidate")
+    assert upsold.lifecycle_state == "upsell_candidate"
 
 
-def test_revision_requested_returns_to_analysis_not_forward_to_delivered():
+def test_revision_requested_returns_to_analysis_not_forward_to_approved():
     pkg = packages_by_id()["product-validation-sprint"]
     engagement = create_engagement(client_id="client-3", workspace=client_workspace("Bright Co"), package=pkg, scope="widget")
-    for state in ("intake_requested", "intake_received", "data_quality_assessed", "evidence_collection", "analysis_in_progress", "internal_review", "client_review", "delivered", "revision_requested"):
+    for state in ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "revision_requested"):
         engagement = transition_engagement(engagement, state)
     assert engagement.lifecycle_state == "revision_requested"
     with pytest.raises(ValueError):
-        transition_engagement(engagement, "accepted")
-    engagement = transition_engagement(engagement, "analysis_in_progress")
-    assert engagement.lifecycle_state == "analysis_in_progress"
+        transition_engagement(engagement, "approved")
+    engagement = transition_engagement(engagement, "analysis")
+    assert engagement.lifecycle_state == "analysis"
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +456,125 @@ def test_existing_service_catalog_economics_helper_is_unaffected():
         capacity_hours=Decimal("40"),
     )
     assert result.incremental_contribution.amount == Decimal("2900.00")
+
+
+# ---------------------------------------------------------------------------
+# V3 reconciliation additions: secret-shape intake, forgery detection,
+# explicit-zero contractor cost
+# ---------------------------------------------------------------------------
+
+def test_secret_shaped_scope_is_rejected_at_intake():
+    pkg = packages_by_id()["launch-draft-pack"]
+    with pytest.raises(ValueError, match="secret-shaped"):
+        create_engagement(
+            client_id="client-a", workspace=client_workspace(), package=pkg,
+            scope="ghp_abcdefghijklmnopqrstuvwxyz1234",
+        )
+
+
+def test_secret_shaped_intake_value_is_rejected():
+    pkg = packages_by_id()["launch-draft-pack"]
+    with pytest.raises(ValueError, match="secret-shaped"):
+        create_engagement(
+            client_id="client-a", workspace=client_workspace(), package=pkg, scope="ok",
+            intake_data={"note": "leaked key sk-live-abc123"},
+        )
+
+
+def test_verify_engagement_id_detects_a_mutated_workspace_id():
+    pkg = packages_by_id()["product-validation-sprint"]
+    engagement = create_engagement(client_id="client-a", workspace=client_workspace("A Co"), package=pkg, scope="x", created_at="t1")
+    assert verify_engagement_id(engagement) is True
+    from dataclasses import replace as _replace
+    forged = _replace(engagement, workspace_id="some-other-clients-workspace")
+    assert verify_engagement_id(forged) is False
+
+
+def test_explicit_zero_contractor_cost_is_a_valid_amount_not_a_missing_default():
+    pkg = packages_by_id()["managed-acquisition-cro"]
+    explicit_zero = evaluate_engagement_economics(
+        pkg, fee=Money("1000", "USD"), ad_spend=Money("1000", "USD"),
+        roas_before=Decimal("1"), roas_after=Decimal("1.5"),
+        cac_before=Money("10", "USD"), cac_after=Money("8", "USD"),
+        labor_cost=Money("400", "USD"), contractor_cost=Money("0", "USD"),
+    )
+    no_override = evaluate_engagement_economics(
+        pkg, fee=Money("1000", "USD"), ad_spend=Money("1000", "USD"),
+        roas_before=Decimal("1"), roas_after=Decimal("1.5"),
+        cac_before=Money("10", "USD"), cac_after=Money("8", "USD"),
+        labor_cost=Money("400", "USD"),
+    )
+    # An explicit $0 contractor cost and "no contractor at all" must be
+    # indistinguishable in the resulting delivery cost -- both mean the
+    # same thing here -- but the explicit path must not be silently
+    # skipped or raise, which is what a truthiness check on a zero-amount
+    # Money would risk if Money ever gained a __bool__/__len__.
+    assert explicit_zero.delivery_cost == no_override.delivery_cost
+
+
+# ---------------------------------------------------------------------------
+# V3 security-review fixes: redaction bypass, forged-identity acceptance,
+# nested secret scanning, unrestricted transition mutation
+# ---------------------------------------------------------------------------
+
+def test_recommendation_and_next_action_are_redacted_not_just_the_metadata_payload():
+    pkg = packages_by_id()["product-validation-sprint"]
+    engagement = create_engagement(client_id="client-r", workspace=client_workspace("Redact Co"), package=pkg, scope="x")
+    dq = assess_client_data_quality(adequate_intake())
+    econ = evaluate_engagement_economics(pkg, fee=Money("500", "USD"), ad_spend=Money("1000", "USD"), roas_before=Decimal("1"), roas_after=Decimal("2"), cac_before=Money("10", "USD"), cac_after=Money("8", "USD"))
+    registry = DeliverableRegistry(path="/tmp/never-written-service-delivery-test-6.json")
+    deliverable = build_client_service_deliverable(
+        engagement, pkg, econ, dq,
+        recommendation="leaked key sk-live-abc123, proceed",
+        next_action="rotate sk-live-abc123 first",
+        registry=registry,
+    )
+    blob = json.dumps(deliverable.to_dict())
+    assert "sk-live-abc123" not in blob
+    assert deliverable.recommendations == ["[redacted: client-unsafe value removed]"]
+    assert deliverable.next_actions == ["[redacted: client-unsafe value removed]"]
+
+
+def test_forbidden_keys_are_redacted_regardless_of_check_workspace_leakage_result():
+    # Whitebox: this module's own _FORBIDDEN_KEYS list (internal_notes,
+    # formula, credentials, filesystem_path, model_trace, ...) is not fully
+    # covered by check_workspace_leakage's own SECRET_KEYS/DATA_CLASSES
+    # vocabulary (confirmed: "internal_notes" matches neither). Redaction
+    # must not be gated on that detector finding something else first.
+    from evaluation.companyos.service_delivery import _redact_client_unsafe_values
+
+    payload = {"internal_notes": "do not export this", "safe_field": "hello"}
+    redacted = _redact_client_unsafe_values(payload)
+    assert redacted["internal_notes"] == "[redacted: internal-only field removed]"
+    assert redacted["safe_field"] == "hello"
+
+
+def test_forged_engagement_is_rejected_before_a_deliverable_is_built():
+    from dataclasses import replace as _replace
+    pkg = packages_by_id()["product-validation-sprint"]
+    engagement = create_engagement(client_id="client-a", workspace=client_workspace("A Co"), package=pkg, scope="x")
+    forged = _replace(engagement, workspace_id="some-other-clients-workspace")
+    dq = assess_client_data_quality(adequate_intake())
+    econ = evaluate_engagement_economics(pkg, fee=Money("500", "USD"), ad_spend=Money("1000", "USD"), roas_before=Decimal("1"), roas_after=Decimal("2"), cac_before=Money("10", "USD"), cac_after=Money("8", "USD"))
+    registry = DeliverableRegistry(path="/tmp/never-written-service-delivery-test-8.json")
+    with pytest.raises(ValueError, match="forged or tampered"):
+        build_client_service_deliverable(forged, pkg, econ, dq, recommendation="ok", registry=registry)
+
+
+def test_nested_secret_in_intake_data_is_rejected():
+    pkg = packages_by_id()["product-validation-sprint"]
+    with pytest.raises(ValueError, match="secret-shaped"):
+        create_engagement(
+            client_id="client-a", workspace=client_workspace(), package=pkg, scope="ok",
+            intake_data={"revenue": {"note": "sk-live-nested-secret-999"}},
+        )
+
+
+def test_transition_engagement_cannot_mutate_identity_fields():
+    pkg = packages_by_id()["product-validation-sprint"]
+    engagement = create_engagement(client_id="client-a", workspace=client_workspace("A Co"), package=pkg, scope="x")
+    engagement = transition_engagement(engagement, "screening")
+    with pytest.raises(ValueError, match="cannot change"):
+        transition_engagement(engagement, "eligible", workspace_id="some-other-clients-workspace")
+    with pytest.raises(ValueError, match="cannot change"):
+        transition_engagement(engagement, "eligible", client_id="someone-else")

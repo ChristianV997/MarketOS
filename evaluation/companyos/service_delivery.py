@@ -48,9 +48,17 @@ from backend.economics import (
     calculate_service_economics,
 )
 from backend.workspaces.client_workspace import ClientWorkspace
-from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
 
 from .service_catalog import ServiceDeliverable, ServicePackage, default_service_catalog, package_map
+
+# `check_workspace_leakage` is imported lazily inside
+# build_client_service_deliverable(), not at module level: evaluation.trustos
+# (via gate_runner.py) imports evaluation.companyos.approval_ledger, and this
+# module is re-exported from evaluation/companyos/__init__.py, so a
+# module-level import here completes a companyos -> trustos -> companyos
+# circular-import cycle the first time either package is imported. Deferring
+# the import to call time breaks the cycle without touching TrustOS, the
+# Governor, or the Approval Ledger.
 
 # ---------------------------------------------------------------------------
 # A. Canonical service packages -- a compatibility layer over ServicePackage
@@ -287,27 +295,35 @@ def default_service_delivery_packages() -> tuple[ClientFacingServicePackage, ...
 # ---------------------------------------------------------------------------
 
 ENGAGEMENT_STATES = (
-    "draft", "intake_requested", "intake_received", "data_quality_assessed",
-    "evidence_collection", "analysis_in_progress", "internal_review",
-    "client_review", "delivered", "revision_requested", "accepted",
-    "renewal_or_upsell", "rejected", "blocked",
+    "intake", "screening", "data_inadequate", "eligible", "scoped",
+    "evidence_collection", "analysis", "draft_ready", "client_review",
+    "revision_requested", "approved", "delivered", "renewal_candidate",
+    "upsell_candidate", "paused", "cancelled", "rejected",
 )
 
+# data_inadequate is a first-class, actionable state (not a warning flag):
+# it is reachable from every stage that depends on client-supplied business
+# data, and it always has a real way forward (resume screening once more
+# evidence arrives) or out (reject/cancel) -- it is never a dead end that
+# silently downgrades to an optimistic result.
 _ENGAGEMENT_TRANSITIONS: dict[str, tuple[str, ...]] = {
-    "draft": ("intake_requested", "blocked"),
-    "intake_requested": ("intake_received", "blocked", "rejected"),
-    "intake_received": ("data_quality_assessed", "blocked"),
-    "data_quality_assessed": ("evidence_collection", "rejected", "blocked"),
-    "evidence_collection": ("analysis_in_progress", "blocked"),
-    "analysis_in_progress": ("internal_review", "blocked"),
-    "internal_review": ("client_review", "analysis_in_progress", "blocked"),
-    "client_review": ("delivered", "revision_requested", "blocked"),
-    "delivered": ("accepted", "revision_requested"),
-    "revision_requested": ("analysis_in_progress", "blocked"),
-    "accepted": ("renewal_or_upsell",),
-    "renewal_or_upsell": (),
+    "intake": ("screening", "paused", "cancelled"),
+    "screening": ("eligible", "data_inadequate", "rejected", "paused"),
+    "data_inadequate": ("screening", "rejected", "cancelled"),
+    "eligible": ("scoped", "rejected", "paused"),
+    "scoped": ("evidence_collection", "paused", "cancelled"),
+    "evidence_collection": ("analysis", "data_inadequate", "paused"),
+    "analysis": ("draft_ready", "data_inadequate", "paused"),
+    "draft_ready": ("client_review", "paused"),
+    "client_review": ("revision_requested", "approved", "paused"),
+    "revision_requested": ("analysis", "cancelled"),
+    "approved": ("delivered",),
+    "delivered": ("renewal_candidate", "upsell_candidate", "cancelled"),
+    "renewal_candidate": ("intake",),
+    "upsell_candidate": ("intake",),
+    "paused": ("intake", "screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "cancelled"),
+    "cancelled": (),
     "rejected": (),
-    "blocked": ("intake_requested", "intake_received", "data_quality_assessed", "evidence_collection", "analysis_in_progress", "rejected"),
 }
 
 
@@ -394,6 +410,30 @@ class ClientEngagement:
         }
 
 
+_SECRET_SHAPE_MARKERS = ("sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "-----begin", "bearer ")
+
+
+def _reject_secret_shaped(value: str, *, field_name: str) -> None:
+    lowered = value.lower()
+    if any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
+        raise ValueError(f"secret-shaped value rejected in {field_name}")
+
+
+def _reject_secret_shaped_recursive(value: Any, *, field_name: str) -> None:
+    """Scan every string reachable from ``value``, including strings nested
+    inside dicts/lists at any depth -- a secret pasted into a nested intake
+    field (e.g. ``{"revenue": {"note": "sk-..."}}``) must be caught just as
+    reliably as one in a top-level field."""
+    if isinstance(value, str):
+        _reject_secret_shaped(value, field_name=field_name)
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            _reject_secret_shaped_recursive(item, field_name=f"{field_name}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _reject_secret_shaped_recursive(item, field_name=f"{field_name}[{index}]")
+
+
 def create_engagement(
     *,
     client_id: str,
@@ -407,17 +447,33 @@ def create_engagement(
         raise ValueError("engagements require a client_service workspace")
     if not client_id:
         raise ValueError("client_id is required")
+    _reject_secret_shaped(scope, field_name="scope")
+    for key, value in (intake_data or {}).items():
+        _reject_secret_shaped_recursive(value, field_name=f"intake_data.{key}")
     engagement_id = new_engagement_id(client_id, workspace.workspace_id, package.package_id, created_at)
     return ClientEngagement(
         engagement_id=engagement_id, client_id=client_id, workspace_id=workspace.workspace_id,
         package_id=package.package_id, scope=scope, intake_data=dict(intake_data or {}),
-        lifecycle_state="draft", data_quality_state="unavailable", evidence_set=(), deliverable_ids=(),
+        lifecycle_state="intake", data_quality_state="unavailable", evidence_set=(), deliverable_ids=(),
         planned_hours=package.estimated_delivery_hours, consumed_hours=Decimal("0"),
         tooling_cost=package.tooling_cost, fee=package.price_min_money, contribution=None,
         client_outcome="pending", approval_state="not_requested", delivery_state="not_started",
         renewal_state="not_applicable", assumptions=(), missing_information=(), evidence_references=(),
-        created_at=created_at, updated_at=created_at, history=("draft",),
+        created_at=created_at, updated_at=created_at, history=("intake",),
     )
+
+
+# Fields a lifecycle transition may legitimately update. Identity fields
+# (engagement_id, client_id, workspace_id, package_id, created_at) are never
+# in this set: allowing a transition call to change them would let a caller
+# silently relabel one client's engagement as belonging to another
+# workspace without going through create_engagement's validation or
+# invalidating the engagement_id's own hash, defeating verify_engagement_id.
+_MUTABLE_ENGAGEMENT_FIELDS = frozenset({
+    "data_quality_state", "evidence_set", "deliverable_ids", "consumed_hours",
+    "contribution", "client_outcome", "approval_state", "delivery_state",
+    "renewal_state", "assumptions", "missing_information", "evidence_references",
+})
 
 
 def transition_engagement(engagement: ClientEngagement, new_state: str, *, updated_at: str = "offline-deterministic", **changes: Any) -> ClientEngagement:
@@ -426,6 +482,9 @@ def transition_engagement(engagement: ClientEngagement, new_state: str, *, updat
     allowed = _ENGAGEMENT_TRANSITIONS.get(engagement.lifecycle_state, ())
     if new_state not in allowed:
         raise ValueError(f"invalid engagement transition: {engagement.lifecycle_state} -> {new_state}")
+    unexpected = set(changes) - _MUTABLE_ENGAGEMENT_FIELDS
+    if unexpected:
+        raise ValueError(f"transition_engagement cannot change: {sorted(unexpected)}")
     return replace(engagement, lifecycle_state=new_state, updated_at=updated_at, history=engagement.history + (new_state,), **changes)
 
 
@@ -434,12 +493,20 @@ def transition_engagement(engagement: ClientEngagement, new_state: str, *, updat
 #
 # Distinct from evaluation.contracts.DataQuality (evidence provenance for
 # product/campaign signals). This gate assesses the CLIENT's OWN supplied
-# business data -- their orders, revenue, CAC, contribution margin, channel
-# data, and period definitions -- before any diagnostic is produced.
+# business data -- identity, offer identity, date range, revenue, orders,
+# ad spend, CAC/ROAS inputs, product/fulfillment costs, shipping,
+# returns/refunds, and payment/platform fees -- before any diagnostic is
+# produced. Unknown values stay unknown here; they are never defaulted to
+# zero (a missing field is recorded in ``missing_fields``, not silently
+# treated as $0 revenue or 0 orders).
 # ---------------------------------------------------------------------------
 
 CLIENT_DATA_QUALITY_STATES = ("adequate", "partial", "stale", "conflicting", "insufficient", "blocked", "unavailable")
-REQUIRED_CLIENT_DATA_FIELDS = ("orders", "revenue", "cac", "contribution_margin", "channel_data", "period_definition")
+REQUIRED_CLIENT_DATA_FIELDS = (
+    "client_identity", "product_offer_identity", "date_range", "revenue", "orders",
+    "ad_spend", "cac_roas_inputs", "product_and_fulfillment_costs", "shipping",
+    "returns_refunds", "payment_platform_fees",
+)
 _STATUS_PRIORITY = ("blocked", "unavailable", "insufficient", "conflicting", "stale", "partial", "adequate")
 
 
@@ -566,7 +633,14 @@ def evaluate_engagement_economics(
         return package_value
 
     labor = _default_or(labor_cost, package.labor_cost)
-    contractor = contractor_cost or Money.zero(currency, source="assumed_contractor_cost")
+    # Explicit `is not None`, not `contractor_cost or ...`: an explicitly
+    # supplied zero-amount Money is a valid, meaningful answer ("no
+    # contractor cost on this engagement"), not an absent value that should
+    # fall back to a default. `or` would happen to still work today because
+    # Money defines no __bool__/__len__ (so any Money instance, including a
+    # zero-amount one, is truthy) -- but relying on that absence is fragile
+    # and reads as a bug at every future call site, so this is explicit.
+    contractor = contractor_cost if contractor_cost is not None else Money.zero(currency, source="assumed_contractor_cost")
     if contractor.currency != currency:
         raise CurrencyMismatchError()
     delivery_cost = labor + contractor
@@ -670,20 +744,22 @@ def build_client_service_deliverable(
     optimistic diagnostic: it returns a ``blocked`` package naming the exact
     missing evidence instead of computed figures.
     """
+    from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
+
+    if not verify_engagement_id(engagement):
+        raise ValueError("engagement identity failed verification (forged or tampered record)")
     if engagement.package_id != package.package_id:
         raise ValueError("engagement and package do not match")
     package_type = CLIENT_DELIVERABLE_PACKAGE_TYPES.get(package.package_id, f"client_{package.package_id}")
 
     if data_quality.data_inadequate or economics is None:
         status = "blocked"
-        exec_summary = f"{package.name}: client data is currently data_inadequate ({data_quality.status}). No diagnostic is produced until the missing evidence below is supplied."
         derived_values: dict[str, Any] = {}
         confidence = "insufficient"
         recommendation = recommendation or "Supply the missing client data before this diagnostic can be produced."
         next_action = next_action or "Collect the missing evidence and resubmit intake."
     else:
         status = "completed"
-        exec_summary = f"{package.name}: {recommendation or 'see analysis'}."
         derived_values = {
             "contribution": economics.contribution.to_dict() if economics.contribution else None,
             "contribution_margin": str(economics.contribution_margin) if economics.contribution_margin is not None else "unknown",
@@ -706,9 +782,25 @@ def build_client_service_deliverable(
         "currency": package.currency,
         "source_timestamps": {"generated_at": generated_at},
     }
+    # Redaction runs unconditionally, not gated on check_workspace_leakage's
+    # own findings: that detector's SECRET_KEYS/DATA_CLASSES matching does
+    # not cover every key this module itself treats as forbidden (e.g.
+    # "formula", "internal_notes", "filesystem_path"), so gating redaction
+    # on its result left this module's own forbidden-key list unenforced
+    # whenever no *other* marker also happened to be present. Redaction is
+    # cheap and idempotent, so there is no reason to skip it.
     leakage_findings = check_workspace_leakage(payload, client_safe=True)
-    if leakage_findings:
-        payload = _redact_client_unsafe_values(payload)
+    payload = _redact_client_unsafe_values(payload)
+    # Every client-facing string is derived from the redacted payload, not
+    # the original arguments: recommendation/next_action/exec_summary must
+    # never carry a value that bypassed redaction.
+    recommendation = str(payload["recommendation"])
+    next_action = str(payload["next_action"])
+    exec_summary = (
+        f"{package.name}: client data is currently data_inadequate ({data_quality.status}). No diagnostic is produced until the missing evidence below is supplied."
+        if status == "blocked"
+        else f"{package.name}: {recommendation or 'see analysis'}."
+    )
 
     section = DeliverableSection("client_deliverable", package.name, 1, exec_summary, exec_summary, metadata=payload)
     deliverable_id = _deterministic_id("deliverable", engagement.engagement_id, package.package_id, generated_at)
@@ -744,6 +836,18 @@ def build_client_service_deliverable(
 # F. Workspace-scoped access -- reuses DeliverableRegistry's own filtering
 # ---------------------------------------------------------------------------
 
+def verify_engagement_id(engagement: ClientEngagement) -> bool:
+    """Recompute the deterministic engagement id from its own client_id,
+    workspace_id, package_id, and created_at, and compare it against the
+    id the record actually carries. A record whose workspace_id (or any
+    other identity field) was mutated after construction -- e.g. an
+    attempt to relabel Client A's engagement as belonging to Client B's
+    workspace -- fails this check even though every individual field still
+    looks well-formed."""
+    expected = new_engagement_id(engagement.client_id, engagement.workspace_id, engagement.package_id, engagement.created_at)
+    return expected == engagement.engagement_id
+
+
 def get_client_engagement_for_workspace(
     engagements: Mapping[str, ClientEngagement], *, workspace_id: str, engagement_id: str
 ) -> ClientEngagement | None:
@@ -752,6 +856,8 @@ def get_client_engagement_for_workspace(
         raise ValueError("workspace_id is required for client engagement access")
     engagement = engagements.get(engagement_id)
     if engagement is None or engagement.workspace_id != workspace_id:
+        return None
+    if not verify_engagement_id(engagement):
         return None
     return engagement
 
@@ -807,6 +913,6 @@ __all__ = [
     "CLIENT_DATA_QUALITY_STATES", "REQUIRED_CLIENT_DATA_FIELDS", "ClientDataQualityAssessment", "assess_client_data_quality",
     "evaluate_engagement_economics", "CLIENT_VALUE_CLASSIFICATIONS", "classify_client_value",
     "CLIENT_DELIVERABLE_PACKAGE_TYPES", "build_client_service_deliverable",
-    "get_client_engagement_for_workspace", "list_client_deliverables_for_workspace",
+    "verify_engagement_id", "get_client_engagement_for_workspace", "list_client_deliverables_for_workspace",
     "ServiceDeliveryPlaneReport", "build_service_delivery_plane_report",
 ]

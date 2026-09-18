@@ -51,20 +51,37 @@ in `tests/test_service_delivery.py`).
 
 ## B. Client engagement lifecycle
 
-`ClientEngagement` moves through a deterministic, forward-only state graph:
+`ClientEngagement` moves through a deterministic, forward-only state graph
+(v3: reconciled against lane `SERVICE-DELIVERY-CLIENT-PLANE-V3-RECONCILIATION`'s
+required vocabulary):
 
 ```
-draft -> intake_requested -> intake_received -> data_quality_assessed
-      -> evidence_collection -> analysis_in_progress -> internal_review
-      -> client_review -> delivered -> accepted -> renewal_or_upsell
-                        \-> revision_requested -> analysis_in_progress
-any state -> blocked -> (resumes at the next forward state) | rejected
+intake -> screening -> eligible -> scoped -> evidence_collection -> analysis
+       -> draft_ready -> client_review -> approved -> delivered
+                                        \-> revision_requested -> analysis
+screening/evidence_collection/analysis -> data_inadequate -> screening | rejected | cancelled
+delivered -> renewal_candidate | upsell_candidate -> intake (a fresh engagement)
+any non-terminal state -> paused -> (resumes at any earlier non-terminal state) | cancelled
 ```
 
-`create_engagement()` requires a `client_service` workspace and produces a
+`data_inadequate` is a first-class, actionable lifecycle state, not a
+warning flag on the side: it is reachable from every stage that depends on
+client-supplied business data, and always has a real way forward (resume
+`screening` once more evidence arrives) or a real way out (`rejected` /
+`cancelled`) — it is never a dead end and never silently downgrades to an
+optimistic result.
+
+`create_engagement()` requires a `client_service` workspace, rejects a
+secret-shaped `scope` or any secret-shaped string in `intake_data` (matching
+common token prefixes such as `sk-`, `ghp_`, `-----BEGIN`), and produces a
 deterministic `engagement_id` (SHA-256 of client/workspace/package/timestamp
 — stable for the same inputs, distinct across clients or workspaces).
 `transition_engagement()` rejects any transition not in the graph.
+`verify_engagement_id()` recomputes that hash from an engagement's own
+fields and flags any record whose identity fields were mutated after
+construction (e.g. relabeling one client's engagement into another
+client's workspace) even though every individual field still looks
+well-formed.
 
 `ClientEngagement.approval_state` is a lifecycle field distinct from the
 CompanyOS **Approval Ledger** (`evaluation.companyos.approval_ledger`): it
@@ -79,16 +96,21 @@ module does not and must not short-circuit that gate.
 `assess_client_data_quality()` is a **new, distinct** gate from
 `evaluation.contracts.DataQuality` (which classifies *evidence provenance*
 for product/campaign signals, e.g. fixture vs. live vs. attributed). This
-gate classifies the **client's own supplied business data** — their orders,
-revenue, CAC, contribution margin, channel data, and period definitions —
-before any diagnostic is produced.
+gate classifies the **client's own supplied business data** across 11
+required fields: client identity, product/offer identity, date range,
+revenue, orders, ad spend, CAC/ROAS inputs, product and fulfillment costs,
+shipping, returns/refunds, and payment/platform fees — before any
+diagnostic is produced.
 
 States: `adequate`, `partial`, `stale`, `conflicting`, `insufficient`,
 `blocked`, `unavailable`. A client missing, or holding stale/conflicting
-evidence for, any of the six required fields is marked
-`data_inadequate = True` and never receives a computed diagnostic —
-`build_client_service_deliverable()` returns a `blocked` package naming the
-exact missing evidence instead.
+evidence for, any required field is marked `data_inadequate = True` and
+never receives a computed diagnostic — `build_client_service_deliverable()`
+returns a `blocked` package naming the exact missing evidence instead, and
+the engagement lifecycle itself moves to the `data_inadequate` state (see
+section B) rather than silently continuing. Unknown values stay unknown:
+a missing field is recorded in `missing_fields`, never defaulted to zero
+revenue, zero orders, or any other numeric placeholder.
 
 ## D. Service economics
 
@@ -132,6 +154,49 @@ existing pattern used in `evaluation/commerce/product_validation_report.py`.
 - Engagement and deliverable IDs are deterministic hashes of
   `(client_id, workspace_id, package_id, timestamp)`; two different clients
   or workspaces never collide (see `test_artifact_ids_cannot_be_forged_across_clients`).
+
+## V3 reconciliation with PR #260
+
+Lane `SERVICE-DELIVERY-CLIENT-PLANE-V3-RECONCILIATION` asked this PR (#261)
+to absorb the stronger lifecycle/data-quality/workspace-separation design
+of a parallel PR #260, while keeping this PR's correct canonical-kernel
+import (#260 reimplements its own local `ServiceEconomics`-shaped
+calculation instead of importing `backend.economics.kernel`, which this
+PR must not copy).
+
+**#260's core module could not actually be read or run**:
+`evaluation/companyos/service_delivery_plane.py` as committed on
+`grok/marketos-service-delivery-client-plane-v2` is a single 746-byte line
+with literal `\n` escape sequences instead of real newlines — not valid,
+importable Python (confirmed: `wc -l` reports 0 lines). #260's own PR body
+acknowledges this ("copy the exclusive files from artifacts if the GitHub
+blob... is not yet the full v4 module") and points at a local
+`artifacts/marketos-service-delivery-plane/` directory that does not exist
+anywhere in the pushed branch. **#260 was not modified** (out of scope per
+this mission), and this PR does not depend on it.
+
+What #260's intended design *could* be recovered from its (intact) test
+file `tests/evaluation/test_service_delivery_plane.py` and its working
+`service_delivery_export.py`, and was adopted here on merit, reimplemented
+against the canonical kernel rather than copied:
+
+- the more granular lifecycle vocabulary (`intake`/`screening`/`eligible`/
+  `scoped`/`draft_ready`/`approved`/`renewal_candidate`/`upsell_candidate`/
+  `paused`/`cancelled`), replacing this PR's earlier, coarser one;
+- `data_inadequate` promoted from a boolean flag to a first-class lifecycle
+  state;
+- a wider (11-field) client business-data-quality checklist;
+- rejecting secret-shaped strings in `scope`/`intake_data` at intake time
+  (defense-in-depth alongside the existing output-side leakage check);
+- `verify_engagement_id()`, an explicit forgery/tamper check.
+
+Also fixed per this mission's explicit instruction: `evaluate_engagement_economics()`'s
+`contractor_cost` parameter used `contractor_cost or Money.zero(...)` to
+supply a default. `Money` defines no `__bool__`/`__len__`, so an explicit
+zero-amount `Money` is still Python-truthy and this did not actually drop
+real inputs today — but the pattern was fragile and inconsistent with the
+`is not None` checks used for every other optional cost parameter, so it
+is now explicit (see `test_explicit_zero_contractor_cost_is_a_valid_amount_not_a_missing_default`).
 
 ## What this module does not do
 
