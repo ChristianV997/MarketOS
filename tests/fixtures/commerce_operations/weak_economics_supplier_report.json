@@ -20,7 +20,10 @@
           "profit_per_order_before_ad_spend": -3.0,
           "break_even_cpa": 0,
           "break_even_roas": null,
-          "assumptions": []
+          "assumptions": [
+            "gross_margin_percent_is_a_planning_assumption",
+            "break_even_cpa_is_not_live_proof"
+          ]
         }
       }
     }

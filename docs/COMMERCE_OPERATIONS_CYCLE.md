@@ -179,6 +179,13 @@ load credentials. `scripts/run_commerce_cycle.py` and
 `backend/execution/loop.py` are not used. SerpApi and DataForSEO are not
 combined here into dual-proof.
 
+The acceptance suite also rejects mixing marketplace, supplier, and attention
+streams or adding a second scorer; treating economics assumptions or missing
+economics as observed proof; inventing live evidence modes; authorizing launch
+from fixture, partial, or simulated confidence; skipping Governor, TrustOS, or
+the client-safe projection after an early blocked stage; and leaking candidate
+ids across fixture packs in one process.
+
 Rollback is revert of this composition vertical only.
 
 ## QA notes
