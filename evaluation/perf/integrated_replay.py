@@ -1,31 +1,40 @@
-"""Bounded integrated commercial-replay measurement seam.
+"""Canonical replay performance arbitration for PR #274.
 
-Times the existing dry-run projection shape (15 lifecycle steps + start/complete)
-without becoming a second event spine, scorer, or economics kernel.
+This module does not own commercial replay. #279 owns the fixture replay
+CLI (`scripts/run_commercial_replay_integration.py` + five scenario
+builders + `lifecycle_events` + `Event.replay_hash`). #280 owns the
+benchmark laboratory and must not be imported or copied here.
 
-When evaluation.commerce / backend.events import, this module classifies them
-and delegates. Isolated sanitize/project/hash helpers exist only so the
-sandbox can measure scale behavior without the full MarketOS checkout.
+When MarketOS commerce imports are available this seam:
 
-Adapted patterns (concepts only, no vendor code):
-- pytest-benchmark: wall time + repeated-run equality
-- OpenLineage: producer + SHA-256 replay identity
-- OpenTelemetry: optional timing fields, no exporter
+- drives the five public dry-run builders twice;
+- projects events only through `evaluation.commerce.dry_run_events.lifecycle_events`;
+- uses `Event.replay_hash()` as the identity;
+- certifies sequence and live-authority through `replay_summary`;
+- records wall time and optional RSS.
+
+When those imports are missing the seam classifies the path as
+unavailable. Isolated dict projection / field-hash helpers remain only
+so this sandbox can prove they are *not* the canonical identity.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import time
-from dataclasses import dataclass
 from typing import Any, Mapping
 
-SCHEMA = "integrated-replay-perf-v1"
+SCHEMA = "integrated-replay-arbitration-v2"
 MAX_CANDIDATES = 2048
 MAX_EVENTS = 40_000
-MAX_PAYLOAD_BYTES = 1_048_576
 TIMEOUT_MS = 8_000
-SIZES = (1, 10, 100, 500, 1500)
+CANONICAL_BUILDERS = (
+    "hydroponics_positive_candidate",
+    "smart_pet_support_burden_candidate",
+    "solar_4g_security_blocked_candidate",
+    "commodity_electronics_rejected_candidate",
+    "high_ticket_deferred_candidate",
+)
 STEPS = (
     "evidence",
     "supplier_offer",
@@ -43,36 +52,20 @@ STEPS = (
     "return_rma",
     "contribution_reconciliation",
 )
-META: Mapping[str, bool] = {
-    "dry_run": True,
-    "read_only": True,
-    "advisory": True,
-    "non_authoritative": True,
-    "no_launch_authority": True,
-    "no_spend_authority": True,
-    "no_publish_authority": True,
-    "no_payment_authority": True,
-}
 LIVE_ATTESTED = frozenset({"observed", "live_readonly", "verified"})
-FIXTURE_DENY = frozenset({"fixture", "simulated", "assumed", "unknown"})
+FIXTURE_DENY = frozenset({"fixture", "simulated", "assumed", "unknown", "missing"})
+AUTHORITIES = {
+    "replay_cli": "#279 scripts/run_commercial_replay_integration.py",
+    "event_projection": "evaluation.commerce.dry_run_events.lifecycle_events",
+    "event_hash": "backend.contracts.events.Event.replay_hash",
+    "certification": "backend.events.replay_certification.replay_summary",
+    "economics": "backend.economics.kernel / evaluation.commerce.dry_run_lifecycle",
+    "laboratory": "#280 scripts/benchmarks/benchmark_commercial_replay_lab.py",
+}
 
 
 class IntegratedReplayPerfError(ValueError):
-    """Stable bound or timeout error."""
-
-
-@dataclass(frozen=True)
-class StageTiming:
-    name: str
-    mean_ms: float
-    samples_ms: tuple[float, ...]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "mean_ms": self.mean_ms,
-            "samples_ms": list(self.samples_ms),
-        }
+    """Stable bound, timeout, or conformance error."""
 
 
 def _rss_kb() -> int | None:
@@ -87,7 +80,171 @@ def _rss_kb() -> int | None:
     return None
 
 
+def classify_canonical() -> dict[str, Any]:
+    missing: list[str] = []
+    imported: dict[str, str] = {}
+    try:
+        from evaluation.commerce.dry_run_events import lifecycle_events  # noqa: F401
+
+        imported["lifecycle_events"] = "evaluation.commerce.dry_run_events.lifecycle_events"
+    except Exception as exc:  # noqa: BLE001
+        missing.append(f"lifecycle_events:{type(exc).__name__}: {exc}")
+    try:
+        from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle  # noqa: F401
+
+        imported["run_dry_run_lifecycle"] = "evaluation.commerce.dry_run_lifecycle.run_dry_run_lifecycle"
+    except Exception as exc:  # noqa: BLE001
+        missing.append(f"run_dry_run_lifecycle:{type(exc).__name__}: {exc}")
+    try:
+        from evaluation.commerce.dry_run_scenarios import SCENARIO_BUILDERS  # noqa: F401
+
+        imported["SCENARIO_BUILDERS"] = "evaluation.commerce.dry_run_scenarios.SCENARIO_BUILDERS"
+    except Exception as exc:  # noqa: BLE001
+        missing.append(f"SCENARIO_BUILDERS:{type(exc).__name__}: {exc}")
+    try:
+        from backend.contracts.events import Event  # noqa: F401
+
+        imported["Event"] = "backend.contracts.events.Event"
+    except Exception as exc:  # noqa: BLE001
+        missing.append(f"Event:{type(exc).__name__}: {exc}")
+    try:
+        from backend.events.replay_certification import replay_summary  # noqa: F401
+
+        imported["replay_summary"] = "backend.events.replay_certification.replay_summary"
+    except Exception as exc:  # noqa: BLE001
+        missing.append(f"replay_summary:{type(exc).__name__}: {exc}")
+    status = "importable" if not missing else "unavailable"
+    return {
+        "status": status,
+        "imported": imported,
+        "missing": missing,
+        "authorities": dict(AUTHORITIES),
+        "event_authority": AUTHORITIES["event_projection"],
+        "hash_authority": AUTHORITIES["event_hash"],
+        "laboratory_owner": AUTHORITIES["laboratory"],
+        "this_module_authority": False,
+        "economics_delegation": "delegated_not_computed_here" if not missing else "unavailable",
+        "note": (
+            "times public builders; does not own economics, events, or the #280 lab"
+            if not missing
+            else "canonical dry-run path classified, not reimplemented"
+        ),
+    }
+
+
+def live_attestation(rows: list[Mapping[str, Any]]) -> bool:
+    states = {str(item.get("evidence_state") or "") for item in rows}
+    if states & FIXTURE_DENY:
+        return False
+    return bool(states) and states <= LIVE_ATTESTED
+
+
+def _time(fn, repeats: int = 2) -> tuple[float, Any]:
+    samples: list[float] = []
+    last = None
+    deadline = time.perf_counter() + (TIMEOUT_MS / 1000)
+    for _ in range(repeats):
+        if time.perf_counter() > deadline:
+            raise IntegratedReplayPerfError("timeout")
+        started = time.perf_counter()
+        last = fn()
+        samples.append((time.perf_counter() - started) * 1000)
+    return round(sum(samples) / len(samples), 3), last
+
+
+def _evidence_state(report: Any) -> str:
+    if getattr(report, "steps", None):
+        detail = report.steps[0].detail or {}
+        return str(detail.get("evidence_state") or "unknown")
+    return str(getattr(report, "evidence_state", "unknown") or "unknown")
+
+
+def measure_canonical_scenarios() -> dict[str, Any]:
+    """Drive the five public builders through the canonical Event path."""
+    classification = classify_canonical()
+    if classification["status"] != "importable":
+        return {
+            "status": "unavailable",
+            "schema": SCHEMA,
+            "canonical": classification,
+            "scenarios": [],
+            "all_replay_stable": False,
+            "all_sequences_clean": False,
+            "no_live_upgrade": True,
+            "event_hash_authority": AUTHORITIES["event_hash"],
+            "field_hash_rejected_as_identity": True,
+            "reason": classification["missing"],
+        }
+
+    from backend.events.replay_certification import replay_summary
+    from evaluation.commerce.dry_run_events import lifecycle_events
+    from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
+    from evaluation.commerce.dry_run_scenarios import SCENARIO_BUILDERS
+
+    builders = {builder.__name__: builder for builder in SCENARIO_BUILDERS}
+    rows: list[dict[str, Any]] = []
+    for name in CANONICAL_BUILDERS:
+        builder = builders.get(name)
+        if builder is None:
+            raise IntegratedReplayPerfError(f"missing canonical builder: {name}")
+
+        def _run(current=builder, label=name):
+            report = run_dry_run_lifecycle(current())
+            events = lifecycle_events(report, workspace_id=f"ws-{label}", occurred_at=0.0)
+            return report, events
+
+        mean_ms, pair = _time(_run, repeats=2)
+        first_report, first_events = pair
+        second_report, second_events = _run()
+        first_ids = [event.event_id for event in first_events]
+        second_ids = [event.event_id for event in second_events]
+        first_hashes = [event.replay_hash() for event in first_events]
+        second_hashes = [event.replay_hash() for event in second_events]
+        summary = replay_summary(first_events)
+        evidence = _evidence_state(first_report)
+        if live_attestation([{"evidence_state": evidence}]):
+            raise IntegratedReplayPerfError("fixture states cannot upgrade to live attestation")
+        if first_report.live_actions_taken:
+            raise IntegratedReplayPerfError("canonical dry-run took a live action")
+        rows.append(
+            {
+                "scenario": name,
+                "scenario_id": first_report.scenario_id,
+                "candidate_id": first_report.candidate_id,
+                "achievable_stage": first_report.achievable_stage,
+                "promoted_to_launch": first_report.promoted_to_launch,
+                "evidence_state": evidence,
+                "event_count": len(first_events),
+                "event_ids": first_ids,
+                "event_ids_equal": first_ids == second_ids,
+                "replay_hashes_equal": first_hashes == second_hashes,
+                "report_equal": first_report.to_dict() == second_report.to_dict(),
+                "sequence_issues": list(summary.get("sequence_issues") or []),
+                "live_authority_violations": list(summary.get("live_authority_violations") or []),
+                "live_actions_taken": first_report.live_actions_taken,
+                "live_attestation": False,
+                "hash_authority": "Event.replay_hash",
+                "wall_ms": mean_ms,
+                "rss_kb": _rss_kb(),
+            }
+        )
+    return {
+        "status": "actual",
+        "schema": SCHEMA,
+        "canonical": classification,
+        "scenarios": rows,
+        "all_replay_stable": all(item["replay_hashes_equal"] and item["event_ids_equal"] for item in rows),
+        "all_sequences_clean": all(not item["sequence_issues"] for item in rows),
+        "no_live_upgrade": all(item["live_attestation"] is False for item in rows),
+        "no_live_authority": all(not item["live_authority_violations"] for item in rows),
+        "event_hash_authority": AUTHORITIES["event_hash"],
+        "field_hash_rejected_as_identity": True,
+        "covered_builders": list(CANONICAL_BUILDERS),
+    }
+
+
 def sanitized_candidates(n: int) -> list[dict[str, Any]]:
+    """Sandbox-only rows. Not a commercial scenario and not a second spine."""
     if n < 1:
         raise IntegratedReplayPerfError("size must be >= 1")
     if n > MAX_CANDIDATES:
@@ -99,265 +256,105 @@ def sanitized_candidates(n: int) -> list[dict[str, Any]]:
                 "candidate_id": f"cand-{i:04d}",
                 "sku": f"SKU-{i % 200:03d}",
                 "supplier": f"sup-{i % 17}",
-                "currency": "USD" if i % 7 else "MXN",
-                "unit_cost": str(10 + (i % 9)),
-                "price": str(20 + (i % 11)),
-                "evidence_state": "observed" if i % 5 == 1 else "fixture",
-                "lane": "US-USD" if i % 7 else "MX-MXN",
+                "evidence_state": "fixture",
             }
         )
-    if n >= 8:
-        conflict = dict(rows[1])
-        conflict["unit_cost"] = "99.00"
-        rows[3] = conflict
-    encoded = json.dumps(rows, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    if len(encoded) > MAX_PAYLOAD_BYTES:
-        raise IntegratedReplayPerfError("payload bound exceeded")
     return rows
 
 
-def normalize(rows: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for raw in rows:
-        item = dict(raw)
-        item["_identity"] = "|".join(
-            (
-                str(item.get("candidate_id") or ""),
-                str(item.get("supplier") or ""),
-                str(item.get("sku") or ""),
-            )
-        )
-        item["_payload"] = json.dumps(
-            {
-                "unit_cost": item.get("unit_cost"),
-                "price": item.get("price"),
-                "currency": item.get("currency"),
-            },
-            sort_keys=True,
-        )
-        out.append(item)
-    return out
-
-
-def detect_conflicts_pairwise(rows: list[Mapping[str, Any]]) -> tuple[str, ...]:
-    seen: list[tuple[str, str]] = []
-    conflicts: list[str] = []
-    for item in rows:
-        key = str(item.get("_identity") or "")
-        payload = str(item.get("_payload") or "")
-        for prev_key, prev_payload in seen:
-            if prev_key == key and prev_payload != payload:
-                conflicts.append(key)
-                break
-        seen.append((key, payload))
-    return tuple(sorted(set(conflicts)))
-
-
-def detect_conflicts_indexed(rows: list[Mapping[str, Any]]) -> tuple[str, ...]:
-    first: dict[str, str] = {}
-    conflicts: list[str] = []
-    for item in rows:
-        key = str(item.get("_identity") or "")
-        payload = str(item.get("_payload") or "")
-        prev = first.get(key)
-        if prev is None:
-            first[key] = payload
-        elif prev != payload:
-            conflicts.append(key)
-    return tuple(sorted(set(conflicts)))
-
-
-def project_events(rows: list[Mapping[str, Any]], *, copy_metadata: bool) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
+def project_event_ids(rows: list[Mapping[str, Any]]) -> list[str]:
+    events: list[str] = []
     for item in rows:
         sid = str(item.get("candidate_id") or "")
-        meta = dict(META) if copy_metadata else META
-        events.append({"id": f"{sid}:started", "payload": {"candidate_id": sid}, "metadata": meta})
-        for step in STEPS:
-            events.append(
-                {
-                    "id": f"{sid}:{step}",
-                    "payload": {"step": step, "evidence_state": item.get("evidence_state")},
-                    "metadata": meta,
-                }
-            )
-        events.append({"id": f"{sid}:completed", "payload": {"candidate_id": sid}, "metadata": meta})
+        events.append(f"{sid}:started")
+        events.extend(f"{sid}:{step}" for step in STEPS)
+        events.append(f"{sid}:completed")
     if len(events) > MAX_EVENTS:
         raise IntegratedReplayPerfError("event bound exceeded")
     return events
 
 
-def hash_events_json(events: list[Mapping[str, Any]]) -> list[str]:
-    """Baseline: full canonical JSON per event (mirrors Event.replay_hash)."""
-    out: list[str] = []
-    for event in events:
-        raw = json.dumps(event, sort_keys=True, separators=(",", ":"), default=str)
-        out.append(hashlib.sha256(raw.encode("utf-8")).hexdigest())
-    return out
-
-
-def hash_events_fields(events: list[Mapping[str, Any]]) -> list[str]:
-    """Measured replacement for isolated identity: event id + evidence fields.
-
-    Constant no-authority metadata is not hashed per event because it cannot
-    change replay identity for this projection. Event.replay_hash remains the
-    canonical envelope hash when backend.contracts.events.Event is imported.
-    """
-    out: list[str] = []
-    for event in events:
-        payload = event.get("payload") or {}
-        raw = (
-            f"{event.get('id')}|{payload.get('step', '')}|"
-            f"{payload.get('candidate_id', '')}|{payload.get('evidence_state', '')}"
-        )
-        out.append(hashlib.sha256(raw.encode("utf-8")).hexdigest())
-    return out
-
-
-def export_identity(rows: list[Mapping[str, Any]], event_ids: list[str], hashes: list[str]) -> str:
-    body = {
-        "schema": SCHEMA,
-        "candidates": [str(item.get("candidate_id")) for item in rows],
-        "evidence_states": [str(item.get("evidence_state")) for item in rows],
-        "event_ids": event_ids,
-        "hashes": hashes,
-    }
-    raw = json.dumps(body, sort_keys=True, separators=(",", ":"))
-    if len(raw.encode("utf-8")) > MAX_PAYLOAD_BYTES * 8:
-        raise IntegratedReplayPerfError("export bound exceeded")
+def isolated_field_fingerprint(event_ids: list[str], evidence_states: list[str]) -> str:
+    """Rejected identity. Kept to prove it is not Event.replay_hash."""
+    raw = json.dumps({"ids": event_ids, "evidence": evidence_states}, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def live_attestation(rows: list[Mapping[str, Any]]) -> bool:
-    states = {str(item.get("evidence_state") or "") for item in rows}
-    if states & FIXTURE_DENY:
-        return False
-    return bool(states) and states <= LIVE_ATTESTED
+def reject_field_hash_as_canonical() -> dict[str, Any]:
+    """Document that the prior isolated optimization must not replace Event.replay_hash."""
+    classification = classify_canonical()
+    rows = sanitized_candidates(4)
+    ids = project_event_ids(rows)
+    isolated = isolated_field_fingerprint(ids, [str(item["evidence_state"]) for item in rows])
+    event_hashes = None
+    hashes_equal = False
+    if classification["status"] == "importable":
+        from evaluation.commerce.dry_run_events import lifecycle_events
+        from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
+        from evaluation.commerce.dry_run_scenarios import hydroponics_positive_candidate
 
-
-def _mean(samples: list[float]) -> float:
-    return round(sum(samples) / len(samples), 3)
-
-
-def _time(fn, repeats: int = 3) -> tuple[float, Any, tuple[float, ...]]:
-    samples: list[float] = []
-    last = None
-    deadline = time.perf_counter() + (TIMEOUT_MS / 1000)
-    for _ in range(repeats):
-        if time.perf_counter() > deadline:
-            raise IntegratedReplayPerfError("timeout")
-        started = time.perf_counter()
-        last = fn()
-        samples.append((time.perf_counter() - started) * 1000)
-    return _mean(samples), last, tuple(round(item, 3) for item in samples)
-
-
-def classify_canonical() -> dict[str, Any]:
-    try:
-        from evaluation.commerce.dry_run_events import lifecycle_events  # noqa: F401
-        from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle  # noqa: F401
-        from evaluation.commerce.dry_run_scenarios import SCENARIO_BUILDERS  # noqa: F401
-        from backend.events.replay_certification import replay_summary  # noqa: F401
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "status": "unavailable",
-            "reason": f"{type(exc).__name__}: {exc}",
-            "economics_delegation": "unavailable",
-            "event_authority": "unavailable",
-            "note": "canonical dry-run path classified, not reimplemented",
-        }
+        events = lifecycle_events(
+            run_dry_run_lifecycle(hydroponics_positive_candidate()),
+            workspace_id="ws-arbitration",
+            occurred_at=0.0,
+        )
+        event_hashes = [event.replay_hash() for event in events]
+        hashes_equal = event_hashes == [isolated] * len(event_hashes)
     return {
-        "status": "importable",
-        "economics_delegation": "delegated_not_computed_here",
-        "event_authority": "evaluation.commerce.dry_run_events.lifecycle_events",
-        "note": "this lane times public builders; it does not own economics",
+        "field_hash_is_canonical": False,
+        "field_fingerprint": isolated,
+        "event_replay_hashes": event_hashes,
+        "hashes_equal_to_event_replay_hash": hashes_equal,
+        "canonical": classification,
+        "verdict": "Event.replay_hash remains the only replay identity",
     }
 
 
-def _pipeline_before(rows: list[Mapping[str, Any]]) -> str:
-    normed = normalize(rows)
-    detect_conflicts_pairwise(normed)
-    events = project_events(normed, copy_metadata=True)
-    hashes = hash_events_json(events)
-    return export_identity(normed, [event["id"] for event in events], hashes)
-
-
-def _pipeline_after(rows: list[Mapping[str, Any]]) -> str:
-    normed = normalize(rows)
-    detect_conflicts_indexed(normed)
-    events = project_events(normed, copy_metadata=False)
-    hashes = hash_events_fields(events)
-    return export_identity(normed, [event["id"] for event in events], hashes)
-
-
-def measure_size(n: int, repeats: int = 3) -> dict[str, Any]:
-    rows = sanitized_candidates(n)
-    norm_ms, normed, norm_s = _time(lambda: normalize(rows), repeats)
-    pair_ms, pair, pair_s = _time(lambda: detect_conflicts_pairwise(normed), repeats)
-    idx_ms, indexed, idx_s = _time(lambda: detect_conflicts_indexed(normed), repeats)
-    naive_ms, naive_events, naive_s = _time(lambda: project_events(normed, copy_metadata=True), repeats)
-    shared_ms, shared_events, shared_s = _time(lambda: project_events(normed, copy_metadata=False), repeats)
-    hash_json_ms, json_hashes, json_s = _time(lambda: hash_events_json(naive_events), repeats)
-    hash_field_ms, field_hashes, field_s = _time(lambda: hash_events_fields(shared_events), repeats)
-    export_ms, identity, export_s = _time(
-        lambda: export_identity(normed, [event["id"] for event in shared_events], field_hashes),
-        repeats,
-    )
-    before_ms, before_id, before_s = _time(lambda: _pipeline_before(rows), repeats)
-    after_ms, after_id, after_s = _time(lambda: _pipeline_after(rows), repeats)
-    second_after = _pipeline_after(rows)
-    stages = [
-        StageTiming("normalize", norm_ms, norm_s),
-        StageTiming("conflict_pairwise", pair_ms, pair_s),
-        StageTiming("conflict_indexed", idx_ms, idx_s),
-        StageTiming("project_copy_metadata", naive_ms, naive_s),
-        StageTiming("project_shared_metadata", shared_ms, shared_s),
-        StageTiming("hash_json_dumps", hash_json_ms, json_s),
-        StageTiming("hash_identity_fields", hash_field_ms, field_s),
-        StageTiming("export_fingerprint", export_ms, export_s),
-        StageTiming("pipeline_before", before_ms, before_s),
-        StageTiming("pipeline_after", after_ms, after_s),
-    ]
-    ranked = sorted(
-        [item for item in stages if item.name not in {"pipeline_before", "pipeline_after"}],
-        key=lambda item: item.mean_ms,
-        reverse=True,
-    )
-    evidence_states = tuple(sorted({str(item.get("evidence_state")) for item in normed}))
+def isolated_scale_note() -> dict[str, Any]:
+    """Historical sandbox measurement. Not a production result and not #280."""
     return {
-        "size": n,
-        "accepted": len(normed),
-        "event_count": len(shared_events),
-        "conflicts": list(indexed),
-        "conflicts_equal": pair == indexed,
-        "event_ids_equal": [event["id"] for event in naive_events] == [event["id"] for event in shared_events],
-        "evidence_states": list(evidence_states),
-        "replay_stable": after_id == second_after,
-        "replay_identity": after_id,
-        "before_identity_distinct": before_id != after_id,
-        "live_attestation": False,
-        "rss_kb": _rss_kb(),
-        "before_ms": before_ms,
-        "after_ms": after_ms,
-        "stages": [item.to_dict() for item in stages],
-        "top_bottleneck": ranked[0].name,
-        "top_bottleneck_ms": ranked[0].mean_ms,
-        "optimization": "indexed_conflicts + shared_metadata + field_hash",
+        "classification": "sandbox_facsimile_not_canonical",
+        "production_path": False,
+        "duplicates_280_laboratory": False,
+        "recorded_before_ms_1500": 205.353,
+        "recorded_after_ms_1500": 56.375,
+        "recorded_bottleneck": "isolated json.dumps of synthetic envelopes",
+        "survives_event_replay_hash": False,
+        "reason": (
+            "the isolated after-path hashed event-id fields instead of "
+            "Event.canonical_json; Event.__post_init__ still copies metadata"
+        ),
+        "evidence_classification": "fixture",
     }
 
 
-def measure_matrix(sizes: tuple[int, ...] = SIZES) -> dict[str, Any]:
-    rows = [measure_size(size) for size in sizes]
+def arbitrate() -> dict[str, Any]:
+    canonical = measure_canonical_scenarios()
+    identity = reject_field_hash_as_canonical()
     return {
         "schema": SCHEMA,
-        "record_kind": "advisory_benchmark",
+        "record_kind": "replay_performance_arbitration",
         "merge_authority": False,
         "quality_gate": False,
-        "canonical": classify_canonical(),
-        "sizes": rows,
-        "all_replay_stable": all(item["replay_stable"] for item in rows),
-        "all_conflicts_equal": all(item["conflicts_equal"] for item in rows),
-        "all_event_ids_equal": all(item["event_ids_equal"] for item in rows),
-        "no_live_upgrade": all(item["live_attestation"] is False for item in rows),
+        "canonical_path": AUTHORITIES["replay_cli"],
+        "laboratory_path": AUTHORITIES["laboratory"],
+        "this_pr": "#274",
+        "measures_real_commercial_replay": canonical.get("status") == "actual",
+        "optimization_changes_event_replay_hash": False,
+        "second_replay_path": False,
+        "canonical": canonical,
+        "identity_arbitration": identity,
+        "isolated_scale_note": isolated_scale_note(),
+        "verdict": {
+            "canonical_owner": "#279",
+            "laboratory_owner": "#280",
+            "this_lane": "conformance and timing of the #279 Event path",
+            "production_optimization_applied": False,
+            "reason": (
+                "changing Event.replay_hash or dry_run_events metadata sharing "
+                "would alter canonical envelope hashes; #280 already owns the "
+                "certification micro-optimization on advisory json.dumps"
+            ),
+        },
         "disclaimer": "sandbox timings are not MarketOS production performance",
     }

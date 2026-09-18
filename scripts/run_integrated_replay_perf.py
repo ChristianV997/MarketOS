@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Bounded integrated commercial-replay performance runner.
+"""Canonical replay performance arbitration runner for PR #274.
 
-Does not replace scripts/benchmark_commerce_cycle.py or
-scripts/run_commercial_replay_integration.py. Does not call providers.
+Does not replace scripts/benchmark_commerce_cycle.py,
+scripts/run_commercial_replay_integration.py, or the #280 laboratory.
+Does not call providers.
 """
 from __future__ import annotations
 
@@ -20,11 +21,7 @@ if str(ROOT) not in sys.path:
 
 from evaluation.perf.integrated_replay import (  # noqa: E402
     IntegratedReplayPerfError,
-    MAX_CANDIDATES,
-    SIZES,
-    classify_canonical,
-    measure_matrix,
-    sanitized_candidates,
+    arbitrate,
 )
 
 
@@ -44,20 +41,15 @@ def _git_sha() -> str:
         return "unavailable"
 
 
-def build_report(sizes: tuple[int, ...]) -> dict[str, Any]:
+def build_report() -> dict[str, Any]:
     try:
-        matrix = measure_matrix(sizes)
+        matrix = arbitrate()
         failure = "ok"
     except IntegratedReplayPerfError as exc:
-        matrix = {
-            "schema": "integrated-replay-perf-v1",
-            "sizes": [],
-            "error": str(exc),
-            "canonical": classify_canonical(),
-        }
+        matrix = {"schema": "integrated-replay-arbitration-v2", "error": str(exc)}
         failure = "bound_or_timeout"
     return {
-        "schema": "integrated-replay-perf-v1",
+        "schema": "integrated-replay-arbitration-v2",
         "repository": "ChristianV997/MarketOS",
         "commit": _git_sha(),
         "command": "python scripts/run_integrated_replay_perf.py --json",
@@ -65,8 +57,9 @@ def build_report(sizes: tuple[int, ...]) -> dict[str, Any]:
             "python": sys.version.split()[0],
             "platform": platform.platform(),
             "windows_operator_packet": "unavailable",
+            "coderos": "unavailable",
         },
-        "matrix": matrix,
+        "arbitration": matrix,
         "failure_class": failure,
         "ci": "ci_unavailable",
         "missing_infrastructure": [
@@ -74,34 +67,21 @@ def build_report(sizes: tuple[int, ...]) -> dict[str, Any]:
             "GitHub Actions runner (ci_unavailable)",
             "full-repo quality gate execution",
             "canonical evaluation.commerce imports in this sandbox",
+            "CoderOS probe/health",
         ],
         "rollback": "close draft PR / delete exclusive files; Event and kernel untouched",
-        "sources": [
-            "pytest-benchmark wall-time + equality concept",
-            "OpenLineage run identity concept",
-            "stdlib hashlib / json / time only",
-        ],
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--size", type=int, default=0, help="single size; 0 runs the default matrix")
-    args = parser.parse_args()
-    if args.size:
-        if args.size > MAX_CANDIDATES:
-            print(json.dumps({"error": "candidate bound exceeded", "max": MAX_CANDIDATES}))
-            return 1
-        sanitized_candidates(args.size)
-        report = build_report((args.size,))
-    else:
-        report = build_report(SIZES)
-    text = json.dumps(report, indent=2, sort_keys=True)
-    print(text)
-    matrix = report.get("matrix") or {}
-    ok = matrix.get("all_replay_stable", False) and matrix.get("no_live_upgrade", False)
-    return 0 if report["failure_class"] == "ok" and (ok or args.json) else 1
+    parser.parse_args()
+    report = build_report()
+    print(json.dumps(report, indent=2, sort_keys=True))
+    arb = report.get("arbitration") or {}
+    ok = report["failure_class"] == "ok" and arb.get("second_replay_path") is False
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

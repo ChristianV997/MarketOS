@@ -1,88 +1,49 @@
-# Integrated commercial replay performance
+# Integrated commercial replay performance arbitration
 
-Lane: `INTEGRATED-REPLAY-PERFORMANCE-V1`
-Branch: `grok/marketos-integrated-replay-performance-v1`
-Schema: `integrated-replay-perf-v1`
+Lane: `REPLAY-PERFORMANCE-CANONICAL-ARBITRATION-V2`
+PR: `#274` `grok/marketos-integrated-replay-performance-v1`
+Schema: `integrated-replay-arbitration-v2`
 Status: draft, do not merge
 
-## Scope
+## Verdict
 
-Measure the existing integrated commercial replay projection:
+| Question | Finding |
+| --- | --- |
+| Which path is canonical? | **#279** — five fixture builders, `run_dry_run_lifecycle`, `lifecycle_events`, `Event.replay_hash`, `replay_summary`. |
+| Does #274 measure real commercial replay? | Only when those imports succeed. This sandbox classifies them **unavailable**. On an operator worktree the seam drives the five builders and times `Event.replay_hash`, it does not invent events. |
+| Does #280 duplicate #274 scope? | **#280 owns the laboratory** (7D sensitivity, cProfile, scale lab, certification `json.dumps` skip for non-advisory events). #274 must not copy those files. |
+| Did any optimization change `Event.replay_hash`? | **No.** Field-hash is rejected as identity. `Event.canonical_json` remains the envelope hash. |
+| Event ids / sequence / payload / evidence? | Canonical path preserves them through `lifecycle_events` + `replay_summary`. Isolated dict projection is not that path. |
+| Does the isolated 3.6x survive real imports? | **No.** The 205.353 ms → 56.375 ms number hashed synthetic field strings. `Event.__post_init__` still copies metadata and `replay_hash` still dumps the full envelope. |
 
-- `scripts/benchmark_commerce_cycle.py` — single-cycle dry-run latency (untouched)
-- `scripts/run_commercial_replay_integration.py` — scenario replay (untouched)
-- `evaluation/commerce/dry_run_events.lifecycle_events` — canonical Event projection
-- `backend.contracts.events.Event.replay_hash` — full canonical JSON SHA-256
+## Why no production optimization in this PR
 
-This lane does not score products, compute kernel money, emit a second event
-spine, or call providers.
+A production change is allowed only if baseline and optimized paths consume the same canonical inputs and keep identical `Event.replay_hash` sequences.
 
-## Measured bottleneck
+Sharing `_NO_AUTHORITY_METADATA` in `dry_run_events.py` does not help: `Event` re-copies metadata through `_json_safe`. Changing `Event.replay_hash` would change existing hashes. #280 already owns the only measured certification skip (`assert_no_live_authority` dumps JSON only for `aggregate_type == "advisory"`). This lane therefore applies **no** production patch.
 
-Authoring-sandbox Python 3.12, fixture candidates only.
+## What #274 now is
 
-| size | events | top stage | before pipeline ms | after pipeline ms | RSS KiB | replay prefix |
-| ---: | ---: | --- | ---: | ---: | ---: | --- |
-| 1 | 17 | hash_json_dumps 0.104 | 0.127 | 0.036 | 19004 | 1ba95137aa587e1f |
-| 10 | 170 | hash_json_dumps 0.911 | 1.077 | 0.269 | 19388 | 19072ffd0dc24b46 |
-| 100 | 1700 | hash_json_dumps 8.969 | 10.763 | 2.627 | 23228 | b293307ec5d4eea4 |
-| 500 | 8500 | hash_json_dumps 46.856 | 59.011 | 13.795 | 36416 | bf6b5f2e88c8b9b6 |
-| 1500 | 25500 | hash_json_dumps 144.323 | 205.353 | 56.375 | 58736 | 9f764135c51debfb |
+Conformance / arbitration for the #279 Event path:
 
-At 1500 candidates the isolated stages were:
-
-- `hash_json_dumps` 144.323 ms (mirrors `Event.replay_hash` / `canonical_json`)
-- full before pipeline 205.353 ms
-- full after pipeline 56.375 ms (~3.6x)
-
-Top measured bottleneck: per-event `json.dumps` of the full envelope,
-including the constant no-authority metadata block.
-
-## Smallest compatible optimization
-
-Isolated after-path only:
-
-1. Indexed identity map for offer conflicts (equivalent to pairwise).
-2. Shared metadata mapping instead of `dict(META)` per event.
-3. Replay identity from event id + evidence fields, not full JSON.
-
-Not done (would be a second authority or a contracts change):
-
-- No cache.
-- No parallel event spine.
-- `Event.replay_hash` left unchanged. It still hashes the full envelope
-  because metadata is part of the canonical contract.
-- `evaluation/commerce/dry_run_events.py` left unchanged. `Event.__post_init__`
-  already copies metadata through `_json_safe`, so sharing the source dict
-  would not change production hashes.
-
-## Equivalence proof
-
-- Pairwise conflicts == indexed conflicts
-- Copied-metadata event ids == shared-metadata event ids
-- Evidence states preserved (`fixture` never upgrades to live attestation)
-- After-path SHA-256 identity equal across repeats
-
-Field hashes are **not** claimed equal to `Event.replay_hash`. They are the
-isolated scale identity for this harness.
-
-## Bounds
-
-- `MAX_CANDIDATES = 2048`
-- `MAX_EVENTS = 40000`
-- `MAX_PAYLOAD_BYTES = 1 MiB` on sanitized input
-- `TIMEOUT_MS = 8000`
-- No network / provider calls
+- classify canonical imports;
+- when importable, run the five builders twice and require equal event ids, equal `Event.replay_hash` sequences, clean sequence, zero live-authority violations, fixture evidence that cannot upgrade to live;
+- reject isolated field-hash as identity;
+- record that #280 remains the laboratory owner.
 
 ## Operator next action
-
-On a disposable MarketOS worktree from `origin/main`:
 
 ```
 git fetch origin --prune
 git worktree add ... origin/grok/marketos-integrated-replay-performance-v1
 python -m pytest -q tests/test_integrated_replay_perf.py
 python scripts/run_integrated_replay_perf.py --json
+```
+
+Optional combined check with #279 (do not copy #280 files into this branch):
+
+```
+python -m pytest -q tests/test_integrated_replay_perf.py tests/system/test_commercial_dry_run_replay_integration.py
 ```
 
 Do not merge. Close the draft PR to roll back.

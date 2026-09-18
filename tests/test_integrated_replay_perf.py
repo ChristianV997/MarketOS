@@ -10,51 +10,33 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from evaluation.perf.integrated_replay import (
+    CANONICAL_BUILDERS,
     IntegratedReplayPerfError,
     MAX_CANDIDATES,
-    detect_conflicts_indexed,
-    detect_conflicts_pairwise,
-    hash_events_fields,
-    hash_events_json,
+    arbitrate,
+    classify_canonical,
+    isolated_field_fingerprint,
     live_attestation,
-    measure_size,
-    normalize,
-    project_events,
+    measure_canonical_scenarios,
+    project_event_ids,
+    reject_field_hash_as_canonical,
     sanitized_candidates,
 )
-from scripts.run_integrated_replay_perf import build_report
 
 
-def test_replay_identity_stable_across_repeats() -> None:
-    first = measure_size(24, repeats=2)
-    second = measure_size(24, repeats=2)
-    assert first["replay_identity"] == second["replay_identity"]
-    assert first["replay_stable"] is True
-    assert first["live_attestation"] is False
-    assert "fixture" in first["evidence_states"]
-
-
-def test_conflict_algorithms_agree() -> None:
-    rows = normalize(sanitized_candidates(32))
-    assert detect_conflicts_pairwise(rows) == detect_conflicts_indexed(rows)
-    assert detect_conflicts_indexed(rows)
-
-
-def test_event_ids_and_evidence_preserved() -> None:
-    rows = normalize(sanitized_candidates(8))
-    copied = project_events(rows, copy_metadata=True)
-    shared = project_events(rows, copy_metadata=False)
-    assert [event["id"] for event in copied] == [event["id"] for event in shared]
-    evidence = [event["payload"].get("evidence_state") for event in shared if "evidence_state" in event["payload"]]
-    assert "fixture" in evidence
-    assert all(event["metadata"]["dry_run"] is True for event in shared)
-    assert all(event["metadata"]["no_payment_authority"] is True for event in shared)
+def test_classification_does_not_claim_this_module_is_authority() -> None:
+    info = classify_canonical()
+    assert info["this_module_authority"] is False
+    assert info["hash_authority"].endswith("Event.replay_hash")
+    assert "#280" in info["laboratory_owner"]
+    assert info["status"] in {"importable", "unavailable"}
 
 
 def test_fixture_states_cannot_upgrade_live() -> None:
     rows = sanitized_candidates(10)
     assert live_attestation(rows) is False
-    assert measure_size(10)["live_attestation"] is False
+    assert live_attestation([{"evidence_state": "fixture"}]) is False
+    assert live_attestation([{"evidence_state": "observed"}, {"evidence_state": "fixture"}]) is False
 
 
 def test_bounds_reject_oversized_input() -> None:
@@ -64,22 +46,51 @@ def test_bounds_reject_oversized_input() -> None:
         sanitized_candidates(0)
 
 
-def test_field_hash_is_deterministic_and_shorter_path() -> None:
-    events = project_events(normalize(sanitized_candidates(12)), copy_metadata=False)
-    assert hash_events_fields(events) == hash_events_fields(events)
-    assert hash_events_json(events) == hash_events_json(events)
-    assert len(hash_events_fields(events)) == len(events)
+def test_isolated_field_hash_is_rejected_as_canonical_identity() -> None:
+    verdict = reject_field_hash_as_canonical()
+    assert verdict["field_hash_is_canonical"] is False
+    assert verdict["hashes_equal_to_event_replay_hash"] is False
+    rows = sanitized_candidates(4)
+    first = isolated_field_fingerprint(project_event_ids(rows), ["fixture"] * 4)
+    second = isolated_field_fingerprint(project_event_ids(rows), ["fixture"] * 4)
+    assert first == second
 
 
-def test_matrix_report_records_required_fields() -> None:
-    report = build_report((1, 10))
-    matrix = report["matrix"]
-    assert matrix["all_replay_stable"] is True
-    assert matrix["all_conflicts_equal"] is True
-    assert matrix["no_live_upgrade"] is True
-    assert report["failure_class"] == "ok"
-    for row in matrix["sizes"]:
-        assert row["top_bottleneck"]
-        assert "before_ms" in row
-        assert "after_ms" in row
-        assert row["event_count"] == row["size"] * 17
+def test_canonical_measure_classifies_or_proves_five_scenarios() -> None:
+    report = measure_canonical_scenarios()
+    assert report["field_hash_rejected_as_identity"] is True
+    assert report["event_hash_authority"].endswith("Event.replay_hash")
+    if report["status"] == "unavailable":
+        assert report["scenarios"] == []
+        assert report["no_live_upgrade"] is True
+        return
+    assert report["status"] == "actual"
+    assert report["all_replay_stable"] is True
+    assert report["all_sequences_clean"] is True
+    assert report["no_live_upgrade"] is True
+    assert report["no_live_authority"] is True
+    names = [row["scenario"] for row in report["scenarios"]]
+    assert names == list(CANONICAL_BUILDERS)
+    for row in report["scenarios"]:
+        assert row["event_count"] >= 17
+        assert row["replay_hashes_equal"] is True
+        assert row["event_ids_equal"] is True
+        assert row["live_actions_taken"] is False
+        assert row["hash_authority"] == "Event.replay_hash"
+
+
+def test_arbitration_report_records_owners_and_does_not_claim_optimization() -> None:
+    report = arbitrate()
+    assert report["schema"] == "integrated-replay-arbitration-v2"
+    assert report["canonical_path"].startswith("#279")
+    assert report["laboratory_path"].startswith("#280")
+    assert report["optimization_changes_event_replay_hash"] is False
+    assert report["second_replay_path"] is False
+    assert report["verdict"]["production_optimization_applied"] is False
+    assert report["identity_arbitration"]["field_hash_is_canonical"] is False
+    assert report["isolated_scale_note"]["survives_event_replay_hash"] is False
+    if report["canonical"]["status"] == "unavailable":
+        assert report["measures_real_commercial_replay"] is False
+    else:
+        assert report["measures_real_commercial_replay"] is True
+        assert report["canonical"]["all_replay_stable"] is True
