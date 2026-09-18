@@ -117,3 +117,17 @@ def test_json_roundtrip_stable() -> None:
     payload = json.dumps(result.to_dict(), sort_keys=True)
     again = json.dumps(result.to_dict(), sort_keys=True)
     assert payload == again
+
+
+@pytest.mark.parametrize("size", (10, 100, 1000))
+def test_indexed_and_pairwise_conflict_detection_stay_equivalent_at_every_measured_size(size: int) -> None:
+    """Mission-required sizes (COMMERCIAL-REPLAY-INTEGRATION-V3 section E):
+    output equivalence and replay stability must hold at every measured
+    size, not just the PR's original 1,500-row headline figure."""
+    rows = build_rows("many_candidates", size)
+    result = measure_algorithms(rows, repeats=3)
+    assert result["rows"] == size
+    assert result["equivalence"] is True
+    assert result["pairwise_replay_stable"] is True
+    assert result["indexed_replay_stable"] is True
+    assert result["indexed_mean_ms"] >= 0 and result["pairwise_mean_ms"] >= 0

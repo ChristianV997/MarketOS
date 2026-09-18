@@ -16,6 +16,39 @@ This lane adds that measurement seam and a measured reliability fix:
 pairwise conflict scans become an indexed identity map with equivalent
 output.
 
+## Classification (verified by COMMERCIAL-REPLAY-INTEGRATION-V3)
+
+**Benchmark-only harness, not a wired optimization of any canonical
+production path.** `evaluation/perf/commerce_engine.py` is fully
+self-contained: it generates its own fixture rows (`build_rows()`), parses
+its own money/currency/evidence-state fields from scratch, and detects
+conflicts over its own `ProcessResult` records. It never imports or calls
+`evaluation.commerce.opportunity_synthesis`, `evaluation.commerce.supplier_feasibility`,
+`backend.economics.kernel`, or any other canonical scoring/economics/report
+authority (confirmed by this module's own `authorities_not_replaced` field
+in every harness run). No production code path was changed or sped up by
+this PR -- the "before/after" comparison is entirely between two algorithms
+written inside this same new module.
+
+It is preserved because it demonstrates a real, reusable pattern
+(identity-map conflict detection vs. a pairwise scan) with genuine measured
+evidence, in case a similar O(n^2) conflict scan is ever found in a
+canonical module and needs the same fix applied *there*. This PR does not
+apply that fix anywhere outside its own sandbox.
+
+### Measured at 10 / 100 / 1,000 rows (`many_candidates` fixture, 5 repeats, this sandbox, Python 3.11.15)
+
+| Rows | Pairwise mean (ms) | Indexed mean (ms) | Output equivalent | Replay stable (both) |
+| --- | --- | --- | --- | --- |
+| 10 | 0.036 | 0.034 | true | true |
+| 100 | 0.417 | 0.312 | true | true |
+| 1,000 | 11.609 | 3.229 | true | true |
+
+The advantage is negligible at 10 rows, modest at 100, and clear (~3.6x) at
+1,000 -- consistent with the pairwise scan's O(n^2) growth against the
+indexed scan's O(n), and reproduced independently of the PR's own
+1,500-row headline figure (22.88ms -> 4.624ms, also reproduced unchanged).
+
 ## Exclusive files
 
 - `evaluation/perf/commerce_engine.py`
