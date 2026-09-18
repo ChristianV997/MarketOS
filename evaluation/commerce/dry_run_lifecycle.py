@@ -24,13 +24,13 @@ truncated one.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from backend.economics.kernel import MarketLane, Money, UnitEconomicsAssumptions, UnitEconomicsResult
 
 from .business_model_economics import calculate_offer_economics
-from .canonical import BusinessModel, CommercialOwnership, CompetitionSnapshot
+from .canonical import BusinessModel, CommercialOwnership, CompetitionSnapshot, SupplierOfferIdentity
 from .promotion import STAGES, PromotionDecision, evaluate_promotion
 
 LIFECYCLE_STEPS: tuple[str, ...] = (
@@ -72,6 +72,8 @@ class DryRunScenarioInput:
     gate_satisfaction: Mapping[str, bool]
     evidence_state: str
     workspace_id: str = "dry-run"
+    supplier_offer: SupplierOfferIdentity | None = None
+    customer_facing_promise: str = ""
 
 
 @dataclass(frozen=True)
@@ -96,6 +98,7 @@ class DryRunLifecycleReport:
     promotion: PromotionDecision
     dry_run: bool = True
     live_actions_taken: bool = False
+    commerce_packet: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -108,7 +111,28 @@ class DryRunLifecycleReport:
             "promotion": self.promotion.to_dict(),
             "dry_run": self.dry_run,
             "live_actions_taken": self.live_actions_taken,
+            "commerce_packet": dict(self.commerce_packet),
         }
+
+
+def _assumptions_payload(assumptions: UnitEconomicsAssumptions) -> dict[str, Any]:
+    """Serialize assumptions without adding a second kernel schema."""
+    payload: dict[str, Any] = {}
+    for name in (
+        "supplier_shipping", "domestic_shipping", "international_shipping", "brokerage_fee",
+        "payment_fee_fixed", "platform_fee_fixed", "ad_spend", "cac",
+        "payment_fee_rate", "platform_fee_rate", "marketplace_fee_rate", "affiliate_fee_rate",
+        "tax_rate", "duty_rate", "return_rate", "defect_rate", "warranty_rate",
+        "support_reserve_rate", "chargeback_rate", "fx_reserve_rate", "discount_rate",
+        "conversion_rate", "refund_lag_days", "target_margin_rate",
+    ):
+        value = getattr(assumptions, name)
+        if isinstance(value, Money):
+            payload[name] = value.to_dict()
+        elif value is not None:
+            payload[name] = str(value)
+    payload["evidence_refs"] = [item.to_dict() for item in assumptions.evidence_refs]
+    return payload
 
 
 def run_dry_run_lifecycle(scenario: DryRunScenarioInput) -> DryRunLifecycleReport:
@@ -126,10 +150,15 @@ def run_dry_run_lifecycle(scenario: DryRunScenarioInput) -> DryRunLifecycleRepor
         lane=scenario.lane,
         assumptions=scenario.assumptions,
     )
+    gates = dict(scenario.gate_satisfaction)
+    if scenario.supplier_offer is None:
+        gates["exact_sku"] = False
+    if not isinstance(scenario.customer_facing_promise, str) or not scenario.customer_facing_promise.strip():
+        gates["customer_facing_promise"] = False
     promotion = evaluate_promotion(
         scenario.candidate_id,
         "scale_candidate",
-        gate_satisfaction=scenario.gate_satisfaction,
+        gate_satisfaction=gates,
         evidence_state=scenario.evidence_state,
         ownership=scenario.ownership,
     )
@@ -141,11 +170,23 @@ def run_dry_run_lifecycle(scenario: DryRunScenarioInput) -> DryRunLifecycleRepor
         DryRunStepResult("evidence", "simulated", {"evidence_state": scenario.evidence_state}),
         DryRunStepResult(
             "supplier_offer", "simulated",
-            {"supplier_permission_satisfied": bool(scenario.gate_satisfaction.get("supplier_permission", False))},
+            {
+                "supplier_permission_satisfied": bool(gates.get("supplier_permission", False)),
+                "supplier_offer": scenario.supplier_offer.to_dict() if scenario.supplier_offer else None,
+            },
         ),
         DryRunStepResult(
             "market_lane", "simulated",
-            {"lane_id": scenario.lane.lane_id, "destination": scenario.lane.destination_country, "currency": scenario.lane.currency},
+            {
+                "lane_id": scenario.lane.lane_id,
+                "destination": scenario.lane.destination_country,
+                "currency": scenario.lane.currency,
+                "shipping_assumptions": {
+                    name: value.to_dict()
+                    for name in ("supplier_shipping", "domestic_shipping", "international_shipping")
+                    if (value := getattr(scenario.assumptions, name)) is not None
+                },
+            },
         ),
         DryRunStepResult(
             "unit_economics", "simulated",
@@ -172,6 +213,26 @@ def run_dry_run_lifecycle(scenario: DryRunScenarioInput) -> DryRunLifecycleRepor
         else:
             steps.append(DryRunStepResult(step, "blocked_upstream", {}, reasons=promotion.blockers))
 
+    packet = {
+        "scenario_id": scenario.scenario_id,
+        "workspace_id": scenario.workspace_id,
+        "business_model": scenario.business_model.value,
+        "supplier_offer": scenario.supplier_offer.to_dict() if scenario.supplier_offer else None,
+        "market_lane": scenario.lane.to_dict(),
+        "shipping_assumptions": {
+            name: value.to_dict()
+            for name in ("supplier_shipping", "domestic_shipping", "international_shipping")
+            if (value := getattr(scenario.assumptions, name)) is not None
+        },
+        "customer_facing_promise": scenario.customer_facing_promise if isinstance(scenario.customer_facing_promise, str) and scenario.customer_facing_promise else None,
+        "evidence_state": scenario.evidence_state,
+        "assumptions": _assumptions_payload(scenario.assumptions),
+        "blockers": list(promotion.blockers),
+        "economics": economics.to_dict(),
+        "launch_decision": "launch_draft_only" if reached_launch else "blocked",
+        "dry_run": True,
+        "live_actions_taken": False,
+    }
     return DryRunLifecycleReport(
         scenario.scenario_id,
         scenario.candidate_id,
@@ -180,6 +241,7 @@ def run_dry_run_lifecycle(scenario: DryRunScenarioInput) -> DryRunLifecycleRepor
         tuple(steps),
         economics,
         promotion,
+        commerce_packet=packet,
     )
 
 

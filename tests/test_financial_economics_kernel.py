@@ -157,13 +157,9 @@ def test_service_economics_uses_the_requested_formulas_and_capacity_state():
     assert result.minimum_acceptable_value_multiple == Decimal("3")
 
 
-# NOTE: PR #248 ("consolidate evidence-backed profit and revenue kernel")
-# also retrofits evaluation/commerce/supplier_feasibility.py's
-# calculate_unit_economics to accept a `lane: MarketLane` parameter. This
-# integration branch deliberately consumes only the self-contained kernel
-# module (backend/economics/kernel.py) from that PR — not its still-pending,
-# unreviewed edits to shared files such as supplier_feasibility.py — to
-# avoid overwriting that PR's own in-flight work (see AGENTS.md's parallel
-# work matrix). The corresponding test is intentionally omitted here; wiring
-# supplier_feasibility.py to the lane-aware kernel call remains PR #248's
-# integration to land (see this branch's final report for the dependency).
+def test_supplier_feasibility_can_consume_a_market_lane():
+    lane = MarketLane("cn-mx", "CN", "CN", "fixture-warehouse", "MX", currency="MXN", tax_rate="0.16", duty_rate="0.05", payment_fee_rate="0.03", platform_fee_rate="0.02")
+    from evaluation.commerce.supplier_feasibility import calculate_unit_economics as supplier_economics
+
+    result = supplier_economics(target_sell_price="100", unit_cost="20", shipping_cost="10", lane=lane)
+    assert result.gross_margin is not None and result.gross_margin < 100

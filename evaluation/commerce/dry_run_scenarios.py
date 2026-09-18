@@ -20,7 +20,7 @@ from decimal import Decimal
 
 from backend.economics.kernel import EvidenceRef, MarketLane, Money, UnitEconomicsAssumptions
 
-from .canonical import BusinessModel, CommercialOwnership, CompetitionSnapshot, OwnershipAssignment
+from .canonical import BusinessModel, CommercialOwnership, CompetitionSnapshot, OwnershipAssignment, SupplierOfferIdentity
 from .dry_run_lifecycle import DryRunScenarioInput
 
 _ALL_GATES_TRUE = {
@@ -75,6 +75,8 @@ def hydroponics_positive_candidate() -> DryRunScenarioInput:
         competition=competition,
         gate_satisfaction=dict(_ALL_GATES_TRUE),
         evidence_state="observed",
+        supplier_offer=SupplierOfferIdentity("supplier-fixture", "hydro-offer-1", "HYDRO-001", evidence_ref=evidence),
+        customer_facing_promise="A practical nutrient kit for a defined home-growing task.",
     )
 
 
@@ -122,6 +124,8 @@ def smart_pet_support_burden_candidate() -> DryRunScenarioInput:
         competition=competition,
         gate_satisfaction=gates,
         evidence_state="observed",
+        supplier_offer=SupplierOfferIdentity("supplier-fixture", "pet-offer-1", "PET-001", evidence_ref=evidence),
+        customer_facing_promise="A practical feeder workflow for a defined pet-care task.",
     )
 
 
@@ -170,6 +174,8 @@ def solar_4g_security_blocked_candidate() -> DryRunScenarioInput:
         competition=competition,
         gate_satisfaction=gates,
         evidence_state="fixture",
+        supplier_offer=SupplierOfferIdentity("supplier-fixture", "solar-offer-1", "SOLAR-001", evidence_ref=evidence),
+        customer_facing_promise="A draft solar-camera workflow pending compliance confirmation.",
     )
 
 
@@ -209,6 +215,8 @@ def commodity_electronics_rejected_candidate() -> DryRunScenarioInput:
         competition=competition,
         gate_satisfaction=gates,
         evidence_state="observed",
+        supplier_offer=SupplierOfferIdentity("supplier-fixture", "usbc-offer-1", "USBC-001", evidence_ref=evidence),
+        customer_facing_promise="A draft cable organization solution for a defined setup task.",
     )
 
 
@@ -257,6 +265,8 @@ def high_ticket_deferred_candidate() -> DryRunScenarioInput:
         competition=competition,
         gate_satisfaction=gates,
         evidence_state="observed",
+        supplier_offer=SupplierOfferIdentity("supplier-fixture", "bike-offer-1", "BIKE-001", evidence_ref=evidence),
+        customer_facing_promise="A draft cargo-bike workflow pending reverse-logistics and warranty confirmation.",
     )
 
 
