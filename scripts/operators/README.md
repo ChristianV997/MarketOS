@@ -1,22 +1,36 @@
-# Windows First-Phase Intelligence Operator
+# Windows operator command surfaces
+
+The operator scripts are fixture-first and offline by default. They do not
+enable network, credentials, providers, models, or external mutation.
+
+## Sprint command surface
+
+Companion to `docs/WINDOWS_OPERATOR_WORKFLOW.md`.
+
+| File | Purpose |
+|------|---------|
+| `Invoke-MarketOSOperator.ps1` | Twelve dry-run commands |
+| `run_dry_run_scenario_pack.ps1` | Five-scenario packet |
+| `Invoke-StagingAcceptance.ps1` | Staging contract (default `not_run`) |
+| `windows_operator_workflow.py` | Canonical implementation (CI + Windows) |
+
+## First-phase intelligence runner
 
 PowerShell entry point: `scripts/operators/run_first_phase_intelligence.ps1`
 
-## Contract
+This is a separate eight-stage intelligence pipeline. It emits a deterministic
+`MarketOS.FirstPhaseOperatorSummary.v1` summary and a nested
+`MarketOS.FirstPhaseExecutionEvidence.v1` packet. Fixture-demo success is
+classified as `fixture`; manual-import success is `simulated`; neither is live
+`actual` evidence. Live attestation switches remain blocked.
 
-- Fixture-first offline planning only; not live-validated or authoritative.
-- Eight bounded stages composed from existing MarketOS CLIs.
-- No network, credentials, providers, models, or external mutation by default.
-- Writes only when `-OutputDirectory` points to a safe non-forbidden path.
-- Emits one deterministic JSON summary (`MarketOS.FirstPhaseOperatorSummary.v1`) on stdout.
-- Nested execution evidence packet (`MarketOS.FirstPhaseExecutionEvidence.v1`) includes run mode, stage status, evidence classes, fixture/manual labels, input fixture identity, provenance, freshness, blocked/unavailable reasons, Governor result, TrustOS result, commerce decision packet, and a deterministic fingerprint.
-- Default fixture-demo success is classified as `fixture`, never as live `actual` execution.
-- Manual-import success is classified as `simulated`, never as live `actual` execution.
-- Live attestation switches (`-ClaimLiveExecution`, `-LiveValidated`) are blocked.
-- Governor and TrustOS stages delegate to their existing offline CLIs; this wrapper does not recreate those authorities.
-- Commerce stage uses `run_commerce_mvp_slice.py` on `main`. PR #225 `run_commerce_operations_cycle.py` remains a separate public contract (`operations_cycle: not_run` in decision packet).
+The runner delegates Governor and TrustOS decisions to their existing offline
+authorities. Its commerce stage uses `run_commerce_mvp_slice.py`; the
+commerce-operations cycle remains a separate public contract.
 
-## Example
+Call the first-phase runner when the eight-stage intelligence pipeline is
+needed, and the sprint command surface for operator scenarios. Do not merge
+their entry points or treat either as live execution authority.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/operators/run_first_phase_intelligence.ps1 -MaxCandidates 3

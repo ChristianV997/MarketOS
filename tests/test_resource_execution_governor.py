@@ -3,16 +3,14 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from evaluation.companyos.resource_execution_governor import (
     ACTION_TYPES, DOMAINS, MODEL_POLICY_TIERS, OUTCOMES, RESOURCE_TYPES,
-    BudgetCheckResult, ExecutionActionType, ExecutionDecisionRequest,
-    ExecutionGovernorSafetySummary, ExecutionResourceType, LearningCaptureRequirement,
-    ResourceBudget, ResourceQuota, build_resource_execution_governor_report,
+    ExecutionDecisionRequest, ExecutionGovernorSafetySummary, LearningCaptureRequirement,
+    ResourceBudget, ResourceQuota, apply_learning_influence, build_resource_execution_governor_report,
     evaluate_execution_request, request_from_mapping,
 )
 
@@ -566,3 +564,239 @@ def test_report_has_no_secret_fixture_values():
     rendered = json.dumps(build_resource_execution_governor_report().to_dict())
     for marker in ("synthetic-secret-value", "BEGIN PRIVATE KEY", "client@example.com", "real account"):
         assert marker not in rendered
+
+
+def test_apply_learning_influence_without_context_returns_same_object():
+    """Required scenario: existing callers that do not provide learning
+    context must behave compatibly -- literally the same object, not just
+    an equal one, and identically under evaluate_execution_request."""
+    request = base("launch_ad_experiment")
+    assert apply_learning_influence(request) is request
+    assert apply_learning_influence(request, None) is request
+    assert apply_learning_influence(request, {}) == request
+
+
+def test_absent_learning_context_preserves_existing_behavior():
+    for action in ("screen_product_opportunities", "launch_ad_experiment", "run_provider_data_pull", "scale_ad_budget"):
+        request = base(action)
+        assert apply_learning_influence(request) is request
+        assert evaluate_execution_request(apply_learning_influence(request)) == evaluate_execution_request(request)
+
+
+def test_apply_learning_influence_never_touches_hard_gate_fields():
+    """The bridge must never move budgets, quotas, TrustOS/workspace
+    decisions, or approval state -- only previous_learning_required and
+    (opt-in) model_tier."""
+    request = base("generate_client_export", trustos_decision="hard_block", workspace_decision="hard_block", approval_state="not_requested", requested_amount=999.0, resource_type="client_export_quota")
+    influence = {"do_not_repeat_blocked": True, "hold_or_avoid": True, "trustos_recurrence_blocked": True, "recommended_model_tier": "cheap_llm"}
+    updated = apply_learning_influence(request, influence, apply_model_routing_lessons=True)
+    assert updated.trustos_decision == request.trustos_decision
+    assert updated.workspace_decision == request.workspace_decision
+    assert updated.approval_state == request.approval_state
+    assert updated.requested_amount == request.requested_amount
+    assert updated.resource_type == request.resource_type
+    assert updated.previous_learning_required is True
+
+
+def test_apply_learning_influence_do_not_repeat_forces_learning_required_blocker():
+    """Requirement: do-not-repeat rules must prevent the Governor from
+    recommending the same known-bad action -- realized through the
+    existing 'required learning has not been captured' blocker rather than
+    a new outcome value."""
+    request = base("launch_ad_experiment", requested_amount=10.0, resource_type="ad_spend", hypothesis="h", success_metric="m", kill_threshold=.02, learning_captured=False)
+    plain = evaluate_execution_request(request)
+    assert "required learning has not been captured" not in plain.blockers
+    influenced = apply_learning_influence(request, {"do_not_repeat_blocked": True})
+    result = evaluate_execution_request(influenced)
+    assert "required learning has not been captured" in result.blockers
+
+
+def test_apply_learning_influence_hold_or_avoid_also_forces_blocker():
+    """Required scenario: repeated failure produces a hold/avoid signal
+    that must actually change the Governor's decision, not just be
+    reported."""
+    request = base("scale_ad_budget", requested_amount=10.0, resource_type="ad_spend", metric_value=.06, scale_threshold=.05, approval_state="approved", learning_captured=False)
+    plain = evaluate_execution_request(request)
+    assert plain.outcome == "scale"
+    influenced = apply_learning_influence(request, {"hold_or_avoid": True})
+    result = evaluate_execution_request(influenced)
+    assert "required learning has not been captured" in result.blockers
+    assert result.outcome != "scale"
+
+
+def test_apply_learning_influence_model_routing_lesson_is_opt_in_only():
+    """Requirement: provider/model lessons influence routing tier as
+    planning metadata only -- never applied unless the caller opts in."""
+    request = base("run_frontier_llm_synthesis", resource_type="frontier_llm_budget", model_tier="frontier_llm")
+    influence = {"recommended_model_tier": "cheap_llm"}
+    default_call = apply_learning_influence(request, influence)
+    assert default_call.model_tier == "frontier_llm"
+    opted_in = apply_learning_influence(request, influence, apply_model_routing_lessons=True)
+    assert opted_in.model_tier == "cheap_llm"
+
+
+def test_apply_learning_influence_ignores_invalid_model_tier():
+    request = base("run_frontier_llm_synthesis", resource_type="frontier_llm_budget", model_tier="frontier_llm")
+    updated = apply_learning_influence(request, {"recommended_model_tier": "not_a_real_tier"}, apply_model_routing_lessons=True)
+    assert updated.model_tier == "frontier_llm"
+
+
+def test_positive_learning_cannot_bypass_budget_hard_block():
+    """Required scenario: repeated successful experiment evidence may
+    support a scale recommendation only when Governor budgets, quotas,
+    portfolio caps, experiment thresholds, and TrustOS gates also pass.
+    Derive a genuinely positive (repeated-win) influence from a real
+    Learning Ledger report and confirm applying it leaves a
+    budget-exceeding request exactly as blocked as before."""
+    from evaluation.companyos.learning_ledger import build_learning_ledger_report, derive_governor_influence
+    events = [
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "over-budget-candidate"},
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "over-budget-candidate"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="scale_ad_budget", candidate_id="over-budget-candidate")
+    assert influence.supports_scale is True
+    request = base("scale_ad_budget", requested_amount=500.0, resource_type="ad_spend", metric_value=.06, scale_threshold=.05, approval_state="approved")
+    plain = evaluate_execution_request(request)
+    assert plain.outcome == "soft_block"
+    assert any("hard cap" in item or "budget" in item for item in plain.blockers)
+    influenced_request = apply_learning_influence(request, influence.to_governor_context())
+    influenced_result = evaluate_execution_request(influenced_request)
+    assert influenced_result.outcome == "soft_block"
+    assert influenced_result.blockers == plain.blockers
+
+
+def test_trustos_recurrence_remains_hard_blocked_despite_positive_learning():
+    """Required scenario: recurring TrustOS/security blockers must remain
+    hard blockers and must never be overridden by positive learning."""
+    request = base("generate_client_export", resource_type="client_export_quota", trustos_decision="hard_block", workspace_decision="allow")
+    plain = evaluate_execution_request(request)
+    assert "TrustOS gate is blocked" in plain.blockers
+    assert plain.outcome == "hard_block"
+    influence = {"do_not_repeat_blocked": False, "hold_or_avoid": False, "trustos_recurrence_blocked": False, "recommended_model_tier": ""}
+    influenced_request = apply_learning_influence(request, influence)
+    influenced_result = evaluate_execution_request(influenced_request)
+    assert "TrustOS gate is blocked" in influenced_result.blockers
+    assert influenced_result.outcome == "hard_block"
+
+
+def test_apply_learning_influence_output_stays_a_valid_execution_decision_request():
+    request = base("launch_ad_experiment", requested_amount=10.0, resource_type="ad_spend", hypothesis="h", success_metric="m", kill_threshold=.02)
+    updated = apply_learning_influence(request, {"do_not_repeat_blocked": True})
+    assert isinstance(updated, ExecutionDecisionRequest)
+    assert updated.action_type == request.action_type
+
+
+def test_clean_positive_learning_with_sufficient_budget_is_allowed():
+    """Required scenario: successful learning plus sufficient budget --
+    learning must not block a request the Governor's own gates would
+    already allow, and a genuinely clean, repeated win is allowed to
+    actually reach the 'scale' outcome once budgets/quotas/thresholds are
+    satisfied."""
+    from evaluation.companyos.learning_ledger import build_learning_ledger_report, derive_governor_influence
+    events = [
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "clean-scale-candidate"},
+        {"event_type": "ad_experiment", "outcome": "win", "success_reasons": ["budget_efficient"], "action_taken": "scale_ad_budget", "candidate_id": "clean-scale-candidate"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="scale_ad_budget", candidate_id="clean-scale-candidate")
+    assert influence.supports_scale is True
+    request = base("scale_ad_budget", requested_amount=20.0, resource_type="ad_spend", metric_value=.06, scale_threshold=.05, approval_state="approved")
+    influenced_request = apply_learning_influence(request, influence.to_governor_context())
+    result = evaluate_execution_request(influenced_request)
+    assert result.outcome == "scale"
+    assert not result.blockers
+
+
+def test_apply_learning_influence_kill_forces_learning_required_blocker():
+    """Required scenario: a kill decision must prevent automatic
+    resumption of the same action, even without repetition -- unlike
+    hold_or_avoid, a single kill is enough."""
+    request = base("kill_ad_experiment", learning_captured=False)
+    plain = evaluate_execution_request(request)
+    assert "required learning has not been captured" not in plain.blockers
+    influenced = apply_learning_influence(request, {"kill_blocks_resumption": True})
+    result = evaluate_execution_request(influenced)
+    assert "required learning has not been captured" in result.blockers
+
+
+def test_apply_learning_influence_provider_lesson_is_opt_in_only():
+    """Required scenario: provider lesson affecting provider selection
+    without live routing -- only switches away from a provider the
+    influence itself flags as blocked, and only when the caller opts in."""
+    request = base("run_provider_data_pull", resource_type="data_provider_budget", provider_id="dataforseo")
+    influence = {"recommended_provider_id": "manual_import", "avoid_provider_ids": ("dataforseo",)}
+    default_call = apply_learning_influence(request, influence)
+    assert default_call.provider_id == "dataforseo"
+    opted_in = apply_learning_influence(request, influence, apply_provider_routing_lessons=True)
+    assert opted_in.provider_id == "manual_import"
+
+
+def test_apply_learning_influence_never_switches_a_provider_not_flagged_avoid():
+    """The bridge must never second-guess a provider the influence did not
+    itself flag as blocked for this action."""
+    request = base("run_provider_data_pull", resource_type="data_provider_budget", provider_id="serpapi")
+    influence = {"recommended_provider_id": "manual_import", "avoid_provider_ids": ("dataforseo",)}
+    updated = apply_learning_influence(request, influence, apply_provider_routing_lessons=True)
+    assert updated.provider_id == "serpapi"
+
+
+def test_provider_lesson_switches_selection_without_live_routing():
+    """Integration form of the provider-lesson scenario: a real,
+    ledger-derived influence switches provider_id in planning only -- no
+    live call is made, and the Governor's own provider readiness gates
+    still apply in full to whichever provider ends up selected."""
+    from evaluation.companyos.learning_ledger import build_learning_ledger_report, derive_governor_influence
+    events = [
+        {"event_type": "provider_run", "outcome": "blocked", "failure_reasons": ["provider_blocker"], "action_taken": "run_provider_data_pull", "provider_id": "dataforseo", "candidate_id": "provider-integration"},
+        {"event_type": "provider_run", "outcome": "win", "success_reasons": ["provider_ready"], "action_taken": "run_provider_data_pull", "provider_id": "manual_import", "candidate_id": "provider-integration"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="run_provider_data_pull", candidate_id="provider-integration")
+    request = base("run_provider_data_pull", resource_type="data_provider_budget", provider_id="dataforseo", registered_provider=True, terms_privacy_complete=True, output_contract_tested=True, approval_state="approved")
+    updated = apply_learning_influence(request, influence.to_governor_context(), apply_provider_routing_lessons=True)
+    assert updated.provider_id == "manual_import"
+    result = evaluate_execution_request(updated)
+    assert result.simulated_only is True
+
+
+def test_apply_learning_influence_never_touches_provider_readiness_flags():
+    """The provider opt-in must never move `registered_provider`,
+    `terms_privacy_complete`, or `output_contract_tested` -- switching
+    which provider is planned is not the same as declaring it ready."""
+    request = base("run_provider_data_pull", resource_type="data_provider_budget", provider_id="dataforseo", registered_provider=False, terms_privacy_complete=False, output_contract_tested=False)
+    influence = {"recommended_provider_id": "manual_import", "avoid_provider_ids": ("dataforseo",)}
+    updated = apply_learning_influence(request, influence, apply_provider_routing_lessons=True)
+    assert updated.provider_id == "manual_import"
+    assert updated.registered_provider is False
+    assert updated.terms_privacy_complete is False
+    assert updated.output_contract_tested is False
+
+
+def test_stacked_negative_learning_signals_coexist_and_hard_gate_still_independently_blocks():
+    """Independent re-verification: stack every negative learning signal
+    (repeated failure, a kill, a do-not-repeat rule, TrustOS recurrence)
+    on one candidate at once and confirm apply_learning_influence combines
+    them without any surprising interaction, while a real, independent
+    Governor hard gate (trustos_decision) still blocks on its own terms
+    regardless of what the learning signal says."""
+    from evaluation.companyos.learning_ledger import build_learning_ledger_report, derive_governor_influence
+    events = [
+        {"event_type": "ad_experiment", "outcome": "loss", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "stacked-candidate"},
+        {"event_type": "ad_experiment", "outcome": "killed", "failure_reasons": ["poor_creative_angle"], "action_taken": "launch_ad_experiment", "candidate_id": "stacked-candidate"},
+        {"event_type": "trustos_review", "outcome": "blocked", "failure_reasons": ["trust_blocker"], "action_taken": "launch_ad_experiment", "candidate_id": "stacked-candidate"},
+        {"event_type": "trustos_review", "outcome": "blocked", "failure_reasons": ["trust_blocker"], "action_taken": "launch_ad_experiment", "candidate_id": "stacked-candidate"},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+    influence = derive_governor_influence(report, action_type="launch_ad_experiment", candidate_id="stacked-candidate")
+    assert influence.hold_or_avoid is True
+    assert influence.kill_blocks_resumption is True
+    assert influence.do_not_repeat_blocked is True
+    assert influence.trustos_recurrence_blocked is True
+    assert influence.supports_scale is False
+    request = base("launch_ad_experiment", requested_amount=25.0, resource_type="ad_spend", hypothesis="h", success_metric="m", kill_threshold=.02, learning_captured=False, trustos_decision="hard_block")
+    updated = apply_learning_influence(request, influence.to_governor_context())
+    result = evaluate_execution_request(updated)
+    assert "TrustOS gate is blocked" in result.blockers
+    assert "required learning has not been captured" in result.blockers
+    assert result.outcome == "hard_block"

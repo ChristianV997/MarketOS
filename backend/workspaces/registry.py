@@ -7,7 +7,6 @@ persistence primitive, no database.
 from __future__ import annotations
 
 import threading
-from typing import Any
 
 from backend.core.persistence import load_json, save_json_atomic, state_path
 

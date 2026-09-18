@@ -6,7 +6,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 try:
     from .operating_layer import ROOT, changed_from_git, staged_from_git, docs_only, normal_paths, render_json_or_markdown, write_optional_output
@@ -18,6 +18,113 @@ except ImportError:  # pragma: no cover - direct script execution
 
 SECRET_VALUE = re.compile(r"(?:CJ_API_KEY|CJ_EMAIL|SUPABASE_SERVICE_ROLE_KEY|(?:api[_-]?key|token|secret|password))\s*[=:]\s*['\"]?[^\s'\"]{6,}", re.I)
 MUTATION = re.compile(r"(?:create[_ ]order|capture[_ ]payment|refund|fulfill|mutate[_ ]inventory|shopify.*(?:create|update|publish)|send[_ ]customer)", re.I)
+QUALITY_GATE_FAILURE_STATUSES = {"failed", "timed_out", "collection_failed", "blocked", "configuration_error"}
+
+
+def _quality_gate_failures(quality_gate: Mapping[str, Any]) -> list[str]:
+    failures: set[str] = set()
+
+    def visit(item: Any) -> None:
+        if not isinstance(item, Mapping):
+            return
+        name = item.get("name")
+        status = item.get("status")
+        if isinstance(name, str) and status in QUALITY_GATE_FAILURE_STATUSES and item.get("execution_status") in {"executed", "timed_out"}:
+            failures.add(name)
+        for key in ("checks", "subchecks"):
+            children = item.get(key, [])
+            if isinstance(children, list):
+                for child in children:
+                    visit(child)
+            elif isinstance(children, Mapping):
+                for child_name, child in children.items():
+                    if isinstance(child, Mapping) and "name" not in child:
+                        child = dict(child)
+                        child["name"] = child_name
+                    visit(child)
+
+    for item in quality_gate.get("checks", []):
+        visit(item)
+    ci = quality_gate.get("ci")
+    if isinstance(ci, Mapping):
+        for job in ci.get("jobs", []):
+            if not isinstance(job, Mapping) or not isinstance(job.get("name"), str):
+                continue
+            if job.get("status") == "failed" and isinstance(job.get("steps_executed"), int) and job["steps_executed"] > 0:
+                failures.add(f"ci:{job['name']}")
+    return sorted(failures)
+
+
+def _baseline_delta_projection(delta: Any, quality_gate: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(delta, Mapping):
+        return {"provided": False, "status": "not_run", "classification": "not_run", "controls": []}
+
+    controls: list[dict[str, Any]] = []
+    for raw in delta.get("controls", []):
+        if not isinstance(raw, Mapping) or not isinstance(raw.get("name"), str):
+            continue
+        control = {"name": raw["name"], "classification": str(raw.get("classification", "malformed"))}
+        for field in ("baseline_status", "candidate_status"):
+            if field in raw and (raw[field] is None or isinstance(raw[field], str)):
+                control[field] = raw[field]
+        controls.append(control)
+    controls.sort(key=lambda item: item["name"])
+
+    names_by_class: dict[str, list[str]] = {}
+    for control in controls:
+        names_by_class.setdefault(control["classification"], []).append(control["name"])
+    classifications = sorted({str(item) for item in delta.get("classifications", []) if isinstance(item, str)} or names_by_class)
+    projection = {
+        "provided": True,
+        "status": str(delta.get("status", "malformed")),
+        "classification": str(delta.get("classification", "malformed")),
+        "classifications": classifications,
+        "baseline_available": bool(delta.get("baseline_available", False)),
+        "controls": controls,
+        "fingerprint": str(delta.get("fingerprint", "")),
+        "introduced_failures": sorted(names_by_class.get("introduced_failure", [])),
+        "inherited_failures": sorted(names_by_class.get("inherited_failure", [])),
+        "resolved_failures": sorted(names_by_class.get("resolved_failure", [])),
+        "newly_available_passes": sorted(names_by_class.get("newly_available_pass", [])),
+        "unavailable_in_both": sorted(names_by_class.get("unavailable_in_both", [])),
+        "candidate_incomplete": sorted(names_by_class.get("candidate_incomplete", [])),
+        "candidate_executed_failure": _quality_gate_failures(quality_gate),
+    }
+    return projection
+
+
+def _quality_gate_projection(quality_gate: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(quality_gate, Mapping):
+        return {"provided": False}
+    status = str(quality_gate.get("status", "malformed"))
+    classification = str(quality_gate.get("classification", "malformed"))
+    ci = quality_gate.get("ci") if isinstance(quality_gate.get("ci"), Mapping) else {}
+    ci_status = str(ci.get("status", "unavailable"))
+    ci_classification = str(ci.get("classification", "ci_unavailable"))
+    delta = _baseline_delta_projection(quality_gate.get("baseline_delta"), quality_gate)
+    blocking_reasons: set[str] = set()
+    if status != "passed":
+        blocking_reasons.add(f"quality_gate:{status}")
+    if ci_status != "passed":
+        blocking_reasons.add(f"ci:{ci_classification}")
+    if delta.get("status") in {"failed", "unavailable", "malformed"}:
+        blocking_reasons.add(f"baseline_delta:{delta['status']}")
+    executed_failures = delta.get("candidate_executed_failure", [])
+    if executed_failures:
+        blocking_reasons.add("candidate_executed_failure")
+    if quality_gate.get("phase") == "final" and quality_gate.get("ready_for_supervised_use") is False:
+        blocking_reasons.add("quality_gate_not_ready")
+    return {
+        "provided": True,
+        "status": status,
+        "classification": classification,
+        "ci_status": ci_status,
+        "ci_classification": ci_classification,
+        "ready_for_supervised_use": quality_gate.get("ready_for_supervised_use") is True,
+        "blocking": bool(blocking_reasons),
+        "blocking_reasons": sorted(blocking_reasons),
+        "baseline_delta": delta,
+    }
 
 
 def _diff_text(path: str | None, *, staged: bool = False) -> str:
@@ -27,7 +134,15 @@ def _diff_text(path: str | None, *, staged: bool = False) -> str:
     return completed.stdout or ""
 
 
-def report(paths: list[str], diff: str, *, branch: str, metadata: dict[str, Any] | None = None, mutation_diff: str | None = None) -> dict[str, Any]:
+def report(
+    paths: list[str],
+    diff: str,
+    *,
+    branch: str,
+    metadata: dict[str, Any] | None = None,
+    mutation_diff: str | None = None,
+    quality_gate: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     paths = normal_paths(paths)
     implementation_paths = [path for path in paths if not path.startswith(("docs/", "tests/")) and path not in {"AGENTS.md", "CLAUDE.md", "README.md"}]
     flags = {
@@ -40,12 +155,19 @@ def report(paths: list[str], diff: str, *, branch: str, metadata: dict[str, Any]
     risk = "none" if not paths else "blocked" if any(flags[key] for key in ("artifacts_detected", "credential_file_detected", "secret_value_like_detected", "provider_mutation_like_detected")) else "low" if docs_only(paths) else "moderate"
     warnings = [name for name, value in flags.items() if value]
     tests = select(paths)
+    quality_gate_projection = _quality_gate_projection(quality_gate)
+    merge_readiness = "clear" if not paths else "blocked" if risk == "blocked" else "needs_tests" if not any(path.startswith("tests/") for path in paths) and not docs_only(paths) else "ready_for_review"
+    if quality_gate_projection.get("blocking"):
+        merge_readiness = "blocked"
+        warnings.extend(quality_gate_projection["blocking_reasons"])
+    warnings = sorted(set(warnings))
     return {
         "branch": branch, "changed_files": paths, "changed_file_count": len(paths), "risk_category": risk,
         "detections": flags, "docs_touched": any(path.startswith("docs/") for path in paths),
         "tests_touched": any(path.startswith("tests/") for path in paths), "recommended_test_set": tests["recommended_commands"],
-        "merge_readiness": "clear" if not paths else "blocked" if risk == "blocked" else "needs_tests" if not any(path.startswith("tests/") for path in paths) and not docs_only(paths) else "ready_for_review",
+        "merge_readiness": merge_readiness,
         "blocking_warnings": warnings, "final_report_checklist": ["scope and safety boundary", "tests and exact results", "unrun checks", "rollback", "no external mutation confirmation"],
+        "quality_gate": quality_gate_projection,
         "metadata": metadata or {},
     }
 

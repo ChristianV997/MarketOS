@@ -28,8 +28,11 @@ fixed check order `compile`, `pytest`, `ruff`, `typed`, `frontend`, `security`,
 and `diff_check`; with `--execute` it runs only those repository-local checks.
 It never installs dependencies, queries CI, calls providers, or publishes
 raw command output. Use `--generated-at` to make the report timestamp an
-explicit input, and use `--baseline-file` only for an operator-supplied
-baseline whose check statuses are classified separately from the current run.
+explicit input. `--baseline-file` accepts a bounded local gate report or the
+same sanitized `MarketOS.CIEvidence.v1` input used by `--ci-evidence-file`.
+Its statuses are classified separately from the current run and are exposed
+as the advisory `baseline_delta` field; this attribution never authorizes a
+merge or changes the final readiness conditions.
 
 The structured report uses schema `MarketOS.LocalQualityGate.v2` and these
 process exits:
@@ -41,6 +44,20 @@ process exits:
 | `2` | A required tool/dependency is unavailable, checks were not run, or CI is unavailable/has no executed steps. |
 | `3` | The report request or repository configuration is malformed. |
 
+## CI preflight and final attestation
+
+The existing workflow runs `--phase preflight`: it proves only that the
+quality-gate authority's bounded compile, focused regression tests, focused
+Ruff checks, and diff check executed successfully. Full repository tests,
+Semgrep, and container validation remain owned by their existing CI jobs. A
+preflight report always keeps
+`ready_for_supervised_use` false and retains absent CI evidence as
+`ci_unavailable`; its zero exit code is not final merge evidence. Final
+attestation uses the default `final` phase with complete sanitized
+`MarketOS.CIEvidence.v1` input after required jobs have completed.
+When local execution fails while final CI evidence is absent, the local
+failure classification remains visible; `ci_unavailable` does not mask it.
+
 Failure classifications distinguish `changed_scope_failure` from
 `pre_existing_failure` only when the injected baseline supports that claim.
 Without baseline evidence, a failed check is `failure_origin_unverified`.
@@ -48,11 +65,30 @@ Missing tools, missing frontend dependencies, missing security policy, and CI
 billing/zero-step states remain unavailable rather than becoming passes.
 For sanitized CI metadata, pass a local JSON file with
 `--ci-evidence-file <path>`. It must use schema `MarketOS.CIEvidence.v1` and
-contain only run status/conclusion plus required-job metadata: job name,
+contain an explicit `required_jobs` list plus run status/conclusion and
+required-job metadata: job name,
 required flag, status, conclusion, runner id/name, executed-step count, log
 availability, and required-check status. Unknown fields, including raw logs,
-are malformed. A missing runner, zero steps, incomplete job, or unavailable
-logs is `ci_unavailable`; it cannot become a pass.
+are malformed. A required job missing from the observed jobs is synthetic
+`ci_unavailable` evidence. A missing runner, zero steps, incomplete job, or
+unavailable logs is `ci_unavailable`; it cannot become a pass.
+When a baseline is supplied, `baseline_delta.controls` compares stable check
+and CI-job names in sorted order. It can classify an `introduced_failure`,
+`inherited_failure`, `resolved_failure`, `newly_available_pass`,
+`unavailable_in_both`, `failure_origin_unverified`, `candidate_incomplete`,
+`baseline_missing`, or malformed baseline. A missing baseline file produces
+an unavailable delta; malformed baseline data produces a malformed delta.
+The delta status itself uses the existing gate vocabulary and is included in
+the readiness blockers. Its `fingerprint` is derived only from canonical
+statuses and classifications, excluding timestamps and raw output, so equal
+inputs produce equal attribution.
+The CLI passes this same result into the existing PR-readiness authority. It
+is exposed at `planning_summary.pr_readiness.quality_gate`, where
+`baseline_delta.introduced_failures`, `inherited_failures`,
+`resolved_failures`, `newly_available_passes`, `unavailable_in_both`, and
+`candidate_executed_failure` remain separate. Failed, incomplete, malformed,
+or `ci_unavailable` gate context changes PR readiness to `blocked`; no report
+field grants merge or deployment authority.
 Malformed scanner output is malformed evidence. A security scanner that exits
 zero while returning findings remains a security failure. The readiness field
 stays false while any blocker exists, while the repository is dirty, or while
