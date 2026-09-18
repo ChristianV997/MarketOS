@@ -14,6 +14,7 @@ building a parallel one:
   - money/economics: ``backend.economics.kernel`` (via ``evaluation.commerce.dry_run_lifecycle``)
   - workspace/export boundary: ``evaluation.trustos.client_workspace_isolation``
   - live-action gating: ``evaluation.companyos.resource_execution_governor``
+  - approval boundary: ``evaluation.companyos.approval_ledger``
 
 The artifact-store checks below use the current workspace-bound API. The
 path-traversal regression is asserted here as an integration contract after
@@ -357,6 +358,21 @@ _CONSOLIDATED_REPLAY_FIXTURES = (
     ("walking_pad_deferred.json", "high_ticket_deferred_candidate"),
 )
 
+_EXPECTED_COMMERCE_STEPS = (
+    "evidence", "supplier_offer", "market_lane", "unit_economics", "competition",
+    "promotion_gate", "offer", "experiment_draft", "campaign_draft", "simulated_order",
+    "supplier_dispatch_draft", "tracking_draft", "delivery", "return_rma",
+    "contribution_reconciliation",
+)
+
+_EXPECTED_FULFILLMENT_STATES = (
+    "order_received", "payment_authorized", "payment_captured", "supplier_order_drafted",
+    "supplier_order_approved", "supplier_order_submitted", "supplier_accepted", "stock_confirmed",
+    "tracking_pending", "in_transit", "delivered", "return_requested", "rma_opened",
+    "return_in_transit", "return_received", "refund_requested", "refund_completed",
+    "contribution_reconciled",
+)
+
 
 @pytest.mark.parametrize("fixture_name,builder_name", _CONSOLIDATED_REPLAY_FIXTURES)
 def test_consolidated_replay_carries_research_through_mexico_fulfillment_and_safe_export(fixture_name, builder_name):
@@ -366,13 +382,37 @@ def test_consolidated_replay_carries_research_through_mexico_fulfillment_and_saf
     assert result["research"]["market_lane"]["currency"] == "MXN"
     assert result["commerce"]["commerce_packet"]["dry_run"] is True
     assert result["commerce"]["commerce_packet"]["live_actions_taken"] is False
+    assert tuple(step["step"] for step in result["commerce"]["steps"]) == _EXPECTED_COMMERCE_STEPS
+    assert all(set(step) == {"step", "status", "detail", "reasons"} for step in result["commerce"]["steps"])
+    assert tuple(result["fulfillment"]["state_path"]) == _EXPECTED_FULFILLMENT_STATES
     assert result["fulfillment"]["state_path"][-1] == "contribution_reconciled"
     assert {"return_requested", "rma_opened", "contribution_reconciled"} <= set(result["fulfillment"]["state_path"])
     assert result["fulfillment"]["live_action_allowed"] is False
     assert result["fulfillment"]["external_mutations"] is False
     assert result["event_summary"]["sequence_issues"] == []
     assert result["event_summary"]["live_authority_violations"] == []
+    assert result["event_count"] == result["event_summary"]["event_count"] == 37
+    assert len(result["event_summary"]["hash_sequence"]) == 37
     assert result["second_append_idempotent_count"] == result["event_count"]
+    assert result["first_append_count"] == result["event_count"]
+    assert result["approval_ledger"]["report_version"] == "companyos-approval-ledger-v1"
+    assert result["approval_ledger"]["simulation_count"] == 1
+    assert result["approval_ledger"]["simulation_results"] == [{
+        "action": "launch_ad",
+        "result": "would_be_blocked_by_policy",
+        "can_be_approved_now": False,
+    }]
+    assert result["approval_ledger"]["external_action_authorized"] is False
+    assert result["approval_ledger"]["safety_summary"]["read_only"] is True
+    assert result["approval_ledger"]["safety_summary"]["external_action_performed"] is False
+    assert result["approval_ledger"]["safety_summary"]["network_calls"] is False
+    assert result["approval_ledger"]["safety_summary"]["mutated"] is False
+    supplier_offer_step = result["commerce"]["steps"][1]["detail"]["supplier_offer"]
+    if result["supplier_offer"] is None:
+        assert supplier_offer_step is None
+    else:
+        assert supplier_offer_step["evidence_ref"]["evidence_state"] == "fixture"
+    assert result["commerce"]["steps"][2]["detail"]["currency"] == "MXN"
     assert result["launch_authorized"] is False
     assert result["provider_calls"] is False
     assert result["credentials_used"] is False

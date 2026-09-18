@@ -125,6 +125,28 @@ def _fulfillment_cli_projection(report: Any) -> dict[str, Any]:
     }
 
 
+def _approval_ledger_cli_projection(report: Any) -> dict[str, Any]:
+    """Expose the canonical offline approval boundary without raw records."""
+    payload = report.to_dict()
+    return {
+        "report_version": report.report_version,
+        "approval_count": report.approval_count,
+        "pending_count": report.pending_count,
+        "blocked_count": report.blocked_count,
+        "simulation_count": len(report.simulations),
+        "simulation_results": [
+            {
+                "action": item.action,
+                "result": item.result,
+                "can_be_approved_now": item.can_be_approved_now,
+            }
+            for item in report.simulations
+        ],
+        "safety_summary": payload["safety_summary"],
+        "external_action_authorized": False,
+    }
+
+
 def _research_evidence(report: dict[str, Any], offer: dict[str, Any], lane: dict[str, Any]):
     from backend.economics.kernel import EvidenceRef
 
@@ -195,6 +217,7 @@ def _replay_scenario(
         ExecutionDecisionRequest,
         evaluate_execution_request,
     )
+    from evaluation.companyos.approval_ledger import build_approval_ledger, simulate_action
     from evaluation.trustos.client_workspace_isolation import export_client_evidence
     from scripts.research_to_decision import build_research_to_decision
 
@@ -322,6 +345,10 @@ def _replay_scenario(
             approval_state="not_requested",
         )
     )
+    approval_ledger = build_approval_ledger(
+        generated_at="offline-deterministic",
+        simulations=(simulate_action("launch_ad"),),
+    )
     registry = WorkspaceRegistry(registry_path)
     workspace = registry.register(
         ClientWorkspace(
@@ -366,6 +393,7 @@ def _replay_scenario(
         "commerce": _commerce_cli_projection(commerce),
         "fulfillment": _fulfillment_cli_projection(fulfillment_report),
         "governor": governor.to_dict(),
+        "approval_ledger": _approval_ledger_cli_projection(approval_ledger),
         "client_export": export.to_dict(),
         "event_summary": summary,
         "event_count": len(events),
