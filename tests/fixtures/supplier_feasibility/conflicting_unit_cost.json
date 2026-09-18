@@ -1,0 +1,20 @@
+[
+  {
+    "candidate_id": "same-product",
+    "supplier": "cj",
+    "supplier_product_id": "SKU-1",
+    "unit_cost": 8,
+    "currency": "USD",
+    "shipping_cost": 2,
+    "source_confidence": 0.5
+  },
+  {
+    "candidate_id": "same-product",
+    "supplier": "cj",
+    "supplier_product_id": "SKU-1",
+    "unit_cost": 12,
+    "currency": "USD",
+    "shipping_cost": 2,
+    "source_confidence": 0.9
+  }
+]

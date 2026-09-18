@@ -2,6 +2,7 @@
 import backend.core.persistence as pers
 import pytest
 from backend.workspaces.artifact_store import ArtifactStore
+from backend.workspaces.registry import get_workspace_registry
 from services.customer_intelligence.sprint import CustomerIntelligenceSprint, build_customer_intelligence_sprint
 
 
@@ -25,6 +26,7 @@ def test_no_vertical_means_no_playbook():
 
 def test_saved_to_artifact_store():
     result, envelope = build_customer_intelligence_sprint("clinic", vertical="clinic_wellness")
-    store = ArtifactStore()
-    saved = store.load(envelope.workspace_id, envelope.experiment_id, "result.json")
+    workspace = get_workspace_registry().get(envelope.workspace_id)
+    assert workspace is not None
+    saved = ArtifactStore(workspace).load(envelope.experiment_id, "result.json")
     assert saved == result.to_dict()

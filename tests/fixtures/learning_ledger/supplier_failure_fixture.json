@@ -1,0 +1,1 @@
+{"events":[{"learning_event_id":"fixture-supplier-failure","event_type":"supplier_validation","outcome":"blocked","failure_reasons":["weak_supplier_feasibility","high_shipping_risk"]}]}

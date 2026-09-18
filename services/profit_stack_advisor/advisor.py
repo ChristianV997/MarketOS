@@ -15,6 +15,7 @@ from backend.experiments.registry import get_experiment_registry
 from backend.stack_planner.schemas import BusinessStackRequest
 from backend.workspaces.artifact_store import ArtifactStore
 from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import get_workspace_registry
 
 from .schemas import ProfitStackAdvisorResult
 
@@ -24,7 +25,7 @@ SERVICE_NAME = "profit_stack_advisor"
 
 
 def _default_workspace() -> ClientWorkspace:
-    return ClientWorkspace(name="ephemeral", workspace_type="internal")
+    return get_workspace_registry().register(ClientWorkspace(name="ephemeral", workspace_type="internal"))
 
 
 def run_profit_stack_advisor(
@@ -46,8 +47,9 @@ def run_profit_stack_advisor(
     never-raise; this function wraps it anyway so a surprise failure
     degrades to a partial result instead of aborting."""
     workspace = workspace or _default_workspace()
+    workspace = get_workspace_registry().register(workspace)
     registry = get_experiment_registry()
-    store = ArtifactStore()
+    store = ArtifactStore(workspace)
 
     envelope = CommercialRunEnvelope(
         service_name=SERVICE_NAME,
@@ -120,11 +122,11 @@ def run_profit_stack_advisor(
     try:
         from services.reporting import save_report_artifacts
         from .report import render_profit_stack_advisor_markdown
-        save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id,
+        save_report_artifacts(store, envelope.experiment_id,
                                render_profit_stack_advisor_markdown(result), result.to_dict())
     except Exception as exc:  # noqa: BLE001 — the JSON result below is the durable fallback
         _log.debug("profit_stack_advisor_report_save_failed error=%s", exc)
-        store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+        store.save(envelope.experiment_id, "result.json", result.to_dict())
 
     envelope.mark_completed(result.to_dict())
     log_transition(envelope, "experiment_completed")
