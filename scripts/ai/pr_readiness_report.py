@@ -50,7 +50,7 @@ def _quality_gate_failures(quality_gate: Mapping[str, Any]) -> list[str]:
         for job in ci.get("jobs", []):
             if not isinstance(job, Mapping) or not isinstance(job.get("name"), str):
                 continue
-            if job.get("status") == "failed" and isinstance(job.get("steps_executed"), int) and job["steps_executed"] > 0:
+            if job.get("status") in {"failed", "timed_out"} and isinstance(job.get("steps_executed"), int) and job["steps_executed"] > 0:
                 failures.add(f"ci:{job['name']}")
     return sorted(failures)
 

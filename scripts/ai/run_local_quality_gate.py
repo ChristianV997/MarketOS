@@ -45,7 +45,7 @@ CLASS_SECURITY_FINDING = "security_finding"
 CLASS_SECURITY_SCANNER_FAILURE = "security_scanner_failure"
 CLASS_DIFF_FAILURE = "diff_failure"
 CLASS_COLLECTION_FAILED = "collection_failed"
-CLASS_TIMEOUT = "timeout"
+CLASS_TIMEOUT = "timed_out"
 CLASS_MALFORMED_CONFIGURATION = "malformed"
 CLASS_BASELINE_MISSING = "baseline_missing"
 CLASS_BASELINE_MALFORMED = "malformed_baseline"
@@ -93,7 +93,7 @@ CI_EVIDENCE_CONCLUSIONS = {
     "success", "failure", "neutral", "cancelled", "skipped", "timed_out",
     "action_required", "stale", "startup_failure", "pending",
 }
-CI_EVIDENCE_CHECK_STATUSES = {"success", "failure", "neutral", "cancelled", "skipped", "pending"}
+CI_EVIDENCE_CHECK_STATUSES = {"success", "failure", "neutral", "cancelled", "skipped", "pending", "timed_out"}
 CI_EVIDENCE_MAX_BYTES = 64 * 1024
 CI_EVIDENCE_MAX_JOBS = 100
 QUALITY_GATE_PHASES = {"final", "preflight"}
@@ -737,6 +737,8 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
             job_status, reason = "unavailable", "ci_logs_unavailable"
         elif job["status"] != "completed":
             job_status, reason = "unavailable", "ci_job_not_completed"
+        elif job["conclusion"] == "timed_out" or job["required_check_status"] == "timed_out":
+            job_status, reason = "timed_out", "ci_required_check_timed_out"
         elif job["conclusion"] != "success" or job["required_check_status"] != "success":
             job_status, reason = "failed", "ci_required_check_failed"
         else:
@@ -771,12 +773,16 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
         for job in required_jobs
         if job["status"] == "failed"
     }
+    if any(job["status"] == "timed_out" for job in required_jobs) or ci_result["run_conclusion"] == "timed_out":
+        failure_classes.add(CLASS_TIMEOUT)
     if any(job["status"] == "unavailable" for job in required_jobs):
         failure_classes.add(CLASS_CI_UNAVAILABLE)
     if ci_result["run_status"] != "completed":
         status, reason, classification = "unavailable", "ci_run_not_completed", CLASS_CI_UNAVAILABLE
     elif any(job["status"] == "unavailable" for job in required_jobs):
         status, reason, classification = "unavailable", "required_ci_evidence_unavailable", CLASS_CI_UNAVAILABLE
+    elif any(job["status"] == "timed_out" for job in required_jobs) or ci_result["run_conclusion"] == "timed_out":
+        status, reason, classification = "timed_out", "required_ci_check_timed_out", CLASS_TIMEOUT
     elif ci_result["run_conclusion"] != "success" or any(job["status"] == "failed" for job in required_jobs):
         status, reason, classification = "failed", "required_ci_check_failed", CLASS_FAILURE_ORIGIN_UNVERIFIED
     else:
@@ -799,17 +805,22 @@ def _ci_snapshot(ci_result: Mapping[str, Any] | None) -> dict[str, Any]:
         return {"status": "unavailable", "reason": "external_ci_not_queried", "executed_steps": 0, "classification": "ci_unavailable"}
     if ci_result.get("evidence_format") == CI_EVIDENCE_SCHEMA:
         return _ci_evidence_snapshot(ci_result)
-    try:
-        status = str(ci_result.get("status", "")).casefold()
-        steps = int(ci_result.get("executed_steps", 0) or 0)
-    except (AttributeError, TypeError, ValueError):
-        return {"status": "unavailable", "reason": "malformed_ci_evidence", "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
+    raw_status = ci_result.get("status")
+    raw_steps = ci_result.get("executed_steps", 0)
+    if not isinstance(raw_status, str) or isinstance(raw_steps, bool) or not isinstance(raw_steps, int):
+        return {"status": "malformed", "reason": "malformed_ci_evidence", "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
+    status = raw_status.casefold()
+    steps = raw_steps
+    if status not in {"success", "failure", "unavailable", "timed_out", "malformed"} or steps < 0:
+        return {"status": "malformed", "reason": "malformed_ci_evidence", "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
     if status == "malformed":
         return {"status": "malformed", "reason": ci_result.get("reason", "malformed_ci_evidence"), "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
     if status == "success" and steps > 0:
         return {"status": "passed", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_PASS}
     if status == "failure" and steps > 0:
         return {"status": "failed", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_FAILURE_ORIGIN_UNVERIFIED}
+    if status == "timed_out" and steps > 0:
+        return {"status": "timed_out", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_TIMEOUT}
     return {"status": "unavailable", "reason": "ci_report_has_no_executed_steps", "executed_steps": steps, "classification": "ci_unavailable"}
 
 
@@ -1281,6 +1292,8 @@ def run_quality_gate(
         value for value in check_classes if value not in {CLASS_PASS, "not_configured", "not_run"}
     }
     ci = _ci_snapshot(ci_result)
+    if ci["status"] == "malformed":
+        configuration_errors.append("malformed:ci")
     baseline_delta = _baseline_delta(
         baseline_report,
         baseline_error=baseline_error,
@@ -1313,8 +1326,10 @@ def run_quality_gate(
         local_status, local_exit_code = "configuration_error", EXIT_CONFIGURATION
     elif not execute:
         local_status, local_exit_code = "not_run", EXIT_UNAVAILABLE
-    elif {"failed", "timed_out", "collection_failed"} & statuses or "blocked" in statuses:
+    elif {"failed", "collection_failed"} & statuses or "blocked" in statuses:
         local_status, local_exit_code = "failed", EXIT_FAILED
+    elif "timed_out" in statuses:
+        local_status, local_exit_code = "timed_out", EXIT_FAILED
     elif "unavailable" in statuses:
         local_status, local_exit_code = "unavailable", EXIT_UNAVAILABLE
     elif warnings:
@@ -1328,6 +1343,8 @@ def run_quality_gate(
         status, final_exit_code = "not_run", EXIT_UNAVAILABLE
     elif local_status == "failed" or ci["status"] == "failed":
         status, final_exit_code = "failed", EXIT_FAILED
+    elif local_status == "timed_out" or ci["status"] == "timed_out":
+        status, final_exit_code = "timed_out", EXIT_FAILED
     elif local_status == "unavailable" or ci["status"] == "unavailable" or baseline_delta["status"] == "unavailable":
         status, final_exit_code = "unavailable", EXIT_UNAVAILABLE
     else:
@@ -1418,7 +1435,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--execute", action="store_true", help="run fixed local checks instead of only reporting their plan")
     parser.add_argument("--phase", choices=("final", "preflight"), default="final", help="final attestation or local preflight")
     parser.add_argument("--generated-at", help="timezone-aware ISO timestamp injected by the caller")
-    parser.add_argument("--ci-status", choices=("success", "failure", "unavailable"), help="optional external CI result; never queried by this tool")
+    parser.add_argument("--ci-status", choices=("success", "failure", "timed_out", "unavailable"), help="optional external CI result; never queried by this tool")
     parser.add_argument("--ci-steps", type=int, default=0, help="executed-step count accompanying --ci-status")
     parser.add_argument("--ci-evidence-file", type=Path, help="local sanitized CI metadata JSON; never queries GitHub or reads logs")
     parser.add_argument(

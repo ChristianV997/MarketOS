@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.ai import run_local_quality_gate as gate
+from scripts.ai import pr_readiness_report
 
 
 def test_no_changes_is_clear_and_offline():
@@ -973,7 +974,89 @@ def test_timeout_is_not_a_pass(monkeypatch, tmp_path):
     assert pytest_result["status"] == "timed_out"
     assert pytest_result["classification"] == gate.CLASS_TIMEOUT
     assert pytest_result["execution_status"] == "timed_out"
-    assert report["status"] == "failed"
+    assert report["status"] == "timed_out"
+
+
+def test_legacy_ci_timeout_remains_timed_out(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "timed_out", "executed_steps": 2},
+        runner=_passing_runner,
+    )
+
+    assert report["ci"]["status"] == "timed_out"
+    assert report["ci"]["classification"] == gate.CLASS_TIMEOUT
+    assert report["status"] == "timed_out"
+    assert report["exit_code"] == gate.EXIT_FAILED
+    assert report["ready_for_supervised_use"] is False
+
+
+def test_sanitized_ci_timeout_remains_timed_out(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    evidence_path = _write_ci_evidence(tmp_path)
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    payload["run"]["conclusion"] = "timed_out"
+    payload["jobs"][0]["conclusion"] = "timed_out"
+    payload["jobs"][0]["required_check_status"] = "timed_out"
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence, error = gate.load_ci_evidence(evidence_path)
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        ci_evidence_error=error,
+        runner=_passing_runner,
+    )
+
+    assert error is None
+    assert report["ci"]["status"] == "timed_out"
+    assert report["ci"]["classification"] == gate.CLASS_TIMEOUT
+    assert report["status"] == "timed_out"
+
+
+def test_malformed_legacy_ci_metadata_fails_closed(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "not-a-ci-status", "executed_steps": 1},
+        runner=_passing_runner,
+    )
+
+    assert report["ci"]["status"] == "malformed"
+    assert report["classification"] == gate.CLASS_MALFORMED_CONFIGURATION
+    assert report["status"] == "configuration_error"
+    assert report["exit_code"] == gate.EXIT_CONFIGURATION
+
+
+def test_readiness_surfaces_executed_ci_timeout():
+    projection = pr_readiness_report._quality_gate_projection({
+        "schema": gate.QUALITY_GATE_SCHEMA,
+        "status": "timed_out",
+        "classification": gate.CLASS_TIMEOUT,
+        "ci": {
+            "status": "timed_out",
+            "classification": gate.CLASS_TIMEOUT,
+            "jobs": [{"name": "test", "status": "timed_out", "steps_executed": 4}],
+        },
+        "baseline_delta": {"status": "passed", "controls": []},
+        "phase": "final",
+        "ready_for_supervised_use": False,
+        "checks": [],
+    })
+
+    assert projection["blocking"] is True
+    assert "ci:timed_out" in projection["blocking_reasons"]
+    assert projection["baseline_delta"]["candidate_executed_failure"] == ["ci:test"]
 
 
 def test_windows_timeout_terminates_descendants_without_waiting(monkeypatch, tmp_path):
