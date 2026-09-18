@@ -92,6 +92,7 @@ class ClientFacingServicePackage:
     tooling_cost: Money
     optional_pass_through_cost: Money
     refund_revision_reserve: Money
+    package_version: str = "v1"
 
     def __post_init__(self) -> None:
         if not isinstance(self.package, ServicePackage):
@@ -180,6 +181,7 @@ class ClientFacingServicePackage:
             "next_step_relationship": self.next_step_relationship,
             "price_evidence_state": self.pricing_evidence_state,
             "price_evidence_classification": self.price_evidence_classification,
+            "package_version": self.package_version,
         }
 
 
