@@ -101,12 +101,15 @@ def _quality_gate_projection(quality_gate: Mapping[str, Any] | None) -> dict[str
     ci = quality_gate.get("ci") if isinstance(quality_gate.get("ci"), Mapping) else {}
     ci_status = str(ci.get("status", "unavailable"))
     ci_classification = str(ci.get("classification", "ci_unavailable"))
+    ci_diagnostic_state = str(ci.get("diagnostic_state", "evidence_not_queried"))
+    ci_operator_action = str(ci.get("operator_action", "collect complete sanitized CI evidence before final attestation"))
     delta = _baseline_delta_projection(quality_gate.get("baseline_delta"), quality_gate)
     blocking_reasons: set[str] = set()
     if status != "passed":
         blocking_reasons.add(f"quality_gate:{status}")
     if ci_status != "passed":
         blocking_reasons.add(f"ci:{ci_classification}")
+        blocking_reasons.add(f"ci_diagnostic:{ci_diagnostic_state}")
     if delta.get("status") in {"failed", "unavailable", "malformed"}:
         blocking_reasons.add(f"baseline_delta:{delta['status']}")
     executed_failures = delta.get("candidate_executed_failure", [])
@@ -120,6 +123,8 @@ def _quality_gate_projection(quality_gate: Mapping[str, Any] | None) -> dict[str
         "classification": classification,
         "ci_status": ci_status,
         "ci_classification": ci_classification,
+        "ci_diagnostic_state": ci_diagnostic_state,
+        "ci_operator_action": ci_operator_action,
         "ready_for_supervised_use": quality_gate.get("ready_for_supervised_use") is True,
         "blocking": bool(blocking_reasons),
         "blocking_reasons": sorted(blocking_reasons),

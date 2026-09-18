@@ -88,7 +88,7 @@ CHECK_STATUS_TAXONOMY = (
     "collection_failed", "blocked", "malformed", "ci_unavailable",
 )
 CI_EVIDENCE_SCHEMA = "MarketOS.CIEvidence.v1"
-CI_EVIDENCE_RUN_STATUSES = {"queued", "in_progress", "completed", "waiting", "requested", "pending"}
+CI_EVIDENCE_RUN_STATUSES = {"not_created", "queued", "in_progress", "completed", "waiting", "requested", "pending"}
 CI_EVIDENCE_CONCLUSIONS = {
     "success", "failure", "neutral", "cancelled", "skipped", "timed_out",
     "action_required", "stale", "startup_failure", "pending",
@@ -96,6 +96,19 @@ CI_EVIDENCE_CONCLUSIONS = {
 CI_EVIDENCE_CHECK_STATUSES = {"success", "failure", "neutral", "cancelled", "skipped", "pending", "timed_out"}
 CI_EVIDENCE_MAX_BYTES = 64 * 1024
 CI_EVIDENCE_MAX_JOBS = 100
+CI_DIAGNOSTIC_STATES = {
+    "evidence_not_queried",
+    "workflow_never_created",
+    "job_queued_without_runner",
+    "job_created_zero_steps",
+    "executed_success",
+    "executed_failure",
+    "executed_timeout",
+    "logs_unavailable_after_execution",
+    "required_job_missing",
+    "malformed_metadata",
+    "mixed",
+}
 QUALITY_GATE_PHASES = {"final", "preflight"}
 BASELINE_FORBIDDEN_FIELDS = {"stdout", "stderr", "raw_logs", "raw_stdout", "raw_stderr", "environment", "credentials"}
 BASELINE_DELTA_UNCHANGED = "unchanged"
@@ -630,11 +643,42 @@ def _ci_evidence_error(reason: str) -> tuple[dict[str, Any], str]:
         "reason": reason,
         "executed_steps": 0,
         "classification": CLASS_MALFORMED_CONFIGURATION,
+        "diagnostic_state": "malformed_metadata",
+        "operator_action": "provide bounded sanitized CI metadata matching MarketOS.CIEvidence.v1",
     }, "malformed_ci_evidence"
 
 
 def _validate_ci_mapping(value: Any, allowed: set[str]) -> bool:
     return isinstance(value, Mapping) and not (set(value) - allowed)
+
+
+def _is_non_ci_check_name(name: str) -> bool:
+    normalized = name.casefold().replace("_", "-")
+    return "netlify" in normalized or "deploy-preview" in normalized
+
+
+def _ci_operator_action(state: str) -> str:
+    return {
+        "evidence_not_queried": "collect sanitized CI run and job metadata before final attestation",
+        "workflow_never_created": "verify pull-request workflow triggers and repository Actions policy, then rerun the workflow",
+        "job_queued_without_runner": "restore GitHub runner allocation or repository Actions capacity, then rerun the job",
+        "job_created_zero_steps": "inspect GitHub Actions startup/runner provisioning and rerun; zero-step evidence is not execution",
+        "executed_success": "no CI remediation is required for this job",
+        "executed_failure": "inspect the executed job failure and repair the tested defect before rerunning",
+        "executed_timeout": "inspect the executed timeout and rerun after addressing the timeout cause",
+        "logs_unavailable_after_execution": "restore GitHub Actions log retention/access and recollect sanitized evidence",
+        "required_job_missing": "verify required workflow jobs and recollect complete sanitized CI metadata",
+        "malformed_metadata": "provide bounded sanitized CI metadata matching the evidence contract",
+        "mixed": "resolve each per-job CI diagnostic state before final attestation",
+    }.get(state, "collect complete sanitized CI evidence before final attestation")
+
+
+def _ci_diagnostic_state(states: set[str], *, run_status: str | None = None) -> str:
+    if run_status == "not_created":
+        return "workflow_never_created"
+    if not states:
+        return "evidence_not_queried"
+    return next(iter(states)) if len(states) == 1 else "mixed"
 
 
 def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
@@ -655,6 +699,8 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
     run_conclusion = run.get("conclusion")
     if run_status not in CI_EVIDENCE_RUN_STATUSES or run_conclusion not in CI_EVIDENCE_CONCLUSIONS:
         return _ci_evidence_error("invalid_ci_run_status")
+    if run_status == "completed" and run_conclusion == "pending":
+        return _ci_evidence_error("contradictory_ci_run_metadata")
 
     required_jobs = payload.get("required_jobs")
     if (
@@ -665,6 +711,8 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
     ):
         return _ci_evidence_error("required_ci_jobs_expected")
     required_jobs = [name.strip() for name in required_jobs]
+    if any(_is_non_ci_check_name(name) for name in required_jobs):
+        return _ci_evidence_error("non_ci_check_in_required_jobs")
     raw_jobs = payload.get("jobs")
     if not isinstance(raw_jobs, list) or len(raw_jobs) > CI_EVIDENCE_MAX_JOBS:
         return _ci_evidence_error("ci_jobs_required")
@@ -701,6 +749,10 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
             return _ci_evidence_error("invalid_ci_runner_id")
         if runner_name is not None and not isinstance(runner_name, str):
             return _ci_evidence_error("invalid_ci_runner_name")
+        if steps > 0 and (runner_id is None or runner_id == 0):
+            return _ci_evidence_error("contradictory_ci_runner_steps")
+        if status == "completed" and conclusion == "pending":
+            return _ci_evidence_error("contradictory_ci_job_metadata")
         normalized_jobs.append({
             "name": name.strip(),
             "required": required,
@@ -725,24 +777,33 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
 
 def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
     jobs: list[dict[str, Any]] = []
+    diagnostic_states: set[str] = set()
     expected_jobs = set(ci_result["required_jobs"])
     observed_jobs = {job["name"] for job in ci_result["jobs"]}
     for job in ci_result["jobs"]:
         runner_assigned = job["runner_id"] is not None and job["runner_id"] > 0
-        if not runner_assigned:
+        if job["status"] != "completed" and not runner_assigned:
+            diagnostic_state = "job_queued_without_runner"
             job_status, reason = "unavailable", "runner_unassigned"
         elif job["steps_executed"] == 0:
+            diagnostic_state = "job_created_zero_steps"
             job_status, reason = "unavailable", "ci_report_has_no_executed_steps"
         elif not job["logs_available"]:
+            diagnostic_state = "logs_unavailable_after_execution"
             job_status, reason = "unavailable", "ci_logs_unavailable"
         elif job["status"] != "completed":
+            diagnostic_state = "job_queued_without_runner" if not runner_assigned else "job_created_zero_steps"
             job_status, reason = "unavailable", "ci_job_not_completed"
         elif job["conclusion"] == "timed_out" or job["required_check_status"] == "timed_out":
+            diagnostic_state = "executed_timeout"
             job_status, reason = "timed_out", "ci_required_check_timed_out"
         elif job["conclusion"] != "success" or job["required_check_status"] != "success":
+            diagnostic_state = "executed_failure"
             job_status, reason = "failed", "ci_required_check_failed"
         else:
+            diagnostic_state = "executed_success"
             job_status, reason = "passed", "observed_ci_success"
+        diagnostic_states.add(diagnostic_state)
         jobs.append({
             "name": job["name"],
             "required": job["required"],
@@ -753,8 +814,12 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
             "steps_executed": job["steps_executed"],
             "logs_available": job["logs_available"],
             "reason": reason,
+            "diagnostic_state": diagnostic_state,
+            "operator_action": _ci_operator_action(diagnostic_state),
         })
     for missing_name in sorted(expected_jobs - observed_jobs):
+        diagnostic_state = "workflow_never_created" if ci_result["run_status"] == "not_created" else "required_job_missing"
+        diagnostic_states.add(diagnostic_state)
         jobs.append({
             "name": missing_name,
             "required": True,
@@ -765,6 +830,8 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
             "steps_executed": 0,
             "logs_available": False,
             "reason": "required_ci_job_missing",
+            "diagnostic_state": diagnostic_state,
+            "operator_action": _ci_operator_action(diagnostic_state),
         })
     required_jobs = [job for job in jobs if job["required"]]
     executed_steps = sum(job["steps_executed"] for job in required_jobs)
@@ -787,6 +854,9 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
         status, reason, classification = "failed", "required_ci_check_failed", CLASS_FAILURE_ORIGIN_UNVERIFIED
     else:
         status, reason, classification = "passed", "observed_ci_success", CLASS_PASS
+    diagnostic_state = _ci_diagnostic_state(diagnostic_states, run_status=ci_result["run_status"])
+    if ci_result["run_status"] == "not_created":
+        status, reason, classification = "unavailable", "workflow_never_created", CLASS_CI_UNAVAILABLE
     return {
         "status": status,
         "reason": reason,
@@ -797,12 +867,19 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
         "jobs": jobs,
         "required_jobs": sorted(expected_jobs),
         "failure_classes": sorted(failure_classes),
+        "diagnostic_state": diagnostic_state,
+        "diagnostic_states": sorted(diagnostic_states),
+        "operator_action": _ci_operator_action(diagnostic_state),
     }
 
 
 def _ci_snapshot(ci_result: Mapping[str, Any] | None) -> dict[str, Any]:
     if not ci_result:
-        return {"status": "unavailable", "reason": "external_ci_not_queried", "executed_steps": 0, "classification": "ci_unavailable"}
+        return {
+            "status": "unavailable", "reason": "external_ci_not_queried", "executed_steps": 0,
+            "classification": "ci_unavailable", "diagnostic_state": "evidence_not_queried",
+            "operator_action": _ci_operator_action("evidence_not_queried"),
+        }
     if ci_result.get("evidence_format") == CI_EVIDENCE_SCHEMA:
         return _ci_evidence_snapshot(ci_result)
     raw_status = ci_result.get("status")
@@ -811,19 +888,34 @@ def _ci_snapshot(ci_result: Mapping[str, Any] | None) -> dict[str, Any]:
         return {"status": "malformed", "reason": "malformed_ci_evidence", "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
     status = raw_status.casefold()
     steps = raw_steps
-    if status not in {"success", "failure", "unavailable", "timed_out", "malformed"} or steps < 0:
+    if status not in {"not_created", "success", "failure", "unavailable", "timed_out", "malformed"} or steps < 0:
         return {"status": "malformed", "reason": "malformed_ci_evidence", "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
     if status == "malformed":
-        return {"status": "malformed", "reason": ci_result.get("reason", "malformed_ci_evidence"), "executed_steps": 0, "classification": CLASS_MALFORMED_CONFIGURATION}
+        return {
+            "status": "malformed", "reason": ci_result.get("reason", "malformed_ci_evidence"), "executed_steps": 0,
+            "classification": CLASS_MALFORMED_CONFIGURATION, "diagnostic_state": "malformed_metadata",
+            "operator_action": _ci_operator_action("malformed_metadata"),
+        }
     if status == "unavailable":
-        return {"status": "unavailable", "reason": "injected_ci_unavailable", "executed_steps": steps, "classification": CLASS_CI_UNAVAILABLE}
+        diagnostic_state = "workflow_never_created" if ci_result.get("reason") == "workflow_never_created" else "evidence_not_queried"
+        return {
+            "status": "unavailable", "reason": ci_result.get("reason", "injected_ci_unavailable"),
+            "executed_steps": steps, "classification": CLASS_CI_UNAVAILABLE,
+            "diagnostic_state": diagnostic_state, "operator_action": _ci_operator_action(diagnostic_state),
+        }
+    if status == "not_created":
+        return {
+            "status": "unavailable", "reason": "workflow_never_created", "executed_steps": 0,
+            "classification": CLASS_CI_UNAVAILABLE, "diagnostic_state": "workflow_never_created",
+            "operator_action": _ci_operator_action("workflow_never_created"),
+        }
     if status == "success" and steps > 0:
-        return {"status": "passed", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_PASS}
+        return {"status": "passed", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_PASS, "diagnostic_state": "executed_success", "operator_action": _ci_operator_action("executed_success")}
     if status == "failure" and steps > 0:
-        return {"status": "failed", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_FAILURE_ORIGIN_UNVERIFIED}
+        return {"status": "failed", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_FAILURE_ORIGIN_UNVERIFIED, "diagnostic_state": "executed_failure", "operator_action": _ci_operator_action("executed_failure")}
     if status == "timed_out" and steps > 0:
-        return {"status": "timed_out", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_TIMEOUT}
-    return {"status": "unavailable", "reason": "ci_report_has_no_executed_steps", "executed_steps": steps, "classification": "ci_unavailable"}
+        return {"status": "timed_out", "reason": "injected_ci_evidence", "executed_steps": steps, "classification": CLASS_TIMEOUT, "diagnostic_state": "executed_timeout", "operator_action": _ci_operator_action("executed_timeout")}
+    return {"status": "unavailable", "reason": "ci_report_has_no_executed_steps", "executed_steps": steps, "classification": "ci_unavailable", "diagnostic_state": "job_created_zero_steps", "operator_action": _ci_operator_action("job_created_zero_steps")}
 
 
 def _timestamp_status(generated_at: str | None) -> tuple[bool, str | None]:
@@ -1420,6 +1512,8 @@ def run_quality_gate(
         "operator_action": (
             "supply complete sanitized CIEvidence.v1 to run final attestation; preflight success is not merge evidence"
             if phase == "preflight" and local_exit_code == EXIT_PASSED
+            else ci.get("operator_action", "collect complete sanitized CI evidence before final attestation")
+            if ci.get("status") != "passed"
             else "run with --execute and an injected timezone-aware --generated-at after resolving unavailable or failed checks"
             if not ready
             else "human review may proceed; inspect the report and CI evidence before merging"
@@ -1437,7 +1531,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--execute", action="store_true", help="run fixed local checks instead of only reporting their plan")
     parser.add_argument("--phase", choices=("final", "preflight"), default="final", help="final attestation or local preflight")
     parser.add_argument("--generated-at", help="timezone-aware ISO timestamp injected by the caller")
-    parser.add_argument("--ci-status", choices=("success", "failure", "timed_out", "unavailable"), help="optional external CI result; never queried by this tool")
+    parser.add_argument("--ci-status", choices=("not_created", "success", "failure", "timed_out", "unavailable"), help="optional external CI result; never queried by this tool")
     parser.add_argument("--ci-steps", type=int, default=0, help="executed-step count accompanying --ci-status")
     parser.add_argument("--ci-evidence-file", type=Path, help="local sanitized CI metadata JSON; never queries GitHub or reads logs")
     parser.add_argument(
