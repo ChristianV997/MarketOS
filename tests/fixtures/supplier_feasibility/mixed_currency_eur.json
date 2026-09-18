@@ -1,0 +1,10 @@
+[
+  {
+    "candidate_id": "eur-widget",
+    "supplier": "cj",
+    "supplier_product_id": "EUR-WIDGET-01",
+    "unit_cost": 9.5,
+    "shipping_cost": 2.0,
+    "currency": "EUR"
+  }
+]

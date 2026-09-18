@@ -1,0 +1,15 @@
+[
+  {
+    "supplier": "cj",
+    "source_type": "cj_validation_pack_report",
+    "pid": "CJ-PID-THERMAL-001",
+    "nameEn": "Mini Bluetooth Thermal Printer",
+    "sellPrice": 8.5,
+    "directMinOrderNum": 1,
+    "deliveryCycle": "7-12 days",
+    "totalInventory": 420,
+    "areaEn": "CN",
+    "ship_to_country": "US",
+    "sku": "THERMAL-001"
+  }
+]

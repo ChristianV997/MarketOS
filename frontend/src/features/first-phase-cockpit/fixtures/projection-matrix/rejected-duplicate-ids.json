@@ -1,0 +1,11 @@
+{
+  "report_version": "product-validation-report-v1",
+  "appendix": {
+    "research_to_decision_version": "v1",
+    "replay_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "candidate_audit": [
+      { "candidate_id": "hydroponics-kit", "title": "A" },
+      { "candidate_id": "hydroponics-kit", "title": "B" }
+    ]
+  }
+}
