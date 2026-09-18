@@ -1,0 +1,12 @@
+{
+  "report_version": "product-validation-report-v1",
+  "appendix": {
+    "research_to_decision_version": "v1",
+    "replay_fingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "client_safe_projection": {
+      "launch_authorized": true,
+      "network_calls": false,
+      "candidates": []
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "candidates": [
+    {
+      "query": "nameless candidate",
+      "score": {"overall_marketplace_opportunity": 0.9, "saturation_score": 0.1}
+    }
+  ]
+}

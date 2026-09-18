@@ -1198,6 +1198,18 @@ def _annotate_check_classes(checks: list[dict[str, Any]], *, baseline_statuses: 
     return classes
 
 
+def _aggregate_local_statuses(checks: list[dict[str, Any]]) -> set[str]:
+    """Treat dependency-backed collection failures as unavailable aggregate evidence."""
+    statuses: set[str] = set()
+    for item in checks:
+        status = item.get("status")
+        if status == "collection_failed" and (item.get("summary") or {}).get("dependency_error"):
+            statuses.add("unavailable")
+        elif isinstance(status, str):
+            statuses.add(status)
+    return statuses
+
+
 def run_quality_gate(
     root: Path = REPOSITORY_ROOT,
     *,
@@ -1296,7 +1308,7 @@ def run_quality_gate(
         warnings.append(f"git_state:{git['status']}")
     warnings = sorted(set(warnings))
 
-    statuses = {check["status"] for check in checks}
+    statuses = _aggregate_local_statuses(checks)
     if configuration_errors:
         local_status, local_exit_code = "configuration_error", EXIT_CONFIGURATION
     elif not execute:

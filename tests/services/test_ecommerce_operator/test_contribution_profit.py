@@ -2,6 +2,7 @@
 import backend.core.persistence as pers
 import pytest
 from backend.workspaces.artifact_store import ArtifactStore
+from backend.workspaces.registry import get_workspace_registry
 from services.ecommerce_operator.contribution_profit import reconcile_contribution_profit
 from services.ecommerce_operator.experiment import create_commerce_experiment
 
@@ -42,8 +43,9 @@ class TestReconcileContributionProfit:
         env = create_commerce_experiment("Widget")
         result = reconcile_contribution_profit(env, campaign_revenue={"camp1": 100.0}, ground_truth_revenue=100.0)
 
-        store = ArtifactStore()
-        saved = store.load(env.workspace_id, env.experiment_id, "contribution_profit.json")
+        workspace = get_workspace_registry().get(env.workspace_id)
+        assert workspace is not None
+        saved = ArtifactStore(workspace).load(env.experiment_id, "contribution_profit.json")
         assert saved == result.to_dict()
         assert env.outputs["contribution_profit_result"] == result.to_dict()
         assert env.actual_spend == 0.0
