@@ -3,15 +3,13 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from evaluation.companyos.resource_execution_governor import (
     ACTION_TYPES, DOMAINS, MODEL_POLICY_TIERS, OUTCOMES, RESOURCE_TYPES,
-    BudgetCheckResult, ExecutionActionType, ExecutionDecisionRequest,
-    ExecutionGovernorSafetySummary, ExecutionResourceType, LearningCaptureRequirement,
+    ExecutionDecisionRequest, ExecutionGovernorSafetySummary, LearningCaptureRequirement,
     ResourceBudget, ResourceQuota, apply_learning_influence, build_resource_execution_governor_report,
     evaluate_execution_request, request_from_mapping,
 )

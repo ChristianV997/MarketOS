@@ -1,11 +1,8 @@
 """Deterministic, offline resource and execution governance for CompanyOS."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any, Mapping, Sequence
-
-from .model_router import MODEL_TIERS
-from .provider_registry import build_provider_registry
 
 ACTION_TYPES = (
     "screen_product_opportunities", "deep_validate_product", "promote_product_candidate", "generate_launch_draft",
