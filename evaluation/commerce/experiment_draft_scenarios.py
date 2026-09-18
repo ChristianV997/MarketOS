@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from evaluation.commerce.experiment_draft import build_experiment_draft, simulate_experiment_draft
+from evaluation.commerce.experiment_draft_scenario_extra import merge_payloads, run_records
 from evaluation.commerce.experiment_draft_scenario_seed import planning, row
 
 
-def scenario_payloads() -> dict[str, dict[str, Any]]:
+def _core() -> dict[str, dict[str, Any]]:
     return {
         "hydroponics_content_paid_social": row(
             experiment_id="exp-hydro-001", product_id="prod-hydro-tower", offer_id="offer-hydro-starter",
@@ -63,3 +63,11 @@ def scenario_payloads() -> dict[str, dict[str, Any]]:
             insufficient_data=True,
         ),
     }
+
+
+def scenario_payloads() -> dict[str, dict[str, Any]]:
+    return merge_payloads(_core())
+
+
+def run_scenarios() -> list[dict[str, Any]]:
+    return run_records(scenario_payloads())
