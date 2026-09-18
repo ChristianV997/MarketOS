@@ -74,6 +74,73 @@ def test_packet_is_deterministic_and_contains_ranked_evidence() -> None:
     assert "economics" in first["appendix"]["candidate_audit"][0]
 
 
+def test_promotion_lifecycle_is_auditable_and_replay_stable() -> None:
+    manifest = load_fixture("hydroponics_promising.json")
+    first = build_research_to_decision(manifest, base_dir=FIXTURES)
+    second = build_research_to_decision(manifest, base_dir=FIXTURES)
+    audit = first["appendix"]["candidate_audit"][0]
+    transitions = audit["promotion_lifecycle"]
+    assert transitions == second["appendix"]["candidate_audit"][0]["promotion_lifecycle"]
+    assert {item["next_state"] for item in transitions} >= {
+        "discovered",
+        "normalized",
+        "screened",
+        "supplier_claimed",
+        "supplier_documented",
+        "sample_required",
+        "direct_ship_required",
+        "promotion_blocked",
+        "launch_authorized_false",
+    }
+    for item in transitions:
+        assert set(item) == {
+            "candidate_id",
+            "prior_state",
+            "next_state",
+            "reason_code",
+            "evidence_ids",
+            "evidence_state",
+            "actor_source",
+            "timestamp",
+            "blocking_conditions",
+            "replay_identity",
+        }
+        assert len(item["replay_identity"]) == 64
+        assert item["timestamp"] == manifest["captured_at"]
+    assert audit["decision_outcome"] == "candidate_only"
+    assert first["appendix"]["client_safe_projection"]["launch_authorized"] is False
+    assert first["appendix"]["client_safe_projection"]["candidates"][0]["promotion_state"] == "launch_authorized_false"
+
+
+def test_conflicting_offers_are_visible_but_cannot_promote() -> None:
+    report = build_research_to_decision(load_fixture("conflicting_quotes.json"), base_dir=FIXTURES)
+    audit = report["appendix"]["candidate_audit"][0]
+    states = {item["next_state"] for item in audit["promotion_lifecycle"]}
+    assert {"supplier_claimed", "offer_conflicted", "promotion_blocked", "launch_authorized_false"} <= states
+    assert "launch_candidate" not in states
+    assert "live_validated" not in states
+    assert audit["decision_outcome"] == "needs_evidence"
+
+
+def test_missing_supplier_evidence_is_an_explicit_promotion_blocker() -> None:
+    report = build_research_to_decision(load_fixture("b2b_insufficient_data.json"), base_dir=FIXTURES)
+    audit = report["appendix"]["candidate_audit"][0]
+    states = {item["next_state"] for item in audit["promotion_lifecycle"]}
+    assert "evidence_incomplete" in states
+    assert "supplier_offer_evidence_missing" in audit["evidence_gaps"]
+    assert audit["decision_outcome"] == "needs_evidence"
+    assert audit["promotion_lifecycle"][-1]["next_state"] == "launch_authorized_false"
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_offline_evidence_never_emits_live_promotion_states(name: str) -> None:
+    report = build_research_to_decision(load_fixture(name), base_dir=FIXTURES)
+    states = {item["next_state"] for item in report["appendix"]["candidate_audit"][0]["promotion_lifecycle"]}
+    assert "live_validated" not in states
+    assert "manually_approved" not in states
+    assert report["appendix"]["client_safe_projection"]["launch_authorized"] is False
+
+
 def test_market_lane_and_supplier_offer_are_explicit_and_bounded() -> None:
     report = build_research_to_decision(load_fixture("hydroponics_promising.json"), base_dir=FIXTURES)
     appendix = report["appendix"]

@@ -84,6 +84,30 @@ and replay consumers; it carries no launch, spend, provider, or order
 authority. The `integration_contract` points those consumers back to this
 existing authority and the existing `product-validation-report-v1` packet.
 
+## Evidence-promotion lifecycle
+
+Each candidate audit also carries a bounded `promotion_lifecycle` transition
+ledger. It is an extension of the existing appendix, not a second packet or
+readiness authority. Transitions use the states `discovered`, `normalized`,
+`screened`, `evidence_incomplete`, `supplier_claimed`,
+`supplier_documented`, `offer_conflicted`, `lane_verified`,
+`sample_required`, `direct_ship_required`, `rma_required`,
+`economics_ready`, `competition_ready`, `promotion_blocked`,
+`launch_candidate`, `launch_authorized_false`, `manually_approved`, and
+`live_validated` where compatible with available evidence. Every transition
+contains its prior and next state, reason code, hashed evidence IDs, evidence
+state, actor/source, captured timestamp, blocking conditions, candidate ID, and
+a SHA-256 `replay_identity` over those fields.
+
+The adapter emits `launch_authorized_false` for offline packets and never emits
+`manually_approved` or `live_validated` from fixture, manual, assumed, or
+simulated evidence. Conflicting offers stay visible but add a blocking
+`offer_conflicted` transition and are excluded from canonical supplier
+scoring. The client-safe projection exposes `decision_outcome` using the
+existing operator outcomes `reject`, `hold_for_manual_review`,
+`needs_evidence`, `deferred`, `candidate_only`, and `launch_candidate` without
+granting merge, launch, spend, or provider authority.
+
 ## Evidence mode
 
 This path is offline and read-only. A generated packet is a reproducible

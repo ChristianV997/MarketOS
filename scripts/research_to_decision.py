@@ -53,6 +53,30 @@ MAX_INPUT_FILES = 24
 MAX_TEXT = 240
 SUPPORTED_CURRENCIES = frozenset({"AUD", "CAD", "CNY", "EUR", "GBP", "JPY", "MXN", "USD"})
 LIFECYCLE_STATES = frozenset({"candidate", "evidence_collected", "research_ready", "hold", "reject", "no_launch"})
+PROMOTION_LIFECYCLE_STATES = (
+    "discovered",
+    "normalized",
+    "screened",
+    "evidence_incomplete",
+    "supplier_claimed",
+    "supplier_documented",
+    "offer_conflicted",
+    "lane_verified",
+    "sample_required",
+    "direct_ship_required",
+    "rma_required",
+    "economics_ready",
+    "competition_ready",
+    "promotion_blocked",
+    "launch_candidate",
+    "launch_authorized_false",
+    "manually_approved",
+    "live_validated",
+)
+DECISION_OUTCOMES = frozenset(
+    {"reject", "hold_for_manual_review", "needs_evidence", "deferred", "candidate_only", "launch_candidate"}
+)
+MAX_TRANSITIONS_PER_CANDIDATE = 24
 OFFER_APPROVAL_STATES = (
     "candidate",
     "contacted",
@@ -731,6 +755,154 @@ def _best(mapping: Mapping[str, Any], candidate_id: str) -> Mapping[str, Any]:
     return next((item for item in mapping.get("candidates", []) if item.get("candidate_id") == candidate_id), {})
 
 
+def _promotion_evidence_state(lane: Mapping[str, Any], offers: list[dict[str, Any]]) -> str:
+    states = [offer.get("evidence", {}).get("state") for offer in offers]
+    states = [state for state in states if state in EVIDENCE_STATES]
+    if not states:
+        return lane.get("evidence_state", "unavailable") if lane.get("evidence_state") in EVIDENCE_STATES else "unavailable"
+    return states[0] if len(set(states)) == 1 else "unavailable"
+
+
+def _promotion_transition(
+    *,
+    candidate_id: str,
+    prior_state: str,
+    next_state: str,
+    reason_code: str,
+    evidence_ids: list[str],
+    evidence_state: str,
+    captured_at: str,
+    blocking_conditions: list[str],
+) -> dict[str, Any]:
+    transition = {
+        "candidate_id": candidate_id,
+        "prior_state": prior_state,
+        "next_state": next_state,
+        "reason_code": reason_code,
+        "evidence_ids": sorted(set(evidence_ids)),
+        "evidence_state": evidence_state,
+        "actor_source": "scripts.research_to_decision.py",
+        "timestamp": captured_at,
+        "blocking_conditions": sorted(set(blocking_conditions)),
+    }
+    transition["replay_identity"] = hashlib.sha256(
+        json.dumps(transition, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return transition
+
+
+def _decision_outcome(
+    *,
+    lifecycle_state: str,
+    decision: str,
+    evidence_gaps: list[str],
+    transitions: list[dict[str, Any]],
+) -> str:
+    normalized = decision.strip().lower()
+    if lifecycle_state in {"reject", "no_launch"} or "reject" in normalized:
+        return "reject"
+    if "defer" in normalized:
+        return "deferred"
+    if evidence_gaps:
+        return "needs_evidence"
+    if transitions and transitions[-1]["next_state"] == "launch_candidate":
+        return "launch_candidate"
+    if "hold" in normalized or lifecycle_state == "hold":
+        return "hold_for_manual_review"
+    return "candidate_only"
+
+
+def _promotion_lifecycle(
+    *,
+    candidate_id: str,
+    meta: Mapping[str, Any],
+    lane: Mapping[str, Any],
+    offers: list[dict[str, Any]],
+    market_item: Mapping[str, Any],
+    supplier_score: Mapping[str, Any],
+    market_score: Mapping[str, Any],
+    hard_gates: list[str],
+    evidence_refs: list[str],
+    captured_at: str,
+    decision: str,
+) -> tuple[list[dict[str, Any]], str, list[str]]:
+    evidence_state = _promotion_evidence_state(lane, offers)
+    offer_issues = sorted({issue for offer in offers for issue in offer.get("issues", [])})
+    market_evidence = market_item.get("evidence", [])
+    blockers = set(hard_gates)
+    if not market_evidence:
+        blockers.add("competition_evidence_missing")
+    if lane.get("evidence_state") != "observed":
+        blockers.add("lane_not_verified")
+    blockers.update(f"supplier_offer:{issue}" for issue in offer_issues)
+    evidence_gaps = {
+        blocker
+        for blocker in blockers
+        if blocker == "supplier_offer_evidence_missing"
+        or blocker == "competition_evidence_missing"
+        or blocker.startswith("supplier_offer:")
+        or blocker == "lane_not_verified" and lane.get("evidence_state") in {"unavailable", "malformed", "blocked"}
+    }
+    transitions: list[dict[str, Any]] = []
+    prior_state = "unavailable"
+
+    def add(next_state: str, reason_code: str, *, state: str = evidence_state, conditions: list[str] | None = None) -> None:
+        nonlocal prior_state
+        transitions.append(
+            _promotion_transition(
+                candidate_id=candidate_id,
+                prior_state=prior_state,
+                next_state=next_state,
+                reason_code=reason_code,
+                evidence_ids=evidence_refs,
+                evidence_state=state,
+                captured_at=captured_at,
+                blocking_conditions=conditions if conditions is not None else sorted(blockers),
+            )
+        )
+        prior_state = next_state
+
+    add("discovered", "candidate_declared", conditions=[])
+    add("normalized", "evidence_normalized", conditions=[])
+    add("screened", "screening_completed")
+    if offers:
+        add("supplier_claimed", "supplier_offer_observed")
+        if all(offer.get("terms_evidence") not in {None, "unknown"} and offer.get("policy_evidence") not in {None, "unknown"} for offer in offers):
+            add("supplier_documented", "supplier_terms_and_policy_present")
+        if "conflicting_offer" in offer_issues:
+            add("offer_conflicted", "conflicting_supplier_offers_quarantined")
+    if evidence_gaps:
+        add("evidence_incomplete", "required_evidence_missing", state="unavailable", conditions=sorted(evidence_gaps))
+    if lane.get("evidence_state") == "observed":
+        add("lane_verified", "lane_evidence_observed")
+    if offers and not all(offer.get("sample_state") == "sample_passed" for offer in offers):
+        add("sample_required", "sample_not_passed")
+    if offers and not all("direct" in str(offer.get("shipping", {}).get("method", "")).lower() for offer in offers):
+        add("direct_ship_required", "direct_ship_not_tested")
+    if offers and not all(offer.get("rma") not in {None, "unknown"} for offer in offers):
+        add("rma_required", "rma_route_missing")
+    economics = supplier_score.get("economics") or {}
+    if economics and not any(
+        value is None or isinstance(value, str) and value in {"unknown", "unavailable"}
+        for value in economics.values()
+    ):
+        add("economics_ready", "economics_observed")
+    if market_evidence and not any("missing" in str(reason) or "unknown" in str(reason) or "unavailable" in str(reason) for reason in market_score.get("reasons", [])):
+        add("competition_ready", "competition_evidence_observed")
+    if blockers:
+        add("promotion_blocked", "promotion_requirements_incomplete")
+    add("launch_authorized_false", "launch_authority_not_granted")
+    if len(transitions) > MAX_TRANSITIONS_PER_CANDIDATE:
+        raise ResearchToDecisionError("promotion lifecycle exceeds transition cap")
+    outcome = _decision_outcome(
+        lifecycle_state=str(meta.get("lifecycle_state", "evidence_collected")),
+        decision=decision,
+        evidence_gaps=sorted(evidence_gaps),
+        transitions=transitions,
+    )
+    return transitions, outcome, sorted(evidence_gaps)
+
+
 def _benchmark_candidates(
     candidate_ids: set[str], metadata: Mapping[str, Mapping[str, Any]], marketplace: Mapping[str, Any], supplier: Mapping[str, Any], lane: Mapping[str, str]
 ) -> list[BenchmarkCandidate]:
@@ -776,6 +948,7 @@ def _candidate_audit(
     lane: Mapping[str, Any],
     supplier_offers: Mapping[str, list[dict[str, Any]]],
     evidence_refs_by_candidate: Mapping[str, set[str]],
+    captured_at: str,
 ) -> list[dict[str, Any]]:
     rows = []
     synthesis_items = {item.get("candidate_id"): item for item in synthesis.get("candidates", [])}
@@ -802,6 +975,20 @@ def _candidate_audit(
         else:
             freshness = "unavailable"
         risk_state = "blocked" if any(gate.startswith("supplier_offer:") or gate == "supplier_offer_evidence_missing" for gate in hard_gates) else "hold"
+        decision = (synthesis_items.get(candidate_id) or {}).get("next_best_action", "hold_for_manual_review")
+        promotion_lifecycle, decision_outcome, evidence_gaps = _promotion_lifecycle(
+            candidate_id=candidate_id,
+            meta=meta,
+            lane=lane,
+            offers=offers,
+            market_item=market_item,
+            supplier_score=supplier_score,
+            market_score=market_score,
+            hard_gates=hard_gates,
+            evidence_refs=evidence_refs,
+            captured_at=captured_at,
+            decision=decision,
+        )
         rows.append({
             "candidate_id": candidate_id,
             "title": meta.get("title", candidate_id),
@@ -819,10 +1006,13 @@ def _candidate_audit(
             "conflicts": sorted({issue for issue in offer_issues if "conflict" in issue}),
             "risk_state": risk_state,
             "confidence": {"supplier": supplier_score.get("overall_supplier_feasibility", 0.0), "marketplace": market_score.get("overall_marketplace_opportunity", 0.0)},
-            "decision": (synthesis_items.get(candidate_id) or {}).get("next_best_action", "hold_for_manual_review"),
-            "next_action": (synthesis_items.get(candidate_id) or {}).get("next_best_action", "hold_for_manual_review"),
-            "action": (synthesis_items.get(candidate_id) or {}).get("next_best_action", "hold_for_manual_review"),
+            "decision": decision,
+            "decision_outcome": decision_outcome,
+            "next_action": decision,
+            "action": decision,
             "hard_gates": sorted(set(hard_gates)),
+            "evidence_gaps": evidence_gaps,
+            "promotion_lifecycle": promotion_lifecycle,
             "safety_classification": "offline_manual_evidence_only",
             "retailer_penalty": meta.get("retailer_penalty"),
             "comparability": "comparable" if market_item and supplier_item else "incomplete",
@@ -941,7 +1131,13 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
         "input_audit": sorted(input_audit, key=lambda item: (item["role"], item["label"])),
         "validation": {"status": "hold_for_manual_review" if validation_warnings else "ready_for_operator_review", "warnings": sorted(set(validation_warnings)), "read_only": True, "network_calls": False, "credentials_used": False, "provider_calls": False, "orders_or_spend": False},
         "supplier_offers": sorted((offer for offers in supplier_offers_by_candidate.values() for offer in offers), key=lambda item: (item["candidate_id"], item["offer_id"])),
-        "candidate_audit": _candidate_audit(candidate_ids, metadata, marketplace_report, supplier_report, synthesis_report, lane, supplier_offers_by_candidate, evidence_refs_by_candidate),
+        "candidate_audit": _candidate_audit(candidate_ids, metadata, marketplace_report, supplier_report, synthesis_report, lane, supplier_offers_by_candidate, evidence_refs_by_candidate, captured_at),
+        "promotion_lifecycle_contract": {
+            "version": "research-to-decision-promotion-lifecycle-v1",
+            "states": list(PROMOTION_LIFECYCLE_STATES),
+            "transition_identity": "sha256(canonical transition fields)",
+            "live_validation_requires": "genuine live evidence; fixture/manual/assumed evidence cannot emit live_validated",
+        },
         "client_safe_projection": {
             "version": "research-to-decision-client-safe-v1",
             "candidates": [],
@@ -957,6 +1153,7 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
             "commerce_cycle_dry_run": "existing source_reports and economics",
             "report_export": "product-validation-report-v1",
             "replay": "appendix.replay_fingerprint",
+            "promotion_lifecycle": "appendix.candidate_audit[].promotion_lifecycle",
         },
         "source_authorities": {"supplier": "evaluation.commerce.supplier_feasibility", "marketplace": "evaluation.commerce.marketplace_trends", "consumer_attention": "evaluation.commerce.consumer_attention", "synthesis": "evaluation.commerce.opportunity_synthesis", "packet": "evaluation.commerce.product_validation_report"},
     }
@@ -965,13 +1162,16 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
             "candidate_id": item["candidate_id"],
             "title": item["title"],
             "decision": item["decision"],
+            "decision_outcome": item["decision_outcome"],
             "next_action": item["next_action"],
             "risk_state": item["risk_state"],
             "freshness": item["freshness"],
             "confidence": item["confidence"],
             "missing_evidence": item["missing_evidence"],
+            "evidence_gaps": item["evidence_gaps"],
             "hard_gates": item["hard_gates"],
             "evidence_refs": item["evidence_refs"],
+            "promotion_state": item["promotion_lifecycle"][-1]["next_state"],
         }
         for item in appendix["candidate_audit"]
     ]
