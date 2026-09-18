@@ -27,6 +27,17 @@ legal advice.
 | woocommerce | pending-version-pin | GPL-3.0 | Merchant-operated WordPress plugin; adapter implements the existing CommerceProvider Protocol. Restricted license (same precedent as Postiz) — legal review required before commercial deployment. |
 | mautic | pending-deferred-review | GPL-3.0-or-later | MarketingAutomationProvider adapter built and tested; copyleft license treated with the same legal-review precedent as GPL-3.0/AGPL-3.0 candidates. |
 | activepieces | pending-deferred-review | MIT | CustomerAutomationProvider adapter built and tested; MIT, no legal-review gate needed. |
+| openlineage | 1.28.0 | Apache-2.0 | Studied/emulated pattern in `backend.observability.lineage_facets`; no upstream source vendored; retain Apache-2.0 notice. |
+| great-expectations | 1.3.0 | Apache-2.0 | Studied/emulated assertion DSL in `evaluation.quality`; no upstream source vendored; retain Apache-2.0 notice. |
+| dagster | 1.9.10 | Apache-2.0 | Studied/emulated software-defined asset lineage metadata in `backend.observability.lineage_facets`; retain Apache-2.0 notice. |
+| higgsfield-ai/skills | 0.12.0 | MIT | Studied creative workflow concepts in `docs.ai.skills`; retain upstream MIT notice. |
+| higgsfield-ai/cli | v0.3.1 | MIT | Studied status/cost reporting lifecycle in `docs.ai.standards`; retain upstream MIT notice. |
+| higgsfield-ai/higgsfield-client | 0.1.0 | Apache-2.0 | Studied polling/error schema contracts in `docs.ai.standards`; retain Apache-2.0 notice. |
+| gstack | main-pinned | MIT | Benchmark and QA review methodology referenced in `docs.ai.standards`; retain MIT notice. |
+| hermes-agent-spec | v1.2.0 | MIT | Contract-first specifications and ADR conventions referenced in `docs.ai.standards`; retain MIT notice. |
+| duckdb | v1.1.3 | MIT | In-process analytical query pattern emulated in `backend.analytics.embedded_query_engine`; retain MIT notice. |
+| polars | py-1.17.1 | MIT | Tabular query expression patterns referenced in `backend.analytics.dataframe_engine`; retain MIT notice. |
+| scrapy | 2.12.0 | BSD-3-Clause | Staged item validation pipeline pattern emulated in `backend.scouting.item_pipeline`; retain BSD-3-Clause notice. |
 
 The generated release SBOM captures resolved Python packages actually present
 in the build environment. Before enabling or updating any listed component,

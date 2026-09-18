@@ -1,0 +1,28 @@
+{
+  "report_version": "supplier-feasibility-v1",
+  "evidence_mode": "fixture_demo",
+  "candidates": [
+    {
+      "candidate_id": "conflict-widget",
+      "query": "conflict widget",
+      "offers": [{"supplier": "alibaba", "unit_cost": 30.0, "shipping_cost": 8.0, "estimated_landed_cost": 38.0, "delivery_max_days": 40, "evidence_mode": "fixture"}],
+      "score": {
+        "overall_supplier_feasibility": 0.25,
+        "recommendation": "reject_poor_margin",
+        "risk_flags": [{"code": "low_margin_proxy", "severity": "blocker"}],
+        "economics": {
+          "target_sell_price": 39.99,
+          "estimated_landed_cost": 38.0,
+          "gross_margin_percent": 0.04,
+          "profit_per_order_before_ad_spend": -2.0,
+          "break_even_cpa": 0,
+          "break_even_roas": null,
+          "assumptions": []
+        }
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

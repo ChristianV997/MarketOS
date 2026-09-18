@@ -1,0 +1,17 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "marketplaces_observed": ["amazon"],
+  "top_candidate_id": "attention-widget",
+  "candidates": [
+    {
+      "candidate_id": "attention-widget",
+      "query": "attention widget",
+      "evidence": [{"marketplace": "amazon", "price": 29.99, "source_confidence": 0.7, "evidence_mode": "fixture"}],
+      "score": {"overall_marketplace_opportunity": 0.6, "demand_proxy_score": 0.62, "saturation_score": 0.25, "price_confidence": 0.7, "recommendation": "validate_supplier_first"}
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}
