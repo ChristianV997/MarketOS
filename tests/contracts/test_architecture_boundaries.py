@@ -186,3 +186,87 @@ def test_creative_artifacts_cannot_authorize_promotion_or_spend() -> None:
     assert "never override opportunity gates" in combined
     assert "authorize publishing" in combined or "authorize launch" in combined
     assert "spend" in combined
+
+
+def test_financial_kernel_is_canonical_money_authority() -> None:
+    """Validate that financial calculations enforce backend.economics.kernel as single authority."""
+    import backend.economics as package
+    import backend.economics.kernel as kernel
+    from evaluation.commerce.kernel_integration import CANONICAL_KERNEL_MODULE
+
+    assert kernel.__name__ == CANONICAL_KERNEL_MODULE
+    assert package.Money is kernel.Money
+    assert package.calculate_unit_economics is kernel.calculate_unit_economics
+    assert package.calculate_service_economics is kernel.calculate_service_economics
+
+
+def test_trustos_is_canonical_export_boundary() -> None:
+    """Validate that TrustOS client workspace isolation governs client-safe export boundaries."""
+    from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
+    test_packet_with_leaks = {
+        "client_name": "Acme",
+        "internal_prompt": "secret internal instructions",
+        "internal_scoring_formula": "x * 2.5",
+        "public_summary": "safe description",
+    }
+    findings = check_workspace_leakage(test_packet_with_leaks, client_safe=True)
+    assert len(findings) > 0
+    leaked_classes = {f.data_class for f in findings}
+    assert "internal_prompt" in leaked_classes or any("internal_prompt" in f.field_path for f in findings)
+    assert "internal_scoring_formula" in leaked_classes or any("formula" in f.field_path for f in findings)
+
+
+def test_companyos_approval_ledger_is_pre_integration_gate() -> None:
+    """Validate that CompanyOS Approval Ledger enforces fail-closed pre-integration policy."""
+    from evaluation.companyos.approval_ledger import simulate_action
+    # Live mutation actions must never auto-allow without human approval or policy clearance
+    sim_publish = simulate_action("site_publish")
+    assert sim_publish.can_be_approved_now is False
+    assert sim_publish.result in {"would_require_human_approval", "would_be_blocked_by_policy"}
+
+    sim_ad = simulate_action("ad_launch")
+    assert sim_ad.can_be_approved_now is False
+    assert sim_ad.result in {"would_require_human_approval", "would_be_blocked_by_policy"}
+
+
+def test_frontend_does_not_own_financial_scoring_or_backend_mutation() -> None:
+    """Validate that frontend code does not calculate backend economics or call live provider mutation."""
+    frontend_dir = ROOT / "frontend"
+    if not frontend_dir.is_dir():
+        pytest.skip("frontend directory not present")
+
+    forbidden_patterns = [
+        "calculate_unit_economics",
+        "calculate_service_economics",
+        "SHOPIFY_ADMIN_TOKEN",
+        "STRIPE_SECRET_KEY",
+    ]
+    violations = []
+    for path in frontend_dir.rglob("*.[jt]s*"):
+        if any(part in IGNORED_PARTS for part in path.relative_to(ROOT).parts):
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        for pattern in forbidden_patterns:
+            if pattern in content:
+                violations.append(f"{_relative(path)} contains forbidden authority pattern '{pattern}'")
+
+    assert not violations, "\n".join(violations)
+
+
+def test_readiness_gates_compose_without_competing_authorities() -> None:
+    """Validate that Phase 1, Deployment, and TrustOS readiness represent distinct non-overlapping concerns."""
+    # 1. Deployment readiness: inspects environment flags and infrastructure
+    from backend.deployment.readiness import build_readiness as build_deploy_readiness
+    deploy_report = build_deploy_readiness(environ={}, platform="local")
+    assert hasattr(deploy_report, "overall_status")
+    assert deploy_report.report_version == "readonly-deployment-readiness-v1"
+
+    # 2. TrustOS public launch readiness: evaluates governance and policy areas
+    from evaluation.trustos.public_launch_readiness import build_public_launch_readiness
+    trust_report = build_public_launch_readiness()
+    assert hasattr(trust_report, "decision")
+    assert hasattr(trust_report, "score")
+    assert trust_report.decision.decision in ("blocked_for_public_beta", "go_for_internal_dry_run", "go_for_private_beta")

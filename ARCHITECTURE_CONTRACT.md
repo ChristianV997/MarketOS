@@ -8,6 +8,10 @@ Status: enforceable direction of travel. This contract does not migrate legacy s
 | --- | --- | --- |
 | Runtime scheduling and lifecycle | `orchestrator/` | `backend/workflows/orchestrator.py` remains a workflow-stage coordinator, not a second runtime. |
 | Business decision-cycle semantics | `backend/execution/` | `backend/decision/`, `core/execution/`, and simulation paths remain existing collaborators. |
+| Financial calculations and money | `backend/economics/kernel.py` | Legacy float-shaped evaluation/service reports are compatibility adapters delegating to kernel. |
+| Client export boundary and isolation | `evaluation/trustos/client_workspace_isolation.py` | Workspace leakage detection and curated evidence export; internal IP remains unexported. |
+| Pre-integration policy gate | `evaluation/companyos/approval_ledger.py` | Fail-closed simulation and offline approval ledger; external mutation requires explicit human approval. |
+| Readiness projections | Distinct non-competing gates | `evaluation/commerce/readiness.py` (Phase 1), `backend/deployment/readiness.py` (deployment), `evaluation/trustos/public_launch_readiness.py` (TrustOS launch governance). |
 | Event envelope schemas | `backend/contracts/events.py` | Existing pub/sub envelopes and workflow records are not migrated by this change. |
 | Event append abstraction | `backend/events/` | `backend/events/log.py` and `backend/orchestration/event_store.py` are current legacy paths pending `EventRepository`. |
 | Durable operational store | Future `EventRepository` on Postgres | JSONL, DuckDB, and replay-store paths remain temporary adapters. |
