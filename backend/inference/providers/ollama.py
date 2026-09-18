@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from typing import Generator
 
 from .._utils import compute_replay_hash, now_ms
@@ -32,16 +31,18 @@ class OllamaProvider(BaseProvider):
     # ── availability ─────────────────────────────────────────────────────────
 
     def is_available(self) -> bool:
-        try:
-            import httpx
-            r = httpx.get(f"{_BASE}/api/tags", timeout=_HEALTH_TIMEOUT)
-            return r.status_code == 200
-        except Exception:
-            return False
+        from ...ollama_manager import OllamaManager
+        return OllamaManager().is_enabled()
+
+    def probe(self) -> bool:
+        from ...ollama_manager import OllamaManager
+        return OllamaManager().probe_health() == "ready"
 
     # ── inference ─────────────────────────────────────────────────────────────
 
     def complete(self, request: InferenceRequest) -> InferenceResponse:
+        if not self.is_available():
+            raise RuntimeError("ollama provider is disabled or unavailable")
         import httpx
 
         model    = request.model if request.model != "default" else _MODEL
@@ -80,6 +81,8 @@ class OllamaProvider(BaseProvider):
     # ── embeddings ────────────────────────────────────────────────────────────
 
     def embed(self, request: EmbeddingRequest) -> list[list[float]]:
+        if not self.is_available():
+            raise RuntimeError("ollama provider is disabled or unavailable")
         import httpx, math
 
         model   = request.model if request.model != "default" else _MODEL
@@ -103,6 +106,8 @@ class OllamaProvider(BaseProvider):
     def stream(
         self, request: InferenceRequest
     ) -> Generator[str, None, InferenceResponse]:
+        if not self.is_available():
+            raise RuntimeError("ollama provider is disabled or unavailable")
         import httpx
 
         model    = request.model if request.model != "default" else _MODEL

@@ -1,0 +1,10 @@
+{
+  "jobs": [
+    {
+      "id": "job-traversal",
+      "marketplace_trend_report": "../secret.json",
+      "supplier_feasibility_report": "tests/fixtures/commerce_operations/cli_batch/good_supplier.json",
+      "consumer_attention_report": "tests/fixtures/commerce_operations/cli_batch/good_consumer.json"
+    }
+  ]
+}

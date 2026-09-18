@@ -1,6 +1,25 @@
 """Tests for signal adapters (amazon_bestsellers, tiktok_organic)."""
-import pytest
+import sys
+from types import ModuleType
+
 from unittest.mock import patch
+
+
+def _install_firecrawl_stub(monkeypatch, client):
+    """Exercise the optional client path without requiring its package in CI."""
+    firecrawl = ModuleType("firecrawl")
+    firecrawl.Firecrawl = client
+    firecrawl_v2 = ModuleType("firecrawl.v2")
+    firecrawl_types = ModuleType("firecrawl.v2.types")
+
+    class JsonFormat:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    firecrawl_types.JsonFormat = JsonFormat
+    monkeypatch.setitem(sys.modules, "firecrawl", firecrawl)
+    monkeypatch.setitem(sys.modules, "firecrawl.v2", firecrawl_v2)
+    monkeypatch.setitem(sys.modules, "firecrawl.v2.types", firecrawl_types)
 
 
 def test_amazon_fetch_returns_mock_when_network_unavailable():
@@ -55,9 +74,9 @@ def test_tiktok_fetch_uses_trendspyg_proxy_when_creative_center_fails(monkeypatc
     monkeypatch.setattr(mod, "_fetch_creative_center", lambda: [])
 
     fake_trends = [{"trend": f"term{i}"} for i in range(3)]
-    monkeypatch.setattr(
-        "trendspyg.download_google_trends_rss", lambda **kw: fake_trends,
-    )
+    trendspyg = ModuleType("trendspyg")
+    trendspyg.download_google_trends_rss = lambda **kw: fake_trends
+    monkeypatch.setitem(sys.modules, "trendspyg", trendspyg)
 
     results = mod.fetch()
     assert len(results) == 3
@@ -75,7 +94,9 @@ def test_tiktok_fetch_falls_back_to_mock_on_trendspyg_failure(monkeypatch):
     def _boom(**kw):
         raise RuntimeError("network down")
 
-    monkeypatch.setattr("trendspyg.download_google_trends_rss", _boom)
+    trendspyg = ModuleType("trendspyg")
+    trendspyg.download_google_trends_rss = _boom
+    monkeypatch.setitem(sys.modules, "trendspyg", trendspyg)
 
     results = mod.fetch()
     assert all(r["source"] == "tiktok_mock" for r in results)
@@ -275,8 +296,7 @@ def test_alibaba_fetch_uses_firecrawl_when_configured(monkeypatch):
         def scrape(self, url, formats=None):
             return FakeDoc()
 
-    import firecrawl
-    monkeypatch.setattr(firecrawl, "Firecrawl", FakeFirecrawl)
+    _install_firecrawl_stub(monkeypatch, FakeFirecrawl)
 
     results = mod.fetch()
     assert len(results) == 1
@@ -298,8 +318,7 @@ def test_alibaba_fetch_falls_back_to_mock_on_firecrawl_failure(monkeypatch):
         def scrape(self, url, formats=None):
             raise RuntimeError("scrape failed")
 
-    import firecrawl
-    monkeypatch.setattr(firecrawl, "Firecrawl", FakeFirecrawl)
+    _install_firecrawl_stub(monkeypatch, FakeFirecrawl)
 
     results = mod.fetch()
     assert all(r["source"] == "alibaba_mock" for r in results)

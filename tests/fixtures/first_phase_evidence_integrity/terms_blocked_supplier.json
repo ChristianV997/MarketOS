@@ -1,0 +1,17 @@
+{
+  "report_version": "supplier-feasibility-v1",
+  "evidence_mode": "fixture_demo",
+  "provider_terms_blocked": true,
+  "candidates": [
+    {
+      "candidate_id": "desk-clamp-lamp",
+      "query": "desk clamp lamp",
+      "offers": [],
+      "score": {
+        "overall_supplier_feasibility": 0.0,
+        "recommendation": "expand_supplier_research",
+        "risk_flags": [{"code": "provider_terms_or_privacy_block", "severity": "blocker"}]
+      }
+    }
+  ]
+}
