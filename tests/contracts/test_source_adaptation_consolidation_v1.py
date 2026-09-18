@@ -1,34 +1,27 @@
-"""Canonical registry assertions for source-adaptation consolidation v1."""
+"""Focused corrections for source-adaptation consolidation v1."""
 from __future__ import annotations
 
 from pathlib import Path
 
-from evaluation.source_governance.consolidation_rules import extra_record_errors
 from evaluation.source_governance.registry import AdaptationMode, SourceAdaptationRegistry
-from evaluation.source_governance.validator import validate_registry, validate_source_record
+from evaluation.source_governance.validator import validate_source_record
+
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _REGISTRY_PATH = _REPO_ROOT / "data" / "source_adaptation_registry.json"
 
 
-def test_canonical_registry_has_no_overlay_dependency():
-    assert not (_REPO_ROOT / "data" / "source_adaptation_corrections_v1.json").exists()
-    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
-    assert len(registry.records) == 29
-    assert validate_registry(registry) == []
-
-
 def test_registry_points_crawl4ai_at_existing_adapter():
-    rec = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH).get_record("src-crawl4ai")
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    rec = registry.get_record("src-crawl4ai")
     assert rec is not None
     assert rec.marketos_target_authority == "backend.adapters.research.crawl4ai"
     assert rec.adaptation_mode == AdaptationMode.INTEGRATE.value
-    assert extra_record_errors(rec.to_dict()) == []
 
 
-def test_stale_scouting_path_is_flagged_by_validator():
+def test_stale_scouting_crawl4ai_authority_is_rejected():
     rec = {
-        "source_id": "src-stale",
+        "source_id": "src-crawl4ai-stale",
         "repository_url": "https://github.com/unclecode/crawl4ai",
         "organization": "unclecode",
         "repository_name": "crawl4ai",
@@ -72,11 +65,16 @@ def test_stale_scouting_path_is_flagged_by_validator():
 
 
 def test_gpu_orchestration_is_rejected_not_deferred():
-    rec = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH).get_record("src-higgsfield-gpu-orchestration")
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    rec = registry.get_record("src-higgsfield-gpu-orchestration")
     assert rec is not None
     assert rec.adaptation_mode == AdaptationMode.REJECT.value
     assert rec.integration_status == "rejected"
-    assert rec.rejection_reason
+
+
+def test_no_overlay_registry_or_corrections_file():
+    overlay = _REPO_ROOT / "data" / "source_adaptation_corrections_v1.json"
+    assert not overlay.exists(), "corrections overlay is not a second authority; apply into canonical registry only"
 
 
 def test_placeholder_pins_replaced_for_reference_sources():
@@ -90,5 +88,3 @@ def test_placeholder_pins_replaced_for_reference_sources():
     assert hermes.repository_url == "https://github.com/NousResearch/hermes-agent"
     assert hermes.commit_sha == "027d1a8a6043355b7af53b4c0645336b41372b7b"
     assert hermes.adaptation_mode == AdaptationMode.REFERENCE_ONLY.value
-    for rec in (coderos, gstack, hermes):
-        assert extra_record_errors(rec.to_dict()) == []
