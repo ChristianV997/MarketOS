@@ -220,3 +220,66 @@ def test_ci_green_with_real_steps_passes_that_rule():
     }
     doc, _ = evaluate_report(report, _packet())
     assert not any(item["rule"] == "ci_green_requires_steps" for item in doc["findings"])
+
+
+def test_executed_failure_relabeled_unavailable_fails_the_rule():
+    report = {
+        "claims": [],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+        "check_classifications": {"pytest": "unavailable"},
+        "actual_check_classifications": {"pytest": "failed"},
+    }
+    doc, code = evaluate_report(report, _packet())
+    assert code == 2
+    assert any(item["rule"] == "executed_failure_not_unavailable" for item in doc["findings"])
+
+
+def test_unavailable_relabeled_failed_also_fails_the_rule_in_reverse():
+    report = {
+        "claims": [],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+        "check_classifications": {"ruff": "failed"},
+        "actual_check_classifications": {"ruff": "unavailable"},
+    }
+    doc, code = evaluate_report(report, _packet())
+    assert code == 2
+    assert any(item["rule"] == "executed_failure_not_unavailable" for item in doc["findings"])
+
+
+def test_consistent_claimed_and_actual_classification_passes_the_rule():
+    report = {
+        "claims": [],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+        "check_classifications": {"pytest": "failed"},
+        "actual_check_classifications": {"pytest": "failed"},
+    }
+    doc, _ = evaluate_report(report, _packet())
+    assert not any(item["rule"] == "executed_failure_not_unavailable" for item in doc["findings"])
+
+
+def test_zero_step_ci_claimed_as_failure_fails_the_rule():
+    report = {
+        "claims": [],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+        "ci_status": "failed",
+        "ci_steps": 0,
+    }
+    doc, code = evaluate_report(report, _packet())
+    assert code == 2
+    assert any(item["rule"] == "zero_step_ci_not_failure" for item in doc["findings"])
+
+
+def test_real_step_ci_failure_passes_the_zero_step_rule():
+    report = {
+        "claims": [],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+        "ci_status": "failed",
+        "ci_steps": 9,
+    }
+    doc, _ = evaluate_report(report, _packet())
+    assert not any(item["rule"] == "zero_step_ci_not_failure" for item in doc["findings"])

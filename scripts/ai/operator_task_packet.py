@@ -440,6 +440,19 @@ def diff_resume_state(previous: dict[str, Any], current: dict[str, Any]) -> dict
     }
 
 
+def verify_replay_hash(resume: dict[str, Any], *, recomputed_replay_hash: str) -> bool:
+    """True when a resume packet's recorded snapshot hash matches an
+    independently recomputed one (e.g. #252's ``context_replay_hash``).
+
+    A resume packet's ``context_snapshot_replay_hash`` is only ever as
+    trustworthy as whoever wrote it; this lets a caller who has re-run
+    #252's own ``context_replay_hash`` over the live repository state
+    detect a tampered or stale resume packet rather than trusting the
+    recorded value at face value.
+    """
+    return resume.get("context_snapshot_replay_hash") == recomputed_replay_hash
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, default=Path.cwd())

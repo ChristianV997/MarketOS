@@ -5,6 +5,7 @@ from scripts.ai.operator_task_packet import (
     build_resume_packet,
     diff_resume_state,
     validate_resume_packet,
+    verify_replay_hash,
 )
 
 TASK_PACKET = {
@@ -121,3 +122,12 @@ def test_missing_required_field_on_a_loaded_resume_packet_is_rejected():
     del incomplete["open_blockers"]
     with pytest.raises(ResumePacketError, match="missing fields"):
         validate_resume_packet(incomplete)
+
+
+def test_verify_replay_hash_detects_a_tampered_resume_bundle():
+    resume = build_resume_packet(TASK_PACKET, **_resume_kwargs())
+    genuine_replay_hash = resume["context_snapshot_replay_hash"]
+    assert verify_replay_hash(resume, recomputed_replay_hash=genuine_replay_hash) is True
+
+    tampered = dict(resume, context_snapshot_replay_hash="f" * 64)
+    assert verify_replay_hash(tampered, recomputed_replay_hash=genuine_replay_hash) is False

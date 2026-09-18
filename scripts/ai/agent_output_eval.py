@@ -31,6 +31,7 @@ SOURCE_MINING_HINT = re.compile(r"(?i)(reviewed|mined|adapted|inspired by).{0,40
 SOURCE_REQUIRED_KEYS = ("url", "version", "license", "pattern")
 TOOL_USE_HINT = re.compile(r"(?i)(used|invoked|ran|called)\s+(the\s+)?[\w.-]*\s*(sub ?agent|skill|tool|gstack|hermes|coderos)\b")
 CI_GREEN_CLASSES = frozenset({"success", "green", "passed"})
+FAILURE_CLASSES = frozenset({"failed", "failure", "red"})
 RESERVED_REWRITE = (
     "run_local_quality_gate.py",
     "resource_execution_governor.py",
@@ -76,6 +77,12 @@ def evaluate_report(
     findings: list[dict[str, str]] = []
     executed = [str(item) for item in (commands or report.get("executed_commands") or [])]
     claims = _as_list(report.get("claims") or report.get("results") or [])
+    ci_status = str(report.get("ci_status") or "").lower()
+    ci_steps = report.get("ci_steps")
+    try:
+        ci_steps_int = int(ci_steps) if ci_steps is not None else None
+    except (TypeError, ValueError):
+        ci_steps_int = None  # non-numeric ci_steps is treated the same as absent, never as a crash
     changed = [_normalize_path(item) for item in _as_list(report.get("changed_files"))]
     evidence = str(report.get("evidence_classification") or report.get("evidence") or "")
     pr_ref = report.get("pr") or report.get("pull_request")
@@ -103,8 +110,25 @@ def evaluate_report(
         if label in UNAVAILABLE_CLASSES and str(report.get("status", "")).lower() in PASSED_CLASSES:
             findings.append({"rule": "unavailable_not_passed", "status": "failed", "detail": f"status vs {name}"})
 
+    # actual_check_classifications, when supplied, is ground truth (e.g. from
+    # execution_bundle.py's real executor) -- claims must not relabel a
+    # genuinely executed failure as unavailable/not_run/blocked, nor the
+    # reverse (a check that never ran claimed as a real failure).
+    actual_map = report.get("actual_check_classifications") or {}
+    for name, actual in actual_map.items():
+        actual_label = str(actual).lower()
+        claimed_label = str(classification_map.get(name, "")).lower()
+        if actual_label == "failed" and claimed_label in UNAVAILABLE_CLASSES:
+            findings.append({"rule": "executed_failure_not_unavailable", "status": "failed", "detail": str(name)})
+        if actual_label in UNAVAILABLE_CLASSES and claimed_label == "failed":
+            findings.append({"rule": "executed_failure_not_unavailable", "status": "failed", "detail": f"{name}:reverse"})
+
     if evidence.lower() in FIXTURE_CLASSES and str(report.get("live_label") or report.get("supplier_proof") or "").lower() in LIVE_CLASSES:
         findings.append({"rule": "fixture_not_live", "status": "failed", "detail": "fixture evidence labeled live"})
+
+    ci_failure_claimed = ci_status in FAILURE_CLASSES
+    if ci_failure_claimed and ci_steps_int is not None and ci_steps_int <= 0:
+        findings.append({"rule": "zero_step_ci_not_failure", "status": "failed", "detail": f"ci_status={report.get('ci_status')} ci_steps={ci_steps!r}"})
 
     allowed = packet.get("allowed_scope") or []
     out_of_scope = [path for path in changed if path and not _in_scope(path, allowed)]
@@ -151,12 +175,6 @@ def evaluate_report(
             if missing_output:
                 findings.append({"rule": "tool_use_requires_output", "status": "failed", "detail": ",".join(missing_output[:5])})
 
-    ci_status = str(report.get("ci_status") or "").lower()
-    ci_steps = report.get("ci_steps")
-    try:
-        ci_steps_int = int(ci_steps) if ci_steps is not None else None
-    except (TypeError, ValueError):
-        ci_steps_int = None  # non-numeric ci_steps is treated the same as absent, never as a crash
     if ci_status in CI_GREEN_CLASSES and (ci_steps_int is None or ci_steps_int <= 0):
         findings.append({"rule": "ci_green_requires_steps", "status": "failed", "detail": f"ci_status={ci_status} ci_steps={ci_steps!r}"})
 
@@ -174,6 +192,8 @@ def evaluate_report(
         "source_mining_requires_metadata",
         "tool_use_requires_output",
         "ci_green_requires_steps",
+        "executed_failure_not_unavailable",
+        "zero_step_ci_not_failure",
     )
     failed_rules = {item["rule"] for item in findings}
     checks = []
