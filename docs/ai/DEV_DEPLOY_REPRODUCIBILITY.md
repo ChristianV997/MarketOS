@@ -139,6 +139,37 @@ Before attempting a private staging deployment, verify via `backend.deployment.e
 - **ECC / gstack / Hermes**: CLI and skills are not installed in the environment (`unavailable`).
 - **Remote CI**: Zero-step / `ci_unavailable`. Local quality gate `--from-git` is the canonical verification authority.
 
+## Promotion rehearsal bundle (PR #249 extension)
+
+The deployment promotion rehearsal composes the environment contract, failure diagnostics, container static checks, high-value-path harness summary, CoderOS status, and CI evidence classification into a single, sanitized, deterministic bundle:
+
+```powershell
+# Run promotion rehearsal for local dry-run (human-readable summary)
+python scripts/deployment_diagnostics.py --promotion-rehearsal --env local_dry_run --summary
+
+# Run promotion rehearsal and output sanitized JSON
+python scripts/deployment_diagnostics.py --promotion-rehearsal --env local_dry_run --json
+
+# Run rehearsal against private staging environment:
+python scripts/deployment_diagnostics.py --promotion-rehearsal --env private_staging --summary
+
+# Run a specific scenario fixture:
+python scripts/deployment_diagnostics.py --promotion-rehearsal --fixture clean_local_dry_run --json
+python scripts/deployment_diagnostics.py --promotion-rehearsal --fixture weak_default_database_password --summary
+```
+
+### Deterministic Replay & Redaction Guarantee
+- **Zero Secrets**: All outputs pass through `redact_secrets()` which redacts credentials in URIs, tokens, keys, and private blocks.
+- **Stable Hash**: The bundle computes a 64-character SHA-256 fingerprint over deterministic fields (excluding timestamps/pids), ensuring bit-for-bit replay reproducibility across runs.
+- **Fail-Closed CI**: Zero-step CI (such as GitHub Actions spending limits / inactive runners) is strictly classified as `ci_unavailable` and cannot pass readiness.
+
+## Design Mining & Source References
+
+1. **Docker Best Practices**: Non-root user execution (`USER 10001:10001`), explicit `HEALTHCHECK`, `STOPSIGNAL` handling (SIGINT/SIGTERM), and multi-stage builds ([Docker Official Documentation](https://docs.docker.com/develop/develop-images/dockerfile_best-practices/)).
+2. **FastAPI Deployment Guidelines**: Production container execution with Gunicorn/Uvicorn workers, non-root system users, and environment-driven port binding ([FastAPI Deployment Docs](https://fastapi.tiangolo.com/deployment/docker/)).
+3. **Reproducible Builds & SOURCE_DATE_EPOCH**: Deterministic hashing principles excluding ambient runtime timestamps to allow bit-for-bit verification ([Reproducible Builds Project](https://reproducible-builds.org/docs/source-date-epoch/)).
+4. **OpenLineage / OpenTelemetry State Models**: Standardized lifecycle status classifications (`passed`, `failed`, `blocked`, `unavailable`, `timed_out`) avoiding ambiguous boolean flags ([OpenLineage Spec](https://openlineage.io/docs/spec/run-states)).
+
 ## Rollback
 
 ```powershell

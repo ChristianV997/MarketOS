@@ -69,3 +69,5 @@ Readiness: `blocked_live`.
 - Failure diagnostics: `backend.deployment.diagnostics` covers 11 actionable failure modes.
 - High-value path harness: `scripts/run_high_value_path_harness.py` classifies `passed`, `failed`, `unavailable`, `not_run`, `blocked`, `malformed`, `timed_out` with zero live actions.
 - Colab benchmark matrix: `scripts/run_high_value_path_harness.py --colab-matrix` measures 8 bounded paths with 100% deterministic bit-identity.
+- Promotion rehearsal bundle: `backend.deployment.promotion_rehearsal` composes environment contract, failure diagnostics, container static checks, harness summary, CoderOS status, and CI classification into a sanitized 64-char SHA-256 fingerprint without replacing existing quality gates.
+- Scenario fixtures: `backend.deployment.promotion_fixtures` provides 15 deterministic scenario fixtures across all deployment readiness edge cases.
