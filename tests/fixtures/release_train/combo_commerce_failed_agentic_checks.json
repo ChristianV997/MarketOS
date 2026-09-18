@@ -1,0 +1,35 @@
+{
+  "pr_identity": "PR (Commerce)",
+  "head_sha": "a898dc3",
+  "base_sha": "5a533d4",
+  "is_stale_base": false,
+  "worktree_ownership_state": "Valid",
+  "changed_file_scope": [
+    "docs/ai/INTEGRATION_RELEASE_CONTRACT.md"
+  ],
+  "diff_type": "Direct",
+  "dependency_ordering": "Yes",
+  "unmet_dependencies": [],
+  "focused_and_adjacent_tests": "Passed",
+  "compile_and_lint_results": "Failed",
+  "evidence": {
+    "simulated": "Dry-run verified"
+  },
+  "ci_execution_steps": {
+    "runner_identity": "local",
+    "required_job_completeness": "Passed",
+    "executed_failures": "Agentic lint failed",
+    "step_evidence": "All steps executed"
+  },
+  "review_state": "Approved",
+  "draft_ready_state": "Ready",
+  "explicit_human_approval": true,
+  "duplicate_superseded_pr_handling": "None",
+  "rollback_reference": "5a533d4",
+  "credential_and_mutation_safety": "Passed",
+  "trustos_status": "Cleared",
+  "approval_ledger_status": "Approved",
+  "provider_model_activation_status": "Offline",
+  "human_override_local_evidence": false,
+  "provenance_and_license_verified": true
+}

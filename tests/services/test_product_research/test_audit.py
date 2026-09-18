@@ -2,6 +2,7 @@
 import backend.core.persistence as pers
 import pytest
 from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import get_workspace_registry
 from services.product_research.audit import run_product_audit
 from services.product_research.schemas import ProductAuditResult
 
@@ -45,7 +46,7 @@ class TestProductAuditDryRunDisclaimer:
 
     def test_markdown_omits_disclaimer_when_not_dry_run(self):
         from services.product_research.report import render_product_audit_markdown
-        ws = ClientWorkspace(name="live-ws", dry_run_default=False)
+        ws = get_workspace_registry().register(ClientWorkspace(name="live-ws", dry_run_default=False))
         result, _ = run_product_audit("Widget", workspace=ws)
         md = render_product_audit_markdown(result)
         assert "DRY RUN" not in md
