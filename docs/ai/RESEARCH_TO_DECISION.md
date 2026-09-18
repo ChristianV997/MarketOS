@@ -41,6 +41,14 @@ accepted without query strings or fragments; observation audits retain labels
 and counts rather than raw URL content. Output is not written unless `--output`
 is explicitly supplied.
 
+Every supplier, marketplace, consumer-attention, and structured observation
+record receives a stable `evidence:<sha256-prefix>` reference. Explicit
+`source_reference` and `extraction_method` values are validated, while legacy
+imports use the bounded input label and a manual-import method as deterministic
+provenance defaults. References are hashed before output, so URLs and document
+paths are not copied into the packet. Bounded warning lists remain attached to
+the evidence record without accepting raw logs or HTML.
+
 ## Existing authorities
 
 The adapter passes accepted rows through the existing authorities:
@@ -63,6 +71,12 @@ Supplier, marketplace demand, consumer attention, competition, economics, and
 compliance remain separate evidence sections. Manual or fixture evidence never
 authorizes launch, spend, orders, or provider actions. A packet with incomplete
 or quarantined evidence remains `hold_for_manual_review`.
+Candidate audits additionally expose evidence references, extraction methods,
+freshness, conflicts, and a conservative `risk_state`. The appendix's
+`client_safe_projection` is a stable, read-only projection for cockpit, export,
+and replay consumers; it carries no launch, spend, provider, or order
+authority. The `integration_contract` points those consumers back to this
+existing authority and the existing `product-validation-report-v1` packet.
 
 ## Evidence mode
 

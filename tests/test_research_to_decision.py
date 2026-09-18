@@ -88,6 +88,36 @@ def test_market_lane_and_supplier_offer_are_explicit_and_bounded() -> None:
     assert "no_launch_or_spend_authority" in appendix["candidate_audit"][0]["hard_gates"]
 
 
+def test_evidence_references_and_client_projection_are_stable() -> None:
+    manifest = load_fixture("hydroponics_promising.json")
+    manifest["supplier_inputs"][0].update(
+        {
+            "source_reference": "fixture:hydroponics-quote.pdf",
+            "extraction_method": "manual_quote_review",
+            "warnings": ["return terms remain manual"],
+        }
+    )
+    report = build_research_to_decision(manifest, base_dir=FIXTURES)
+    appendix = report["appendix"]
+    offer = appendix["supplier_offers"][0]
+    audit = appendix["candidate_audit"][0]
+    projection = appendix["client_safe_projection"]
+    assert offer["evidence"]["reference_id"].startswith("evidence:")
+    assert len(offer["evidence"]["reference_id"]) == 25
+    assert offer["evidence"]["extraction_method"] == "manual_quote_review"
+    assert offer["evidence"]["warnings"] == ["return terms remain manual"]
+    assert offer["evidence"]["reference_id"] in audit["evidence_refs"]
+    assert len(audit["evidence_refs"]) == 3
+    assert audit["extraction_methods"] == ["manual_quote_review"]
+    assert audit["freshness"] == "current"
+    assert audit["risk_state"] == "hold"
+    assert audit["conflicts"] == []
+    assert projection["launch_authorized"] is False
+    assert projection["candidates"][0]["evidence_refs"] == audit["evidence_refs"]
+    assert appendix["integration_contract"]["cockpit"] == "appendix.client_safe_projection"
+    assert "hydroponics-quote.pdf" not in json.dumps(report)
+
+
 def test_lane_and_supplier_identity_do_not_accept_implicit_global_defaults(tmp_path: Path) -> None:
     manifest = load_fixture("b2b_insufficient_data.json")
     manifest["lane"] = {"origin": "Shenzhen", "destination": "Mexico", "currency": "MXN"}
@@ -131,6 +161,8 @@ def test_pdf_derived_manual_evidence_requires_terms_and_freshness(tmp_path: Path
             {
                 "candidate_id": "pdf-candidate",
                 "source": "supplier-quote.pdf",
+                "source_reference": "supplier-quote.pdf",
+                "extraction_method": "manual_pdf_review",
                 "captured_at": "2026-09-16T09:00:00-06:00",
                 "expires_at": "2027-01-01T00:00:00Z",
                 "evidence_state": "manual",
@@ -148,6 +180,8 @@ def test_pdf_derived_manual_evidence_requires_terms_and_freshness(tmp_path: Path
     manifest = {"captured_at": "2026-09-16T09:00:00-06:00", "lane": dict(LANE), "candidates": [{"candidate_id": "pdf-candidate", "lifecycle_state": "candidate"}], "observation_inputs": [{"path": "quote.json", "kind": "pdf_derived"}]}
     report = build_research_to_decision(manifest, base_dir=tmp_path)
     assert report["appendix"]["input_audit"][0]["kind"] == "pdf_derived"
+    assert report["appendix"]["input_audit"][0]["extraction_methods"] == ["manual_pdf_review"]
+    assert report["appendix"]["input_audit"][0]["evidence_refs"][0].startswith("evidence:")
 
     evidence.write_text(json.dumps({"candidate_id": "pdf-candidate", "source": "supplier-quote.pdf"}), encoding="utf-8")
     with pytest.raises(ResearchToDecisionError, match="pdf_derived evidence is missing"):
@@ -182,6 +216,14 @@ def test_reviewed_url_observation_is_summarized_without_raw_url(tmp_path: Path) 
     report = build_research_to_decision(manifest, base_dir=tmp_path)
     assert report["appendix"]["input_audit"][0]["kind"] == "reviewed_url"
     assert "example.test" not in json.dumps(report)
+
+
+@pytest.mark.parametrize("source_reference", ["../private.json", "https://example.test/quote?token=hidden"])
+def test_explicit_source_references_reject_traversal_and_query_strings(source_reference: str) -> None:
+    manifest = load_fixture("hydroponics_promising.json")
+    manifest["supplier_inputs"][0]["source_reference"] = source_reference
+    with pytest.raises(ResearchToDecisionError, match="safe reference|query or fragment"):
+        build_research_to_decision(manifest, base_dir=FIXTURES)
 
 
 @pytest.mark.parametrize(

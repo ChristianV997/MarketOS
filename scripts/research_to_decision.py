@@ -139,6 +139,9 @@ OFFER_FIELDS = frozenset(
         "source_type",
         "source",
         "source_url",
+        "source_reference",
+        "document_reference",
+        "extraction_method",
         "captured_at",
         "observed_at",
         "expires_at",
@@ -184,6 +187,43 @@ def _contains_secret(value: Any) -> bool:
 def _reject_html(raw: str) -> None:
     if raw.lstrip().lower().startswith(("<", "<!doctype")):
         raise ResearchToDecisionError("HTML or raw page content is not accepted")
+
+
+def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_query: bool = False) -> str:
+    reference = _text(value, field, required=required)
+    if not reference:
+        return reference
+    parsed = urlparse(reference)
+    if parsed.scheme in {"http", "https"}:
+        if not parsed.netloc or parsed.username or parsed.password:
+            raise ResearchToDecisionError(f"{field} must be a safe reference")
+        if (parsed.query or parsed.fragment) and not allow_url_query:
+            raise ResearchToDecisionError(f"{field} must not contain a query or fragment")
+        if allow_url_query:
+            reference = parsed._replace(query="", fragment="").geturl()
+    elif parsed.scheme:
+        if "://" in reference or parsed.scheme not in {"fixture", "file", "manual"}:
+            raise ResearchToDecisionError(f"{field} must be a safe reference")
+    path = Path(parsed.path or reference)
+    if path.is_absolute() or ".." in path.parts or any(char in reference for char in "<>\r\n"):
+        raise ResearchToDecisionError(f"{field} must be a safe reference")
+    return reference
+
+
+def _evidence_reference(value: Any, field: str, *, allow_url_query: bool = False) -> str:
+    reference = _reference_text(value, field, allow_url_query=allow_url_query)
+    return f"evidence:{hashlib.sha256(reference.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _warning_values(value: Any, field: str) -> list[str]:
+    if value in (None, ""):
+        return []
+    values = value if isinstance(value, list) else [value]
+    if not all(isinstance(item, str) for item in values):
+        raise ResearchToDecisionError(f"{field} must be a bounded list of strings")
+    if len(values) > 12:
+        raise ResearchToDecisionError(f"{field} has too many entries")
+    return sorted({_text(item, field, required=True) for item in values})
 
 
 def _parse_timezone(value: Any, field: str) -> str:
@@ -377,10 +417,15 @@ def _input_entries(manifest: Mapping[str, Any], key: str) -> list[Mapping[str, A
     for item in values:
         if not isinstance(item, Mapping):
             raise ResearchToDecisionError(f"{key} entries must be objects")
-        if set(item) - {"path", "label", "supplier", "source_type", "marketplace", "platform", "kind", "candidate_ids"}:
+        if set(item) - {"path", "label", "supplier", "source_type", "marketplace", "platform", "kind", "candidate_ids", "source_reference", "extraction_method", "warnings"}:
             raise ResearchToDecisionError(f"unknown fields in {key} entry")
         if "candidate_ids" in item and (not isinstance(item["candidate_ids"], list) or not all(isinstance(value, str) and value for value in item["candidate_ids"])):
             raise ResearchToDecisionError(f"{key}.candidate_ids must be a list of strings")
+        if "source_reference" in item:
+            _reference_text(item["source_reference"], f"{key}.source_reference")
+        if "extraction_method" in item:
+            _text(item["extraction_method"], f"{key}.extraction_method", required=True)
+        _warning_values(item.get("warnings"), f"{key}.warnings")
         result.append(item)
     return result
 
@@ -449,7 +494,16 @@ def _offer_number(row: Mapping[str, Any], names: tuple[str, ...], field: str, is
     return _number(value, f"supplier_offer.{field}", minimum=0.0)
 
 
-def _normalize_supplier_offer(row: Mapping[str, Any], *, lane: Mapping[str, Any], captured_at: str, source_label: str) -> dict[str, Any]:
+def _normalize_supplier_offer(
+    row: Mapping[str, Any],
+    *,
+    lane: Mapping[str, Any],
+    captured_at: str,
+    source_label: str,
+    source_reference: Any = None,
+    extraction_method: Any = None,
+    input_warnings: Any = None,
+) -> dict[str, Any]:
     candidate_id = _text(row.get("candidate_id"), "supplier_offer.candidate_id", required=True)
     offer_id = _row_value(row, "offer_id", "supplier_offer_id", "supplier_product_id")
     exact_sku = _row_value(row, "supplier_sku", "sku")
@@ -471,6 +525,11 @@ def _normalize_supplier_offer(row: Mapping[str, Any], *, lane: Mapping[str, Any]
     if expires_at and datetime.fromisoformat(expires_at.replace("Z", "+00:00")) < datetime.fromisoformat(observed_at.replace("Z", "+00:00")):
         issues.append("offer_expired")
     source = _offer_text(row, ("source_type", "source"), "source", issues) or source_label
+    reference_value = _row_value(row, "source_reference", "document_reference") or source_reference or source_label
+    reference_id = _evidence_reference(reference_value, "supplier_offer.source_reference")
+    method_value = _row_value(row, "extraction_method") or extraction_method or "manual_import"
+    method = _text(method_value, "supplier_offer.extraction_method", required=True)
+    evidence_warnings = _warning_values(_row_value(row, "warnings") or input_warnings, "supplier_offer.warnings")
     evidence_state = _offer_text(row, ("evidence_state",), "evidence_state", issues)
     if evidence_state != "unknown" and evidence_state not in EVIDENCE_STATES:
         raise ResearchToDecisionError(f"unsupported supplier offer evidence_state: {evidence_state}")
@@ -512,7 +571,7 @@ def _normalize_supplier_offer(row: Mapping[str, Any], *, lane: Mapping[str, Any]
         "policy_evidence": _offer_text(row, ("policy_evidence",), "policy_evidence", issues),
         "backup_supplier": _offer_text(row, ("backup_supplier",), "backup_supplier", issues),
         "approval_state": approval_state,
-        "evidence": {"captured_at": observed_at, "expires_at": expires_at, "source": source, "state": evidence_state, "confidence": confidence},
+        "evidence": {"captured_at": observed_at, "expires_at": expires_at, "source": source, "reference_id": reference_id, "extraction_method": method, "state": evidence_state, "confidence": confidence, "warnings": evidence_warnings},
         "unknown_fields": sorted(set(row) - OFFER_FIELDS),
     }
     if approval_state == "approved" and any(offer[key] in {"unknown", None} for key in ("sample_state", "rma")):
@@ -542,11 +601,34 @@ def _load_import(path: Path, entry: Mapping[str, Any], role: str, *, lane: Mappi
         raise ResearchToDecisionError(f"unsupported import role: {role}")
     supplier_offers = []
     if role == "supplier":
-        supplier_offers = [_normalize_supplier_offer(row, lane=lane, captured_at=captured_at, source_label=label) for row in rows]
+        supplier_offers = [
+            _normalize_supplier_offer(
+                row,
+                lane=lane,
+                captured_at=captured_at,
+                source_label=label,
+                source_reference=entry.get("source_reference") or path.name,
+                extraction_method=entry.get("extraction_method") or ("manual_csv_import" if fmt == "csv" else "manual_json_import"),
+                input_warnings=entry.get("warnings"),
+            )
+            for row in rows
+        ]
     selected = set(entry.get("candidate_ids", []))
     if selected:
         records = [record for record in records if getattr(record, "candidate_id", "") in selected]
         supplier_offers = [offer for offer in supplier_offers if offer["candidate_id"] in selected]
+    selected_rows = rows if not selected else [row for row in rows if _candidate_id(row) in selected]
+    candidate_evidence_refs: dict[str, list[str]] = {}
+    if role == "supplier":
+        for offer in supplier_offers:
+            candidate_evidence_refs.setdefault(offer["candidate_id"], []).append(offer["evidence"]["reference_id"])
+    else:
+        default_reference = entry.get("source_reference") or path.name
+        for row in selected_rows:
+            candidate_id = _candidate_id(row)
+            reference_value = row.get("source_reference") or row.get("document_reference") or row.get("source_url") or row.get("url") or default_reference
+            reference_id = _evidence_reference(reference_value, f"{role}.source_reference", allow_url_query=bool(row.get("source_url") or row.get("url")))
+            candidate_evidence_refs.setdefault(candidate_id, []).append(reference_id)
     return records, {
         "label": label,
         "role": role,
@@ -558,6 +640,10 @@ def _load_import(path: Path, entry: Mapping[str, Any], role: str, *, lane: Mappi
         "supplier_offers_quarantined": sum(offer["status"] == "quarantined" for offer in supplier_offers),
         "supplier_offer_issues": sorted({issue for offer in supplier_offers for issue in offer["issues"]}),
         "supplier_offers": supplier_offers,
+        "evidence_refs": sorted({ref for refs in candidate_evidence_refs.values() for ref in refs}),
+        "extraction_methods": sorted({entry.get("extraction_method") or ("manual_csv_import" if fmt == "csv" else f"manual_{role}_import")}),
+        "warnings": _warning_values(entry.get("warnings"), f"{role}.warnings"),
+        "candidate_evidence_refs": {key: sorted(set(value)) for key, value in sorted(candidate_evidence_refs.items())},
         "status": "accepted" if records else "needs_evidence",
     }
 
@@ -569,10 +655,22 @@ def _load_observation(path: Path, entry: Mapping[str, Any]) -> dict[str, Any]:
     rows, fmt = _raw_records(path)
     label = _text(entry.get("label") or path.name, "observation.label")
     _validate_rows(rows, label=label, role="observation")
+    evidence_refs: set[str] = set()
+    extraction_methods: set[str] = set()
+    warnings: set[str] = set(_warning_values(entry.get("warnings"), "observation.warnings"))
+    candidate_evidence_refs: dict[str, list[str]] = {}
     for row in rows:
         url = row.get("url") or row.get("source_url")
         if kind == "reviewed_url" and (not isinstance(url, str) or urlparse(url).scheme not in {"http", "https"} or not urlparse(url).netloc):
             raise ResearchToDecisionError(f"reviewed_url requires an http(s) URL: {label}")
+        reference_value = row.get("source_reference") or row.get("document_reference") or (url if kind == "reviewed_url" else row.get("source")) or entry.get("source_reference") or label
+        reference_id = _evidence_reference(reference_value, f"{kind}.source_reference", allow_url_query=kind == "reviewed_url")
+        method = _text(row.get("extraction_method") or entry.get("extraction_method") or ("operator_reviewed_url" if kind == "reviewed_url" else "manual_document_review"), f"{kind}.extraction_method", required=True)
+        row_warnings = _warning_values(row.get("warnings") or entry.get("warnings"), f"{kind}.warnings")
+        warnings.update(row_warnings)
+        evidence_refs.add(reference_id)
+        extraction_methods.add(method)
+        candidate_evidence_refs.setdefault(_candidate_id(row), []).append(reference_id)
         if kind in {"pdf_derived", "form"}:
             required = ("source", "captured_at", "expires_at", "evidence_state", "confidence", "terms", "returns", "warranty", "support", "delivery", "permissions")
             missing = [field for field in required if row.get(field) in (None, "")]
@@ -584,7 +682,19 @@ def _load_observation(path: Path, entry: Mapping[str, Any]) -> dict[str, Any]:
             if evidence_state not in EVIDENCE_STATES:
                 raise ResearchToDecisionError(f"unsupported {kind} evidence_state: {evidence_state}")
             _number(row.get("confidence"), f"{kind}.confidence", minimum=0.0, maximum=1.0)
-    return {"label": label, "role": "observation", "kind": kind, "format": fmt, "records_seen": len(rows), "records_accepted": len(rows), "status": "accepted"}
+    return {
+        "label": label,
+        "role": "observation",
+        "kind": kind,
+        "format": fmt,
+        "records_seen": len(rows),
+        "records_accepted": len(rows),
+        "evidence_refs": sorted(evidence_refs),
+        "extraction_methods": sorted(extraction_methods),
+        "warnings": sorted(warnings),
+        "candidate_evidence_refs": {key: sorted(set(value)) for key, value in sorted(candidate_evidence_refs.items())},
+        "status": "accepted",
+    }
 
 
 def _best(mapping: Mapping[str, Any], candidate_id: str) -> Mapping[str, Any]:
@@ -635,6 +745,7 @@ def _candidate_audit(
     synthesis: Mapping[str, Any],
     lane: Mapping[str, Any],
     supplier_offers: Mapping[str, list[dict[str, Any]]],
+    evidence_refs_by_candidate: Mapping[str, set[str]],
 ) -> list[dict[str, Any]]:
     rows = []
     synthesis_items = {item.get("candidate_id"): item for item in synthesis.get("candidates", [])}
@@ -651,8 +762,19 @@ def _candidate_audit(
             hard_gates.append("supplier_offer_evidence_missing")
         if offer_issues:
             hard_gates.extend(f"supplier_offer:{issue}" for issue in offer_issues)
+        evidence_refs = sorted(evidence_refs_by_candidate.get(candidate_id, set()))
+        if any("offer_expired" in issue for issue in offer_issues):
+            freshness = "expired"
+        elif offers and all(offer["evidence"].get("expires_at") for offer in offers):
+            freshness = "current"
+        elif offers:
+            freshness = "unknown"
+        else:
+            freshness = "unavailable"
+        risk_state = "blocked" if any(gate.startswith("supplier_offer:") or gate == "supplier_offer_evidence_missing" for gate in hard_gates) else "hold"
         rows.append({
             "candidate_id": candidate_id,
+            "title": meta.get("title", candidate_id),
             "lifecycle_state": meta.get("lifecycle_state", "evidence_collected"),
             "evidence_expiry": meta.get("evidence_expiry"),
             "lane": {"destination_country": lane["destination_country"], "currency": lane["currency"], "warehouse": lane["warehouse"]},
@@ -661,6 +783,11 @@ def _candidate_audit(
             "observed_values": {"supplier_offer_count": len(offers), "marketplace_evidence_count": len(market_item.get("evidence", [])), "currency": lane["currency"], "destination_country": lane["destination_country"]},
             "assumptions": sorted({*supplier_score.get("reasons", []), *market_score.get("reasons", [])}),
             "missing_evidence": sorted({item for item in (supplier_score.get("reasons", []) + market_score.get("reasons", [])) if "missing" in item or "unknown" in item or "unavailable" in item}),
+            "evidence_refs": evidence_refs,
+            "extraction_methods": sorted({offer["evidence"].get("extraction_method", "") for offer in offers if offer["evidence"].get("extraction_method")}),
+            "freshness": freshness,
+            "conflicts": sorted({issue for issue in offer_issues if "conflict" in issue}),
+            "risk_state": risk_state,
             "confidence": {"supplier": supplier_score.get("overall_supplier_feasibility", 0.0), "marketplace": market_score.get("overall_marketplace_opportunity", 0.0)},
             "decision": (synthesis_items.get(candidate_id) or {}).get("next_best_action", "hold_for_manual_review"),
             "next_action": (synthesis_items.get(candidate_id) or {}).get("next_best_action", "hold_for_manual_review"),
@@ -685,6 +812,7 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
     seen_records: dict[tuple[str, ...], str] = {}
     input_audit: list[dict[str, Any]] = []
     supplier_offers_by_candidate: dict[str, list[dict[str, Any]]] = {}
+    evidence_refs_by_candidate: dict[str, set[str]] = {}
     warnings: list[str] = []
     candidate_ids = set(metadata)
     for key, role, destination in (("supplier_inputs", "supplier", supplier_records), ("marketplace_inputs", "marketplace", marketplace_records), ("consumer_attention_inputs", "consumer_attention", consumer_records)):
@@ -704,13 +832,18 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
                 for offer in audit.get("supplier_offers", []):
                     supplier_offers_by_candidate.setdefault(offer["candidate_id"], []).append(offer)
                 warnings.extend(f"supplier_offer:{issue}" for issue in audit.get("supplier_offer_issues", []))
+            for candidate_id, refs in audit.get("candidate_evidence_refs", {}).items():
+                evidence_refs_by_candidate.setdefault(candidate_id, set()).update(refs)
             input_audit.append(audit)
             if not records:
                 warnings.append(f"no_accepted_records:{audit['label']}")
             if role in {"supplier", "marketplace", "consumer_attention"}:
                 warnings.extend(_check_lane(records, lane, label=audit["label"]))
     for entry in _input_entries(manifest, "observation_inputs"):
-        input_audit.append(_load_observation(_resolve(base, entry.get("path"), label="observation_inputs.path"), entry))
+        audit = _load_observation(_resolve(base, entry.get("path"), label="observation_inputs.path"), entry)
+        input_audit.append(audit)
+        for candidate_id, refs in audit.get("candidate_evidence_refs", {}).items():
+            evidence_refs_by_candidate.setdefault(candidate_id, set()).update(refs)
 
     public_market_report: dict[str, Any] = {}
     if manifest.get("public_market_seed"):
@@ -758,9 +891,40 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
         "input_audit": sorted(input_audit, key=lambda item: (item["role"], item["label"])),
         "validation": {"status": "hold_for_manual_review" if validation_warnings else "ready_for_operator_review", "warnings": sorted(set(validation_warnings)), "read_only": True, "network_calls": False, "credentials_used": False, "provider_calls": False, "orders_or_spend": False},
         "supplier_offers": sorted((offer for offers in supplier_offers_by_candidate.values() for offer in offers), key=lambda item: (item["candidate_id"], item["offer_id"])),
-        "candidate_audit": _candidate_audit(candidate_ids, metadata, marketplace_report, supplier_report, synthesis_report, lane, supplier_offers_by_candidate),
+        "candidate_audit": _candidate_audit(candidate_ids, metadata, marketplace_report, supplier_report, synthesis_report, lane, supplier_offers_by_candidate, evidence_refs_by_candidate),
+        "client_safe_projection": {
+            "version": "research-to-decision-client-safe-v1",
+            "candidates": [],
+            "read_only": True,
+            "launch_authorized": False,
+            "provider_calls": False,
+            "network_calls": False,
+            "mutated": False,
+        },
+        "integration_contract": {
+            "authority": "scripts.research_to_decision.py",
+            "cockpit": "appendix.client_safe_projection",
+            "commerce_cycle_dry_run": "existing source_reports and economics",
+            "report_export": "product-validation-report-v1",
+            "replay": "appendix.replay_fingerprint",
+        },
         "source_authorities": {"supplier": "evaluation.commerce.supplier_feasibility", "marketplace": "evaluation.commerce.marketplace_trends", "consumer_attention": "evaluation.commerce.consumer_attention", "synthesis": "evaluation.commerce.opportunity_synthesis", "packet": "evaluation.commerce.product_validation_report"},
     }
+    appendix["client_safe_projection"]["candidates"] = [
+        {
+            "candidate_id": item["candidate_id"],
+            "title": item["title"],
+            "decision": item["decision"],
+            "next_action": item["next_action"],
+            "risk_state": item["risk_state"],
+            "freshness": item["freshness"],
+            "confidence": item["confidence"],
+            "missing_evidence": item["missing_evidence"],
+            "hard_gates": item["hard_gates"],
+            "evidence_refs": item["evidence_refs"],
+        }
+        for item in appendix["candidate_audit"]
+    ]
     fingerprint_input = {"report": report, "appendix": appendix}
     appendix["replay_fingerprint"] = hashlib.sha256(json.dumps(fingerprint_input, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     report["appendix"] = appendix
