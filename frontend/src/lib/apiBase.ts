@@ -1,10 +1,8 @@
-/** Shared API base URL resolution for frontend HTTP clients. */
+/** Shared API base URL resolution for frontend HTTP clients (#213 authority). */
 
 export function resolveApiBaseUrl(): string {
-  const base =
-    (import.meta.env.VITE_API_BASE_URL as string | undefined)
-    ?? (import.meta.env.VITE_API_URL as string | undefined)
-    ?? "";
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
+  const base = env.VITE_API_BASE_URL ?? env.VITE_API_URL ?? "";
   return base.replace(/\/$/, "");
 }
 
