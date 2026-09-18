@@ -27,6 +27,9 @@ legal advice.
 | woocommerce | pending-version-pin | GPL-3.0 | Merchant-operated WordPress plugin; adapter implements the existing CommerceProvider Protocol. Restricted license (same precedent as Postiz) — legal review required before commercial deployment. |
 | mautic | pending-deferred-review | GPL-3.0-or-later | MarketingAutomationProvider adapter built and tested; copyleft license treated with the same legal-review precedent as GPL-3.0/AGPL-3.0 candidates. |
 | activepieces | pending-deferred-review | MIT | CustomerAutomationProvider adapter built and tested; MIT, no legal-review gate needed. |
+| openlineage | 1.28.0 | Apache-2.0 | Studied/emulated pattern in `backend.observability.lineage_facets`; no upstream source vendored; retain Apache-2.0 notice. |
+| great-expectations | 1.3.0 | Apache-2.0 | Studied/emulated assertion DSL in `evaluation.quality_certification`; no upstream source vendored; retain Apache-2.0 notice. |
+| dagster | 1.9.10 | Apache-2.0 | Studied/emulated software-defined asset lineage metadata in `backend.observability.lineage_facets`; retain Apache-2.0 notice. |
 
 The generated release SBOM captures resolved Python packages actually present
 in the build environment. Before enabling or updating any listed component,

@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/duckdb/duckdb`
-- **Pinned Commit SHA**: `a5c2f8e1b4d3c2a1e0f9b8a7c6d5e4f3a2b1c0d9`
-- **Pinned Release / Tag**: `v1.2.0`
+- **Pinned Commit SHA**: `19864453f7d0ed095256d848b46e7b8630989bac`
+- **Pinned Release / Tag**: `v1.1.3`
 - **License**: `MIT`
 
 ## License & Attribution Obligations

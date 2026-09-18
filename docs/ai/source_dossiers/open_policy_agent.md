@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/open-policy-agent/opa`
-- **Pinned Commit SHA**: `9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b`
-- **Pinned Release / Tag**: `v1.2.0`
+- **Pinned Commit SHA**: `b2c26708e9d55645d7f837db495031f7e4152594`
+- **Pinned Release / Tag**: `v1.20.2`
 - **License**: `Apache-2.0`
 
 ## License & Attribution Obligations

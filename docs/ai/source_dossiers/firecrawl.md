@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/mendableai/firecrawl`
-- **Pinned Commit SHA**: `6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a`
-- **Pinned Release / Tag**: `v1.8.0`
+- **Pinned Commit SHA**: `2a71f0190a02544f1ae06f0e1ce0c050cc4fe36a`
+- **Pinned Release / Tag**: `v2.11.359`
 - **License**: `AGPL-3.0`
 
 ## License & Attribution Obligations

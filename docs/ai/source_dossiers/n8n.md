@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/n8n-io/n8n`
-- **Pinned Commit SHA**: `3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d`
-- **Pinned Release / Tag**: `n8n@1.80.0`
+- **Pinned Commit SHA**: `0e26f58ae66c2aaad05af24fd56c28c960bcdd9b`
+- **Pinned Release / Tag**: `n8n@1.71.0`
 - **License**: `Sustainable Use License`
 
 ## License & Attribution Obligations

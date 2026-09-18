@@ -2,7 +2,7 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/great-expectations/great_expectations`
-- **Pinned Commit SHA**: `1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d`
+- **Pinned Commit SHA**: `883fd69e62d44fde0db8c61e300305a4f678b87f`
 - **Pinned Release / Tag**: `1.3.0`
 - **License**: `Apache-2.0`
 

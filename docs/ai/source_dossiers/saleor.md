@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/saleor/saleor`
-- **Pinned Commit SHA**: `4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e`
-- **Pinned Release / Tag**: `3.20.0`
+- **Pinned Commit SHA**: `a2a04538ed9e64bfee844179e672645d4fd3f6a5`
+- **Pinned Release / Tag**: `3.20.91`
 - **License**: `BSD-3-Clause`
 
 ## License & Attribution Obligations

@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/dlt-hub/dlt`
-- **Pinned Commit SHA**: `3d9f1c7e9a8b4f2e1d0c5a6b7c8d9e0f1a2b3c4d`
-- **Pinned Release / Tag**: `1.8.0`
+- **Pinned Commit SHA**: `5a608086b7f7c6735968911138cb449472f7a259`
+- **Pinned Release / Tag**: `1.7.0`
 - **License**: `Apache-2.0`
 
 ## License & Attribution Obligations

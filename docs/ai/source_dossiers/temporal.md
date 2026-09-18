@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/temporalio/temporal`
-- **Pinned Commit SHA**: `1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c`
-- **Pinned Release / Tag**: `v1.26.2`
+- **Pinned Commit SHA**: `b16215104069f798b79592679d8a16dd3d702883`
+- **Pinned Release / Tag**: `1.8.0`
 - **License**: `BSL-1.1` (Server) / `MIT` (Python SDK)
 
 ## License & Attribution Obligations

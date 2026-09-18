@@ -2,7 +2,7 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/scrapy/scrapy`
-- **Pinned Commit SHA**: `2c7b5b5c98d6f51f5c6e838e5c46e32d5e786b3e`
+- **Pinned Commit SHA**: `8c85937adef8279f12e35e0ee9a20c52ff6d1648`
 - **Pinned Release / Tag**: `2.12.0`
 - **License**: `BSD-3-Clause`
 

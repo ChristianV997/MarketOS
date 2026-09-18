@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/unclecode/crawl4ai`
-- **Pinned Commit SHA**: `b6e9c40db8c1f964c48a735629c5c2d398d36eb1`
-- **Pinned Release / Tag**: `v0.9.2`
+- **Pinned Commit SHA**: `b04ed9f3a941a96509272f3bc14be85f5767736a`
+- **Pinned Release / Tag**: `v0.4.2`
 - **License**: `Apache-2.0`
 
 ## License & Attribution Obligations

@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/chatwoot/chatwoot`
-- **Pinned Commit SHA**: `7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a`
-- **Pinned Release / Tag**: `v3.15.0`
+- **Pinned Commit SHA**: `9f920b549c14491a4e587687a3eed5d21c6ccc7d`
+- **Pinned Release / Tag**: `v4.18.0`
 - **License**: `AGPL-3.0`
 
 ## License & Attribution Obligations

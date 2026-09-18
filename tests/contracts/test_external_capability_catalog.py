@@ -262,3 +262,32 @@ def test_main_catalog_file_validity():
     assert len(catalog) >= 31, f"Expected at least 31 capabilities, found {len(catalog)}"
     errors = validate_catalog_data(catalog)
     assert errors == [], f"Main catalog has validation errors: {errors}"
+
+
+def test_oss_entries_have_real_shas():
+    """Verify that evaluated OSS capabilities have 40-char commit SHAs without placeholder patterns."""
+    catalog_path = _REPO_ROOT / "data" / "external_capability_catalog.json"
+    with open(catalog_path, "r", encoding="utf-8") as f:
+        catalog = json.load(f)
+
+    oss_ids = {
+        "openlineage", "great_expectations", "polars", "prefect", "temporal",
+        "dlt", "duckdb", "scrapy", "airbyte", "n8n", "dagster",
+        "opentelemetry_python", "medusa", "saleor", "vendure", "crawl4ai",
+        "open_policy_agent", "chatwoot", "firecrawl"
+    }
+
+    dummy_patterns = ("1a2b3c4d", "1c2d3e4f", "2b3c4d5e", "2c3d4e5f", "3c4d5e6f", "3d4e5f6a", "4d5e6f7a", "5a6b7c8d", "5e6f7a8b", "6f7a8b9c", "7f8a9b0c", "8e7d6c5b", "9a8b7c6d")
+
+    found_ids = set()
+    for entry in catalog:
+        cid = entry.get("capability_id")
+        if cid in oss_ids:
+            found_ids.add(cid)
+            sha = entry.get("commit_sha", "")
+            assert len(sha) == 40, f"Capability {cid} must have a 40-char commit SHA, got {sha}"
+            assert sha != "0" * 40, f"Capability {cid} has dummy all-zero SHA"
+            assert not any(sha.startswith(pat) for pat in dummy_patterns), f"Capability {cid} has placeholder pattern SHA {sha}"
+
+    missing = oss_ids - found_ids
+    assert not missing, f"Missing expected OSS capabilities in catalog: {missing}"

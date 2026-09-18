@@ -302,3 +302,19 @@ def test_duplicate_lineage_or_quality_authorities_rejected():
     # Canonical passes
     cert = DeterministicReplayCertifier(authority=CANONICAL_QUALITY_AUTHORITY)
     assert cert.authority == CANONICAL_QUALITY_AUTHORITY
+
+
+def test_quality_certification_evaluation_package_accessible():
+    """Verify quality certification primitives are cleanly exported from the evaluation root."""
+    import evaluation
+
+    assert hasattr(evaluation, "DeterministicReplayCertifier")
+    assert hasattr(evaluation, "QualityAssertionState")
+    assert hasattr(evaluation, "QualityAssertionResult")
+    assert hasattr(evaluation, "ExpectationSuite")
+    assert hasattr(evaluation, "ExpectationRule")
+    assert hasattr(evaluation, "ReplayCertificationReport")
+    assert hasattr(evaluation, "CANONICAL_QUALITY_AUTHORITY")
+
+    certifier = evaluation.DeterministicReplayCertifier()
+    assert certifier.authority == evaluation.CANONICAL_QUALITY_AUTHORITY

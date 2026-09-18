@@ -2,7 +2,7 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/OpenLineage/OpenLineage`
-- **Pinned Commit SHA**: `8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d`
+- **Pinned Commit SHA**: `e7a768ffef28b2dd011e2376d4c63267316b6584`
 - **Pinned Release / Tag**: `1.28.0`
 - **License**: `Apache-2.0`
 

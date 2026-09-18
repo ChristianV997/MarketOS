@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/airbytehq/airbyte`
-- **Pinned Commit SHA**: `1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b`
-- **Pinned Release / Tag**: `v0.64.0`
+- **Pinned Commit SHA**: `2fa9e2ec2098ef2e400d7e39fd1db4200209c628`
+- **Pinned Release / Tag**: `v0.64.4`
 - **License**: `ELv2`
 
 ## License & Attribution Obligations

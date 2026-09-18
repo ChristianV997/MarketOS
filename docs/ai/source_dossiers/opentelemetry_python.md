@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/open-telemetry/opentelemetry-python`
-- **Pinned Commit SHA**: `5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f`
-- **Pinned Release / Tag**: `v1.30.0`
+- **Pinned Commit SHA**: `74509a111acd486d195ec5ea8478c8ccbf1f93c1`
+- **Pinned Release / Tag**: `v1.31.1`
 - **License**: `Apache-2.0`
 
 ## License & Attribution Obligations

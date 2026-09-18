@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/medusajs/medusa`
-- **Pinned Commit SHA**: `2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c`
-- **Pinned Release / Tag**: `v2.5.0`
+- **Pinned Commit SHA**: `956a50e934fb0db6f55d5b9fa459a43abcee358b`
+- **Pinned Release / Tag**: `v2.4.0`
 - **License**: `MIT`
 
 ## License & Attribution Obligations

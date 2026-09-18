@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/PrefectHQ/prefect`
-- **Pinned Commit SHA**: `2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d`
-- **Pinned Release / Tag**: `3.2.3`
+- **Pinned Commit SHA**: `c8986edebb2dde3e2a931adbe24d2eaefcb799cb`
+- **Pinned Release / Tag**: `3.2.0`
 - **License**: `Apache-2.0`
 
 ## License & Attribution Obligations

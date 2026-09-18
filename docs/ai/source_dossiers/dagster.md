@@ -2,7 +2,7 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/dagster-io/dagster`
-- **Pinned Commit SHA**: `3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e`
+- **Pinned Commit SHA**: `21db4e55d3d1b723be3fdd90690fb9ca638744ac`
 - **Pinned Release / Tag**: `1.9.10`
 - **License**: `Apache-2.0`
 

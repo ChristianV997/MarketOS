@@ -2,8 +2,8 @@
 
 ## Repository Identification
 - **Repository URL**: `https://github.com/pola-rs/polars`
-- **Pinned Commit SHA**: `f4b8c2d1e0a9f8b7c6d5e4a3b2c1d0f9e8a7b6c5`
-- **Pinned Release / Tag**: `py-polars-1.24.0`
+- **Pinned Commit SHA**: `87feed72585eff5acf3defb7f81029123d5cba68`
+- **Pinned Release / Tag**: `py-1.17.1`
 - **License**: `MIT`
 
 ## License & Attribution Obligations
