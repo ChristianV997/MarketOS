@@ -61,6 +61,40 @@ def test_protocol_documents_worktree_and_authorities():
     assert "compaction" in text.lower()
     assert "git reset --hard" in text
     assert "/api/phase1/evidence-cockpit" in text
+    assert "PR #254" in text
+    assert "MarketOS.AITask.v1" in text
+    assert "select_tests.py --from-git" in text
+
+
+def test_powershell_rejects_nonpositive_timeout():
+    shell = _powershell()
+    if not shell:
+        return
+    completed = subprocess.run(
+        [
+            shell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(PS1),
+            "-Action",
+            "snapshot",
+            "-Timeout",
+            "0",
+            "-NoGitHub",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+        shell=False,
+    )
+    assert completed.returncode == 2
+    combined = (completed.stdout or "") + (completed.stderr or "")
+    assert "timeout must be positive" in combined.lower()
 
 
 def _powershell() -> str | None:

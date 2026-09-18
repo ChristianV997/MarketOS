@@ -155,6 +155,15 @@ def _is_canonical_checkout(path: Path) -> bool:
     return text.endswith("/MarketOS") and ".worktrees" not in text and ".validation" not in text
 
 
+def _worktree_safe_metadata(path: str | None) -> bool:
+    if not path:
+        return False
+    normalized = path.replace("\\", "/").lower()
+    if any(marker in normalized for marker in (".env", "/artifacts/", "customer", "/credentials/", "/secrets/")):
+        return False
+    return "marketos" in normalized
+
+
 def _run_allowlisted(
     argv: list[str],
     *,
@@ -466,7 +475,11 @@ def build_snapshot(
         path = line[3:].split(" -> ")[-1]
         changed.append(path)
     changed = _safe_changed_paths(changed)
-    listed = _parse_worktrees(worktree_list.get("stdout") or "")
+    listed = [
+        item
+        for item in _parse_worktrees(worktree_list.get("stdout") or "")
+        if _worktree_safe_metadata(item.get("path"))
+    ]
     worktree_path = toplevel.get("stdout") or str(validated)
     drift = _classify_drift(head.get("stdout"), origin_main.get("stdout"), merge_base.get("stdout"))
 

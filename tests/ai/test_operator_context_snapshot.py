@@ -116,6 +116,10 @@ def test_parse_worktrees_and_drift():
     listed = snapshot._parse_worktrees(raw)
     assert listed[0]["branch"] == "main"
     assert listed[1]["branch"] == "detached"
+    safe = [item for item in listed if snapshot._worktree_safe_metadata(item.get("path"))]
+    assert len(safe) == 1
+    assert snapshot._worktree_safe_metadata("C:/tmp/other") is False
+    assert snapshot._worktree_safe_metadata("C:/tmp/.env/MarketOS") is False
     assert snapshot._classify_drift("aaa", "aaa", "aaa") == "aligned"
     assert snapshot._classify_drift("bbb", "aaa", "aaa") == "ahead"
     assert snapshot._classify_drift("aaa", "ccc", "aaa") == "behind"

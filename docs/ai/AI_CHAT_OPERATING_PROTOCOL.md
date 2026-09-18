@@ -38,6 +38,12 @@ Local checks never prove production or deployment readiness. Fixture, manual, an
 | Environment split | PR #253 (closed) `.cursor` bootstrap contract | metadata only | not an execution engine |
 | CoderOS | `backend.adapters.coderos_readonly` | `plan_only` / `not_run` | `mode=probe` requires explicit opt-in |
 | Quality gate | `scripts/ai/run_local_quality_gate.py` | local/dry-run | `--execute` is out of scope for the snapshot |
+| Task packet | PR #254 `scripts/ai/operator_task_packet.py` (`MarketOS.AITask.v1`) | validate-only; disk write needs `--output` | do not copy into this PR |
+| Worktree safety | PR #254 `scripts/ai/worktree_safety.py` (`MarketOS.WorktreeSafety.v1`) | read-only git allowlist | does not create/remove worktrees |
+| Agent-eval | PR #254 `scripts/ai/agent_output_eval.py` (`MarketOS.AgentEval.v1`) | claim checker | not a quality gate |
+| Research-to-decision | PR #247 | offline packet | do not rewrite |
+| Financial kernel | PR #248 / #250 | collision lane | do not rewrite |
+| Deployment/security | PR #258 | container/auth matrix | do not rewrite |
 
 ## Prohibited actions
 
@@ -102,7 +108,9 @@ Inspect `owned_path_changes`, `docs/ai/PARALLEL_WORK_MATRIX.md`, and:
 gh pr list --state open --limit 20 --json number,title,headRefName,files
 ```
 
-If `gh` is missing, classify GitHub `unavailable` and compare local `git worktree list` plus open PR branches you already know. Do not overlap another open PR's paths. This lane owns `scripts/ai/operator_context_snapshot.py`, `scripts/operators/marketos_ai_session.ps1`, `docs/ai/AI_CHAT_OPERATING_PROTOCOL.md`, and `tests/ai/test_operator_context_snapshot.py`. It must not rewrite PR #246 operator workflow files or PR #230 cockpit UI.
+If `gh` is missing, classify GitHub `unavailable` and compare local `git worktree list` plus open PR branches you already know. Do not overlap another open PR's paths. This lane owns `scripts/ai/operator_context_snapshot.py`, `scripts/operators/marketos_ai_session.ps1`, `docs/ai/AI_CHAT_OPERATING_PROTOCOL.md`, and `tests/ai/test_operator_context_snapshot.py`. It must not rewrite PR #246 operator workflow files, PR #230 cockpit UI, or PR #254 task/eval/worktree-safety files.
+
+Declare scope before editing. When PR #254 is present, validate a `MarketOS.AITask.v1` packet instead of inventing a second task format.
 
 ## 5. Inspect another branch or PR without checkout mutation
 
@@ -203,12 +211,17 @@ Do not mark ready or merge. Final reports must include files changed, tests run,
 
 ## 11. Hand off after context compaction
 
-1. `git worktree list`
-2. `git status --short` and `git log -1 --oneline` in the exclusive worktree
-3. Re-run `marketos_ai_session.ps1 -Action snapshot -NoGitHub`
-4. Re-read `docs/ai/AI_CHAT_OPERATING_PROTOCOL.md` and `docs/ai/PARALLEL_WORK_MATRIX.md`
-5. Do not reuse pasted SHAs from an old chat as live evidence
-6. Resume the same exclusive worktree; do not create a second snapshot authority
+Do not resume from chat memory.
+
+1. Refresh state: `git fetch origin --prune`, then `git worktree list`
+2. Inspect dirty files with `git status --short` in the exclusive worktree only. A detached inspect worktree makes `select_tests.py --from-git` return empty; use the named PR branch worktree.
+3. Inspect PR ownership (`gh pr view` / `gh pr list`). Missing `gh` is `unavailable`.
+4. Re-run `marketos_ai_session.ps1 -Action snapshot -NoGitHub`
+5. If PR #254 files exist, run `worktree_safety.py` and `agent_output_eval.py` against the task packet. Missing report rollback fails closed.
+6. Declare scope, select tests, run only affected validation, then create/update the PR.
+7. Re-read `docs/ai/AI_CHAT_OPERATING_PROTOCOL.md` and `docs/ai/PARALLEL_WORK_MATRIX.md`
+8. Report evidence classes, rollback SHA, and one next action. Do not reuse pasted SHAs from an old chat.
+9. Resume the same exclusive worktree; do not create a second snapshot, task format, or quality gate.
 
 ## 12. Clean up only an explicitly named worktree after approval
 
