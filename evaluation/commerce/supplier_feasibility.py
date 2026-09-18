@@ -7,9 +7,12 @@ fulfillment action, or provider write.
 """
 from __future__ import annotations
 
-import statistics
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal
 from typing import Any, Iterable, Mapping
+
+from backend.economics import MarketLane, Money, UnitEconomicsAssumptions
+from backend.economics import calculate_unit_economics as calculate_canonical_unit_economics
 
 PROVENANCE = frozenset(
     {
@@ -152,6 +155,8 @@ class UnitEconomicsScenario:
     break_even_roas: float | None
     profit_per_order_before_ad_spend: float | None
     assumptions: tuple[str, ...] = ()
+    canonical_economics: Mapping[str, Any] | None = None
+    currency: str = "USD"
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -167,13 +172,16 @@ def calculate_unit_economics(
     estimated_landed_cost: Any = None,
     payment_fee_rate: float = 0.029,
     platform_fee_rate: float = 0.05,
+    lane: MarketLane | None = None,
+    currency: str | None = None,
 ) -> UnitEconomicsScenario:
-    """Calculate a conservative scenario without inventing missing cost inputs."""
+    """Compatibility adapter over the canonical Decimal economics model."""
     sell = number(target_sell_price)
     cost = number(unit_cost)
     shipping = number(shipping_cost)
     landed = number(estimated_landed_cost)
     assumptions: list[str] = []
+    resolved_currency = lane.currency if lane else (currency or "USD")
     if landed is None and cost is not None:
         if shipping is not None:
             landed = cost + shipping
@@ -181,13 +189,38 @@ def calculate_unit_economics(
             assumptions.append("shipping_cost_missing")
             landed = cost
     if sell is None or landed is None:
-        return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, None, None, None, None, None, tuple(assumptions + ["sell_price_or_landed_cost_missing"]))
-    fees = sell * (payment_fee_rate + platform_fee_rate)
-    profit = sell - landed - fees
-    margin_percent = profit / sell if sell else None
-    cpa = max(0.0, profit) if profit is not None else None
-    roas = sell / cpa if cpa and cpa > 0 else None
-    return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, profit, margin_percent, cpa, roas, profit, tuple(assumptions))
+        return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, None, None, None, None, None, tuple(assumptions + ["sell_price_or_landed_cost_missing"]), currency=resolved_currency)
+    if lane and currency and currency.upper() != lane.currency:
+        return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, None, None, None, None, None, tuple(assumptions + ["currency_mismatch"]), currency=resolved_currency)
+    try:
+        canonical = calculate_canonical_unit_economics(
+            Money(sell, resolved_currency, source="supplier_feasibility", provenance="assumed"),
+            Money(cost, resolved_currency, source="supplier_feasibility", provenance="assumed"),
+            lane=lane,
+            assumptions=UnitEconomicsAssumptions(
+                supplier_shipping=Money(shipping, resolved_currency, source="supplier_feasibility", provenance="assumed") if shipping is not None else None,
+                payment_fee_rate=None if lane and lane.payment_fee_rate is not None else Decimal(str(payment_fee_rate)),
+                platform_fee_rate=None if lane and lane.platform_fee_rate is not None else Decimal(str(platform_fee_rate)),
+                tax_rate=None if lane else Decimal("0"),
+                duty_rate=None if lane else Decimal("0"),
+                return_rate=Decimal("0"),
+                defect_rate=Decimal("0"),
+                warranty_rate=Decimal("0"),
+                support_reserve_rate=Decimal("0"),
+                chargeback_rate=Decimal("0"),
+                fx_reserve_rate=Decimal("0"),
+                discount_rate=Decimal("0"),
+                affiliate_fee_rate=Decimal("0"),
+                marketplace_fee_rate=Decimal("0"),
+            ),
+        )
+    except (TypeError, ValueError):
+        return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, None, None, None, None, None, tuple(assumptions + ["invalid_economics_input"]), currency=resolved_currency)
+    profit = float(canonical.contribution_before_cac.amount)
+    margin_percent = float(canonical.contribution_margin) if canonical.contribution_margin is not None else None
+    cpa = float(canonical.break_even_cac.amount)
+    roas = float(canonical.break_even_roas) if canonical.break_even_roas is not None else None
+    return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, profit, margin_percent, cpa, roas, profit, tuple(assumptions), canonical.to_dict(), resolved_currency)
 
 
 @dataclass(frozen=True)
@@ -369,6 +402,7 @@ def score_candidate(
     target_sell_price: Any = None,
     payment_fee_rate: float = 0.029,
     platform_fee_rate: float = 0.05,
+    lane: MarketLane | None = None,
 ) -> SupplierFeasibilityScore:
     evidence = collapse_duplicates(evidence)
     best = sorted(evidence, key=lambda item: (-item.source_confidence, item.unit_cost is None, item.shipping_cost is None))[0] if evidence else None
@@ -379,13 +413,14 @@ def score_candidate(
         estimated_landed_cost=best.estimated_landed_cost if best else None,
         payment_fee_rate=payment_fee_rate,
         platform_fee_rate=platform_fee_rate,
+        lane=lane,
     )
     if not best:
         return SupplierFeasibilityScore(candidate_id, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, "validate_live_supplier_first", {}, ("no_supplier_evidence",), economics, _risk_flags([], economics))
     costs = _confidence(best, "unit_cost")
     landed = _confidence(best, "estimated_landed_cost")
     inventory = _confidence(best, "inventory_status")
-    min_days, max_days = best.delivery_min_days, best.delivery_max_days
+    max_days = best.delivery_max_days
     speed = 0.9 if max_days is not None and max_days <= 7 else 0.75 if max_days is not None and max_days <= 14 else 0.5 if max_days is not None and max_days <= 30 else 0.2 if max_days is not None else 0.0
     delivery_risk = 1.0 - speed if max_days is not None else 0.8
     reliability = bounded((best.supplier_rating or 0) / 5) * (0.5 + bounded((best.supplier_review_count or 0) / 1000) * 0.5)
@@ -427,7 +462,7 @@ def score_candidate(
     return SupplierFeasibilityScore(candidate_id, costs, landed, inventory, speed, delivery_risk, reliability, fulfillment, margin, diversity, options, round(overall, 4), recommendation, {key: round(value, 4) for key, value in contributions.items()}, tuple(sorted(set(reasons))), economics, flags)
 
 
-def build_report(records: list[SupplierFeasibilityEvidence], *, evidence_mode: str = "fixture", target_sell_prices: Mapping[str, Any] | None = None) -> SupplierFeasibilityReport:
+def build_report(records: list[SupplierFeasibilityEvidence], *, evidence_mode: str = "fixture", target_sell_prices: Mapping[str, Any] | None = None, lane: MarketLane | None = None) -> SupplierFeasibilityReport:
     records = collapse_duplicates(records)
     grouped: dict[str, list[SupplierFeasibilityEvidence]] = {}
     for record in records:
@@ -436,7 +471,7 @@ def build_report(records: list[SupplierFeasibilityEvidence], *, evidence_mode: s
     prices = target_sell_prices or {}
     results = []
     for candidate_id, rows in sorted(grouped.items()):
-        results.append(SupplierFeasibilityCandidateResult(candidate_id, rows[0].query, tuple(rows), score_candidate(candidate_id, rows, target_sell_price=prices.get(candidate_id)), tuple(sorted({warning for row in rows for warning in row.warnings}))))
+        results.append(SupplierFeasibilityCandidateResult(candidate_id, rows[0].query, tuple(rows), score_candidate(candidate_id, rows, target_sell_price=prices.get(candidate_id), lane=lane), tuple(sorted({warning for row in rows for warning in row.warnings}))))
     results = tuple(sorted(results, key=lambda item: (-item.score.overall_supplier_feasibility, item.candidate_id)))
     top = results[0] if results else None
     warnings = ("supplier_feasibility_is_not_live_supplier_authorization",) if records else ("supplier_feasibility_not_supplied",)
