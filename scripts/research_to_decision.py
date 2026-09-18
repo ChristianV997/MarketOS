@@ -153,6 +153,7 @@ OFFER_FIELDS = frozenset(
         "variant_count",
         "moq",
         "shipping_cost",
+        "shipping_method",
         "estimated_landed_cost",
         "fulfillment_method",
         "field_provenance",
@@ -449,22 +450,43 @@ def _check_lane(records: list[Any], lane: Mapping[str, Any], *, label: str) -> l
     return sorted(set(warnings))
 
 
-def _check_record_conflicts(records: list[Any], role: str, seen: dict[tuple[str, ...], str]) -> None:
+def _record_conflict_key(record: Any, role: str) -> tuple[str, ...]:
+    candidate_id = str(getattr(record, "candidate_id", ""))
+    if role == "supplier":
+        identity = str(
+            getattr(record, "supplier_product_id", "")
+            or getattr(record, "supplier_sku", "")
+            or getattr(record, "source_url", "")
+        )
+        return (role, candidate_id, str(getattr(record, "supplier", "")), identity)
+    if role == "marketplace":
+        return (role, candidate_id, str(getattr(record, "marketplace", "")), str(getattr(record, "source_type", "")), str(getattr(record, "source_url", "")))
+    return (role, candidate_id, str(getattr(record, "platform", "")), str(getattr(record, "source", "")), str(getattr(record, "content_title", "") or getattr(record, "hook", "")))
+
+
+def _check_record_conflicts(
+    records: list[Any], role: str, seen: dict[tuple[str, ...], str], *, allow_supplier_conflicts: bool = False
+) -> set[tuple[str, ...]]:
+    conflicts: set[tuple[str, ...]] = set()
     for record in records:
         candidate_id = str(getattr(record, "candidate_id", ""))
         if role == "supplier":
-            key = (role, candidate_id, str(getattr(record, "supplier", "")), str(getattr(record, "supplier_product_id", "") or getattr(record, "source_url", "")))
+            key = _record_conflict_key(record, role)
             value = json.dumps({"unit_cost": getattr(record, "unit_cost", None), "shipping_cost": getattr(record, "shipping_cost", None), "currency": getattr(record, "currency", ""), "destination": getattr(record, "destination_region", "")}, sort_keys=True)
         elif role == "marketplace":
-            key = (role, candidate_id, str(getattr(record, "marketplace", "")), str(getattr(record, "source_type", "")), str(getattr(record, "source_url", "")))
+            key = _record_conflict_key(record, role)
             value = json.dumps({"price": getattr(record, "price", None), "currency": getattr(record, "currency", ""), "availability": getattr(record, "availability", "")}, sort_keys=True)
         else:
-            key = (role, candidate_id, str(getattr(record, "platform", "")), str(getattr(record, "source", "")), str(getattr(record, "content_title", "") or getattr(record, "hook", "")))
+            key = _record_conflict_key(record, role)
             value = json.dumps({"content": getattr(record, "content_text_excerpt", ""), "objection": getattr(record, "objection", "")}, sort_keys=True)
         previous = seen.get(key)
         if previous is not None and previous != value:
-            raise ResearchToDecisionError(f"conflicting duplicate evidence: {candidate_id}")
+            if role == "supplier" and allow_supplier_conflicts:
+                conflicts.add(key)
+            else:
+                raise ResearchToDecisionError(f"conflicting duplicate evidence: {candidate_id}")
         seen[key] = value
+    return conflicts
 
 
 def _row_value(row: Mapping[str, Any], *names: str) -> Any:
@@ -539,6 +561,7 @@ def _normalize_supplier_offer(
         issues.append("confidence_missing")
     price = _offer_number(row, ("unit_cost", "price", "supplier_price"), "price", issues)
     shipping_cost = _offer_number(row, ("shipping_cost", "shipping"), "shipping_cost", issues)
+    shipping_method = _offer_text(row, ("shipping_method", "fulfillment_method", "fulfillment"), "shipping_method", issues)
     inventory = _offer_text(row, ("inventory_status", "stock_status", "availability"), "stock", issues)
     p50 = _offer_number(row, ("p50_delivery_days", "delivery_min_days", "min_delivery_days"), "p50_delivery_days", issues)
     p95 = _offer_number(row, ("p95_delivery_days", "delivery_max_days", "max_delivery_days"), "p95_delivery_days", issues)
@@ -552,7 +575,7 @@ def _normalize_supplier_offer(
         "exact_sku": _text(exact_sku, "supplier_offer.exact_sku", required=True),
         "variant": _offer_text(row, ("variant", "variant_name"), "variant", issues),
         "price": {"amount": price, "currency": currency, "valid_until": expires_at},
-        "shipping": {"cost": shipping_cost, "model": lane["shipping_model"]},
+        "shipping": {"cost": shipping_cost, "model": lane["shipping_model"], "method": shipping_method},
         "stock": {"status": inventory, "quantity": _row_value(row, "inventory_quantity", "stock")},
         "warehouse": _offer_text(row, ("warehouse_region", "warehouse"), "warehouse", issues),
         "destination": destination,
@@ -648,7 +671,7 @@ def _load_import(path: Path, entry: Mapping[str, Any], role: str, *, lane: Mappi
     }
 
 
-def _load_observation(path: Path, entry: Mapping[str, Any]) -> dict[str, Any]:
+def _load_observation(path: Path, entry: Mapping[str, Any], *, lane: Mapping[str, Any]) -> dict[str, Any]:
     kind = _text(entry.get("kind"), "observation.kind", required=True)
     if kind not in OBSERVATION_KINDS:
         raise ResearchToDecisionError(f"unsupported observation kind: {kind}")
@@ -672,12 +695,19 @@ def _load_observation(path: Path, entry: Mapping[str, Any]) -> dict[str, Any]:
         extraction_methods.add(method)
         candidate_evidence_refs.setdefault(_candidate_id(row), []).append(reference_id)
         if kind in {"pdf_derived", "form"}:
-            required = ("source", "captured_at", "expires_at", "evidence_state", "confidence", "terms", "returns", "warranty", "support", "delivery", "permissions")
+            required = ("source", "captured_at", "expires_at", "evidence_state", "confidence", "terms", "returns", "warranty", "support", "delivery", "permissions", "supplier_sku", "destination_country", "currency", "extraction_method")
             missing = [field for field in required if row.get(field) in (None, "")]
             if missing:
                 raise ResearchToDecisionError(f"{kind} evidence is missing required fields: {', '.join(missing)}")
             _parse_timezone(row.get("captured_at"), f"{kind}.captured_at")
             _parse_timezone(row.get("expires_at"), f"{kind}.expires_at")
+            _text(row.get("supplier_sku"), f"{kind}.supplier_sku", required=True)
+            destination = _text(row.get("destination_country"), f"{kind}.destination_country", required=True)
+            if destination.lower() != lane["destination_country"].lower():
+                raise ResearchToDecisionError(f"destination mismatch in {kind}: {destination}")
+            currency = _currency(row.get("currency"))
+            if currency != lane["currency"]:
+                raise ResearchToDecisionError(f"currency mismatch in {kind}: {currency} != {lane['currency']}")
             evidence_state = _text(row.get("evidence_state"), f"{kind}.evidence_state")
             if evidence_state not in EVIDENCE_STATES:
                 raise ResearchToDecisionError(f"unsupported {kind} evidence_state: {evidence_state}")
@@ -813,13 +843,16 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
     input_audit: list[dict[str, Any]] = []
     supplier_offers_by_candidate: dict[str, list[dict[str, Any]]] = {}
     evidence_refs_by_candidate: dict[str, set[str]] = {}
+    supplier_conflict_keys: set[tuple[str, ...]] = set()
     warnings: list[str] = []
     candidate_ids = set(metadata)
     for key, role, destination in (("supplier_inputs", "supplier", supplier_records), ("marketplace_inputs", "marketplace", marketplace_records), ("consumer_attention_inputs", "consumer_attention", consumer_records)):
         for entry in _input_entries(manifest, key):
             path = _resolve(base, entry.get("path"), label=f"{key}.path")
             records, audit = _load_import(path, entry, role, lane=lane, captured_at=captured_at)
-            _check_record_conflicts(records, role, seen_records)
+            supplier_conflict_keys.update(
+                _check_record_conflicts(records, role, seen_records, allow_supplier_conflicts=role == "supplier")
+            )
             if role == "supplier":
                 quarantined = {(offer["candidate_id"], offer["exact_sku"]) for offer in audit.get("supplier_offers", []) if offer["status"] == "quarantined"}
                 original_count = len(records)
@@ -840,7 +873,7 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
             if role in {"supplier", "marketplace", "consumer_attention"}:
                 warnings.extend(_check_lane(records, lane, label=audit["label"]))
     for entry in _input_entries(manifest, "observation_inputs"):
-        audit = _load_observation(_resolve(base, entry.get("path"), label="observation_inputs.path"), entry)
+        audit = _load_observation(_resolve(base, entry.get("path"), label="observation_inputs.path"), entry, lane=lane)
         input_audit.append(audit)
         for candidate_id, refs in audit.get("candidate_evidence_refs", {}).items():
             evidence_refs_by_candidate.setdefault(candidate_id, set()).update(refs)
@@ -855,6 +888,23 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
         public_market_report = build_public_market_benchmark(candidates, allow_network=False).to_dict()
         warnings.extend(seed_warnings)
         input_audit.append({"label": path.name, "role": "public_market_seed", "format": "json", "records_seen": len(candidates), "records_accepted": len(candidates), "status": "accepted" if candidates else "needs_evidence"})
+
+    if supplier_conflict_keys:
+        for audit in input_audit:
+            if audit.get("role") != "supplier":
+                continue
+            for offer in audit.get("supplier_offers", []):
+                key = ("supplier", offer["candidate_id"], offer["supplier"], offer["exact_sku"])
+                if key in supplier_conflict_keys:
+                    offer["issues"] = sorted(set(offer["issues"] + ["conflicting_offer"]))
+                    offer["status"] = "quarantined"
+            audit["supplier_offers_accepted"] = sum(offer["status"] == "accepted" for offer in audit.get("supplier_offers", []))
+            audit["supplier_offers_quarantined"] = sum(offer["status"] == "quarantined" for offer in audit.get("supplier_offers", []))
+            audit["supplier_offer_issues"] = sorted({issue for offer in audit.get("supplier_offers", []) for issue in offer["issues"]})
+            audit["records_accepted"] = audit["supplier_offers_accepted"]
+            audit["records_quarantined"] = audit["supplier_offers_quarantined"]
+        supplier_records = [record for record in supplier_records if _record_conflict_key(record, "supplier") not in supplier_conflict_keys]
+        warnings.append("supplier_offer:conflicting_offer")
 
     supplier_report = build_supplier_report(supplier_records, evidence_mode="manual_import", target_sell_prices={key: value.get("target_sell_price") for key, value in metadata.items() if value.get("target_sell_price") is not None}).to_dict()
     marketplace_report = build_marketplace_report(marketplace_records, evidence_mode="manual_import").to_dict()

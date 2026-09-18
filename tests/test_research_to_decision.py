@@ -83,6 +83,7 @@ def test_market_lane_and_supplier_offer_are_explicit_and_bounded() -> None:
     assert offer["exact_sku"] == "HYD-01"
     assert offer["price"]["currency"] == "MXN"
     assert offer["delivery"] == {"p50_days": 7.0, "p95_days": 12.0}
+    assert offer["shipping"]["method"] == "dropship"
     assert offer["evidence"]["state"] == "fixture"
     assert offer["status"] == "accepted"
     assert "no_launch_or_spend_authority" in appendix["candidate_audit"][0]["hard_gates"]
@@ -148,8 +149,13 @@ def test_missing_return_address_is_preserved_as_a_supplier_gate() -> None:
 
 
 def test_conflicting_quotes_and_currency_mismatch_fail_closed() -> None:
-    with pytest.raises(ResearchToDecisionError, match="conflicting duplicate"):
-        build_research_to_decision(load_fixture("conflicting_quotes.json"), base_dir=FIXTURES)
+    report = build_research_to_decision(load_fixture("conflicting_quotes.json"), base_dir=FIXTURES)
+    offers = report["appendix"]["supplier_offers"]
+    assert len(offers) == 2
+    assert {offer["status"] for offer in offers} == {"quarantined"}
+    assert all("conflicting_offer" in offer["issues"] for offer in offers)
+    assert all(audit["supplier_offers_accepted"] == 0 for audit in report["appendix"]["input_audit"] if audit["role"] == "supplier")
+    assert report["appendix"]["candidate_audit"][0]["risk_state"] == "blocked"
     with pytest.raises(ResearchToDecisionError, match="currency mismatch"):
         build_research_to_decision(load_fixture("usd_quote.json"), base_dir=FIXTURES)
 
@@ -163,6 +169,9 @@ def test_pdf_derived_manual_evidence_requires_terms_and_freshness(tmp_path: Path
                 "source": "supplier-quote.pdf",
                 "source_reference": "supplier-quote.pdf",
                 "extraction_method": "manual_pdf_review",
+                "supplier_sku": "PDF-01",
+                "destination_country": "Mexico",
+                "currency": "MXN",
                 "captured_at": "2026-09-16T09:00:00-06:00",
                 "expires_at": "2027-01-01T00:00:00Z",
                 "evidence_state": "manual",
@@ -295,5 +304,8 @@ def test_conflicting_same_identity_across_inputs_fails_closed(tmp_path: Path) ->
         "candidates": [{"candidate_id": "x"}],
         "supplier_inputs": [{"path": "first.json"}, {"path": "second.json"}],
     }
-    with pytest.raises(ResearchToDecisionError, match="conflicting duplicate"):
-        build_research_to_decision(manifest, base_dir=tmp_path)
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    offers = report["appendix"]["supplier_offers"]
+    assert len(offers) == 2
+    assert all(offer["status"] == "quarantined" for offer in offers)
+    assert all("conflicting_offer" in offer["issues"] for offer in offers)

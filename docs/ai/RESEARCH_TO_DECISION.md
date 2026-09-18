@@ -16,16 +16,19 @@ and confidence. An evaluation cannot silently fall back to a global margin.
 Each evidence input is a relative `.json` or `.csv` path under the manifest
 directory. Inputs may be supplier, marketplace, consumer-attention, or
 summarized observation evidence. Structured `pdf_derived` and `form`
-observations are accepted as sanitized local records only. `candidate_ids` can
+observations are accepted as sanitized local records only and must identify the
+supplier SKU, destination country, lane currency, capture/expiry times, and
+extraction method. `candidate_ids` can
 select rows from a bounded shared fixture without changing the source evidence.
 
 The loader caps manifests at 128 KiB, evidence files at 256 KiB, records at 100
 per file, and input files at 24. It rejects HTML, raw/log-like fields, secret
 patterns, path traversal, missing IDs, unsupported destinations/currencies,
-duplicate identities, conflicting same-identity records, unsafe source URLs,
-and lane currency or destination mismatches. Supplier rows are normalized into
+duplicate identities, unsafe source URLs, and lane currency or destination
+mismatches. Conflicting supplier offers remain visible as quarantined evidence
+but are excluded from canonical supplier scoring. Supplier rows are normalized into
 bounded `SupplierOffer` evidence with exact SKU, price validity, stock,
-warehouse/destination, P50/P95 delivery, tracking, blind-shipping and
+warehouse/destination, shipping method, P50/P95 delivery, tracking, blind-shipping and
 packaging, return address and payer, warranty/RMA/refund SLA, support owner and
 response SLA, dropshipping/marketplace permissions, sample state, terms/policy
 evidence, backup supplier, approval lifecycle, freshness, source, and
@@ -71,6 +74,9 @@ Supplier, marketplace demand, consumer attention, competition, economics, and
 compliance remain separate evidence sections. Manual or fixture evidence never
 authorizes launch, spend, orders, or provider actions. A packet with incomplete
 or quarantined evidence remains `hold_for_manual_review`.
+Conflicting offers remain visible in the appendix with a `conflicting_offer`
+issue and a blocked candidate risk state; they never become accepted supplier
+evidence.
 Candidate audits additionally expose evidence references, extraction methods,
 freshness, conflicts, and a conservative `risk_state`. The appendix's
 `client_safe_projection` is a stable, read-only projection for cockpit, export,
