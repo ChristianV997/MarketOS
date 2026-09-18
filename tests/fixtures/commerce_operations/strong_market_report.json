@@ -1,0 +1,17 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "marketplaces_observed": ["amazon"],
+  "top_candidate_id": "strong-market-widget",
+  "candidates": [
+    {
+      "candidate_id": "strong-market-widget",
+      "query": "strong market widget",
+      "evidence": [{"marketplace": "amazon", "price": 24.99, "review_count": 1800, "source_confidence": 0.8, "evidence_mode": "fixture"}],
+      "score": {"overall_marketplace_opportunity": 0.82, "demand_proxy_score": 0.84, "saturation_score": 0.18, "price_confidence": 0.8, "recommendation": "validate_supplier_first"}
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

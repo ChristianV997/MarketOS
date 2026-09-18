@@ -2,6 +2,12 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "path";
 
+const BACKEND_TARGET = "http://localhost:3000";
+
+// Dashboard polling routes live at the backend root, not under /api.
+const BACKEND_ROOT_PROXY =
+  "^/(metrics|snapshot|opportunities|campaigns|creatives|geo|alerts|risk|agents|runtime|prediction_errors|simulation|playbook|portfolio|capital_allocation|macro|causal|accounts|phase|bandit|cycle|runner|tiktok|health|ready|status|events|commerce)(/|$)";
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -12,13 +18,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // api/routes/services.py's router is mounted at the literal prefix
-      // /api/services (backend/api.py: APIRouter(prefix="/api/services")),
-      // so this must forward unchanged — no path rewrite. The previous
-      // strip-/api rewrite was dead configuration: nothing in the
-      // frontend called an /api/* path until services.* did.
+      [BACKEND_ROOT_PROXY]: {
+        target: BACKEND_TARGET,
+        changeOrigin: true,
+      },
       "/api": {
-        target: "http://localhost:3000",
+        target: BACKEND_TARGET,
         changeOrigin: true,
       },
       "/ws": {
