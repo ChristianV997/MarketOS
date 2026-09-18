@@ -5,11 +5,13 @@ etc. were being updated on every cycle but nothing ever exposed them over HTTP
 for a real Prometheus server to scrape.
 """
 from fastapi.testclient import TestClient
+import pytest
 
 from backend.api import app
 
 
 def test_prometheus_metrics_endpoint_exposes_text_format():
+    pytest.importorskip("prometheus_client", reason="Prometheus exposition is an optional runtime capability")
     client = TestClient(app)
     resp = client.get("/metrics/prometheus")
     assert resp.status_code == 200
@@ -17,6 +19,7 @@ def test_prometheus_metrics_endpoint_exposes_text_format():
 
 
 def test_prometheus_metrics_endpoint_includes_marketos_metrics():
+    pytest.importorskip("prometheus_client", reason="Prometheus exposition is an optional runtime capability")
     client = TestClient(app)
     resp = client.get("/metrics/prometheus")
     # Counters/gauges are always registered at import time even before any

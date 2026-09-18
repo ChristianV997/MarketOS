@@ -16,7 +16,9 @@ def test_otel_adapter_singleton():
 
 
 def test_otel_export_no_endpoint():
-    adapter = OTelAdapter(endpoint="", service_name="test")
+    from backend.observability.adapters.opentelemetry_adapter import LangfuseOTELConfig, OTELBoundaryState
+    config = LangfuseOTELConfig(state=OTELBoundaryState.DRY_RUN, credential_reference_id="cred-123")
+    adapter = OTelAdapter(endpoint="", service_name="test", config=config)
     from backend.observability.tracing import tracer
     with tracer.span("otel.test") as span:
         pass
@@ -25,13 +27,15 @@ def test_otel_export_no_endpoint():
 
 
 def test_otel_export_batch():
+    from backend.observability.adapters.opentelemetry_adapter import LangfuseOTELConfig, OTELBoundaryState
     from backend.observability.tracing import tracer
     spans = []
     for _ in range(3):
         with tracer.span("batch.op") as sp:
             pass
         spans.append(sp)
-    adapter = OTelAdapter()
+    config = LangfuseOTELConfig(state=OTELBoundaryState.DRY_RUN, credential_reference_id="cred-123")
+    adapter = OTelAdapter(config=config)
     count = adapter.export_batch(spans)
     assert count == 3
 
