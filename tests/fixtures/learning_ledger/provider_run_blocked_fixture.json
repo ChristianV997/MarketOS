@@ -1,0 +1,1 @@
+{"events":[{"learning_event_id":"fixture-provider-blocked","event_type":"provider_run","outcome":"blocked","action_taken":"run_provider_data_pull","failure_reasons":["provider_blocker"]}]}
