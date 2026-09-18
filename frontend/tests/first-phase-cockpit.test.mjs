@@ -602,7 +602,8 @@ test("route wiring and api base authority remain unchanged", async () => {
   const apiBase = await readFile(new URL("../src/lib/apiBase.ts", import.meta.url), "utf8");
   assert.match(mainSource, /\/operator\/first-phase/);
   assert.match(hookSource, /usePhase1Readiness/);
-  assert.match(hookSource, /useBenchmarkMatrix/);
+  assert.match(hookSource, /useResearchPortfolios/);
+  assert.doesNotMatch(hookSource, /research_to_decision\.py|fetchResearchToDecision/);
   assert.match(apiBase, /VITE_API_BASE_URL/);
 });
 
@@ -654,15 +655,17 @@ test("research-to-decision overlay fills identity without re-ranking", () => {
     return rows.map((row) => {
       const audit = byId.get(row.candidateId);
       if (!audit) return row;
+      const overall = typeof audit.confidence?.overall === "number" ? audit.confidence.overall : null;
       return {
         ...row,
-        sku: audit.sku ?? row.sku,
+        sku: audit.sku ?? null,
         marketLane: audit.lane ?? row.marketLane,
-        supplierOffer: audit.supplier_offer ?? row.supplierOffer,
+        supplierOffer: audit.supplier_offer ?? null,
         assumptions: audit.assumptions ?? row.assumptions,
         missingEvidence: audit.missing_evidence ?? row.missingEvidence,
-        conflicts: audit.conflicts ?? row.conflicts,
-        confidence: audit.confidence?.overall ?? row.confidence,
+        conflicts: audit.conflicts ?? [],
+        confidence: overall,
+        confidenceSupplier: typeof audit.confidence?.supplier === "number" ? audit.confidence.supplier : null,
       };
     });
   }
@@ -679,14 +682,41 @@ test("research-to-decision overlay fills identity without re-ranking", () => {
       assumptions: ["landed_cost_assumed"],
       missing_evidence: ["sample_not_verified"],
       conflicts: ["price_mismatch"],
-      confidence: { overall: 0.4 },
+      confidence: { supplier: 0.4, marketplace: 0.8 },
     },
   ]);
   assert.deepEqual(overlaid.map((row) => row.candidateId), ["beta", "alpha"]);
   assert.equal(overlaid[0].sku, null);
   assert.equal(overlaid[1].sku, "SKU-ALPHA");
   assert.equal(overlaid[1].rankIndex, 1);
-  assert.equal(overlaid[1].confidence, 0.4);
+  assert.equal(overlaid[1].confidence, null);
+  assert.equal(overlaid[1].confidenceSupplier, 0.4);
+});
+
+test("research-to-decision schema mismatch and missing fields stay unavailable", async () => {
+  const source = await readFile(new URL("lib/overlayResearchToDecision.ts", featureRoot), "utf8");
+  const contracts = await readFile(new URL("contracts/firstPhaseEvidencePacket.ts", featureRoot), "utf8");
+  assert.match(contracts, /product-validation-report-v1/);
+  assert.match(source, /PRODUCT_VALIDATION_REPORT_VERSION/);
+  assert.match(source, /schema_version_unsupported/);
+  assert.match(source, /Does not sort/);
+  assert.doesNotMatch(source, /\.sort\(/);
+  assert.doesNotMatch(source, /\(supplier \+ market\) \/ 2/);
+  assert.match(source, /economics_unavailable/);
+  assert.match(source, /not_run/);
+});
+
+test("fixture-only evidence stays separated from consumer attention and blocked promotion", async () => {
+  const classify = await readFile(new URL("lib/classifyEvidence.ts", featureRoot), "utf8");
+  const promotion = await readFile(new URL("lib/derivePromotionState.ts", featureRoot), "utf8");
+  const detail = await readFile(new URL("components/CandidateDetailPanel.tsx", featureRoot), "utf8");
+  assert.match(classify, /"stale"/);
+  assert.match(classify, /"not_run"/);
+  assert.match(promotion, /blocked/);
+  assert.match(detail, /Supplier evidence class/);
+  assert.match(detail, /Consumer evidence class/);
+  assert.match(detail, /Economics/);
+  assert.match(detail, /Replay identity/);
 });
 
 test("direct_ship_verified is live proof and fixture never keeps it", () => {

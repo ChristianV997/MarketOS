@@ -9,6 +9,10 @@ export const SUPPORTED_EVIDENCE_COCKPIT_SCHEMA_VERSIONS = new Set<string>([
 
 export const CLIENT_SAFE_EXPORT_VERSION = "first-phase-cockpit-client-safe-v1" as const;
 
+/** Existing product-validation report identity (PR #247). Not a second cockpit packet. */
+export const PRODUCT_VALIDATION_REPORT_VERSION = "product-validation-report-v1" as const;
+export const RESEARCH_TO_DECISION_APPENDIX_VERSION = "v1" as const;
+
 /** Default visible row window for large ranked sets (no virtualization dependency). */
 export const CANDIDATE_WINDOW_SIZE = 50;
 
@@ -43,8 +47,10 @@ export const EVIDENCE_CLASSES = [
   "direct_ship_verified",
   "live_order_verified",
   "live_sales_validated",
-  "unavailable",
+  "stale",
   "blocked",
+  "unavailable",
+  "not_run",
 ] as const;
 
 export type EvidenceClass = (typeof EVIDENCE_CLASSES)[number];
@@ -90,11 +96,13 @@ export interface MarketLaneView {
   origin: string | null;
   destination: string | null;
   currency: string | null;
+  warehouse: string | null;
 }
 
 export interface RankedCandidateRow {
   candidateId: string;
   title: string;
+  productTitle: string | null;
   sku: string | null;
   rankIndex: number;
   evidenceCompleteness: number | null;
@@ -114,9 +122,20 @@ export interface RankedCandidateRow {
   marketLane: MarketLaneView | null;
   supplierOffer: string | null;
   confidence: number | null;
+  confidenceSupplier: number | null;
+  confidenceMarketplace: number | null;
   assumptions: string[];
   missingEvidence: string[];
   conflicts: string[];
+  hardGates: string[];
+  evidenceReferences: string[];
+  consumerAttentionSummary: string | null;
+  competitionSummary: string | null;
+  replayIdentity: string | null;
+  freshnessExpiry: string | null;
+  supplierEvidenceClass: EvidenceClass;
+  consumerEvidenceClass: EvidenceClass;
+  economicsUnavailable: boolean;
   isTopCandidate: boolean;
   pillarCells: CandidatePillarCell[];
 }
@@ -156,6 +175,8 @@ export interface RunFingerprint {
   schemaVersion: string | null;
   generatedAt: string | null;
   freshnessLabel: string | null;
+  replayIdentity: string | null;
+  researchToDecisionSchema: string | null;
 }
 
 export interface FirstPhaseEvidencePacket {
@@ -206,9 +227,19 @@ export interface ClientSafeCockpitExport {
     promotion_state: PromotionState;
     market_lane: MarketLaneView | null;
     confidence: number | null;
+    confidence_supplier: number | null;
+    confidence_marketplace: number | null;
     assumptions: string[];
     missing_evidence: string[];
     conflicts: string[];
+    hard_gates: string[];
+    evidence_references: string[];
+    consumer_attention: string | null;
+    competition_summary: string | null;
+    replay_identity: string | null;
+    supplier_evidence_class: EvidenceClass;
+    consumer_evidence_class: EvidenceClass;
+    economics_unavailable: boolean;
   }>;
   pillars: Array<{
     pillar_id: PillarId;
@@ -304,27 +335,6 @@ export interface FirstPhaseEvidenceCockpitApiContract {
   read_only: true;
   mutated: false;
   network_calls: boolean;
-  /** Optional PR #247 research-to-decision appendix; overlay only, never a second ranking. */
-  appendix?: {
-    candidate_audit?: Array<{
-      candidate_id?: string;
-      sku?: string | null;
-      supplier_sku?: string | null;
-      lifecycle_state?: string | null;
-      lane?: {
-        origin?: string | null;
-        destination?: string | null;
-        currency?: string | null;
-      } | null;
-      assumptions?: string[];
-      missing_evidence?: string[];
-      conflicts?: string[];
-      confidence?: {
-        supplier?: number;
-        marketplace?: number;
-        overall?: number;
-      } | null;
-      supplier_offer?: string | null;
-    }>;
-  };
+  /** Optional PR #247 product-validation-report appendix; overlay only, never a second ranking. */
+  appendix?: Record<string, unknown>;
 }

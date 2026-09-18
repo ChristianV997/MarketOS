@@ -15,6 +15,8 @@ const OFFLINE_MODES: ReadonlySet<EvidenceMode> = new Set([
 function parseDeclaredClass(value: string | null | undefined): EvidenceClass | null {
   if (!value) return null;
   const lowered = value.toLowerCase().replace(/-/g, "_");
+  if (lowered.includes("not_run") || lowered.includes("not_supplied")) return "not_run";
+  if (lowered.includes("stale") || lowered.includes("expired")) return "stale";
   if (lowered.includes("live_sales") || lowered.includes("sales_validated")) return "live_sales_validated";
   if (lowered.includes("live_order") || lowered.includes("order_verified")) return "live_order_verified";
   if (lowered.includes("direct_ship")) return "direct_ship_verified";
@@ -63,7 +65,7 @@ export function classifyEvidenceClass(input: {
   if (input.evidenceMode === "fixture_only") return "fixture";
   if (input.pillarId === "economics") return "assumption";
   if (input.pillarId === "freshness" || input.pillarId === "provenance") return "derived";
-  if (input.pillarId === "consumer_attention") return "unavailable";
+  if (input.pillarId === "consumer_attention") return "not_run";
 
   const family = (input.sourceFamily ?? "").toLowerCase();
   if (family.includes("public_market") && input.evidenceMode === "live_readonly") return "public_observed";

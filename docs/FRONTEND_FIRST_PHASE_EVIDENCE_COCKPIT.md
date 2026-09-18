@@ -20,9 +20,11 @@ Read-only operator surface stacked on PR #213 frontend/API authority.
 - Candidate identity, exact SKU (when present), market lane, supplier offer, economics,
   competition, consumer attention, assumptions, missing evidence, conflicts, confidence,
   promotion/risk, next-best action
-- Optional overlay of PR #247 `appendix.candidate_audit` onto existing server-ordered rows
-  (no second ranking schema; missing audits leave rows unchanged)
-- Fixture/manual/simulated success never becomes live proof
+- Evidence classes also include `stale` and `not_run`. The client never upgrades evidence.
+- Maps existing PR #247 `product-validation-report-v1` + `appendix.research_to_decision_version: v1`
+  onto server-ordered rows by `candidate_id`. Missing fields render as unavailable; confidence is
+  not averaged. Replay fingerprint is display-only SHA-256 hex.
+- No second API client: the projection is optional overlay input, not a new fetch.
 - TrustOS / Governor / Approval Ledger panels (explicit unavailable until merged packet)
 - States: loading, empty, blocked, unavailable, stale, **partial**, success
 - Schema-version gated future packet validator (`phase1-evidence-cockpit-v1`) — endpoint not claimed to exist

@@ -18,6 +18,7 @@ import type {
 import { classifyEvidenceClass } from "./classifyEvidence";
 import { derivePromotionState } from "./derivePromotionState";
 import { formatFreshnessLabel } from "./freshness";
+import { overlayResearchToDecisionProjection } from "./overlayResearchToDecision";
 
 export interface ComposeCockpitInput {
   phase1Readiness: Phase1Readiness | null;
@@ -29,6 +30,7 @@ export interface ComposeCockpitInput {
   publicMarketError: boolean;
   researchError: boolean;
   isLoading: boolean;
+  researchToDecisionProjection?: unknown;
 }
 
 export function normalizeEvidenceMode(value: string | null | undefined): EvidenceMode {
@@ -142,7 +144,7 @@ function buildPillarCells(item: BenchmarkMatrixView["candidates"][number], evide
       score: null,
       status: "unavailable",
       detail: "consumer_attention_api_unavailable",
-      evidenceClass: "unavailable",
+      evidenceClass: "not_run",
     },
   ];
 }
@@ -156,6 +158,7 @@ function mapCandidates(
   return benchmark.candidates.map((item, rankIndex) => ({
     candidateId: item.candidate.candidate_id,
     title: item.candidate.title,
+    productTitle: item.candidate.title,
     sku: null,
     rankIndex,
     evidenceCompleteness: item.evidence_completeness ?? null,
@@ -174,12 +177,29 @@ function mapCandidates(
     promotionState: derivePromotionState(item.commercial_decision),
     marketLane: null,
     supplierOffer: null,
-    confidence: item.evidence_completeness ?? null,
+    confidence: null,
+    confidenceSupplier: null,
+    confidenceMarketplace: null,
     assumptions: item.economics?.assumption_ratio
       ? [`assumption_ratio_${item.economics.assumption_ratio}`]
       : [],
     missingEvidence: item.validation_priority?.target ? [`validation_target_${item.validation_priority.target}`] : [],
     conflicts: [],
+    hardGates: [],
+    evidenceReferences: ["evaluation.commerce.benchmark_matrix"],
+    consumerAttentionSummary: null,
+    competitionSummary: item.competition_evidence?.score !== undefined
+      ? `competition_score_${item.competition_evidence.score}`
+      : null,
+    replayIdentity: null,
+    freshnessExpiry: null,
+    supplierEvidenceClass: classifyEvidenceClass({
+      evidenceMode,
+      pillarId: "supplier_feasibility",
+      sourceFamily: "benchmark_matrix",
+    }),
+    consumerEvidenceClass: "not_run",
+    economicsUnavailable: !item.economics?.margin_quality,
     isTopCandidate: item.candidate.candidate_id === benchmark.top_candidate_id,
     pillarCells: buildPillarCells(item, evidenceMode),
   }));
@@ -224,7 +244,7 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
       freshness: null,
       sourceFamily: null,
       evidenceMode: null,
-      evidenceClass: "unavailable" as const,
+      evidenceClass: "not_run" as const,
       blockedReasons: ["consumer_attention_api_unavailable"],
     },
     {
@@ -346,13 +366,20 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
   const evidenceMode = normalizeEvidenceMode(
     input.benchmark?.evidence_mode ?? input.publicMarket?.evidence_mode,
   );
-  const rankedCandidates = mapCandidates(input.benchmark, evidenceMode);
+  const mapped = overlayResearchToDecisionProjection(
+    mapCandidates(input.benchmark, evidenceMode),
+    input.researchToDecisionProjection,
+  );
+  const rankedCandidates = mapped.rows;
   const pillars = buildPillars(input, evidenceMode);
   const warnings = [
     ...(input.benchmark?.warnings ?? []),
     ...(input.publicMarket?.warnings ?? []),
     ...(input.phase1Readiness?.advisory_warnings ?? []),
   ];
+  if (mapped.warning && input.researchToDecisionProjection != null) {
+    warnings.push(`research_to_decision_${mapped.warning}`);
+  }
   const blockedReasons = [
     ...(input.phase1Readiness?.blocking_gates ?? []),
     ...(input.phase1Readiness?.forbidden_next_phases ?? []),
@@ -372,6 +399,7 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     input.benchmark ? "benchmark-matrix" : null,
     input.publicMarket ? "public-market-benchmark" : null,
     input.researchPortfolio ? "research-portfolio" : null,
+    mapped.warning === null && input.researchToDecisionProjection != null ? "research-to-decision" : null,
   ].filter((label): label is string => Boolean(label));
 
   const sourceFamilies = [
@@ -379,6 +407,7 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     input.benchmark ? "benchmark_matrix" : null,
     input.publicMarket ? "public_market_benchmark" : null,
     input.researchPortfolio ? "research_portfolio" : null,
+    mapped.warning === null && input.researchToDecisionProjection != null ? "product_validation_report" : null,
   ].filter((label): label is string => Boolean(label));
 
   return {
@@ -409,6 +438,8 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
       schemaVersion: "composed-live",
       generatedAt: null,
       freshnessLabel: formatFreshnessLabel(null, Date.now()),
+      replayIdentity: mapped.replayIdentity,
+      researchToDecisionSchema: mapped.warning ? null : (input.researchToDecisionProjection ? "product-validation-report-v1" : null),
     },
     blockedReasons,
     unavailableReasons,

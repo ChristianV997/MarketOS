@@ -114,7 +114,63 @@ export function CandidateDetailPanel({
           <dd className="mt-1 text-zinc-200">
             {candidate.evidenceCompleteness !== null
               ? `${(candidate.evidenceCompleteness * 100).toFixed(0)}%`
-              : "—"}
+              : "unavailable"}
+          </dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Supplier evidence class</dt>
+          <dd className="mt-1 text-zinc-200">{candidate.supplierEvidenceClass.replace(/_/g, " ")}</dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Consumer evidence class</dt>
+          <dd className="mt-1 text-zinc-200">{candidate.consumerEvidenceClass.replace(/_/g, " ")}</dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Consumer attention</dt>
+          <dd className="mt-1 text-zinc-200">{candidate.consumerAttentionSummary?.replace(/_/g, " ") ?? "unavailable"}</dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Competition</dt>
+          <dd className="mt-1 text-zinc-200">{candidate.competitionSummary?.replace(/_/g, " ") ?? "unavailable"}</dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Economics</dt>
+          <dd className="mt-1 text-zinc-200">
+            {candidate.economicsUnavailable
+              ? "unavailable"
+              : (candidate.economicsLabel?.replace(/_/g, " ") ?? "unavailable")}
+          </dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Replay identity</dt>
+          <dd className="mt-1 font-mono text-[11px] text-zinc-200">{candidate.replayIdentity ?? "unavailable"}</dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Hard gates</dt>
+          <dd className="mt-1 text-zinc-200">
+            {candidate.hardGates.length ? candidate.hardGates.join(" · ") : "none listed"}
+          </dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Evidence references</dt>
+          <dd className="mt-1 text-zinc-200">
+            {candidate.evidenceReferences.length ? candidate.evidenceReferences.join(" · ") : "unavailable"}
+          </dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Freshness expiry</dt>
+          <dd className="mt-1 text-zinc-200">{candidate.freshnessExpiry ?? "unavailable"}</dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Supplier confidence</dt>
+          <dd className="mt-1 text-zinc-200">
+            {candidate.confidenceSupplier !== null ? `${(candidate.confidenceSupplier * 100).toFixed(0)}%` : "unavailable"}
+          </dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Marketplace confidence</dt>
+          <dd className="mt-1 text-zinc-200">
+            {candidate.confidenceMarketplace !== null ? `${(candidate.confidenceMarketplace * 100).toFixed(0)}%` : "unavailable"}
           </dd>
         </div>
       </dl>

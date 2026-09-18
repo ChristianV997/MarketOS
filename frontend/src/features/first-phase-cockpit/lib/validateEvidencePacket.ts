@@ -12,7 +12,7 @@ import { containsSecretShapedValue } from "./exportClientSafeReport";
 import { normalizeEvidenceMode } from "./composeCockpitViewModel";
 import { derivePromotionState } from "./derivePromotionState";
 import { formatFreshnessLabel, isStaleFreshness } from "./freshness";
-import { overlayResearchToDecisionAudits } from "./overlayResearchToDecision";
+import { overlayResearchToDecisionAudits, overlayResearchToDecisionProjection } from "./overlayResearchToDecision";
 
 const PILLAR_IDS = new Set<PillarId>([
   "market_evidence",
@@ -119,10 +119,11 @@ export function mapApiPacketToViewModel(
 ): FirstPhaseEvidencePacket {
   const evidenceMode: EvidenceMode = normalizeEvidenceMode(api.evidence_mode);
   const freshnessLabel = formatFreshnessLabel(api.generated_at, nowMs);
-  const rankedCandidates = overlayResearchToDecisionAudits(
+  const rankedCandidates = overlayResearchToDecisionProjection(
     api.ranked_candidates.map((candidate) => ({
       candidateId: candidate.candidate_id,
       title: candidate.title,
+      productTitle: candidate.title,
       sku: null,
       rankIndex: candidate.rank_index,
       evidenceCompleteness: candidate.evidence_completeness,
@@ -145,10 +146,25 @@ export function mapApiPacketToViewModel(
       promotionState: derivePromotionState(candidate.commercial_decision),
       marketLane: null,
       supplierOffer: null,
-      confidence: candidate.evidence_completeness,
+      confidence: null,
+      confidenceSupplier: null,
+      confidenceMarketplace: null,
       assumptions: [],
       missingEvidence: [],
       conflicts: [],
+      hardGates: [],
+      evidenceReferences: [],
+      consumerAttentionSummary: null,
+      competitionSummary: null,
+      replayIdentity: null,
+      freshnessExpiry: null,
+      supplierEvidenceClass: classifyEvidenceClass({
+        evidenceMode,
+        pillarId: "supplier_feasibility",
+        sourceFamily: candidate.source_family,
+      }),
+      consumerEvidenceClass: "not_run",
+      economicsUnavailable: candidate.economics_label == null,
       isTopCandidate: candidate.is_top_candidate,
       pillarCells: (candidate.pillar_cells ?? []).map((cell) => ({
         pillarId: cell.pillar_id,
@@ -164,10 +180,21 @@ export function mapApiPacketToViewModel(
         }),
       })),
     })),
-    api.appendix?.candidate_audit,
+    api.appendix
+      ? { report_version: api.report_version, appendix: api.appendix }
+      : undefined,
+    nowMs,
   );
+  const overlayFallback = rankedCandidates.warning
+    ? overlayResearchToDecisionAudits(
+      rankedCandidates.rows,
+      Array.isArray((api.appendix as { candidate_audit?: unknown } | undefined)?.candidate_audit)
+        ? (api.appendix as { candidate_audit: Parameters<typeof overlayResearchToDecisionAudits>[1] }).candidate_audit
+        : null,
+    )
+    : rankedCandidates.rows;
 
-  let state: FirstPhaseEvidencePacket["state"] = rankedCandidates.length ? "success" : "empty";
+  let state: FirstPhaseEvidencePacket["state"] = overlayFallback.length ? "success" : "empty";
   if (api.overall_status === "blocked") state = "blocked";
   else if (api.overall_status === "degraded" || isStaleFreshness(freshnessLabel)) state = "stale";
   else if (api.overall_status === "partially_ready" || (api.unavailable_reasons?.length ?? 0) > 0) {
@@ -176,7 +203,7 @@ export function mapApiPacketToViewModel(
 
   return {
     state,
-    rankedCandidates,
+    rankedCandidates: overlayFallback,
     pillars: api.pillars.map((pillar) => ({
       id: pillar.pillar_id,
       label: pillar.pillar_id.replace(/_/g, " "),
@@ -236,6 +263,8 @@ export function mapApiPacketToViewModel(
       schemaVersion: api.schema_version ?? EVIDENCE_COCKPIT_SCHEMA_VERSION,
       generatedAt: api.fingerprint.generated_at ?? api.generated_at,
       freshnessLabel,
+      replayIdentity: rankedCandidates.replayIdentity,
+      researchToDecisionSchema: rankedCandidates.warning ? null : (api.appendix ? String(api.report_version) : null),
     },
     blockedReasons: api.blocked_reasons,
     unavailableReasons: api.unavailable_reasons ?? [],

@@ -43,7 +43,10 @@ export function RunMetadataPanel({
           Generated at: <b>{fingerprint.generatedAt ?? "not provided"}</b>
         </span>
         <span className="rounded bg-zinc-950/50 p-2">
-          Next action: <b>{fingerprint.nextBestAction?.replace(/_/g, " ") ?? "none"}</b>
+          Replay identity: <b>{fingerprint.replayIdentity ?? "unavailable"}</b>
+        </span>
+        <span className="rounded bg-zinc-950/50 p-2">
+          Research-to-decision schema: <b>{fingerprint.researchToDecisionSchema ?? "not supplied"}</b>
         </span>
       </div>
       {warnings.length > 0 && (
