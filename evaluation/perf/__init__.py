@@ -1,5 +1,6 @@
 """Bounded commercial-engine performance helpers.
 
-This package is a measurement and reliability seam. It does not score
-products, compute unit economics, emit events, or authorize launch.
+Measurement seam only. Does not score products, compute unit economics,
+emit events, or authorize launch. Canonical adapters time existing
+authorities when they import; the sandbox engine is a labeled pattern.
 """

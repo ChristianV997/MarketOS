@@ -1,95 +1,92 @@
-# Commercial-engine performance and reliability
+# Commerce performance regression benchmark
 
-Lane: `grok/marketos-commerce-engine-perf-v1`
-Base: `origin/main` `df59a0609897907c1565d7d5f78e20959095d430`
-Posture: fixture-only, no live providers, no merge.
+Lane: `grok/marketos-commerce-engine-perf-v1` (PR #255)  
+Base: `origin/main` `df59a0609897907c1565d7d5f78e20959095d430`  
+Schema: `commerce-regression-benchmark-v2`  
+Posture: fixture-only, no live providers, not a merge gate.
 
-## Why this exists
+## What this lane is
 
-`scripts/benchmark_commerce_cycle.py` times the canonical commerce loop when
-`backend.commerce` imports. `#249` `scripts/run_high_value_path_harness.py`
-classifies missing modules. Neither measures bounded offer normalization,
-duplicate/conflict detection, mixed-currency isolation, or replay equality
-under stress.
+A **regression-detecting measurement layer**. It times existing MarketOS
+authorities when they import. It does not replace those authorities.
 
-This lane adds that measurement seam and a measured reliability fix:
-pairwise conflict scans become an indexed identity map with equivalent
-output.
+Two path classes are recorded separately and must not be mixed:
 
-## Classification (verified by COMMERCIAL-REPLAY-INTEGRATION-V3)
+| Class | Meaning |
+| --- | --- |
+| `canonical` | `status=measured` only when the real module imported and ran |
+| `sandbox_pattern_not_production` | indexed-vs-pairwise conflict scan inside `evaluation/perf/commerce_engine.py` |
 
-**Benchmark-only harness, not a wired optimization of any canonical
-production path.** `evaluation/perf/commerce_engine.py` is fully
-self-contained: it generates its own fixture rows (`build_rows()`), parses
-its own money/currency/evidence-state fields from scratch, and detects
-conflicts over its own `ProcessResult` records. It never imports or calls
-`evaluation.commerce.opportunity_synthesis`, `evaluation.commerce.supplier_feasibility`,
-`backend.economics.kernel`, or any other canonical scoring/economics/report
-authority (confirmed by this module's own `authorities_not_replaced` field
-in every harness run). No production code path was changed or sped up by
-this PR -- the "before/after" comparison is entirely between two algorithms
-written inside this same new module.
+Do **not** cite sandbox-pattern milliseconds as production MarketOS
+performance.
 
-It is preserved because it demonstrates a real, reusable pattern
-(identity-map conflict detection vs. a pairwise scan) with genuine measured
-evidence, in case a similar O(n^2) conflict scan is ever found in a
-canonical module and needs the same fix applied *there*. This PR does not
-apply that fix anywhere outside its own sandbox.
+## Canonical call graph (audit)
 
-### Measured at 10 / 100 / 1,000 rows (`many_candidates` fixture, 5 repeats, this sandbox, Python 3.11.15)
+| Path | Authority | How measured | Typical status on main |
+| --- | --- | --- | --- |
+| supplier normalization | `evaluation.commerce.supplier_feasibility.build_report` | fixture `SupplierFeasibilityEvidence` rows | measured when checkout present |
+| opportunity synthesis | `evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis` | three fixture pillar packets | measured when checkout present |
+| client-safe export | `evaluation.commerce.product_validation_report.generate` | explicit packets, no filesystem defaults | measured when checkout present |
+| commerce-cycle packet | `backend.commerce.run_commerce_cycle` | dry-run attributed fixtures | often unavailable without backend extras |
+| research-to-decision | `#247` | never reimplemented | unavailable on main |
+| financial kernel | `backend.economics.kernel` (`#248`) | never driven | unavailable / not_run |
+| competition combine | `backend.mvp_commerce.competition_intelligence.build_market_opportunity_report` | empty evidence combine | unavailable without mvp stack |
+| competition fetch | `gather_market_intelligence` | **not called** | — |
 
-| Rows | Pairwise mean (ms) | Indexed mean (ms) | Output equivalent | Replay stable (both) |
-| --- | --- | --- | --- | --- |
-| 10 | 0.036 | 0.034 | true | true |
-| 100 | 0.417 | 0.312 | true | true |
-| 1,000 | 11.609 | 3.229 | true | true |
+Replay identity is SHA-256 of the serialized measured payload
+(OpenLineage-style run identity, no vendor install).
 
-The advantage is negligible at 10 rows, modest at 100, and clear (~3.6x) at
-1,000 -- consistent with the pairwise scan's O(n^2) growth against the
-indexed scan's O(n), and reproduced independently of the PR's own
-1,500-row headline figure (22.88ms -> 4.624ms, also reproduced unchanged).
+## Benchmark matrix
 
-## Exclusive files
+Sizes: 100 / 500 / 1,500 / 5,000 (5,000 uses `max_rows` override; may
+`not_run` if the payload is too large).
 
-- `evaluation/perf/commerce_engine.py`
-- `evaluation/perf/__init__.py`
-- `scripts/run_commerce_engine_perf.py`
-- `tests/test_commerce_engine_perf.py`
-- `docs/ai/COMMERCE_ENGINE_PERFORMANCE.md`
+Stress: duplicate ids, conflicting offers, mixed currency, stale
+evidence, malformed / secret-shaped rows, mixed evidence, replay
+hashing, export projection.
 
-Do not edit `#247` research-to-decision, `#248`/`#250` economics kernel,
-`#249` deploy harness, synthesis scoring, or event stores.
+Warmup: 1. Repeats: 5. Timer: `time.perf_counter`. Stats: mean / stdev /
+min / max.
+
+## Advisory budgets
+
+Outcomes: `pass`, `regression`, `unavailable`, `not_run`, `malformed`.
+Budgets are not a quality gate and do not block merge.
+
+## Equivalence rules
+
+For the sandbox pattern, pairwise and indexed detectors must agree and
+replay hashes must match. Fixture evidence cannot become
+`live_attestation`. Mixed currencies are listed, never converted.
+Canonical adapters never mutate ranking or launch authority; they only
+time existing functions.
 
 ## Commands
 
 ```powershell
-python -m pytest -q tests/test_commerce_engine_perf.py
-python scripts/run_commerce_engine_perf.py --size 200
-python -m compileall evaluation/perf scripts/run_commerce_engine_perf.py tests/test_commerce_engine_perf.py
+python -m pytest -q tests/test_commerce_engine_perf.py tests/test_commerce_regression_benchmark.py
+python scripts/run_commerce_engine_perf.py --mode all --size 200 --json
+python -m compileall evaluation/perf scripts/run_commerce_engine_perf.py tests
 ```
 
-## Recorded fields
+## Public sources (not vendored)
 
-scenario, input size, row count, wall time, repeated-run equality, output
-size, failure classification, environment, commit SHA, evidence state.
-
-## Public sources reviewed (not vendored)
-
-| Source | License | Use |
+| Source | License | Taken |
 | --- | --- | --- |
-| Python `time.perf_counter` / `hashlib` | PSF | timing + replay |
-| pytest | MIT | focused tests |
-| Hypothesis docs | MPL-2.0 | case shapes only |
-| OpenLineage spec 1.53.0 | Apache-2.0 | producer/job/replay identity |
-| OpenTelemetry Python | Apache-2.0 | no exporter added |
-| DuckDB / Polars / dlt | MIT / MIT / Apache-2.0 | deferred; row counts stay in stdlib |
+| pytest-benchmark usage | MIT | warmup, min rounds, perf_counter, do not treat VM noise as truth |
+| pyperf | PSF | report mean + variance, name the machine |
+| OpenLineage 1.53.0 | Apache-2.0 | producer / job / run hash |
+| OpenTelemetry | Apache-2.0 | span-like path_id names; no exporter |
+| DuckDB / Polars / dlt | MIT / MIT / Apache-2.0 | reviewed; not imported |
 
-## Safety
+## Grok / CoderOS / gstack tools
 
-Sanitized fixtures only. Secret-shaped keys are rejected. Fixture evidence
-cannot become `live_attestation`. Mixed currencies are listed, never FX'd.
-No second scorer.
+Used: GitHub connector, web search, code execution, CoderOS skill
+read-only. Not present in this runtime: gstack-benchmark,
+gstack-plan-eng-review, gstack-review, gstack-qa, ECC/Hermes plugins,
+CoderOS CLI probe (CoderOS source is frozen).
 
 ## Rollback
 
-Delete the five exclusive files / close the draft PR. No schema migration.
+Remove exclusive files under `evaluation/perf`, the two scripts/tests,
+and this doc; or close draft PR #255. No schema migration.
