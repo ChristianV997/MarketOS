@@ -10,8 +10,6 @@ permissions:
 
 jobs:
   agentic-quality-gate:
-    # Advisory until the gate has a measured false-positive baseline.
-    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -23,16 +21,19 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Install focused test dependency
-        # The gate itself is dependency-free, but its regression tests use pytest.
-        run: python -m pip install --disable-pip-version-check pytest
+      - name: Install focused gate dependencies
+        # Both packages are declared development tools used by this bounded gate.
+        run: python -m pip install --disable-pip-version-check pytest ruff==0.16.1
       - name: Compile agentic tooling
         run: python -m compileall -q scripts tests
-      - name: Run local quality gate
-        run: python scripts/ai/run_local_quality_gate.py --from-git --json
+      - name: Run local quality-gate preflight
+        run: |
+          set -o pipefail
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "quality_gate_preflight_generated_at: ${generated_at}" >> "$GITHUB_STEP_SUMMARY"
+          python scripts/ai/run_local_quality_gate.py --from-git --execute --phase preflight --generated-at "$generated_at" --markdown | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Write advisory summary
         run: |
-          python scripts/ai/run_local_quality_gate.py --from-git --markdown >> "$GITHUB_STEP_SUMMARY"
           python scripts/ai/select_tests.py --from-git --markdown >> "$GITHUB_STEP_SUMMARY"
           python scripts/ai/ci_matrix_plan.py --from-git --markdown >> "$GITHUB_STEP_SUMMARY"
           python scripts/ai/phase_gate.py --markdown >> "$GITHUB_STEP_SUMMARY"

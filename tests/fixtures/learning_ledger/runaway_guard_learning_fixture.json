@@ -1,0 +1,1 @@
+{"events":[{"learning_event_id":"fixture-runaway","event_type":"runaway_guard_event","outcome":"killed","action_taken":"spawn_agent_workflow","failure_reasons":["runaway_guard_triggered"]}]}

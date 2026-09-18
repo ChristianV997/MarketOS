@@ -1,0 +1,16 @@
+{
+  "jobs": [
+    {
+      "id": "job-good",
+      "marketplace_trend_report": "tests/fixtures/commerce_operations/cli_batch/good_market.json",
+      "supplier_feasibility_report": "tests/fixtures/commerce_operations/cli_batch/good_supplier.json",
+      "consumer_attention_report": "tests/fixtures/commerce_operations/cli_batch/good_consumer.json"
+    },
+    {
+      "id": "job-missing",
+      "marketplace_trend_report": "tests/fixtures/commerce_operations/cli_batch/does_not_exist.json",
+      "supplier_feasibility_report": "tests/fixtures/commerce_operations/cli_batch/good_supplier.json",
+      "consumer_attention_report": "tests/fixtures/commerce_operations/cli_batch/good_consumer.json"
+    }
+  ]
+}
