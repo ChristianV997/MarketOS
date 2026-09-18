@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
 from backend.economics.kernel import (
@@ -31,6 +31,15 @@ from evaluation.commerce.dry_run_lifecycle import DryRunLifecycleReport, DryRunS
 
 SCHEMA = "MarketOS.CommerceKernelIntegration.v1"
 CANONICAL_KERNEL_MODULE = "backend.economics.kernel"
+LIVE_ACTION_MARKERS = (
+    "place_order",
+    "capture_payment",
+    "charge_card",
+    "dispatch_supplier",
+    "publish_listing",
+    "launch_ad",
+    "refund_live",
+)
 FORBIDDEN_EXPORT = (
     "prompt",
     "formula",
@@ -43,6 +52,15 @@ FORBIDDEN_EXPORT = (
     "payload",
     "trace",
     "internal",
+)
+REQUIRED_SERVICE_INPUTS = (
+    "ad_spend",
+    "contribution_margin",
+    "roas_before",
+    "roas_after",
+    "cac_before",
+    "cac_after",
+    "delivery_hours",
 )
 
 
@@ -57,6 +75,19 @@ def _require_same_currency(*values: Money | None) -> str:
     return next(iter(currencies))
 
 
+def assert_offline(payload: Mapping[str, Any] | None = None) -> None:
+    """Reject live-action language at the integration boundary."""
+    blob = json.dumps(payload or {}, default=str).lower()
+    for marker in LIVE_ACTION_MARKERS:
+        if marker in blob:
+            raise IntegrationError(f"live action blocked: {marker}")
+
+
+def missing_evidence(result: UnitEconomicsResult | ServiceEconomics) -> tuple[str, ...]:
+    """Explicit missing-evidence surface. Unknown costs never become observed zero."""
+    return tuple(getattr(result, "missing_inputs", ()) or ())
+
+
 def economics_payload(result: UnitEconomicsResult | ServiceEconomics) -> dict[str, Any]:
     """Canonical economics payload: kernel dict plus ownership metadata."""
     body = result.to_dict()
@@ -64,6 +95,8 @@ def economics_payload(result: UnitEconomicsResult | ServiceEconomics) -> dict[st
     body["kernel_authority"] = CANONICAL_KERNEL_MODULE
     body["record_kind"] = "planning_record"
     body["live_actions_taken"] = False
+    body["missing_evidence"] = list(missing_evidence(result))
+    assert_offline(body)
     return body
 
 
@@ -80,6 +113,8 @@ def supplier_offer_to_economics(
     if lane.currency != price.currency:
         raise CurrencyMismatchError()
     merged = assumptions or UnitEconomicsAssumptions(evidence_refs=evidence_refs)
+    if evidence_refs and not merged.evidence_refs:
+        merged = replace(merged, evidence_refs=evidence_refs)
     return calculate_unit_economics(price, product_cost, lane=lane, assumptions=merged)
 
 
@@ -91,8 +126,7 @@ def service_package_to_economics(
     evidence_refs: tuple[EvidenceRef, ...] = (),
 ) -> ServiceEconomics:
     """Map a CompanyOS service package onto kernel service economics."""
-    required = ("ad_spend", "contribution_margin", "roas_before", "roas_after", "cac_before", "cac_after", "delivery_hours")
-    missing = [name for name in required if inputs.get(name) is None]
+    missing = [name for name in REQUIRED_SERVICE_INPUTS if inputs.get(name) is None]
     if missing:
         raise IntegrationError(f"missing service evidence: {', '.join(missing)}")
     return calculate_service_economics(
@@ -172,7 +206,10 @@ def client_safe_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def replay_fingerprint(payload: Mapping[str, Any]) -> str:
     """Deterministic replay identity over a kernel payload."""
-    encoded = canonical_json(payload) if hasattr(payload, "keys") else json.dumps(payload, sort_keys=True, default=str)
+    try:
+        encoded = canonical_json(payload)
+    except Exception:
+        encoded = json.dumps(payload, sort_keys=True, default=str)
     if not isinstance(encoded, str):
         encoded = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -189,7 +226,7 @@ def integrate_offer(offer: Offer, product_cost: Money | None = None) -> UnitEcon
 
 def integrate_dry_run(scenario: DryRunScenarioInput) -> DryRunLifecycleReport:
     report = run_dry_run_lifecycle(scenario)
-    if report.live_actions_taken:
+    if getattr(report, "live_actions_taken", False):
         raise IntegrationError("dry-run lifecycle must not take live actions")
     return report
 
@@ -200,6 +237,8 @@ class AuthorityInventory:
     integration_module: str = "evaluation.commerce.kernel_integration"
     owns_money_arithmetic: str = CANONICAL_KERNEL_MODULE
     owns_commerce_mapping: str = "evaluation.commerce.kernel_integration"
+    kernel_owner_pr: str = "248"
+    integration_owner_pr: str = "250"
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -207,14 +246,19 @@ class AuthorityInventory:
             "integration_module": self.integration_module,
             "owns_money_arithmetic": self.owns_money_arithmetic,
             "owns_commerce_mapping": self.owns_commerce_mapping,
+            "kernel_owner_pr": self.kernel_owner_pr,
+            "integration_owner_pr": self.integration_owner_pr,
         }
 
 
 __all__ = [
     "SCHEMA",
     "CANONICAL_KERNEL_MODULE",
+    "REQUIRED_SERVICE_INPUTS",
     "IntegrationError",
     "AuthorityInventory",
+    "assert_offline",
+    "missing_evidence",
     "economics_payload",
     "supplier_offer_to_economics",
     "service_package_to_economics",
