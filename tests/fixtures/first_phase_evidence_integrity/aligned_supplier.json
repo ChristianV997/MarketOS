@@ -1,0 +1,45 @@
+{
+  "report_version": "supplier-feasibility-v1",
+  "evidence_mode": "fixture_demo",
+  "generated_at": "deterministic",
+  "suppliers_observed": ["public_catalog"],
+  "top_candidate_id": "desk-clamp-lamp",
+  "candidates": [
+    {
+      "candidate_id": "desk-clamp-lamp",
+      "query": "desk clamp lamp",
+      "evidence_class": "derived",
+      "provenance": {"source": "sanitized_fixture", "collected_at": "2026-01-01T00:00:00Z"},
+      "offers": [
+        {
+          "supplier": "public_catalog",
+          "unit_cost": 9.5,
+          "shipping_cost": 3.2,
+          "estimated_landed_cost": 12.7,
+          "delivery_max_days": 12,
+          "evidence_mode": "fixture",
+          "evidence_class": "derived"
+        }
+      ],
+      "score": {
+        "overall_supplier_feasibility": 0.71,
+        "supplier_cost_confidence": 0.6,
+        "margin_feasibility_proxy": 0.55,
+        "recommendation": "validate_live_supplier_first",
+        "risk_flags": [],
+        "economics": {
+          "target_sell_price": 29.99,
+          "estimated_landed_cost": 12.7,
+          "gross_margin_percent": 0.57,
+          "profit_per_order_before_ad_spend": 17.29,
+          "break_even_cpa": 17.29,
+          "break_even_roas": 1.73,
+          "assumptions": ["shipping_is_estimated"]
+        }
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}
