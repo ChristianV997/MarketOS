@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -46,8 +47,11 @@ CLASS_DIFF_FAILURE = "diff_failure"
 CLASS_COLLECTION_FAILED = "collection_failed"
 CLASS_TIMEOUT = "timeout"
 CLASS_MALFORMED_CONFIGURATION = "malformed"
+CLASS_BASELINE_MISSING = "baseline_missing"
+CLASS_BASELINE_MALFORMED = "malformed_baseline"
 
 CHECK_ORDER = ("compile", "pytest", "ruff", "typed", "frontend", "security", "diff_check")
+PREFLIGHT_CHECK_ORDER = ("compile", "pytest", "ruff", "diff_check")
 FRONTEND_CHECK_ORDER = ("lint", "typecheck", "test", "build")
 KNOWN_LOCKFILES = (
     "uv.lock", "poetry.lock", "Pipfile.lock", "package-lock.json", "pnpm-lock.yaml",
@@ -87,11 +91,22 @@ CI_EVIDENCE_SCHEMA = "MarketOS.CIEvidence.v1"
 CI_EVIDENCE_RUN_STATUSES = {"queued", "in_progress", "completed", "waiting", "requested", "pending"}
 CI_EVIDENCE_CONCLUSIONS = {
     "success", "failure", "neutral", "cancelled", "skipped", "timed_out",
-    "action_required", "stale", "startup_failure",
+    "action_required", "stale", "startup_failure", "pending",
 }
 CI_EVIDENCE_CHECK_STATUSES = {"success", "failure", "neutral", "cancelled", "skipped", "pending"}
 CI_EVIDENCE_MAX_BYTES = 64 * 1024
 CI_EVIDENCE_MAX_JOBS = 100
+QUALITY_GATE_PHASES = {"final", "preflight"}
+BASELINE_FORBIDDEN_FIELDS = {"stdout", "stderr", "raw_logs", "raw_stdout", "raw_stderr", "environment", "credentials"}
+BASELINE_DELTA_UNCHANGED = "unchanged"
+BASELINE_DELTA_INTRODUCED_FAILURE = "introduced_failure"
+BASELINE_DELTA_INHERITED_FAILURE = "inherited_failure"
+BASELINE_DELTA_RESOLVED_FAILURE = "resolved_failure"
+BASELINE_DELTA_NEWLY_AVAILABLE_PASS = "newly_available_pass"
+BASELINE_DELTA_UNAVAILABLE_IN_BOTH = "unavailable_in_both"
+BASELINE_DELTA_FAILURE_ORIGIN_UNVERIFIED = CLASS_FAILURE_ORIGIN_UNVERIFIED
+BASELINE_DELTA_CANDIDATE_INCOMPLETE = "candidate_incomplete"
+BASELINE_DELTA_CANDIDATE_MALFORMED = "candidate_malformed"
 
 
 def _optional_phase1_summary() -> tuple[dict[str, Any], dict[str, Any]]:
@@ -147,20 +162,35 @@ def _implementation_diff(paths: list[str], diff_text: str) -> str:
     return "".join(kept)
 
 
-def run(paths: list[str], *, diff_text: str = "", branch: str = "local") -> dict[str, Any]:
+def run(
+    paths: list[str],
+    *,
+    diff_text: str = "",
+    branch: str = "local",
+    quality_gate_report: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Compose existing planning functions; no network, writes, or subprocess tests."""
     paths = normal_paths(paths)
     implementation_diff = _implementation_diff(paths, diff_text)
-    readiness = pr_readiness_report.report(paths, diff_text, branch=branch, mutation_diff=implementation_diff)
+    readiness = pr_readiness_report.report(
+        paths,
+        diff_text,
+        branch=branch,
+        mutation_diff=implementation_diff,
+        quality_gate=quality_gate_report,
+    )
     phase = phase_gate.check(paths, implementation_diff)
     selected = select_tests.select(paths)
     ci_plan = ci_matrix_plan.plan(paths)
     phase1_readiness, benchmark = _optional_phase1_summary()
     impact = impact_planner.plan(impact_planner.DEFAULT_BACKLOG, phase1_readiness)
-    blocked = phase["status"] == "blocked" or readiness["risk_category"] == "blocked"
+    blocked = phase["status"] == "blocked" or readiness["risk_category"] == "blocked" or readiness["merge_readiness"] == "blocked"
+    quality_gate_blocked = readiness["merge_readiness"] == "blocked" and phase["status"] != "blocked" and readiness["risk_category"] != "blocked"
     status = "blocked" if blocked else "clear" if not paths else "advisory"
     flags = readiness["detections"]
     next_action = (
+        "resolve quality-gate failures or unavailable evidence before continuing"
+        if quality_gate_blocked else
         "remove credentials, generated artifacts, or blocked mutation work before continuing"
         if blocked else "no changed files; choose one unblocked task from the impact backlog"
         if not paths else "run the recommended focused tests, then session_finish and PR readiness before opening a PR"
@@ -172,6 +202,12 @@ def run(paths: list[str], *, diff_text: str = "", branch: str = "local") -> dict
         "mutation_flags": {"provider_mutation_like_detected": flags["provider_mutation_like_detected"]},
         "recommended_tests": selected["recommended_commands"], "recommended_ci_lanes": ci_plan["recommended_lanes"],
         "pr_merge_readiness": readiness["merge_readiness"],
+        "pr_readiness": {
+            "merge_readiness": readiness["merge_readiness"],
+            "risk_category": readiness["risk_category"],
+            "blocking_warnings": readiness["blocking_warnings"],
+            "quality_gate": readiness["quality_gate"],
+        },
         "impact_top_task": impact["ranked_backlog"][0]["task"], "recommended_next_action": next_action,
         "phase1_readiness": {"overall_status": phase1_readiness["overall_status"], "overall_score": phase1_readiness["overall_score"], "next_best_action": phase1_readiness["next_best_action"], "blocking_gates": phase1_readiness["blocking_gates"]},
         "benchmark_matrix": {"status": benchmark.get("status", "unavailable"), "evidence_mode": benchmark.get("evidence_mode", "unavailable"), "top_candidate_id": benchmark.get("top_candidate_id"), "next_best_action": benchmark.get("next_best_action", "install the optional evaluation profile to include benchmark context")},
@@ -609,7 +645,7 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return _ci_evidence_error("unreadable_ci_evidence")
-    if not _validate_ci_mapping(payload, {"schema", "run", "jobs"}) or payload.get("schema") != CI_EVIDENCE_SCHEMA:
+    if not _validate_ci_mapping(payload, {"schema", "run", "required_jobs", "jobs"}) or payload.get("schema") != CI_EVIDENCE_SCHEMA:
         return _ci_evidence_error("invalid_ci_evidence_schema")
 
     run = payload.get("run")
@@ -620,14 +656,24 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
     if run_status not in CI_EVIDENCE_RUN_STATUSES or run_conclusion not in CI_EVIDENCE_CONCLUSIONS:
         return _ci_evidence_error("invalid_ci_run_status")
 
+    required_jobs = payload.get("required_jobs")
+    if (
+        not isinstance(required_jobs, list) or not required_jobs
+        or len(required_jobs) > CI_EVIDENCE_MAX_JOBS
+        or any(not isinstance(name, str) or not name.strip() for name in required_jobs)
+        or len({name.strip() for name in required_jobs}) != len(required_jobs)
+    ):
+        return _ci_evidence_error("required_ci_jobs_expected")
+    required_jobs = [name.strip() for name in required_jobs]
     raw_jobs = payload.get("jobs")
-    if not isinstance(raw_jobs, list) or not raw_jobs or len(raw_jobs) > CI_EVIDENCE_MAX_JOBS:
+    if not isinstance(raw_jobs, list) or len(raw_jobs) > CI_EVIDENCE_MAX_JOBS:
         return _ci_evidence_error("ci_jobs_required")
     normalized_jobs: list[dict[str, Any]] = []
     allowed_job_fields = {
         "name", "required", "status", "conclusion", "runner_id", "runner_name",
         "steps_executed", "logs_available", "required_check_status",
     }
+    seen_job_names: set[str] = set()
     for raw_job in raw_jobs:
         if not _validate_ci_mapping(raw_job, allowed_job_fields):
             return _ci_evidence_error("invalid_ci_job_metadata")
@@ -648,6 +694,9 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
             or required_check_status not in CI_EVIDENCE_CHECK_STATUSES
         ):
             return _ci_evidence_error("invalid_ci_job_fields")
+        if name.strip() in seen_job_names:
+            return _ci_evidence_error("duplicate_ci_job_name")
+        seen_job_names.add(name.strip())
         if runner_id is not None and (not isinstance(runner_id, int) or isinstance(runner_id, bool) or runner_id < 0):
             return _ci_evidence_error("invalid_ci_runner_id")
         if runner_name is not None and not isinstance(runner_name, str):
@@ -663,18 +712,21 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
             "logs_available": logs_available,
             "required_check_status": required_check_status,
         })
-    if not any(job["required"] for job in normalized_jobs):
-        return _ci_evidence_error("required_ci_job_missing")
+    if any(job["required"] != (job["name"] in required_jobs) for job in normalized_jobs):
+        return _ci_evidence_error("ci_job_required_flag_mismatch")
     return {
         "evidence_format": CI_EVIDENCE_SCHEMA,
         "run_status": run_status,
         "run_conclusion": run_conclusion,
+        "required_jobs": required_jobs,
         "jobs": normalized_jobs,
     }, None
 
 
 def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
     jobs: list[dict[str, Any]] = []
+    expected_jobs = set(ci_result["required_jobs"])
+    observed_jobs = {job["name"] for job in ci_result["jobs"]}
     for job in ci_result["jobs"]:
         runner_assigned = job["runner_id"] is not None and job["runner_id"] > 0
         if not runner_assigned:
@@ -700,8 +752,27 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
             "logs_available": job["logs_available"],
             "reason": reason,
         })
+    for missing_name in sorted(expected_jobs - observed_jobs):
+        jobs.append({
+            "name": missing_name,
+            "required": True,
+            "status": "unavailable",
+            "conclusion": "pending",
+            "required_check_status": "pending",
+            "runner_assigned": False,
+            "steps_executed": 0,
+            "logs_available": False,
+            "reason": "required_ci_job_missing",
+        })
     required_jobs = [job for job in jobs if job["required"]]
     executed_steps = sum(job["steps_executed"] for job in required_jobs)
+    failure_classes = {
+        CLASS_FAILURE_ORIGIN_UNVERIFIED
+        for job in required_jobs
+        if job["status"] == "failed"
+    }
+    if any(job["status"] == "unavailable" for job in required_jobs):
+        failure_classes.add(CLASS_CI_UNAVAILABLE)
     if ci_result["run_status"] != "completed":
         status, reason, classification = "unavailable", "ci_run_not_completed", CLASS_CI_UNAVAILABLE
     elif any(job["status"] == "unavailable" for job in required_jobs):
@@ -718,6 +789,8 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
         "run_status": ci_result["run_status"],
         "run_conclusion": ci_result["run_conclusion"],
         "jobs": jobs,
+        "required_jobs": sorted(expected_jobs),
+        "failure_classes": sorted(failure_classes),
     }
 
 
@@ -750,25 +823,304 @@ def _timestamp_status(generated_at: str | None) -> tuple[bool, str | None]:
     return parsed.tzinfo is not None, None if parsed.tzinfo is not None else "generated_at_requires_timezone"
 
 
+def _contains_forbidden_baseline_fields(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        if any(field in value for field in BASELINE_FORBIDDEN_FIELDS):
+            return True
+        return any(_contains_forbidden_baseline_fields(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_forbidden_baseline_fields(child) for child in value)
+    return False
+
+
+def _baseline_status_value(value: Any) -> str | None:
+    status = value if isinstance(value, str) else value.get("status") if isinstance(value, Mapping) else None
+    return status if isinstance(status, str) and status in CHECK_STATUS_TAXONOMY else None
+
+
+def _valid_local_baseline_payload(payload: Mapping[str, Any]) -> bool:
+    if _contains_forbidden_baseline_fields(payload):
+        return False
+
+    checks = payload.get("checks")
+    has_control = False
+    if checks is not None:
+        if isinstance(checks, Mapping):
+            if not checks:
+                return False
+            for name, value in checks.items():
+                if not isinstance(name, str) or not name.strip() or _baseline_status_value(value) is None:
+                    return False
+                has_control = True
+        elif isinstance(checks, list):
+            if not checks:
+                return False
+            names: set[str] = set()
+            for item in checks:
+                if not isinstance(item, Mapping) or not isinstance(item.get("name"), str) or not item["name"].strip():
+                    return False
+                name = item["name"].strip()
+                if name in names or _baseline_status_value(item) is None:
+                    return False
+                names.add(name)
+                has_control = True
+        else:
+            return False
+    else:
+        for name, value in payload.items():
+            if name in {"schema", "ci"}:
+                continue
+            if not isinstance(name, str) or not name.strip() or _baseline_status_value(value) is None:
+                return False
+            has_control = True
+
+    ci = payload.get("ci")
+    if ci is not None:
+        if not isinstance(ci, Mapping):
+            return False
+        if "status" in ci and _baseline_status_value(ci) is None:
+            return False
+        jobs = ci.get("jobs", [])
+        if not isinstance(jobs, list):
+            return False
+        names: set[str] = set()
+        for job in jobs:
+            if not isinstance(job, Mapping) or not isinstance(job.get("name"), str) or not job["name"].strip():
+                return False
+            name = job["name"].strip()
+            if name in names or _baseline_status_value(job) is None:
+                return False
+            names.add(name)
+            has_control = True
+        if "status" not in ci and not jobs:
+            return False
+    return has_control
+
+
+def load_baseline_evidence(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Load a bounded local baseline report or the existing sanitized CI schema."""
+    try:
+        if path.stat().st_size > CI_EVIDENCE_MAX_BYTES:
+            return None, "baseline_too_large"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, CLASS_BASELINE_MISSING
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None, CLASS_BASELINE_MALFORMED
+    if not isinstance(payload, Mapping):
+        return None, CLASS_BASELINE_MALFORMED
+    if payload.get("schema") == CI_EVIDENCE_SCHEMA:
+        evidence, error = load_ci_evidence(path)
+        return (None, CLASS_BASELINE_MALFORMED) if error else (evidence, None)
+    if payload.get("schema") not in {None, QUALITY_GATE_SCHEMA}:
+        return None, CLASS_BASELINE_MALFORMED
+    if not _valid_local_baseline_payload(payload):
+        return None, CLASS_BASELINE_MALFORMED
+    return dict(payload), None
+
+
 def _baseline_statuses(baseline_report: Mapping[str, Any] | None) -> dict[str, str]:
     """Extract only check statuses from an operator-supplied baseline report."""
     if not isinstance(baseline_report, Mapping):
         return {}
-    raw_checks = baseline_report.get("checks", baseline_report)
-    if isinstance(raw_checks, list):
-        entries = ((item.get("name"), item) for item in raw_checks if isinstance(item, Mapping))
-    elif isinstance(raw_checks, Mapping):
-        entries = raw_checks.items()
-    else:
-        return {}
+    if baseline_report.get("evidence_format") == CI_EVIDENCE_SCHEMA:
+        snapshot = _ci_evidence_snapshot(baseline_report)
+        statuses = {
+            f"ci:{job['name']}": job["status"]
+            for job in snapshot.get("jobs", [])
+            if isinstance(job, Mapping) and isinstance(job.get("name"), str)
+        }
+        if isinstance(snapshot.get("status"), str):
+            statuses["ci"] = snapshot["status"]
+        return statuses
     statuses: dict[str, str] = {}
-    for name, value in entries:
+    def record(name: Any, value: Any) -> None:
         if not isinstance(name, str):
-            continue
+            return
         status = value if isinstance(value, str) else value.get("status") if isinstance(value, Mapping) else None
         if isinstance(status, str) and status:
             statuses[name] = status
+        if isinstance(value, Mapping):
+            for child_key in ("checks", "subchecks"):
+                children = value.get(child_key)
+                if isinstance(children, list):
+                    for child in children:
+                        if isinstance(child, Mapping):
+                            record(child.get("name"), child)
+                elif isinstance(children, Mapping):
+                    for child_name, child_value in children.items():
+                        record(child_name, child_value)
+
+    raw_checks = baseline_report.get("checks", baseline_report)
+    if isinstance(raw_checks, list):
+        for item in raw_checks:
+            if isinstance(item, Mapping):
+                record(item.get("name"), item)
+    elif isinstance(raw_checks, Mapping):
+        for name, value in raw_checks.items():
+            record(name, value)
+    else:
+        return {}
+    ci = baseline_report.get("ci")
+    if isinstance(ci, Mapping):
+        status = ci.get("status")
+        if isinstance(status, str) and status:
+            statuses["ci"] = status
+        for job in ci.get("jobs", []):
+            if isinstance(job, Mapping) and isinstance(job.get("name"), str) and isinstance(job.get("status"), str):
+                statuses[f"ci:{job['name']}"] = job["status"]
     return statuses
+
+
+def _candidate_statuses(checks: list[dict[str, Any]], ci_result: Mapping[str, Any]) -> dict[str, str]:
+    statuses: dict[str, str] = {}
+    for item in checks:
+        if isinstance(item.get("name"), str) and isinstance(item.get("status"), str):
+            statuses[item["name"]] = item["status"]
+        for child_key in ("checks", "subchecks"):
+            children = item.get(child_key, [])
+            if isinstance(children, list):
+                entries = ((child.get("name"), child) for child in children if isinstance(child, Mapping))
+            elif isinstance(children, Mapping):
+                entries = children.items()
+            else:
+                entries = ()
+            for name, child in entries:
+                if isinstance(name, str) and isinstance(child, Mapping) and isinstance(child.get("status"), str):
+                    statuses[name] = child["status"]
+    ci = _ci_snapshot(ci_result)
+    statuses["ci"] = str(ci.get("status", "unavailable"))
+    for job in ci.get("jobs", []):
+        if isinstance(job, Mapping) and isinstance(job.get("name"), str) and isinstance(job.get("status"), str):
+            statuses[f"ci:{job['name']}"] = job["status"]
+    return statuses
+
+
+def _status_bucket(status: str | None) -> str:
+    if status == "passed":
+        return "pass"
+    if status in {"failed", "timed_out", "collection_failed", "blocked"}:
+        return "failure"
+    if status in {"unavailable", "ci_unavailable", "not_run", "not_configured"}:
+        return "unavailable"
+    if status == "malformed":
+        return "malformed"
+    return "unknown"
+
+
+def _baseline_delta_classification(baseline_status: str | None, candidate_status: str | None) -> str:
+    if baseline_status is None:
+        if _status_bucket(candidate_status) == "failure":
+            return BASELINE_DELTA_FAILURE_ORIGIN_UNVERIFIED
+        return CLASS_BASELINE_MISSING
+    baseline_bucket = _status_bucket(baseline_status)
+    candidate_bucket = _status_bucket(candidate_status)
+    if baseline_bucket == "malformed":
+        return CLASS_BASELINE_MALFORMED
+    if candidate_bucket == "malformed":
+        return BASELINE_DELTA_CANDIDATE_MALFORMED
+    if candidate_bucket == "pass":
+        if baseline_bucket == "pass":
+            return BASELINE_DELTA_UNCHANGED
+        if baseline_bucket == "failure":
+            return BASELINE_DELTA_RESOLVED_FAILURE
+        if baseline_bucket == "unavailable":
+            return BASELINE_DELTA_NEWLY_AVAILABLE_PASS
+    if candidate_bucket == "failure":
+        if baseline_bucket == "pass":
+            return BASELINE_DELTA_INTRODUCED_FAILURE
+        if baseline_bucket == "failure":
+            return BASELINE_DELTA_INHERITED_FAILURE
+        return BASELINE_DELTA_FAILURE_ORIGIN_UNVERIFIED
+    if candidate_bucket == "unavailable":
+        if baseline_bucket == "unavailable":
+            return BASELINE_DELTA_UNAVAILABLE_IN_BOTH
+        return BASELINE_DELTA_CANDIDATE_INCOMPLETE
+    return BASELINE_DELTA_CANDIDATE_MALFORMED
+
+
+def _stable_fingerprint(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _baseline_delta(
+    baseline_report: Mapping[str, Any] | None,
+    *,
+    baseline_error: str | None,
+    checks: list[dict[str, Any]],
+    ci_result: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if baseline_error == CLASS_BASELINE_MISSING:
+        return {
+            "status": "unavailable",
+            "classification": CLASS_BASELINE_MISSING,
+            "classifications": [CLASS_BASELINE_MISSING],
+            "baseline_available": False,
+            "controls": [],
+            "summary": {CLASS_BASELINE_MISSING: 1},
+            "fingerprint": _stable_fingerprint({"error": CLASS_BASELINE_MISSING}),
+        }
+    if baseline_error:
+        return {
+            "status": "malformed",
+            "classification": CLASS_BASELINE_MALFORMED,
+            "classifications": [CLASS_BASELINE_MALFORMED],
+            "baseline_available": False,
+            "controls": [],
+            "summary": {CLASS_BASELINE_MALFORMED: 1},
+            "fingerprint": _stable_fingerprint({"error": CLASS_BASELINE_MALFORMED}),
+        }
+    if baseline_report is None:
+        return {
+            "status": "not_run",
+            "classification": "not_run",
+            "classifications": ["not_run"],
+            "baseline_available": False,
+            "controls": [],
+            "summary": {"not_run": 1},
+            "fingerprint": _stable_fingerprint({"status": "not_run"}),
+        }
+    baseline_statuses = _baseline_statuses(baseline_report)
+    candidate_statuses = _candidate_statuses(checks, ci_result or {})
+    controls: list[dict[str, Any]] = []
+    for name in sorted(set(baseline_statuses) | set(candidate_statuses)):
+        baseline_status = baseline_statuses.get(name)
+        candidate_status = candidate_statuses.get(name)
+        controls.append({
+            "name": name,
+            "baseline_status": baseline_status,
+            "candidate_status": candidate_status,
+            "classification": _baseline_delta_classification(baseline_status, candidate_status),
+        })
+    summary: dict[str, int] = {}
+    for control in controls:
+        classification = control["classification"]
+        summary[classification] = summary.get(classification, 0) + 1
+    classifications = sorted(summary)
+    if any(item in summary for item in {CLASS_BASELINE_MALFORMED, BASELINE_DELTA_CANDIDATE_MALFORMED}):
+        status = "malformed"
+    elif any(item in summary for item in {BASELINE_DELTA_INTRODUCED_FAILURE, BASELINE_DELTA_INHERITED_FAILURE, BASELINE_DELTA_FAILURE_ORIGIN_UNVERIFIED}):
+        status = "failed"
+    elif any(item in summary for item in {CLASS_BASELINE_MISSING, BASELINE_DELTA_CANDIDATE_INCOMPLETE, BASELINE_DELTA_UNAVAILABLE_IN_BOTH}):
+        status = "unavailable"
+    else:
+        status = "passed"
+    primary = classifications[0] if len(classifications) == 1 else "mixed"
+    fingerprint_input = {
+        "baseline_statuses": dict(sorted(baseline_statuses.items())),
+        "candidate_statuses": dict(sorted(candidate_statuses.items())),
+        "controls": controls,
+    }
+    return {
+        "status": status,
+        "classification": primary,
+        "classifications": classifications,
+        "baseline_available": True,
+        "controls": controls,
+        "summary": dict(sorted(summary.items())),
+        "fingerprint": _stable_fingerprint(fingerprint_input),
+    }
 
 
 def _classify_check(item: dict[str, Any], *, baseline_statuses: Mapping[str, str], changed_paths: list[str]) -> str:
@@ -846,6 +1198,18 @@ def _annotate_check_classes(checks: list[dict[str, Any]], *, baseline_statuses: 
     return classes
 
 
+def _aggregate_local_statuses(checks: list[dict[str, Any]]) -> set[str]:
+    """Treat dependency-backed collection failures as unavailable aggregate evidence."""
+    statuses: set[str] = set()
+    for item in checks:
+        status = item.get("status")
+        if status == "collection_failed" and (item.get("summary") or {}).get("dependency_error"):
+            statuses.add("unavailable")
+        elif isinstance(status, str):
+            statuses.add(status)
+    return statuses
+
+
 def run_quality_gate(
     root: Path = REPOSITORY_ROOT,
     *,
@@ -856,6 +1220,7 @@ def run_quality_gate(
     baseline_report: Mapping[str, Any] | None = None,
     baseline_error: str | None = None,
     ci_evidence_error: str | None = None,
+    phase: str = "final",
     runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     """Run fixed local checks while preserving evidence boundaries.
@@ -878,31 +1243,58 @@ def run_quality_gate(
         configuration_errors.append(timestamp_error)
     if execute and not timestamp_injected:
         configuration_errors.append("timestamp_not_injected")
-    if baseline_error:
+    if baseline_error and baseline_error != CLASS_BASELINE_MISSING:
         configuration_errors.append(baseline_error)
     if ci_evidence_error:
         configuration_errors.append(ci_evidence_error)
+    if phase not in QUALITY_GATE_PHASES:
+        configuration_errors.append("invalid_quality_gate_phase")
+    if phase == "preflight" and ci_result is not None:
+        configuration_errors.append("preflight_ci_evidence_forbidden")
 
-    checks = [
-        _check_command("compile", [sys.executable, "-m", "compileall", "-q", "."], root=root, execute=execute, runner=runner),
-        _check_command("pytest", [sys.executable, "-m", "pytest", "-q"], root=root, execute=execute, runner=runner),
-        _check_command("ruff", ["ruff", "check", "."], root=root, execute=execute, tool="ruff", runner=runner),
-        _typed_check(root, typed, execute=execute, runner=runner),
-        _frontend_check(root, execute=execute, runner=runner),
-        _security_check(root, execute=execute, runner=runner),
-        _check_command("diff_check", ["git", "diff", "--check"], root=root, execute=execute, runner=runner),
-    ]
+    if phase == "preflight":
+        checks = [
+            _check_command("compile", [sys.executable, "-m", "compileall", "-q", "scripts", "tests"], root=root, execute=execute, runner=runner),
+            _check_command("pytest", [sys.executable, "-m", "pytest", "-q", "tests/test_local_quality_gate.py"], root=root, execute=execute, runner=runner),
+            _check_command(
+                "ruff", ["ruff", "check", "scripts/ai/run_local_quality_gate.py", "tests/test_local_quality_gate.py"],
+                root=root, execute=execute, tool="ruff", runner=runner,
+            ),
+            _check_command("diff_check", ["git", "diff", "--check"], root=root, execute=execute, runner=runner),
+        ]
+    else:
+        checks = [
+            _check_command("compile", [sys.executable, "-m", "compileall", "-q", "."], root=root, execute=execute, runner=runner),
+            _check_command("pytest", [sys.executable, "-m", "pytest", "-q"], root=root, execute=execute, runner=runner),
+            _check_command("ruff", ["ruff", "check", "."], root=root, execute=execute, tool="ruff", runner=runner),
+            _typed_check(root, typed, execute=execute, runner=runner),
+            _frontend_check(root, execute=execute, runner=runner),
+            _security_check(root, execute=execute, runner=runner),
+            _check_command("diff_check", ["git", "diff", "--check"], root=root, execute=execute, runner=runner),
+        ]
     for item in checks:
         if item.get("status") == "malformed":
             configuration_errors.append(f"malformed:{item.get('name')}")
     baseline_statuses = _baseline_statuses(baseline_report)
     check_classes = _annotate_check_classes(checks, baseline_statuses=baseline_statuses, changed_paths=paths)
-    ci = _ci_snapshot(ci_result)
-    failure_classes = {
+    local_failure_classes = {
         value for value in check_classes if value not in {CLASS_PASS, "not_configured", "not_run"}
     }
+    ci = _ci_snapshot(ci_result)
+    baseline_delta = _baseline_delta(
+        baseline_report,
+        baseline_error=baseline_error,
+        checks=checks,
+        ci_result=ci_result,
+    )
+    failure_classes = set(local_failure_classes)
+    failure_classes.update(ci.get("failure_classes", []))
     if ci["classification"] != CLASS_PASS:
         failure_classes.add(ci["classification"])
+    if baseline_delta["status"] == "unavailable":
+        failure_classes.add(baseline_delta["classification"])
+    elif baseline_delta["status"] == "malformed":
+        failure_classes.add(CLASS_MALFORMED_CONFIGURATION)
     failure_classes = sorted(failure_classes)
     git = _git_state(root)
     warnings = list(toolchain["findings"])
@@ -916,19 +1308,30 @@ def run_quality_gate(
         warnings.append(f"git_state:{git['status']}")
     warnings = sorted(set(warnings))
 
-    statuses = {check["status"] for check in checks}
+    statuses = _aggregate_local_statuses(checks)
     if configuration_errors:
-        status, exit_code = "configuration_error", EXIT_CONFIGURATION
+        local_status, local_exit_code = "configuration_error", EXIT_CONFIGURATION
     elif not execute:
-        status, exit_code = "not_run", EXIT_UNAVAILABLE
-    elif {"failed", "timed_out", "collection_failed"} & statuses or "blocked" in statuses or ci["status"] == "failed":
-        status, exit_code = "failed", EXIT_FAILED
-    elif "unavailable" in statuses or ci["status"] == "unavailable":
-        status, exit_code = "unavailable", EXIT_UNAVAILABLE
+        local_status, local_exit_code = "not_run", EXIT_UNAVAILABLE
+    elif {"failed", "timed_out", "collection_failed"} & statuses or "blocked" in statuses:
+        local_status, local_exit_code = "failed", EXIT_FAILED
+    elif "unavailable" in statuses:
+        local_status, local_exit_code = "unavailable", EXIT_UNAVAILABLE
     elif warnings:
-        status, exit_code = "passed_with_warnings", EXIT_PASSED
+        local_status, local_exit_code = "passed_with_warnings", EXIT_PASSED
     else:
-        status, exit_code = "passed", EXIT_PASSED
+        local_status, local_exit_code = "passed", EXIT_PASSED
+
+    if configuration_errors:
+        status, final_exit_code = "configuration_error", EXIT_CONFIGURATION
+    elif not execute:
+        status, final_exit_code = "not_run", EXIT_UNAVAILABLE
+    elif local_status == "failed" or ci["status"] == "failed":
+        status, final_exit_code = "failed", EXIT_FAILED
+    elif local_status == "unavailable" or ci["status"] == "unavailable" or baseline_delta["status"] == "unavailable":
+        status, final_exit_code = "unavailable", EXIT_UNAVAILABLE
+    else:
+        status, final_exit_code = local_status, local_exit_code
 
     if configuration_errors:
         classification = CLASS_MALFORMED_CONFIGURATION
@@ -942,30 +1345,50 @@ def run_quality_gate(
             CLASS_FAILURE_ORIGIN_UNVERIFIED, CLASS_MISSING_TOOL,
             CLASS_UNAVAILABLE_DEPENDENCY, CLASS_CI_UNAVAILABLE, "blocked",
         )
-        classification = next((value for value in priority if value in failure_classes), failure_classes[0])
+        if local_failure_classes:
+            classification = next((value for value in priority if value in local_failure_classes), sorted(local_failure_classes)[0])
+        elif ci["classification"] == CLASS_CI_UNAVAILABLE:
+            classification = CLASS_CI_UNAVAILABLE
+        elif baseline_delta["classification"] in {CLASS_BASELINE_MISSING, CLASS_BASELINE_MALFORMED}:
+            classification = baseline_delta["classification"]
+        else:
+            classification = next((value for value in priority if value in failure_classes), sorted(failure_classes)[0])
     else:
         classification = CLASS_PASS
-    ready = execute and status == "passed" and git["status"] == "clean" and ci["status"] == "passed"
+    ready = (
+        phase == "final" and execute and status == "passed" and git["status"] == "clean"
+        and ci["status"] == "passed"
+        and baseline_delta["status"] not in {"unavailable", "malformed"}
+    )
+    preflight = {
+        "status": local_status,
+        "exit_code": local_exit_code,
+        "ready_for_supervised_use": False,
+    }
+    exit_code = local_exit_code if phase == "preflight" else final_exit_code
     return {
         "schema": QUALITY_GATE_SCHEMA,
         "generated_at": generated_at,
         "timestamp_injected": timestamp_injected,
-        "mode": "real_execution" if execute else "dry_run",
+        "mode": "preflight_execution" if execute and phase == "preflight" else "real_execution" if execute else "dry_run",
+        "phase": phase,
         "status": status,
         "classification": classification,
         "failure_classes": failure_classes,
         "exit_code": exit_code,
         "ready_for_supervised_use": ready,
+        "preflight": preflight,
         "changed_files": paths,
         "toolchain": toolchain,
         "dependencies": dependencies,
         "typed_analysis": typed,
         "checks": checks,
-        "check_order": list(CHECK_ORDER),
+        "check_order": list(PREFLIGHT_CHECK_ORDER if phase == "preflight" else CHECK_ORDER),
         "status_taxonomy": list(CHECK_STATUS_TAXONOMY),
         "frontend_check_order": list(FRONTEND_CHECK_ORDER),
         "ci": ci,
         "baseline": {"provided": baseline_report is not None, "check_statuses": dict(sorted(baseline_statuses.items()))},
+        "baseline_delta": baseline_delta,
         "git_state": git,
         "warnings": warnings,
         "configuration_errors": sorted(set(configuration_errors)),
@@ -975,7 +1398,13 @@ def run_quality_gate(
             "environment_values_persisted": False, "automatic_repair": False,
             "merge_or_publish": False,
         },
-        "operator_action": "run with --execute and an injected timezone-aware --generated-at after resolving unavailable or failed checks" if not ready else "human review may proceed; inspect the report and CI evidence before merging",
+        "operator_action": (
+            "supply complete sanitized CIEvidence.v1 to run final attestation; preflight success is not merge evidence"
+            if phase == "preflight" and local_exit_code == EXIT_PASSED
+            else "run with --execute and an injected timezone-aware --generated-at after resolving unavailable or failed checks"
+            if not ready
+            else "human review may proceed; inspect the report and CI evidence before merging"
+        ),
     }
 
 
@@ -987,17 +1416,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--branch", default="local")
     parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--execute", action="store_true", help="run fixed local checks instead of only reporting their plan")
+    parser.add_argument("--phase", choices=("final", "preflight"), default="final", help="final attestation or local preflight")
     parser.add_argument("--generated-at", help="timezone-aware ISO timestamp injected by the caller")
     parser.add_argument("--ci-status", choices=("success", "failure", "unavailable"), help="optional external CI result; never queried by this tool")
     parser.add_argument("--ci-steps", type=int, default=0, help="executed-step count accompanying --ci-status")
     parser.add_argument("--ci-evidence-file", type=Path, help="local sanitized CI metadata JSON; never queries GitHub or reads logs")
-    parser.add_argument("--baseline-file", help="optional JSON baseline report used to classify pre-existing failures")
+    parser.add_argument(
+        "--baseline-file", type=Path,
+        help="optional bounded baseline report or MarketOS.CIEvidence.v1 file for deterministic delta attribution",
+    )
     parser.add_argument("--json", action="store_true"); parser.add_argument("--markdown", action="store_true"); parser.add_argument("--output")
     args = parser.parse_args(argv)
     if args.json and args.markdown: parser.error("choose --json or --markdown")
     paths = list(args.changed_file) + (changed_from_git(args.repository) if args.from_git else [])
     if args.ci_status is not None and args.ci_evidence_file is not None:
         parser.error("choose --ci-status or --ci-evidence-file")
+    if args.phase == "preflight" and not args.execute:
+        parser.error("--phase preflight requires --execute")
+    if args.phase == "preflight" and (args.ci_status is not None or args.ci_evidence_file is not None):
+        parser.error("--phase preflight does not accept final CI evidence")
     ci_evidence_error = None
     if args.ci_evidence_file is not None:
         ci_result, ci_evidence_error = load_ci_evidence(args.ci_evidence_file)
@@ -1006,13 +1443,7 @@ def main(argv: list[str] | None = None) -> int:
     baseline_report = None
     baseline_error = None
     if args.baseline_file:
-        try:
-            baseline_report = json.loads(Path(args.baseline_file).read_text(encoding="utf-8"))
-            if not isinstance(baseline_report, Mapping):
-                baseline_report = None
-                baseline_error = "malformed_baseline"
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            baseline_error = "malformed_baseline"
+        baseline_report, baseline_error = load_baseline_evidence(args.baseline_file)
     report = run_quality_gate(
         args.repository,
         generated_at=args.generated_at,
@@ -1022,8 +1453,14 @@ def main(argv: list[str] | None = None) -> int:
         baseline_report=baseline_report,
         baseline_error=baseline_error,
         ci_evidence_error=ci_evidence_error,
+        phase=args.phase,
     )
-    report["planning_summary"] = run(paths, diff_text=_diff_text(args.diff_file, args.repository), branch=args.branch)
+    report["planning_summary"] = run(
+        paths,
+        diff_text=_diff_text(args.diff_file, args.repository),
+        branch=args.branch,
+        quality_gate_report=report,
+    )
     content = render_json_or_markdown(report, markdown=args.markdown, title="MarketOS local quality gate")
     write_optional_output(content, args.output); print(content, end="")
     return int(report["exit_code"])

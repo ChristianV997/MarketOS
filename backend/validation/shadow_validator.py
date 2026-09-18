@@ -49,8 +49,6 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable
 
 import numpy as np
 from scipy import stats
@@ -509,9 +507,8 @@ class UnitEconomicsValidator(PhaseValidator):
                 recommendation="collect_more_data",
             )
 
-        legacy_rankings = []
-        policy_rankings = []
-        realized_outcomes = []
+        legacy_correlations = []
+        policy_correlations = []
 
         for e in events:
             data = e.get("data") or {}
@@ -520,29 +517,31 @@ class UnitEconomicsValidator(PhaseValidator):
                 pol_rank = data.get("policy_product_ranking")
                 outcome = data.get("realized_roas")
 
-                if leg_rank and pol_rank and outcome is not None:
-                    legacy_rankings.append(leg_rank)
-                    policy_rankings.append(pol_rank)
-                    realized_outcomes.append(outcome)
+                values = (leg_rank, pol_rank, outcome)
+                if not all(isinstance(value, (list, tuple, np.ndarray)) for value in values):
+                    continue
+                if len(leg_rank) < 2 or len(leg_rank) != len(pol_rank) or len(leg_rank) != len(outcome):
+                    continue
+                legacy_corr, _ = stats.spearmanr(leg_rank, outcome)
+                policy_corr, _ = stats.spearmanr(pol_rank, outcome)
+                if np.isfinite(legacy_corr) and np.isfinite(policy_corr):
+                    legacy_correlations.append(legacy_corr)
+                    policy_correlations.append(policy_corr)
             except Exception:
                 continue
 
-        if len(legacy_rankings) < 5:
+        if len(legacy_correlations) < 5:
             return ValidationResult(
                 phase=self.phase,
                 passed=False,
                 num_events=len(events),
-                metrics={"valid_rankings": len(legacy_rankings)},
+                metrics={"valid_rankings": len(legacy_correlations)},
                 regression_detected=False,
                 recommendation="collect_more_data",
             )
 
-        legacy_corr, _ = stats.spearmanr(
-            list(range(len(legacy_rankings))), realized_outcomes
-        )
-        policy_corr, _ = stats.spearmanr(
-            list(range(len(policy_rankings))), realized_outcomes
-        )
+        legacy_corr = np.mean(legacy_correlations)
+        policy_corr = np.mean(policy_correlations)
 
         ranking_accuracy_lift = policy_corr - legacy_corr
 
