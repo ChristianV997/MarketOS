@@ -83,6 +83,30 @@ def test_scope_and_pr_and_rollback():
     rules = {item["rule"] for item in document["findings"]}
     assert "changed_files_match_scope" in rules
     assert "pr_must_exist" in rules
+    assert "rollback_must_exist" in rules
+
+
+def test_packet_rollback_does_not_excuse_missing_report_rollback():
+    report = {
+        "changed_files": ["scripts/ai/agent_output_eval.py"],
+        "pr": 1,
+        "evidence_classification": "actual",
+    }
+    document, code = evaluate_report(report, _packet())
+    assert code == 2
+    assert any(item["rule"] == "rollback_must_exist" for item in document["findings"])
+
+
+def test_undeclared_owned_files():
+    report = {
+        "changed_files": ["scripts/ai/agent_output_eval.py"],
+        "owned_files": ["scripts/ai/agent_output_eval.py", "docs/secret-plan.md"],
+        "pr": 1,
+        "rollback": "revert",
+    }
+    document, code = evaluate_report(report, _packet())
+    assert code == 2
+    assert any(item["rule"] == "undeclared_files" for item in document["findings"])
 
 
 def test_duplicate_authority_and_secrets_and_full_suite():

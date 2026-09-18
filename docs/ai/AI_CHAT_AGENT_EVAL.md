@@ -11,10 +11,11 @@ and it is not `pr_readiness_report.py`.
 3. Fixture or simulated evidence must not be labeled live.
 4. `changed_files` must stay inside `allowed_scope`.
 5. The report must cite a PR.
-6. Rollback must exist on the report or the packet.
-7. Reserved authority files must not be rewritten.
-8. Secret-shaped strings fail the eval.
-9. "Full suite passed" requires an actual full-suite command.
+6. Rollback must exist on the report. A packet rollback is not a substitute.
+7. `owned_files` must also appear in `changed_files`.
+8. Reserved authority files must not be rewritten.
+9. Secret-shaped strings fail the eval.
+10. "Full suite passed" requires an actual full-suite command.
 
 ## Command
 

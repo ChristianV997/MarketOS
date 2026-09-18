@@ -109,11 +109,15 @@ def evaluate_report(
 
     if not pr_ref:
         findings.append({"rule": "pr_must_exist", "status": "failed", "detail": "report omits PR reference"})
-    packet_rollback = str(packet.get("rollback") or "")
-    if not rollback and not packet_rollback:
-        findings.append({"rule": "rollback_must_exist", "status": "failed", "detail": "rollback missing"})
+    if not rollback:
+        findings.append({"rule": "rollback_must_exist", "status": "failed", "detail": "report omits rollback"})
 
-    rewritten = " ".join(changed + _as_list(report.get("owned_files")))
+    owned = [_normalize_path(item) for item in _as_list(report.get("owned_files"))]
+    undeclared = [path for path in owned if path and path not in changed]
+    if undeclared:
+        findings.append({"rule": "undeclared_files", "status": "failed", "detail": ",".join(undeclared[:8])})
+
+    rewritten = " ".join(changed + owned)
     if any(name in rewritten for name in RESERVED_REWRITE):
         findings.append({"rule": "duplicate_authority_rejected", "status": "failed", "detail": "reserved authority path rewritten"})
 
@@ -124,6 +128,7 @@ def evaluate_report(
         "changed_files_match_scope",
         "pr_must_exist",
         "rollback_must_exist",
+        "undeclared_files",
         "duplicate_authority_rejected",
         "raw_secrets",
         "full_suite_requires_command",
