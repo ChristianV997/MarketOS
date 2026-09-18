@@ -43,6 +43,7 @@ class LiveActionRequest:
     budget_amount: float = 0.0
     budget_currency: str = "USD"
     approval_id: str | None = None
+    run_id: str | None = None
     dry_run: bool = True  # Strict dry-run default
     target_platform: str = ""
     parameters: dict[str, Any] = field(default_factory=dict)
@@ -133,12 +134,16 @@ def evaluate_live_action_gate(request: LiveActionRequest) -> LiveActionVerdict:
     if not request.approval_id:
         blockers.append("approval_id_required_for_live_action")
 
-    # 4. Scope and budget ceiling check
+    # 4. Explicit run_id required for audit traceability
+    if not request.run_id or len(request.run_id.strip()) < 4:
+        blockers.append("run_id_required_for_live_action")
+
+    # 5. Scope and budget ceiling check
     ceiling = get_live_budget_ceiling_usd()
     if request.budget_amount > ceiling:
         blockers.append(f"budget_exceeds_ceiling: {request.budget_amount} > {ceiling}")
 
-    # 5. Idempotency key required
+    # 6. Idempotency key required
     if not request.idempotency_key or len(request.idempotency_key.strip()) < 8:
         blockers.append("valid_idempotency_key_required_min_8_chars")
 

@@ -16,44 +16,21 @@ Local testing (Stripe):
 """
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import json
 import logging
 import os
 
-import stripe
 from fastapi import APIRouter, Header, HTTPException, Request
+
+from backend.security.webhooks import (
+    read_and_validate_webhook_body,
+    verify_shopify_signature,
+    verify_stripe_signature,
+)
 
 _log = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_STRIPE_TOLERANCE_S = 300
-
-
-def _verify_stripe_signature(payload: bytes, sig_header: str, secret: str) -> bool:
-    """Verify a Stripe webhook signature via the official stripe SDK.
-
-    Delegates to ``stripe.Webhook.construct_event`` (constant-time
-    comparison, timestamp-tolerance check, "t=<ts>,v1=<sig>[,v1=<sig>...]"
-    header parsing) rather than hand-rolling the HMAC-SHA256 check — same
-    tolerance window (300s) as before. Only the boolean result is used
-    here; the parsed Event object is discarded since the caller already
-    re-parses the raw body as a plain dict downstream.
-    """
-    try:
-        stripe.Webhook.construct_event(payload, sig_header, secret, tolerance=_STRIPE_TOLERANCE_S)
-        return True
-    except (ValueError, stripe.error.SignatureVerificationError):
-        return False
-
-
-def _verify_shopify_signature(payload: bytes, hmac_header: str, secret: str) -> bool:
-    digest = hmac.new(secret.encode(), payload, hashlib.sha256).digest()
-    expected = base64.b64encode(digest).decode()
-    return hmac.compare_digest(expected, hmac_header)
 
 
 def _journal_signature_failure(source: str) -> None:
@@ -91,10 +68,8 @@ async def stripe_webhook(
         # silently trust an unverifiable webhook.
         raise HTTPException(status_code=503, detail="stripe_webhook_not_configured")
 
-    body = await request.body()
-    if len(body) > 1_048_576:
-        raise HTTPException(status_code=413, detail="payload_too_large")
-    if not stripe_signature or not _verify_stripe_signature(body, stripe_signature, secret):
+    body = await read_and_validate_webhook_body(request)
+    if not stripe_signature or not verify_stripe_signature(body, stripe_signature, secret):
         _journal_signature_failure("stripe")
         raise HTTPException(status_code=400, detail="invalid_signature")
 
@@ -221,10 +196,8 @@ async def shopify_webhook(
     if not secret:
         raise HTTPException(status_code=503, detail="shopify_webhook_not_configured")
 
-    body = await request.body()
-    if len(body) > 1_048_576:
-        raise HTTPException(status_code=413, detail="payload_too_large")
-    if not x_shopify_hmac_sha256 or not _verify_shopify_signature(
+    body = await read_and_validate_webhook_body(request)
+    if not x_shopify_hmac_sha256 or not verify_shopify_signature(
         body, x_shopify_hmac_sha256, secret
     ):
         _journal_signature_failure("shopify")
@@ -300,9 +273,7 @@ async def cj_webhook(
     if not shared_key:
         raise HTTPException(status_code=503, detail="cj_webhook_not_configured")
 
-    body = await request.body()
-    if len(body) > 1_048_576:
-        raise HTTPException(status_code=413, detail="payload_too_large")
+    body = await read_and_validate_webhook_body(request)
 
     sig = x_cj_signature or x_webhook_signature
     from backend.security.webhooks import get_webhook_ledger, parse_safe_webhook_json, verify_generic_hmac

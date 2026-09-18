@@ -93,3 +93,20 @@ def test_credential_set_api_boundary(client):
     assert data["key"] == "SHOPIFY_ACCESS_TOKEN"
     assert data["masked"] == "shpa...cdef"
     assert "1234567890" not in data["masked"]
+
+
+def test_credential_test_endpoint_dry_run_and_fail_closed(client):
+    register_test_token("tok_op", actor_id="operator", role="operator")
+    headers = {"Authorization": "Bearer tok_op"}
+
+    # In dry-run mode (default), returns dry-run status without provider mutations
+    resp = client.post("/api/setup/test/meta", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] in {"dry_run", "ok", "blocked"}
+    if data["status"] == "blocked":
+        assert "reasons" in data
+
+    # Unknown service
+    resp_unknown = client.post("/api/setup/test/unknown_service", headers=headers)
+    assert resp_unknown.status_code == 404

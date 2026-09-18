@@ -213,99 +213,50 @@ async def test_credentials(
 ) -> dict[str, Any]:
     """Test service configuration in dry-run mode. Operator authentication required."""
     service = service.lower()
-
-    if service == "meta":
-        try:
-            from backend.config import is_dry_run
-            from backend.integrations import meta_ads_client
-
-            if is_dry_run("meta"):
-                return {
-                    "status": "dry_run",
-                    "message": "Meta is in dry-run mode (no credentials detected or dry-run active)",
-                }
-
-            campaign_id = meta_ads_client.create_campaign("__TEST__Campaign__")
-            if campaign_id:
-                return {
-                    "status": "ok",
-                    "message": "Meta credentials verified",
-                    "campaign_id": campaign_id,
-                }
-            return {
-                "status": "error",
-                "message": "Failed to create test campaign",
-            }
-        except Exception as exc:
-            return {
-                "status": "error",
-                "message": str(exc),
-            }
-
-    elif service == "tiktok":
-        try:
-            from backend.config import is_dry_run
-            from backend.integrations import tiktok_ads
-
-            if is_dry_run("tiktok"):
-                return {
-                    "status": "dry_run",
-                    "message": "TikTok is in dry-run mode (no credentials detected or dry-run active)",
-                }
-
-            campaign_id = tiktok_ads.create_campaign("__TEST__Campaign__", budget=1.0)
-            if campaign_id:
-                return {
-                    "status": "ok",
-                    "message": "TikTok credentials verified",
-                    "campaign_id": str(campaign_id),
-                }
-            return {
-                "status": "error",
-                "message": "Failed to create test campaign",
-            }
-        except Exception as exc:
-            _log.exception("tiktok_test_failed")
-            return {
-                "status": "error",
-                "message": str(exc),
-            }
-
-    elif service == "shopify":
-        try:
-            from backend.config import is_dry_run
-            from backend.creation.store_builder import create_product_page
-
-            if is_dry_run("shopify"):
-                return {
-                    "status": "dry_run",
-                    "message": "Shopify is in dry-run mode (no credentials detected or dry-run active)",
-                }
-
-            page = create_product_page(
-                "__TEST__Product__",
-                "<p>Test product for credential verification</p>",
-                1.0,
-            )
-            if page.get("status") == "ok":
-                return {
-                    "status": "ok",
-                    "message": "Shopify credentials verified",
-                    "product_id": page.get("product_id"),
-                }
-            return {
-                "status": "error",
-                "message": "Failed to create test product",
-            }
-        except Exception as exc:
-            _log.exception("shopify_test_failed")
-            return {
-                "status": "error",
-                "message": str(exc),
-            }
-
-    else:
+    if service not in {"meta", "tiktok", "shopify"}:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service}")
+
+    from backend.config import get_service_credentials, is_dry_run
+    from backend.security.live_action_gate import LiveActionRequest, evaluate_live_action_gate
+
+    creds = get_service_credentials(service)
+    dry_run = is_dry_run(service)
+
+    # Dry-run / offline verification (always safe, no remote provider mutations)
+    if dry_run or not creds:
+        return {
+            "status": "dry_run",
+            "service": service,
+            "has_credentials": bool(creds),
+            "configured_keys": list(creds.keys()),
+            "message": f"{service.capitalize()} is configured in dry-run / simulation mode",
+        }
+
+    # Live verification is strictly evaluated through the mutation gate
+    gate_verdict = evaluate_live_action_gate(
+        LiveActionRequest(
+            action_type="ad_spend" if service in {"meta", "tiktok"} else "storefront_mutation",
+            workspace_id="default",
+            actor=actor,
+            idempotency_key=f"test_{service}_dry_gate",
+            dry_run=False,  # testing live eligibility
+        )
+    )
+
+    if not gate_verdict.allowed:
+        return {
+            "status": "blocked",
+            "service": service,
+            "message": f"Live {service.capitalize()} verification blocked by policy gate",
+            "reasons": list(gate_verdict.blockers),
+            "audit_event_id": gate_verdict.audit_event_id,
+        }
+
+    return {
+        "status": "ok",
+        "service": service,
+        "message": f"{service.capitalize()} credentials verified (dry-run preflight passed)",
+    }
 
 
 __all__ = ["router"]

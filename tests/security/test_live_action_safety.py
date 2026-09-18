@@ -41,6 +41,7 @@ def test_live_action_blocked_without_global_enable(monkeypatch):
         actor=actor,
         idempotency_key="live_key_12345",
         approval_id="appr_123",
+        run_id="run_123",
         dry_run=False,
     )
     verdict = evaluate_live_action_gate(req)
@@ -59,6 +60,7 @@ def test_live_action_requires_approval_and_idempotency(monkeypatch):
         actor=actor,
         idempotency_key="live_key_12345",
         approval_id=None,
+        run_id="run_123",
         dry_run=False,
     )
     verdict = evaluate_live_action_gate(req_no_appr)
@@ -72,11 +74,30 @@ def test_live_action_requires_approval_and_idempotency(monkeypatch):
         actor=actor,
         idempotency_key="",
         approval_id="appr_123",
+        run_id="run_123",
         dry_run=False,
     )
     verdict_idem = evaluate_live_action_gate(req_no_idem)
     assert verdict_idem.allowed is False
     assert "valid_idempotency_key_required_min_8_chars" in verdict_idem.blockers
+
+
+def test_live_action_requires_run_id(monkeypatch):
+    monkeypatch.setenv("MARKETOS_ENABLE_LIVE_ACTIONS", "true")
+    actor = AuthenticatedActor("op1", "operator", frozenset({"*"}))
+
+    req_no_run = LiveActionRequest(
+        action_type="ad_spend",
+        workspace_id="default",
+        actor=actor,
+        idempotency_key="live_key_12345",
+        approval_id="appr_123",
+        run_id=None,
+        dry_run=False,
+    )
+    verdict = evaluate_live_action_gate(req_no_run)
+    assert verdict.allowed is False
+    assert "run_id_required_for_live_action" in verdict.blockers
 
 
 def test_kill_switch_blocks_action(monkeypatch):
@@ -90,6 +111,7 @@ def test_kill_switch_blocks_action(monkeypatch):
         actor=actor,
         idempotency_key="live_key_12345",
         approval_id="appr_123",
+        run_id="run_123",
         dry_run=False,
     )
     verdict = evaluate_live_action_gate(req)
@@ -109,6 +131,7 @@ def test_budget_ceiling_enforcement(monkeypatch):
         budget_amount=200.0,
         idempotency_key="live_key_12345",
         approval_id="appr_123",
+        run_id="run_123",
         dry_run=False,
     )
     verdict = evaluate_live_action_gate(req)

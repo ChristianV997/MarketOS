@@ -172,3 +172,21 @@ Status: Evidence snapshot for `origin/main` (`df59a0609897907c1565d7d5f78e209590
 | `tests/test_high_value_path_harness.py` | #249 | **PR #258** (Adopted) | Automated tests asserting deterministic unit economics, replay stability, and non-live invariants. | Adopted cleanly from PR #249 without alteration. |
 | `docs/ai/DEV_DEPLOY_REPRODUCIBILITY.md` | #249 | **PR #258** (Adopted) | Operator instructions for worktree isolation, dev stack verification, and offline test selection. | Adopted cleanly from PR #249 without alteration. |
 | `backend/security/*` | #251, #258 | **PR #258** | Canonical security suite (`auth.py`, `cors.py`, `credentials.py`, `live_action_gate.py`, `webhooks.py`, `deployment_validation.py`). | Fragmented security patches from closed PR #251 fully superseded. |
+
+---
+
+## PR #211 Boundary Coordination (Artifact Store vs Ingress Auth)
+
+To ensure clear non-overlapping ownership between PR #211 (`codex/marketos-artifact-store-security-v4`) and PR #258 (`antigravity/marketos-deployment-auth-public-readiness-v2`):
+
+1. **Owned by PR #211 (Filesystem Storage Confinement)**:
+   - `backend/workspaces/artifact_store.py`: Path traversal, directory traversal (`..`), absolute path rejection, symlink escape detection, filename sanitation, payload credential shape redaction, and storage-level file persistence confinement.
+   - `services/*/plan.py`: Service-level artifact path helpers.
+   - `tests/test_workspaces/test_artifact_store.py`: Unit and regression tests for storage traversal.
+
+2. **Owned by PR #258 (HTTP Ingress & Identity Admission Control)**:
+   - `backend/security/auth.py`: Ingress actor authentication, role evaluation (`operator` vs `client`), and token-to-workspace binding resolution via `resolve_authorized_workspace(requested_workspace, actor)`.
+   - `backend/security/live_action_gate.py`: Pre-execution validation enforcing that `actor.can_access_workspace(workspace_id)`.
+   - `api/routes/services.py`: Resolves caller workspace through `resolve_authorized_workspace` before creating/fetching `ClientWorkspace`.
+   - `api/routes/workflows.py` & `api/routes/execution_cockpit.py`: Rejects cross-workspace access attempts fail-closed with 403.
+   - **Zero file overlap**: PR #258 does NOT modify `backend/workspaces/artifact_store.py` or any service artifact helpers. Both layers cleanly compose: PR #258 verifies identity at the API boundary, while PR #211 enforces physical isolation at the filesystem layer.
