@@ -315,6 +315,156 @@ def test_quality_certification_evaluation_package_accessible():
     assert hasattr(evaluation, "ExpectationRule")
     assert hasattr(evaluation, "ReplayCertificationReport")
     assert hasattr(evaluation, "CANONICAL_QUALITY_AUTHORITY")
+    assert hasattr(evaluation, "certify_data_quality")
+    assert hasattr(evaluation, "quality_reasons")
+    assert hasattr(evaluation, "deduplicate_observations")
 
     certifier = evaluation.DeterministicReplayCertifier()
     assert certifier.authority == evaluation.CANONICAL_QUALITY_AUTHORITY
+
+
+def test_canonical_quality_authority_consolidation():
+    """Verify evaluation.quality is the canonical authority and quality_certification is a thin adapter."""
+    import evaluation.quality as eq
+    import evaluation.quality_certification as eqc
+
+    # Assert exact reference identity across the canonical module and adapter
+    assert eq.DeterministicReplayCertifier is eqc.DeterministicReplayCertifier
+    assert eq.QualityAssertionState is eqc.QualityAssertionState
+    assert eq.ExpectationSuite is eqc.ExpectationSuite
+    assert eq.ExpectationRule is eqc.ExpectationRule
+    assert eq.CANONICAL_QUALITY_AUTHORITY is eqc.CANONICAL_QUALITY_AUTHORITY
+
+    # Base quality functions remain available on canonical authority
+    assert hasattr(eq, "quality_reasons")
+    assert hasattr(eq, "deduplicate_observations")
+    assert hasattr(eq, "certify_data_quality")
+
+
+def test_data_quality_contract_certification_bridge():
+    """Verify DataQuality contract directly bridges into deterministic replay certification."""
+    from evaluation.contracts import DataQuality
+    from evaluation.quality import certify_data_quality, QualityAssertionState
+
+    # Normal valid simulated data quality record
+    dq = DataQuality(
+        provenance="simulated",
+        attribution="attributed",
+        completeness="complete",
+        observed_at=datetime.now(timezone.utc),
+        source_ref="fixture://product/123",
+    )
+    report = certify_data_quality(dq)
+    assert report.overall_state == QualityAssertionState.PASSED
+    assert len(report.replay_signature) == 64
+    assert len(report.record_fingerprint) == 64
+
+
+def test_stale_and_conflicting_data_quality_promotion_blocked():
+    """Verify DataQuality records fail closed on stale timestamps or illegal promotion."""
+    from evaluation.contracts import DataQuality
+    from evaluation.quality import (
+        certify_data_quality,
+        InvalidEvidencePromotionError,
+        StaleEvidenceError,
+    )
+
+    # 1. Illegal promotion from simulated to live
+    dq_sim = DataQuality(
+        provenance="simulated",
+        attribution="attributed",
+        completeness="complete",
+        observed_at=datetime.now(timezone.utc),
+    )
+    with pytest.raises(InvalidEvidencePromotionError) as exc_p:
+        certify_data_quality(dq_sim, target_provenance="live")
+    assert "cannot be promoted to live evidence" in str(exc_p.value)
+
+    # 2. Stale evidence promotion rejected
+    dq_stale = DataQuality(
+        provenance="live",
+        attribution="attributed",
+        completeness="complete",
+        observed_at=datetime.now(timezone.utc) - timedelta(hours=50),
+    )
+    with pytest.raises(StaleEvidenceError) as exc_s:
+        certify_data_quality(dq_stale, target_provenance="live")
+    assert "exceeds max freshness window" in str(exc_s.value)
+
+
+def test_trustos_and_local_gate_state_compatibility():
+    """Verify bidirectional state mappings across QualityAssertionState, TrustOS, and local gates."""
+    from evaluation.quality import (
+        QualityAssertionState,
+        quality_state_to_trustos_evidence_status,
+        trustos_evidence_status_to_quality_state,
+        quality_state_to_local_gate_class,
+    )
+
+    assert quality_state_to_trustos_evidence_status(QualityAssertionState.PASSED) == "passed"
+    assert quality_state_to_trustos_evidence_status(QualityAssertionState.FAILED) == "failed"
+    assert quality_state_to_trustos_evidence_status(QualityAssertionState.UNAVAILABLE) == "requires_review"
+    assert quality_state_to_trustos_evidence_status(QualityAssertionState.DEFERRED) == "draft"
+
+    assert trustos_evidence_status_to_quality_state("passed") == QualityAssertionState.PASSED
+    assert trustos_evidence_status_to_quality_state("failed") == QualityAssertionState.FAILED
+    assert trustos_evidence_status_to_quality_state("draft") == QualityAssertionState.DEFERRED
+    assert trustos_evidence_status_to_quality_state("stale") == QualityAssertionState.UNAVAILABLE
+
+    assert quality_state_to_local_gate_class(QualityAssertionState.PASSED) == "pass"
+    assert quality_state_to_local_gate_class(QualityAssertionState.FAILED) == "changed_scope_failure"
+    assert quality_state_to_local_gate_class(QualityAssertionState.UNAVAILABLE) == "unavailable_dependency"
+    assert quality_state_to_local_gate_class(QualityAssertionState.DEFERRED) == "not_run"
+
+
+def test_lineage_trust_evidence_record_integration():
+    """Verify lineage facets wire directly into canonical TrustOS TrustEvidenceRecord."""
+    from backend.observability.lineage_facets import (
+        DatasetFacet,
+        create_evidence_lineage,
+        create_trust_evidence_with_lineage,
+    )
+
+    inp = DatasetFacet("marketos.supplier", "quotes_raw", "sha_in", ("product_id",), "static_fixture")
+    out = DatasetFacet("marketos.evaluation", "product_scored", "sha_out", ("product_id",), "simulated")
+    facet = create_evidence_lineage("run-777", "scoring", [inp], out)
+
+    evidence_record = create_trust_evidence_with_lineage(
+        facet,
+        control_id="SEC-L1-LINEAGE-01",
+        summary="Automated pipeline lineage proof",
+    )
+
+    assert evidence_record.evidence_id == f"evidence-lineage-{facet.lineage_id}"
+    assert evidence_record.control_id == "SEC-L1-LINEAGE-01"
+    assert evidence_record.status == "passed"
+    assert f"trustos://lineage/{facet.lineage_id}" in evidence_record.source_ref
+    assert evidence_record.internal_only is True
+
+
+def test_lineage_data_quality_and_report_projection_integration():
+    """Verify lineage facets attach cleanly to DataQuality records and format for report projections."""
+    from backend.observability.lineage_facets import (
+        DatasetFacet,
+        create_evidence_lineage,
+        attach_lineage_to_data_quality,
+        format_lineage_for_report,
+    )
+    from evaluation.contracts import DataQuality
+
+    inp = DatasetFacet("marketos.signals", "signals_raw", "sha_sig", ("signal_id",), "static_fixture")
+    out = DatasetFacet("marketos.candidates", "candidates_norm", "sha_cand", ("candidate_id",), "simulated")
+    facet = create_evidence_lineage("run-888", "candidate_norm", [inp], out, asset_key="candidates/norm")
+
+    # Wire to DataQuality
+    base_dq = DataQuality(provenance="simulated", attribution="attributed")
+    enriched_dq = attach_lineage_to_data_quality(base_dq, facet)
+    assert f"lineage://{facet.lineage_id}" in enriched_dq.source_ref
+
+    # Format for report projections
+    report_summary = format_lineage_for_report(facet)
+    assert report_summary["lineage_id"] == facet.lineage_id
+    assert report_summary["job_name"] == "candidate_norm"
+    assert report_summary["orchestrator"] == "marketos_event_spine"
+    assert report_summary["input_dataset_count"] == 1
+    assert report_summary["has_asset_metadata"] is True

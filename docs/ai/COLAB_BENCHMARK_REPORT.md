@@ -1,10 +1,12 @@
-# MarketOS Sanitized Colab Benchmark Report
+# MarketOS Lineage & Replay Benchmark Report
 
-## Operational Context
-- **Lane**: `OSS-PATTERN-RETROFIT-COLAB-V2`
+## Operational Context & Execution Classification
+- **Lane**: `OSS-RETROFIT-AUTHORITY-INTEGRATION-V4`
 - **Benchmark Driver**: `scripts/benchmarks/benchmark_lineage_replay.py`
-- **Environment**: Sanitized, zero-network, local/Colab execution profile
-- **Compute Allocation Used**: Bounded synthetic evaluation run (< 1 compute unit of 200 CU allocation)
+- **Local Benchmark Execution**: `actual_executed` (Executed locally on operator dev workstation: Python 3.14.7, 0 live network calls, 0 credentials, 0 mutations).
+- **Google Colab Remote Execution**: `unavailable` (Headless Google Colab environment is not attached in this CLI session; all benchmarks executed in local offline simulation mode. Notebook execution is reproducible offline without CU spend).
+- **Runtime Metadata**: Windows 11 / Python 3.14.7, single-process, in-memory synthetic fixture execution.
+- **Exact Execution Command**: `python scripts/benchmarks/benchmark_lineage_replay.py --quick`
 - **Data Boundaries**: 100% synthetic/fixture data only. 0 live network calls, 0 credentials, 0 customer data, 0 raw provider payloads, 0 mutations.
 
 ---
@@ -13,6 +15,7 @@
 1. **Normalization & Ingestion Scaling**: Compare raw dictionary serialization against OpenLineage Run/Dataset facet enrichment and Great Expectations assertion evaluation.
 2. **Deterministic Replay Bit-Identity**: Verify that repeated execution on identical inputs yields bit-identical certification signatures across multiple iterations.
 3. **Fail-Closed Anomaly Interception**: Measure fault-detection accuracy across negative test scenarios (invalid promotions, numeric boundary violations, and unredacted raw payload detection).
+
 
 ---
 

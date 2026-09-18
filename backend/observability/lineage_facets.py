@@ -206,6 +206,74 @@ def attach_lineage_to_evidence(evidence_record: dict[str, Any], lineage: Evidenc
     return out
 
 
+def create_trust_evidence_with_lineage(
+    lineage: EvidenceLineageFacet,
+    control_id: str,
+    summary: str,
+    *,
+    source_type: str = "lineage_verified_pipeline",
+    professional_review_required: bool = False,
+    internal_only: bool = True,
+) -> Any:
+    """Wire lineage facet into canonical TrustOS TrustEvidenceRecord.
+
+    Reuses existing TrustOS evidence locker and control plane contracts rather than
+    creating a second evidence system or second promotion gate.
+    """
+    lineage.validate_safety()
+    from evaluation.trustos.control_plane import TrustEvidenceRecord
+
+    return TrustEvidenceRecord(
+        evidence_id=f"evidence-lineage-{lineage.lineage_id}",
+        control_id=control_id,
+        source_type=source_type,
+        source_ref=f"trustos://lineage/{lineage.lineage_id}?fp={lineage.fingerprint()[:16]}",
+        summary=summary,
+        owner_department="operations",
+        created_at=lineage.run.nominal_start_time,
+        expires_at="TBD",
+        status="passed",
+        redaction_status="client_safe_minimal_export",
+        client_visible=not internal_only,
+        internal_only=internal_only,
+        professional_review_required=professional_review_required,
+        notes=f"Lineage verified job={lineage.run.job_name} orchestrator={lineage.run.orchestrator} inputs={len(lineage.inputs)}",
+    )
+
+
+def attach_lineage_to_data_quality(quality: Any, lineage: EvidenceLineageFacet) -> Any:
+    """Wire lineage facet into existing DataQuality contract record."""
+    lineage.validate_safety()
+    from evaluation.contracts import DataQuality
+
+    if not isinstance(quality, DataQuality):
+        raise TypeError(f"Expected evaluation.contracts.DataQuality, got {type(quality)}")
+
+    ref = f"lineage://{lineage.lineage_id}?fp={lineage.fingerprint()[:16]}"
+    return DataQuality(
+        provenance=quality.provenance,
+        attribution=quality.attribution,
+        completeness=quality.completeness,
+        observed_at=quality.observed_at,
+        source_ref=ref,
+    )
+
+
+def format_lineage_for_report(lineage: EvidenceLineageFacet) -> dict[str, Any]:
+    """Provide a client-safe sanitized summary of lineage facets for report projections."""
+    lineage.validate_safety()
+    return {
+        "lineage_id": lineage.lineage_id,
+        "job_name": lineage.run.job_name,
+        "orchestrator": lineage.run.orchestrator,
+        "fingerprint": lineage.fingerprint(),
+        "input_dataset_count": len(lineage.inputs),
+        "output_dataset": f"{lineage.output.namespace}.{lineage.output.dataset_name}",
+        "lifecycle_stage": lineage.output.lifecycle_stage,
+        "has_asset_metadata": lineage.asset is not None,
+    }
+
+
 __all__ = [
     "RunFacet",
     "DatasetFacet",
@@ -214,4 +282,7 @@ __all__ = [
     "LineageSecurityError",
     "create_evidence_lineage",
     "attach_lineage_to_evidence",
+    "create_trust_evidence_with_lineage",
+    "attach_lineage_to_data_quality",
+    "format_lineage_for_report",
 ]

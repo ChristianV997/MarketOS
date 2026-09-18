@@ -3,7 +3,7 @@
 from .contracts import CampaignCandidate, CampaignObservation, CreativeCandidate, DataQuality, ProductCandidate, SupplierOffer
 from .economics import UnitEconomics, calculate_unit_economics
 from .experiments import ExperimentResult, evaluate_experiment
-from .quality_certification import (
+from .quality import (
     CANONICAL_QUALITY_AUTHORITY,
     DeterministicReplayCertifier,
     ExpectationRule,
@@ -11,6 +11,9 @@ from .quality_certification import (
     QualityAssertionResult,
     QualityAssertionState,
     ReplayCertificationReport,
+    certify_data_quality,
+    deduplicate_observations,
+    quality_reasons,
 )
 from .readiness import LaunchReadiness, evaluate_campaign, evaluate_product
 
@@ -32,7 +35,10 @@ __all__ = [
     "SupplierOffer",
     "UnitEconomics",
     "calculate_unit_economics",
+    "certify_data_quality",
+    "deduplicate_observations",
     "evaluate_campaign",
     "evaluate_experiment",
     "evaluate_product",
+    "quality_reasons",
 ]
