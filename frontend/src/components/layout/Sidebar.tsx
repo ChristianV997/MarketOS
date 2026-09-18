@@ -10,6 +10,7 @@ import {
   History,
   Wrench,
   ListChecks,
+  Telescope,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ const NAV = [
   { to: "/replay",    icon: History,          label: "Replay"     },
   { to: "/services",  icon: Wrench,           label: "Services"   },
   { to: "/operator/events", icon: ListChecks, label: "Operator Events" },
+  { to: "/operator/first-phase", icon: Telescope, label: "First-phase cockpit" },
 ];
 
 export default function Sidebar() {

@@ -1,0 +1,16 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "generated_at": "2019-01-01T00:00:00Z",
+  "stale": true,
+  "candidates": [
+    {
+      "candidate_id": "desk-clamp-lamp",
+      "query": "desk clamp lamp",
+      "evidence_class": "stale",
+      "provenance": {"collected_at": "2019-01-01T00:00:00Z"},
+      "evidence": [{"price": 29.99, "evidence_mode": "fixture", "collected_at": "2019-01-01T00:00:00Z"}],
+      "score": {"overall_marketplace_opportunity": 0.9, "saturation_score": 0.1}
+    }
+  ]
+}

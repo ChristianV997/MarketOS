@@ -1,0 +1,30 @@
+{
+  "schema_version": "marketos-windows-operator-scenario-v1",
+  "scenario_id": "smart-pet",
+  "title": "Smart pet feeder with camera",
+  "evidence_class": "fixture",
+  "expected_decision": "expand_consumer_research",
+  "expected_promotion_gate": "hold",
+  "network_mutation": false,
+  "read_only": true,
+  "authorities": {
+    "launch": false,
+    "ads": false,
+    "orders": false,
+    "payments": false,
+    "messaging": false,
+    "publishing": false
+  },
+  "stages": {
+    "ingestion": "fixture",
+    "supplier_feasibility": "available",
+    "market_lane": "partial",
+    "economics": "simulated",
+    "competition": "available",
+    "opportunity_synthesis": "fixture",
+    "promotion_gate": "hold",
+    "client_safe_export": "fixture"
+  },
+  "blocked_reasons": [],
+  "unavailable_reasons": ["consumer_attention_api_unavailable"]
+}

@@ -22,6 +22,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument("--output", type=Path, help="write the handoff to a Markdown file")
+    parser.add_argument("--replay-hash", help="optional MarketOS.AIContext.v1 replay hash from operator_context_snapshot.py")
     args = parser.parse_args()
     root = args.repository.resolve()
     content = (
@@ -29,6 +30,7 @@ def main() -> int:
         f"Date: {date.today().isoformat()}\n"
         f"Repository: {root}\n"
         f"Branch: {git_value(root, ['branch', '--show-current'])}\n"
+        f"Replay hash: {args.replay_hash or 'not_run'}\n"
         f"Objective:\n\n"
         f"## Files changed\n{format_status(root)}\n"
         f"## Interfaces affected\n\n"
