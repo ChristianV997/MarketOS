@@ -15,15 +15,10 @@ building a parallel one:
   - workspace/export boundary: ``evaluation.trustos.client_workspace_isolation``
   - live-action gating: ``evaluation.companyos.resource_execution_governor``
 
-Known, already-owned gap (documented, not duplicated): artifact-store path
-traversal / workspace escape (``backend.workspaces.artifact_store.ArtifactStore.path_for``
-performs no path-traversal sanitization on ``workspace_id``/``experiment_id``/
-``filename``) is the explicit subject of open PR #211
-("fix(workspaces): close artifact-store path traversal and workspace
-escape"). ``test_artifact_store_path_escape_is_not_yet_closed`` below
-reproduces it against the current SHA and documents PR #211 as its owner —
-it does not patch it here, to avoid duplicating that PR's already-assigned
-scope.
+The artifact-store checks below use the current workspace-bound API. The
+path-traversal regression is asserted here as an integration contract after
+PR #211's security repair; the implementation remains owned by the artifact
+store module.
 """
 from __future__ import annotations
 
@@ -35,6 +30,8 @@ from backend.contracts.events import Event
 from backend.economics.kernel import Money
 from backend.events.replay_certification import replay_summary
 from backend.workspaces.artifact_store import ArtifactStore
+from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import WorkspaceRegistry
 from evaluation.commerce.dry_run_events import lifecycle_events
 from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
 from evaluation.commerce.dry_run_scenarios import (
@@ -331,30 +328,20 @@ def test_report_generation_is_deterministic_for_the_same_scenario():
     assert report_a.to_dict() == report_b.to_dict()
 
 
-def test_internal_and_client_workspaces_use_disjoint_artifact_paths():
-    store = ArtifactStore()
-    internal_path = store.path_for("internal_marketos_core", "exp-1", "result.json")
-    client_path = store.path_for("client_ecommerce_workspace", "exp-1", "result.json")
+def test_internal_and_client_workspaces_use_disjoint_artifact_paths(tmp_path):
+    registry = WorkspaceRegistry(str(tmp_path / "workspaces.json"))
+    internal = registry.register(ClientWorkspace(name="internal-marketos", workspace_type="internal"))
+    client = registry.register(ClientWorkspace(name="client-ecommerce", workspace_type="client_service"))
+    internal_store = ArtifactStore(internal, registry)
+    client_store = ArtifactStore(client, registry)
+    internal_path = internal_store.path_for("exp-1", "result.json")
+    client_path = client_store.path_for("exp-1", "result.json")
     assert internal_path != client_path
 
 
-@pytest.mark.xfail(
-    reason=(
-        "backend.workspaces.artifact_store.ArtifactStore.path_for performs no "
-        "traversal sanitization on workspace_id/experiment_id/filename; this exact "
-        "defect is PR #211's assigned scope ('fix(workspaces): close artifact-store "
-        "path traversal and workspace escape'), still open as of this harness. "
-        "Documented here rather than duplicated -- see this PR's final report."
-    ),
-    strict=True,
-)
-def test_artifact_store_path_escape_is_not_yet_closed():
-    import os
-
-    store = ArtifactStore()
-    client_root = os.path.abspath(store.path_for("client_ecommerce_workspace", "", ""))
-    workspaces_root = os.path.dirname(os.path.dirname(client_root.rstrip(os.sep)))
-    escaping_path = os.path.abspath(store.path_for("../../../../../../../../tmp", "exp-1", "escape.json"))
-    # Once PR #211 lands, a workspace_id containing path-traversal segments
-    # must not be able to resolve outside the workspaces root. Today it can.
-    assert escaping_path.startswith(workspaces_root + os.sep)
+def test_artifact_store_path_escape_is_rejected(tmp_path):
+    registry = WorkspaceRegistry(str(tmp_path / "workspaces.json"))
+    client = registry.register(ClientWorkspace(name="client-ecommerce", workspace_type="client_service"))
+    store = ArtifactStore(client, registry)
+    with pytest.raises(ValueError, match="invalid experiment_id"):
+        store.path_for("../../../../../../../../tmp", "escape.json")
