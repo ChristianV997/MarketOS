@@ -15,6 +15,7 @@ from backend.experiments.envelope import CommercialRunEnvelope
 from backend.experiments.registry import get_experiment_registry
 from backend.workspaces.artifact_store import ArtifactStore
 from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import get_workspace_registry
 
 from .break_even import break_even_cac, required_roas, verdict_from_margin
 from .schemas import UnitEconomicsResult
@@ -25,7 +26,7 @@ SERVICE_NAME = "unit_economics"
 
 
 def _default_workspace() -> ClientWorkspace:
-    return ClientWorkspace(name="ephemeral", workspace_type="internal")
+    return get_workspace_registry().register(ClientWorkspace(name="ephemeral", workspace_type="internal"))
 
 
 def _canonical_economics(
@@ -86,8 +87,9 @@ def run_unit_economics(
     this function wraps them anyway so a surprise failure degrades to a
     partial result instead of aborting."""
     workspace = workspace or _default_workspace()
+    workspace = get_workspace_registry().register(workspace)
     registry = get_experiment_registry()
-    store = ArtifactStore()
+    store = ArtifactStore(workspace)
 
     envelope = CommercialRunEnvelope(
         service_name=SERVICE_NAME,
@@ -181,11 +183,11 @@ def run_unit_economics(
     try:
         from services.reporting import save_report_artifacts
         from .report import render_unit_economics_markdown
-        save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id,
+        save_report_artifacts(store, envelope.experiment_id,
                                render_unit_economics_markdown(result), result.to_dict())
     except Exception as exc:  # noqa: BLE001 — the JSON result below is the durable fallback
         _log.debug("unit_economics_report_save_failed error=%s", exc)
-        store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+        store.save(envelope.experiment_id, "result.json", result.to_dict())
 
     envelope.mark_completed(result.to_dict())
     log_transition(envelope, "experiment_completed")
@@ -249,15 +251,15 @@ def from_ledger(
             lane=lane,
         )
 
-        store = ArtifactStore()
+        store = ArtifactStore(workspace)
         try:
             from services.reporting import save_report_artifacts
             from .report import render_unit_economics_markdown
-            save_report_artifacts(store, workspace.workspace_id, envelope.experiment_id,
+            save_report_artifacts(store, envelope.experiment_id,
                                    render_unit_economics_markdown(result), result.to_dict())
         except Exception as exc:  # noqa: BLE001
             _log.debug("unit_economics_from_ledger_report_save_failed error=%s", exc)
-            store.save(workspace.workspace_id, envelope.experiment_id, "result.json", result.to_dict())
+            store.save(envelope.experiment_id, "result.json", result.to_dict())
         log_transition(envelope, "experiment_updated_from_ledger")
     except Exception as exc:  # noqa: BLE001 — direct-input result above is the fallback
         _log.debug("unit_economics_from_ledger_margin_failed product=%s error=%s", product_name, exc)
