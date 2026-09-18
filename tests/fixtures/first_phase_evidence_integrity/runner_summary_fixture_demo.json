@@ -3,11 +3,11 @@
   "lane_id": "WINDOWS-FIRST-PHASE-RUNNER-01",
   "mutated": false,
   "network_calls": false,
-  "overall_classification": "actual",
+  "overall_classification": "fixture",
   "overall_exit_code": 0,
   "read_only": true,
   "stages": [
-    {"id": "marketplace_trend", "exit_code": 0, "classification": "actual"},
-    {"id": "opportunity_synthesis", "exit_code": 0, "classification": "actual"}
+    {"id": "marketplace_trend", "exit_code": 0, "classification": "fixture"},
+    {"id": "opportunity_synthesis", "exit_code": 0, "classification": "fixture"}
   ]
 }

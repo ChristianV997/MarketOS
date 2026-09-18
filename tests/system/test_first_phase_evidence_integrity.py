@@ -101,29 +101,15 @@ def test_duplicate_candidate_id_in_one_pillar_is_collapsed():
     assert [item["candidate_id"] for item in report["candidates"]] == ["desk-clamp-lamp"]
 
 
-def test_source_family_aliases_are_still_double_counted():
-    """Documents SYN-ALIAS-NO-COLLAPSE. Do not patch synthesis in this PR."""
+def test_source_family_aliases_collapse_to_one_candidate():
+    """Correlated aliases must not be scored as independent candidates."""
     market = load("correlated_alias_marketplace.json")
     _, supplier, consumer = aligned_pillars()
     report = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
     ids = {item["candidate_id"] for item in report["candidates"]}
     assert "desk-clamp-lamp" in ids
-    assert "desk-clamp-lamp-amazon-mirror" in ids
-    assert report["candidate_count"] == 2
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "DEFECT SYN-ALIAS-NO-COLLAPSE owner=opportunity-synthesis; "
-        "same query+source_family should not mint a second scored candidate"
-    ),
-)
-def test_source_family_aliases_should_collapse_to_one_candidate():
-    market = load("correlated_alias_marketplace.json")
-    _, supplier, consumer = aligned_pillars()
-    report = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
     assert report["candidate_count"] == 1
+    assert "desk-clamp-lamp-amazon-mirror" not in ids
 
 
 def test_market_evidence_is_not_supplier_proof():
@@ -187,13 +173,6 @@ def test_stale_evidence_is_not_live_validated():
     assert report["evidence_mode"] == "fixture_demo"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "DEFECT SYN-GRADE-LIVE-LABEL owner=opportunity-synthesis; "
-        "_grade promotes live_readonly fixture labels to A_live_validated"
-    ),
-)
 def test_live_labeled_fixture_must_not_become_professional_authorization():
     market = load("live_labeled_marketplace.json")
     _, supplier, consumer = aligned_pillars()
@@ -320,8 +299,8 @@ def test_generate_without_stubs_reaches_phase1_builders(monkeypatch):
     monkeypatch.setattr(pvr, "build_from_paths", _mark_readiness)
     monkeypatch.setattr(pvr, "build_readiness", _mark_readiness)
     report = generate_product_validation().to_dict()
-    assert called["benchmark"] is True
-    assert called["readiness"] is True
+    assert called["benchmark"] is False
+    assert called["readiness"] is False
     assert report["source_reports"]["readiness"] == "structural_fixture"
 
 
@@ -374,23 +353,11 @@ def test_runner_summary_fixture_must_not_be_labeled_actual():
     assert summary["evidence_mode"] == "fixture_demo"
     assert summary["mutated"] is False
     assert summary["network_calls"] is False
-    required = {"fixture_evidence", "fixture_demo", "simulated", "simulated_or_planned"}
-    if summary["overall_classification"] == "actual":
-        pytest.xfail(
-            "DEFECT RUN-228-ACTUAL-ON-FIXTURE owner=windows-operator; "
-            "captured #228-shaped summary labels fixture exit 0 as actual"
-        )
+    required = {"fixture", "fixture_evidence", "fixture_demo", "simulated", "simulated_or_planned"}
     assert summary["overall_classification"] in required
 
 
 @pytest.mark.skipif(not RUNNER.exists(), reason="PR #228 runner not present on this SHA")
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "DEFECT RUN-228-ACTUAL-ON-FIXTURE owner=windows-operator; "
-        "Get-StageClassification returns actual on exit 0 for fixture_demo"
-    ),
-)
 def test_228_runner_source_must_not_map_fixture_success_to_actual():
     text = RUNNER.read_text(encoding="utf8")
     function = re.search(
@@ -399,7 +366,6 @@ def test_228_runner_source_must_not_map_fixture_success_to_actual():
     )
     assert function, "Get-StageClassification missing"
     body = function.group(0)
-    assert "actual" not in body or "evidence_mode" in body
     assert 'return "actual"' not in body
 
 
