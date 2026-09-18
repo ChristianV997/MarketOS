@@ -46,7 +46,9 @@ from __future__ import annotations
 
 import re
 import shlex
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -197,6 +199,27 @@ def _redact_output(text: str) -> str:
     return text[:MAX_OUTPUT_CHARS]
 
 
+def _resolve_execution_argv(argv: Sequence[str]) -> list[str]:
+    """Resolve a missing Python shim without weakening command validation.
+
+    The command is validated before this helper runs.  On Windows, ``python3``
+    is commonly absent even when the interpreter running this process is
+    available.  Falling back only to that trusted interpreter keeps the
+    allowlist portable while avoiding PATH-dependent false ``unavailable``
+    results.  No caller-provided path is ever resolved here.
+    """
+    resolved = list(argv)
+    # Windows App Execution Aliases can make ``shutil.which("python3")``
+    # return a Microsoft Store shim that exits with 9009 instead of launching
+    # Python.  Prefer the already-running trusted interpreter for that exact
+    # portable command spelling.
+    if resolved and resolved[0] == "python3" and sys.platform == "win32":
+        resolved[0] = sys.executable
+    elif resolved and resolved[0] in {"python", "python3"} and shutil.which(resolved[0]) is None:
+        resolved[0] = sys.executable
+    return resolved
+
+
 def render_command(argv: Sequence[str]) -> dict[str, Any]:
     """One canonical argv plus informational POSIX/PowerShell renderings.
 
@@ -252,9 +275,10 @@ def run_allowlisted(
         record.update({"classification": "ci_unavailable", "reason": "ci_only_command_has_no_local_runner"})
         return record
 
+    execution_argv = _resolve_execution_argv(argv)
     try:
         completed = subprocess.run(
-            argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            execution_argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=timeout_s, cwd=str(cwd) if cwd else None, shell=False, check=False,
         )
     except FileNotFoundError:
@@ -267,6 +291,7 @@ def run_allowlisted(
     record.update({
         "classification": "passed" if completed.returncode == 0 else "failed",
         "exit_code": completed.returncode,
+        "executed_argv": execution_argv,
         "stdout": _redact_output(completed.stdout or ""),
         "stderr": _redact_output(completed.stderr or ""),
     })
