@@ -19,6 +19,13 @@ Run the fixed local checks in a clean isolated worktree:
 python scripts/ai/run_local_quality_gate.py --from-git --execute --generated-at 2026-08-29T12:00:00+00:00 --json
 ```
 
+Run the workflow-compatible local preflight when final CI evidence does not
+yet exist:
+
+```powershell
+python scripts/ai/run_local_quality_gate.py --from-git --execute --phase preflight --generated-at 2026-08-29T12:00:00+00:00 --json
+```
+
 The timestamp is injected by the operator. Check ordering is stable and is
 always `compile`, `pytest`, `ruff`, `typed`, `frontend`, `security`, then
 `diff_check`. The executable mode does not install dependencies or make
@@ -52,6 +59,32 @@ baseline is `changed_scope_failure`. If the baseline does not prove either
 origin, the result is `failure_origin_unverified`; the gate does not infer
 ownership from history or from a green-looking summary.
 
+For deterministic baseline attribution, pass a bounded local gate report or
+sanitized `MarketOS.CIEvidence.v1` file as `--baseline-file` alongside the
+candidate's `--ci-evidence-file`:
+
+```powershell
+python scripts/ai/run_local_quality_gate.py --from-git --execute `
+  --generated-at 2026-08-29T12:00:00+00:00 `
+  --baseline-file baseline.json --ci-evidence-file candidate-ci.json --json
+```
+
+The report adds one `baseline_delta` object to the existing gate output. Its
+sorted controls compare baseline and candidate statuses and classify
+`introduced_failure`, `inherited_failure`, `resolved_failure`,
+`newly_available_pass`, `unavailable_in_both`, `failure_origin_unverified`,
+or candidate-incomplete evidence. Missing baseline input is unavailable and
+malformed baseline input is malformed; neither can produce final readiness.
+The delta is advisory attribution within the existing authority, not a second
+readiness decision. Its stable fingerprint excludes timestamps and raw output.
+When invoked through the local gate CLI, the same sanitized projection is
+passed to the existing PR-readiness report at
+`planning_summary.pr_readiness.quality_gate`. That projection keeps
+introduced, inherited, resolved, newly available, unavailable-in-both, and
+candidate-executed failures separately visible. Failed, incomplete, malformed,
+or `ci_unavailable` quality evidence makes PR readiness `blocked`; it never
+creates merge or deployment authority.
+
 CI is an explicit input only. The local gate never queries GitHub. A missing
 CI input is `ci_unavailable`, and a reported CI failure with zero executed
 steps is also `ci_unavailable`, not a pass. A real failure with executed steps
@@ -67,6 +100,7 @@ and its required check status is `success`. Otherwise the evidence remains
 {
   "schema": "MarketOS.CIEvidence.v1",
   "run": {"status": "completed", "conclusion": "failure"},
+  "required_jobs": ["agentic-quality-gate"],
   "jobs": [{
     "name": "agentic-quality-gate",
     "required": true,
@@ -98,6 +132,16 @@ checks, clean git state, and observed CI success with at least one executed
 step. Human review remains required. Planning output never authorizes
 deployment, publishing, provider calls, supplier calls, commerce mutation,
 repair, merge, or credential use.
+
+Preflight has a deliberately narrower check scope and exit contract: it runs
+only compile, the quality-gate regression tests, focused Ruff checks, and the
+diff check. Full repository tests and security/container jobs remain separate
+CI evidence. It exits zero only when its local checks pass, but it always
+reports `ready_for_supervised_use: false` and does not turn missing final CI evidence into success. Supply complete
+sanitized `MarketOS.CIEvidence.v1` to the default final phase after required
+jobs finish to obtain final attestation. If a local check fails before that
+evidence exists, its failure classification remains visible instead of being
+replaced by `ci_unavailable`.
 
 ## Operator interpretation
 
