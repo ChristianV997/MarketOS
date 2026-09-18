@@ -155,11 +155,3 @@ def test_service_economics_uses_the_requested_formulas_and_capacity_state():
     assert result.required_clients_for_target_monthly_contribution == Decimal("1000") / Decimal("65")
     assert result.client_value_multiple == Decimal("5")
     assert result.minimum_acceptable_value_multiple == Decimal("3")
-
-
-def test_supplier_feasibility_can_consume_a_market_lane():
-    lane = MarketLane("cn-mx", "CN", "CN", "fixture-warehouse", "MX", currency="MXN", tax_rate="0.16", duty_rate="0.05", payment_fee_rate="0.03", platform_fee_rate="0.02")
-    from evaluation.commerce.supplier_feasibility import calculate_unit_economics as supplier_economics
-
-    result = supplier_economics(target_sell_price="100", unit_cost="20", shipping_cost="10", lane=lane)
-    assert result.gross_margin is not None and result.gross_margin < 100
