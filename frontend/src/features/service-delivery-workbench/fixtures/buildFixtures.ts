@@ -12,6 +12,7 @@ import {
 } from "../contracts/serviceEngagementProjection.ts";
 import { HIGGSFIELD_DRAFT_SKILLS } from "../lib/creativeAssetContract.ts";
 
+/** Sanitized fixture classes only. Never emit live_validated from local builders. */
 const EVIDENCE_CYCLE: EvidenceClass[] = [
   "observed",
   "derived",
@@ -22,7 +23,6 @@ const EVIDENCE_CYCLE: EvidenceClass[] = [
   "manual_import",
   "simulated",
   "unavailable",
-  "live_validated",
 ];
 
 function creativeDraft(title: string): CreativeAssetRequest[] {
