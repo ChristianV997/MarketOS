@@ -1,0 +1,1 @@
+{"events":[{"learning_event_id":"fixture-frontier-waste","event_type":"model_routing_decision","outcome":"loss","action_taken":"run_frontier_llm_synthesis","failure_reasons":["model_cost_too_high"]}]}

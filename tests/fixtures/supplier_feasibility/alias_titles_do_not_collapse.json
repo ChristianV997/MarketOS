@@ -1,0 +1,18 @@
+[
+  {
+    "candidate_id": "mini-printer",
+    "supplier": "cj",
+    "supplier_product_id": "A-1",
+    "supplier_title": "Mini Thermal Printer",
+    "unit_cost": 8,
+    "shipping_cost": 2
+  },
+  {
+    "candidate_id": "mini-printer",
+    "supplier": "cj",
+    "supplier_product_id": "B-2",
+    "supplier_title": "Mini Thermal Printer",
+    "unit_cost": 9,
+    "shipping_cost": 2
+  }
+]

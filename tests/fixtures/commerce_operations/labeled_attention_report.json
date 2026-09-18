@@ -1,0 +1,40 @@
+{
+  "report_version": "consumer-attention-v1",
+  "evidence_mode": "fixture_demo",
+  "source_type": "fixture_demo",
+  "candidates": [
+    {
+      "candidate_id": "labeled-widget",
+      "query": "labeled widget",
+      "evidence": [
+        {
+          "platform": "tiktok",
+          "hook": "viral fixture hook",
+          "evidence_mode": "fixture",
+          "source_type": "tiktok_creative_center_snapshot",
+          "source_url": "https://example.test/attention/labeled-widget",
+          "observed_at": "deterministic",
+          "field_provenance": {
+            "hook": "manual_import"
+          }
+        }
+      ],
+      "score": {
+        "overall_consumer_attention": 0.88,
+        "source_diversity": 0.8,
+        "objection_density": 0.1,
+        "recommended_ad_angles": ["demo", "ugc"],
+        "creative_hooks": [{"hook": "viral fixture hook"}],
+        "voice_of_customer": {
+          "pain_points": ["messy cables"],
+          "desired_outcomes": ["clean desk"],
+          "objections": []
+        },
+        "recommendation": "validate_supplier_first"
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

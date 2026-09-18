@@ -1,29 +1,22 @@
 # Parallel Work Matrix
 
-Updated: 2026-08-10
+Updated: 2026-09-01
 
-Codex is paused. Claude is the only active AI contributor; this matrix now exists primarily to record current
-ownership so a future session (Claude or otherwise) doesn't duplicate or collide with in-flight review work.
+## Current Ownership Model
+- **One agent owns one large vertical.** Agents must not overlap scopes.
+- **Detached validation worktrees are evidence only, not ownership.** They do not represent active authority over a branch.
+- **No new worktree may overwrite an active dirty owner.**
+- **No duplicate PRs.** Only one active PR per integration/capability.
+- **No parallel edits to shared files.**
+- **Merger Agent is the ONLY rebase/merge/close authority.** Feature agents must not self-merge, rebase others, or close other PRs.
 
-| Owner | Paths | Current responsibility |
-|---|---|---|
-| Claude | `scripts/run_phase1_live_validation.py`, `docs/PHASE1_LIVE_VALIDATION_RUNBOOK.md` | Phase 1 intelligence stack (PR #149) and its live-validation harness (PR #150) are both merged to `main`. Only remaining Phase 1 work is running the harness from unrestricted network egress — see `docs/ai/SESSION_HANDOFF.md`. |
-| Codex | — | Paused; no active ownership. Prior assignments below are historical, not current. |
-| Shared | `docs/ai/SESSION_HANDOFF.md`, `AGENTS.md`, `CLAUDE.md` | Coordinate before changing; latest committed handoff is the cross-environment source of truth |
+## Current WIP Limits & Sequencing
+1. **Artifact Security:** Resolving #211 identity-binding containment.
+2. **Baseline/Quality Recovery:** Resolving test-health (Ollama/router timeouts, SBOM) and #221 quality-gate evidence.
+3. **Learning Ledger Recovery:** Re-establishing deterministic training signals.
+4. **Frontend/API Consolidation:** Resolving #213 and the stacked Cursor environment (#214).
+5. **SerpApi Consolidation:** #220 organic request, followed safely by downstream #222 commerce projection without double-counting.
+6. **Future External Capability Adoption:** Strictly queued after the above integrations merge cleanly.
 
-## Do not start new Phase 1 feature work until live validation is attempted
-
-PR #149 and PR #150 are both merged. The next branch (one of `claude/phase1-live-results`,
-`claude/phase1-crawl4ai-js-extraction`, `claude/phase1-auth-readonly-supplier`, `claude/phase1-deployment-proof`)
-depends on the outcome of running `scripts/run_phase1_live_validation.py --allow-network` from an unrestricted
-environment — see `docs/ai/SESSION_HANDOFF.md`'s "Next action". Do not create any of those branches, or start
-another intelligence module, until that outcome is known.
-
-## Historical (pre-pause Codex assignments, no longer current)
-
-Earlier matrix versions assigned Codex ownership of `backend/commerce/**`, `orchestrator/**`, commerce/orchestration
-tests, `scripts/ai/**`, and performance benchmarks. Treat these as historical only — Codex is not currently active,
-and Claude should not assume those paths are being watched by another agent.
-
-Before editing a shared path, compare the remote branch and record the decision in the session handoff. Never
-reset, rebase, or overwrite another agent's work.
+## Historical Directions
+*(Note: Earlier matrix versions assigning Codex ownership over commerce/orchestrator or referencing Phase 1 live validation are now strictly historical and deprecated.)*
