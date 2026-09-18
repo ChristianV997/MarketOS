@@ -112,6 +112,25 @@ test("secret-shaped values fail closed", () => {
   assert.match(String(exported.rejection_reason), /secret/i);
 });
 
+test("adapter refuses to upgrade a weaker base evidence class", () => {
+  const result = adaptServiceProjection({
+    schema_version: "service-engagement-projection-v1",
+    engagements: [{
+      engagement_id: "eng-upgrade",
+      service_id: "product-validation-sprint",
+      lifecycle_state: "analysis",
+      evidence: [{
+        evidence_id: "e1",
+        title: "claim",
+        base_class: "fixture",
+        evidence_class: "live_validated",
+        summary: "must remain fixture",
+      }],
+    }],
+  });
+  assert.equal(result.projection.engagements[0].evidence[0].evidence_class, "fixture");
+});
+
 test("adapter rejects unsupported versions without inventing economics", () => {
   const result = adaptServiceProjection({ schema_version: "other-v9", engagements: [{ fee: 12 }] });
   assert.equal(result.rejected, true);

@@ -207,7 +207,10 @@ function adaptEngagement(raw: unknown): ServiceEngagement | null {
         return {
           evidence_id: String(row.evidence_id ?? `ev-${index}`),
           title: String(row.title ?? "Evidence item"),
-          evidence_class: normalizeEvidenceClass(row.evidence_class),
+          evidence_class: neverUpgradeEvidenceClass(
+            normalizeEvidenceClass(row.base_class ?? row.evidence_class),
+            row.evidence_class,
+          ),
           summary: String(row.summary ?? ""),
           collected_at: row.collected_at == null ? null : String(row.collected_at),
         };
