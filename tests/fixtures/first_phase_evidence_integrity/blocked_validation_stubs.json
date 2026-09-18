@@ -1,0 +1,15 @@
+{
+  "benchmark": {
+    "candidates": [],
+    "evidence_mode": "fixture_demo"
+  },
+  "readiness": {
+    "overall_status": "blocked",
+    "supplier_readiness": {"status": "unknown"},
+    "blocking_gates": ["first_phase_blocked_readiness"],
+    "next_best_action": "expand_supplier_research"
+  },
+  "deployment": {
+    "overall_status": "blocked"
+  }
+}

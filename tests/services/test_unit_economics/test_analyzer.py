@@ -1,10 +1,12 @@
 """Tests for services.unit_economics.analyzer.run_unit_economics."""
 import backend.core.persistence as pers
+import backend.workspaces.registry as registry_module
 import pytest
 from backend.experiments.audit_log import transitions_for
 from backend.experiments.registry import get_experiment_registry
 from backend.workspaces.artifact_store import ArtifactStore
 from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import get_workspace_registry
 from services.unit_economics.analyzer import run_unit_economics
 from services.unit_economics.schemas import UnitEconomicsResult
 
@@ -12,6 +14,7 @@ from services.unit_economics.schemas import UnitEconomicsResult
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(pers, "STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(registry_module, "_registry", None)
 
 
 class TestUnitEconomicsAnalyzer:
@@ -44,26 +47,24 @@ class TestUnitEconomicsAnalyzer:
         assert {"experiment_created", "experiment_running", "experiment_completed"} <= events
 
     def test_result_saved_to_artifact_store(self):
-        ws = ClientWorkspace(name="own-store")
+        ws = get_workspace_registry().register(ClientWorkspace(name="own-store"))
         result, envelope = run_unit_economics("Widget", supplier_cost=10.0, retail_price=40.0, workspace=ws)
-        store = ArtifactStore()
-        saved = store.load(ws.workspace_id, envelope.experiment_id, "result.json")
+        saved = ArtifactStore(ws).load(envelope.experiment_id, "result.json")
         assert saved == result.to_dict()
 
 
 class TestUnitEconomicsCrossWorkspaceIsolation:
     def test_two_workspaces_same_product_produce_distinct_experiments_and_paths(self):
-        ws_a = ClientWorkspace(name="workspace-a")
-        ws_b = ClientWorkspace(name="workspace-b")
+        ws_a = get_workspace_registry().register(ClientWorkspace(name="workspace-a"))
+        ws_b = get_workspace_registry().register(ClientWorkspace(name="workspace-b"))
 
         _, env_a = run_unit_economics("Widget", supplier_cost=10.0, retail_price=40.0, workspace=ws_a)
         _, env_b = run_unit_economics("Widget", supplier_cost=10.0, retail_price=40.0, workspace=ws_b)
 
         assert env_a.experiment_id != env_b.experiment_id
 
-        store = ArtifactStore()
-        assert store.path_for(ws_a.workspace_id, env_a.experiment_id, "result.json") != \
-               store.path_for(ws_b.workspace_id, env_b.experiment_id, "result.json")
+        assert ArtifactStore(ws_a).path_for(env_a.experiment_id, "result.json") != \
+               ArtifactStore(ws_b).path_for(env_b.experiment_id, "result.json")
 
 
 class TestUnitEconomicsNeverRaises:

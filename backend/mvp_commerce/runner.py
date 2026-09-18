@@ -2,8 +2,11 @@
 from __future__ import annotations
 import hashlib, json
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from backend.economics import Money, UnitEconomicsAssumptions
+from backend.economics import calculate_unit_economics as calculate_canonical_unit_economics
 from backend.creative_intelligence.claim_safety import sanitize_creative_claim
 from backend.events.repository import EventRepository
 from backend.providers.vendor_router import recommend_vendor_for_capability
@@ -25,11 +28,32 @@ def _load_signals(path: str | Path) -> list[PublicSignal]:
 
 
 def _economics(candidate: OpportunityCandidate, price: float, unit_cost: float, shipping: float, cac: float, returns: float, payment_rate: float) -> UnitEconomicsSummary:
-    fee = round(price * payment_rate, 2); retained = price * (1 - returns)
-    gross = round(retained - unit_cost - shipping - fee, 2); contribution = round(gross - cac, 2)
+    canonical = _canonical_economics(price, unit_cost, shipping, cac, returns, payment_rate)
+    fee = round(float(canonical.payment_fees.amount), 2)
+    gross = round(float(canonical.contribution_before_cac.amount), 2)
+    contribution = round(float(canonical.contribution_after_cac.amount), 2)
     return UnitEconomicsSummary(candidate.candidate_id, price, unit_cost, shipping, fee, returns, cac, gross, contribution, gross,
         ("All inputs are dry-run assumptions; no actual margin, CAC, profitability, or ROAS conclusion is supported.",),
-        (f"Assumed price={price}", f"Assumed unit cost={unit_cost}", f"Assumed shipping={shipping}", f"Assumed CAC={cac}", f"Assumed return rate={returns}"), "dry_run_assumption")
+        (f"Assumed price={price}", f"Assumed unit cost={unit_cost}", f"Assumed shipping={shipping}", f"Assumed CAC={cac}", f"Assumed return rate={returns}"), "dry_run_assumption", canonical.to_dict())
+
+
+def _canonical_economics(price: float, unit_cost: float, shipping: float, cac: float, returns: float, payment_rate: float):
+    return calculate_canonical_unit_economics(
+        Money(price, "USD", source="commerce_mvp_input", provenance="assumed"),
+        Money(unit_cost, "USD", source="commerce_mvp_input", provenance="assumed"),
+        assumptions=UnitEconomicsAssumptions(
+            supplier_shipping=Money(shipping, "USD", source="commerce_mvp_input", provenance="assumed"),
+            payment_fee_rate=Decimal(str(payment_rate)),
+            platform_fee_rate=Decimal("0"),
+            discount_rate=Decimal(str(returns)),
+            return_rate=Decimal("0"),
+            cac=Money(cac, "USD", source="commerce_mvp_input", provenance="assumed"),
+            tax_rate=Decimal("0"), duty_rate=Decimal("0"),
+            affiliate_fee_rate=Decimal("0"), marketplace_fee_rate=Decimal("0"),
+            defect_rate=Decimal("0"), warranty_rate=Decimal("0"),
+            support_reserve_rate=Decimal("0"), chargeback_rate=Decimal("0"), fx_reserve_rate=Decimal("0"),
+        ),
+    )
 
 
 def _economics_with_evidence(candidate: OpportunityCandidate, price: float, assumed_unit_cost: float, assumed_shipping_cost: float,
@@ -43,15 +67,17 @@ def _economics_with_evidence(candidate: OpportunityCandidate, price: float, assu
     has_shipping = evidence is not None and evidence.shipping_cost is not None
     unit_cost = evidence.unit_cost if has_cost else assumed_unit_cost
     shipping = evidence.shipping_cost if has_shipping else assumed_shipping_cost
-    fee = round(price * payment_rate, 2); retained = price * (1 - returns)
-    gross = round(retained - unit_cost - shipping - fee, 2); contribution = round(gross - cac, 2)
+    canonical = _canonical_economics(price, unit_cost, shipping, cac, returns, payment_rate)
+    fee = round(float(canonical.payment_fees.amount), 2)
+    gross = round(float(canonical.contribution_before_cac.amount), 2)
+    contribution = round(float(canonical.contribution_after_cac.amount), 2)
     cost_note = f"Observed CJ supplier cost={unit_cost} (source={evidence.source_url})" if has_cost else f"Assumed unit cost={unit_cost}"
     shipping_note = f"Observed CJ shipping={shipping} (source={evidence.source_url})" if has_shipping else f"Assumed shipping={shipping}"
     source = "partial_observed_supplier_evidence" if (has_cost or has_shipping) else "dry_run_assumption"
     warnings = ("Price, CAC, and return-rate inputs remain dry-run assumptions unless explicitly marked 'Observed' below; "
                 "no actual margin, CAC, profitability, or ROAS conclusion is supported.",)
     return UnitEconomicsSummary(candidate.candidate_id, price, unit_cost, shipping, fee, returns, cac, gross, contribution, gross,
-        warnings, (f"Assumed price={price}", cost_note, shipping_note, f"Assumed CAC={cac}", f"Assumed return rate={returns}"), source)
+        warnings, (f"Assumed price={price}", cost_note, shipping_note, f"Assumed CAC={cac}", f"Assumed return rate={returns}"), source, canonical.to_dict())
 
 
 def _creative(candidate: OpportunityCandidate) -> CreativePacket:

@@ -113,3 +113,28 @@ Product Opportunity Synthesis uses this layer for landed cost, margin,
 delivery, inventory, and supplier-risk decisions. Missing or fixture-only
 supplier fields keep `supplier_validation_required=true` and prevent a claim
 of live sourcing proof.
+
+## Importer dump-key aliases (not a new authority)
+
+The offline importer maps public dump keys onto existing evidence fields only:
+`pid`/`productId`/`item_id` → `supplier_product_id`/`candidate_id`;
+`nameEn`/`productNameEn`/`name` → `supplier_title`;
+`sellPrice`/`regular_price`/`unitCost` → `unit_cost`;
+`directMinOrderNum`/`min_order_quantity` → `moq`;
+`deliveryCycle`/`deliveryTime` → delivery window;
+`totalInventory`/`inventoryQuantity`/`stock_quantity`/`cjInventory` → `inventory_quantity`;
+`areaEn`/`store_code`/`origin_country`/`countryCodeOfOrigin` → `warehouse_region`;
+`ship_to_country` → `destination_region`;
+`sku`/`variantSku` → `supplier_sku`.
+
+Nested `variants`/`skus`/`offers` arrays flatten to one row per mapping; parent
+fields fill gaps and variant sku/id/price/inventory override. A lone integer
+`variants` remains `variant_count`. `collapse_duplicates` still keys on
+`(candidate_id, supplier, supplier_product_id or source_url)` after flatten —
+similar titles with different product ids stay separate. Conflicting
+`unit_cost`/`currency`/`shipping_cost` on that key add
+`conflicting_supplier_offer` on the kept row.
+
+This layer does not convert FX, apply shipping-zone tables, or add a
+title-similarity alias identity. Currency labels pass through; missing currency
+is assumed USD as a warning only.
