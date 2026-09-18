@@ -20,7 +20,11 @@ MAX_OUTPUT_BYTES = 50_000
 SENSITIVE_NAME = re.compile(
     r"(?i)(\.env($|\.)|credentials|id_rsa|id_ed25519|\.pem$|\.p12$|secrets?/)"
 )
-UNSAFE_TARGET = re.compile(r"(^/)|(^[A-Za-z]:\\)|(\.\.)|(artifacts/)|(\.git/)")
+# The drive-letter branch is checked against the backslash-normalized form
+# unsafe_target() actually searches (see below) -- a literal "\\" here would
+# never match, since by the time this pattern runs, every backslash has
+# already been converted to "/".
+UNSAFE_TARGET = re.compile(r"(^/)|(^[A-Za-z]:/)|(\.\.)|(artifacts/)|(\.git/)")
 ALLOWED_GIT = {
     ("rev-parse", "--show-toplevel"),
     ("rev-parse", "--is-inside-work-tree"),

@@ -124,10 +124,25 @@ def _normalize_path(path: str) -> str:
     return value
 
 
+# pathlib.Path resolves to PosixPath on a Linux/macOS host, which never
+# treats a drive letter as absolute ("C:/Windows/System32".is_absolute() ==
+# False there) -- so a Windows-shaped absolute path slips past
+# candidate.is_absolute() whenever this validator runs on a non-Windows
+# host (as it does in this sandbox). A task packet's paths must be rejected
+# the same way regardless of which OS is validating them. A UNC share
+# ("//server/share/...") needs no separate check here: PosixPath already
+# treats a leading "//" as absolute (POSIX reserves exactly two leading
+# slashes for implementation-defined, but in practice always "is
+# absolute", behavior), so candidate.is_absolute() alone already covers
+# it -- do not remove that line under the assumption only the explicit
+# drive-letter check below matters.
+WINDOWS_DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:/")
+
+
 def assert_safe_path(path: str, field: str) -> str:
     value = _normalize_path(_text(path, field))
     candidate = Path(value)
-    if candidate.is_absolute() or ".." in candidate.parts:
+    if candidate.is_absolute() or ".." in candidate.parts or WINDOWS_DRIVE_ABSOLUTE.match(value):
         raise TaskPacketError(f"{field} must stay relative without '..'")
     lowered = value.lower()
     if any(marker in lowered for marker in PROHIBITED_PATH_MARKERS):
