@@ -57,6 +57,8 @@ _PATH_TO_STATE: dict[str, tuple[str, ...]] = {
     "delivered": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "approved", "delivered"),
     "renewal_candidate": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "approved", "delivered", "renewal_candidate"),
     "upsell_candidate": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "approved", "delivered", "upsell_candidate"),
+    "revision_requested": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "revision_requested"),
+    "paused": ("screening", "paused"),
 }
 
 
@@ -127,7 +129,7 @@ def _reproduce_271_route_validation(payload: dict) -> str:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("package_id", PACKAGE_IDS)
-@pytest.mark.parametrize("target_state", ("eligible", "data_inadequate", "cancelled", "rejected", "draft_ready", "client_review", "approved", "delivered"))
+@pytest.mark.parametrize("target_state", ("eligible", "data_inadequate", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "revision_requested", "approved", "delivered", "paused", "cancelled", "rejected"))
 def test_every_required_state_is_reachable_and_produces_a_route_compatible_row(package_id, target_state):
     _, pkg, dq, economics, row = _drive_to_state(package_id, target_state, client_id=f"client-{package_id}-{target_state}", registry_path=f"/tmp/never-written-chain-test-{package_id}-{target_state}.json")
     assert row["lifecycle_state"] == target_state
@@ -315,3 +317,17 @@ def test_missing_data_reflects_the_supplied_assessment_not_a_stale_engagement_de
     row = build_service_engagement_row(engagement, pkg, dq, None, artifact)
     assert set(dq.missing_fields) <= set(row["missing_data"])
     assert len(row["missing_data"]) > 0
+
+
+def test_unavailable_is_a_frontend_only_pseudo_state_not_a_real_engagement_lifecycle_state():
+    # The frontend's LIFECYCLE_STATES adds "unavailable" on top of every
+    # real CompanyOS engagement state, to represent "no data was returned at
+    # all" -- it is never a state a real ClientEngagement can be in. This
+    # producer never emits it as a lifecycle_state; the empty/missing/
+    # malformed/leaking/unsafe cases already covered above are how
+    # "unavailable" is actually reached, at the envelope level, not the
+    # per-engagement level.
+    assert "unavailable" not in ENGAGEMENT_STATES
+    empty_projection = build_service_engagement_projection([], availability="unavailable")
+    assert empty_projection["engagements"] == []
+    assert empty_projection["availability"] == "unavailable"
