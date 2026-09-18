@@ -139,6 +139,17 @@ Before attempting a private staging deployment, verify via `backend.deployment.e
 - **ECC / gstack / Hermes**: CLI and skills are not installed in the environment (`unavailable`).
 - **Remote CI**: Zero-step / `ci_unavailable`. Local quality gate `--from-git` is the canonical verification authority.
 
+## Promotion rehearsal bundle
+
+The offline promotion rehearsal composes existing deployment authorities into a deterministic, sanitized readiness record:
+
+```powershell
+python scripts/deployment_diagnostics.py --promotion-rehearsal --env local_dry_run --json
+python scripts/deployment_diagnostics.py --promotion-rehearsal --fixture clean_local_dry_run --json
+```
+
+It redacts secret-shaped values, keeps CI with zero executed steps as `ci_unavailable`, and never enables providers or live mutations.
+
 ## Rollback
 
 ```powershell

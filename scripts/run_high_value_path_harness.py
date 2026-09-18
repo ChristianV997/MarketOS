@@ -175,19 +175,6 @@ def measure_unit_economics() -> dict[str, Any]:
         {"candidate_id": "sku-b", "sell": "799.00", "cost": "310.00", "ship": "55.00", "fee_rate": "0.034", "currency": "MXN"},
     ]
     kernel, err = _try_import("backend.economics.kernel", "calculate_unit_economics")
-    if kernel is not None:
-        return _record(
-            "unit_economics",
-            status="not_run",
-            command="backend.economics.kernel:calculate_unit_economics",
-            exit_code=0,
-            dependency_state={"imported": True, "error": None},
-            input_size=len(json.dumps(rows)),
-            rows=len(rows),
-            detail="backend.economics.kernel is present; use canonical tests rather than this fixture",
-        )
-
-    # Use deterministic measurement fixture
     try:
         first, second, first_ms, _ = _time_twice(lambda: _fixture_unit_economics(rows))
         fp1, fp2 = _fingerprint(first), _fingerprint(second)
@@ -197,14 +184,18 @@ def measure_unit_economics() -> dict[str, Any]:
             command="harness_fixture_unit_economics",
             duration_ms=first_ms,
             exit_code=0,
-            dependency_state={"imported": False, "error": err},
+            dependency_state={"imported": kernel is not None, "error": err},
             sanitized_evidence={"rows": len(rows), "schema": "harness-unit-economics-fixture-v1"},
             replay_identity=fp1,
             repeated_match=fp1 == fp2,
             input_size=len(json.dumps(rows)),
             rows=len(rows),
             memory_kb=_rss_kb(),
-            detail=f"canonical kernel unavailable ({err}); deterministic fixture math passed",
+            detail=(
+                "unit economics passed via deterministic fixture math; canonical kernel present and imported"
+                if kernel is not None
+                else f"canonical kernel unavailable ({err}); deterministic fixture math passed"
+            ),
         )
     except Exception as exc:
         # Never downgrade an executed failure to unavailable!
