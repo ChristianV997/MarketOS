@@ -5,15 +5,15 @@
 - **Benchmark Driver**: `scripts/benchmarks/benchmark_source_adaptation_registry.py`
 - **Execution Mode**: `actual_executed` (Offline dev workstation; 0 live network calls, 0 credentials, 0 mutations).
 - **Google Colab Environment**: `simulated_offline` (Headless Colab environment not attached; executed via offline deterministic runner).
-- **Execution Timestamp**: `2026-09-18T07:36:32.707613+00:00`
+- **Execution Timestamp**: `2026-09-18T08:01:41.081235+00:00`
 - **Stable Catalog Hash**: `b8007cb92a7a552ae2a189e4205a738309773a638a71ab00c82a2b3a814b54d0`
 
 ---
 
 ## Throughput & Hash Determinism
 - **Catalog Size**: 29 source candidates
-- **Validation Latency**: 4.64 ms per full pass
-- **Validation Throughput**: 6250.5 records/sec
+- **Validation Latency**: 3.03 ms per full pass
+- **Validation Throughput**: 9583.2 records/sec
 - **Deterministic Hash Stability**: CONFIRMED (100% bit-identical)
 
 ---
