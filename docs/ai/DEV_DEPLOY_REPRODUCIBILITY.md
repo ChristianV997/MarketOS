@@ -62,24 +62,65 @@ git diff --check
 
 Ruff is advisory (`ARCHITECTURE_CONTRACT.md`). If `ruff` is missing, record `unavailable`.
 
-## Deployment descriptors
+## Deployment descriptors and failure diagnostics
 
 ```powershell
+# Offline deployment and readiness smoke checks
 python scripts/deployment_smoke_check.py --local --json
 python scripts/mvp_readiness.py --json
-python scripts/run_high_value_path_harness.py --json
+
+# Actionable failure diagnostics (covers 11 failure modes)
+python scripts/deployment_diagnostics.py --mode local_dry_run --json
+
+# To diagnose private staging readiness:
+python scripts/deployment_diagnostics.py --mode staging --json
 ```
 
-Parse-only checks for Render/Railway live in `tests/contracts/test_deployment_env_contract.py` and `tests/contracts/test_container_hardening.py`.
-
-## Performance harness
+## Performance harness & Colab benchmark matrix
 
 ```powershell
+# Bounded deterministic path measurement
 python scripts/run_high_value_path_harness.py --json
-python scripts/benchmark_commerce_cycle.py --runs 5
+
+# Run the 8-path Colab benchmark matrix (local actual_executed or Colab managed):
+python scripts/run_high_value_path_harness.py --colab-matrix --runs 3
 ```
 
-The new harness times fixture-sized paths and classifies missing modules as `unavailable` / `not_run`. It does not optimize and does not call providers. Existing `scripts/benchmark_commerce_cycle.py` remains the commerce-cycle authority when the full stack imports.
+### How to interpret harness classifications
+
+1. `passed`: The path executed bounded deterministic logic to completion, validated its output against schema/expectations, and verified bit-identical replay fingerprint.
+2. `failed`: The path attempted execution but raised an unhandled exception or failed an assertion. **Failures are never downgraded to unavailable.**
+3. `unavailable`: The required module, CLI tool, or fixture file was absent prior to execution (e.g. absent optional provider or missing native package).
+4. `not_run`: The path module is present in the repository, but execution was intentionally skipped (e.g. reserved for operator local fixture path without synthetic candidate generation).
+5. `blocked`: A safety gate or policy stopped execution (e.g. live commerce runs or mutation flags enabled without authorization).
+6. `malformed`: The input fixture or output record failed schema structure validation.
+7. `timed_out`: Path execution exceeded the bounded timeout threshold.
+
+### How to reproduce the Colab benchmark matrix
+
+Run:
+```bash
+python scripts/run_high_value_path_harness.py --colab-matrix --runs 3
+```
+Expected summary results on synthetic fixture data (0 secrets, 0 network, 0 live mutations):
+- `unit_economics`: passed, ~0.05ms, bit_identity=True (1 unique hash across runs)
+- `supplier_import_normalization`: passed, ~0.01ms, bit_identity=True
+- `product_opportunity_synthesis`: passed, ~0.001ms, bit_identity=True
+- `competition_normalization`: passed, ~0.008ms, bit_identity=True
+- `commerce_dry_run_cycle`: passed, ~0.001ms, bit_identity=True
+- `report_export_generation`: passed, ~0.002ms, bit_identity=True
+- `replay_idempotency`: passed, ~0.028ms, bit_identity=True
+- `container_contract_parsing`: passed, ~0.000ms, bit_identity=True
+- `dependency_unavailable_behavior`: passed, ~0.000ms, bit_identity=True
+
+## Private staging prerequisites
+
+Before attempting a private staging deployment, verify via `backend.deployment.environment_contract`:
+1. `ALLOWED_ORIGINS`: explicit private staging URL (no wildcard `*`).
+2. `DATABASE_URL` and `POSTGRES_PASSWORD`: strong non-default password (rejects `upos`, `postgres`, `admin`, `password`, `123456`).
+3. `REDIS_URL`: valid connection string.
+4. Mutation gates: `MARKETOS_PUBLIC_COMMERCE_RUNS=0`, `MARKETOS_ENABLE_LIVE_ACTIONS=0`.
+5. Container dependency health: `redis` and `db` services configured with `condition: service_healthy`.
 
 ## AI-chat continuation protocol
 
@@ -91,15 +132,22 @@ The new harness times fixture-sized paths and classifies missing modules as `una
 6. Never merge. Never claim production readiness from local evidence.
 7. No `--allow-network`, no provider flags, no `.env` commits, no `artifacts/` staging.
 
+## Known unavailable checks
+
+- **Google Colab compute**: Not mounted or connected on local workstation (`unavailable`); synthetic benchmark matrix runs locally as `actual_executed`.
+- **CoderOS CLI**: Probed via `backend.adapters.coderos_readonly.probe()`; reported `unavailable` (no `coderos` executable/root).
+- **ECC / gstack / Hermes**: CLI and skills are not installed in the environment (`unavailable`).
+- **Remote CI**: Zero-step / `ci_unavailable`. Local quality gate `--from-git` is the canonical verification authority.
+
 ## Rollback
 
 ```powershell
 git switch main
-git worktree remove C:\Users\HP\Documents\GitHub\MarketOS-wt-deploy
+git worktree remove C:\Users\HP\Documents\MarketOS.worktrees\dev-deploy-reliability-v1
 ```
 
-If this branch was pushed: close the draft PR unmerged and delete the branch. Revert Dockerfile / compose by restoring main blobs. No database migration is introduced.
+If this branch was pushed: close the PR unmerged and delete the branch. Revert Dockerfile / compose by restoring main blobs. No database migration is introduced.
 
 ## No-live-action statement
 
-This lane did not deploy, did not call providers, did not write credentials, did not open public endpoints, and did not merge.
+This lane did not deploy, did not call providers, did not write credentials, did not open public endpoints, did not spend funds, and did not merge.
