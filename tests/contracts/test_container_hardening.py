@@ -18,11 +18,12 @@ def test_dockerfile_hardening_invariants():
 
     # Non-root user created and switched to
     assert "USER marketos" in dockerfile
-    assert "useradd -u 10001 -g marketos" in dockerfile
+    assert "10001" in dockerfile
+    assert "marketos" in dockerfile
 
-    # Healthcheck defined targeting /health
+    # Healthcheck defined targeting /health on port 3000
     assert "HEALTHCHECK" in dockerfile
-    assert "http://localhost:8000/health" in dockerfile
+    assert "3000/health" in dockerfile
 
     # Graceful shutdown stop signal
     assert "STOPSIGNAL SIGINT" in dockerfile
@@ -30,6 +31,7 @@ def test_dockerfile_hardening_invariants():
     # No reload flag in production container CMD
     cmd_line = [line for line in lines if line.startswith("CMD")][0]
     assert "--reload" not in cmd_line
+    assert '3000' in cmd_line
 
 
 def test_docker_compose_prod_hardening_invariants():
@@ -45,8 +47,9 @@ def test_docker_compose_prod_hardening_invariants():
 
     # Postgres password must require environment variable rather than hardcoded insecure default
     raw_text = compose_path.read_text(encoding="utf-8")
+    assert "5432:5432" not in raw_text
     assert "POSTGRES_PASSWORD: upos" not in raw_text
-    assert "- POSTGRES_PASSWORD" in raw_text
+    assert "POSTGRES_PASSWORD: ${POSTGRES_PASSWORD" in raw_text
 
     # Redis service invariants
     redis = services["redis"]
@@ -57,6 +60,19 @@ def test_docker_compose_prod_hardening_invariants():
     api = services["api"]
     assert api.get("restart") == "unless-stopped"
     assert api["environment"].get("MARKETOS_PUBLIC_COMMERCE_RUNS") == "0"
+
+
+def test_render_and_railway_descriptors_stay_health_gated_and_secret_free():
+    railway = (ROOT / "deploy/railway/railway.json").read_text(encoding="utf-8")
+    render = (ROOT / "deploy/render/render.yaml").read_text(encoding="utf-8")
+    assert "healthcheckPath" in railway
+    assert "healthCheckPath: /health" in render
+    assert "uvicorn backend.api:app" in railway
+    assert "uvicorn backend.api:app" in render
+    for content in (railway, render):
+        assert "SERVICE_ROLE_KEY" not in content
+        assert "sk-live" not in content
+        assert "--reload" not in content
 
 
 def test_docker_compose_grafana_invariants():

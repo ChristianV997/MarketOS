@@ -151,6 +151,24 @@ Status: Evidence snapshot for `origin/main` (`df59a0609897907c1565d7d5f78e209590
 5. **Credential Safety & Sanitization**:
    - Implemented `backend/security/credentials.py` preventing credential exposure in logs or JSON error payloads.
 6. **Container & Compose Hardening**:
-   - Pinned `Dockerfile` to `python:3.12-slim` (matching `.python-version`), non-root `USER marketos`, `HEALTHCHECK`, and `STOPSIGNAL SIGINT`.
-   - Hardened `docker-compose.prod.yml`: removed host port exposure (`5432:5432`), required `POSTGRES_PASSWORD`, added container healthchecks for Postgres and Redis.
+   - Pinned `Dockerfile` to `python:3.12-slim` (matching `.python-version`), non-root `USER marketos` (UID 10001, `/usr/sbin/nologin`), `HEALTHCHECK` on port 3000, `STOPSIGNAL SIGINT`, and Python environment variables (`PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`, `PIP_DISABLE_PIP_VERSION_CHECK=1`).
+   - Hardened `docker-compose.prod.yml`: unified on port 3000, removed host port exposure (`5432:5432` omitted), required `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the environment}`, added container healthchecks for Postgres (`pg_isready`) and Redis (`redis-cli ping`), `redis:7-alpine`, `init: true`, and `stop_grace_period: 15s`.
    - Added database credential audit to `validate_production_deployment()` to reject default passwords (`upos`).
+7. **Offline Reproducibility Harness**:
+   - Integrated `scripts/run_high_value_path_harness.py` and `tests/test_high_value_path_harness.py` to deterministically benchmark high-value paths (unit economics, supplier import, competition normalization, report export, replay idempotency) without invoking live providers or mutation paths.
+   - Preserved `docs/ai/DEV_DEPLOY_REPRODUCIBILITY.md` for clean offline replication guidelines.
+
+---
+
+## Deployment Collision Resolution & Canonical Authority
+
+| Target Path | Colliding PRs | Canonical Owner | Retained Changes | Discarded / Harmonized Duplicate |
+| :--- | :--- | :--- | :--- | :--- |
+| `Dockerfile` | #249, #251, #258 | **PR #258** | Port 3000 standard, non-root user (UID 10001, `/usr/sbin/nologin`), Python runtime env vars, `/app/artifacts` dir, `STOPSIGNAL SIGINT`, healthcheck on `/health`. | Port 8000 deviation in earlier PR #258 drafts discarded; redundant layer ordering discarded. |
+| `docker-compose.prod.yml` | #249, #251, #258 | **PR #258** | Port 3000 mapping, `redis:7-alpine`, `init: true`, `stop_grace_period: 15s`, container healthchecks, volume persistence `postgres_data`, private database networking (no 5432 host publish), fail-closed `POSTGRES_PASSWORD` env requirement. | Insecure fallback passwords (`POSTGRES_PASSWORD: upos`) discarded. |
+| `tests/contracts/test_container_hardening.py` | #249, #258 | **PR #258** | Invariants for Python 3.12, non-root user, port 3000, stop signal, no `--reload`, compose no host publish, Render (`deploy/render/render.yaml`) and Railway (`deploy/railway/railway.json`) secret-free descriptor checks, Grafana invariants, deployment validator rejection of default passwords. | Divergent port 8000 assertions discarded. |
+| `docs/DEPLOYMENT_READINESS_MATRIX.md` | #249, #258 | **PR #258** | Full 6-tier readiness matrix, evaluation taxonomy, implemented security controls, and cross-PR collision resolution table. | Partial staging-only matrix notes consolidated into canonical document. |
+| `scripts/run_high_value_path_harness.py` | #249 | **PR #258** (Adopted) | Offline timing and fingerprint reproducibility harness for core paths; strict `live_actions: False`. | Adopted cleanly from PR #249 without alteration. |
+| `tests/test_high_value_path_harness.py` | #249 | **PR #258** (Adopted) | Automated tests asserting deterministic unit economics, replay stability, and non-live invariants. | Adopted cleanly from PR #249 without alteration. |
+| `docs/ai/DEV_DEPLOY_REPRODUCIBILITY.md` | #249 | **PR #258** (Adopted) | Operator instructions for worktree isolation, dev stack verification, and offline test selection. | Adopted cleanly from PR #249 without alteration. |
+| `backend/security/*` | #251, #258 | **PR #258** | Canonical security suite (`auth.py`, `cors.py`, `credentials.py`, `live_action_gate.py`, `webhooks.py`, `deployment_validation.py`). | Fragmented security patches from closed PR #251 fully superseded. |
