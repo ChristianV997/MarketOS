@@ -74,6 +74,8 @@ def test_schema_constant():
     assert snapshot.SCHEMA == "MarketOS.AIContext.v1"
     assert "repository" in snapshot.REQUIRED_KEYS
     assert "deployment_readiness" in snapshot.REQUIRED_KEYS
+    assert "replay_hash" in snapshot.REQUIRED_KEYS
+    assert "protected_dirty" in snapshot.REQUIRED_KEYS
 
 
 def test_excluded_paths_drop_artifacts_and_env():
@@ -254,3 +256,15 @@ def test_schema_stability_document_keys(monkeypatch, tmp_path: Path):
     assert "ghp_" not in encoded
     assert "artifacts/" not in document["changed_paths"]
     assert document["deployment_readiness_classification"] != "actual"
+    assert document["schema_version"] == "1"
+    assert len(document["replay_hash"]) == 64
+    assert document["protected_dirty"]["paths_disclosed"] is False
+    first = snapshot.context_replay_hash(
+        head=document["HEAD"],
+        origin_main=document["origin_main"],
+        merge_base=document["worktree"]["drift"]["merge_base"],
+        branch=document["branch"],
+        worktree=document["worktree"]["path"],
+        changed_paths=list(document["changed_paths"]),
+    )
+    assert first == document["replay_hash"]

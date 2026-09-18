@@ -15,7 +15,7 @@ RULES = (
     (("evaluation/commerce/",), ("pytest tests/evaluation -q", "pytest tests/contracts/test_architecture_boundaries.py -q"), "evaluation"),
     (("api/routes/", "backend/events/"), ("pytest tests/integration/test_canonical_events_api_readonly.py -q", "pytest tests/system/test_canonical_event_read_views.py -q"), "api_events"),
     (("frontend/",), ("cd frontend && npm run build",), "frontend"),
-    (("scripts/ai/", "scripts/operators/", "docs/ai/AI_CHAT_OPERATING_PROTOCOL.md"), ("pytest tests/test_ai_dev_stack.py -q", "pytest tests/ai/test_operator_context_snapshot.py -q", "pytest tests/ai/test_marketos_ai_session.py -q", "python scripts/ai/session_finish.py --dry-run"), "agentic_tools"),
+    (("scripts/ai/", "scripts/operators/", "docs/ai/AI_CHAT_OPERATING_PROTOCOL.md"), ("pytest tests/test_ai_dev_stack.py -q", "pytest tests/ai/test_operator_context_snapshot.py -q", "pytest tests/ai/test_marketos_ai_session.py -q", "pytest tests/ai/test_operator_session_continue.py -q", "python scripts/ai/session_finish.py --dry-run"), "agentic_tools"),
     ((".github/workflows/",), ("python -m compileall -q scripts tests", "python scripts/ai/ci_matrix_plan.py --json"), "ci_workflow"),
 )
 

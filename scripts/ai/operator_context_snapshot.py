@@ -7,6 +7,7 @@ Default is dry-run / read-only.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -43,7 +44,10 @@ REQUIRED_KEYS = (
     "blockers",
     "next_best_action",
     "evidence_classifications",
+    "replay_hash",
+    "protected_dirty",
 )
+LANE_PATH_PREFIXES = ("scripts/ai/", "tests/ai/", "docs/ai/", "scripts/operators/")
 
 SECRET_SHAPED = re.compile(
     r"(?is)("
@@ -315,18 +319,74 @@ def _python() -> str:
     return sys.executable
 
 
+def _posix_path(path: str) -> str:
+    value = str(path).replace("\\", "/").replace("\r", "").lstrip("\ufeff")
+    if value.startswith("./"):
+        value = value[2:]
+    return value
+
+
 def _safe_changed_paths(raw: list[str]) -> list[str]:
     cleaned = []
     for path in raw:
-        value = str(path).replace("\\", "/")
-        if value.startswith("./"):
-            value = value[2:]
+        value = _posix_path(path)
         if not value or _excluded_path(value):
             continue
         cleaned.append(value)
         if len(cleaned) >= MAX_CHANGED_FILES:
             break
     return cleaned
+
+
+def _protected_dirty_summary(raw: list[str]) -> dict[str, Any]:
+    protected = [_posix_path(path) for path in raw if _excluded_path(_posix_path(path))]
+    markers = sorted({marker for path in protected for marker in EXCLUDED_PATH_MARKERS if marker in path.lower()})
+    prefixes = sorted(
+        {
+            prefix.rstrip("/")
+            for path in protected
+            for prefix in EXCLUDED_PATH_PREFIXES
+            if path.startswith(prefix) or f"/{prefix.rstrip('/')}" in f"/{path}"
+        }
+    )
+    return {
+        "count": len(protected),
+        "markers": markers,
+        "prefixes": prefixes,
+        "paths_disclosed": False,
+        "classification": "blocked" if protected else "not_run",
+    }
+
+
+def _unrelated_dirty(safe_paths: list[str]) -> list[str]:
+    unrelated: list[str] = []
+    for path in safe_paths:
+        if any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in LANE_PATH_PREFIXES):
+            continue
+        unrelated.append(path)
+    return unrelated[:MAX_CHANGED_FILES]
+
+
+def context_replay_hash(
+    *,
+    head: str | None,
+    origin_main: str | None,
+    merge_base: str | None,
+    branch: str,
+    worktree: str,
+    changed_paths: list[str],
+) -> str:
+    payload = {
+        "schema": SCHEMA,
+        "branch": branch,
+        "HEAD": head,
+        "origin_main": origin_main,
+        "merge_base": merge_base,
+        "worktree": worktree,
+        "changed_paths": sorted(changed_paths),
+    }
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def _parse_worktrees(raw: str) -> list[dict[str, str | None]]:
@@ -407,6 +467,7 @@ def _blocked_document(reason: str) -> dict[str, Any]:
     }
     return {
         "schema": SCHEMA,
+        "schema_version": "1",
         "read_only": True,
         "mutated": False,
         "network_calls": False,
@@ -416,6 +477,9 @@ def _blocked_document(reason: str) -> dict[str, Any]:
         "origin_main": None,
         "worktree": empty_worktree,
         "changed_paths": [],
+        "unrelated_dirty": [],
+        "protected_dirty": {"count": 0, "markers": [], "prefixes": [], "paths_disclosed": False, "classification": "not_run"},
+        "replay_hash": None,
         "open_prs": {"classification": "not_run", "items": []},
         "selected_tests": [],
         "phase1_readiness": {},
@@ -468,13 +532,15 @@ def build_snapshot(
     worktree_list = _git(validated, "worktree", "list", "--porcelain")
     merge_base = _git(validated, "merge-base", "origin/main", "HEAD")
     dirty = bool(status.get("stdout"))
-    changed: list[str] = []
+    raw_changed: list[str] = []
     for line in (status.get("stdout") or "").splitlines():
         if len(line) < 4:
             continue
-        path = line[3:].split(" -> ")[-1]
-        changed.append(path)
-    changed = _safe_changed_paths(changed)
+        path = _posix_path(line[3:].split(" -> ")[-1])
+        raw_changed.append(path)
+    protected_dirty = _protected_dirty_summary(raw_changed)
+    changed = _safe_changed_paths(raw_changed)
+    unrelated_dirty = _unrelated_dirty(changed)
     listed = [
         item
         for item in _parse_worktrees(worktree_list.get("stdout") or "")
@@ -694,9 +760,18 @@ def build_snapshot(
         },
         "ownership_note": "edits must stay in this exclusive worktree; never modify the canonical dirty checkout",
     }
+    replay = context_replay_hash(
+        head=head.get("stdout") or None,
+        origin_main=origin_main.get("stdout") or None,
+        merge_base=merge_base.get("stdout") or None,
+        branch=branch.get("stdout") or "detached",
+        worktree=worktree_path,
+        changed_paths=changed,
+    )
 
     document = {
         "schema": SCHEMA,
+        "schema_version": "1",
         "read_only": True,
         "mutated": False,
         "network_calls": include_github and "actual" in {github_view["classification"], github_list["classification"]},
@@ -710,6 +785,9 @@ def build_snapshot(
         "origin_main": origin_main.get("stdout") or None,
         "worktree": worktree,
         "changed_paths": changed,
+        "unrelated_dirty": unrelated_dirty,
+        "protected_dirty": protected_dirty,
+        "replay_hash": replay,
         "open_prs": github_list,
         "selected_tests": selected_commands if isinstance(selected_commands, list) else [],
         "phase1_readiness": phase1_summary,

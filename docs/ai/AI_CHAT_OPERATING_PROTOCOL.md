@@ -29,6 +29,7 @@ Local checks never prove production or deployment readiness. Fixture, manual, an
 | Concern | Authority | Data class | Disabled / future |
 |---|---|---|---|
 | AI-chat repository context | `scripts/ai/operator_context_snapshot.py` (`MarketOS.AIContext.v1`) | mixed local `actual` + dry-run `simulated` | never production proof |
+| AI-chat session continuation | `scripts/ai/operator_session_continue.py` (`MarketOS.AISession.v1`) | fail-closed resume/record; no live execution | not `MarketOS.AITask.v1` (#254) |
 | AI-chat PowerShell session | `scripts/operators/marketos_ai_session.ps1` | wrapper; preserves child exit codes | never stages/deletes files |
 | Product Validation sprints | PR #246 `scripts/operators/Invoke-MarketOSOperator.ps1` + `windows_operator_workflow.py` | dry-run / fixture | live/network/start flags rejected |
 | First-phase intelligence runner | PR #228 `scripts/operators/run_first_phase_intelligence.ps1` | fixture/simulated packet | no ads/orders/payments |
@@ -108,7 +109,7 @@ Inspect `owned_path_changes`, `docs/ai/PARALLEL_WORK_MATRIX.md`, and:
 gh pr list --state open --limit 20 --json number,title,headRefName,files
 ```
 
-If `gh` is missing, classify GitHub `unavailable` and compare local `git worktree list` plus open PR branches you already know. Do not overlap another open PR's paths. This lane owns `scripts/ai/operator_context_snapshot.py`, `scripts/operators/marketos_ai_session.ps1`, `docs/ai/AI_CHAT_OPERATING_PROTOCOL.md`, and `tests/ai/test_operator_context_snapshot.py`. It must not rewrite PR #246 operator workflow files, PR #230 cockpit UI, or PR #254 task/eval/worktree-safety files.
+If `gh` is missing, classify GitHub `unavailable` and compare local `git worktree list` plus open PR branches you already know. Do not overlap another open PR's paths. This lane owns `scripts/ai/operator_context_snapshot.py`, `scripts/ai/operator_session_continue.py`, `scripts/operators/marketos_ai_session.ps1`, `docs/ai/AI_CHAT_OPERATING_PROTOCOL.md`, `tests/ai/test_operator_context_snapshot.py`, `tests/ai/test_marketos_ai_session.py`, and `tests/ai/test_operator_session_continue.py`. It must not rewrite PR #246 operator workflow files, PR #230 cockpit UI, or PR #254 task/eval/worktree-safety files.
 
 Declare scope before editing. When PR #254 is present, validate a `MarketOS.AITask.v1` packet instead of inventing a second task format.
 
@@ -217,11 +218,20 @@ Do not resume from chat memory.
 2. Inspect dirty files with `git status --short` in the exclusive worktree only. A detached inspect worktree makes `select_tests.py --from-git` return empty; use the named PR branch worktree.
 3. Inspect PR ownership (`gh pr view` / `gh pr list`). Missing `gh` is `unavailable`.
 4. Re-run `marketos_ai_session.ps1 -Action snapshot -NoGitHub`
-5. If PR #254 files exist, run `worktree_safety.py` and `agent_output_eval.py` against the task packet. Missing report rollback fails closed.
-6. Declare scope, select tests, run only affected validation, then create/update the PR.
-7. Re-read `docs/ai/AI_CHAT_OPERATING_PROTOCOL.md` and `docs/ai/PARALLEL_WORK_MATRIX.md`
-8. Report evidence classes, rollback SHA, and one next action. Do not reuse pasted SHAs from an old chat.
-9. Resume the same exclusive worktree; do not create a second snapshot, task format, or quality gate.
+5. Resume continuation from the snapshot identity, not chat memory:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\operators\marketos_ai_session.ps1 -Action continue -NoGitHub
+python scripts/ai/operator_session_continue.py --json --repository . --session docs/ai/session-continue.json
+python scripts/ai/generate_session_handoff.py --replay-hash <snapshot.replay_hash>
+```
+
+Interrupted, timed-out, malformed, missing-worktree, stale merge-base, and changed-HEAD packets fail closed. Completed packets return `already_completed`. Failed packets return `safe_retry_same_step` and do not invent success.
+6. If PR #254 files exist, run `worktree_safety.py` and `agent_output_eval.py` against the task packet. Missing report rollback fails closed.
+7. Declare scope, select tests, run only affected validation, then create/update the PR.
+8. Re-read `docs/ai/AI_CHAT_OPERATING_PROTOCOL.md` and `docs/ai/PARALLEL_WORK_MATRIX.md`
+9. Report evidence classes, rollback SHA, and one next action. Do not reuse pasted SHAs from an old chat.
+10. Resume the same exclusive worktree; do not create a second snapshot, task format, or quality gate.
 
 ## 12. Clean up only an explicitly named worktree after approval
 

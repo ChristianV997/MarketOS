@@ -21,6 +21,8 @@ def test_session_script_exists_and_is_ps51():
     assert "frontend-check" in text
     assert "backend-check" in text
     assert "final-check" in text
+    assert "continue" in text
+    assert "operator_session_continue.py" in text
 
 
 def test_powershell_rejects_injection_and_destruction():
@@ -63,6 +65,8 @@ def test_protocol_documents_worktree_and_authorities():
     assert "/api/phase1/evidence-cockpit" in text
     assert "PR #254" in text
     assert "MarketOS.AITask.v1" in text
+    assert "MarketOS.AISession.v1" in text
+    assert "operator_session_continue.py" in text
     assert "select_tests.py --from-git" in text
 
 

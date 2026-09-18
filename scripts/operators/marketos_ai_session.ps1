@@ -15,6 +15,7 @@
     frontend-check  -> frontend npm scripts (PR #213 authority; default not_run in snapshot)
     backend-check   -> focused pytest/compileall/ruff for this lane
     final-check     -> run_local_quality_gate.py (no --execute) + pr_readiness + session_finish --dry-run + git diff --check
+    continue        -> scripts/ai/operator_session_continue.py (MarketOS.AISession.v1; does not execute live commands)
 
   PR #246 Invoke-MarketOSOperator.ps1 remains the Product Validation sprint
   authority. Do not merge these command sets.
@@ -34,12 +35,16 @@ param(
         "select-tests",
         "frontend-check",
         "backend-check",
-        "final-check"
+        "final-check",
+        "continue"
     )]
     [string] $Action,
 
     [string] $RepositoryPath,
     [string] $PythonPath,
+    [string] $SessionPath,
+    [string] $ContextPath,
+    [string] $OutputPath,
     [switch] $NoGitHub,
     [switch] $IncludeFrontend,
     [double] $Timeout = 45
@@ -249,6 +254,7 @@ switch ($Action) {
         [void]$argvPytest.Add("-q")
         [void]$argvPytest.Add("tests/ai/test_operator_context_snapshot.py")
         [void]$argvPytest.Add("tests/ai/test_marketos_ai_session.py")
+        [void]$argvPytest.Add("tests/ai/test_operator_session_continue.py")
         Invoke-Argv -Command $Python.Command -Arguments $argvPytest.ToArray() -WorkingDirectory $RepoRoot -CheckName "pytest_ai" -SuccessClass "actual"
         if ($script:LastSessionCode -ne 0) { exit $script:LastSessionCode }
         $argvRuff = New-Object System.Collections.Generic.List[string]
@@ -290,6 +296,35 @@ switch ($Action) {
             Stop-Session -Message "git unavailable" -Code 2 -Class "unavailable"
         }
         Invoke-Argv -Command $git.Source -Arguments @("diff", "--check") -WorkingDirectory $RepoRoot -CheckName "git_diff_check" -SuccessClass "actual"
+        exit $script:LastSessionCode
+    }
+    "continue" {
+        Assert-SafePathText -Value $SessionPath -Label "SessionPath"
+        Assert-SafePathText -Value $ContextPath -Label "ContextPath"
+        Assert-SafePathText -Value $OutputPath -Label "OutputPath"
+        $scriptPath = Join-Path $RepoRoot "scripts\ai\operator_session_continue.py"
+        if (-not (Test-Path -LiteralPath $scriptPath)) {
+            Stop-Session -Message "operator_session_continue.py missing" -Code 2 -Class "unavailable"
+        }
+        $argv = New-Object System.Collections.Generic.List[string]
+        foreach ($item in $Python.Prefix) { [void]$argv.Add($item) }
+        [void]$argv.Add($scriptPath)
+        [void]$argv.Add("--json")
+        [void]$argv.Add("--repository")
+        [void]$argv.Add($RepoRoot)
+        if (-not [string]::IsNullOrWhiteSpace($SessionPath)) {
+            [void]$argv.Add("--session")
+            [void]$argv.Add($SessionPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ContextPath)) {
+            [void]$argv.Add("--context")
+            [void]$argv.Add($ContextPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+            [void]$argv.Add("--output")
+            [void]$argv.Add($OutputPath)
+        }
+        Invoke-Argv -Command $Python.Command -Arguments $argv.ToArray() -WorkingDirectory $RepoRoot -CheckName "session_continue" -SuccessClass "actual"
         exit $script:LastSessionCode
     }
 }
