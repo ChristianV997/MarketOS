@@ -7,36 +7,39 @@ the Higgsfield CLI/SDK, register an MCP server, or authorize publication.
 
 | Repository | Commit / tag | License | Adopted | Rejected |
 | --- | --- | --- | --- | --- |
-| higgsfield-ai/skills | `d071406` / VERSION 0.12.0 | MIT | Workflow names: product photoshoot, marketplace cards, brand kit, explainer, generate | Hidden prompt templates, skill install, CLI auth |
-| higgsfield-ai/cli | `dc7e2d2` | MIT | Job/status/cost grouping as a dry-run lifecycle | Mutation commands, auth login, website deploy |
-| higgsfield-ai/higgsfield-client | `aefd1ca` / 0.1.0 | Apache-2.0 | Polling/error/timeout taxonomy; optional import detection | Live subscribe/submit, env credentials |
-| higgsfield-ai/higgsfield-js | `e3f2742` / npm 0.2.6 | MIT (`package.json`) | Server-only client boundary | Browser SDK, axios credential calls |
-| higgsfield-ai/cursor-plugin | public main / plugin 1.1.0 | MIT | Agent-tool grouping reference | Marketplace plugin registration, MCP client |
-| higgsfield-ai/fnf-local-pluging-bridge-mcp | public main | MIT | None | After Effects, Blender, mailbox, OS scripting |
-| higgsfield-ai/higgsfield | `v0.0.4-rc` | Apache-2.0 | None | GPU orchestration / multi-node training |
+| higgsfield-ai/skills | public main / VERSION 0.12.0 | MIT | Workflow names only | Skill install, CLI auth, hidden prompts |
+| higgsfield-ai/cli | `dc7e2d2` / v1.1.25 | MIT | Job/status/cost grouping | `auth login`, generate, website deploy |
+| higgsfield-ai/higgsfield-client | 0.1.0 | Apache-2.0 | Timeout/unavailable taxonomy | `subscribe`/`submit`, `HF_KEY` |
+| higgsfield-ai/higgsfield-js | npm 0.2.6 | MIT | Server-only boundary | Browser SDK |
+| higgsfield-ai/cursor-plugin | plugin 1.1.0 | MIT | Tool grouping reference | MCP registration |
+| higgsfield-ai/fnf-local-pluging-bridge-mcp | public main | MIT | None | Desktop AE/Blender control |
+| higgsfield-ai/higgsfield | `v0.0.4-rc` | Apache-2.0 | None | GPU orchestration |
 
-Attribution: Higgsfield AI copyright notices remain on the upstream
-repositories. This adapter reimplements compatible concepts only.
+## Commercial draft workflow
 
-## Why GPU orchestration and desktop MCP were rejected
+`evaluation.creative.workflow` binds creative jobs to product/offer/SKU,
+supplier offer, market lane, workspace, language/locale, brief type,
+claims, evidence, approval, asset lineage, and replay hash.
 
-MarketOS is not a distributed training platform. The `higgsfield` GPU
-framework allocates nodes and trains LLMs. The FNF local MCP bridge drives
-After Effects and Blender on the operator desktop. Both are out of scope
-and would create a second mutation surface.
+Named drafts: hydroponics Spanish-first education, smart-pet support-risk,
+solar 4G security blocked on missing compliance/SIM/support, marketplace
+card with exact SKU, product-validation appendix, managed-acquisition
+variants (en-US + en-CA).
+
+Creative quality is `draft_only`. Commercial validation is
+`not_commercially_validated`. Client export requires evidence ids and
+`approval_state=approved`.
+
+## Source governance
+
+Consumes PR #257 by reference only:
+`MarketOS.SourceGovernance.Higgsfield.v1-pending`.
+Do not fork the registry.
 
 ## Modes
 
 `fixture`, `manual_import`, `dry_run`, `blocked_live`, `live_unavailable`.
-Draft modes never become observed, published, launch-authorized, or
-commercially proven.
-
-## Live prerequisites (recorded, not executed)
-
-human approval, evidence refs, budget/credit cap, idempotency key, audit
-event, rollback plan, provider terms review, privacy review.
 
 ## Rollback
 
-Delete `evaluation/creative/` and `tests/creative/` and
-`docs/ai/HIGGSFIELD_CREATIVE_ADAPTER.md`.
+Delete `evaluation/creative/`, `tests/creative/`, and this file.
