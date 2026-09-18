@@ -46,6 +46,63 @@ Confidence grades communicate evidence quality rather than business certainty:
 recommend validation or a launch draft for human review, but never authorizes
 launch, ad spend, posting, orders, payments, or provider mutations.
 
+**SYN-GRADE-LIVE-LABEL fix:** `A_live_validated` used to require only that
+*any one* of the three supplied pillars carried a live-looking `evidence_mode`
+-- so a single live-labeled pillar mixed with two fixture/manual pillars still
+graded as professionally live-validated. It now requires an explicit live
+attestation (`live_readonly`, `public_live`, or `authenticated_live`) on
+*every* supplied pillar. Three populated pillars alone is never sufficient,
+and a single fixture/manual pillar caps the grade at `C_fixture_or_partial`
+even when another pillar claims live evidence. Genuinely all-live evidence
+still reaches `A_live_validated`; the grade was tightened, not disabled.
+
+**Evidence-label consistency (found during a follow-up review):** the first
+pass only checked the *candidate's* embedded evidence/offer `evidence_mode`,
+never the pillar *report's own* top-level `evidence_mode` field -- so a
+report that labeled itself `fixture_demo` at the top level while an embedded
+evidence item claimed `live_readonly` (or the reverse) still graded as
+`A_live_validated`, an internally self-contradictory result. The grade now
+requires the pillar report's top-level label to agree with its own evidence
+items before counting as live.
+
+**SYN-ALIAS-NO-COLLAPSE fix:** two candidates in the same pillar report that
+share both `query` and an evidence/offer `source_family` (an existing
+provenance field, not a new one) are now collapsed into a single scored
+candidate, so a correlated alias of the same product/source family is never
+ranked twice. `query` text alone never triggers a collapse -- many distinct
+products share a plain search query -- so this cannot merge genuinely
+different candidates. Every collapse is recorded in a new `alias_notes` field
+on the report; a score mismatch between the kept candidate and its alias is
+called out explicitly there rather than picked silently.
+
+**Bounded public patterns mined for these fixes:** no new dependency or scoring
+framework was adopted. The evidence-label-consistency fix mirrors an
+*independent attestation* idea common to data-quality tools (e.g. requiring
+two separately-recorded signals to agree, rather than trusting either one
+alone) -- here, the pillar's own top-level label and its embedded evidence
+items. The alias-collapse fix mirrors OpenLineage's *identity via existing
+provenance fields* idea (`source_family`) rather than inventing a new
+correlation ID or fuzzy-matching engine. Evidently-style reference/current
+drift comparison and Great Expectations-style declarative "expectations" were
+reviewed but not adopted here -- both assume more state (a reference window,
+a rule engine) than this thin decision layer is meant to hold. OPA/Rego's
+"collect every denial reason into one set, default-deny" pattern was reviewed
+against `_grade()`/`derive_governor_influence` and found already present:
+`_grade()`'s tiers are a deliberate fail-closed ladder ending in
+`D_low_confidence`/`F_reject_or_missing`, not an open-ended allow, and the
+Learning Ledger's `LearningGovernorInfluence.rationale` already accumulates
+every contributing signal rather than stopping at the first one -- confirmed
+by adversarial testing rather than changed further.
+
+**Independent re-verification (found no new production defect, confirmed by
+direct testing):** a correlated alias that gets discarded during collapse
+cannot leak its own evidence_mode into the kept candidate's grade -- collapse
+runs before grading, on the kept candidate's evidence only. A sibling
+adapter's `evidence_mode: "stale"` value (not `A_live_validated`-eligible, not
+`"manual_import"`) falls through to the same `C_fixture_or_partial` treatment
+as any other unlabeled evidence, confirmed with `stale_pillar()`-style
+fixtures rather than assumed.
+
 ## Decision rules
 
 Poor margin, high saturation, and low or objection-heavy attention take

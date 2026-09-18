@@ -1,0 +1,33 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "generated_at": "deterministic",
+  "marketplaces_observed": ["amazon"],
+  "top_candidate_id": "desk-clamp-lamp",
+  "candidates": [
+    {
+      "candidate_id": "desk-clamp-lamp",
+      "query": "desk clamp lamp",
+      "evidence_class": "observed",
+      "provenance": {"source": "sanitized_fixture", "collected_at": "2026-01-01T00:00:00Z"},
+      "evidence": [
+        {
+          "marketplace": "amazon",
+          "price": 29.99,
+          "price_band_min": 24.99,
+          "price_band_max": 34.99,
+          "evidence_mode": "fixture",
+          "evidence_class": "observed"
+        }
+      ],
+      "score": {
+        "overall_marketplace_opportunity": 0.72,
+        "saturation_score": 0.31,
+        "recommendation": "advance_research"
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

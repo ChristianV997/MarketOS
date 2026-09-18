@@ -861,6 +861,30 @@ def test_collection_failure_without_dependency_is_explicit(monkeypatch, tmp_path
     assert pytest_result["classification"] == gate.CLASS_COLLECTION_FAILED
 
 
+def test_collection_dependency_is_unavailable_at_gate_boundary(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+
+    def runner(command, root):
+        if "pytest" in " ".join(command):
+            return _result(1, "ERROR collecting tests/test_optional.py\nModuleNotFoundError: No module named 'optional_dep'")
+        return _passing_runner(command, root)
+
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "success", "executed_steps": 1},
+        runner=runner,
+    )
+    pytest_result = next(item for item in report["checks"] if item["name"] == "pytest")
+    assert pytest_result["status"] == "collection_failed"
+    assert pytest_result["classification"] == gate.CLASS_UNAVAILABLE_DEPENDENCY
+    assert report["status"] == "unavailable"
+    assert report["exit_code"] == gate.EXIT_UNAVAILABLE
+    assert report["ready_for_supervised_use"] is False
+
+
 def test_missing_security_policy_is_unavailable_and_blocks(monkeypatch, tmp_path):
     _all_tools_available(monkeypatch)
     root = _configured_root(tmp_path)

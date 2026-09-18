@@ -1,10 +1,12 @@
 """Tests for services.profit_stack_advisor.advisor.run_profit_stack_advisor."""
 import backend.core.persistence as pers
+import backend.workspaces.registry as registry_module
 import pytest
 from backend.experiments.audit_log import transitions_for
 from backend.experiments.registry import get_experiment_registry
 from backend.workspaces.artifact_store import ArtifactStore
 from backend.workspaces.client_workspace import ClientWorkspace
+from backend.workspaces.registry import get_workspace_registry
 from services.profit_stack_advisor.advisor import run_profit_stack_advisor
 from services.profit_stack_advisor.schemas import ProfitStackAdvisorResult
 
@@ -12,6 +14,7 @@ from services.profit_stack_advisor.schemas import ProfitStackAdvisorResult
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(pers, "STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(registry_module, "_registry", None)
 
 
 class TestProfitStackAdvisor:
@@ -48,10 +51,9 @@ class TestProfitStackAdvisor:
         assert {"experiment_created", "experiment_running", "experiment_completed"} <= events
 
     def test_result_saved_to_artifact_store(self):
-        ws = ClientWorkspace(name="own-store")
+        ws = get_workspace_registry().register(ClientWorkspace(name="own-store"))
         result, envelope = run_profit_stack_advisor("Own Store", business_model="own_ecommerce", workspace=ws)
-        store = ArtifactStore()
-        saved = store.load(ws.workspace_id, envelope.experiment_id, "result.json")
+        saved = ArtifactStore(ws).load(envelope.experiment_id, "result.json")
         assert saved == result.to_dict()
 
 
