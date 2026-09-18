@@ -19,7 +19,7 @@ from evaluation.perf.canonical_adapters import measure_all_canonical
 from evaluation.perf.commerce_engine import CommerceEnginePerfError, measure_algorithms, process_offers
 
 
-SCHEMA = "commerce-regression-benchmark-v3"
+SCHEMA = "commerce-regression-benchmark-v2"
 WARMUP = 1
 REPEATS = 5
 
