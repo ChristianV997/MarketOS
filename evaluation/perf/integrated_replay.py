@@ -1,1 +1,1 @@
-placeholder-will-fail-if-not-replaced
+"""Canonical replay performance arbitration for PR #274.\n\nThis module does not own commercial replay.\n"""\nfrom __future__ import annotations\n\nimport hashlib\nimport json\nimport time\nfrom typing import Any, Mapping\n\nSCHEMA = \"integrated-replay-arbitration-v2\"\n
