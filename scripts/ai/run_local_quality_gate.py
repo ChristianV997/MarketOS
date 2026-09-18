@@ -57,8 +57,8 @@ KNOWN_LOCKFILES = (
     "uv.lock", "poetry.lock", "Pipfile.lock", "package-lock.json", "pnpm-lock.yaml",
     "yarn.lock", "bun.lock", "bun.lockb",
 )
-SAFE_FRONTEND_TOKENS = ("eslint", "jest", "tsc", "vite", "vitest", "webpack")
-SAFE_FRONTEND_COMMANDS = {"eslint", "jest", "tsc", "vite", "vitest", "webpack"}
+SAFE_FRONTEND_TOKENS = ("eslint", "jest", "tsc", "vite", "vitest", "webpack", "node")
+SAFE_FRONTEND_COMMANDS = {"eslint", "jest", "tsc", "vite", "vitest", "webpack", "node"}
 UNSAFE_FRONTEND_MARKERS = (
     "curl", "docker", "git ", "invoke-webrequest", "npm install", "pnpm add",
     "pnpm install", "publish", "scp ", "secret", "ssh ", "token", "wget",

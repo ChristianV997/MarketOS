@@ -41,8 +41,8 @@ def test_api_selector_includes_read_view_regressions():
     assert any("canonical_events_api_readonly" in command for command in commands)
 
 
-def test_frontend_selector_builds_without_adding_tests():
-    assert select_tests.select(["frontend/src/pages/OperatorEventDashboard.tsx"])["recommended_commands"][0] == "cd frontend && npm run build"
+def test_frontend_selector_runs_validation_harness():
+    assert select_tests.select(["frontend/src/pages/OperatorEventDashboard.tsx"])["recommended_commands"][0] == "python scripts/ai/run_frontend_validation.py --json"
 
 
 def test_agent_script_selector_includes_session_finish():
