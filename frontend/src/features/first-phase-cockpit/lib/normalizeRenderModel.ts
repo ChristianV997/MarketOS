@@ -25,6 +25,9 @@ export function normalizeRenderModel(packet: FirstPhaseEvidencePacket) {
     blocked_reasons: [...packet.blockedReasons],
     unavailable_reasons: [...packet.unavailableReasons],
     warnings: [...packet.warnings],
+    unmatched_server_ids: [...packet.fingerprint.unmatchedServerIds],
+    unmatched_projection_ids: [...packet.fingerprint.unmatchedProjectionIds],
+    projection_warning: packet.fingerprint.projectionWarning,
     read_only: packet.fingerprint.readOnly,
     network_calls: packet.fingerprint.networkCalls,
   };

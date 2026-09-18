@@ -1,4 +1,5 @@
 import {
+  MAX_PROJECTION_CANDIDATES,
   PRODUCT_VALIDATION_REPORT_VERSION,
   RESEARCH_TO_DECISION_APPENDIX_VERSION,
   type EvidenceClass,
@@ -13,6 +14,15 @@ export type ProjectionValidationResult =
   | { ok: true; packet: ResearchToDecisionProjection }
   | { ok: false; reason: string };
 
+export interface ProjectionAdapterResult {
+  rows: RankedCandidateRow[];
+  warning: string | null;
+  accepted: boolean;
+  replayIdentity: string | null;
+  unmatchedServerIds: string[];
+  unmatchedProjectionIds: string[];
+}
+
 export interface ResearchToDecisionAuditRow {
   candidate_id?: string;
   sku?: string | null;
@@ -20,6 +30,9 @@ export interface ResearchToDecisionAuditRow {
   title?: string;
   lifecycle_state?: string | null;
   evidence_expiry?: string | null;
+  freshness?: string | null;
+  risk_state?: string | null;
+  evidence_refs?: string[];
   lane?: {
     origin?: string | null;
     origin_country?: string | null;
@@ -53,6 +66,19 @@ export interface ResearchToDecisionAuditRow {
   hard_gates?: string[];
 }
 
+export interface ClientSafeProjectionCandidate {
+  candidate_id?: string;
+  title?: string;
+  decision?: string | null;
+  next_action?: string | null;
+  risk_state?: string | null;
+  freshness?: string | null;
+  confidence?: ResearchToDecisionAuditRow["confidence"];
+  missing_evidence?: string[];
+  hard_gates?: string[];
+  evidence_refs?: string[];
+}
+
 export interface ResearchToDecisionProjection {
   report_version: typeof PRODUCT_VALIDATION_REPORT_VERSION;
   appendix: {
@@ -61,6 +87,16 @@ export interface ResearchToDecisionProjection {
     market_lane?: ResearchToDecisionAuditRow["lane"];
     source_authorities?: Record<string, string>;
     candidate_audit?: ResearchToDecisionAuditRow[];
+    validation?: {
+      network_calls?: boolean;
+      read_only?: boolean;
+    };
+    client_safe_projection?: {
+      version?: string;
+      network_calls?: boolean;
+      launch_authorized?: boolean;
+      candidates?: ClientSafeProjectionCandidate[];
+    };
   };
   executive_summary?: {
     consumer_attention_signals?: { status?: string | null };
@@ -75,13 +111,36 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** Fail-closed schema gate for the existing product-validation-report projection. */
+/** Present finite numbers including 0; missing keys stay unavailable. Never coerce null to 0. */
+export function optionalNumber(record: Record<string, unknown> | null | undefined, key: string): number | null {
+  if (!record || !(key in record)) return null;
+  const value = record[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value;
+}
+
+function indexUniqueAudits(
+  audits: Array<{ candidate_id?: string }>,
+): { ok: true; byId: Map<string, (typeof audits)[number]> } | { ok: false; reason: string } {
+  const byId = new Map<string, (typeof audits)[number]>();
+  for (const audit of audits) {
+    if (!audit || typeof audit !== "object" || typeof audit.candidate_id !== "string" || !audit.candidate_id) {
+      continue;
+    }
+    if (byId.has(audit.candidate_id)) {
+      return { ok: false, reason: "candidate_identity_duplicate" };
+    }
+    byId.set(audit.candidate_id, audit);
+  }
+  return { ok: true, byId };
+}
+
+/** Fail-closed schema gate for the existing product-validation-report projection. Extra fields are ignored. */
 export function validateResearchToDecisionProjection(raw: unknown): ProjectionValidationResult {
   if (!raw || typeof raw !== "object") return { ok: false, reason: "projection_not_object" };
   if (containsSecretShapedValue(raw)) return { ok: false, reason: "secret_shaped_value_rejected" };
   const packet = raw as Record<string, unknown>;
-  const reportVersion = packet.report_version;
-  if (reportVersion !== PRODUCT_VALIDATION_REPORT_VERSION) {
+  if (packet.report_version !== PRODUCT_VALIDATION_REPORT_VERSION) {
     return { ok: false, reason: "schema_version_unsupported" };
   }
   const appendix = asRecord(packet.appendix);
@@ -92,9 +151,29 @@ export function validateResearchToDecisionProjection(raw: unknown): ProjectionVa
   if (appendix.candidate_audit !== undefined && !Array.isArray(appendix.candidate_audit)) {
     return { ok: false, reason: "candidate_audit_malformed" };
   }
+  const clientSafe = asRecord(appendix.client_safe_projection);
+  if (clientSafe?.launch_authorized === true) {
+    return { ok: false, reason: "launch_authorized_rejected" };
+  }
+  if (clientSafe?.candidates !== undefined && !Array.isArray(clientSafe.candidates)) {
+    return { ok: false, reason: "client_safe_projection_malformed" };
+  }
+  const auditCount = Array.isArray(appendix.candidate_audit) ? appendix.candidate_audit.length : 0;
+  const safeCount = Array.isArray(clientSafe?.candidates) ? clientSafe.candidates.length : 0;
+  if (auditCount > MAX_PROJECTION_CANDIDATES || safeCount > MAX_PROJECTION_CANDIDATES) {
+    return { ok: false, reason: "projection_oversized" };
+  }
   const replay = appendix.replay_fingerprint;
   if (replay != null && (typeof replay !== "string" || !/^[a-f0-9]{64}$/i.test(replay))) {
     return { ok: false, reason: "replay_identity_invalid" };
+  }
+  if (Array.isArray(appendix.candidate_audit)) {
+    const indexed = indexUniqueAudits(appendix.candidate_audit as Array<{ candidate_id?: string }>);
+    if (!indexed.ok) return indexed;
+  }
+  if (Array.isArray(clientSafe?.candidates)) {
+    const indexed = indexUniqueAudits(clientSafe.candidates as Array<{ candidate_id?: string }>);
+    if (!indexed.ok) return indexed;
   }
   return { ok: true, packet: packet as unknown as ResearchToDecisionProjection };
 }
@@ -125,18 +204,18 @@ function economicsUnavailable(economics: Record<string, unknown> | null | undefi
 
 function economicsLabel(economics: Record<string, unknown> | null | undefined): string | null {
   if (economicsUnavailable(economics)) return null;
-  const margin = economics?.gross_margin_percent;
-  if (typeof margin === "number") return `gross_margin_percent_${margin}`;
+  const margin = optionalNumber(economics ?? undefined, "gross_margin_percent");
+  if (margin !== null) return `gross_margin_percent_${margin}`;
   const quality = economics?.margin_quality;
   if (typeof quality === "string" && quality) return quality;
   return null;
 }
 
 function mapLane(
-  audit: ResearchToDecisionAuditRow,
+  audit: ResearchToDecisionAuditRow | undefined,
   packetLane: ResearchToDecisionAuditRow["lane"],
 ): RankedCandidateRow["marketLane"] {
-  const lane = audit.lane ?? packetLane;
+  const lane = audit?.lane ?? packetLane;
   if (!lane) return null;
   const destination = lane.destination_country ?? lane.destination ?? null;
   const origin = lane.origin_country ?? lane.origin ?? null;
@@ -146,16 +225,31 @@ function mapLane(
   return { origin, destination, currency, warehouse };
 }
 
-function offerConflicts(audit: ResearchToDecisionAuditRow): string[] {
-  if (Array.isArray(audit.conflicts)) return [...audit.conflicts];
-  const issues = (audit.supplier_offers ?? []).flatMap((offer) => offer.issues ?? []);
-  return issues;
+function mergeAudit(
+  audit: ResearchToDecisionAuditRow | undefined,
+  safe: ClientSafeProjectionCandidate | undefined,
+): ResearchToDecisionAuditRow | undefined {
+  if (!audit && !safe) return undefined;
+  return {
+    ...(safe ?? {}),
+    ...(audit ?? {}),
+    candidate_id: audit?.candidate_id ?? safe?.candidate_id,
+    title: audit?.title ?? safe?.title,
+    decision: audit?.decision ?? safe?.decision,
+    next_action: audit?.next_action ?? safe?.next_action,
+    risk_state: audit?.risk_state ?? safe?.risk_state,
+    freshness: audit?.freshness ?? safe?.freshness,
+    confidence: audit?.confidence ?? safe?.confidence,
+    missing_evidence: audit?.missing_evidence ?? safe?.missing_evidence,
+    hard_gates: audit?.hard_gates ?? safe?.hard_gates,
+    evidence_refs: audit?.evidence_refs ?? safe?.evidence_refs,
+  };
 }
 
 /**
- * Overlay PR #247 candidate_audit onto existing server-ordered rows.
- * Does not sort, invent ranking, average confidence, or upgrade evidence class.
- * Missing audits and missing fields stay unavailable.
+ * Overlay existing #247 candidate_audit / client_safe_projection onto server-ordered rows.
+ * Does not sort, invent ranking, average confidence, coerce unavailable to zero, or
+ * upgrade fixture/manual evidence to live proof. Report-only IDs stay unmatched.
  */
 export function overlayResearchToDecisionAudits(
   rows: RankedCandidateRow[],
@@ -166,32 +260,54 @@ export function overlayResearchToDecisionAudits(
     consumerAttentionStatus?: string | null;
     packetLane?: ResearchToDecisionAuditRow["lane"];
     nowMs?: number;
+    clientSafeCandidates?: ClientSafeProjectionCandidate[];
   } = {},
-): RankedCandidateRow[] {
-  if (!audits?.length) return rows;
-  const byId = new Map<string, ResearchToDecisionAuditRow>();
-  for (const audit of audits) {
-    if (audit.candidate_id) byId.set(audit.candidate_id, audit);
+): { rows: RankedCandidateRow[]; unmatchedServerIds: string[]; unmatchedProjectionIds: string[]; warning: string | null } {
+  if (!audits?.length && !options.clientSafeCandidates?.length) {
+    return { rows, unmatchedServerIds: [], unmatchedProjectionIds: [], warning: null };
   }
+  const auditIndex = indexUniqueAudits(audits ?? []);
+  if (!auditIndex.ok) return { rows, unmatchedServerIds: [], unmatchedProjectionIds: [], warning: auditIndex.reason };
+  const safeIndex = indexUniqueAudits(options.clientSafeCandidates ?? []);
+  if (!safeIndex.ok) return { rows, unmatchedServerIds: [], unmatchedProjectionIds: [], warning: safeIndex.reason };
+
+  const projectionIds = new Set<string>([...auditIndex.byId.keys(), ...safeIndex.byId.keys()]);
+  const unmatchedServerIds: string[] = [];
+  const matched = new Set<string>();
   const refs = options.evidenceReferences ?? [];
   const consumerStatus = options.consumerAttentionStatus ?? null;
-  return rows.map((row) => {
-    const audit = byId.get(row.candidateId);
-    if (!audit) return row;
+
+  const nextRows = rows.map((row) => {
+    const audit = mergeAudit(
+      auditIndex.byId.get(row.candidateId) as ResearchToDecisionAuditRow | undefined,
+      safeIndex.byId.get(row.candidateId) as ClientSafeProjectionCandidate | undefined,
+    );
+    if (!audit) {
+      unmatchedServerIds.push(row.candidateId);
+      return row;
+    }
+    matched.add(row.candidateId);
     const sku = firstAcceptedSku(audit);
-    const overall = typeof audit.confidence?.overall === "number" ? audit.confidence.overall : null;
-    const supplierConf = typeof audit.confidence?.supplier === "number" ? audit.confidence.supplier : null;
-    const marketConf = typeof audit.confidence?.marketplace === "number" ? audit.confidence.marketplace : null;
+    const confidenceRecord = audit.confidence as Record<string, unknown> | null | undefined;
+    const overall = optionalNumber(confidenceRecord, "overall");
+    const supplierConf = optionalNumber(confidenceRecord, "supplier");
+    const marketConf = optionalNumber(confidenceRecord, "marketplace");
     const expiry = audit.evidence_expiry ?? null;
     const freshnessLabel = formatFreshnessLabel(expiry, options.nowMs ?? Date.now());
-    const stale = isStaleFreshness(freshnessLabel);
+    const declaredFreshness = (audit.freshness ?? "").toLowerCase();
+    const stale = declaredFreshness === "expired" || isStaleFreshness(freshnessLabel);
     const economicsMissing = economicsUnavailable(audit.economics);
     const mappedEconomics = economicsLabel(audit.economics);
     const decision = audit.decision ?? audit.next_action ?? null;
     const nextAction = audit.next_action ?? audit.decision ?? null;
     const hardGates = Array.isArray(audit.hard_gates) ? [...audit.hard_gates] : [];
-    const promotion = derivePromotionState(audit.lifecycle_state ?? decision ?? row.commercialDecision);
-    const competitionCount = audit.observed_values?.marketplace_evidence_count;
+    const promotion = derivePromotionState(
+      audit.risk_state ?? audit.lifecycle_state ?? decision ?? row.commercialDecision,
+    );
+    const competitionCount = optionalNumber(
+      audit.observed_values as Record<string, unknown> | undefined,
+      "marketplace_evidence_count",
+    );
     const supplierClass: EvidenceClass = classifyEvidenceClass({
       evidenceMode: row.evidenceMode,
       sourceFamily: "supplier_feasibility",
@@ -204,10 +320,12 @@ export function overlayResearchToDecisionAudits(
         sourceFamily: "consumer_attention",
       })
       : "not_run";
-    const freshnessClass: EvidenceClass = stale ? "stale" : classifyEvidenceClass({
-      evidenceMode: row.evidenceMode,
-      pillarId: "freshness",
-    });
+    const freshnessClass: EvidenceClass = stale
+      ? "stale"
+      : classifyEvidenceClass({ evidenceMode: row.evidenceMode, pillarId: "freshness" });
+    const rowRefs = Array.isArray(audit.evidence_refs) && audit.evidence_refs.length
+      ? [...audit.evidence_refs]
+      : refs;
     return {
       ...row,
       productTitle: audit.title ?? row.productTitle ?? row.title,
@@ -216,28 +334,33 @@ export function overlayResearchToDecisionAudits(
       supplierOffer: summarizeOffer(audit),
       assumptions: Array.isArray(audit.assumptions) ? [...audit.assumptions] : row.assumptions,
       missingEvidence: Array.isArray(audit.missing_evidence) ? [...audit.missing_evidence] : row.missingEvidence,
-      conflicts: offerConflicts(audit),
+      conflicts: Array.isArray(audit.conflicts) ? [...audit.conflicts] : row.conflicts,
       confidence: overall,
       confidenceSupplier: supplierConf,
       confidenceMarketplace: marketConf,
       commercialDecision: decision ?? row.commercialDecision,
       nextBestAction: nextAction ?? row.nextBestAction,
       promotionState: promotion,
+      riskLevel: audit.risk_state ?? row.riskLevel,
       hardGates,
-      evidenceReferences: refs.length ? refs : row.evidenceReferences,
+      evidenceReferences: rowRefs.length ? rowRefs : row.evidenceReferences,
       consumerAttentionSummary: consumerStatus,
-      competitionSummary: typeof competitionCount === "number"
+      competitionSummary: competitionCount !== null
         ? `marketplace_evidence_count_${competitionCount}`
-        : null,
+        : row.competitionSummary,
       replayIdentity: options.replayIdentity ?? row.replayIdentity,
       freshnessExpiry: expiry,
       supplierEvidenceClass: supplierClass,
       consumerEvidenceClass: consumerClass,
       economicsUnavailable: economicsMissing,
       economicsLabel: economicsMissing ? null : (mappedEconomics ?? row.economicsLabel),
-      pillarCells: row.pillarCells.map((cell) => {
+      pillarCells: row.pillarCells.map((cell): typeof cell => {
         if (cell.pillarId === "consumer_attention") {
-          return { ...cell, evidenceClass: consumerClass, status: consumerClass === "not_run" ? "unavailable" : cell.status };
+          return {
+            ...cell,
+            evidenceClass: consumerClass,
+            status: consumerClass === "not_run" ? "unavailable" : cell.status,
+          };
         }
         if (cell.pillarId === "supplier_feasibility") {
           return { ...cell, evidenceClass: supplierClass };
@@ -250,37 +373,77 @@ export function overlayResearchToDecisionAudits(
             ...cell,
             evidenceClass: freshnessClass,
             status: stale ? "partial" : cell.status,
-            detail: freshnessLabel ?? cell.detail,
+            detail: audit.freshness ?? freshnessLabel ?? cell.detail,
           };
         }
         return cell;
       }),
     };
   });
+
+  const unmatchedProjectionIds = [...projectionIds].filter((id) => !matched.has(id));
+  return { rows: nextRows, unmatchedServerIds, unmatchedProjectionIds, warning: null };
+}
+
+/** Single compatibility adapter for product-validation-report-v1 + appendix v1. */
+export function adaptResearchToDecisionProjection(
+  rows: RankedCandidateRow[],
+  raw: unknown,
+  nowMs: number = Date.now(),
+): ProjectionAdapterResult {
+  if (raw == null) {
+    return {
+      rows,
+      warning: null,
+      accepted: false,
+      replayIdentity: null,
+      unmatchedServerIds: [],
+      unmatchedProjectionIds: [],
+    };
+  }
+  const validated = validateResearchToDecisionProjection(raw);
+  if (!validated.ok) {
+    return {
+      rows,
+      warning: validated.reason,
+      accepted: false,
+      replayIdentity: null,
+      unmatchedServerIds: [],
+      unmatchedProjectionIds: [],
+    };
+  }
+  const appendix = validated.packet.appendix;
+  const reportsNetwork = appendix.validation?.network_calls === true
+    || appendix.client_safe_projection?.network_calls === true;
+  const authorities = appendix.source_authorities ?? {};
+  const refs = Object.values(authorities).filter((value) => typeof value === "string");
+  const consumerStatus = validated.packet.executive_summary?.consumer_attention_signals?.status ?? null;
+  const overlaid = overlayResearchToDecisionAudits(rows, appendix.candidate_audit, {
+    replayIdentity: appendix.replay_fingerprint ?? null,
+    evidenceReferences: refs,
+    consumerAttentionStatus: consumerStatus,
+    packetLane: appendix.market_lane,
+    nowMs,
+    clientSafeCandidates: appendix.client_safe_projection?.candidates,
+  });
+  const warnings = [
+    overlaid.warning,
+    reportsNetwork ? "projection_reports_network_calls" : null,
+  ].filter((value): value is string => Boolean(value));
+  return {
+    rows: overlaid.rows,
+    warning: warnings.join(",") || null,
+    accepted: overlaid.warning == null,
+    replayIdentity: appendix.replay_fingerprint ?? null,
+    unmatchedServerIds: overlaid.unmatchedServerIds,
+    unmatchedProjectionIds: overlaid.unmatchedProjectionIds,
+  };
 }
 
 export function overlayResearchToDecisionProjection(
   rows: RankedCandidateRow[],
   raw: unknown,
   nowMs: number = Date.now(),
-): { rows: RankedCandidateRow[]; warning: string | null; replayIdentity: string | null } {
-  const validated = validateResearchToDecisionProjection(raw);
-  if (!validated.ok) {
-    return { rows, warning: validated.reason, replayIdentity: null };
-  }
-  const appendix = validated.packet.appendix;
-  const authorities = appendix.source_authorities ?? {};
-  const refs = Object.values(authorities).filter((value) => typeof value === "string");
-  const consumerStatus = validated.packet.executive_summary?.consumer_attention_signals?.status ?? null;
-  return {
-    rows: overlayResearchToDecisionAudits(rows, appendix.candidate_audit, {
-      replayIdentity: appendix.replay_fingerprint ?? null,
-      evidenceReferences: refs,
-      consumerAttentionStatus: consumerStatus,
-      packetLane: appendix.market_lane,
-      nowMs,
-    }),
-    warning: null,
-    replayIdentity: appendix.replay_fingerprint ?? null,
-  };
+): ProjectionAdapterResult {
+  return adaptResearchToDecisionProjection(rows, raw, nowMs);
 }

@@ -1,4 +1,5 @@
 import type { CandidateFilterState, RankedCandidateRow } from "../contracts/firstPhaseEvidencePacket";
+import { STABLE_TOP_N } from "../contracts/firstPhaseEvidencePacket";
 import { uniqueDecisions } from "../lib/filterCandidates";
 
 export function CockpitToolbar({
@@ -69,6 +70,15 @@ export function CockpitToolbar({
                 </option>
               ))}
             </select>
+          </label>
+          <label className="flex items-center gap-2 pt-5 text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={filter.topN}
+              onChange={(event) => onFilterChange({ ...filter, topN: event.target.checked })}
+              className="rounded border-zinc-600"
+            />
+            Stable top {STABLE_TOP_N} (server order)
           </label>
           <label className="flex items-center gap-2 pt-5 text-xs text-zinc-300">
             <input

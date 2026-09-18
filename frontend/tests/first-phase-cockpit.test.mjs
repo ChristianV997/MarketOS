@@ -52,6 +52,7 @@ function filterCandidates(candidates, filter) {
   const query = filter.query.trim().toLowerCase();
   const filtered = [];
   for (const candidate of candidates) {
+    if (filter.topN && candidate.rankIndex >= 10) continue;
     if (filter.topOnly && !candidate.isTopCandidate) continue;
     if (filter.risk !== "all") {
       const risk = (candidate.riskLevel ?? "unknown").toLowerCase();
@@ -351,9 +352,23 @@ test("filters preserve relative order and do not invent rankings", () => {
     risk: "all",
     decision: "hold_for_credentials",
     topOnly: false,
+    topN: false,
   });
   assert.deepEqual(filtered.map((row) => row.candidateId), ["beta", "gamma"]);
   assert.ok(filtered[0].rankIndex < filtered[1].rankIndex);
+});
+
+test("stable top-N keeps server order and does not re-rank", () => {
+  const large = buildLargeCandidates(120);
+  const windowed = filterCandidates(large, {
+    query: "",
+    risk: "all",
+    decision: "all",
+    topOnly: false,
+    topN: true,
+  });
+  assert.equal(windowed.length, 10);
+  assert.deepEqual(windowed.map((row) => row.rankIndex), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 });
 
 test("large candidate sets stay ordered under filter and windowing", () => {
@@ -363,6 +378,7 @@ test("large candidate sets stay ordered under filter and windowing", () => {
     risk: "high",
     decision: "all",
     topOnly: false,
+    topN: false,
   });
   for (let i = 1; i < filtered.length; i += 1) {
     assert.ok(filtered[i - 1].rankIndex < filtered[i].rankIndex);
@@ -575,6 +591,7 @@ test("accessibility and focus contracts are present", async () => {
   assert.match(table, /shouldHandoffDetailFocus/);
   assert.match(banner, /partial/);
   assert.match(banner, /aria-live="polite"/);
+  assert.match(banner, /Fixture evidence is screening-only/);
 });
 
 test("demo fixture and control planes avoid secrets and document unavailable slots", async () => {

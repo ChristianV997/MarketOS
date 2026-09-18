@@ -10,7 +10,7 @@ Read-only operator surface stacked on PR #213 frontend/API authority.
 
 - Ranked candidate table with pillar-level evidence columns (server order preserved)
 - Bounded windowing (50 rows) for larger ranked sets — no client re-ranking
-- Filters: search, risk, commercial decision, top-candidate only (`useDeferredValue` / `useTransition`)
+- Filters: search, risk, commercial decision, top-candidate only, stable top-10 (`useDeferredValue` / `useTransition`)
 - Keyboard selection with roving tabindex (ArrowUp/Down, Home/End, Enter/Space) + detail focus handoff
 - Responsive mobile card list + desktop evidence grid
 - Evidence pillars: provenance, freshness, source family, evidence mode, evidence class
@@ -42,6 +42,40 @@ Composed via `useCanonicalEvents` hooks only:
 
 The frontend **never** recalculates rankings, never grants launch authority, and never calls providers directly.
 
+`origin/main` (`df59a06`) exposes Phase 1 readiness/benchmark routes. It does **not** expose
+`GET /api/phase1/evidence-cockpit`. The cockpit therefore remains a composed-live view plus an
+optional overlay of a supplied `product-validation-report-v1` packet. Do not treat the overlay
+as a live API.
+
+## Stack / route conflict with PR #213
+
+#230 stays stacked on #213 (`70ffc9f`). Unique cockpit commits do **not** absorb #213 files.
+The only shared frontend files touched on top of #213 are additive navigation:
+
+- `frontend/src/main.tsx` adds `/operator/first-phase`
+- `frontend/src/components/layout/Sidebar.tsx` adds the First-phase cockpit nav item
+
+No #213 routes are renamed or removed. Merge #213 first; then #230 is a fast-forward-style
+stack of cockpit files plus those two nav lines.
+
+## Contract fixture matrix
+
+Deterministic fixtures live in `frontend/src/features/first-phase-cockpit/fixtures/projection-matrix/`.
+They follow the existing #247 report/appendix shape (not a second packet):
+
+| Fixture | Expected |
+|---------|----------|
+| `accepted-manual-screening.json` | Overlay SKU/lane/offer; overall confidence stays unavailable (not averaged) |
+| `partial-appendix.json` | Accepted; server rows unchanged |
+| `stale-unmatched.json` | Expired/blocked economics unavailable; report-only IDs not inserted |
+| `rejected-unsupported-version.json` | `schema_version_unsupported` |
+| `rejected-duplicate-ids.json` | `candidate_identity_duplicate` |
+| `rejected-secret.json` | `secret_shaped_value_rejected` |
+| `rejected-malformed.json` | `candidate_audit_malformed` |
+| `rejected-launch-authorized.json` | `launch_authorized_rejected` |
+
+Screening fixture evidence is never commercial validation.
+
 ## Future merged packet
 
 When backend merges a single packet, validate with `validateEvidenceCockpitApiPacket` then map with
@@ -57,11 +91,15 @@ Malformed / unsupported schema / out-of-order rank_index / secret-shaped values 
 
 ## Public patterns adapted (no new dependencies)
 
-- WAI-ARIA APG / React Aria: roving tabindex, grid semantics, skip link, focus handoff to detail
-- TanStack Table concepts: filter + window without mutating sort order
-- Radix-style labeled focus-visible controls (plain HTML)
-- Storybook-style deterministic fixture + normalized render model
-- Vite/same-origin proxy unchanged from PR #213
+Reference-only; no vendored code and no second data layer.
+
+| Pattern | Use | License / source |
+|---------|-----|------------------|
+| WAI-ARIA APG Grid | roving tabindex, `aria-selected`, caption, skip link | [W3C Software and Document License](https://www.w3.org/copyright/software-license-2023/) — [APG Grid Pattern](https://www.w3.org/WAI/ARIA/apg/patterns/grid/) |
+| React Aria Collections | keyboard activation + focus handoff concepts | Apache-2.0 — https://react-spectrum.adobe.com/react-aria/ |
+| TanStack Table | filter/window without mutating sort order; stable top-N | MIT — https://tanstack.com/table/latest |
+| Storybook CSF | deterministic fixture matrix + normalized snapshots | MIT — https://storybook.js.org/docs/writing-stories |
+| Stale/partial UI | explicit banners; unmatched rows announced, never invented | operator-local; no extra library |
 
 ## Safety
 

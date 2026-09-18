@@ -34,7 +34,7 @@ export default function FirstPhaseEvidenceCockpitPage() {
 
   useEffect(() => {
     setWindowStart(0);
-  }, [deferredFilter.query, deferredFilter.risk, deferredFilter.decision, deferredFilter.topOnly]);
+  }, [deferredFilter.query, deferredFilter.risk, deferredFilter.decision, deferredFilter.topOnly, deferredFilter.topN]);
 
   const selectedCandidate =
     filteredCandidates.find((candidate) => candidate.candidateId === selectedId)
@@ -96,6 +96,9 @@ export default function FirstPhaseEvidenceCockpitPage() {
         overallStatus={packet.fingerprint.overallStatus}
         nextBestAction={packet.fingerprint.nextBestAction}
         evidenceMode={packet.fingerprint.evidenceMode}
+        projectionWarning={packet.fingerprint.projectionWarning}
+        unmatchedServerCount={packet.fingerprint.unmatchedServerIds.length}
+        unmatchedProjectionCount={packet.fingerprint.unmatchedProjectionIds.length}
       />
 
       {isLoading && (

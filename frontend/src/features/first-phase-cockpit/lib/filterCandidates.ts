@@ -1,6 +1,7 @@
-import type {
-  CandidateFilterState,
-  RankedCandidateRow,
+import {
+  STABLE_TOP_N,
+  type CandidateFilterState,
+  type RankedCandidateRow,
 } from "../contracts/firstPhaseEvidencePacket";
 
 export const DEFAULT_CANDIDATE_FILTER: CandidateFilterState = {
@@ -8,6 +9,7 @@ export const DEFAULT_CANDIDATE_FILTER: CandidateFilterState = {
   risk: "all",
   decision: "all",
   topOnly: false,
+  topN: false,
 };
 
 /**
@@ -21,6 +23,7 @@ export function filterCandidates(
   const query = filter.query.trim().toLowerCase();
   const filtered: RankedCandidateRow[] = [];
   for (const candidate of candidates) {
+    if (filter.topN && candidate.rankIndex >= STABLE_TOP_N) continue;
     if (filter.topOnly && !candidate.isTopCandidate) continue;
     if (filter.risk !== "all") {
       const risk = (candidate.riskLevel ?? "unknown").toLowerCase();

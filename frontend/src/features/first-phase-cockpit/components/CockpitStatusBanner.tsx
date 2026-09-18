@@ -1,4 +1,4 @@
-import type { EvidenceState } from "../contracts/firstPhaseEvidencePacket";
+import type { EvidenceMode, EvidenceState } from "../contracts/firstPhaseEvidencePacket";
 
 const STATE_STYLES: Record<EvidenceState, string> = {
   loading: "border-zinc-700 bg-zinc-900/40 text-zinc-400",
@@ -20,17 +20,33 @@ const STATE_HINTS: Record<EvidenceState, string> = {
   success: "Evidence packet composed successfully. Ranking and launch authority remain server-side.",
 };
 
+const MODE_EXPLANATIONS: Record<EvidenceMode, string> = {
+  fixture_only: "Fixture evidence is screening-only. It is not live supplier proof or commercial validation.",
+  manual: "Manual import is operator-supplied screening evidence. It does not authorize orders, spend, or launch.",
+  simulated: "Simulated values are derived planning assumptions, not observed live results.",
+  live_readonly: "Live-readonly means the backend reported a read-only live path. This cockpit still cannot mutate providers.",
+  unknown: "Evidence mode is unknown. Treat every field as unavailable until provenance is explicit.",
+};
+
 export function CockpitStatusBanner({
   state,
   overallStatus,
   nextBestAction,
   evidenceMode,
+  projectionWarning,
+  unmatchedServerCount,
+  unmatchedProjectionCount,
 }: {
   state: EvidenceState;
   overallStatus: string | null;
   nextBestAction: string | null;
-  evidenceMode: string | null;
+  evidenceMode: EvidenceMode | string | null;
+  projectionWarning?: string | null;
+  unmatchedServerCount?: number;
+  unmatchedProjectionCount?: number;
 }) {
+  const modeKey = (evidenceMode ?? "unknown") as EvidenceMode;
+  const explanation = MODE_EXPLANATIONS[modeKey] ?? MODE_EXPLANATIONS.unknown;
   return (
     <section
       className={`rounded-lg border p-4 ${STATE_STYLES[state]}`}
@@ -50,6 +66,7 @@ export function CockpitStatusBanner({
           {state}
         </span>
       </div>
+      <p className="mt-3 text-xs text-zinc-300">{explanation}</p>
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
         {overallStatus && (
           <p>
@@ -58,7 +75,7 @@ export function CockpitStatusBanner({
         )}
         {evidenceMode && (
           <p>
-            Evidence mode: <span className="font-medium">{evidenceMode.replace(/_/g, " ")}</span>
+            Evidence mode: <span className="font-medium">{String(evidenceMode).replace(/_/g, " ")}</span>
           </p>
         )}
         {nextBestAction && (
@@ -67,6 +84,14 @@ export function CockpitStatusBanner({
           </p>
         )}
       </div>
+      {(projectionWarning || unmatchedServerCount || unmatchedProjectionCount) && (
+        <p className="mt-2 text-[11px] text-amber-200">
+          {projectionWarning ? `Projection: ${projectionWarning.replace(/_/g, " ")}. ` : ""}
+          {unmatchedServerCount ? `${unmatchedServerCount} server row(s) have no matching report. ` : ""}
+          {unmatchedProjectionCount ? `${unmatchedProjectionCount} report row(s) have no matching server rank. ` : ""}
+          Unmatched report rows are not inserted and never re-rank the table.
+        </p>
+      )}
     </section>
   );
 }

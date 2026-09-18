@@ -15,6 +15,9 @@ export const RESEARCH_TO_DECISION_APPENDIX_VERSION = "v1" as const;
 
 /** Default visible row window for large ranked sets (no virtualization dependency). */
 export const CANDIDATE_WINDOW_SIZE = 50;
+/** Stable top-N window over server rankIndex; filters never re-order. */
+export const STABLE_TOP_N = 10;
+export const MAX_PROJECTION_CANDIDATES = 200;
 
 export type EvidenceState =
   | "loading"
@@ -177,6 +180,9 @@ export interface RunFingerprint {
   freshnessLabel: string | null;
   replayIdentity: string | null;
   researchToDecisionSchema: string | null;
+  projectionWarning: string | null;
+  unmatchedServerIds: string[];
+  unmatchedProjectionIds: string[];
 }
 
 export interface FirstPhaseEvidencePacket {
@@ -195,6 +201,7 @@ export interface CandidateFilterState {
   risk: CandidateRiskFilter;
   decision: CandidateDecisionFilter;
   topOnly: boolean;
+  topN: boolean;
 }
 
 export interface ClientSafeCockpitExport {

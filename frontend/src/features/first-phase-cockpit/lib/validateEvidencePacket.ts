@@ -185,14 +185,15 @@ export function mapApiPacketToViewModel(
       : undefined,
     nowMs,
   );
-  const overlayFallback = rankedCandidates.warning
+  const fallback = !rankedCandidates.accepted
     ? overlayResearchToDecisionAudits(
       rankedCandidates.rows,
       Array.isArray((api.appendix as { candidate_audit?: unknown } | undefined)?.candidate_audit)
         ? (api.appendix as { candidate_audit: Parameters<typeof overlayResearchToDecisionAudits>[1] }).candidate_audit
         : null,
     )
-    : rankedCandidates.rows;
+    : null;
+  const overlayFallback = fallback?.rows ?? rankedCandidates.rows;
 
   let state: FirstPhaseEvidencePacket["state"] = overlayFallback.length ? "success" : "empty";
   if (api.overall_status === "blocked") state = "blocked";
@@ -264,7 +265,10 @@ export function mapApiPacketToViewModel(
       generatedAt: api.fingerprint.generated_at ?? api.generated_at,
       freshnessLabel,
       replayIdentity: rankedCandidates.replayIdentity,
-      researchToDecisionSchema: rankedCandidates.warning ? null : (api.appendix ? String(api.report_version) : null),
+      researchToDecisionSchema: rankedCandidates.accepted ? String(api.report_version) : null,
+      projectionWarning: rankedCandidates.warning,
+      unmatchedServerIds: rankedCandidates.unmatchedServerIds,
+      unmatchedProjectionIds: rankedCandidates.unmatchedProjectionIds,
     },
     blockedReasons: api.blocked_reasons,
     unavailableReasons: api.unavailable_reasons ?? [],

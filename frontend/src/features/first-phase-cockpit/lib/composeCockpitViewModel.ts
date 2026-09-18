@@ -380,6 +380,8 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
   if (mapped.warning && input.researchToDecisionProjection != null) {
     warnings.push(`research_to_decision_${mapped.warning}`);
   }
+  for (const id of mapped.unmatchedServerIds) warnings.push(`unmatched_server:${id}`);
+  for (const id of mapped.unmatchedProjectionIds) warnings.push(`unmatched_projection:${id}`);
   const blockedReasons = [
     ...(input.phase1Readiness?.blocking_gates ?? []),
     ...(input.phase1Readiness?.forbidden_next_phases ?? []),
@@ -399,7 +401,7 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     input.benchmark ? "benchmark-matrix" : null,
     input.publicMarket ? "public-market-benchmark" : null,
     input.researchPortfolio ? "research-portfolio" : null,
-    mapped.warning === null && input.researchToDecisionProjection != null ? "research-to-decision" : null,
+    mapped.accepted ? "research-to-decision" : null,
   ].filter((label): label is string => Boolean(label));
 
   const sourceFamilies = [
@@ -407,7 +409,7 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     input.benchmark ? "benchmark_matrix" : null,
     input.publicMarket ? "public_market_benchmark" : null,
     input.researchPortfolio ? "research_portfolio" : null,
-    mapped.warning === null && input.researchToDecisionProjection != null ? "product_validation_report" : null,
+    mapped.accepted ? "product_validation_report" : null,
   ].filter((label): label is string => Boolean(label));
 
   return {
@@ -439,7 +441,10 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
       generatedAt: null,
       freshnessLabel: formatFreshnessLabel(null, Date.now()),
       replayIdentity: mapped.replayIdentity,
-      researchToDecisionSchema: mapped.warning ? null : (input.researchToDecisionProjection ? "product-validation-report-v1" : null),
+      researchToDecisionSchema: mapped.accepted ? "product-validation-report-v1" : null,
+      projectionWarning: mapped.warning,
+      unmatchedServerIds: mapped.unmatchedServerIds,
+      unmatchedProjectionIds: mapped.unmatchedProjectionIds,
     },
     blockedReasons,
     unavailableReasons,
