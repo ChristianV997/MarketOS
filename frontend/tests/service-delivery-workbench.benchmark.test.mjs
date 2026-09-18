@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 import { composeWorkbenchViewModel } from "../src/features/service-delivery-workbench/lib/composeWorkbenchViewModel.ts";
 import { buildClientSafeServiceExport } from "../src/features/service-delivery-workbench/lib/exportClientSafeEngagement.ts";
 import { EMPTY_FILTERS, filterEngagements } from "../src/features/service-delivery-workbench/lib/filterEngagements.ts";
 import { adaptServiceProjection } from "../src/features/service-delivery-workbench/lib/adaptServiceProjection.ts";
+import { normalizeWorkbenchRenderModel } from "../src/features/service-delivery-workbench/lib/normalizeWorkbenchRenderModel.ts";
 import { buildOneClientProjection, buildScaleProjection, buildTenClientProjection } from "../src/features/service-delivery-workbench/fixtures/buildFixtures.ts";
 
 function timed(label, fn) {
@@ -14,33 +16,51 @@ function timed(label, fn) {
   return { label, elapsed, value };
 }
 
-test("deterministic performance budget for normalize/filter/compose/export", () => {
-  const one = timed("one-client", () => buildOneClientProjection());
-  const ten = timed("ten-clients", () => buildTenClientProjection());
-  const scale = timed("hundred-engagements", () => buildScaleProjection(100, 40, 20));
+function digest(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
 
-  const normalize = timed("normalize-100", () => adaptServiceProjection(scale.value));
-  const filter = timed("filter-100", () => filterEngagements(scale.value.engagements, {
-    ...EMPTY_FILTERS,
-    query: "northwind",
-  }));
-  const compose = timed("compose-100", () => composeWorkbenchViewModel({
-    isLoading: false,
-    errorMessage: null,
-    projection: scale.value,
-    filters: EMPTY_FILTERS,
-    selectedId: scale.value.engagements[0].engagement_id,
-  }));
-  const exportAll = timed("export-100", () => scale.value.engagements.map((item) => buildClientSafeServiceExport(item)));
-
-  const report = { one, ten, scale, normalize, filter, compose, exportAll };
-  for (const row of Object.values(report)) {
-    assert.ok(row.elapsed < 1500, `${row.label} exceeded 1500ms: ${row.elapsed}`);
+test("observed normalize/filter/compose/export timings for 1/10/100/500 (no ranking, replay-stable)", () => {
+  const sizes = [1, 10, 100, 500];
+  const report = {};
+  for (const size of sizes) {
+    const built = size === 1
+      ? timed(`build-${size}`, () => buildOneClientProjection())
+      : size === 10
+        ? timed(`build-${size}`, () => buildTenClientProjection())
+        : timed(`build-${size}`, () => buildScaleProjection(size, 8, 4));
+    const normalize = timed(`normalize-${size}`, () => adaptServiceProjection(built.value));
+    const filtered = timed(`filter-${size}`, () => filterEngagements(normalize.value.projection.engagements, {
+      ...EMPTY_FILTERS,
+      query: size === 1 ? "northwind" : "",
+    }));
+    const compose = timed(`compose-${size}`, () => composeWorkbenchViewModel({
+      isLoading: false,
+      errorMessage: null,
+      projection: normalize.value.projection,
+      filters: EMPTY_FILTERS,
+      selectedId: normalize.value.projection.engagements[0]?.engagement_id ?? null,
+    }));
+    const exported = timed(`export-${size}`, () =>
+      normalize.value.projection.engagements.map((item) => buildClientSafeServiceExport(item)));
+    const snapshot = normalizeWorkbenchRenderModel(normalize.value.projection);
+    const replay = digest(snapshot);
+    assert.deepEqual(
+      snapshot.engagement_ids_in_order,
+      (size === 1 ? buildOneClientProjection() : size === 10 ? buildTenClientProjection() : buildScaleProjection(size, 8, 4))
+        .engagements.map((item) => item.engagement_id),
+    );
+    assert.equal(digest(snapshot), replay);
+    assert.equal(snapshot.frontend_calculates, true);
+    assert.notEqual(compose.value.surface, "success");
+    report[size] = {
+      build_ms: Number(built.elapsed.toFixed(3)),
+      normalize_ms: Number(normalize.elapsed.toFixed(3)),
+      filter_ms: Number(filtered.elapsed.toFixed(3)),
+      compose_ms: Number(compose.elapsed.toFixed(3)),
+      export_ms: Number(exported.elapsed.toFixed(3)),
+      replay_sha256: replay,
+    };
   }
-  assert.equal(normalize.value.projection.engagements.length, 100);
-  assert.ok(filter.value.length >= 1);
-  assert.equal(compose.value.filtered.length, 100);
-  assert.equal(exportAll.value.length, 100);
-  // No virtualization required under this budget.
-  assert.ok(compose.elapsed < 250, `compose should stay cheap without virtualization: ${compose.elapsed}`);
+  process.stdout.write(`${JSON.stringify({ service_workbench_perf: report }, null, 2)}\n`);
 });

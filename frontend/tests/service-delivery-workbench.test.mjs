@@ -19,9 +19,10 @@ test("apiBase matches #213 join/resolve contract", () => {
 
 test("lifecycle states cover the operator workflow including data_inadequate", () => {
   assert.deepEqual(LIFECYCLE_STATES, [
-    "intake", "data_inadequate", "eligible", "scoped", "evidence_collection",
+    "intake", "screening", "data_inadequate", "eligible", "scoped", "evidence_collection",
     "analysis", "draft_ready", "client_review", "revision_requested",
-    "approved", "delivered", "paused", "cancelled", "rejected", "unavailable",
+    "approved", "delivered", "renewal_candidate", "upsell_candidate",
+    "paused", "cancelled", "rejected", "unavailable",
   ]);
 });
 
@@ -184,6 +185,13 @@ test("component sources expose required accessibility contracts", async () => {
   assert.match(workflow, /data_inadequate/);
   assert.match(workflow, /required_from_client/);
   assert.match(page, /Service delivery workbench/);
+  assert.match(page, /Skip to service pipeline/);
+  assert.match(page, /not commercially validated/);
+  assert.match(table, /Home/);
+  assert.match(table, /End/);
+  assert.match(workflow, /Package and scope review/);
+  assert.match(workflow, /Client review \/ revision \/ approval \/ delivery/);
+  assert.match(workflow, /Draft report preview/);
   assert.match(sidebar, /\/operator\/services/);
   assert.match(main, /\/operator\/services/);
 });
@@ -193,4 +201,106 @@ test("scale fixture exists for one hundred engagements", () => {
   assert.equal(scale.engagements.length, 100);
   assert.equal(scale.engagements[0].evidence.length, 30);
   assert.equal(scale.engagements[0].deliverables.length, 15);
+});
+
+test("fixture compose never reports success or live_validated", () => {
+  const demo = buildDemoProjection();
+  const view = composeWorkbenchViewModel({
+    isLoading: false,
+    errorMessage: null,
+    projection: demo,
+    filters: EMPTY_FILTERS,
+    selectedId: demo.engagements[0].engagement_id,
+  });
+  assert.notEqual(view.surface, "success");
+  assert.equal(view.liveEndpointUnavailable, true);
+});
+
+test("adapter maps a #261 plane-shaped engagement without recalculating economics", () => {
+  const result = adaptServiceProjection({
+    report_version: "service-delivery-plane-v1",
+    generated_at: "2026-09-18T00:00:00Z",
+    packages: [],
+    engagements: [{
+      engagement_id: "eng-plane-1",
+      client_id: "client-a",
+      workspace_id: "ws-a",
+      package_id: "client_product_validation_sprint",
+      scope: "Named SKU review only",
+      lifecycle_state: "client_review",
+      data_quality_state: "eligible",
+      intake_data: { sku: "ABC-1" },
+      evidence_set: [{ evidence_id: "e1", title: "fixture shot", evidence_class: "fixture", summary: "screening copy" }],
+      deliverable_ids: ["pack-1"],
+      fee: { amount: "1200.00", currency: "USD", evidence_class: "assumption" },
+      contribution: null,
+      assumptions: ["planning fee copy"],
+      missing_information: [],
+    }],
+  });
+  assert.equal(result.rejected, false);
+  assert.equal(result.projection.input_contract, "service-delivery-plane-v1");
+  assert.equal(result.projection.availability, "manual_import");
+  assert.equal(result.projection.live_endpoint_status, "unavailable");
+  assert.equal(result.projection.engagements[0].service_id, "product-validation-sprint");
+  assert.equal(result.projection.engagements[0].lifecycle_state, "client_review");
+  assert.equal(result.projection.engagements[0].economics.frontend_calculates, false);
+  assert.equal(result.projection.engagements[0].economics.fee?.amount_label, "1200.00");
+  assert.equal(result.projection.engagements[0].evidence[0].evidence_class, "fixture");
+});
+
+test("adapter rejects duplicate ids, missing ids, malformed artifacts, leakage, and secrets", () => {
+  assert.equal(adaptServiceProjection({
+    schema_version: "service-engagement-projection-v1",
+    engagements: [
+      { engagement_id: "dup", service_id: "product-validation-sprint" },
+      { engagement_id: "dup", service_id: "launch-draft-pack" },
+    ],
+  }).rejection_reason?.startsWith("duplicate_engagement_id"), true);
+  assert.equal(adaptServiceProjection({
+    schema_version: "service-engagement-projection-v1",
+    engagements: [{ service_id: "product-validation-sprint" }],
+  }).rejection_reason, "missing_engagement_id");
+  assert.equal(adaptServiceProjection(null).rejected, true);
+  assert.match(String(adaptServiceProjection({
+    schema_version: "service-engagement-projection-v1",
+    engagements: [{
+      engagement_id: "leak",
+      service_id: "product-validation-sprint",
+      cross_client_data: { other: "ws-b" },
+    }],
+  }).rejection_reason), /secret_or_cross_workspace|cross_workspace/);
+  assert.equal(adaptServiceProjection({
+    schema_version: "service-engagement-projection-v1",
+    engagements: [{
+      engagement_id: "sec",
+      service_id: "product-validation-sprint",
+      evidence: [{ title: "x", summary: "sk-live-abcdefghijklmnopqrstuvwxyz" }],
+    }],
+  }).rejected, true);
+});
+
+test("data_inadequate export lists exact missing client input", () => {
+  const engagement = buildOneClientProjection().engagements[0];
+  const exported = buildClientSafeServiceExport(engagement);
+  assert.equal(exported.accepted, false);
+  assert.match(String(exported.rejection_reason), /Missing client input/);
+  assert.equal(Array.isArray(exported.payload?.required_from_client), true);
+});
+
+test("hook source uses #213 apiBase and never POSTs", async () => {
+  const source = await readFile(new URL("../src/features/service-delivery-workbench/hooks/useServiceDeliveryWorkbench.ts", import.meta.url), "utf8");
+  assert.match(source, /joinApiPath/);
+  assert.match(source, /resolveApiBaseUrl/);
+  assert.match(source, /adaptServiceProjection/);
+  assert.doesNotMatch(source, /method: "POST"/);
+  assert.doesNotMatch(source, /\.sort\(/);
+});
+
+test("adapter and filter sources never sort or recalculate contribution", async () => {
+  const adapter = await readFile(new URL("../src/features/service-delivery-workbench/lib/adaptServiceProjection.ts", import.meta.url), "utf8");
+  const filter = await readFile(new URL("../src/features/service-delivery-workbench/lib/filterEngagements.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(adapter, /\.sort\(/);
+  assert.doesNotMatch(filter, /\.sort\(/);
+  assert.match(adapter, /frontend_calculates: false/);
 });

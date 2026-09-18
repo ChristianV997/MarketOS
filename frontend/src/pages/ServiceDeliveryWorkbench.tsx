@@ -8,20 +8,32 @@ import { moveSelection } from "../features/service-delivery-workbench/lib/compos
 export default function ServiceDeliveryWorkbench() {
   const { view, filters, setFilters, setSelectedId, recovery } = useServiceDeliveryWorkbench();
   const tableRef = useRef<HTMLDivElement>(null);
+  const skipInitialFocus = useRef(true);
 
   useEffect(() => {
+    if (skipInitialFocus.current) {
+      skipInitialFocus.current = false;
+      return;
+    }
     const selected = tableRef.current?.querySelector<HTMLElement>("[aria-selected='true']");
     selected?.focus();
   }, [view.selected?.engagement_id]);
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-4 p-3 md:p-5">
+    <div className="mx-auto flex max-w-7xl flex-col gap-4 overflow-x-hidden p-3 md:p-5">
+      <a
+        href="#pipeline-heading"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm"
+      >
+        Skip to service pipeline
+      </a>
       <header className="space-y-2">
         <h1 className="text-xl font-semibold text-zinc-50">Service delivery workbench</h1>
         <p className="text-sm text-zinc-400">
-          Operator workflow for Product Validation Sprint, Unit Economics + CAC/ROAS Diagnostic,
-          Launch Draft Pack, and Managed Acquisition and CRO. Display-only: fixtures are not
-          commercial validation and cannot execute live client actions.
+          Operator review for Product Validation Sprint, Unit Economics + CAC/ROAS Diagnostic,
+          Launch Draft Pack, and Managed Acquisition and CRO. Read-only: the canonical GET is
+          unavailable, fixtures/manual/simulated rows are not live client evidence, and
+          draft-ready is not commercially validated.
         </p>
       </header>
 

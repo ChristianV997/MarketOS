@@ -22,7 +22,8 @@ export function PipelineTable({
         <p className="p-4 text-sm text-zinc-400">No engagements match. Clear filters to recover the source list.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
+          <table className="min-w-full text-left text-sm" role="table">
+            <caption className="sr-only">Server-ordered service engagements. Filtering does not re-rank.</caption>
             <thead className="bg-[#111113] text-[11px] uppercase tracking-widest text-zinc-500">
               <tr>
                 <th scope="col" className="px-3 py-2">Client</th>
@@ -50,6 +51,12 @@ export function PipelineTable({
                       } else if (event.key === "ArrowUp") {
                         event.preventDefault();
                         onMove(-1);
+                      } else if (event.key === "Home") {
+                        event.preventDefault();
+                        onMove(-rows.length);
+                      } else if (event.key === "End") {
+                        event.preventDefault();
+                        onMove(rows.length);
                       } else if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
                         onSelect(row.engagement_id);

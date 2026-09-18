@@ -5,6 +5,7 @@
  */
 
 export const SERVICE_ENGAGEMENT_PROJECTION_VERSION = "service-engagement-projection-v1";
+export const SERVICE_DELIVERY_PLANE_REPORT_VERSION = "service-delivery-plane-v1";
 export const CLIENT_SAFE_SERVICE_EXPORT_VERSION = "client-safe-service-export-v1";
 export const FUTURE_WORKBENCH_PATH = "/api/service-delivery/workbench";
 
@@ -26,6 +27,7 @@ export const PRIORITY_SERVICE_LABELS: Record<PriorityServiceId, string> = {
 
 export const LIFECYCLE_STATES = [
   "intake",
+  "screening",
   "data_inadequate",
   "eligible",
   "scoped",
@@ -36,6 +38,8 @@ export const LIFECYCLE_STATES = [
   "revision_requested",
   "approved",
   "delivered",
+  "renewal_candidate",
+  "upsell_candidate",
   "paused",
   "cancelled",
   "rejected",
@@ -177,13 +181,14 @@ export type ServiceEngagement = {
 
 export type ServiceEngagementProjection = {
   schema_version: typeof SERVICE_ENGAGEMENT_PROJECTION_VERSION;
-  availability: "fixture" | "unavailable" | "partial";
+  availability: "fixture" | "unavailable" | "partial" | "manual_import";
   live_endpoint: typeof FUTURE_WORKBENCH_PATH;
   live_endpoint_status: "unavailable";
   read_only: true;
   generated_at: string;
   engagements: ServiceEngagement[];
   diagnostics: string[];
+  input_contract: typeof SERVICE_ENGAGEMENT_PROJECTION_VERSION | typeof SERVICE_DELIVERY_PLANE_REPORT_VERSION | "unknown";
 };
 
 export type ClientSafeServiceExport = {

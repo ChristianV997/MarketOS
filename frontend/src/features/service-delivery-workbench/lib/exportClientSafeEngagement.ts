@@ -6,6 +6,8 @@ import {
 
 const SECRET_SHAPED = /sk-live-|sk-test-|ghp_|github_pat_|AKIA[0-9A-Z]{16}|bearer\s+[a-z0-9._-]{10,}/i;
 const FORBIDDEN_KEY = /(prompt|formula|heuristic|source_code|private_key|provider_payload|internal_notes|credential|cross_client)/i;
+const PATH_SHAPED = /(^|[\\/])(users|home|documents|marketos)[\\/]/i;
+const HTML_SHAPED = /<\/?[a-z][\s\S]*>/i;
 
 export const EXPORT_OMIT_KEYS = [
   "internal_prompt",
@@ -19,7 +21,9 @@ export const EXPORT_OMIT_KEYS = [
 ] as const;
 
 export function containsSecretShapedValue(value: unknown): boolean {
-  if (typeof value === "string") return SECRET_SHAPED.test(value);
+  if (typeof value === "string") {
+    return SECRET_SHAPED.test(value) || PATH_SHAPED.test(value) || HTML_SHAPED.test(value);
+  }
   if (Array.isArray(value)) return value.some(containsSecretShapedValue);
   if (value && typeof value === "object") {
     return Object.entries(value as Record<string, unknown>).some(([key, item]) => {
@@ -48,18 +52,23 @@ export function buildClientSafeServiceExport(engagement: ServiceEngagement): Cli
     };
   }
 
-  if (engagement.eligibility.data_inadequate) {
+  if (engagement.eligibility.data_inadequate || engagement.lifecycle_state === "data_inadequate") {
+    const missing = engagement.eligibility.required_from_client;
+    const missingLabel = missing.length
+      ? missing.map((item) => `${item.field} (${item.how_to_provide})`).join("; ")
+      : engagement.missing_data.join("; ") || "unspecified client intake";
     return {
       export_version: CLIENT_SAFE_SERVICE_EXPORT_VERSION,
       accepted: false,
       rejection_reason:
-        "Export rejected: data_inadequate. The client must supply the listed intake fields before a client-safe packet can be produced.",
+        `Export rejected: data_inadequate. Missing client input: ${missingLabel}. This is not a complete deliverable.`,
       read_only: true,
       mutated: false,
       payload: {
         engagement_id: engagement.engagement_id,
         lifecycle_state: engagement.lifecycle_state,
-        required_from_client: engagement.eligibility.required_from_client,
+        required_from_client: missing,
+        missing_data: engagement.missing_data,
       },
     };
   }

@@ -127,6 +127,71 @@ export function EngagementWorkflow({
         )}
       </Panel>
 
+      <Panel title="Package and scope review" headingId="scope-heading">
+        <p className="text-xs text-zinc-400">
+          Package identity is mapped from the #261 package_id / workbench service_id. Scope text is a display copy.
+        </p>
+        <p className="font-medium text-zinc-100">{PRIORITY_SERVICE_LABELS[engagement.service_id]}</p>
+        <ul className="list-disc pl-5 text-xs">
+          {engagement.assumptions.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+        <p className="text-[11px] text-zinc-500">Draft-ready is not commercially validated.</p>
+      </Panel>
+
+      <Panel title="Deliverable acceptance criteria" headingId="acceptance-heading">
+        <ul className="space-y-2">
+          {engagement.deliverables.map((item) => (
+            <li key={item.deliverable_id} className="rounded-md border border-white/[0.05] p-2 text-xs">
+              <p className="font-medium text-zinc-100">{item.name}</p>
+              <p className="text-zinc-400">Acceptance: status {item.status}. Blocked reason: {item.blocked_reason ?? "none"}.</p>
+            </li>
+          ))}
+        </ul>
+      </Panel>
+
+      <Panel title="Client review / revision / approval / delivery" headingId="lifecycle-review-heading">
+        <p className="text-xs">
+          Current state: <strong>{lifecycleLabel(engagement.lifecycle_state)}</strong>.
+          This panel does not transition CompanyOS states.
+        </p>
+        {engagement.lifecycle_state === "client_review" && (
+          <p className="text-sky-200">Client review: wait for the client. Do not publish or charge.</p>
+        )}
+        {engagement.lifecycle_state === "revision_requested" && (
+          <p className="text-amber-200">Revision requested: inspect missing evidence and assumptions; do not treat the draft as accepted.</p>
+        )}
+        {engagement.lifecycle_state === "approved" && (
+          <p className="text-emerald-200">Approved is a backend-copied label, not live delivery or payment authority.</p>
+        )}
+        {engagement.lifecycle_state === "delivered" && (
+          <p className="text-emerald-200">Delivered is a planning label. Confirm the client-safe packet, not a live storefront.</p>
+        )}
+        {(engagement.lifecycle_state === "renewal_candidate" || engagement.lifecycle_state === "upsell_candidate") && (
+          <p className="text-indigo-200">
+            Renewal/upsell candidate is advisory only. The workbench cannot create a new engagement or send outreach.
+          </p>
+        )}
+        {engagement.lifecycle_state === "unavailable" && (
+          <p>Lifecycle unavailable. Treat every field as missing until a canonical projection arrives.</p>
+        )}
+        {engagement.lifecycle_state === "screening" && (
+          <p>Screening: data-quality blockers still apply. Do not skip to draft-ready.</p>
+        )}
+      </Panel>
+
+      <Panel title="Draft report preview" headingId="draft-report-heading">
+        <p className="text-xs text-zinc-400">
+          Preview reuses the client-safe export. data_inadequate engagements cannot be exported as complete deliverables.
+        </p>
+        {exportPreview?.accepted ? (
+          <pre className="mt-2 max-h-40 overflow-auto rounded bg-black/40 p-2 text-[11px] text-zinc-300">
+            {JSON.stringify(exportPreview.payload, null, 2)}
+          </pre>
+        ) : (
+          <p className="text-red-200 text-xs">{exportPreview?.rejection_reason ?? "No draft report."}</p>
+        )}
+      </Panel>
+
       <Panel title="Deliverable checklist" headingId="deliverable-heading">
         <ul className="space-y-2">
           {engagement.deliverables.map((item) => (

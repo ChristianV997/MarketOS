@@ -271,6 +271,7 @@ export function buildOneClientProjection(): ServiceEngagementProjection {
     live_endpoint_status: "unavailable",
     read_only: true,
     generated_at: "2026-09-18T00:00:00Z",
+    input_contract: SERVICE_ENGAGEMENT_PROJECTION_VERSION,
     diagnostics: ["Canonical live endpoint unavailable; one-client fixture in use."],
     engagements: [
       buildEngagement({
@@ -304,6 +305,7 @@ export function buildTenClientProjection(): ServiceEngagementProjection {
     live_endpoint_status: "unavailable",
     read_only: true,
     generated_at: "2026-09-18T00:00:00Z",
+    input_contract: SERVICE_ENGAGEMENT_PROJECTION_VERSION,
     diagnostics: ["Ten-client fixture covers every priority service and mixed lifecycle states."],
     engagements,
   };
@@ -327,6 +329,7 @@ export function buildScaleProjection(count = 100, evidenceCount = 24, deliverabl
     live_endpoint_status: "unavailable",
     read_only: true,
     generated_at: "2026-09-18T00:00:00Z",
+    input_contract: SERVICE_ENGAGEMENT_PROJECTION_VERSION,
     diagnostics: [`Scale fixture: ${count} engagements, ${evidenceCount} evidence rows, ${deliverableCount} deliverables.`],
     engagements,
   };
