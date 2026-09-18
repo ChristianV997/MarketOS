@@ -1269,7 +1269,6 @@ def build_and_save(target_path: Path, work_orders_path: Path | None = None) -> t
 
     from evaluation.source_governance.registry import (
         SourceAdaptationRecord,
-        SourceAdaptationRegistry,
         WorkOrderRegistry,
         generate_work_order_from_source_record,
     )

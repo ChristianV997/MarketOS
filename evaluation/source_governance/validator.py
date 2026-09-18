@@ -30,7 +30,6 @@ from .registry import (
     SourceAdaptationRecord,
     SourceAdaptationRegistry,
     TargetBoundaryReview,
-    WorkOrderRegistry,
 )
 
 _HEX_40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -471,12 +470,6 @@ def generate_evidence_bundle(
     record: SourceAdaptationRecord,
 ) -> EvidenceBundle:
     """Generate a sanitized, reviewer-ready evidence bundle for an adaptation work order."""
-    is_active = work_order.adaptation_mode in (
-        AdaptationMode.COPY_PATTERN.value,
-        AdaptationMode.INTEGRATE.value,
-        AdaptationMode.EMULATE.value,
-    )
-
     tb_review = TargetBoundaryReview(
         target_module=work_order.marketos_target_module,
         target_symbol=work_order.marketos_target_symbol,

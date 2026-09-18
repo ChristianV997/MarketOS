@@ -14,7 +14,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 # Ensure repo root is on sys.path
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
