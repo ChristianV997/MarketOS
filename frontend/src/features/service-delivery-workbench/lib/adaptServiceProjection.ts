@@ -131,6 +131,9 @@ export function adaptServiceProjection(raw: unknown, generatedAt = "fixture"): A
   }
 
   const rows = collectRawEngagements(record);
+  const liveEndpointStatus = record.live_endpoint_status === "available_read_only"
+    ? "available_read_only" as const
+    : "unavailable" as const;
   const engagements: ServiceEngagement[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
@@ -160,7 +163,7 @@ export function adaptServiceProjection(raw: unknown, generatedAt = "fixture"): A
       schema_version: SERVICE_ENGAGEMENT_PROJECTION_VERSION,
       availability,
       live_endpoint: FUTURE_WORKBENCH_PATH,
-      live_endpoint_status: "unavailable",
+      live_endpoint_status: liveEndpointStatus,
       read_only: true,
       generated_at: String(record.generated_at ?? generatedAt),
       engagements,

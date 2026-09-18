@@ -59,12 +59,13 @@ export function composeWorkbenchViewModel(input: {
     ? filtered.findIndex((item) => item.engagement_id === selected.engagement_id)
     : -1;
 
-  // Live GET remains unavailable: never emit success or live_validated for fixture/manual copies.
+  const endpointAvailableReadOnly = input.projection.live_endpoint_status === "available_read_only";
+  // Read-only availability never promotes fixture/manual evidence or enables mutations.
   let surface: SurfaceState = "unavailable";
-  let statusMessage = `${filtered.length} engagement(s) in the current filter. Source order is preserved. Canonical GET ${input.projection.live_endpoint} is unavailable. Fixture/manual/simulated rows are not live client evidence.`;
+  let statusMessage = `${filtered.length} engagement(s) in the current filter. Source order is preserved. Canonical GET ${input.projection.live_endpoint} is ${endpointAvailableReadOnly ? "available read-only" : "unavailable"}. Fixture/manual/simulated rows are not live client evidence.`;
   if (input.projection.availability === "unavailable" && input.projection.engagements.length === 0) {
     surface = "unavailable";
-    statusMessage = "Canonical GET /api/service-delivery/workbench is unavailable. No sanitized engagements to review.";
+    statusMessage = `Canonical GET /api/service-delivery/workbench is ${endpointAvailableReadOnly ? "available read-only" : "unavailable"}. No sanitized engagements to review.`;
   } else if (input.projection.engagements.length === 0) {
     surface = "empty";
     statusMessage = "No engagements in the sanitized projection.";
@@ -79,7 +80,7 @@ export function composeWorkbenchViewModel(input: {
     statusMessage = "Selected engagement is stale. Do not treat displayed figures as current proof.";
   } else if (input.projection.availability === "partial" || input.projection.availability === "fixture") {
     surface = "partial";
-    statusMessage = "Partial/fixture projection: the live endpoint remains unavailable. These rows are not live-validated commercial proof.";
+    statusMessage = `Partial/fixture projection: the endpoint is ${endpointAvailableReadOnly ? "available read-only" : "unavailable"}. These rows are not live-validated commercial proof.`;
   } else if (input.projection.availability === "manual_import") {
     surface = "partial";
     statusMessage = "Manual-import / #261 plane copy. Not live-validated. Server order is preserved; economics are display copies only.";
@@ -92,7 +93,7 @@ export function composeWorkbenchViewModel(input: {
     selected,
     selectedIndex,
     exportPreview: selected ? buildClientSafeServiceExport(selected) : null,
-    liveEndpointUnavailable: true,
+    liveEndpointUnavailable: !endpointAvailableReadOnly,
     diagnostics: [
       ...(input.errorMessage ? [input.errorMessage] : []),
       ...input.projection.diagnostics,

@@ -15,11 +15,11 @@ Accepted **inputs**:
 | `service-engagement-projection-v1` | Existing #264 workbench projection |
 | `service-delivery-plane-v1` | PR #261 `ServiceDeliveryPlaneReport` / `ClientEngagement.to_dict()` copies, including `package_id` aliases |
 
-Output schema is always `service-engagement-projection-v1` with `live_endpoint_status: "unavailable"` until a canonical HTTP route exists.
+Output schema is always `service-engagement-projection-v1`; endpoint status is `available_read_only` only for a validated sanitized artifact, otherwise `unavailable`.
 
-Canonical probe: `GET /api/service-delivery/workbench` via `#213` `frontend/src/lib/apiBase.ts` (`resolveApiBaseUrl` + `joinApiPath`). There is no second API client and no frontend `ServiceEconomics` calculator.
+Canonical probe: `GET /api/service-delivery/workbench` via `#213` `frontend/src/lib/apiBase.ts` (`resolveApiBaseUrl` + `joinApiPath`). The backend route is GET-only and reads only an operator-configured artifact beneath `artifacts/`; there is no second API client and no frontend `ServiceEconomics` calculator.
 
-HTTP route on origin/main: **unavailable**. Missing GET is fixture/manual-import display, never `success` or `live_validated`.
+HTTP route: available read-only when `MARKETOS_SERVICE_DELIVERY_PROJECTION` points to a safe artifact; otherwise the response is explicitly `unavailable`. Read-only availability never means live validation, client approval, or mutation authority.
 
 ## State taxonomy
 
