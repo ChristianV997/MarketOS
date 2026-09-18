@@ -1,0 +1,53 @@
+{
+  "note": "Apply these field replacements onto data/source_adaptation_registry.json. Not a second registry.",
+  "corrections": [
+    {
+      "source_id": "src-crawl4ai",
+      "marketos_target_authority": "backend.adapters.research.crawl4ai",
+      "rollback_strategy": "Keep backend/adapters/research/crawl4ai.py optional; disable by leaving crawl4ai uninstalled and CRAWL4AI_ALLOWED_DOMAINS empty.",
+      "verification_evidence": "backend/adapters/research/crawl4ai.py",
+      "last_reviewed_at": "2026-09-18T19:00:00Z"
+    },
+    {
+      "source_id": "src-higgsfield-gpu-orchestration",
+      "adaptation_mode": "reject",
+      "compatibility_status": "rejected",
+      "integration_status": "rejected",
+      "rejection_reason": "GPU cluster orchestration and foundation-model training runtime are out of Phase-1 scope; desktop/cluster control is rejected, not deferred.",
+      "last_reviewed_at": "2026-09-18T19:00:00Z"
+    },
+    {
+      "source_id": "src-higgsfield-cli",
+      "version_tag": "v1.1.25",
+      "last_reviewed_at": "2026-09-18T19:00:00Z"
+    },
+    {
+      "source_id": "src-coderos",
+      "revision": "b980e90b49ea7c0639094f3060ced5aaf772a571",
+      "commit_sha": "b980e90b49ea7c0639094f3060ced5aaf772a571",
+      "license_evidence_url": "https://github.com/ChristianV997/CoderOS/blob/main/LICENSE",
+      "last_reviewed_at": "2026-09-18T19:00:00Z"
+    },
+    {
+      "source_id": "src-gstack",
+      "revision": "a6b3a57512ca6d5c6aa5b68f74f736195021f96e",
+      "commit_sha": "a6b3a57512ca6d5c6aa5b68f74f736195021f96e",
+      "version_tag": "main",
+      "last_reviewed_at": "2026-09-18T19:00:00Z"
+    },
+    {
+      "source_id": "src-hermes-ecc",
+      "repository_url": "https://github.com/NousResearch/hermes-agent",
+      "organization": "NousResearch",
+      "repository_name": "hermes-agent",
+      "revision": "027d1a8a6043355b7af53b4c0645336b41372b7b",
+      "commit_sha": "027d1a8a6043355b7af53b4c0645336b41372b7b",
+      "version_tag": "main-reference",
+      "license_evidence_url": "https://github.com/NousResearch/hermes-agent/blob/main/LICENSE",
+      "inspected_paths": ["README.md", "LICENSE"],
+      "adaptation_mode": "reference_only",
+      "integration_status": "reference_only",
+      "last_reviewed_at": "2026-09-18T19:00:00Z"
+    }
+  ]
+}
