@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from evaluation.commerce.kernel_integration import (
     supplier_offer_to_economics,
 )
 from evaluation.companyos.service_engagement import build_service_engagement
+from evaluation.commerce.dry_run_scenarios import hydroponics_positive_candidate
+from evaluation.commerce.kernel_integration import integrate_dry_run
 
 KERNEL_BLOB = "4baba4be5bcddeab71d841d0d8f26f84a7c8bef3"
 
@@ -177,6 +180,47 @@ def test_compatibility_api_and_client_safe_export():
     assert "secret" not in blob
     assert safe["record_kind"] == "planning_record"
     assert safe["live_actions_taken"] is False
+
+
+def test_client_safe_export_drops_nested_sensitive_values_and_secret_shapes():
+    safe = client_safe_projection({
+        "safe_note": "client-facing planning note",
+        "nested": {
+            "internal_prompt": "do not expose",
+            "ordinary_key": "internal formula: hidden",
+            "kept": "approved summary",
+        },
+        "list": ["sk-test-fixture-value", "safe item"],
+        "cross_client_data": {"other_client": "private"},
+    })
+    assert safe["safe_note"] == "client-facing planning note"
+    assert safe["nested"] == {"kept": "approved summary"}
+    assert safe["list"] == ["safe item"]
+    assert "cross_client_data" not in safe
+
+
+def test_dry_run_emits_complete_packet_with_supplier_identity_and_economics():
+    report = integrate_dry_run(hydroponics_positive_candidate())
+    packet = report.to_dict()["commerce_packet"]
+    assert packet["supplier_offer"]["supplier_sku"] == "HYDRO-001"
+    assert packet["market_lane"]["destination_country"] == "US"
+    assert packet["shipping_assumptions"]["supplier_shipping"]["currency"] == "USD"
+    assert packet["customer_facing_promise"]
+    assert packet["economics"]["break_even_cac"]
+    assert packet["economics"]["target_roas"]
+    assert packet["launch_decision"] == "launch_draft_only"
+    assert packet["live_actions_taken"] is False
+
+
+def test_dry_run_missing_offer_identity_or_promise_fails_closed():
+    scenario = hydroponics_positive_candidate()
+    report = integrate_dry_run(replace(scenario, supplier_offer=None, customer_facing_promise=""))
+    packet = report.to_dict()["commerce_packet"]
+    assert not report.promoted_to_launch
+    assert "exact_sku" in report.promotion.blockers
+    assert "customer_facing_promise" in report.promotion.blockers
+    assert packet["supplier_offer"] is None
+    assert packet["launch_decision"] == "blocked"
 
 
 def test_deterministic_replay_and_no_live_execution():

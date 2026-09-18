@@ -1,3 +1,5 @@
+import pytest
+
 from backend.economics.kernel import EvidenceRef
 
 from evaluation.commerce.canonical import (
@@ -6,6 +8,7 @@ from evaluation.commerce.canonical import (
     CompetitionSnapshot,
     OwnershipAssignment,
     ServiceEngagement,
+    SupplierOfferIdentity,
     WorkspaceReplayContext,
     launch_blockers_for_ownership,
 )
@@ -94,3 +97,10 @@ def test_evidence_reference_is_the_kernel_evidence_ref():
     assert EvidenceReference is EvidenceRef
     ref = EvidenceReference("ev-1", evidence_state="observed")
     assert isinstance(ref, EvidenceRef)
+
+
+def test_supplier_offer_identity_requires_exact_nonempty_components():
+    identity = SupplierOfferIdentity("supplier-1", "offer-1", "SKU-1")
+    assert identity.to_dict()["supplier_sku"] == "SKU-1"
+    with pytest.raises(ValueError):
+        SupplierOfferIdentity("supplier-1", "offer-1", "")

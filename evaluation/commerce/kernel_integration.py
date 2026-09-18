@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
@@ -52,6 +53,28 @@ FORBIDDEN_EXPORT = (
     "payload",
     "trace",
     "internal",
+    "raw_payload",
+    "cross_client",
+    "private",
+    "secret",
+)
+SENSITIVE_VALUE_MARKERS = (
+    "internal prompt",
+    "internal formula",
+    "internal heuristic",
+    "source code",
+    "raw provider payload",
+    "cross-client",
+    "cross client",
+    "api key",
+    "credential",
+    "password",
+    "bearer ",
+)
+SECRET_VALUE_PATTERNS = (
+    re.compile(r"(?i)\b(?:api[_ -]?key|token|password|secret)\s*[:=]\s*\S+"),
+    re.compile(r"\b(?:sk|pk|ghp|github_pat)[_-][A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
 )
 REQUIRED_SERVICE_INPUTS = (
     "ad_spend",
@@ -182,8 +205,16 @@ def client_safe_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
     """TrustOS-shaped client export: drop internal keys and secret-shaped values."""
     blocked = set(FORBIDDEN_EXPORT)
 
+    def _sensitive_text(value: str) -> bool:
+        lowered = value.casefold()
+        return any(marker in lowered for marker in SENSITIVE_VALUE_MARKERS) or any(
+            pattern.search(value) for pattern in SECRET_VALUE_PATTERNS
+        )
+
     def _clean(value: Any, key: str | None = None) -> Any:
         if key and any(marker in key.lower() for marker in blocked):
+            return None
+        if isinstance(value, str) and _sensitive_text(value):
             return None
         if isinstance(value, Mapping):
             out = {}
@@ -193,10 +224,12 @@ def client_safe_projection(payload: Mapping[str, Any]) -> dict[str, Any]:
                     out[child_key] = cleaned
             return out
         if isinstance(value, (list, tuple)):
-            return [_clean(item) for item in value]
+            return [cleaned for item in value if (cleaned := _clean(item)) is not None]
         return value
 
     cleaned = _clean(dict(payload))
+    if not isinstance(cleaned, dict):
+        cleaned = {}
     cleaned["schema"] = "MarketOS.ClientCommerceProjection.v1"
     cleaned["record_kind"] = "planning_record"
     cleaned["confidence"] = "planning_only"
