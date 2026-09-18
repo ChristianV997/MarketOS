@@ -1,0 +1,13 @@
+{
+  "jobs": [
+    {"id": "job-hydroponics", "scenario_id": "hydroponics"},
+    {"id": "job-smart-pet", "scenario_id": "smart-pet"}
+  ],
+  "read_only": true,
+  "authorities": {
+    "launch": false,
+    "ads": false,
+    "orders": false,
+    "payments": false
+  }
+}

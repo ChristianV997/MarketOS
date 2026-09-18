@@ -1,0 +1,1 @@
+{"events":[{"learning_event_id":"fixture-ad-loser","event_type":"ad_experiment","outcome":"loss","candidate_id":"portable-espresso-maker","action_taken":"launch_ad_experiment","failure_reasons":["low_click_through","poor_creative_angle"],"confidence":0.85}]}

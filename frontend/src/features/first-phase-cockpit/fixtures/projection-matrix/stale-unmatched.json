@@ -1,0 +1,34 @@
+{
+  "report_version": "product-validation-report-v1",
+  "appendix": {
+    "research_to_decision_version": "v1",
+    "replay_fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "client_safe_projection": {
+      "version": "research-to-decision-client-safe-v1",
+      "launch_authorized": false,
+      "network_calls": false,
+      "candidates": [
+        {
+          "candidate_id": "report-only-row",
+          "title": "Not on server ranking",
+          "decision": "hold_for_manual_review",
+          "risk_state": "hold",
+          "freshness": "expired",
+          "confidence": { "supplier": 0.1 },
+          "missing_evidence": [],
+          "hard_gates": ["manual_evidence_is_not_live_supplier_proof"],
+          "evidence_refs": []
+        }
+      ]
+    },
+    "candidate_audit": [
+      {
+        "candidate_id": "hydroponics-kit",
+        "freshness": "expired",
+        "risk_state": "blocked",
+        "economics": {},
+        "hard_gates": ["supplier_offer_evidence_missing"]
+      }
+    ]
+  }
+}

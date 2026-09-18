@@ -1,0 +1,41 @@
+{
+  "report_version": "supplier-feasibility-v1",
+  "evidence_mode": "fixture_demo",
+  "suppliers_observed": ["cj"],
+  "top_candidate_id": "mini-thermal-printer",
+  "candidates": [
+    {
+      "candidate_id": "mini-thermal-printer",
+      "query": "mini thermal printer",
+      "offers": [
+        {
+          "supplier": "cj",
+          "unit_cost": 28.0,
+          "shipping_cost": 6.0,
+          "estimated_landed_cost": 34.0,
+          "delivery_max_days": 20,
+          "evidence_mode": "fixture"
+        }
+      ],
+      "score": {
+        "overall_supplier_feasibility": 0.18,
+        "supplier_cost_confidence": 0.4,
+        "margin_feasibility_proxy": 0.1,
+        "recommendation": "reject_poor_margin",
+        "risk_flags": [{"code": "low_margin_proxy", "severity": "blocker"}],
+        "economics": {
+          "target_sell_price": 29.99,
+          "estimated_landed_cost": 34.0,
+          "gross_margin_percent": 0.08,
+          "profit_per_order_before_ad_spend": -4.01,
+          "break_even_cpa": 0,
+          "break_even_roas": null,
+          "assumptions": []
+        }
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}
