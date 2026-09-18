@@ -1,1 +1,1 @@
-placeholder-will-fail-if-this-ships
+"""Static audit of the MarketOS commerce/research call graph.\n\nThis module does not execute authorities. It records where measurement\nshould attach so the harness never invents a second scorer, economics\nengine, event system, quality gate, or replay authority.\n"""\nfrom __future__ import annotations\n\nfrom typing import Any\n\n\nSCHEMA = \"commerce-call-graph-audit-v2\"\n
