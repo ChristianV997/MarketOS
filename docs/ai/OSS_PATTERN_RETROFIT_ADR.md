@@ -83,3 +83,21 @@ To solve this, MarketOS conducted an exhaustive audit of 19 premier public open-
 ## 5. Rollback & Deactivation Plan
 - If lineage facet enrichment needs to be disabled, the factory helper `attach_lineage_to_evidence` can be bypassed; base evidence records retain their native schema (`contracts.py`) without breakage.
 - If advanced expectation rules need to be bypassed, standard `evaluation.quality.quality_reasons` continues to operate identically as the baseline data-quality evaluator.
+
+---
+
+## 6. Source-Adaptation Governance Registry & Acceptance Pipeline
+- **Lane**: `OSS-SOURCE-ADAPTATION-REGISTRY-AND-QUALITY-V2`
+- **Canonical Schema**: `evaluation/source_governance/registry.py` (`SourceAdaptationRecord`, `SourceAdaptationRegistry`)
+- **Fail-Closed Validator**: `evaluation/source_governance/validator.py` (`validate_registry`, `validate_source_record`)
+- **Canonical Registry**: `data/source_adaptation_registry.json` (28 evaluated sources with 100% 40-character commit SHAs)
+- **Governance CLI**: `python scripts/ai/validate_source_adaptation_registry.py --summary`
+- **Deterministic Matrix Benchmark**: `python scripts/benchmarks/benchmark_source_adaptation_registry.py` (10/10 scenarios intercepted fail-closed, 100% bit-identical hash stability)
+- **Benchmark Report**: `docs/ai/SOURCE_ADAPTATION_GOVERNANCE_REPORT.md`
+- **Key Invariants**:
+  - Pinned immutable 40-character commit SHAs mandatory for all Git repositories.
+  - Incompatible/restrictive licenses (AGPL-3.0, ELv2, BSL-1.1, Sustainable Use) strictly prohibited from core integration.
+  - Secret-shaped metadata intercepted with automated output redaction.
+  - Desktop control / local IPC bridges (Higgsfield MCP bridge) rejected fail-closed.
+  - GPU orchestration sources deferred until dedicated cluster infrastructure exists.
+  - Protected MarketOS authorities (TrustOS, Governor, Approval Ledger, Quality, Event Spine) cannot be duplicated or replaced.
