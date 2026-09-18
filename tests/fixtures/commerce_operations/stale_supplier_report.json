@@ -1,0 +1,28 @@
+{
+  "report_version": "supplier-feasibility-v1",
+  "evidence_mode": "fixture_demo",
+  "candidates": [
+    {
+      "candidate_id": "stale-widget",
+      "query": "stale widget",
+      "offers": [{"supplier": "cj", "unit_cost": 8.0, "shipping_cost": 2.5, "estimated_landed_cost": 10.5, "delivery_max_days": 14, "evidence_mode": "fixture"}],
+      "score": {
+        "overall_supplier_feasibility": 0.6,
+        "recommendation": "expand_supplier_research",
+        "risk_flags": [],
+        "economics": {
+          "target_sell_price": 22.0,
+          "estimated_landed_cost": 10.5,
+          "gross_margin_percent": 0.42,
+          "profit_per_order_before_ad_spend": 9.2,
+          "break_even_cpa": 9.2,
+          "break_even_roas": 2.39,
+          "assumptions": []
+        }
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

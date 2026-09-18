@@ -1,0 +1,5 @@
+# Shell scripts must stay LF: CRLF breaks `set -o pipefail` on Windows checkouts.
+.cursor/*.sh text eol=lf
+.cursor/*.mjs text eol=lf
+.cursor/*.json text eol=lf
+*.sh text eol=lf
