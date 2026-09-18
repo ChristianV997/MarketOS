@@ -1,0 +1,12 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "live_readonly",
+  "candidates": [
+    {
+      "candidate_id": "desk-clamp-lamp",
+      "query": "desk clamp lamp",
+      "evidence": [{"price": 29.99, "evidence_mode": "live_readonly"}],
+      "score": {"overall_marketplace_opportunity": 0.72, "saturation_score": 0.31}
+    }
+  ]
+}

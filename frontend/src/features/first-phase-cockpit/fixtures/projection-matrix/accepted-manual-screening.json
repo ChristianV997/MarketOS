@@ -1,0 +1,88 @@
+{
+  "report_version": "product-validation-report-v1",
+  "read_only": true,
+  "mutated": false,
+  "network_calls": false,
+  "evidence_mode": "fixture_demo",
+  "screening_only": true,
+  "appendix": {
+    "research_to_decision_version": "v1",
+    "replay_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "market_lane": {
+      "origin_country": "China",
+      "destination_country": "Mexico",
+      "currency": "MXN",
+      "warehouse": "Shenzhen manual warehouse"
+    },
+    "validation": {
+      "status": "hold_for_manual_review",
+      "read_only": true,
+      "network_calls": false,
+      "credentials_used": false,
+      "provider_calls": false,
+      "orders_or_spend": false
+    },
+    "client_safe_projection": {
+      "version": "research-to-decision-client-safe-v1",
+      "read_only": true,
+      "launch_authorized": false,
+      "provider_calls": false,
+      "network_calls": false,
+      "mutated": false,
+      "candidates": [
+        {
+          "candidate_id": "hydroponics-kit",
+          "title": "Compact hydroponics kit",
+          "decision": "hold_for_manual_review",
+          "next_action": "hold_for_manual_review",
+          "risk_state": "hold",
+          "freshness": "current",
+          "confidence": { "supplier": 0.4, "marketplace": 0.5 },
+          "missing_evidence": ["duty_model_unknown"],
+          "hard_gates": ["manual_evidence_is_not_live_supplier_proof", "no_launch_or_spend_authority"],
+          "evidence_refs": ["supplier:all_supplier.json"]
+        }
+      ]
+    },
+    "candidate_audit": [
+      {
+        "candidate_id": "hydroponics-kit",
+        "title": "Compact hydroponics kit",
+        "lifecycle_state": "research_ready",
+        "lane": {
+          "destination_country": "Mexico",
+          "currency": "MXN",
+          "warehouse": "Shenzhen manual warehouse"
+        },
+        "supplier_offers": [
+          {
+            "offer_id": "offer-hydro-1",
+            "exact_sku": "HYDRO-KIT-01",
+            "status": "accepted",
+            "issues": []
+          }
+        ],
+        "economics": { "gross_margin_percent": 28 },
+        "observed_values": { "supplier_offer_count": 1, "marketplace_evidence_count": 2 },
+        "assumptions": ["duty_model_unknown"],
+        "missing_evidence": ["duty_model_unknown"],
+        "conflicts": [],
+        "freshness": "current",
+        "risk_state": "hold",
+        "confidence": { "supplier": 0.4, "marketplace": 0.5 },
+        "decision": "hold_for_manual_review",
+        "next_action": "hold_for_manual_review",
+        "hard_gates": ["manual_evidence_is_not_live_supplier_proof", "no_launch_or_spend_authority"],
+        "evidence_refs": ["supplier:all_supplier.json"],
+        "safety_classification": "offline_manual_evidence_only"
+      }
+    ],
+    "source_authorities": {
+      "supplier": "evaluation.commerce.supplier_feasibility",
+      "packet": "evaluation.commerce.product_validation_report"
+    }
+  },
+  "executive_summary": {
+    "consumer_attention_signals": { "status": "consumer_attention_not_supplied" }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "candidates": [
+    {
+      "candidate_id": "dup-widget",
+      "query": "first duplicate should lose",
+      "evidence": [{"marketplace": "amazon", "price": 9.99, "source_confidence": 0.3, "evidence_mode": "fixture"}],
+      "score": {"overall_marketplace_opportunity": 0.3, "demand_proxy_score": 0.3, "saturation_score": 0.2, "price_confidence": 0.3, "recommendation": "expand_marketplace_research"}
+    },
+    {
+      "candidate_id": "dup-widget",
+      "query": "last-wins duplicate",
+      "evidence": [{"marketplace": "amazon", "price": 19.99, "source_confidence": 0.7, "evidence_mode": "fixture"}],
+      "score": {"overall_marketplace_opportunity": 0.7, "demand_proxy_score": 0.72, "saturation_score": 0.2, "price_confidence": 0.7, "recommendation": "validate_supplier_first"}
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}
