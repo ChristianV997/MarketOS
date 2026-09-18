@@ -30,6 +30,7 @@ class UnitEconomicsSummary(_Packet):
     candidate_id: str; assumed_price: float; assumed_unit_cost: float; assumed_shipping_cost: float
     assumed_payment_fee: float; assumed_return_rate: float; assumed_cac: float; gross_margin: float
     contribution_margin: float; break_even_cac: float; warnings: tuple[str, ...]; assumptions: tuple[str, ...]; source: str
+    canonical_economics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -13,6 +13,7 @@ from typing import Any
 from backend.experiments.audit_log import log_transition
 from backend.experiments.envelope import CommercialRunEnvelope
 from backend.workspaces.artifact_store import ArtifactStore
+from backend.workspaces.registry import get_workspace_registry
 
 from .schemas import ContributionProfitResult
 
@@ -41,7 +42,7 @@ def reconcile_contribution_profit(
     recorded events yet, so a zero result there reads as "no data" rather
     than "genuinely zero profit" (previously indistinguishable)."""
     product_name = (envelope.inputs or {}).get("product_name", "")
-    store = ArtifactStore()
+    workspace = get_workspace_registry().get(envelope.workspace_id)
 
     raw_total = sum(max(0.0, v) for v in campaign_revenue.values())
     reconciliation: dict[str, Any] = {}
@@ -74,7 +75,8 @@ def reconcile_contribution_profit(
 
     envelope.actual_spend = actual_spend
     envelope.outputs["contribution_profit_result"] = result.to_dict()
-    store.save(envelope.workspace_id, envelope.experiment_id, "contribution_profit.json", result.to_dict())
+    if workspace is not None:
+        ArtifactStore(workspace).save(envelope.experiment_id, "contribution_profit.json", result.to_dict())
     log_transition(envelope, "contribution_profit_reconciled", data=result.to_dict())
 
     return result
