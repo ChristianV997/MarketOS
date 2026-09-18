@@ -1,12 +1,10 @@
 """Client-ready presentation layer over existing Phase 1 evidence reports."""
 from __future__ import annotations
-import json, re
+import re
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any, Mapping
 from .benchmark_matrix import build_benchmark_from_paths
-from .readiness import build_from_paths, load_sanitized_artifact
-from .public_market_benchmark import build_public_market_benchmark, load_public_market_seed
+from .readiness import build_from_paths
 from backend.deployment.readiness import build_readiness
 
 VERSION="product-validation-report-v1"
@@ -20,7 +18,24 @@ class ProductValidationReport:
   return d
 
 def generate(*, client_name="", benchmark:Mapping[str,Any]|None=None, public_market:Mapping[str,Any]|None=None, readiness:Mapping[str,Any]|None=None, deployment:Mapping[str,Any]|None=None, marketplace_trends:Mapping[str,Any]|None=None, supplier_feasibility:Mapping[str,Any]|None=None, consumer_attention:Mapping[str,Any]|None=None, opportunity_synthesis:Mapping[str,Any]|None=None, launch_draft_pack:Mapping[str,Any]|None=None, site_draft_pack:Mapping[str,Any]|None=None)->ProductValidationReport:
- b=dict(benchmark or build_benchmark_from_paths().to_dict()); p=dict(public_market or {}); r=dict(readiness or build_from_paths().to_dict()); d=dict(deployment or build_readiness().to_dict())
+ # VAL-GENERATE-DEFAULT-BUILDERS: build_from_paths()/build_readiness() read
+ # os.environ for CJ_* credential presence by default (environ=None ->
+ # os.environ); a caller who omits benchmark/readiness/deployment entirely
+ # should never trigger that, or a "set_cj_credentials..." next action,
+ # merely by not supplying optional stubs. build_benchmark_from_paths()
+ # itself never touches env/credentials, but is skipped too so the bare
+ # call never reaches any path-builder flow at all -- it returns a
+ # deterministic blocked/offline result with an explicit reason instead.
+ # Any explicit non-empty stub for benchmark/readiness/deployment (even a
+ # partial one) preserves the prior, real path-builder behavior for the
+ # ones still omitted.
+ if not benchmark and not readiness and not deployment:
+  b={"candidates":[],"evidence_mode":"fixture_demo"}
+  r={"overall_status":"blocked","supplier_readiness":{"status":"unknown"},"competition_readiness":{},"blocking_gates":["no_evidence_supplied"],"next_best_action":"supply_marketplace_supplier_or_consumer_evidence"}
+  d={"overall_status":"blocked"}
+ else:
+  b=dict(benchmark or build_benchmark_from_paths().to_dict()); r=dict(readiness or build_from_paths().to_dict()); d=dict(deployment or build_readiness().to_dict())
+ p=dict(public_market or {})
  candidates=list(b.get("candidates",[])); top=candidates[:3]; leader=top[0] if top else {}; title=clean((leader.get("candidate") or {}).get("title","No candidate")); decision=leader.get("commercial_decision","hold_for_more_evidence")
  recommendation="validate_supplier_first" if r.get("supplier_readiness",{}).get("status")!="live_observed" else "advance_to_launch_draft" if decision=="ready_for_readonly_deployment" else "client_review_required"
  mode="fixture_demo" if b.get("evidence_mode","fixture_demo")=="fixture_demo" else "sanitized_report"

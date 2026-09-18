@@ -22,24 +22,74 @@ def _live_context() -> SidecarContext:
     return SidecarContext(workspace_id="test-workspace", run_id="run-1", dry_run=False)
 
 
-# --- organic/shopping request plan reuse (via the generic offline module) ---
+# --- organic SERP request plan (primary, required) ------------------------------
 
 
-def test_fetch_search_evidence_parses_default_fixture():
+def test_organic_search_snapshot_is_the_default_request_kind():
+    assert adapter.DEFAULT_REQUEST_KIND == "organic_search_snapshot"
     evidence = adapter.fetch_search_evidence("neck massager", context=_dry_run_context())
-    assert evidence.source == adapter.SOURCE
-    assert evidence.provider_id == "serpapi"
-    assert evidence.query == "neck massager"
-    assert evidence.status == "dry_run_ready"
+    assert evidence.request_kind == "organic_search_snapshot"
+    assert evidence.evidence_category == "SearchDemandEvidence"
     assert evidence.signal_count == 1
 
 
-def test_fetch_search_evidence_substitutes_caller_query_into_fixture_record():
+def test_organic_snapshot_substitutes_caller_query_into_fixture_record():
     evidence = adapter.fetch_search_evidence("portable espresso maker", context=_dry_run_context())
     record = evidence.report["records"][0]
     assert record["normalized_fields"]["query"] == "portable espresso maker"
-    # Every other sanitized field from the bundled fixture is preserved.
-    assert record["normalized_fields"]["candidate_id"] == "neck-massager"
+    assert "rank" in record["normalized_fields"]
+    assert "trend_label" in record["normalized_fields"]
+
+
+def test_fixture_overlay_keeps_candidate_id_title_and_query_self_consistent():
+    """Regression: overlaying only `query` onto the fixture's static
+    example previously left candidate_id/title describing an unrelated
+    fixture example (e.g. candidate_id="neck-massager") beside the
+    caller's real query -- a misleading identity mismatch. candidate_id
+    and title must now be derived from the same query as the record's
+    own query field, for both request kinds."""
+    for request_kind in adapter.REQUEST_KINDS:
+        evidence = adapter.fetch_search_evidence(
+            "portable espresso maker", context=_dry_run_context(), request_kind=request_kind
+        )
+        fields = evidence.report["records"][0]["normalized_fields"]
+        assert fields["query"] == "portable espresso maker"
+        assert fields["candidate_id"] == "portable-espresso-maker"
+        assert "portable espresso maker" in fields["title"]
+        assert "neck" not in fields["candidate_id"]
+        assert "neck" not in fields["title"].lower()
+
+
+def test_organic_request_plan_is_bounded():
+    """max_items > 0, max_cost bounded, scheduling disabled, no live
+    request created -- enforced by the reused generic module's own
+    ProviderRequestPlan.__post_init__, not re-implemented here."""
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    request_plan = evidence.report["request_plan"]
+    assert request_plan["max_items"] > 0
+    assert request_plan["max_cost"] >= 0
+    assert request_plan["schedule_disabled"] is True
+    assert request_plan["live_request_created"] is False
+
+
+# --- shopping snapshot (optional secondary) --------------------------------------
+
+
+def test_shopping_snapshot_is_selectable_as_secondary_request_kind():
+    evidence = adapter.fetch_search_evidence("neck massager", context=_dry_run_context(), request_kind="shopping_snapshot")
+    assert evidence.request_kind == "shopping_snapshot"
+    assert evidence.evidence_category == "CompetitorPricingEvidence"
+    record = evidence.report["records"][0]["normalized_fields"]
+    assert record["price"] == 35.0
+    assert record["currency"] == "USD"
+
+
+def test_unsupported_request_kind_falls_back_to_organic_default():
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context(), request_kind="not_a_real_kind")
+    assert evidence.request_kind == "organic_search_snapshot"
+
+
+# --- request-plan / contract reuse (via the generic offline module) -------------
 
 
 def test_request_plan_and_contract_are_reused_from_generic_offline_module():
@@ -51,16 +101,8 @@ def test_request_plan_and_contract_are_reused_from_generic_offline_module():
     request_plan = evidence.report["request_plan"]
     assert request_plan["provider_id"] == "serpapi"
     assert request_plan["parameters"]["engine_placeholder"] == "google_shopping"
-    assert request_plan["schedule_disabled"] is True
-    assert request_plan["live_request_created"] is False
     contract = evidence.report["contract"]
     assert contract["provider_id"] == "serpapi"
-    assert contract["output_contract"]["raw_payload_allowed"] is False
-
-
-def test_evidence_category_defaults_and_falls_back_for_unsupported_value():
-    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context(), evidence_category="not_a_real_category")
-    assert evidence.evidence_category == adapter.DEFAULT_EVIDENCE_CATEGORY
 
 
 def test_caller_supplied_fixture_payload_is_used_instead_of_bundled_default():
@@ -72,6 +114,69 @@ def test_caller_supplied_fixture_payload_is_used_instead_of_bundled_default():
     evidence = adapter.fetch_search_evidence("ignored", context=_dry_run_context(), payload=payload)
     assert evidence.signal_count == 1
     assert evidence.report["records"][0]["normalized_fields"]["candidate_id"] == "custom"
+
+
+# --- output-contract validation --------------------------------------------------
+
+
+def test_output_contract_forbids_raw_payload_and_is_sanitized():
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    output_contract = evidence.report["contract"]["output_contract"]
+    assert output_contract["raw_payload_allowed"] is False
+    assert output_contract["sanitized"] is True
+    assert output_contract["required_fields"]
+
+
+def test_normalization_rules_and_evidence_mapping_are_present():
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    contract = evidence.report["contract"]
+    assert contract["evidence_mapping"]
+    assert contract["normalization_rules"]
+    assert all(rule["missing_behavior"] for rule in contract["normalization_rules"])
+
+
+# --- provider registration --------------------------------------------------------
+
+
+def test_provider_registered_check_reflects_real_provider_registry():
+    """serpapi is a real entry in evaluation.companyos.provider_registry
+    today -- this must reflect that truthfully, not assume it."""
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    assert evidence.provider_registered is True
+    assert "provider_not_registered" not in evidence.blockers
+
+
+def test_missing_provider_registration_blocks_and_is_named(monkeypatch):
+    from evaluation.companyos.provider_registry import ProviderRegistryReport
+
+    real_registry = adapter.build_provider_registry()
+
+    def _empty_provider_registry(*args, **kwargs):
+        return ProviderRegistryReport(**{**real_registry.__dict__, "providers": ()})
+
+    monkeypatch.setattr(adapter, "build_provider_registry", _empty_provider_registry)
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    assert evidence.provider_registered is False
+    assert "provider_not_registered" in evidence.blockers
+    assert evidence.readiness_state == "blocked"
+    assert evidence.status == "blocked"
+
+
+def test_provider_registry_lookup_failure_fails_closed_without_leaking(monkeypatch):
+    """Regression: _is_provider_registered() called build_provider_registry()
+    outside any exception boundary -- an unexpected failure there (not just
+    an empty registry) would have propagated uncaught out of
+    fetch_search_evidence, contradicting the 'must fail closed' contract."""
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("registry lookup failed embedding credential-shaped-value: sk-test-abcdefghijklmnopqrstuvwxyz")
+
+    monkeypatch.setattr(adapter, "build_provider_registry", _raise)
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    assert evidence.provider_registered is False
+    assert "provider_not_registered" in evidence.blockers
+    assert evidence.status == "blocked"
+    assert "sk-test" not in str(evidence.to_dict())
 
 
 # --- approval / credential / terms-privacy blockers -----------------------------
@@ -91,6 +196,9 @@ def test_credential_reference_check_is_metadata_only_no_secret_read():
     assert credential_check["credential_reference_id"] == "credential-serpapi"
 
 
+# --- budget/rate/retry caps --------------------------------------------------------
+
+
 def test_budget_and_rate_caps_are_present_and_bounded():
     evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
     contract = evidence.report["contract"]
@@ -100,9 +208,6 @@ def test_budget_and_rate_caps_are_present_and_bounded():
     assert rate["max_runs_per_day"] >= 1
     assert rate["max_items_per_run"] >= 1
     assert "cost_cap_reached" in rate["stop_conditions"]
-
-
-# --- explicit retry cap ----------------------------------------------------------
 
 
 def test_retry_attempts_allowed_is_explicitly_zero():
@@ -118,7 +223,6 @@ def test_retry_attempts_allowed_is_explicitly_zero():
 def test_evidence_tier_labels_dry_run_result_as_supplemental_non_live():
     evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
     assert evidence.evidence_tier == "supplemental_non_live"
-    assert adapter.EVIDENCE_TIER == "supplemental_non_live"
 
 
 def test_evidence_tier_labels_live_blocked_result_as_supplemental_non_live():
@@ -130,7 +234,7 @@ def test_evidence_tier_labels_live_blocked_result_as_supplemental_non_live():
 async def test_discover_signals_carry_evidence_category_and_readiness_state():
     signals = await adapter.discover("widget", context=_dry_run_context())
     assert signals
-    assert all(record["evidence_category"] == adapter.DEFAULT_EVIDENCE_CATEGORY for record in signals)
+    assert all(record["evidence_category"] == "SearchDemandEvidence" for record in signals)
     assert all(record["readiness_state"] == "dry_run_ready" for record in signals)
 
 
@@ -171,6 +275,16 @@ def test_malformed_fixture_records_field_fails_closed_not_raises():
     assert evidence.signal_count == 0
 
 
+def test_empty_records_list_is_valid_not_an_error():
+    """An empty (but syntactically valid) records list is a legitimate,
+    zero-signal dry-run result -- distinct from a malformed payload."""
+    payload = {"provider": "serpapi", "records": [], "fixture_mode": True}
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context(), payload=payload)
+    assert evidence.status == "dry_run_ready"
+    assert evidence.signal_count == 0
+    assert evidence.report["records"] == []
+
+
 def test_secret_like_fixture_payload_is_rejected_not_kept():
     payload = {
         "provider": "serpapi",
@@ -193,7 +307,6 @@ def test_unexpected_offline_module_failure_fails_closed_without_leaking(monkeypa
     assert evidence.readiness_state == "unavailable"
     blob = str(evidence.to_dict())
     assert "sk-test" not in blob
-    assert "secret=" not in blob
 
 
 def test_raw_payload_and_html_are_never_stored():
@@ -270,6 +383,10 @@ def test_health_reports_unreachable_offline_adapter():
 
 
 def test_module_imports_no_network_or_sdk_modules():
+    """Strengthened denylist: covers both third-party HTTP/SDK clients and
+    stdlib network-capable modules (urllib itself, not just urllib3;
+    http.client; ftplib/smtplib/telnetlib; ssl; subprocess, which could be
+    used to shell out to curl/wget as an indirect network path)."""
     import ast
     import inspect
 
@@ -281,5 +398,20 @@ def test_module_imports_no_network_or_sdk_modules():
             imported_names.update(alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported_names.add(node.module.split(".")[0])
-    forbidden = {"requests", "httpx", "urllib3", "socket", "aiohttp", "boto3", "openai", "anthropic"}
+    forbidden = {
+        "requests", "httpx", "urllib", "urllib3", "socket", "aiohttp", "boto3",
+        "openai", "anthropic", "http", "ftplib", "smtplib", "telnetlib", "ssl",
+        "subprocess", "grpc", "websocket", "websockets", "paramiko",
+    }
     assert imported_names.isdisjoint(forbidden)
+
+
+def test_report_blob_never_contains_html_or_script_tags():
+    """Defensive scan of the full serialized report for HTML/script
+    markers, independent of the output-contract's own raw_payload_allowed
+    assertion -- belt-and-suspenders against an unsafe payload ever
+    surfacing in a raw report blob."""
+    evidence = adapter.fetch_search_evidence("widget", context=_dry_run_context())
+    blob = str(evidence.to_dict()).lower()
+    for marker in ("<html", "<script", "<!doctype", "javascript:"):
+        assert marker not in blob

@@ -1,0 +1,1 @@
+{"events":[{"learning_event_id":"fixture-cheap-success","event_type":"model_routing_decision","outcome":"win","action_taken":"run_cheap_llm_task","success_reasons":["budget_efficient"]}]}

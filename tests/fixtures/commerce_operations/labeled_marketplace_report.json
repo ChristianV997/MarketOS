@@ -1,0 +1,39 @@
+{
+  "report_version": "marketplace-trends-v1",
+  "evidence_mode": "fixture_demo",
+  "source_type": "fixture_demo",
+  "observed_at": "report-should-lose",
+  "candidates": [
+    {
+      "candidate_id": "labeled-widget",
+      "query": "labeled widget",
+      "source_type": "fixture_demo",
+      "evidence": [
+        {
+          "marketplace": "amazon",
+          "price": 24.99,
+          "review_count": 1800,
+          "source_confidence": 0.8,
+          "evidence_mode": "fixture",
+          "source_type": "amazon_product_snapshot",
+          "source_url": "https://example.test/listing/labeled-widget",
+          "observed_at": "deterministic",
+          "field_provenance": {
+            "price": "observed",
+            "review_count": "derived"
+          }
+        }
+      ],
+      "score": {
+        "overall_marketplace_opportunity": 0.82,
+        "demand_proxy_score": 0.84,
+        "saturation_score": 0.18,
+        "price_confidence": 0.8,
+        "recommendation": "validate_supplier_first"
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

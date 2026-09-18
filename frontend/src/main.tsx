@@ -14,6 +14,7 @@ import Risk from "./pages/Risk";
 import Replay from "./pages/Replay";
 import Services from "./pages/Services";
 import OperatorEventDashboard from "./pages/OperatorEventDashboard";
+import FirstPhaseEvidenceCockpitPage from "./pages/FirstPhaseEvidenceCockpit";
 import { initPosthog } from "./lib/posthog";
 
 initPosthog(); // no-op unless VITE_POSTHOG_KEY is set — see lib/posthog.ts
@@ -34,6 +35,7 @@ const router = createBrowserRouter([
       { path: "/replay", element: <Replay /> },
       { path: "/services", element: <Services /> },
       { path: "/operator/events", element: <OperatorEventDashboard /> },
+      { path: "/operator/first-phase", element: <FirstPhaseEvidenceCockpitPage /> },
     ],
   },
 ]);

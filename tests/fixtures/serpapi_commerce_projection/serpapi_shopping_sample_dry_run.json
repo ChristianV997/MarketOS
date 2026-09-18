@@ -1,0 +1,7 @@
+{
+  "provider": "serpapi",
+  "records": [
+    {"candidate_id": "insulated-travel-mug", "query": "insulated travel mug", "title": "Synthetic shopping result", "rank": 4, "price": 22.5, "currency": "USD", "review_count": 61, "rating": 4.3}
+  ],
+  "fixture_mode": true
+}
