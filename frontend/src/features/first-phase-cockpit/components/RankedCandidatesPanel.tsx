@@ -191,6 +191,9 @@ export function RankedCandidatesPanel({
                   {candidate.promotionState.replace(/_/g, " ")} ·{" "}
                   {candidate.nextBestAction?.replace(/_/g, " ") ?? "no next action"}
                 </p>
+                <p className="mt-1 text-[11px] text-amber-200/90">
+                  {(candidate.commercialReviewTags ?? []).join(" · ").replace(/_/g, " ") || "review tags unavailable"}
+                </p>
                 <span className="sr-only">Absolute index {absoluteIndex}</span>
               </button>
             </li>
@@ -203,7 +206,7 @@ export function RankedCandidatesPanel({
           className="min-w-full text-left text-xs"
           aria-labelledby="ranked-candidates-heading"
           role="grid"
-          aria-colcount={13}
+          aria-colcount={14}
           aria-rowcount={candidates.length + 1}
         >
           <caption className="sr-only">
@@ -226,6 +229,7 @@ export function RankedCandidatesPanel({
                 "Next action",
                 "Decision",
                 "Risk",
+                "Review",
               ].map((heading) => (
                 <th key={heading} scope="col" role="columnheader" className="px-2 py-1.5 font-medium">
                   {heading}
@@ -286,6 +290,9 @@ export function RankedCandidatesPanel({
                   <td role="gridcell" className="px-2 py-2">{candidate.nextBestAction?.replace(/_/g, " ") ?? "—"}</td>
                   <td role="gridcell" className="px-2 py-2">{candidate.commercialDecision?.replace(/_/g, " ") ?? "—"}</td>
                   <td role="gridcell" className="px-2 py-2">{candidate.riskLevel ?? "—"}</td>
+                  <td role="gridcell" className="px-2 py-2 text-[10px] text-zinc-400">
+                    {(candidate.commercialReviewTags ?? []).slice(0, 3).join(" · ").replace(/_/g, " ") || "—"}
+                  </td>
                 </tr>
               );
             })}

@@ -13,6 +13,7 @@ import { normalizeEvidenceMode } from "./composeCockpitViewModel";
 import { derivePromotionState } from "./derivePromotionState";
 import { formatFreshnessLabel, isStaleFreshness } from "./freshness";
 import { overlayResearchToDecisionAudits, overlayResearchToDecisionProjection } from "./overlayResearchToDecision";
+import { enrichDecisionReview } from "./mapDecisionReview";
 
 const PILLAR_IDS = new Set<PillarId>([
   "market_evidence",
@@ -163,7 +164,7 @@ export function mapApiPacketToViewModel(
         pillarId: "supplier_feasibility",
         sourceFamily: candidate.source_family,
       }),
-      consumerEvidenceClass: "not_run",
+      consumerEvidenceClass: "not_run" as const,
       economicsUnavailable: candidate.economics_label == null,
       isTopCandidate: candidate.is_top_candidate,
       pillarCells: (candidate.pillar_cells ?? []).map((cell) => ({
@@ -179,6 +180,21 @@ export function mapApiPacketToViewModel(
           sourceFamily: candidate.source_family,
         }),
       })),
+      offerDisposition: "unavailable" as const,
+      decisionTimeline: [],
+      commercialReviewTags: [],
+      nextActionWorkflow: {
+        action: candidate.next_best_action ?? "unavailable",
+        missingEvidence: [],
+        responsibleParty: "operator" as const,
+        expectedEvidenceType: candidate.validation_target ?? "unavailable",
+        humanConfirmationRequired: true,
+        allowedInReadOnlyCockpit: false,
+        futureActionStatus: "unavailable" as const,
+        futureActionNote: "Cockpit cannot mutate external systems.",
+      },
+      promotionTransitions: [],
+      launchAuthorizedFalse: true,
     })),
     api.appendix
       ? { report_version: api.report_version, appendix: api.appendix }
@@ -193,7 +209,7 @@ export function mapApiPacketToViewModel(
         : null,
     )
     : null;
-  const overlayFallback = fallback?.rows ?? rankedCandidates.rows;
+  const overlayFallback = (fallback?.rows ?? rankedCandidates.rows).map(enrichDecisionReview);
 
   let state: FirstPhaseEvidencePacket["state"] = overlayFallback.length ? "success" : "empty";
   if (api.overall_status === "blocked") state = "blocked";

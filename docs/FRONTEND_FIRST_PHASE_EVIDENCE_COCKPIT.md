@@ -30,6 +30,8 @@ Read-only operator surface stacked on PR #213 frontend/API authority.
 - Schema-version gated future packet validator (`phase1-evidence-cockpit-v1`) — endpoint not claimed to exist
 - Deterministic freshness labels + client-safe JSON export
 - Normalized render model for contract snapshots
+- Decision-review timeline, promotion/blocker tags, and display-only next-action workflow
+- Optional #250 `MarketOS.ClientCommerceProjection.v1` overlay by `candidate_id` (never a second API client)
 
 ## Data sources (existing API authority)
 
@@ -99,7 +101,26 @@ Reference-only; no vendored code and no second data layer.
 | React Aria Collections | keyboard activation + focus handoff concepts | Apache-2.0 — https://react-spectrum.adobe.com/react-aria/ |
 | TanStack Table | filter/window without mutating sort order; stable top-N | MIT — https://tanstack.com/table/latest |
 | Storybook CSF | deterministic fixture matrix + normalized snapshots | MIT — https://storybook.js.org/docs/writing-stories |
+| Radix focus/label | visible focus ring, labelled sections, non-modal detail | MIT — https://www.radix-ui.com/primitives/docs/overview/accessibility |
+| WAI-ARIA APG list/status | timeline as ordered list; next-action as description list + live status | [W3C Software and Document License](https://www.w3.org/copyright/software-license-2023/) |
 | Stale/partial UI | explicit banners; unmatched rows announced, never invented | operator-local; no extra library |
+
+## Commercial decision review (V6)
+
+The cockpit is a read-only review surface, not a ranked-score editor.
+
+- Timeline kinds are always rendered; missing projection fields stay `unavailable` with `at: null`.
+- Promotion tags distinguish screening / needs_evidence / hold / reject / draft_ready /
+  launch_authorized_false / unavailable / stale / fixture / manual_import / simulated /
+  live_readonly / live_validated. Weaker evidence is never upgraded.
+- Next-action workflow shows action, missing evidence, responsible party, expected evidence type,
+  human-confirmation, and `allowedInReadOnlyCockpit: false`. Future actions stay draft/unavailable
+  metadata. No mutation buttons.
+- #247 overlay remains `product-validation-report-v1`. #250 overlay is
+  `MarketOS.ClientCommerceProjection.v1` only. Malformed, secret-shaped, duplicate, oversized,
+  cross-workspace, or `launch_authorized: true` packets are rejected with the exact warning token.
+- `commerceProjection` is not fetched. Until a cockpit-owned endpoint exists, the hook passes
+  `undefined` and the UI records `commerce_client_projection_unavailable`.
 
 ## Safety
 

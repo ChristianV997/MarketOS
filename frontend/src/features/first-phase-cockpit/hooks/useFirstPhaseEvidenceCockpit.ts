@@ -41,6 +41,8 @@ export function useFirstPhaseEvidenceCockpit(): {
       undefined,
       researchPortfolio,
     ),
+    commerceProjection: undefined,
+    operatorWorkspaceId: researchPortfolio?.workspace_id ?? null,
   });
 
   return {

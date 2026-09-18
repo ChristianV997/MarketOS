@@ -1,4 +1,5 @@
 import type { RankedCandidateRow } from "../contracts/firstPhaseEvidencePacket";
+import { CommercialReviewTags, DecisionTimelinePanel, NextActionWorkflowPanel } from "./DecisionReviewPanels";
 
 export function CandidateDetailPanel({
   candidate,
@@ -173,7 +174,19 @@ export function CandidateDetailPanel({
             {candidate.confidenceMarketplace !== null ? `${(candidate.confidenceMarketplace * 100).toFixed(0)}%` : "unavailable"}
           </dd>
         </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Launch authorized</dt>
+          <dd className="mt-1 text-zinc-200">{candidate.launchAuthorizedFalse ? "false" : "unavailable"}</dd>
+        </div>
+        <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
+          <dt className="text-zinc-500">Offer disposition</dt>
+          <dd className="mt-1 text-zinc-200">{candidate.offerDisposition}</dd>
+        </div>
       </dl>
+
+      <CommercialReviewTags candidate={candidate} />
+      <NextActionWorkflowPanel candidate={candidate} />
+      <DecisionTimelinePanel candidate={candidate} />
 
       <div className="mt-4 grid gap-3 text-xs sm:grid-cols-3">
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">

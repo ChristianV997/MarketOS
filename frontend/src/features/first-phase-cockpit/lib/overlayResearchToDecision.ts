@@ -9,6 +9,7 @@ import { classifyEvidenceClass } from "./classifyEvidence";
 import { derivePromotionState } from "./derivePromotionState";
 import { containsSecretShapedValue } from "./exportClientSafeReport";
 import { formatFreshnessLabel, isStaleFreshness } from "./freshness";
+import { enrichDecisionReview } from "./mapDecisionReview";
 
 export type ProjectionValidationResult =
   | { ok: true; packet: ResearchToDecisionProjection }
@@ -178,6 +179,17 @@ export function validateResearchToDecisionProjection(raw: unknown): ProjectionVa
   return { ok: true, packet: packet as unknown as ResearchToDecisionProjection };
 }
 
+function offerDispositionFromAudit(audit: ResearchToDecisionAuditRow): RankedCandidateRow["offerDisposition"] {
+  const offers = audit.supplier_offers ?? [];
+  if (!offers.length && !audit.supplier_offer) return "unavailable";
+  if (offers.some((offer) => offer.status === "quarantined") && !offers.some((offer) => offer.status && offer.status !== "quarantined")) {
+    return "quarantined";
+  }
+  if (offers.some((offer) => offer.status && offer.status !== "quarantined")) return "accepted";
+  if (audit.supplier_offer) return "accepted";
+  return "unavailable";
+}
+
 function firstAcceptedSku(audit: ResearchToDecisionAuditRow): string | null {
   const offers = audit.supplier_offers ?? [];
   for (const offer of offers) {
@@ -326,12 +338,13 @@ export function overlayResearchToDecisionAudits(
     const rowRefs = Array.isArray(audit.evidence_refs) && audit.evidence_refs.length
       ? [...audit.evidence_refs]
       : refs;
-    return {
+    return enrichDecisionReview({
       ...row,
       productTitle: audit.title ?? row.productTitle ?? row.title,
       sku,
       marketLane: mapLane(audit, options.packetLane) ?? row.marketLane,
       supplierOffer: summarizeOffer(audit),
+      offerDisposition: offerDispositionFromAudit(audit),
       assumptions: Array.isArray(audit.assumptions) ? [...audit.assumptions] : row.assumptions,
       missingEvidence: Array.isArray(audit.missing_evidence) ? [...audit.missing_evidence] : row.missingEvidence,
       conflicts: Array.isArray(audit.conflicts) ? [...audit.conflicts] : row.conflicts,
@@ -378,7 +391,7 @@ export function overlayResearchToDecisionAudits(
         }
         return cell;
       }),
-    };
+    });
   });
 
   const unmatchedProjectionIds = [...projectionIds].filter((id) => !matched.has(id));

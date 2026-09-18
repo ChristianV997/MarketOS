@@ -18,7 +18,9 @@ import type {
 import { classifyEvidenceClass } from "./classifyEvidence";
 import { derivePromotionState } from "./derivePromotionState";
 import { formatFreshnessLabel } from "./freshness";
+import { enrichDecisionReview } from "./mapDecisionReview";
 import { overlayResearchToDecisionProjection } from "./overlayResearchToDecision";
+import { adaptCommerceProjection } from "./overlayCommerceProjection";
 
 export interface ComposeCockpitInput {
   phase1Readiness: Phase1Readiness | null;
@@ -31,6 +33,8 @@ export interface ComposeCockpitInput {
   researchError: boolean;
   isLoading: boolean;
   researchToDecisionProjection?: unknown;
+  commerceProjection?: unknown;
+  operatorWorkspaceId?: string | null;
 }
 
 export function normalizeEvidenceMode(value: string | null | undefined): EvidenceMode {
@@ -59,6 +63,7 @@ const FATAL_PROJECTION_WARNINGS = new Set([
   "launch_authorized_rejected",
   "replay_identity_invalid",
   "appendix_required",
+  "cross_workspace_rejected",
 ]);
 
 export interface OverlayDiagnostics {
@@ -209,7 +214,7 @@ function mapCandidates(
 ): RankedCandidateRow[] {
   if (!benchmark?.candidates?.length) return [];
   // Preserve backend order exactly — never sort or re-rank.
-  return benchmark.candidates.map((item, rankIndex) => ({
+  const rows: RankedCandidateRow[] = benchmark.candidates.map((item, rankIndex) => ({
     candidateId: item.candidate.candidate_id,
     title: item.candidate.title,
     productTitle: item.candidate.title,
@@ -252,11 +257,27 @@ function mapCandidates(
       pillarId: "supplier_feasibility",
       sourceFamily: "benchmark_matrix",
     }),
-    consumerEvidenceClass: "not_run",
+    consumerEvidenceClass: "not_run" as const,
     economicsUnavailable: !item.economics?.margin_quality,
     isTopCandidate: item.candidate.candidate_id === benchmark.top_candidate_id,
     pillarCells: buildPillarCells(item, evidenceMode),
+    offerDisposition: "unavailable" as const,
+    decisionTimeline: [],
+    commercialReviewTags: [],
+    nextActionWorkflow: {
+      action: item.next_best_action ?? "unavailable",
+      missingEvidence: item.validation_priority?.target ? [`validation_target_${item.validation_priority.target}`] : [],
+      responsibleParty: "operator" as const,
+      expectedEvidenceType: item.validation_priority?.target ?? "unavailable",
+      humanConfirmationRequired: true,
+      allowedInReadOnlyCockpit: false,
+      futureActionStatus: "unavailable" as const,
+      futureActionNote: "Cockpit cannot mutate external systems.",
+    },
+    promotionTransitions: [],
+    launchAuthorizedFalse: true,
   }));
+  return rows.map(enrichDecisionReview);
 }
 
 function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): EvidencePillar[] {
@@ -427,15 +448,23 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     mapCandidates(input.benchmark, evidenceMode),
     projection,
   );
+  const commerce = adaptCommerceProjection(
+    mapped.rows,
+    input.commerceProjection,
+    input.operatorWorkspaceId ?? null,
+  );
+  const rankedCandidates = commerce.rows.map(enrichDecisionReview);
+  const commerceFatal = commerce.warning && commerce.warning !== "commerce_client_projection_unavailable"
+    ? commerce.warning
+    : null;
   const state = deriveState(input, {
-    supplied: projection != null,
-    accepted: mapped.accepted,
-    warning: mapped.warning,
+    supplied: projection != null || Boolean(input.commerceProjection),
+    accepted: mapped.accepted && (commerce.accepted || !input.commerceProjection),
+    warning: [mapped.warning, commerceFatal].filter(Boolean).join(",") || null,
     unmatchedServerIds: mapped.unmatchedServerIds,
     unmatchedProjectionIds: mapped.unmatchedProjectionIds,
-    rankedCount: mapped.rows.length,
+    rankedCount: rankedCandidates.length,
   });
-  const rankedCandidates = mapped.rows;
   const pillars = buildPillars(input, evidenceMode);
   const warnings = [
     ...(input.benchmark?.warnings ?? []),
@@ -444,6 +473,9 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
   ];
   if (mapped.warning && projection != null) {
     warnings.push(`research_to_decision_${mapped.warning}`);
+  }
+  if (commerce.warning) {
+    warnings.push(`commerce_projection_${commerce.warning}`);
   }
   for (const id of mapped.unmatchedServerIds) warnings.push(`unmatched_server:${id}`);
   for (const id of mapped.unmatchedProjectionIds) warnings.push(`unmatched_projection:${id}`);
@@ -456,6 +488,13 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
   if (input.benchmarkError) unavailableReasons.push("benchmark_matrix_unavailable");
   if (input.publicMarketError) unavailableReasons.push("public_market_benchmark_unavailable");
   if (input.researchError) unavailableReasons.push("research_portfolio_unavailable");
+  if (!commerce.accepted) {
+    unavailableReasons.push(
+      commerce.warning === "commerce_client_projection_unavailable"
+        ? "commerce_client_projection_unavailable"
+        : `commerce_projection_${commerce.warning ?? "unavailable"}`,
+    );
+  }
   unavailableReasons.push("consumer_attention_api_unavailable");
   unavailableReasons.push("trustos_api_unavailable");
   unavailableReasons.push("governor_api_unavailable");
@@ -467,6 +506,7 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     input.publicMarket ? "public-market-benchmark" : null,
     input.researchPortfolio ? "research-portfolio" : null,
     mapped.accepted ? "research-to-decision" : null,
+    commerce.accepted ? "commerce-client-projection" : null,
   ].filter((label): label is string => Boolean(label));
 
   const sourceFamilies = [
@@ -475,6 +515,7 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     input.publicMarket ? "public_market_benchmark" : null,
     input.researchPortfolio ? "research_portfolio" : null,
     mapped.accepted ? "product_validation_report" : null,
+    commerce.accepted ? "client_commerce_projection" : null,
   ].filter((label): label is string => Boolean(label));
 
   return {

@@ -91,6 +91,10 @@ export function buildClientSafeExport(
       supplier_evidence_class: candidate.supplierEvidenceClass,
       consumer_evidence_class: candidate.consumerEvidenceClass,
       economics_unavailable: candidate.economicsUnavailable,
+      commercial_review_tags: [...(candidate.commercialReviewTags ?? [])],
+      next_action_workflow: candidate.nextActionWorkflow,
+      decision_timeline: [...(candidate.decisionTimeline ?? [])],
+      launch_authorized_false: candidate.launchAuthorizedFalse ?? true,
     })),
     pillars: packet.pillars.map((pillar) => ({
       pillar_id: pillar.id,

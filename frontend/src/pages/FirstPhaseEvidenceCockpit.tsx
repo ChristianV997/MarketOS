@@ -96,8 +96,9 @@ export default function FirstPhaseEvidenceCockpitPage() {
       <header className="space-y-3">
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">First-phase evidence cockpit</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Composes existing Phase 1 API contracts without recalculating rankings or granting external authority.
+      <p className="mt-1 text-sm text-zinc-500">
+            Decision-review surface over existing Phase 1 projections. Rankings and economics are not recalculated.
+            GET /api/phase1/evidence-cockpit is not implemented; missing slots stay unavailable.
           </p>
         </div>
         <div className="flex flex-wrap gap-2" aria-label="Safety guarantees">

@@ -93,7 +93,73 @@ export interface CandidatePillarCell {
   evidenceClass: EvidenceClass;
 }
 
-export type PromotionState = "hold" | "blocked" | "reject" | "defer" | "unavailable";
+export type PromotionState =
+  | "screening"
+  | "needs_evidence"
+  | "hold"
+  | "reject"
+  | "draft_ready"
+  | "blocked"
+  | "defer"
+  | "unavailable";
+
+export const COMMERCIAL_REVIEW_TAGS = [
+  "screening",
+  "needs_evidence",
+  "hold",
+  "reject",
+  "draft_ready",
+  "launch_authorized_false",
+  "unavailable",
+  "stale",
+  "fixture",
+  "manual_import",
+  "simulated",
+  "live_readonly",
+  "live_validated",
+] as const;
+
+export type CommercialReviewTag = (typeof COMMERCIAL_REVIEW_TAGS)[number];
+
+export const DECISION_TIMELINE_KINDS = [
+  "evidence_captured",
+  "supplier_offer_normalized",
+  "offer_accepted_or_quarantined",
+  "economics_calculated",
+  "competition_market_status",
+  "promotion_gate_evaluated",
+  "lifecycle_decision",
+  "blocker_or_next_best_action",
+  "replay_identity",
+  "evidence_freshness_expiry",
+] as const;
+
+export type DecisionTimelineKind = (typeof DECISION_TIMELINE_KINDS)[number];
+
+export interface DecisionTimelineEvent {
+  kind: DecisionTimelineKind;
+  status: "observed" | "unavailable";
+  summary: string;
+  at: string | null;
+}
+
+export interface PromotionTransition {
+  from: string | null;
+  to: string | null;
+  status: "observed" | "unavailable";
+  reason: string | null;
+}
+
+export interface NextActionWorkflow {
+  action: string;
+  missingEvidence: string[];
+  responsibleParty: "operator" | "client" | "supplier" | "unavailable";
+  expectedEvidenceType: string;
+  humanConfirmationRequired: boolean;
+  allowedInReadOnlyCockpit: boolean;
+  futureActionStatus: "draft" | "unavailable";
+  futureActionNote: string;
+}
 
 export interface MarketLaneView {
   origin: string | null;
@@ -141,6 +207,12 @@ export interface RankedCandidateRow {
   economicsUnavailable: boolean;
   isTopCandidate: boolean;
   pillarCells: CandidatePillarCell[];
+  offerDisposition: "accepted" | "quarantined" | "unavailable";
+  decisionTimeline: DecisionTimelineEvent[];
+  commercialReviewTags: CommercialReviewTag[];
+  nextActionWorkflow: NextActionWorkflow;
+  promotionTransitions: PromotionTransition[];
+  launchAuthorizedFalse: boolean;
 }
 
 export interface EvidencePillar {
@@ -247,6 +319,10 @@ export interface ClientSafeCockpitExport {
     supplier_evidence_class: EvidenceClass;
     consumer_evidence_class: EvidenceClass;
     economics_unavailable: boolean;
+    commercial_review_tags: CommercialReviewTag[];
+    next_action_workflow: NextActionWorkflow;
+    decision_timeline: DecisionTimelineEvent[];
+    launch_authorized_false: boolean;
   }>;
   pillars: Array<{
     pillar_id: PillarId;
