@@ -239,6 +239,13 @@ def build_service_engagement_row(
         "missing": list(data_quality.missing_fields),
         "note": "Financial figures are display copies only. The frontend does not calculate contribution.",
     }
+    # Same class of fix as data_quality_state above: engagement.missing_information
+    # only updates via an explicit transition_engagement(..., missing_information=...)
+    # call, so it is frequently stale/empty. The adapter reads "missing_data"
+    # in preference to "missing_information" (falling back to the latter only
+    # when the former is absent) -- set it directly from the authoritative
+    # ClientDataQualityAssessment instead of trusting the engagement's own copy.
+    row["missing_data"] = list(dict.fromkeys((*data_quality.missing_fields, *engagement.missing_information)))
     row["capacity"] = _capacity_signal(economics)
     row["next_best_action"] = {
         "action": artifact.next_human_action if artifact else "Review intake and data quality before proceeding.",

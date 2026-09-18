@@ -118,6 +118,11 @@ Two things this producer gets right that are easy to get wrong:
   trusting it directly would silently emit a stale value whenever a caller
   (as this module's own first draft did) computes a fresh assessment but
   forgets that step.
+- **`row["missing_data"]` is set explicitly from `ClientDataQualityAssessment.missing_fields`**
+  (merged with `engagement.missing_information`), not left to the
+  engagement's own `missing_information` field, which has the identical
+  staleness problem as `data_quality_state` above and is only a fallback
+  the frontend adapter reads when `missing_data` itself is absent.
 
 `scripts/generate_service_delivery_projection.py` demonstrates the full,
 offline, deterministic pipeline end to end and writes an example projection
