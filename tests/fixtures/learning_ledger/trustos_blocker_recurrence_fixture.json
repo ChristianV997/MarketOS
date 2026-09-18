@@ -1,0 +1,1 @@
+{"events":[{"learning_event_id":"fixture-trustos","event_type":"trustos_review","outcome":"blocked","action_taken":"generate_client_export","failure_reasons":["trust_blocker"]}]}

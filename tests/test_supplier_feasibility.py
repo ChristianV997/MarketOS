@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.economics import MarketLane
 from backend.adapters.research.supplier_feasibility import (
     SupplierImportError,
     client_safe_offer,
@@ -319,6 +320,18 @@ def test_unit_economics_calculates_break_even_cpa_and_roas():
     assert scenario.break_even_cpa is not None
     assert scenario.break_even_roas is not None
     assert scenario.break_even_roas > 1
+
+
+def test_supplier_report_forwards_market_lane_to_canonical_economics():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "unit_cost": 10, "shipping_cost": 5, "delivery_window": "5-9", "inventory_status": "in_stock"})
+    assert row is not None
+    lane = MarketLane("cn-mx", "CN", "CN", "fixture-warehouse", "MX", currency="MXN", tax_rate="0.16")
+    score = score_candidate("x", [row], target_sell_price=30, lane=lane)
+    assert score.economics is not None
+    assert score.economics.currency == "MXN"
+    assert score.economics.canonical_economics["currency"] == "MXN"
+    report = build_report([row], target_sell_prices={"x": 30}, lane=lane).to_dict()
+    assert report["candidates"][0]["score"]["economics"]["currency"] == "MXN"
 
 
 def test_unit_economics_does_not_hide_negative_margin():

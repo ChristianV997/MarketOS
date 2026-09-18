@@ -2,6 +2,7 @@
 import backend.core.persistence as pers
 import pytest
 from backend.workspaces.artifact_store import ArtifactStore
+from backend.workspaces.registry import get_workspace_registry
 from services.digital_products.plan import build_digital_product_plan
 from services.digital_products.schemas import DigitalProductPlan
 
@@ -27,8 +28,9 @@ def test_returns_plan_and_completed_envelope():
 
 def test_saved_to_artifact_store():
     plan, envelope = build_digital_product_plan("Thing", price=99.0)
-    store = ArtifactStore()
-    saved = store.load(envelope.workspace_id, envelope.experiment_id, "result.json")
+    workspace = get_workspace_registry().get(envelope.workspace_id)
+    assert workspace is not None
+    saved = ArtifactStore(workspace).load(envelope.experiment_id, "result.json")
     assert saved == plan.to_dict()
 
 

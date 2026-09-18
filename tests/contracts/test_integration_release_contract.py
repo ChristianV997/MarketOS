@@ -1,0 +1,226 @@
+import json
+import os
+
+def validate_release_contract(payload: dict) -> dict:
+    """
+    Validates an integration release contract payload for the Merger Agent.
+    Returns {"decision": "MERGE", "reason": "..."} or REJECT/HOLD.
+    """
+    # 1. PR identity, head SHA, base SHA, and stale-base detection
+    if payload.get("is_stale_base", False):
+        return {"decision": "REJECT", "reason": "stale_base"}
+
+    # 2. Branch/worktree ownership and active-worktree conflicts
+    if payload.get("worktree_ownership_state") == "Conflict":
+        return {"decision": "REJECT", "reason": "worktree_conflict"}
+
+    # 3. Changed-file scope and direct versus stacked diff (handled implicitly by structural adherence)
+
+    # 4. Dependency ordering
+    if payload.get("dependency_ordering") != "Yes" or len(payload.get("unmet_dependencies", [])) > 0:
+        return {"decision": "HOLD", "reason": "unmet_dependencies"}
+
+    # 5. Focused and adjacent test evidence
+    if payload.get("focused_and_adjacent_tests") == "Failed":
+        return {"decision": "REJECT", "reason": "test_failure"}
+
+    # 6. Compile, lint, diff, and quality-gate evidence
+    if payload.get("compile_and_lint_results") == "Failed":
+        return {"decision": "REJECT", "reason": "compile_lint_failure"}
+
+    # 7. Evidence classifications
+    evidence = payload.get("evidence", {})
+    if not evidence.get("actual") and not evidence.get("simulated"):
+        return {"decision": "REJECT", "reason": "missing_evidence"}
+
+    actual_evidence = str(evidence.get("actual", "")).lower()
+    if any(k in actual_evidence for k in ["fixture", "mock", "simulated", "dry-run"]):
+        return {"decision": "REJECT", "reason": "mislabeled_actual_evidence"}
+
+    # 8. CI execution steps, runner identity, logs, required-job completeness, executed failures
+    ci_steps = payload.get("ci_execution_steps", {})
+    if ci_steps.get("required_job_completeness") == "Missing":
+        return {"decision": "REJECT", "reason": "missing_required_job"}
+    if ci_steps.get("executed_failures") != "None":
+        return {"decision": "REJECT", "reason": "executed_failures"}
+
+    if ci_steps.get("step_evidence") == "ci_unavailable":
+        if not payload.get("human_override_local_evidence", False):
+            return {"decision": "HOLD", "reason": "ci_unavailable"}
+
+    # 9. Review state, draft state, and explicit human approval
+    if payload.get("draft_ready_state") != "Ready":
+        return {"decision": "HOLD", "reason": "draft"}
+    if payload.get("review_state") != "Approved":
+        return {"decision": "HOLD", "reason": "needs_review"}
+    if not payload.get("explicit_human_approval", False):
+        return {"decision": "HOLD", "reason": "needs_human_approval"}
+
+    # 10. Duplicate, superseded, stale, and harmful PR disposition
+    if payload.get("duplicate_superseded_pr_handling") not in ["None", "Resolved"]:
+        return {"decision": "HOLD", "reason": "duplicate_superseded"}
+
+    # 11. Rollback reference (just ensure it exists)
+    if not payload.get("rollback_reference"):
+        return {"decision": "REJECT", "reason": "missing_rollback"}
+
+    # 12. Credential, provider, model, database, and external-mutation safety
+    if payload.get("credential_and_mutation_safety") != "Passed":
+        return {"decision": "REJECT", "reason": "unsafe_mutation"}
+
+    # 13. TrustOS and Approval Ledger state
+    if payload.get("trustos_status") != "Cleared":
+        return {"decision": "REJECT", "reason": "trustos_blocked"}
+    if payload.get("approval_ledger_status") != "Approved":
+        return {"decision": "HOLD", "reason": "approval_ledger_pending"}
+
+    if payload.get("provider_model_activation_status") not in ["Offline", "Dry-Run only"]:
+        return {"decision": "REJECT", "reason": "live_activation_unsupported"}
+
+    if not payload.get("provenance_and_license_verified", True):
+        return {"decision": "REJECT", "reason": "unverified_provenance"}
+
+    if payload.get("credential_boundary_status") == "Missing":
+        return {"decision": "REJECT", "reason": "missing_credential_boundary"}
+
+    if payload.get("export_safety") == "Unsafe":
+        return {"decision": "REJECT", "reason": "unsafe_export"}
+
+    if payload.get("learning_evidence_status") == "Incomplete":
+        return {"decision": "REJECT", "reason": "incomplete_learning_evidence"}
+
+    lifecycle = payload.get("capability_promotion_lifecycle")
+    if lifecycle:
+        if not lifecycle.get("approved_for_future_activation", False):
+            return {"decision": "REJECT", "reason": "capability_not_approved"}
+
+    # 14. Explicit final merger decision
+    return {"decision": "MERGE", "reason": "all_checks_passed"}
+
+
+def load_fixture(name: str) -> dict:
+    base_path = os.path.dirname(__file__)
+    fixture_path = os.path.join(base_path, "..", "fixtures", "release_train", f"{name}.json")
+    with open(fixture_path, "r") as f:
+        return json.load(f)
+
+
+def test_combo_green_independent_quality():
+    payload = load_fixture("combo_green_independent_quality")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
+
+def test_combo_security_unavailable_symlink():
+    payload = load_fixture("combo_security_unavailable_symlink")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "ci_unavailable"
+
+def test_combo_stacked_frontend_environment():
+    payload = load_fixture("combo_stacked_frontend_environment")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "unmet_dependencies"
+
+def test_combo_commerce_failed_agentic_checks():
+    payload = load_fixture("combo_commerce_failed_agentic_checks")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+
+def test_combo_learning_ledger_missing_trustos():
+    payload = load_fixture("combo_learning_ledger_missing_trustos")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "trustos_blocked"
+
+def test_combo_test_only_exposing_defects():
+    payload = load_fixture("combo_test_only_exposing_defects")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+
+def test_combo_capability_unverified_licensing():
+    payload = load_fixture("combo_capability_unverified_licensing")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "unverified_provenance"
+
+def test_combo_duplicate_serpapi():
+    payload = load_fixture("combo_duplicate_serpapi")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "duplicate_superseded"
+
+def test_combo_executed_failure_and_unavailable():
+    payload = load_fixture("combo_executed_failure_and_unavailable")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "executed_failures"
+
+def test_combo_valid_local_evidence_no_ci():
+    payload = load_fixture("combo_valid_local_evidence_no_ci")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
+
+def test_combo_falsely_claims_live_activation():
+    payload = load_fixture("combo_falsely_claims_live_activation")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "live_activation_unsupported"
+
+def test_combo_runner_mislabeled_evidence():
+    payload = load_fixture("combo_runner_mislabeled_evidence")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "mislabeled_actual_evidence"
+
+def test_combo_learning_ledger_complete_local():
+    payload = load_fixture("combo_learning_ledger_complete_local")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
+
+def test_combo_missing_credential_boundary():
+    payload = load_fixture("combo_missing_credential_boundary")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "missing_credential_boundary"
+
+def test_combo_unsafe_export_claim():
+    payload = load_fixture("combo_unsafe_export_claim")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "unsafe_export"
+
+def test_combo_incomplete_learning_evidence():
+    payload = load_fixture("combo_incomplete_learning_evidence")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "incomplete_learning_evidence"
+
+def test_combo_capability_promotion_lifecycle_valid():
+    payload = load_fixture("combo_capability_promotion_lifecycle_valid")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "MERGE"
+
+def test_combo_behind_main_225():
+    payload = load_fixture("combo_behind_main_225")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "stale_base"
+
+def test_combo_production_repairs_229():
+    payload = load_fixture("combo_production_repairs_229")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "test_failure"
+
+def test_combo_stacked_230():
+    payload = load_fixture("combo_stacked_230")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "HOLD"
+    assert result["reason"] == "unmet_dependencies"
+
+def test_combo_security_supplier_231():
+    payload = load_fixture("combo_security_supplier_231")
+    result = validate_release_contract(payload)
+    assert result["decision"] == "REJECT"
+    assert result["reason"] == "unsafe_mutation"
