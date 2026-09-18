@@ -21,8 +21,17 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from evaluation.source_governance.registry import SourceAdaptationRegistry, redact_secrets
-from evaluation.source_governance.validator import validate_registry
+from evaluation.source_governance.registry import (
+    SourceAdaptationRegistry,
+    WorkOrderRegistry,
+    redact_secrets,
+)
+from evaluation.source_governance.validator import (
+    generate_evidence_bundle,
+    validate_registry,
+    validate_target_boundary_collisions,
+    validate_work_order,
+)
 
 
 def run_validation(registry_path: Path, max_freshness_days: int = 180) -> Dict[str, Any]:
@@ -71,6 +80,35 @@ def main() -> int:
         help="Path to source_adaptation_registry.json",
     )
     parser.add_argument(
+        "--work-orders",
+        nargs="?",
+        const="data/source_adaptation_work_orders.json",
+        default=None,
+        help="Validate work orders file (default: data/source_adaptation_work_orders.json when specified without value)",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List registered sources and their adaptation modes/statuses",
+    )
+    parser.add_argument(
+        "--filter-mode",
+        type=str,
+        default=None,
+        help="Filter listed sources or work orders by adaptation mode (copy_pattern, emulate, reference_only, defer, reject)",
+    )
+    parser.add_argument(
+        "--bundle",
+        type=str,
+        default=None,
+        help="Generate review evidence bundle for specified source_id",
+    )
+    parser.add_argument(
+        "--check-collisions",
+        action="store_true",
+        help="Check active work orders for target boundary collisions",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit full report as JSON to stdout",
@@ -99,6 +137,112 @@ def main() -> int:
 
     args = parser.parse_args()
     reg_path = Path(args.registry).resolve()
+
+    # Load registry if needed
+    registry: SourceAdaptationRegistry | None = None
+    if reg_path.exists():
+        try:
+            registry = SourceAdaptationRegistry.load_from_file(reg_path)
+        except Exception:
+            registry = None
+
+    # Handle --bundle <source_id>
+    if args.bundle:
+        wo_path = Path(args.work_orders or "data/source_adaptation_work_orders.json").resolve()
+        if not wo_path.exists():
+            print(f"Error: Work orders file not found: {wo_path}", file=sys.stderr)
+            return 1
+        wo_registry = WorkOrderRegistry.load_from_file(wo_path)
+        matching_wo = None
+        for wo in wo_registry.work_orders.values():
+            if wo.source_id == args.bundle or wo.work_order_id == args.bundle:
+                matching_wo = wo
+                break
+        if not matching_wo:
+            print(f"Error: No work order found for source '{args.bundle}'", file=sys.stderr)
+            return 1
+        matching_rec = registry.get_record(matching_wo.source_id) if registry else None
+        bundle = generate_evidence_bundle(matching_wo, matching_rec)
+        if args.json:
+            print(json.dumps(bundle.to_dict(), indent=2))
+        else:
+            print(bundle.render_markdown())
+        return 0
+
+    # Handle --list
+    if args.list:
+        if not registry:
+            print(f"Error: Registry not found at {reg_path}", file=sys.stderr)
+            return 1
+        records = list(registry.records.values())
+        if args.filter_mode:
+            records = [r for r in records if r.adaptation_mode == args.filter_mode]
+        records = sorted(records, key=lambda r: r.source_id)
+        if args.json:
+            print(json.dumps([redact_secrets(r.to_dict()) for r in records], indent=2))
+        else:
+            print(f"{'Source ID':<36} {'Mode':<16} {'Status':<20} {'Target Authority'}")
+            print("-" * 100)
+            for r in records:
+                print(f"{r.source_id:<36} {r.adaptation_mode:<16} {r.integration_status:<20} {r.marketos_target_authority}")
+            print("-" * 100)
+            print(f"Total: {len(records)} sources")
+        return 0
+
+    # Handle --check-collisions
+    if args.check_collisions:
+        wo_path = Path(args.work_orders or "data/source_adaptation_work_orders.json").resolve()
+        if not wo_path.exists():
+            print(f"Error: Work orders file not found: {wo_path}", file=sys.stderr)
+            return 1
+        wo_registry = WorkOrderRegistry.load_from_file(wo_path)
+        collisions = validate_target_boundary_collisions(list(wo_registry.work_orders.values()))
+        if args.json:
+            print(json.dumps({"collisions": collisions, "valid": len(collisions) == 0}, indent=2))
+        else:
+            if collisions:
+                print("Target Boundary Collisions Detected:")
+                for c in collisions:
+                    print(f"  [X] {c}")
+                return 1
+            else:
+                print("No target boundary collisions detected across active work orders.")
+        return 0 if len(collisions) == 0 else 1
+
+    # Handle --work-orders validation
+    if args.work_orders is not None:
+        wo_path = Path(args.work_orders).resolve()
+        if not wo_path.exists():
+            print(f"Error: Work orders file not found: {wo_path}", file=sys.stderr)
+            return 1
+        wo_registry = WorkOrderRegistry.load_from_file(wo_path)
+        wo_errors: List[str] = []
+        for wo in wo_registry.work_orders.values():
+            wo_errors.extend(validate_work_order(wo))
+        wo_errors.extend(validate_target_boundary_collisions(list(wo_registry.work_orders.values())))
+        is_wo_valid = len(wo_errors) == 0
+        wo_res = {
+            "valid": is_wo_valid,
+            "total_work_orders": len(wo_registry.work_orders),
+            "errors": wo_errors,
+            "stable_hash": wo_registry.compute_stable_hash(),
+        }
+        if args.json:
+            print(json.dumps(wo_res, indent=2))
+        else:
+            print("=" * 70)
+            print("MarketOS Source Adaptation Work Orders Validation")
+            print("=" * 70)
+            print(f"Work Orders Path : {wo_path}")
+            print(f"Total Work Orders : {len(wo_registry.work_orders)}")
+            print(f"Validation        : {'PASSED' if is_wo_valid else 'FAILED'}")
+            print(f"Stable Hash       : {wo_res['stable_hash']}")
+            print("-" * 70)
+            if not is_wo_valid:
+                print(f"ERRORS ({len(wo_errors)}):")
+                for err in wo_errors:
+                    print(f"  [X] {err}")
+        return 0 if is_wo_valid else 1
 
     res = run_validation(reg_path, max_freshness_days=args.max_freshness_days)
     is_valid = res["valid"]
@@ -147,6 +291,7 @@ def main() -> int:
             print("-" * 70)
 
     return 0 if is_valid else 1
+
 
 
 if __name__ == "__main__":

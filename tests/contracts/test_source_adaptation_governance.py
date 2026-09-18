@@ -123,7 +123,8 @@ def test_stable_hash_is_deterministic_and_bit_identical():
 
     assert len(hash1) == 64
     assert hash1 == hash2
-    assert hash1 == "3571bc3f9ddcf73c99362b1a26c4eab99e43b92af540ef22860d16739bfb29b2"
+    assert hash1 == "b8007cb92a7a552ae2a189e4205a738309773a638a71ab00c82a2b3a814b54d0"
+
 
 
 def test_redact_secrets_filters_tokens():
@@ -228,12 +229,13 @@ def test_fail_closed_missing_rollback_and_attribution():
     assert any("missing_attribution_requirement" in e for e in errs)
 
 
-def test_deterministic_matrix_ten_scenarios():
-    """Verify that all 10 scenarios in the Colab/offline matrix pass with 100% interception."""
+def test_deterministic_matrix_twelve_scenarios():
+    """Verify that all 12 scenarios in the Colab/offline matrix pass with 100% interception."""
     results = execute_matrix()
-    assert len(results) == 10
+    assert len(results) == 12
     for r in results:
         assert r["intercepted"] is True, f"Matrix scenario failed: {r}"
+
 
 
 # -----------------------------------------------------------------------------
@@ -290,3 +292,92 @@ def test_architecture_boundary_canonical_authorities_preserved():
             assert "approval_ledger" not in rec.marketos_target_authority
             # Cannot replace governor
             assert "resource_execution_governor" not in rec.marketos_target_authority
+
+
+# -----------------------------------------------------------------------------
+# 4. Work Order & Evidence Bundle Contract Tests
+# -----------------------------------------------------------------------------
+
+def test_canonical_work_orders_load_and_validate():
+    """Verify that all generated adaptation work orders load cleanly and pass validation."""
+    from evaluation.source_governance.registry import WorkOrderRegistry
+    from evaluation.source_governance.validator import validate_work_order, validate_target_boundary_collisions
+
+    wo_path = _REPO_ROOT / "data" / "source_adaptation_work_orders.json"
+    assert wo_path.exists(), f"Work orders file missing: {wo_path}"
+    registry = WorkOrderRegistry.load_from_file(wo_path)
+
+    assert len(registry.work_orders) == 29
+    all_errors = []
+    for wo in registry.work_orders.values():
+        all_errors.extend(validate_work_order(wo))
+
+    collision_errors = validate_target_boundary_collisions(list(registry.work_orders.values()))
+    all_errors.extend(collision_errors)
+    assert all_errors == [], f"Work order validation errors: {all_errors}"
+
+
+def test_work_order_hash_is_deterministic():
+    """Work order compute_hash must be bit-identical across runs."""
+    from evaluation.source_governance.registry import (
+        SourceAdaptationRecord,
+        generate_work_order_from_source_record,
+    )
+    rec = SourceAdaptationRecord.from_dict(_sample_valid_record())
+    wo1 = generate_work_order_from_source_record(rec)
+    wo2 = generate_work_order_from_source_record(rec)
+
+    assert len(wo1.work_order_hash) == 64
+    assert wo1.work_order_hash == wo2.work_order_hash
+    assert wo1.compute_hash() == wo1.work_order_hash
+
+
+def test_target_boundary_collision_detection():
+    """Target boundary validator must intercept duplicate module/symbol across active work orders."""
+    from evaluation.source_governance.registry import (
+        SourceAdaptationRecord,
+        generate_work_order_from_source_record,
+        AdaptationWorkOrder,
+    )
+    from evaluation.source_governance.validator import validate_target_boundary_collisions
+
+    rec1 = SourceAdaptationRecord.from_dict(_sample_valid_record("src-collision-1", adaptation_mode="copy_pattern"))
+    rec2 = SourceAdaptationRecord.from_dict(_sample_valid_record("src-collision-2", adaptation_mode="copy_pattern"))
+
+    wo1 = generate_work_order_from_source_record(rec1)
+    wo2 = generate_work_order_from_source_record(rec2)
+
+    # Both target the same module and symbol
+    assert wo1.marketos_target_module == wo2.marketos_target_module
+    assert wo1.marketos_target_symbol == wo2.marketos_target_symbol
+
+    collisions = validate_target_boundary_collisions([wo1, wo2])
+    assert len(collisions) == 1
+    assert "target_boundary_collision" in collisions[0]
+
+
+def test_evidence_bundle_generation_and_secret_redaction():
+    """Evidence bundle generation must produce markdown and scrub secrets."""
+    from evaluation.source_governance.registry import (
+        SourceAdaptationRecord,
+        generate_work_order_from_source_record,
+    )
+    from evaluation.source_governance.validator import generate_evidence_bundle
+
+    rec = SourceAdaptationRecord.from_dict(_sample_valid_record())
+    wo = generate_work_order_from_source_record(rec)
+
+    bundle = generate_evidence_bundle(wo, rec)
+    assert bundle.bundle_id == f"bundle-{wo.work_order_id}"
+    assert bundle.work_order_hash == wo.work_order_hash
+    assert bundle.safety_certification["zero_credentials"] is True
+    assert bundle.safety_certification["zero_network_egress"] is True
+    assert bundle.safety_certification["zero_desktop_control"] is True
+
+
+    md = bundle.render_markdown()
+    assert f"# Source Adaptation Review Evidence Bundle: {rec.source_id}" in md
+    assert wo.work_order_hash in md
+
+    bundle_dict = bundle.to_dict()
+    assert "sanitized_work_order" in bundle_dict

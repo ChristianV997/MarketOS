@@ -1214,11 +1214,66 @@ RECORDS = [
         "verification_evidence": "docs/ai/OSS_PATTERN_RETROFIT_ADR.md",
         "rejection_reason": None,
         "last_reviewed_at": "2026-09-17T20:00:00Z"
+    },
+    {
+        "source_id": "src-pyperf",
+        "repository_url": "https://github.com/psf/pyperf",
+        "organization": "psf",
+        "repository_name": "pyperf",
+        "revision": "c0e9eb8a78fd148f0746ba2b9cb030206dfd8478",
+        "commit_sha": "c0e9eb8a78fd148f0746ba2b9cb030206dfd8478",
+        "version_tag": "2.8.1",
+        "source_type": "git_repository",
+        "license": "MIT",
+        "license_evidence_url": "https://github.com/psf/pyperf/blob/main/COPYING",
+        "inspected_paths": [
+            "pyperf/_runner.py",
+            "pyperf/_benchmark.py"
+        ],
+        "dependencies": [],
+        "security_surface": {
+            "network_access": False,
+            "credential_exposure": "none",
+            "code_execution": False,
+            "local_ipc": False,
+            "desktop_control_risk": False,
+            "attack_surface_notes": "Pure Python deterministic timing and calibration harness; no network or subprocess mutation."
+        },
+        "data_network_behavior": {
+            "network_mode": "offline_only",
+            "outbound_calls_allowed": False,
+            "telemetry_mode": "none",
+            "data_persistence": "none"
+        },
+        "adaptation_mode": "copy_pattern",
+        "marketos_target_authority": "scripts.benchmarks.perf_engine",
+        "expected_benefit": "Deterministic calibration and warm-up iteration patterns for MarketOS offline benchmark scripts.",
+        "compatibility_status": "compatible",
+        "integration_status": "accepted_pattern",
+        "attribution_requirement": "Python Software Foundation pyperf MIT copyright notice in THIRD_PARTY_NOTICES.md.",
+        "rollback_strategy": "Revert scripts/benchmarks/perf_engine.py; fall back to standard time.perf_counter loops.",
+        "owner": "antigravity-source-adaptation-governance-owner",
+        "reviewer": "quality-architecture-reviewer",
+        "verification_evidence": "docs/ai/OSS_PATTERN_RETROFIT_ADR.md",
+        "rejection_reason": None,
+        "last_reviewed_at": "2026-09-17T20:00:00Z"
     }
 ]
 
 
-def build_and_save(target_path: Path) -> int:
+def build_and_save(target_path: Path, work_orders_path: Path | None = None) -> tuple[int, int]:
+    import sys
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+
+    from evaluation.source_governance.registry import (
+        SourceAdaptationRecord,
+        SourceAdaptationRegistry,
+        WorkOrderRegistry,
+        generate_work_order_from_source_record,
+    )
+
     target_path.parent.mkdir(parents=True, exist_ok=True)
     # Sort deterministically by source_id
     sorted_records = sorted(RECORDS, key=lambda x: x["source_id"])
@@ -1226,9 +1281,24 @@ def build_and_save(target_path: Path) -> int:
         json.dump(sorted_records, f, indent=2, ensure_ascii=False)
         f.write("\n")
     print(f"Successfully generated {len(sorted_records)} source records into {target_path}")
-    return len(sorted_records)
+
+    wo_count = 0
+    if work_orders_path is not None:
+        work_orders_path.parent.mkdir(parents=True, exist_ok=True)
+        wo_registry = WorkOrderRegistry()
+        for rec_dict in sorted_records:
+            rec = SourceAdaptationRecord.from_dict(rec_dict)
+            wo = generate_work_order_from_source_record(rec)
+            wo_registry.add_work_order(wo)
+        wo_registry.save_to_file(work_orders_path)
+        wo_count = len(wo_registry.work_orders)
+        print(f"Successfully generated {wo_count} adaptation work orders into {work_orders_path}")
+
+    return len(sorted_records), wo_count
 
 
 if __name__ == "__main__":
-    out_file = Path(__file__).resolve().parent.parent.parent / "data" / "source_adaptation_registry.json"
-    build_and_save(out_file)
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    out_file = repo_root / "data" / "source_adaptation_registry.json"
+    wo_file = repo_root / "data" / "source_adaptation_work_orders.json"
+    build_and_save(out_file, wo_file)

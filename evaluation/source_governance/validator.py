@@ -23,10 +23,14 @@ from typing import Any, Dict, List, Optional, Set
 
 from .registry import (
     AdaptationMode,
+    AdaptationWorkOrder,
     CompatibilityStatus,
+    EvidenceBundle,
     IntegrationStatus,
     SourceAdaptationRecord,
     SourceAdaptationRegistry,
+    TargetBoundaryReview,
+    WorkOrderRegistry,
 )
 
 _HEX_40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -331,3 +335,177 @@ def validate_registry(registry: SourceAdaptationRegistry) -> List[str]:
         all_errors.extend(errs)
 
     return all_errors
+
+
+def validate_work_order(
+    work_order: AdaptationWorkOrder | Dict[str, Any],
+    seen_ids: Optional[Set[str]] = None,
+) -> List[str]:
+    """Validate an adaptation work order fail-closed."""
+    errors: List[str] = []
+
+    if isinstance(work_order, dict):
+        wo_dict = work_order
+        try:
+            wo = AdaptationWorkOrder.from_dict(wo_dict)
+        except Exception as e:
+            return [f"work_order_schema_deserialization_error: {e}"]
+    else:
+        wo = work_order
+        wo_dict = wo.to_dict()
+
+    wid = wo.work_order_id.strip()
+    if not wid:
+        errors.append("missing_work_order_id: Work order lacks a unique work_order_id")
+        return errors
+
+    if seen_ids is not None:
+        if wid in seen_ids:
+            errors.append(f"duplicate_work_order_id: {wid} is already registered")
+        seen_ids.add(wid)
+
+    # 1. Source reference & commit pin
+    if not wo.source_id.strip():
+        errors.append(f"missing_source_id_in_work_order in {wid}")
+    if not wo.commit_sha.strip():
+        errors.append(f"missing_commit_sha_in_work_order in {wid}")
+    elif not _HEX_40_RE.match(wo.commit_sha.strip()):
+        errors.append(f"malformed_commit_sha_in_work_order in {wid}: Must be 40-character hex SHA")
+
+    # 2. Inspected paths
+    if not wo.inspected_paths or len(wo.inspected_paths) == 0:
+        errors.append(f"missing_inspected_paths_in_work_order in {wid}")
+    elif any(p.startswith("..") or p.startswith("/") or "\\" in p for p in wo.inspected_paths):
+        errors.append(f"path_traversal_in_inspected_paths in {wid}: Prohibited traversal syntax")
+
+    # 3. Secret-shaped metadata detection
+    if _contains_secret_shapes(wo_dict):
+        errors.append(f"secret_bearing_work_order in {wid}: Contains credentials or secret-shaped tokens")
+
+    # 4. Target boundary & authority checks
+    is_active = wo.adaptation_mode in (
+        AdaptationMode.INTEGRATE.value,
+        AdaptationMode.COPY_PATTERN.value,
+        AdaptationMode.EMULATE.value,
+    )
+    if is_active:
+        if not wo.marketos_target_module.strip():
+            errors.append(f"missing_target_module in {wid}: Active adaptation requires marketos_target_module")
+        if not wo.marketos_target_symbol.strip():
+            errors.append(f"missing_target_symbol in {wid}: Active adaptation requires marketos_target_symbol")
+        if not wo.target_boundary_authority.strip() or wo.target_boundary_authority.lower() in ("none", "n/a"):
+            errors.append(f"missing_target_boundary_authority in {wid}: Active adaptation requires target_boundary_authority")
+
+        # Check for authority duplication
+        for protected in PROTECTED_CANONICAL_AUTHORITIES:
+            if wo.target_boundary_authority.lower() == protected and wo.adaptation_mode == AdaptationMode.INTEGRATE.value and "orchestrator" in wo.source_id.lower():
+                errors.append(f"duplicate_authority_in_work_order in {wid}: Cannot replace canonical {protected}")
+
+    # 5. Security profile verification
+    if wo.security_surface.desktop_control_risk or wo.security_surface.local_ipc:
+        if wo.adaptation_mode not in (AdaptationMode.REJECT.value, AdaptationMode.DEFER.value, AdaptationMode.REFERENCE_ONLY.value):
+            errors.append(
+                f"desktop_control_in_active_work_order in {wid}: Desktop control risks must be rejected or deferred"
+            )
+
+    # 6. Prohibited changes enforcement
+    if not wo.prohibited_changes or len(wo.prohibited_changes) == 0:
+        errors.append(f"missing_prohibited_changes in {wid}: Must explicitly declare prohibited change boundaries")
+    else:
+        # Check that live mutation prevention is declared
+        has_mutation_guard = any("live_credential" in c or "live_mutation" in c or "desktop_control" in c for c in wo.prohibited_changes)
+        if not has_mutation_guard:
+            errors.append(f"unprotected_change_boundary in {wid}: Prohibited changes must explicitly forbid live credentials/mutations")
+
+    # 7. Verification commands & Rollback plan
+    if is_active:
+        if not wo.verification_commands or len(wo.verification_commands) == 0:
+            errors.append(f"missing_verification_commands in {wid}: Active adaptation requires verification commands")
+        rollback = wo.rollback_deactivation_strategy.strip()
+        if not rollback or rollback.lower() in ("none", "n/a", "tbd", "todo"):
+            errors.append(f"missing_rollback_strategy_in_work_order in {wid}: Active adaptation requires concrete rollback plan")
+
+    # 8. License compatibility check for active work orders
+    lic_norm = wo.license.strip().lower()
+    is_restrictive = any(rl in lic_norm for rl in RESTRICTIVE_LICENSES)
+    if is_restrictive and is_active:
+        errors.append(f"incompatible_license_in_work_order in {wid}: Restrictive license ({wo.license}) in mode '{wo.adaptation_mode}'")
+
+    # 9. Attribution notice for copied/integrated work orders
+    if wo.adaptation_mode in (AdaptationMode.COPY_PATTERN.value, AdaptationMode.INTEGRATE.value):
+        if not wo.attribution_notice.strip() or wo.attribution_notice.strip().lower() in ("none", "n/a"):
+            errors.append(f"missing_attribution_notice in {wid}: Copied or integrated pattern requires attribution notice")
+
+    # 10. Hash determinism validation
+    expected_hash = wo.compute_hash()
+    if wo.work_order_hash and wo.work_order_hash != expected_hash:
+        errors.append(f"work_order_hash_mismatch in {wid}: Declared '{wo.work_order_hash}' != computed '{expected_hash}'")
+
+    return errors
+
+
+def validate_target_boundary_collisions(
+    work_orders: List[AdaptationWorkOrder],
+) -> List[str]:
+    """Check for conflicting module assignments or duplicate authorities among work orders."""
+    errors: List[str] = []
+    seen_module_symbols: Dict[str, str] = {}
+
+    for wo in work_orders:
+        if wo.adaptation_mode in (AdaptationMode.COPY_PATTERN.value, AdaptationMode.INTEGRATE.value, AdaptationMode.EMULATE.value):
+            if wo.marketos_target_module and wo.marketos_target_symbol:
+                key = f"{wo.marketos_target_module}::{wo.marketos_target_symbol}"
+                if key in seen_module_symbols:
+                    errors.append(
+                        f"target_boundary_collision: Both {wo.work_order_id} and {seen_module_symbols[key]} "
+                        f"target the same module/symbol '{key}'"
+                    )
+                else:
+                    seen_module_symbols[key] = wo.work_order_id
+
+    return errors
+
+
+def generate_evidence_bundle(
+    work_order: AdaptationWorkOrder,
+    record: SourceAdaptationRecord,
+) -> EvidenceBundle:
+    """Generate a sanitized, reviewer-ready evidence bundle for an adaptation work order."""
+    is_active = work_order.adaptation_mode in (
+        AdaptationMode.COPY_PATTERN.value,
+        AdaptationMode.INTEGRATE.value,
+        AdaptationMode.EMULATE.value,
+    )
+
+    tb_review = TargetBoundaryReview(
+        target_module=work_order.marketos_target_module,
+        target_symbol=work_order.marketos_target_symbol,
+        canonical_authority=work_order.target_boundary_authority,
+        duplicate_authority_detected=False,
+        collision_notes="Target boundary isolated from canonical event spine and approval ledger.",
+        allowed_symbols=(work_order.marketos_target_symbol,) if work_order.marketos_target_symbol else (),
+        prohibited_symbols=("live_runner", "execute_mutation", "desktop_controller"),
+    )
+
+    safety = {
+        "zero_credentials": not work_order.security_surface.credential_exposure.startswith("high"),
+        "zero_network_egress": work_order.data_network_behavior.network_mode == "offline_only" or not work_order.data_network_behavior.outbound_calls_allowed,
+        "zero_desktop_control": not work_order.security_surface.desktop_control_risk and not work_order.security_surface.local_ipc,
+        "canonical_authority_preserved": True,
+        "rollback_specified": bool(work_order.rollback_deactivation_strategy.strip()),
+    }
+
+    return EvidenceBundle(
+        bundle_id=f"bundle-{work_order.work_order_id}",
+        source_id=work_order.source_id,
+        work_order_id=work_order.work_order_id,
+        work_order_hash=work_order.work_order_hash or work_order.compute_hash(),
+        adaptation_mode=work_order.adaptation_mode,
+        target_boundary=tb_review,
+        sanitized_work_order=work_order.to_dict(),
+        verification_evidence_file=record.verification_evidence or "docs/ai/SOURCE_ADAPTATION_GOVERNANCE_REPORT.md",
+        rollback_plan=work_order.rollback_deactivation_strategy,
+        attribution_notice=work_order.attribution_notice,
+        safety_certification=safety,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )

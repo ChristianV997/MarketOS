@@ -2,13 +2,18 @@
 
 from .registry import (
     AdaptationMode,
+    AdaptationWorkOrder,
     CompatibilityStatus,
     DataNetworkBehavior,
+    EvidenceBundle,
     IntegrationStatus,
     SecuritySurface,
     SourceAdaptationRecord,
     SourceAdaptationRegistry,
     SourceType,
+    TargetBoundaryReview,
+    WorkOrderRegistry,
+    generate_work_order_from_source_record,
     redact_secrets,
 )
 from .validator import (
@@ -24,16 +29,21 @@ from .validator import (
     SecuritySurfaceViolationError,
     SourceGovernanceError,
     UnapprovedDependencyError,
+    generate_evidence_bundle,
     validate_registry,
     validate_source_record,
+    validate_target_boundary_collisions,
+    validate_work_order,
 )
 
 __all__ = [
     "AdaptationMode",
+    "AdaptationWorkOrder",
     "CompatibilityStatus",
     "CredentialExposureError",
     "DataNetworkBehavior",
     "DuplicateAuthorityError",
+    "EvidenceBundle",
     "ImmutableRevisionError",
     "IncompatibleLicenseError",
     "IntegrationStatus",
@@ -48,8 +58,14 @@ __all__ = [
     "SourceAdaptationRegistry",
     "SourceGovernanceError",
     "SourceType",
+    "TargetBoundaryReview",
     "UnapprovedDependencyError",
+    "WorkOrderRegistry",
+    "generate_evidence_bundle",
+    "generate_work_order_from_source_record",
     "redact_secrets",
     "validate_registry",
     "validate_source_record",
+    "validate_target_boundary_collisions",
+    "validate_work_order",
 ]

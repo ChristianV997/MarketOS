@@ -1,7 +1,7 @@
 """scripts/benchmarks/benchmark_source_adaptation_registry.py -- Deterministic
 validation matrix benchmark for MarketOS source adaptation governance.
 
-Validates the 10 canonical scenarios:
+Validates the 12 canonical scenarios:
 1. Valid MIT source
 2. Valid Apache-2.0 source
 3. Missing license
@@ -12,6 +12,8 @@ Validates the 10 canonical scenarios:
 8. Runtime-mutation source claim
 9. Rejected desktop-control bridge
 10. Deferred GPU orchestration source
+11. Missing inspected paths / malformed record
+12. Missing rollback strategy in work order
 """
 from __future__ import annotations
 
@@ -28,11 +30,15 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from evaluation.source_governance.registry import (
+    AdaptationWorkOrder,
+    SourceAdaptationRecord,
     SourceAdaptationRegistry,
+    generate_work_order_from_source_record,
 )
 from evaluation.source_governance.validator import (
     validate_registry,
     validate_source_record,
+    validate_work_order,
 )
 
 
@@ -86,7 +92,7 @@ def _build_base_record(
 
 
 def execute_matrix() -> List[Dict[str, Any]]:
-    """Execute the 10 deterministic test matrix cases."""
+    """Execute the 12 deterministic test matrix cases."""
     results: List[Dict[str, Any]] = []
 
     # Case 1: Valid MIT
@@ -214,7 +220,37 @@ def execute_matrix() -> List[Dict[str, Any]]:
         "intercepted": any("gpu_orchestration_unauthorized" in e for e in errs10),
     })
 
+    # Case 11: Missing inspected paths (malformed record)
+    c11 = _build_base_record("src-case-11-missing-inspected-paths")
+    c11["inspected_paths"] = []
+    errs11 = validate_source_record(c11)
+    results.append({
+        "case_id": 11,
+        "description": "Missing inspected paths in source record",
+        "expected": "INTERCEPTED",
+        "actual": "INTERCEPTED" if any("missing_inspected_paths" in e for e in errs11) else "FAIL",
+        "errors": errs11,
+        "intercepted": any("missing_inspected_paths" in e for e in errs11),
+    })
+
+    # Case 12: Missing rollback strategy in active adaptation work order
+    c12_rec = SourceAdaptationRecord.from_dict(_build_base_record("src-case-12-missing-rollback"))
+    c12_wo = generate_work_order_from_source_record(c12_rec)
+    c12_dict = c12_wo.to_dict()
+    c12_dict["rollback_deactivation_strategy"] = ""
+    c12_wo_invalid = AdaptationWorkOrder.from_dict(c12_dict)
+    errs12 = validate_work_order(c12_wo_invalid)
+    results.append({
+        "case_id": 12,
+        "description": "Missing concrete rollback strategy in active work order",
+        "expected": "INTERCEPTED",
+        "actual": "INTERCEPTED" if any("missing_rollback_strategy" in e for e in errs12) else "FAIL",
+        "errors": errs12,
+        "intercepted": any("missing_rollback_strategy" in e for e in errs12),
+    })
+
     return results
+
 
 
 def run_benchmark(iterations: int = 5) -> Dict[str, Any]:
@@ -273,7 +309,7 @@ def generate_report(bench_data: Dict[str, Any], output_path: Path) -> None:
         "",
         "---",
         "",
-        "## 10-Scenario Deterministic Matrix Results",
+        "## 12-Scenario Deterministic Matrix Results",
         "",
         "| Case | Scenario Description | Expected | Result | Interception Status |",
         "|---|---|---|---|---|",

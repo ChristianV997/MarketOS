@@ -5,20 +5,20 @@
 - **Benchmark Driver**: `scripts/benchmarks/benchmark_source_adaptation_registry.py`
 - **Execution Mode**: `actual_executed` (Offline dev workstation; 0 live network calls, 0 credentials, 0 mutations).
 - **Google Colab Environment**: `simulated_offline` (Headless Colab environment not attached; executed via offline deterministic runner).
-- **Execution Timestamp**: `2026-09-18T04:41:24.469893+00:00`
-- **Stable Catalog Hash**: `3571bc3f9ddcf73c99362b1a26c4eab99e43b92af540ef22860d16739bfb29b2`
+- **Execution Timestamp**: `2026-09-18T07:36:32.707613+00:00`
+- **Stable Catalog Hash**: `b8007cb92a7a552ae2a189e4205a738309773a638a71ab00c82a2b3a814b54d0`
 
 ---
 
 ## Throughput & Hash Determinism
-- **Catalog Size**: 28 source candidates
-- **Validation Latency**: 9.21 ms per full pass
-- **Validation Throughput**: 3039.1 records/sec
+- **Catalog Size**: 29 source candidates
+- **Validation Latency**: 4.64 ms per full pass
+- **Validation Throughput**: 6250.5 records/sec
 - **Deterministic Hash Stability**: CONFIRMED (100% bit-identical)
 
 ---
 
-## 10-Scenario Deterministic Matrix Results
+## 12-Scenario Deterministic Matrix Results
 
 | Case | Scenario Description | Expected | Result | Interception Status |
 |---|---|---|---|---|
@@ -32,8 +32,10 @@
 | Case 8 | Unbounded live network / mutation mode | INTERCEPTED | INTERCEPTED | **PASSED** |
 | Case 9 | Rejected desktop-control bridge (local IPC / OS scripting) | INTERCEPTED | INTERCEPTED | **PASSED** |
 | Case 10 | Unauthorized GPU orchestration in integrate mode | INTERCEPTED | INTERCEPTED | **PASSED** |
+| Case 11 | Missing inspected paths in source record | INTERCEPTED | INTERCEPTED | **PASSED** |
+| Case 12 | Missing concrete rollback strategy in active work order | INTERCEPTED | INTERCEPTED | **PASSED** |
 
-**Fault Interception Rate**: **10 / 10 (100.0%)** fail-closed.
+**Fault Interception Rate**: **12 / 12 (100.0%)** fail-closed.
 
 ---
 
