@@ -467,7 +467,9 @@ function Get-StageClassification {
     if ($EvidenceClass -eq "unavailable") { return "unavailable" }
     if ($EvidenceClass -eq "fixture") { return "fixture" }
     if ($EvidenceClass -eq "simulated") { return "simulated" }
-    if ($EvidenceClass -eq "actual") { return "actual" }
+    # An actual label cannot be established by this offline wrapper. Treat an
+    # injected or stale actual claim as blocked instead of promoting it.
+    if ($EvidenceClass -eq "actual") { return "blocked" }
     if ($ExitCode -eq 0) { return "fixture" }
     return "failed"
 }
@@ -478,6 +480,7 @@ function Get-StageEvidenceClass {
         [string] $Preset = "",
         [string] $Mode = "fixture_demo"
     )
+    if ($Preset -eq "actual") { return "blocked" }
     if ($Preset) { return $Preset }
     if ($ExitCode -eq 0) { return (Get-SuccessEvidenceClass -Mode $Mode) }
     return "failed"
