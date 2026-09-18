@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from backend.economics import MarketLane
 from backend.adapters.research.supplier_feasibility import (
     SupplierImportError,
+    client_safe_offer,
+    contains_html,
     contains_secret,
-    import_alibaba,
-    import_aliexpress,
     import_csv,
     import_cj_validation_pack,
     import_json,
@@ -154,6 +155,86 @@ def test_secret_detection_does_not_flag_normal_product_values():
     assert not contains_secret({"candidate_id": "x", "supplier_title": "Safe product", "unit_cost": 4})
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "<html><body>x</body></html>",
+        "<!DOCTYPE html><html></html>",
+        "<body>",
+        "<script>alert(1)</script>",
+        {"supplier_title": "<HTML lang='en'>"},
+        b"<!doctype html>",
+    ],
+)
+def test_html_detection_catches_document_markers(payload):
+    assert contains_html(payload)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "Widget size < 10cm",
+        "a < b",
+        {"supplier_title": "Price < $12"},
+        {"candidate_id": "x", "unit_cost": 4},
+        None,
+    ],
+)
+def test_html_detection_does_not_flag_lone_less_than(payload):
+    assert not contains_html(payload)
+
+
+def test_html_json_import_is_rejected():
+    with pytest.raises(SupplierImportError, match="raw HTML"):
+        import_json(fixture("html_supplier_import_rejected.json"), supplier="cj")
+
+
+def test_html_csv_import_is_rejected():
+    with pytest.raises(SupplierImportError, match="raw HTML"):
+        import_csv(fixture("html_supplier_import_rejected.csv"))
+
+
+def test_html_in_record_raises():
+    with pytest.raises(SupplierImportError, match="raw HTML"):
+        normalize_record({"candidate_id": "x", "supplier": "cj", "supplier_title": "<html><body>raw</body></html>", "unit_cost": 5})
+
+
+def test_less_than_in_title_is_not_html():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "supplier_title": "Widget size < 10cm", "unit_cost": 5})
+    assert row is not None
+    assert row.supplier_title == "Widget size < 10cm"
+
+
+def test_raw_html_file_is_rejected_before_json_parse(tmp_path):
+    target = tmp_path / "dump.json"
+    target.write_text("<!DOCTYPE html><html><body></body></html>", encoding="utf8")
+    with pytest.raises(SupplierImportError, match="raw HTML"):
+        import_json(target)
+
+
+def test_missing_observed_at_is_not_invented():
+    rows = import_cj_validation_pack(fixture("cj_validation_pack_success.json"))
+    assert rows[0].observed_at == ""
+
+
+def test_observed_at_is_preserved_when_present():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "unit_cost": 5, "observed_at": "2026-09-01T12:00:00Z"})
+    assert row is not None
+    assert row.observed_at == "2026-09-01T12:00:00Z"
+
+
+def test_stale_evidence_mode_survives_normalize_record():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "unit_cost": 5, "evidence_mode": "stale"})
+    assert row is not None
+    assert row.evidence_mode == "stale"
+
+
+def test_stale_evidence_mode_survives_import_json():
+    rows = import_json(fixture("stale_evidence_mode.json"), supplier="cj")
+    assert len(rows) == 1
+    assert rows[0].evidence_mode == "stale"
+
+
 def test_path_traversal_is_rejected():
     with pytest.raises(SupplierImportError):
         validate_input_path(FIXTURES / ".." / "secrets.json")
@@ -239,6 +320,18 @@ def test_unit_economics_calculates_break_even_cpa_and_roas():
     assert scenario.break_even_cpa is not None
     assert scenario.break_even_roas is not None
     assert scenario.break_even_roas > 1
+
+
+def test_supplier_report_forwards_market_lane_to_canonical_economics():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "unit_cost": 10, "shipping_cost": 5, "delivery_window": "5-9", "inventory_status": "in_stock"})
+    assert row is not None
+    lane = MarketLane("cn-mx", "CN", "CN", "fixture-warehouse", "MX", currency="MXN", tax_rate="0.16")
+    score = score_candidate("x", [row], target_sell_price=30, lane=lane)
+    assert score.economics is not None
+    assert score.economics.currency == "MXN"
+    assert score.economics.canonical_economics["currency"] == "MXN"
+    report = build_report([row], target_sell_prices={"x": 30}, lane=lane).to_dict()
+    assert report["candidates"][0]["score"]["economics"]["currency"] == "MXN"
 
 
 def test_unit_economics_does_not_hide_negative_margin():
@@ -343,3 +436,95 @@ def test_missing_credentials_remains_a_warning_not_a_live_success():
 def test_supplier_feasibility_never_claims_supplier_authorization():
     report = build_report(import_cj_validation_pack(fixture("cj_validation_pack_success.json"))).to_dict()
     assert "authorization" in " ".join(report["warnings"])
+
+
+def test_nested_variants_flatten_to_one_row_each():
+    rows = import_json(fixture("shopify_woo_nested_variants.json"), supplier="manual")
+    assert len(rows) == 2
+    assert {row.supplier_sku for row in rows} == {"HOOD-S", "HOOD-M"}
+    assert {row.supplier_product_id for row in rows} == {"var-s", "var-m"}
+    assert {row.unit_cost for row in rows} == {12.0, 13.5}
+    assert {row.inventory_quantity for row in rows} == {10, 6}
+    assert all(row.variant_count == 2 for row in rows)
+    assert all(row.candidate_id == "cotton-hoodie" for row in rows)
+    assert all(row.shipping_cost == 4.0 for row in rows)
+
+
+def test_integer_variants_still_sets_variant_count():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "variants": 3, "unit_cost": 5})
+    assert row is not None
+    assert row.variant_count == 3
+
+
+def test_cj_dump_keys_map_onto_existing_fields():
+    rows = import_json(fixture("cj_dump_key_aliases.json"), supplier="cj", source_type="cj_validation_pack_report")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.candidate_id == "CJ-PID-THERMAL-001"
+    assert row.supplier_product_id == "CJ-PID-THERMAL-001"
+    assert row.supplier_title == "Mini Bluetooth Thermal Printer"
+    assert row.unit_cost == 8.5
+    assert row.moq == 1
+    assert (row.delivery_min_days, row.delivery_max_days) == (7, 12)
+    assert row.inventory_quantity == 420
+    assert row.warehouse_region == "CN"
+    assert row.destination_region == "US"
+    assert row.supplier_sku == "THERMAL-001"
+
+
+def test_mixed_currency_is_not_converted():
+    rows = import_json(fixture("mixed_currency_eur.json"), supplier="cj")
+    assert len(rows) == 1
+    assert rows[0].unit_cost == 9.5
+    assert rows[0].currency == "EUR"
+    assert rows[0].estimated_landed_cost == 11.5
+    assert "currency_assumed_usd" not in rows[0].warnings
+
+
+def test_conflicting_unit_cost_marks_kept_row():
+    rows = import_json(fixture("conflicting_unit_cost.json"), supplier="cj")
+    assert len(rows) == 1
+    assert rows[0].unit_cost == 12
+    assert "conflicting_supplier_offer" in rows[0].warnings
+
+
+def test_similar_titles_with_different_product_ids_do_not_collapse():
+    rows = import_json(fixture("alias_titles_do_not_collapse.json"), supplier="cj")
+    assert len(rows) == 2
+    assert {row.supplier_product_id for row in rows} == {"A-1", "B-2"}
+    assert {row.supplier_title for row in rows} == {"Mini Thermal Printer"}
+
+
+def test_missing_cost_fields_emit_assumption_warnings():
+    rows = import_json(fixture("missing_fields.json"), supplier="cj")
+    assert len(rows) == 1
+    assert rows[0].unit_cost is None
+    assert rows[0].shipping_cost is None
+    assert rows[0].currency == "USD"
+    assert rows[0].source_confidence == 0.55
+    assert "unit_cost_unavailable" in rows[0].warnings
+    assert "shipping_cost_unavailable" in rows[0].warnings
+    assert "currency_assumed_usd" in rows[0].warnings
+    assert "source_confidence_defaulted" in rows[0].warnings
+
+
+def test_derived_landed_cost_adds_warning():
+    row = import_cj_validation_pack(fixture("cj_validation_pack_success.json"))[0]
+    assert row.field_provenance["estimated_landed_cost"] == "derived"
+    assert "landed_cost_derived" in row.warnings
+
+
+def test_client_safe_offer_strips_nested_secret_and_html():
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "unit_cost": 5, "supplier_title": "Safe product"})
+    assert row is not None
+    payload = row.to_dict()
+    payload["nested"] = {"api_key": "synthetic-secret", "ok": "keep"}
+    payload["note"] = "<html><body>raw</body></html>"
+    safe = client_safe_offer(payload)
+    blob = json.dumps(safe).lower()
+    assert "api_key" not in blob
+    assert "synthetic-secret" not in blob
+    assert "<html" not in blob
+    assert safe["nested"]["ok"] == "keep"
+    assert "note" not in safe
+    assert client_safe_offer(row)["candidate_id"] == "x"

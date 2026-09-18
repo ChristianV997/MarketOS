@@ -1,8 +1,6 @@
 """Tests for backend.validation.shadow_validator — phase validation framework."""
 from __future__ import annotations
 
-import pytest
-
 from backend.validation.shadow_validator import (
     EventStoreReader,
     CapitalPolicyValidator,
@@ -13,7 +11,6 @@ from backend.validation.shadow_validator import (
     CreativeFatigueValidator,
     UrgencyScoringValidator,
     OrganicChannelValidator,
-    ValidationCriteria,
     ValidationResult,
     PHASE_CRITERIA,
 )
@@ -271,7 +268,9 @@ class TestUnitEconomicsValidator:
             for _ in range(60)
         ]
         result = validator.validate(events)
-        assert "policy_ranking_corr" in result.metrics or not result.passed
+        assert isinstance(result.metrics["legacy_ranking_corr"], float)
+        assert isinstance(result.metrics["policy_ranking_corr"], float)
+        assert isinstance(result.metrics["ranking_accuracy_lift"], float)
 
 
 class TestCreativeFatigueValidator:

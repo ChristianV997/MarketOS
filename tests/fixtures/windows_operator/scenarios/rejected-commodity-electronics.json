@@ -1,0 +1,30 @@
+{
+  "schema_version": "marketos-windows-operator-scenario-v1",
+  "scenario_id": "rejected-commodity-electronics",
+  "title": "Generic USB gadget bundle",
+  "evidence_class": "fixture",
+  "expected_decision": "reject_poor_margin",
+  "expected_promotion_gate": "reject",
+  "network_mutation": false,
+  "read_only": true,
+  "authorities": {
+    "launch": false,
+    "ads": false,
+    "orders": false,
+    "payments": false,
+    "messaging": false,
+    "publishing": false
+  },
+  "stages": {
+    "ingestion": "fixture",
+    "supplier_feasibility": "available",
+    "market_lane": "available",
+    "economics": "simulated",
+    "competition": "available",
+    "opportunity_synthesis": "fixture",
+    "promotion_gate": "reject",
+    "client_safe_export": "fixture"
+  },
+  "blocked_reasons": ["assumption_heavy_unit_economics"],
+  "unavailable_reasons": []
+}

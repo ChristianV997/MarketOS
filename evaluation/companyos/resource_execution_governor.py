@@ -1,11 +1,8 @@
 """Deterministic, offline resource and execution governance for CompanyOS."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from typing import Any, Mapping, Sequence
-
-from .model_router import MODEL_TIERS
-from .provider_registry import build_provider_registry
 
 ACTION_TYPES = (
     "screen_product_opportunities", "deep_validate_product", "promote_product_candidate", "generate_launch_draft",
@@ -544,4 +541,60 @@ def request_from_mapping(payload: Mapping[str, Any]) -> ExecutionDecisionRequest
     return ExecutionDecisionRequest(**{key: value for key, value in payload.items() if key in allowed})
 
 
-__all__ = ["ACTION_TYPES", "RESOURCE_TYPES", "DOMAINS", "OUTCOMES", "MODEL_POLICY_TIERS", "ExecutionActionType", "ExecutionResourceType", "ResourceBudget", "ResourceQuota", "BudgetCheckResult", "QuotaCheckResult", "ModelSpendPolicy", "ProviderSpendPolicy", "DepartmentCapacityPolicy", "PortfolioPolicy", "KillScaleRule", "ExperimentPolicy", "RunawayGuardPolicy", "LearningCaptureRequirement", "CrossDepartmentDependency", "ExecutionPriorityScore", "ExecutionRiskScore", "ExecutionApprovalRequirement", "ExecutionDecisionRequest", "ExecutionDecisionResult", "ExecutionGovernorSafetySummary", "ResourceExecutionGovernorReport", "evaluate_execution_request", "build_resource_execution_governor_report", "request_from_mapping"]
+def apply_learning_influence(request: ExecutionDecisionRequest, influence: Mapping[str, Any] | None = None, *, apply_model_routing_lessons: bool = False, apply_provider_routing_lessons: bool = False) -> ExecutionDecisionRequest:
+    """Fold an optional, externally-derived learning signal into the
+    inputs `evaluate_execution_request` already consumes, without changing
+    that function at all.
+
+    `influence` is a plain `Mapping` -- e.g. the dict returned by
+    `evaluation.companyos.learning_ledger.LearningGovernorInfluence.to_governor_context()`
+    -- rather than a typed import, so this module never depends on the
+    Learning Ledger's types and the Learning Ledger never depends on this
+    module's types. Four keys can only ever *tighten* the request, by
+    reusing the existing `previous_learning_required` gate
+    `evaluate_execution_request` already enforces at line-level as
+    "required learning has not been captured": `do_not_repeat_blocked`,
+    `hold_or_avoid`, `trustos_recurrence_blocked`, and
+    `kill_blocks_resumption` (a single recorded kill, unlike the other
+    three, needs no repetition to force this). Two more keys are read only
+    when the caller opts in: `recommended_model_tier`, with
+    `apply_model_routing_lessons` (planning metadata -- ignored unless
+    already one of `MODEL_POLICY_TIERS`), and `recommended_provider_id` /
+    `avoid_provider_ids`, with `apply_provider_routing_lessons` -- and even
+    then only ever to move the request *away* from a provider the
+    influence itself flags as blocked for this action, never to
+    second-guess an otherwise-fine provider choice.
+
+    This function never touches `trustos_decision`, `workspace_decision`,
+    `approval_state`, budgets, quotas, or provider readiness flags
+    (`registered_provider`, `terms_privacy_complete`,
+    `output_contract_tested`): those hard gates stay under
+    `evaluate_execution_request`'s exclusive, unmodified control, so a
+    positive learning signal -- never even read here -- cannot bypass
+    them, and a negative one can only ever ask for more learning capture
+    or plan around a different tier/provider, never execute, approve, or
+    call anything itself.
+
+    Absent or empty `influence` returns `request` unchanged, so existing
+    callers that never pass a learning context see no behavior change.
+    """
+    if not influence: return request
+    do_not_repeat_blocked = bool(influence.get("do_not_repeat_blocked", False))
+    hold_or_avoid = bool(influence.get("hold_or_avoid", False))
+    trustos_recurrence_blocked = bool(influence.get("trustos_recurrence_blocked", False))
+    kill_blocks_resumption = bool(influence.get("kill_blocks_resumption", False))
+    previous_learning_required = request.previous_learning_required or do_not_repeat_blocked or hold_or_avoid or trustos_recurrence_blocked or kill_blocks_resumption
+    model_tier = request.model_tier
+    if apply_model_routing_lessons:
+        recommended_model_tier = str(influence.get("recommended_model_tier", "") or "")
+        if recommended_model_tier in MODEL_POLICY_TIERS: model_tier = recommended_model_tier
+    provider_id = request.provider_id
+    if apply_provider_routing_lessons:
+        recommended_provider_id = str(influence.get("recommended_provider_id", "") or "")
+        avoid_provider_ids = tuple(influence.get("avoid_provider_ids", ()) or ())
+        if recommended_provider_id and request.provider_id in avoid_provider_ids: provider_id = recommended_provider_id
+    if previous_learning_required == request.previous_learning_required and model_tier == request.model_tier and provider_id == request.provider_id: return request
+    return replace(request, previous_learning_required=previous_learning_required, model_tier=model_tier, provider_id=provider_id)
+
+
+__all__ = ["ACTION_TYPES", "RESOURCE_TYPES", "DOMAINS", "OUTCOMES", "MODEL_POLICY_TIERS", "ExecutionActionType", "ExecutionResourceType", "ResourceBudget", "ResourceQuota", "BudgetCheckResult", "QuotaCheckResult", "ModelSpendPolicy", "ProviderSpendPolicy", "DepartmentCapacityPolicy", "PortfolioPolicy", "KillScaleRule", "ExperimentPolicy", "RunawayGuardPolicy", "LearningCaptureRequirement", "CrossDepartmentDependency", "ExecutionPriorityScore", "ExecutionRiskScore", "ExecutionApprovalRequirement", "ExecutionDecisionRequest", "ExecutionDecisionResult", "ExecutionGovernorSafetySummary", "ResourceExecutionGovernorReport", "evaluate_execution_request", "build_resource_execution_governor_report", "request_from_mapping", "apply_learning_influence"]

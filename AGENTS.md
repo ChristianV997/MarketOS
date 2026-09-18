@@ -2,6 +2,7 @@
 
 - Use `evaluation/trustos/client_workspace_isolation.py` as the canonical internal-to-client export boundary. Never export internal prompts, formulas, heuristics, source code, cross-client data, or unredacted professional packets.
 - Use `evaluation/companyos/resource_execution_governor.py` for deterministic budget, quota, portfolio, experiment, model/provider spend, runaway, and cross-department decisions. It must remain offline and simulated.
+- Use `evaluation/companyos/learning_ledger.py` for deterministic experiment outcomes, wins/losses, do-not-repeat rules, iteration recommendations, portfolio lessons, model/provider lessons, and TrustOS feedback. It must remain fixture-backed and must not become persistence or vector memory.
 
 - Use the smallest sufficient context: inspect symbols and direct references before full files.
 - Search for existing equivalent functionality before creating a module.

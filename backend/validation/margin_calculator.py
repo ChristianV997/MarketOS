@@ -41,6 +41,10 @@ behavior.
 from __future__ import annotations
 
 import os
+from decimal import Decimal
+
+from backend.economics import Money, UnitEconomicsAssumptions
+from backend.economics import calculate_unit_economics as calculate_canonical_unit_economics
 
 # Platform fee model (Shopify Basic defaults; env-tunable per deployment)
 _PAYMENT_FEE_PCT   = float(os.getenv("MARGIN_PAYMENT_FEE_PCT", "0.029"))
@@ -143,23 +147,27 @@ def calculate_margin(
             "margin_status": "loss",
         }
 
-    landed_cost  = supplier_cost + shipping_cost
+    expected_orders = max(Decimal(str(expected_monthly_revenue)) / Decimal(str(retail_price)), Decimal("1"))
+    landed_cost = supplier_cost + shipping_cost
     gross_margin = retail_price - landed_cost
-
-    payment_fee = retail_price * payment_fee_pct + payment_fee_fixed
-
-    # Subscription amortized per order: monthly fee spread over expected orders
-    expected_orders = max(expected_monthly_revenue / retail_price, 1.0)
-    platform_fee    = platform_monthly_fee / expected_orders
-
-    # Expected loss from returns: refunded revenue minus recovered nothing
-    # (dropship returns are rarely restocked) → lose the gross margin on
-    # return_rate of orders, plus the payment fee is not refunded by Stripe.
     return_loss = gross_margin * return_rate
-
-    cac = monthly_ad_spend / expected_orders
-
-    net_margin     = gross_margin - payment_fee - platform_fee - return_loss - cac
+    cac = monthly_ad_spend / float(expected_orders)
+    canonical = calculate_canonical_unit_economics(
+        Money(retail_price, "USD", source="legacy_margin_adapter", provenance="assumed"),
+        Money(max(supplier_cost, 0.0), "USD", source="legacy_margin_adapter", provenance="assumed"),
+        assumptions=UnitEconomicsAssumptions(
+            supplier_shipping=Money(max(shipping_cost, 0.0), "USD", source="legacy_margin_adapter", provenance="assumed"),
+            payment_fee_rate=Decimal(str(max(payment_fee_pct, 0.0))),
+            payment_fee_fixed=Money(max(payment_fee_fixed, 0.0), "USD", source="legacy_margin_adapter", provenance="assumed"),
+            platform_fee_fixed=Money(Decimal(str(max(platform_monthly_fee, 0.0))) / expected_orders, "USD", source="legacy_margin_adapter", provenance="assumed"),
+            platform_fee_rate=Decimal("0"),
+            return_rate=Decimal("0"),
+            cac=Money(max(cac, 0.0), "USD", source="legacy_margin_adapter", provenance="assumed"),
+        ),
+    )
+    payment_fee = float(canonical.payment_fees.amount)
+    platform_fee = float(canonical.platform_fees.amount)
+    net_margin = float(canonical.contribution_before_cac.amount) - return_loss - cac
     net_margin_pct = net_margin / retail_price * 100
 
     if net_margin_pct > _PROFITABLE_PCT:
