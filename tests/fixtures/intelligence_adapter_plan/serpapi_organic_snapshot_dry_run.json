@@ -1,0 +1,7 @@
+{
+  "provider": "serpapi",
+  "records": [
+    {"candidate_id": "neck-massager", "query": "neck massager", "title": "Synthetic organic search result", "rank": 3, "trend_label": "steady"}
+  ],
+  "fixture_mode": true
+}

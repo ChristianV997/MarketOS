@@ -1,0 +1,40 @@
+{
+  "report_version": "consumer-attention-v1",
+  "evidence_mode": "fixture_demo",
+  "generated_at": "deterministic",
+  "platforms_observed": ["google_trends"],
+  "top_candidate_id": "desk-clamp-lamp",
+  "candidates": [
+    {
+      "candidate_id": "desk-clamp-lamp",
+      "query": "desk clamp lamp",
+      "evidence_class": "observed",
+      "provenance": {"source": "sanitized_fixture", "collected_at": "2026-01-01T00:00:00Z"},
+      "evidence": [
+        {
+          "platform": "google_trends",
+          "hook": "clamp saves desk space",
+          "evidence_mode": "fixture",
+          "evidence_class": "observed"
+        }
+      ],
+      "score": {
+        "overall_consumer_attention": 0.64,
+        "source_diversity": 0.4,
+        "objection_density": 0.2,
+        "attention_saturation_risk": 0.25,
+        "recommended_ad_angles": ["space-saving clamp"],
+        "creative_hooks": [{"hook": "clamp saves desk space"}],
+        "voice_of_customer": {
+          "pain_points": ["desk clutter"],
+          "desired_outcomes": ["clear workspace"],
+          "objections": ["clamp scratches wood"]
+        },
+        "recommendation": "test_creative_offline"
+      }
+    }
+  ],
+  "read_only": true,
+  "network_calls": false,
+  "mutated": false
+}

@@ -2,6 +2,7 @@
 import backend.core.persistence as pers
 import pytest
 from backend.workspaces.artifact_store import ArtifactStore
+from backend.workspaces.registry import get_workspace_registry
 from services.sales_automation.schemas import AppointmentHandoff, ChatSession
 from services.sales_automation.simulate import run_sales_bot_simulation, run_simulated_conversation
 
@@ -43,8 +44,9 @@ class TestRunSalesBotSimulation:
 
     def test_saved_to_artifact_store(self):
         _, _, _, envelope = run_sales_bot_simulation("ecommerce_brand", ["hi"])
-        store = ArtifactStore()
-        saved = store.load(envelope.workspace_id, envelope.experiment_id, "result.json")
+        workspace = get_workspace_registry().get(envelope.workspace_id)
+        assert workspace is not None
+        saved = ArtifactStore(workspace).load(envelope.experiment_id, "result.json")
         assert "session" in saved and "handoff" in saved
 
     def test_explicit_attempt_without_configured_chatwoot_stays_simulation_only(self):

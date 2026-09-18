@@ -11,6 +11,18 @@ The report is validation guidance, never a profit promise or launch authority.
 Fixture/demo evidence is clearly labeled and must be replaced with sanitized
 live supplier evidence before any commercial launch decision.
 
+**VAL-GENERATE-DEFAULT-BUILDERS fix:** calling `generate()` with no
+benchmark/readiness/deployment stubs at all used to fall through to
+`build_from_paths()`/`build_readiness()`, both of which read `os.environ` for
+CJ credential presence by default -- so a caller who simply omitted optional
+arguments could receive a `next_best_action` mentioning CJ credential setup,
+and the call touched the real process environment for no reason. A bare call
+now returns a deterministic, offline result (`overall_status: blocked`,
+`risk_flags: ["no_evidence_supplied"]`, a credential-free next action) without
+reaching any path-builder or the environment at all. Supplying even a partial
+explicit stub for benchmark/readiness/deployment restores the prior,
+real path-builder behavior for the arguments still left out.
+
 ## Optional marketplace trend enrichment
 
 Marketplace-native demand signals can be generated offline and passed into the
