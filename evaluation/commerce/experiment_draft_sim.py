@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from evaluation.commerce.experiment_draft_models import ExperimentDraft, SimulationReport
+from evaluation.commerce.experiment_draft_models import ExperimentDraft
+from evaluation.commerce.experiment_draft_report import SimulationReport
 from evaluation.commerce.experiment_draft_types import FIXTURE_STATES, replay_hash
 
 
