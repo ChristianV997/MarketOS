@@ -147,3 +147,171 @@ def judge(
         status = "regression"
         notes.append("rss_over_advisory_budget")
     return BudgetVerdict(name, status, observed_ms, budget, tuple(notes), output_bytes, rss_kb)
+
+
+def run_sandbox_scale(sizes: tuple[int, ...] = (100, 500, 1500, 5000)) -> dict[str, Any]:
+    stages: list[dict[str, Any]] = []
+    verdicts: list[BudgetVerdict] = []
+    for size in sizes:
+        try:
+            rows = _rows(size)
+        except Exception as exc:  # noqa: BLE001
+            stages.append({"size": size, "status": "malformed", "error": str(exc)})
+            verdicts.append(judge(f"sandbox_preprocess_{size}", None, status_hint="malformed"))
+            continue
+        encoded = json.dumps(rows, default=str)
+        if size >= 5000 and len(encoded) > 2_000_000:
+            stages.append({"size": size, "status": "not_run", "reason": "payload_too_large_for_sandbox"})
+            verdicts.append(judge(f"sandbox_preprocess_{size}", None, status_hint="not_run"))
+            continue
+        try:
+            timed = _time_call(
+                lambda r=rows, n=size: process_offers(r, job_name=f"scale.{n}", max_rows=max(n, 2048))
+            )
+        except CommerceEnginePerfError as exc:
+            stages.append({"size": size, "status": "not_run", "reason": str(exc)})
+            verdicts.append(judge(f"sandbox_preprocess_{size}", None, status_hint="not_run"))
+            continue
+        last = timed.pop("last")
+        output_bytes = len(json.dumps(last.to_dict(), default=str))
+        rss = _rss_kb()
+        stages.append(
+            {
+                "size": size,
+                "status": "measured",
+                "path_class": "sandbox_pattern_not_production",
+                "accepted": len(last.accepted),
+                "rejected": len(last.rejected),
+                "live_attestation": last.live_attestation,
+                "replay_identity": last.replay_identity,
+                "output_bytes": output_bytes,
+                "rss_kb": rss,
+                **timed,
+            }
+        )
+        verdicts.append(
+            judge(
+                f"sandbox_preprocess_{size}",
+                timed["mean_ms"],
+                output_bytes=output_bytes,
+                rss_kb=rss,
+            )
+        )
+    comparison = measure_algorithms(_rows(1500), repeats=3)
+    verdicts.append(judge("sandbox_conflict_indexed_1500", comparison["indexed_mean_ms"]))
+    return {
+        "stages": stages,
+        "algorithm_comparison": comparison,
+        "verdicts": [item.to_dict() for item in verdicts],
+        "disclaimer": "sandbox_pattern timings are not MarketOS production performance",
+    }
+
+
+def run_canonical_matrix() -> dict[str, Any]:
+    results = measure_all_canonical(supplier_offers=50, synthesis_candidates=25)
+    mapped = {
+        "supplier_normalization": "canonical_supplier_50",
+        "opportunity_synthesis": "canonical_synthesis_25",
+        "client_safe_export": "canonical_export",
+        "commerce_cycle": "canonical_commerce_cycle",
+        "existing_cycle_benchmark": "canonical_existing_cycle_benchmark",
+        "replay_hashing": "replay_hash",
+    }
+    verdicts = []
+    for item in results:
+        budget_name = mapped.get(item.path_id)
+        if budget_name:
+            verdicts.append(
+                judge(
+                    budget_name,
+                    item.wall_ms,
+                    status_hint=item.status if item.status != "measured" else None,
+                    output_bytes=item.output_size,
+                )
+            )
+        else:
+            verdicts.append(
+                BudgetVerdict(
+                    item.path_id,
+                    item.status,
+                    item.wall_ms,
+                    None,
+                    ("no_numeric_budget", "advisory_only"),
+                    item.output_size,
+                    None,
+                )
+            )
+    return {
+        "results": [item.to_dict() for item in results],
+        "verdicts": [item.to_dict() for item in verdicts],
+        "any_canonical_measured": any(item.status == "measured" for item in results),
+    }
+
+
+def run_stress_equivalence() -> dict[str, Any]:
+    scenarios = (
+        "duplicate_ids",
+        "conflicting_offers",
+        "mixed_currency",
+        "mixed_lanes",
+        "stale_records",
+        "malformed",
+        "secret_shaped",
+        "mixed_evidence",
+    )
+    records = []
+    for scenario in scenarios:
+        rows = _rows(80, scenario)
+        first = process_offers(rows, job_name=f"eq.{scenario}")
+        second = process_offers(rows, job_name=f"eq.{scenario}")
+        records.append(
+            {
+                "scenario": scenario,
+                "replay_equal": first.replay_identity == second.replay_identity,
+                "live_attestation": first.live_attestation,
+                "currencies": list(first.currencies),
+                "failure_class": first.failure_class,
+                "accepted": len(first.accepted),
+                "rejected": len(first.rejected),
+                "candidate_loss": first.row_count_in != (len(first.accepted) + len(first.rejected)),
+            }
+        )
+    return {
+        "records": records,
+        "all_replay_stable": all(item["replay_equal"] for item in records),
+        "no_live_upgrade": all(item["live_attestation"] is False for item in records),
+        "no_candidate_loss": all(item["candidate_loss"] is False for item in records),
+        "no_currency_conversion": all(
+            set(item["currencies"]) <= {"MXN", "USD", "CAD", "EUR", "GBP"} for item in records
+        ),
+    }
+
+
+def build_report() -> dict[str, Any]:
+    sandbox = run_sandbox_scale()
+    canonical = run_canonical_matrix()
+    equivalence = run_stress_equivalence()
+    return {
+        "schema": SCHEMA,
+        "record_kind": "advisory_benchmark",
+        "merge_authority": False,
+        "quality_gate": False,
+        "environment": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "warmup": WARMUP,
+            "repeats": REPEATS,
+            "timer": "time.perf_counter",
+            "rss_kb": _rss_kb(),
+        },
+        "disclaimer": (
+            "Sandbox-pattern timings are not MarketOS production performance. "
+            "Canonical timings are only valid when status=measured on a checkout "
+            "that actually imports those modules. Hardware differs across machines. "
+            "Passing an advisory budget does not imply commercial viability."
+        ),
+        "call_graph": call_graph_audit(),
+        "sandbox_pattern": sandbox,
+        "canonical_paths": canonical,
+        "equivalence": equivalence,
+    }
