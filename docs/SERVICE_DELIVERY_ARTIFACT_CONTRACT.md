@@ -86,6 +86,49 @@ directly regression-tested
 (`test_supplier_tier_cannot_launder_fixture_evidence_into_live_validated`,
 `test_non_live_evidence_states_never_classify_as_live_validated`).
 
+## Producing the frontend-consumable projection (PR #264 / #271)
+
+`evaluation.companyos.service_delivery_projection` is the producer that
+turns engagement + package + data-quality + economics + artifact objects
+into the `service-delivery-plane-v1`-shaped envelope the existing,
+untouched frontend adapter (`adaptServiceProjection.ts`) already knows how
+to consume, and that PR #271's read-only `GET /api/service-delivery/workbench`
+route (also untouched here) already knows how to validate and serve.
+
+This module does not reimplement that adapter's translation logic — it
+only supplies keys the adapter already reads (`evidence_set[].evidence_class`,
+`economics`, `financial_readiness`, `capacity`, `next_best_action`,
+`intake`, `eligibility`), falling back to the adapter's own defaults for
+anything it omits (e.g. `deliverables`, which the adapter derives from the
+existing `deliverable_ids` list when a richer object isn't supplied).
+
+Two things this producer gets right that are easy to get wrong:
+
+- **Fee display uses `ServiceEconomics.service_fee`, not `ClientEngagement.fee`.**
+  The engagement's own `fee` is the package's default-currency quote fixed
+  at intake time and is never updated afterward; `service_fee` is the exact
+  value actually passed into `calculate_service_economics`. Using the
+  engagement's fee would silently show the wrong currency for any
+  engagement whose actual computed fee differs from the package's default
+  currency (e.g. an MXN client on a USD-default package).
+- **`row["data_quality_state"]` is always taken from the `ClientDataQualityAssessment`
+  passed to `build_service_engagement_row()`, never from
+  `engagement.data_quality_state`.** The latter only updates when a caller
+  explicitly threads it through `transition_engagement(..., data_quality_state=...)`;
+  trusting it directly would silently emit a stale value whenever a caller
+  (as this module's own first draft did) computes a fresh assessment but
+  forgets that step.
+
+`scripts/generate_service_delivery_projection.py` demonstrates the full,
+offline, deterministic pipeline end to end and writes an example projection
+to `artifacts/service_delivery_projection.json` — the exact location and
+shape `MARKETOS_SERVICE_DELIVERY_PROJECTION` (PR #271) is willing to read
+from. It has been directly verified against that route's exact validation
+logic (schema-version allowlist, `read_only`/`network_calls`/`mutated`
+checks, `check_workspace_leakage`) reproduced from the PR's own diff, since
+that route is not yet merged into `main` and cannot be imported directly
+in this worktree.
+
 ## Compatibility rules for future changes to this module
 
 1. Never add a field that duplicates a value already owned by
