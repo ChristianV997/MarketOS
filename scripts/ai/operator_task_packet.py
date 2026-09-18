@@ -7,6 +7,7 @@ Default mode is validate-and-print. Disk writes require --output.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -270,6 +271,173 @@ def safe_output_path(root: Path, raw: str) -> Path:
     if resolved.suffix.lower() not in {".json", ".md"}:
         raise TaskPacketError("output must be .json or .md")
     return resolved
+
+
+# ---------------------------------------------------------------------------
+# MarketOS.AIResume.v1 -- resume-after-compaction protocol.
+#
+# A distinct schema from MarketOS.AITask.v1 on purpose: a task packet
+# describes intent before work starts, a resume packet describes proven
+# state after a compaction/interruption. It reuses every validation helper
+# above (_text, _string_list, assert_safe_path, _secret_like, EVIDENCE_CLASSES)
+# rather than re-implementing text/secret/path safety, and references #252's
+# MarketOS.AIContext.v1 "replay_hash" field by name instead of inventing a
+# second snapshot-identity concept.
+# ---------------------------------------------------------------------------
+
+RESUME_SCHEMA = "MarketOS.AIResume.v1"
+RESUME_REQUIRED = (
+    "task_packet_digest",
+    "context_snapshot_replay_hash",
+    "worktree",
+    "branch",
+    "head_sha",
+    "base_sha",
+    "changed_files",
+    "tests_already_run",
+    "tests_still_required",
+    "open_blockers",
+    "pending_decisions",
+    "public_sources_inspected",
+    "claims_not_yet_proven",
+    "next_action",
+)
+
+
+class ResumePacketError(ValueError):
+    """Malformed or unsafe AI resume packet."""
+
+
+def _test_record_list(value: Any, field: str) -> list[dict[str, str]]:
+    """Each test record must carry its own evidence classification.
+
+    This is what stops a resumed agent from inventing prior test results or
+    silently treating an unavailable/not_run check as passed: a bare string
+    like "tests passed" is rejected outright.
+    """
+    if not isinstance(value, list):
+        raise ResumePacketError(f"{field} must be a list of {{command, evidence_classification}} records")
+    if len(value) > MAX_LIST:
+        raise ResumePacketError(f"{field} exceeds {MAX_LIST} items")
+    records: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict) or "command" not in item or "evidence_classification" not in item:
+            raise ResumePacketError(f"{field}[] must be {{command, evidence_classification}}")
+        command = _text(item["command"], f"{field}.command")
+        classification = _text(item["evidence_classification"], f"{field}.evidence_classification")
+        if classification not in EVIDENCE_CLASSES:
+            raise ResumePacketError(f"{field}.evidence_classification unknown: {classification}")
+        records.append({"command": command, "evidence_classification": classification})
+    return records
+
+
+def _packet_digest(packet: dict[str, Any]) -> str:
+    encoded = json.dumps(packet, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def build_resume_packet(
+    task_packet: dict[str, Any],
+    *,
+    context_snapshot_replay_hash: str,
+    worktree: str,
+    branch: str,
+    head_sha: str,
+    base_sha: str,
+    changed_files: list[str],
+    tests_already_run: list[dict[str, str]],
+    tests_still_required: list[str],
+    open_blockers: list[str],
+    pending_decisions: list[str],
+    public_sources_inspected: list[str],
+    claims_not_yet_proven: list[str],
+    next_action: str,
+    current_head_sha: str | None = None,
+) -> dict[str, Any]:
+    """Build a resume packet tied to an already-validated task packet.
+
+    ``current_head_sha``, when supplied by the caller from a live ``git
+    rev-parse HEAD``, is compared against ``head_sha`` -- a mismatch means
+    someone else has committed since this snapshot was taken, so the resume
+    packet is flagged rather than silently trusted (guards against
+    "overwriting newer commits").
+    """
+    validated_task = validate_packet(task_packet)
+    warnings: list[str] = []
+    if base_sha.lower() != validated_task["base_sha"]:
+        warnings.append("resume_base_sha_differs_from_task_packet_base_sha")
+    if not SHA_RE.fullmatch(head_sha.lower()):
+        raise ResumePacketError("head_sha must be a git SHA")
+    if not SHA_RE.fullmatch(base_sha.lower()):
+        raise ResumePacketError("base_sha must be a git SHA")
+    if current_head_sha and current_head_sha.lower() != head_sha.lower():
+        warnings.append("resume_head_sha_stale_possible_overwrite_by_newer_commit")
+
+    resume = {
+        "schema": RESUME_SCHEMA,
+        "task_schema": validated_task["schema"],
+        "task_packet_digest": _packet_digest(validated_task),
+        "agent_id": validated_task["agent_id"],
+        "lane": validated_task["lane"],
+        "context_snapshot_replay_hash": _text(context_snapshot_replay_hash, "context_snapshot_replay_hash"),
+        "worktree": _text(worktree, "worktree"),
+        "branch": _text(branch, "branch"),
+        "head_sha": head_sha.lower(),
+        "base_sha": base_sha.lower(),
+        "changed_files": [assert_safe_path(item, "changed_files") for item in _string_list(changed_files, "changed_files")],
+        "tests_already_run": _test_record_list(tests_already_run, "tests_already_run"),
+        "tests_still_required": _string_list(tests_still_required, "tests_still_required"),
+        "open_blockers": _string_list(open_blockers, "open_blockers"),
+        "pending_decisions": _string_list(pending_decisions, "pending_decisions"),
+        "public_sources_inspected": _string_list(public_sources_inspected, "public_sources_inspected"),
+        "claims_not_yet_proven": _string_list(claims_not_yet_proven, "claims_not_yet_proven"),
+        "next_action": _text(next_action, "next_action"),
+        "warnings": warnings,
+        "read_only": True,
+    }
+    if _secret_like(resume):
+        raise ResumePacketError("resume packet contains secret-shaped values")
+    return resume
+
+
+def validate_resume_packet(raw: Any, *, expected_task_packet: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate a previously-built resume packet, e.g. loaded from disk.
+
+    ``expected_task_packet``, when supplied, must match the resume packet's
+    recorded ``agent_id``/``lane`` -- a mismatch means ownership changed
+    mid-task, which is rejected rather than silently accepted.
+    """
+    if not isinstance(raw, dict):
+        raise ResumePacketError("resume packet root must be an object")
+    if raw.get("schema") != RESUME_SCHEMA:
+        raise ResumePacketError(f"unsupported schema: {raw.get('schema')}")
+    missing = [key for key in RESUME_REQUIRED if key not in raw]
+    if missing:
+        raise ResumePacketError(f"missing fields: {missing}")
+    if _secret_like(raw):
+        raise ResumePacketError("resume packet contains secret-shaped values")
+    for record in raw.get("tests_already_run", []):
+        if not isinstance(record, dict) or record.get("evidence_classification") not in EVIDENCE_CLASSES:
+            raise ResumePacketError("tests_already_run entries must carry a known evidence_classification")
+    if expected_task_packet is not None:
+        validated_expected = validate_packet(expected_task_packet)
+        if raw.get("agent_id") != validated_expected["agent_id"] or raw.get("lane") != validated_expected["lane"]:
+            raise ResumePacketError("resume packet ownership does not match the expected task packet")
+    return raw
+
+
+def diff_resume_state(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """Flag when a resumed agent is about to repeat already-completed edits."""
+    same_head = previous.get("head_sha") == current.get("head_sha")
+    same_changes = sorted(previous.get("changed_files", [])) == sorted(current.get("changed_files", []))
+    return {
+        "no_new_edits_detected": same_head and same_changes,
+        "head_advanced": previous.get("head_sha") != current.get("head_sha"),
+        "newly_completed_tests": [
+            item for item in current.get("tests_already_run", [])
+            if item not in previous.get("tests_already_run", [])
+        ],
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

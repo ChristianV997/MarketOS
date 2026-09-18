@@ -27,6 +27,10 @@ FIXTURE_CLASSES = frozenset({"fixture", "simulated", "manual", "dry_run"})
 UNAVAILABLE_CLASSES = frozenset({"unavailable", "not_run", "ci_unavailable", "blocked"})
 FULL_SUITE_HINT = re.compile(r"(?i)(full suite|entire suite|all tests passed|pytest -q(?! tests/))")
 FULL_SUITE_CMD = re.compile(r"(?i)(pytest(\s+-q)?\s+(tests)?\s*$|pytest\s+tests\s*$|npm test && .*pytest)")
+SOURCE_MINING_HINT = re.compile(r"(?i)(reviewed|mined|adapted|inspired by).{0,40}(public source|oss pattern|github\.com|open.?source)")
+SOURCE_REQUIRED_KEYS = ("url", "version", "license", "pattern")
+TOOL_USE_HINT = re.compile(r"(?i)(used|invoked|ran|called)\s+(the\s+)?[\w.-]*\s*(sub ?agent|skill|tool|gstack|hermes|coderos)\b")
+CI_GREEN_CLASSES = frozenset({"success", "green", "passed"})
 RESERVED_REWRITE = (
     "run_local_quality_gate.py",
     "resource_execution_governor.py",
@@ -121,6 +125,41 @@ def evaluate_report(
     if any(name in rewritten for name in RESERVED_REWRITE):
         findings.append({"rule": "duplicate_authority_rejected", "status": "failed", "detail": "reserved authority path rewritten"})
 
+    sources_reviewed = report.get("sources_reviewed") or report.get("public_sources") or []
+    claims_source_mining = any(SOURCE_MINING_HINT.search(claim) for claim in claims) or any(
+        SOURCE_MINING_HINT.search(str(report.get(field, ""))) for field in ("summary", "notes")
+    )
+    if claims_source_mining:
+        if not sources_reviewed:
+            findings.append({"rule": "source_mining_requires_metadata", "status": "failed", "detail": "source-mining claimed with no sources_reviewed entries"})
+        else:
+            incomplete = [
+                str(item.get("url", item)) for item in sources_reviewed
+                if not isinstance(item, dict) or any(not item.get(key) for key in SOURCE_REQUIRED_KEYS)
+            ]
+            if incomplete:
+                findings.append({"rule": "source_mining_requires_metadata", "status": "failed", "detail": ",".join(incomplete[:5])})
+
+    tools_used = _as_list(report.get("tools_used") or report.get("skills_used"))
+    tool_output = report.get("tool_output") or report.get("skill_output") or {}
+    claims_tool_use = any(TOOL_USE_HINT.search(claim) for claim in claims) or bool(tools_used)
+    if claims_tool_use:
+        if not tools_used:
+            findings.append({"rule": "tool_use_requires_output", "status": "failed", "detail": "tool/subagent use claimed with no tools_used entries"})
+        else:
+            missing_output = [name for name in tools_used if not (isinstance(tool_output, dict) and tool_output.get(name))]
+            if missing_output:
+                findings.append({"rule": "tool_use_requires_output", "status": "failed", "detail": ",".join(missing_output[:5])})
+
+    ci_status = str(report.get("ci_status") or "").lower()
+    ci_steps = report.get("ci_steps")
+    try:
+        ci_steps_int = int(ci_steps) if ci_steps is not None else None
+    except (TypeError, ValueError):
+        ci_steps_int = None  # non-numeric ci_steps is treated the same as absent, never as a crash
+    if ci_status in CI_GREEN_CLASSES and (ci_steps_int is None or ci_steps_int <= 0):
+        findings.append({"rule": "ci_green_requires_steps", "status": "failed", "detail": f"ci_status={ci_status} ci_steps={ci_steps!r}"})
+
     rules = (
         "claims_match_commands",
         "unavailable_not_passed",
@@ -132,6 +171,9 @@ def evaluate_report(
         "duplicate_authority_rejected",
         "raw_secrets",
         "full_suite_requires_command",
+        "source_mining_requires_metadata",
+        "tool_use_requires_output",
+        "ci_green_requires_steps",
     )
     failed_rules = {item["rule"] for item in findings}
     checks = []

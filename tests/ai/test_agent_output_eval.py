@@ -137,3 +137,86 @@ def test_deterministic_output_order():
     second, _ = evaluate_report(report, _packet())
     assert first == second
     assert [item["rule"] for item in first["checks"]] == [item["rule"] for item in second["checks"]]
+
+
+def test_source_mining_claim_without_metadata_fails():
+    report = {
+        "claims": ["reviewed a public source pattern from github.com for retry backoff"],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+    }
+    doc, code = evaluate_report(report, _packet())
+    assert code == 2
+    assert any(item["rule"] == "source_mining_requires_metadata" for item in doc["findings"])
+
+
+def test_source_mining_claim_with_complete_metadata_passes_that_rule():
+    report = {
+        "claims": ["reviewed a public source pattern from github.com for retry backoff"],
+        "sources_reviewed": [{"url": "https://github.com/x/y", "version": "1.0", "license": "MIT", "pattern": "retry backoff"}],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+    }
+    doc, _ = evaluate_report(report, _packet())
+    assert not any(item["rule"] == "source_mining_requires_metadata" for item in doc["findings"])
+
+
+def test_tool_use_claim_without_output_fails():
+    report = {
+        "claims": ["used the security-review skill on the diff"],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+    }
+    doc, code = evaluate_report(report, _packet())
+    assert code == 2
+    assert any(item["rule"] == "tool_use_requires_output" for item in doc["findings"])
+
+
+def test_tool_use_claim_with_matching_output_passes_that_rule():
+    report = {
+        "claims": ["used the security-review skill on the diff"],
+        "tools_used": ["security-review"],
+        "tool_output": {"security-review": "no findings"},
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+    }
+    doc, _ = evaluate_report(report, _packet())
+    assert not any(item["rule"] == "tool_use_requires_output" for item in doc["findings"])
+
+
+def test_ci_green_from_zero_step_job_fails():
+    report = {
+        "claims": [],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+        "ci_status": "success",
+        "ci_steps": 0,
+    }
+    doc, code = evaluate_report(report, _packet())
+    assert code == 2
+    assert any(item["rule"] == "ci_green_requires_steps" for item in doc["findings"])
+
+
+def test_ci_green_with_non_numeric_steps_fails_the_rule_not_the_evaluator():
+    report = {
+        "claims": [],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+        "ci_status": "success",
+        "ci_steps": "many",
+    }
+    doc, code = evaluate_report(report, _packet())  # must not raise
+    assert code == 2
+    assert any(item["rule"] == "ci_green_requires_steps" for item in doc["findings"])
+
+
+def test_ci_green_with_real_steps_passes_that_rule():
+    report = {
+        "claims": [],
+        "pr": "https://example.invalid/pr/1",
+        "rollback": "revert",
+        "ci_status": "success",
+        "ci_steps": 14,
+    }
+    doc, _ = evaluate_report(report, _packet())
+    assert not any(item["rule"] == "ci_green_requires_steps" for item in doc["findings"])

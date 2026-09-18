@@ -30,7 +30,11 @@ ALLOWED_GIT = {
     ("status", "--porcelain"),
     ("worktree", "list", "--porcelain"),
     ("merge-base", "HEAD", "origin/main"),
+    ("merge-base", "--is-ancestor", "@{u}", "HEAD"),
 }
+# NOTE: _run_git's own allowlist check treats every ("rev-parse", ...) argv
+# as allowed regardless of membership above -- do not add rev-parse entries
+# here expecting them to be enforced; add non-rev-parse subcommands only.
 
 
 def _run_git(root: Path, *args: str, timeout_s: float = DEFAULT_TIMEOUT_S) -> dict[str, Any]:
@@ -123,12 +127,105 @@ def unsafe_target(path: str) -> bool:
     return bool(UNSAFE_TARGET.search(normalized))
 
 
+def prunable_worktrees(worktrees: list[dict[str, str]], *, current_root: Path) -> list[str]:
+    """Worktree entries git still lists whose directory no longer exists on disk."""
+    missing: list[str] = []
+    for item in worktrees:
+        path = item.get("path")
+        if not path:
+            continue
+        candidate = Path(path)
+        if candidate.resolve() == current_root.resolve():
+            continue
+        if not candidate.exists():
+            missing.append(path)
+    return missing
+
+
+def outside_allowed_roots(root: Path, *, allowed_roots: list[str] | None = None) -> bool:
+    """True when this worktree's own path is not under any declared-safe root.
+
+    Default allowed roots match how EnterWorktree provisions isolated
+    worktrees (``.claude/worktrees/``) and how a plain canonical checkout is
+    used directly; a worktree created somewhere else (e.g. a stray path
+    outside the repository the agent was handed) is flagged rather than
+    silently trusted.
+    """
+    resolved = root.resolve().as_posix()
+    roots = allowed_roots or [".claude/worktrees/"]
+    if any(marker in resolved for marker in roots):
+        return False
+    # A bare canonical checkout (no worktrees/ segment at all) is allowed --
+    # only a path that looks like it escaped an expected worktrees root is
+    # flagged, e.g. a sibling directory a caller manually copied files into.
+    return "worktrees" in resolved and not any(marker.strip("/") in resolved for marker in roots)
+
+
+def overlapping_pr_paths(allowed_scope: list[str], other_pr_paths: dict[str, list[str]] | None) -> dict[str, list[str]]:
+    """Flag allowed_scope paths another open PR already declares changed.
+
+    ``other_pr_paths`` is caller-supplied (e.g. from a prior ``gh``/GitHub
+    API read elsewhere) -- this utility makes no network call itself.
+    """
+    overlaps: dict[str, list[str]] = {}
+    for pr_ref, paths in (other_pr_paths or {}).items():
+        hit = sorted(set(allowed_scope) & set(paths))
+        if hit:
+            overlaps[pr_ref] = hit
+    return overlaps
+
+
+def protected_paths_hit(allowed_scope: list[str]) -> list[str]:
+    """Reuse #254's own reserved-authority list rather than a second one."""
+    try:
+        from scripts.ai.operator_task_packet import RESERVED_AUTHORITIES
+    except ImportError:
+        return []
+    return [name for name in RESERVED_AUTHORITIES if any(name in path for path in allowed_scope)]
+
+
+def force_push_risk(root: Path, *, git_runner=_run_git) -> dict[str, Any]:
+    """Detect whether pushing HEAD would require a force-push.
+
+    Only meaningful when an upstream is configured; absent that this is
+    honestly ``not_run`` rather than a false "safe".
+    """
+    upstream = git_runner(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    if upstream["classification"] != "actual":
+        return {"classification": "not_run", "reason": "no_upstream_configured", "force_push_required": False}
+    ancestor = git_runner(root, "merge-base", "--is-ancestor", "@{u}", "HEAD")
+    # --is-ancestor: exit 0 = upstream is an ancestor of HEAD (safe,
+    # fast-forwardable); exit 1 = it is not (a normal push would need
+    # --force); any other exit code is a real git failure, not a verdict.
+    if ancestor["exit_code"] == 0:
+        return {"classification": "actual", "reason": None, "force_push_required": False}
+    if ancestor["exit_code"] == 1:
+        return {"classification": "actual", "reason": "upstream_diverged", "force_push_required": True}
+    return {"classification": "unavailable", "reason": "merge_base_check_failed", "force_push_required": None}
+
+
+def native_agent_command_status() -> dict[str, Any]:
+    """Delegate command-presence detection to the one capability catalog."""
+    try:
+        from scripts.ai.native_agent_capability import build_capability_record
+    except ImportError:
+        return {"classification": "unavailable", "reason": "native_agent_capability_module_missing"}
+    record = build_capability_record()
+    return {
+        "classification": "actual",
+        "agents": {item["command"]: item["state"] for item in record["agents"]},
+        "coderos": record["coderos"]["state"],
+    }
+
+
 def evaluate_safety(
     root: Path,
     *,
     declared_canonical: str | None = None,
     expected_branch: str | None = None,
     allowed_scope: list[str] | None = None,
+    allowed_roots: list[str] | None = None,
+    other_pr_paths: dict[str, list[str]] | None = None,
     git_runner=_run_git,
 ) -> tuple[dict[str, Any], int]:
     toplevel = git_runner(root, "rev-parse", "--show-toplevel")
@@ -197,6 +294,28 @@ def evaluate_safety(
         if item.get("path") and Path(item["path"]).resolve() != root.resolve()
     ]
 
+    prunable = prunable_worktrees(worktrees, current_root=root)
+    if prunable:
+        blockers.append("deleted_worktree_still_registered")
+
+    outside_roots = outside_allowed_roots(root, allowed_roots=allowed_roots)
+    if outside_roots:
+        blockers.append("worktree_path_outside_allowed_roots")
+
+    pr_overlap = overlapping_pr_paths(allowed_scope or [], other_pr_paths)
+    if pr_overlap:
+        blockers.append("overlapping_pr_paths")
+
+    protected_hits = protected_paths_hit(allowed_scope or [])
+    if protected_hits:
+        blockers.append("protected_path_in_scope")
+
+    push_risk = force_push_risk(root, git_runner=git_runner)
+    if push_risk.get("force_push_required"):
+        blockers.append("force_push_risk")
+
+    agent_commands = native_agent_command_status()
+
     document = {
         "schema": SCHEMA,
         "read_only": True,
@@ -213,10 +332,28 @@ def evaluate_safety(
         "stale_branch_base": stale,
         "untracked_sensitive_files": untracked_sensitive,
         "unsafe_target_paths": scope_conflicts,
+        "prunable_worktrees": prunable,
+        "worktree_outside_allowed_roots": outside_roots,
+        "overlapping_pr_paths": pr_overlap,
+        "protected_paths_in_scope": protected_hits,
+        "force_push_risk": push_risk,
+        "native_agent_commands": agent_commands,
         "evidence_classification": classifications,
         "blockers": blockers,
         "safe_to_edit": not blockers and classifications.get("inside") == "actual",
-        "coderos": {"classification": "unavailable", "reason": "coderos_not_probed_by_this_utility"},
+        # Shape AND classification vocabulary preserved from the original
+        # stub ({"classification": one of "actual"/"unavailable"/"blocked"/
+        # "malformed", "reason": ...}) -- native_agent_capability's own
+        # richer state vocabulary ("installed"/"configured"/...) must never
+        # leak into this field; it lives in "native_agent_commands" above.
+        "coderos": (
+            {
+                "classification": "actual" if agent_commands["coderos"] == "installed" else "unavailable",
+                "reason": None if agent_commands["coderos"] == "installed" else "not_found_on_path",
+            }
+            if agent_commands.get("classification") == "actual"
+            else {"classification": "unavailable", "reason": "coderos_not_probed_by_this_utility"}
+        ),
         "next_best_action": (
             "use_exclusive_worktree_off_canonical"
             if "dirty_canonical_checkout" in blockers
@@ -233,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--canonical")
     parser.add_argument("--expected-branch")
     parser.add_argument("--allowed-scope", action="append", default=[])
+    parser.add_argument("--allowed-root", action="append", default=[])
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     document, code = evaluate_safety(
@@ -240,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         declared_canonical=args.canonical,
         expected_branch=args.expected_branch,
         allowed_scope=args.allowed_scope,
+        allowed_roots=args.allowed_root or None,
     )
     print(json.dumps(document, indent=2))
     return code
