@@ -275,6 +275,40 @@ test("#271 packages[] engagement rows and #261 Money fee copies are consumed wit
   assert.equal(result.projection.engagements[0].renewal_state, "not_applicable");
 });
 
+test("unserved GET envelope composes unavailable and is never fixture success", () => {
+  const result = adaptServiceProjection({
+    schema_version: "service-engagement-projection-v1",
+    availability: "unavailable",
+    live_endpoint: "/api/service-delivery/workbench",
+    live_endpoint_status: "unavailable",
+    read_only: true,
+    generated_at: "unserved",
+    engagements: [],
+    diagnostics: ["canonical_get_not_served"],
+    input_contract: "unknown",
+    network_calls: false,
+    mutated: false,
+  }, "unavailable");
+  const view = composeWorkbenchViewModel({
+    isLoading: false,
+    errorMessage: "Canonical /api/service-delivery/workbench unavailable (404). This is not a fixture success state.",
+    projection: result.projection,
+    filters: EMPTY_FILTERS,
+    selectedId: null,
+  });
+  assert.equal(view.surface, "unavailable");
+  assert.notEqual(view.surface, "success");
+  assert.equal(view.filtered.length, 0);
+  assert.equal(view.liveEndpointUnavailable, true);
+});
+
+test("workbench hook never substitutes demo fixtures when GET is down", async () => {
+  const source = await readFile(new URL("../src/features/service-delivery-workbench/hooks/useServiceDeliveryWorkbench.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /buildDemoProjection/);
+  assert.match(source, /canonical_get_not_served/);
+  assert.match(source, /method: "GET"/);
+});
+
 test("renewal and upsell metadata survive mapping as display copies", () => {
   const result = adaptServiceProjection(buildProducerPlaneEnvelope());
   const renewal = result.projection.engagements.find((row) => row.lifecycle_state === "renewal_candidate");

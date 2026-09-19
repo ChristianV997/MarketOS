@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FUTURE_WORKBENCH_PATH } from "../contracts/serviceEngagementProjection.ts";
-import { buildDemoProjection } from "../fixtures/buildFixtures.ts";
 import { adaptServiceProjection } from "../lib/adaptServiceProjection.ts";
 import { composeWorkbenchViewModel } from "../lib/composeWorkbenchViewModel.ts";
 import { EMPTY_FILTERS, type WorkbenchFilters } from "../lib/filterEngagements.ts";
@@ -9,7 +8,7 @@ import { joinApiPath, resolveApiBaseUrl } from "@/lib/apiBase";
 
 /**
  * Probes the canonical GET with the #213 apiBase helper. Never POSTs.
- * A missing route stays unavailable; fixtures are display-only, never success.
+ * A missing or failed route stays unavailable; demo fixtures are never substituted.
  */
 async function probeWorkbenchProjection(): Promise<unknown> {
   const url = joinApiPath(resolveApiBaseUrl(), FUTURE_WORKBENCH_PATH);
@@ -19,6 +18,20 @@ async function probeWorkbenchProjection(): Promise<unknown> {
   }
   return response.json();
 }
+
+const UNSERVED_GET_ENVELOPE = {
+  schema_version: "service-engagement-projection-v1",
+  availability: "unavailable",
+  live_endpoint: FUTURE_WORKBENCH_PATH,
+  live_endpoint_status: "unavailable",
+  read_only: true,
+  generated_at: "unserved",
+  engagements: [],
+  diagnostics: ["canonical_get_not_served"],
+  input_contract: "unknown",
+  network_calls: false,
+  mutated: false,
+} as const;
 
 export function useServiceDeliveryWorkbench() {
   const probe = useQuery({
@@ -32,8 +45,7 @@ export function useServiceDeliveryWorkbench() {
     if (probe.data) {
       return adaptServiceProjection(probe.data, "live-get");
     }
-    const fixture = adaptServiceProjection(buildDemoProjection(), "fixture");
-    return fixture;
+    return adaptServiceProjection(UNSERVED_GET_ENVELOPE, "unavailable");
   }, [probe.data]);
 
   const projection = adapted.projection;
@@ -45,7 +57,7 @@ export function useServiceDeliveryWorkbench() {
     errorMessage: adapted.rejected
       ? adapted.rejection_reason
       : probe.isError
-        ? `Canonical ${FUTURE_WORKBENCH_PATH} unavailable (${probe.error instanceof Error ? probe.error.message : "error"}). Showing fixture/manual copies only.`
+        ? `Canonical ${FUTURE_WORKBENCH_PATH} unavailable (${probe.error instanceof Error ? probe.error.message : "error"}). This is not a fixture success state.`
         : null,
     projection,
     filters,
@@ -59,6 +71,6 @@ export function useServiceDeliveryWorkbench() {
     selectedId: view.selected?.engagement_id ?? selectedId,
     setSelectedId,
     view,
-    recovery: "Clear filters or reload fixtures. Live fetch remains unavailable until a canonical projection ships. Do not treat this board as live client evidence.",
+    recovery: "Reload after a canonical GET /api/service-delivery/workbench envelope is served. Demo fixtures are not substituted when the route is down.",
   };
 }
