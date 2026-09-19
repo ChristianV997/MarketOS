@@ -328,6 +328,11 @@ def evaluate_safety(
         "origin_main_sha": main_sha or None,
         "merge_base_sha": base_sha or None,
         "branch": current_branch or None,
+        # Recorded unconditionally (not only when a "branch_conflict"
+        # blocker fires) so a caller reading this document can always see
+        # what was expected without cross-referencing the original call --
+        # a resume/handoff reader has no access to that call's arguments.
+        "expected_branch": expected_branch or None,
         "dirty": dirty,
         "canonical": current,
         "worktrees": worktrees,
