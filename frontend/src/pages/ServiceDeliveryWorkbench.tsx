@@ -15,7 +15,7 @@ export default function ServiceDeliveryWorkbench() {
       skipInitialFocus.current = false;
       return;
     }
-    const selected = tableRef.current?.querySelector<HTMLElement>("[aria-selected='true']");
+    const selected = tableRef.current?.querySelector<HTMLElement>("button[aria-pressed='true']");
     selected?.focus();
   }, [view.selected?.engagement_id]);
 
@@ -23,7 +23,7 @@ export default function ServiceDeliveryWorkbench() {
     <div className="mx-auto flex max-w-7xl flex-col gap-4 overflow-x-hidden p-3 md:p-5">
       <a
         href="#pipeline-heading"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
       >
         Skip to service pipeline
       </a>

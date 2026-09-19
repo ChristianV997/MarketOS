@@ -187,7 +187,8 @@ test("keyboard skip-link live region table and mobile semantics remain in source
   assert.match(table, /ArrowDown/);
   assert.match(table, /Home/);
   assert.match(table, /End/);
-  assert.match(table, /Enter/);
+  assert.match(table, /type="button"/);
+  assert.doesNotMatch(table, /event\.key === "Enter"/);
   assert.match(table, /overflow-x-auto/);
   assert.match(table, /scope="col"/);
   assert.match(table, /Filtering does not re-rank/);

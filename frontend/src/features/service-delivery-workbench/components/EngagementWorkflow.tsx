@@ -17,7 +17,7 @@ const EVIDENCE_STYLE: Record<EvidenceClass, string> = {
   fixture: "border-zinc-500/40 bg-zinc-700/20 text-zinc-300",
   manual_import: "border-indigo-500/30 bg-indigo-500/10 text-indigo-200",
   simulated: "border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-200",
-  unavailable: "border-zinc-600/40 bg-zinc-800/40 text-zinc-500",
+  unavailable: "border-zinc-600/40 bg-zinc-800/40 text-zinc-300",
   live_validated: "border-lime-500/30 bg-lime-500/10 text-lime-200",
 };
 
@@ -35,6 +35,27 @@ function Panel({
       <h3 id={headingId} className="text-sm font-semibold text-zinc-100">{title}</h3>
       <div className="mt-3 space-y-2 text-sm text-zinc-300">{children}</div>
     </section>
+  );
+}
+
+function JsonPreview({
+  value,
+  label,
+  maxHeightClass = "max-h-40",
+}: {
+  value: unknown;
+  label: string;
+  maxHeightClass?: string;
+}) {
+  return (
+    <pre
+      role="region"
+      tabIndex={0}
+      aria-label={label}
+      className={`mt-2 ${maxHeightClass} overflow-auto whitespace-pre-wrap break-all rounded bg-black/40 p-2 text-[11px] text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400`}
+    >
+      {JSON.stringify(value, null, 2)}
+    </pre>
   );
 }
 
@@ -57,13 +78,13 @@ export function EngagementWorkflow({
     <div className="grid gap-3 lg:grid-cols-2">
       <Panel title="Client intake" headingId="intake-heading">
         <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <div><dt className="text-[11px] uppercase text-zinc-500">Client</dt><dd>{engagement.intake.display_name}</dd></div>
-          <div><dt className="text-[11px] uppercase text-zinc-500">Workspace</dt><dd>{engagement.intake.workspace_id}</dd></div>
-          <div><dt className="text-[11px] uppercase text-zinc-500">Service</dt><dd>{PRIORITY_SERVICE_LABELS[engagement.service_id]}</dd></div>
-          <div><dt className="text-[11px] uppercase text-zinc-500">Lifecycle</dt><dd>{lifecycleLabel(engagement.lifecycle_state)}</dd></div>
+          <div><dt className="text-[11px] uppercase text-zinc-400">Client</dt><dd>{engagement.intake.display_name}</dd></div>
+          <div><dt className="text-[11px] uppercase text-zinc-400">Workspace</dt><dd>{engagement.intake.workspace_id}</dd></div>
+          <div><dt className="text-[11px] uppercase text-zinc-400">Service</dt><dd>{PRIORITY_SERVICE_LABELS[engagement.service_id]}</dd></div>
+          <div><dt className="text-[11px] uppercase text-zinc-400">Lifecycle</dt><dd>{lifecycleLabel(engagement.lifecycle_state)}</dd></div>
         </dl>
         <table className="mt-2 min-w-full text-left text-xs">
-          <thead className="text-zinc-500">
+          <thead className="text-zinc-400">
             <tr><th scope="col" className="py-1">Field</th><th scope="col">Status</th><th scope="col">Client must provide</th></tr>
           </thead>
           <tbody>
@@ -101,7 +122,7 @@ export function EngagementWorkflow({
       </Panel>
 
       <Panel title="Evidence register" headingId="evidence-heading">
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-400">
           Classes are displayed separately and never upgraded. live_validated is shown only when the projection already carries that class.
         </p>
         <ul className="mt-2 space-y-2">
@@ -119,7 +140,7 @@ export function EngagementWorkflow({
 
       <Panel title="Financial-analysis readiness" headingId="finance-heading">
         <p>{engagement.financial_readiness.ready ? "Ready for display of sanitized copies." : "Not ready."}</p>
-        <p className="text-xs text-zinc-500">{engagement.financial_readiness.note}</p>
+        <p className="text-xs text-zinc-400">{engagement.financial_readiness.note}</p>
         {engagement.financial_readiness.missing.length > 0 && (
           <ul className="list-disc pl-5 text-xs">
             {engagement.financial_readiness.missing.map((item) => <li key={item}>{item}</li>)}
@@ -135,7 +156,7 @@ export function EngagementWorkflow({
         <ul className="list-disc pl-5 text-xs">
           {engagement.assumptions.map((item) => <li key={item}>{item}</li>)}
         </ul>
-        <p className="text-[11px] text-zinc-500">Draft-ready is not commercially validated.</p>
+        <p className="text-[11px] text-zinc-400">Draft-ready is not commercially validated.</p>
       </Panel>
 
       <Panel title="Deliverable acceptance criteria" headingId="acceptance-heading">
@@ -185,9 +206,11 @@ export function EngagementWorkflow({
           Preview reuses the client-safe export. data_inadequate engagements cannot be exported as complete deliverables.
         </p>
         {exportPreview?.accepted ? (
-          <pre className="mt-2 max-h-40 overflow-auto rounded bg-black/40 p-2 text-[11px] text-zinc-300">
-            {JSON.stringify(exportPreview.payload, null, 2)}
-          </pre>
+          <JsonPreview
+            value={exportPreview.payload}
+            label="Draft report JSON preview"
+            maxHeightClass="max-h-40"
+          />
         ) : (
           <p className="text-red-200 text-xs">{exportPreview?.rejection_reason ?? "No draft report."}</p>
         )}
@@ -209,33 +232,39 @@ export function EngagementWorkflow({
         {exportPreview?.accepted ? (
           <div>
             <p className="text-emerald-300">Accepted client-safe preview. Internal prompts, formulas, heuristics, credentials, and cross-client data are omitted.</p>
-            <pre className="mt-2 max-h-64 overflow-auto rounded bg-black/40 p-2 text-[11px] text-zinc-300">
-              {JSON.stringify(exportPreview.payload, null, 2)}
-            </pre>
+            <JsonPreview
+              value={exportPreview.payload}
+              label="Client-safe export JSON preview"
+              maxHeightClass="max-h-64"
+            />
           </div>
         ) : (
           <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-red-100">
             <p className="font-medium">Export rejected</p>
             <p className="mt-1 text-xs">{exportPreview?.rejection_reason}</p>
             {exportPreview?.payload && (
-              <pre className="mt-2 max-h-40 overflow-auto text-[11px]">{JSON.stringify(exportPreview.payload, null, 2)}</pre>
+              <JsonPreview
+                value={exportPreview.payload}
+                label="Rejected export JSON preview"
+                maxHeightClass="max-h-40"
+              />
             )}
           </div>
         )}
       </Panel>
 
       <Panel title="Assumptions and missing data" headingId="assumptions-heading">
-        <p className="text-[11px] uppercase text-zinc-500">Assumptions</p>
+        <p className="text-[11px] uppercase text-zinc-400">Assumptions</p>
         <ul className="list-disc pl-5 text-xs">
           {engagement.assumptions.map((item) => <li key={item}>{item}</li>)}
         </ul>
-        <p className="pt-2 text-[11px] uppercase text-zinc-500">Missing data</p>
+        <p className="pt-2 text-[11px] uppercase text-zinc-400">Missing data</p>
         {engagement.missing_data.length ? (
           <ul className="list-disc pl-5 text-xs">
             {engagement.missing_data.map((item) => <li key={item}>{item}</li>)}
           </ul>
         ) : (
-          <p className="text-xs text-zinc-500">No missing-data rows on this engagement.</p>
+          <p className="text-xs text-zinc-400">No missing-data rows on this engagement.</p>
         )}
       </Panel>
 
@@ -243,7 +272,7 @@ export function EngagementWorkflow({
         <p className="text-xs text-amber-200">{engagement.economics.planning_assumption_note}</p>
         <dl className="grid grid-cols-2 gap-2 text-xs">
           <div>
-            <dt className="text-zinc-500">Fee copy</dt>
+            <dt className="text-zinc-400">Fee copy</dt>
             <dd>
               {engagement.economics.fee
                 ? `${engagement.economics.fee.amount_label} ${engagement.economics.fee.currency}`
@@ -254,7 +283,7 @@ export function EngagementWorkflow({
             </dd>
           </div>
           <div>
-            <dt className="text-zinc-500">Contribution copy</dt>
+            <dt className="text-zinc-400">Contribution copy</dt>
             <dd>
               {engagement.economics.contribution
                 ? `${engagement.economics.contribution.amount_label} ${engagement.economics.contribution.currency}`
@@ -262,34 +291,34 @@ export function EngagementWorkflow({
             </dd>
           </div>
         </dl>
-        <p className="text-[11px] text-zinc-500">frontend_calculates={String(engagement.economics.frontend_calculates)}</p>
+        <p className="text-[11px] text-zinc-400">frontend_calculates={String(engagement.economics.frontend_calculates)}</p>
       </Panel>
 
       <Panel title="Capacity warning" headingId="capacity-heading">
         <p className="font-medium capitalize">{engagement.capacity.state}</p>
         <p className="text-xs">{engagement.capacity.message}</p>
         {engagement.capacity.concurrent_label && (
-          <p className="text-xs text-zinc-500">{engagement.capacity.concurrent_label}</p>
+          <p className="text-xs text-zinc-400">{engagement.capacity.concurrent_label}</p>
         )}
       </Panel>
 
       <Panel title="Decision and next-best action" headingId="nba-heading">
         <p className="text-zinc-100">{engagement.next_best_action.action}</p>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-400">
           Owner: {engagement.next_best_action.owner}. Live execution: never.
         </p>
         <p className="text-xs">{engagement.next_best_action.rationale}</p>
       </Panel>
 
       <Panel title="Creative asset requests (draft / unavailable)" headingId="creative-heading">
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-400">
           Inspected {HIGGSFIELD_CONTRACT_SOURCE}. No Higgsfield SDK, key, MCP, upload, generation, or publish.
         </p>
         <ul className="space-y-2">
           {engagement.creative_assets.map((item) => (
             <li key={item.skill_id} className="rounded-md border border-dashed border-white/[0.08] p-2 text-xs">
               <p className="font-medium text-zinc-200">{item.skill_id} · {item.status}</p>
-              <p className="text-zinc-500">{item.note}</p>
+              <p className="text-zinc-400">{item.note}</p>
             </li>
           ))}
         </ul>

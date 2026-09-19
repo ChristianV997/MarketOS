@@ -36,7 +36,7 @@ export function WorkbenchStatusBanner({
         <span className="font-medium uppercase tracking-wide text-[11px]">{surface}</span>
         <span className="ml-2">{message}</span>
       </p>
-      <p className="mt-1 text-[11px] opacity-80">
+      <p className="mt-1 text-[11px]">
         Read-only operator workbench. No client accounts, messages, publishing, campaign edits, or charges.
       </p>
     </div>
@@ -58,16 +58,16 @@ export function FilterBar({
       onSubmit={(event) => event.preventDefault()}
       aria-label="Filter engagements without changing source order"
     >
-      <label className="block text-[11px] uppercase tracking-widest text-zinc-500">
+      <label className="block text-[11px] uppercase tracking-widest text-zinc-400">
         Search
         <input
-          className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0a0a0b] px-2.5 py-1.5 text-sm text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
+          className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0a0a0b] px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
           value={filters.query}
           onChange={(event) => onChange({ ...filters, query: event.target.value })}
           placeholder="Client, engagement, service"
         />
       </label>
-      <label className="block text-[11px] uppercase tracking-widest text-zinc-500">
+      <label className="block text-[11px] uppercase tracking-widest text-zinc-400">
         Service
         <select
           className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0a0a0b] px-2.5 py-1.5 text-sm text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
@@ -83,7 +83,7 @@ export function FilterBar({
           ))}
         </select>
       </label>
-      <label className="block text-[11px] uppercase tracking-widest text-zinc-500">
+      <label className="block text-[11px] uppercase tracking-widest text-zinc-400">
         Lifecycle
         <select
           className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0a0a0b] px-2.5 py-1.5 text-sm text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
@@ -99,7 +99,7 @@ export function FilterBar({
           ))}
         </select>
       </label>
-      <label className="block text-[11px] uppercase tracking-widest text-zinc-500">
+      <label className="block text-[11px] uppercase tracking-widest text-zinc-400">
         Evidence class
         <select
           className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0a0a0b] px-2.5 py-1.5 text-sm text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
