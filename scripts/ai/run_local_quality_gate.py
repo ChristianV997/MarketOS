@@ -751,7 +751,9 @@ def load_ci_evidence(path: Path) -> tuple[dict[str, Any], str | None]:
             return _ci_evidence_error("invalid_ci_runner_name")
         if steps > 0 and (runner_id is None or runner_id == 0):
             return _ci_evidence_error("contradictory_ci_runner_steps")
-        if status == "completed" and conclusion == "pending":
+        if status == "completed" and (conclusion == "pending" or required_check_status == "pending"):
+            return _ci_evidence_error("contradictory_ci_job_metadata")
+        if status != "completed" and (conclusion != "pending" or required_check_status != "pending"):
             return _ci_evidence_error("contradictory_ci_job_metadata")
         normalized_jobs.append({
             "name": name.strip(),

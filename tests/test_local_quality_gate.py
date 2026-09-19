@@ -573,6 +573,15 @@ def test_ci_evidence_rejects_contradictory_runner_steps_and_netlify_required_job
     assert contradictory["diagnostic_state"] == "malformed_metadata"
     assert error == "malformed_ci_evidence"
 
+    contradictory_job_root = tmp_path / "contradictory-job"
+    contradictory_job_root.mkdir()
+    contradictory_job_path = _write_ci_evidence(contradictory_job_root, extra_job_fields={
+        "status": "queued", "conclusion": "failure", "required_check_status": "failure",
+    })
+    contradictory_job, error = gate.load_ci_evidence(contradictory_job_path)
+    assert contradictory_job["diagnostic_state"] == "malformed_metadata"
+    assert error == "malformed_ci_evidence"
+
     netlify_root = tmp_path / "netlify"
     netlify_root.mkdir()
     netlify_path = _write_ci_evidence(netlify_root)
