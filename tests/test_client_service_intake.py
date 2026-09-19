@@ -328,6 +328,55 @@ def test_csv_missing_required_columns_is_rejected(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# Replay determinism
+#
+# The service layer this bridge composes has no idempotency/event-spine
+# authority of its own (confirmed by reading evaluation/companyos/
+# service_delivery.py and backend/deliverables/package.py), and this
+# lane's own instructions are explicit: do not add one just to make a
+# replay "look" perfectly identical. This test documents the real,
+# verified boundary instead -- verified directly via two live CLI runs of
+# byte-identical input files before writing this assertion.
+# ---------------------------------------------------------------------------
+
+
+def test_replaying_the_same_sanitized_input_is_deterministic_except_the_canonical_deliverable_timestamp(tmp_path: Path):
+    """DeliverablePackage.created_at (backend/deliverables/package.py) is a
+    pre-existing field on the canonical deliverable dataclass, defaulted
+    via `field(default_factory=time.time)` -- a real wall-clock value this
+    bridge neither sets nor has any parameter to override, and must not
+    "fix" by constructing DeliverablePackage itself (that would duplicate
+    the one existing deliverable-construction authority). Every other
+    field -- engagement_id, workspace_id, deliverable package_id,
+    lifecycle_state, data_quality, and every real number in
+    derived_values -- is byte-identical across two independent runs of
+    the same sanitized input."""
+    registry_one, deliverables_one = _registries(tmp_path / "run1")
+    registry_two, deliverables_two = _registries(tmp_path / "run2")
+    intake = _base_intake()
+    first = bridge.run(intake, workspace_registry=registry_one, deliverable_registry=deliverables_one)
+    second = bridge.run(intake, workspace_registry=registry_two, deliverable_registry=deliverables_two)
+
+    assert first["engagement_id"] == second["engagement_id"]
+    assert first["workspace_id"] == second["workspace_id"]
+    assert first["classification"] == second["classification"]
+    assert first["lifecycle_state"] == second["lifecycle_state"]
+    assert first["data_quality"] == second["data_quality"]
+
+    # The one documented exception: a live wall-clock field on the
+    # canonical DeliverablePackage this bridge does not control. Every
+    # other deliverable key (package_id, status, sections/derived_values,
+    # etc.) is asserted equal by this single loop -- checked both
+    # directions so a key present on only one side is caught too.
+    non_deterministic_fields = {"created_at"}
+    assert set(first["deliverable"]) == set(second["deliverable"])
+    for key in first["deliverable"]:
+        if key in non_deterministic_fields:
+            continue
+        assert first["deliverable"][key] == second["deliverable"][key], key
+
+
+# ---------------------------------------------------------------------------
 # Workspace identity separation
 # ---------------------------------------------------------------------------
 
