@@ -329,7 +329,12 @@ def _replay_scenario(
     candidate_id = manifest["candidates"][0]["candidate_id"]
     audit = next(item for item in research["appendix"]["candidate_audit"] if item["candidate_id"] == candidate_id)
     offer = next(
-        (item for item in research["appendix"]["supplier_offers"] if item["candidate_id"] == candidate_id),
+        (
+            item
+            for item in research["appendix"]["supplier_offers"]
+            if item["candidate_id"] == candidate_id
+            and item.get("status") == "accepted"
+        ),
         None,
     )
     if offer is not None:
@@ -512,7 +517,12 @@ def _replay_scenario(
         "governor": governor.to_dict(),
         "approval_ledger": _approval_ledger_cli_projection(approval_ledger),
         "client_export": export.to_dict(),
-        "event_summary": summary,
+        # These are lifecycle events, not financial-ledger observations. The
+        # canonical summary defaults empty ledger aggregates to numeric zero;
+        # omit that unsupported projection rather than imply observed zeroes.
+        "event_summary": {
+            key: value for key, value in summary.items() if key != "ledger"
+        },
         "event_ids": [event.event_id for event in events],
         "event_replay_hashes": event_replay_hashes,
         # Derive this only from canonical event replay hashes; packet-level

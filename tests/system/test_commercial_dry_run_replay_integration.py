@@ -411,6 +411,7 @@ def test_consolidated_replay_carries_research_through_mexico_fulfillment_and_saf
         assert "unknown_cost:supplier_shipping" in result["fulfillment"]["reserve_classifications"]
     assert result["event_summary"]["sequence_issues"] == []
     assert result["event_summary"]["live_authority_violations"] == []
+    assert "ledger" not in result["event_summary"]
     assert result["event_count"] == result["event_summary"]["event_count"] == 37
     assert len(result["event_summary"]["hash_sequence"]) == 37
     assert len(result["event_ids"]) == len(set(result["event_ids"])) == 37
@@ -581,6 +582,136 @@ def test_missing_supplier_shipping_is_unavailable_but_explicit_zero_is_preserved
     assert zero_result["commerce"]["commerce_packet"]["assumptions"][
         "supplier_shipping"
     ]["amount"] == "0"
+
+
+@pytest.mark.parametrize(
+    ("product_cost_value", "shipping_value", "expected_status"),
+    ((None, "25", "unavailable"), ("0", "0", "simulated"), ("100", "25", "simulated")),
+)
+def test_product_cost_missing_zero_and_positive_remain_distinct_in_serialized_replay(
+    monkeypatch, product_cost_value, shipping_value, expected_status,
+):
+    import scripts.research_to_decision as research_to_decision
+    from backend.events.repository import InMemoryEventRepository
+
+    captured_events = []
+    append_many = InMemoryEventRepository.append_many
+
+    def capture_events(repository, events):
+        rows = tuple(events)
+        captured_events.extend(rows)
+        return append_many(repository, rows)
+
+    monkeypatch.setattr(InMemoryEventRepository, "append_many", capture_events)
+    build = research_to_decision.build_research_to_decision
+
+    def with_cost_values(manifest, *, base_dir):
+        report = build(manifest, base_dir=base_dir)
+        candidate_id = manifest["candidates"][0]["candidate_id"]
+        offer = next(
+            item for item in report["appendix"]["supplier_offers"]
+            if item["candidate_id"] == candidate_id
+        )
+        offer["price"]["amount"] = product_cost_value
+        offer["shipping"]["cost"] = shipping_value
+        offer["evidence"]["state"] = "fixture"
+        manifest["candidates"][0]["target_sell_price"] = "10000"
+        return report
+
+    monkeypatch.setattr(
+        research_to_decision, "build_research_to_decision", with_cost_values
+    )
+    result = run_consolidated_scenario(
+        "hydroponics_promising.json", "hydroponics_positive_candidate"
+    )
+    economics_step = next(
+        step for step in result["commerce"]["steps"] if step["step"] == "unit_economics"
+    )
+    economics_event = next(
+        event for event in captured_events
+        if event.event_type == "commerce_dry_run_step_unit_economics"
+    )
+    export_json = json.dumps(result["client_export"]["payload"], sort_keys=True)
+    result_json = json.dumps(result, sort_keys=True)
+
+    assert economics_step["status"] == expected_status
+    assert result["client_export"]["payload"]["status"] == "blocked"
+    assert "contribution" not in export_json
+    assert "product_cost" not in export_json
+    assert "supplier_shipping" not in export_json
+    if product_cost_value is None:
+        assert economics_step["detail"]["evidence_state"] == "missing"
+        assert "product_cost" in economics_step["detail"]["missing_inputs"]
+        assert "contribution_before_cac" not in economics_step["detail"]
+        assert "amount" not in economics_event.payload["detail"]
+        assert "economics" in result["commerce"]["promotion"]["blockers"]
+        assert "unknown_cost:product_cost" in result["fulfillment"]["reserve_classifications"]
+        assert result["commerce"]["commerce_packet"]["economics"]["status"] == "unavailable"
+        assert "contribution_before_cac" not in result_json
+        assert "contribution_profit" not in result_json
+    else:
+        economics = result["commerce"]["commerce_packet"]["economics"]
+        assert economics["product_cost"]["amount"] == product_cost_value
+        assert economics["product_cost"]["source"] == "fixture"
+        assert economics["product_cost"]["evidence_state"] == "fixture"
+        assert economics["supplier_shipping"]["amount"] == shipping_value
+        assert economics["supplier_shipping"]["evidence_state"] == "fixture"
+        assert economics_event.payload["status"] == "simulated"
+        assert economics_event.payload["detail"]["contribution_before_cac"][
+            "evidence_state"
+        ] == "fixture"
+        assert result["evidence_classes"]["economics"] == "derived"
+        assert result["launch_authorized"] is False
+
+
+@pytest.mark.parametrize("fixture_name", ("stale_offer.json", "conflicting_quotes.json"))
+def test_quarantined_supplier_offers_cannot_supply_replay_economics(
+    monkeypatch, fixture_name,
+):
+    import scripts.research_to_decision as research_to_decision
+
+    build = research_to_decision.build_research_to_decision
+
+    def complete_quarantined_offer(manifest, *, base_dir):
+        report = build(manifest, base_dir=base_dir)
+        candidate_id = manifest["candidates"][0]["candidate_id"]
+        offers = [
+            item for item in report["appendix"]["supplier_offers"]
+            if item["candidate_id"] == candidate_id
+        ]
+        assert offers and all(item["status"] == "quarantined" for item in offers)
+        for offer in offers:
+            offer["shipping"]["cost"] = "1"
+            offer["evidence"]["state"] = "fixture"
+        manifest["candidates"][0]["target_sell_price"] = "10000"
+        return report
+
+    monkeypatch.setattr(
+        research_to_decision, "build_research_to_decision", complete_quarantined_offer
+    )
+    result = run_consolidated_scenario(
+        fixture_name, "hydroponics_positive_candidate"
+    )
+    economics_step = next(
+        step for step in result["commerce"]["steps"] if step["step"] == "unit_economics"
+    )
+    export_json = json.dumps(result["client_export"]["payload"], sort_keys=True)
+
+    assert result["supplier_offer"] is None
+    assert result["evidence_classes"]["supplier_evidence"] == "unavailable"
+    assert result["evidence_classes"]["economics"] == "unavailable"
+    assert economics_step["status"] == "unavailable"
+    assert economics_step["detail"]["evidence_state"] == "missing"
+    assert {"product_cost", "supplier_shipping"} <= set(
+        economics_step["detail"]["missing_inputs"]
+    )
+    assert "economics" in result["commerce"]["promotion"]["blockers"]
+    assert result["commerce"]["promoted_to_launch"] is False
+    assert result["client_export"]["payload"]["status"] == "blocked"
+    assert "contribution" not in export_json
+    assert "product_cost" not in export_json
+    assert "supplier_shipping" not in export_json
+    assert any("supplier_offer:" in blocker for blocker in result["research"]["blockers"])
 
 
 @pytest.mark.parametrize("fixture_name,builder_name", _CONSOLIDATED_REPLAY_FIXTURES)
