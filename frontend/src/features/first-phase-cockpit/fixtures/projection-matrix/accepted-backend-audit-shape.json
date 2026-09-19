@@ -64,6 +64,7 @@
         "observed_values": { "supplier_offer_count": 1, "marketplace_evidence_count": 2 },
         "assumptions": ["duty_model_unknown"],
         "missing_evidence": ["duty_model_unknown"],
+        "evidence_refs": ["evidence:abc123"],
         "evidence_gaps": ["lane_not_verified"],
         "conflicts": [],
         "freshness": "expired",

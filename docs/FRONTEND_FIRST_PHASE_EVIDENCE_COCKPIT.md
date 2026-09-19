@@ -68,6 +68,7 @@ They follow the existing #247 report/appendix shape (not a second packet):
 | Fixture | Expected |
 |---------|----------|
 | `accepted-manual-screening.json` | Overlay SKU/lane/offer; overall confidence stays unavailable (not averaged) |
+| `accepted-backend-audit-shape.json` | Fixture/contract-shaped #247 `candidate_audit` (`action`, `evidence_gaps`, `promotion_lifecycle`, `evidence_refs`); compose+view-model join only, never producer output |
 | `partial-appendix.json` | Accepted; server rows unchanged |
 | `stale-unmatched.json` | Expired/blocked economics unavailable; report-only IDs not inserted |
 | `rejected-unsupported-version.json` | `schema_version_unsupported` |

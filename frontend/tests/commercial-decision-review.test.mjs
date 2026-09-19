@@ -4,6 +4,8 @@ import { test } from "node:test";
 
 import { DECISION_TIMELINE_KINDS } from "../src/features/first-phase-cockpit/contracts/firstPhaseEvidencePacket.ts";
 import { classifyEvidenceClass } from "../src/features/first-phase-cockpit/lib/classifyEvidence.ts";
+import { composeCockpitViewModel } from "../src/features/first-phase-cockpit/lib/composeCockpitViewModel.ts";
+import { DEFAULT_CANDIDATE_FILTER, filterCandidates } from "../src/features/first-phase-cockpit/lib/filterCandidates.ts";
 import {
   enrichDecisionReview,
   mapCommercialReviewTags,
@@ -12,6 +14,7 @@ import {
 } from "../src/features/first-phase-cockpit/lib/mapDecisionReview.ts";
 import { adaptCommerceProjection } from "../src/features/first-phase-cockpit/lib/overlayCommerceProjection.ts";
 import { adaptResearchToDecisionProjection } from "../src/features/first-phase-cockpit/lib/overlayResearchToDecision.ts";
+import { windowCandidates } from "../src/features/first-phase-cockpit/lib/windowCandidates.ts";
 
 const featureRoot = new URL("../src/features/first-phase-cockpit/", import.meta.url);
 const matrixRoot = new URL("../src/features/first-phase-cockpit/fixtures/projection-matrix/", import.meta.url);
@@ -258,6 +261,152 @@ test("keyboard helpers and reduced-motion documentation remain in source", async
   assert.match(compose, /never sort or re-rank/);
   assert.match(compose, /adaptCommerceProjection/);
   assert.match(compose, /operatorWorkspaceId/);
+});
+
+function composeWithProjection(ids, projection, extra = {}) {
+  return composeCockpitViewModel({
+    phase1Readiness: { overall_status: "ready" },
+    benchmark: {
+      top_candidate_id: ids[0] ?? null,
+      next_best_action: "review_evidence",
+      evidence_mode: "fixture_demo",
+      warnings: [],
+      read_only: true,
+      mutated: false,
+      network_calls: false,
+      candidates: ids.map((candidate_id) => ({
+        candidate: { candidate_id, title: candidate_id },
+        evidence_completeness: 0.4,
+        risk_level: "medium",
+        commercial_decision: "hold_for_manual_review",
+        next_best_action: "hold_for_manual_review",
+        supplier_evidence: { score: 0.4 },
+        competition_evidence: { score: 0.5 },
+        economics: { margin_quality: "assumption", assumption_ratio: 0.8 },
+        validation_priority: { priority: "high", target: "duty_model" },
+      })),
+    },
+    publicMarket: null,
+    researchPortfolio: null,
+    readinessError: false,
+    benchmarkError: false,
+    publicMarketError: false,
+    researchError: false,
+    isLoading: false,
+    researchToDecisionProjection: projection,
+    ...extra,
+  });
+}
+
+test("compose+view-model consume fixture/contract-shaped #247 candidate_audit without inventing proof", async () => {
+  const packet = JSON.parse(await readFile(new URL("accepted-backend-audit-shape.json", matrixRoot), "utf8"));
+  const view = composeWithProjection(["hydroponics-kit", "server-only"], packet);
+  assert.equal(view.state, "stale");
+  assert.deepEqual(view.rankedCandidates.map((row) => row.candidateId), ["hydroponics-kit", "server-only"]);
+  const joined = view.rankedCandidates[0];
+  const unmatched = view.rankedCandidates[1];
+  assert.equal(joined.sku, "HYDRO-KIT-01");
+  assert.equal(joined.commercialDecision, "hold_for_manual_review");
+  assert.equal(joined.nextBestAction, "hold_for_manual_review");
+  assert.equal(joined.nextActionWorkflow.action, "hold_for_manual_review");
+  assert.equal(joined.nextActionWorkflow.allowedInReadOnlyCockpit, false);
+  assert.ok(joined.missingEvidence.includes("duty_model_unknown"));
+  assert.ok(joined.missingEvidence.includes("lane_not_verified"));
+  assert.ok(joined.hardGates.includes("supplier_offer:offer_expired"));
+  assert.ok(joined.hardGates.includes("manual_evidence_is_not_live_supplier_proof"));
+  assert.ok(joined.evidenceReferences.includes("evidence:abc123"));
+  assert.equal(joined.riskLevel, "blocked");
+  assert.equal(joined.promotionState, "blocked");
+  assert.ok(joined.commercialReviewTags.includes("blocked"));
+  assert.ok(joined.commercialReviewTags.includes("stale"));
+  assert.ok(joined.commercialReviewTags.includes("fixture"));
+  assert.ok(!joined.commercialReviewTags.includes("live_validated"));
+  assert.equal(joined.launchAuthorizedFalse, true);
+  assert.equal(joined.confidence, null);
+  assert.equal(joined.confidenceSupplier, 0.4);
+  assert.equal(joined.freshnessExpiry, "expired");
+  assert.deepEqual(
+    joined.promotionTransitions.map((item) => item.to),
+    ["discovered", "promotion_blocked", "launch_authorized_false"],
+  );
+  assert.ok(joined.decisionTimeline.every((item) => item.at === null));
+  const blocker = joined.decisionTimeline.find((item) => item.kind === "blocker_or_next_best_action");
+  assert.equal(blocker.status, "observed");
+  assert.equal(blocker.summary, joined.hardGates[0]);
+  assert.ok(joined.hardGates.includes("manual_evidence_is_not_live_supplier_proof"));
+  assert.equal(unmatched.sku, null);
+  assert.equal(unmatched.confidence, null);
+  assert.ok(!unmatched.evidenceReferences.includes("evidence:abc123"));
+
+  const filtered = filterCandidates(view.rankedCandidates, { ...DEFAULT_CANDIDATE_FILTER, query: "hydro" });
+  assert.deepEqual(filtered.map((row) => row.candidateId), ["hydroponics-kit"]);
+  const windowed = windowCandidates(view.rankedCandidates, 0, 1);
+  assert.deepEqual(windowed.visible.map((row) => row.candidateId), ["hydroponics-kit"]);
+  const topN = filterCandidates(
+    composeWithProjection(
+      ["hydroponics-kit", ...Array.from({ length: 11 }, (_, index) => `tail-${index}`)],
+      packet,
+    ).rankedCandidates,
+    { ...DEFAULT_CANDIDATE_FILTER, topN: true },
+  );
+  assert.equal(topN.length, 10);
+  assert.deepEqual(topN.map((row) => row.rankIndex), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+});
+
+test("compose keeps absent/null/empty #247 audit fields unavailable instead of fabricating success", () => {
+  const view = composeWithProjection(["hydroponics-kit"], {
+    report_version: "product-validation-report-v1",
+    appendix: {
+      research_to_decision_version: "v1",
+      candidate_audit: [{
+        candidate_id: "hydroponics-kit",
+        action: null,
+        next_action: null,
+        decision: null,
+        evidence_gaps: [],
+        missing_evidence: null,
+        promotion_lifecycle: [],
+        evidence_refs: [],
+        freshness: null,
+        evidence_expiry: null,
+        confidence: { overall: null },
+        economics: {},
+        hard_gates: [],
+      }],
+    },
+  });
+  const row = view.rankedCandidates[0];
+  assert.equal(row.confidence, null);
+  assert.equal(row.freshnessExpiry, null);
+  assert.ok(row.decisionTimeline.every((item) => item.at === null));
+  assert.equal(row.launchAuthorizedFalse, true);
+  assert.ok(!row.commercialReviewTags.includes("live_validated"));
+  assert.equal(row.economicsUnavailable, true);
+  assert.equal(row.economicsLabel, null);
+  assert.notEqual(view.state, "empty");
+});
+
+test("compose fail-closed on #247 launch_authorized, malformed, duplicate, secret, and oversized packets", async () => {
+  const rejected = async (name, token) => {
+    const packet = JSON.parse(await readFile(new URL(name, matrixRoot), "utf8"));
+    const view = composeWithProjection(["hydroponics-kit"], packet);
+    assert.equal(view.state, "unavailable");
+    assert.match(view.fingerprint.projectionWarning ?? "", new RegExp(token));
+    assert.equal(view.rankedCandidates[0].sku, null);
+  };
+  await rejected("rejected-launch-authorized.json", "launch_authorized_rejected");
+  await rejected("rejected-malformed.json", "candidate_audit_malformed");
+  await rejected("rejected-duplicate-ids.json", "candidate_identity_duplicate");
+  await rejected("rejected-secret.json", "secret_shaped_value_rejected");
+  const oversized = composeWithProjection(["hydroponics-kit"], {
+    report_version: "product-validation-report-v1",
+    appendix: {
+      research_to_decision_version: "v1",
+      candidate_audit: Array.from({ length: 201 }, (_, index) => ({ candidate_id: `c-${index}` })),
+    },
+  });
+  assert.equal(oversized.state, "unavailable");
+  assert.match(oversized.fingerprint.projectionWarning ?? "", /projection_oversized/);
 });
 
 test("#247 hydroponics screening fixture remains mapped by id", async () => {
