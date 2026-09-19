@@ -519,6 +519,8 @@ def test_missing_supplier_cost_is_unavailable_in_report_and_canonical_economics_
 
 
 def test_missing_supplier_shipping_is_unavailable_but_explicit_zero_is_preserved(monkeypatch):
+    from dataclasses import replace
+
     import scripts.research_to_decision as research_to_decision
     from scripts.run_commercial_replay_integration import _missing_supplier_cost_inputs
     from backend.events.repository import InMemoryEventRepository
@@ -539,19 +541,27 @@ def test_missing_supplier_shipping_is_unavailable_but_explicit_zero_is_preserved
         {"price": {"amount": None}}, "0"
     ) == ("product_cost",)
 
-    build = research_to_decision.build_research_to_decision
+    load_import = research_to_decision._load_import
 
-    def without_shipping(manifest, *, base_dir):
-        report = build(manifest, base_dir=base_dir)
-        supplier_offer = next(
-            item for item in report["appendix"]["supplier_offers"]
-            if item["candidate_id"] == "hydroponics-kit"
-        )
-        supplier_offer["shipping"]["cost"] = None
-        return report
+    def set_shipping_cost(value):
+        def load_with_shipping(path, entry, role, **kwargs):
+            records, audit = load_import(path, entry, role, **kwargs)
+            if role == "supplier":
+                records = [
+                    replace(record, shipping_cost=value)
+                    if record.candidate_id == "hydroponics-kit"
+                    else record
+                    for record in records
+                ]
+                for supplier_offer in audit.get("supplier_offers", []):
+                    if supplier_offer.get("candidate_id") == "hydroponics-kit":
+                        supplier_offer["shipping"]["cost"] = value
+            return records, audit
+
+        return load_with_shipping
 
     monkeypatch.setattr(
-        research_to_decision, "build_research_to_decision", without_shipping
+        research_to_decision, "_load_import", set_shipping_cost(None)
     )
     result = run_consolidated_scenario(
         "hydroponics_promising.json", "hydroponics_positive_candidate"
@@ -585,17 +595,8 @@ def test_missing_supplier_shipping_is_unavailable_but_explicit_zero_is_preserved
     assert "supplier_shipping" not in export_json
     assert "contribution" not in export_json
 
-    def with_zero_shipping(manifest, *, base_dir):
-        report = build(manifest, base_dir=base_dir)
-        supplier_offer = next(
-            item for item in report["appendix"]["supplier_offers"]
-            if item["candidate_id"] == "hydroponics-kit"
-        )
-        supplier_offer["shipping"]["cost"] = "0"
-        return report
-
     monkeypatch.setattr(
-        research_to_decision, "build_research_to_decision", with_zero_shipping
+        research_to_decision, "_load_import", set_shipping_cost("0")
     )
     zero_result = run_consolidated_scenario(
         "hydroponics_promising.json", "hydroponics_positive_candidate"
