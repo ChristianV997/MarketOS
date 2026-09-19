@@ -89,20 +89,83 @@ def _canonical_fingerprint(value: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _scenario_evidence_classes(offer: dict[str, Any] | None) -> dict[str, str]:
+def _scenario_evidence_classes(
+    offer: dict[str, Any] | None,
+    *,
+    missing_cost_inputs: tuple[str, ...] = (),
+) -> dict[str, str]:
     """Classify each evidence boundary without changing existing status fields."""
     return {
         "runner": "actual_executed",
         "research_input": "fixture",
         "supplier_evidence": "manual_import" if offer is not None else "unavailable",
-        "economics": "derived",
+        "economics": "unavailable" if missing_cost_inputs else "derived",
+        "economics_calculation": "actual_executed",
         "commerce_lifecycle": "simulated_or_planned",
         "fulfillment_lifecycle": "simulated_or_planned",
         "governor": "simulated_or_planned",
         "approval_ledger": "simulated_or_planned",
         "trustos_export": "actual_executed",
+        "external_validation": "unavailable",
         "ci": "ci_unavailable",
     }
+
+
+def _missing_supplier_cost_inputs(
+    offer: dict[str, Any] | None,
+    shipping_value: Any,
+) -> tuple[str, ...]:
+    """Treat absent amounts as unknown while preserving explicitly supplied zero."""
+    missing: list[str] = []
+    price_value = offer.get("price", {}).get("amount") if offer is not None else None
+    unknown_tokens = {"", "unknown", "unavailable", "n/a", "none", "missing"}
+    if offer is None or price_value is None or (
+        isinstance(price_value, str) and price_value.strip().lower() in unknown_tokens
+    ):
+        missing.append("product_cost")
+    if offer is None or shipping_value is None or (
+        isinstance(shipping_value, str) and shipping_value.strip().lower() in unknown_tokens
+    ):
+        missing.append("supplier_shipping")
+    return tuple(missing)
+
+
+def _mark_missing_cost_economics_unavailable(report: Any, missing_cost_inputs: tuple[str, ...]) -> Any:
+    """Do not publish kernel arithmetic that used missing supplier costs as zero."""
+    missing_inputs = set(report.economics.missing_inputs)
+    missing_inputs.update(missing_cost_inputs)
+
+    packet = dict(report.commerce_packet)
+    assumptions = dict(packet.get("assumptions", {}))
+    for name, value in tuple(assumptions.items()):
+        if isinstance(value, dict) and value.get("source") == "missing":
+            missing_inputs.add(name)
+            assumptions.pop(name)
+    packet["assumptions"] = assumptions
+    missing = sorted(missing_inputs)
+    unavailable = {
+        "status": "unavailable",
+        "currency": report.economics.currency,
+        "evidence_state": "missing",
+        "missing_inputs": missing,
+        "reason": "supplier_offer_evidence_missing",
+    }
+    packet["economics"] = unavailable
+
+    steps = tuple(
+        replace(
+            step,
+            status="unavailable",
+            detail={
+                **unavailable,
+                "calculation_execution": "actual_executed",
+            },
+        )
+        if step.step == "unit_economics"
+        else step
+        for step in report.steps
+    )
+    return replace(report, steps=steps, commerce_packet=packet)
 
 
 def _commerce_cli_projection(report: Any) -> dict[str, Any]:
@@ -120,8 +183,14 @@ def _commerce_cli_projection(report: Any) -> dict[str, Any]:
     }
 
 
-def _fulfillment_cli_projection(report: Any) -> dict[str, Any]:
+def _fulfillment_cli_projection(
+    report: Any,
+    *,
+    missing_cost_inputs: tuple[str, ...] = (),
+) -> dict[str, Any]:
     """Expose the existing fulfillment state projection, not raw internals."""
+    reserve_classifications = set(report.reserve_classifications)
+    reserve_classifications.update(f"unknown_cost:{name}" for name in missing_cost_inputs)
     return {
         "schema": "MarketOS.FulfillmentRiskDryRun.v1",
         "scenario_id": report.scenario_id,
@@ -137,7 +206,7 @@ def _fulfillment_cli_projection(report: Any) -> dict[str, Any]:
         "evidence_state": report.evidence_state,
         "evidence_refs": [item.to_dict() for item in report.evidence_refs],
         "sla_risks": list(report.sla_risks),
-        "reserve_classifications": list(report.reserve_classifications),
+        "reserve_classifications": sorted(reserve_classifications),
         "risk_flags": list(report.risk_flags),
         "port_observations": [item.to_dict() for item in report.port_observations],
         "event_ids": [item.event_id for item in report.events],
@@ -279,12 +348,17 @@ def _replay_scenario(
     template = builders[builder_name]()
     price_value = manifest["candidates"][0].get("target_sell_price") or (offer["price"]["amount"] if offer else "0")
     product_cost_value = offer["price"]["amount"] if offer else "0"
-    shipping_value = offer["shipping"]["cost"] if offer else "0"
+    shipping_value = offer["shipping"]["cost"] if offer else None
+    missing_cost_inputs = _missing_supplier_cost_inputs(offer, shipping_value)
     money_evidence_state = "fixture" if offer is not None else "missing"
     money_source = "fixture" if offer is not None else "missing"
+    product_cost_missing = "product_cost" in missing_cost_inputs
     product_cost = Money(
-        str(product_cost_value), lane.currency, source=money_source, provenance=money_source,
-        evidence_ref=evidence, evidence_state=money_evidence_state,
+        str("0" if product_cost_missing else product_cost_value), lane.currency,
+        source="missing" if product_cost_missing else money_source,
+        provenance="missing" if product_cost_missing else money_source,
+        evidence_ref=evidence,
+        evidence_state="missing" if product_cost_missing else money_evidence_state,
     )
     price = Money(
         str(price_value), lane.currency, source="fixture", provenance="fixture",
@@ -292,9 +366,13 @@ def _replay_scenario(
     )
     assumptions = replace(
         template.assumptions,
-        supplier_shipping=Money(
-            str(shipping_value or "0"), lane.currency, source=money_source, provenance=money_source,
-            evidence_ref=evidence, evidence_state=money_evidence_state,
+        supplier_shipping=(
+            Money(
+                str(shipping_value), lane.currency, source=money_source, provenance=money_source,
+                evidence_ref=evidence, evidence_state=money_evidence_state,
+            )
+            if "supplier_shipping" not in missing_cost_inputs
+            else None
         ),
         payment_fee_fixed=Money("0", lane.currency, source=money_source, provenance=money_source, evidence_state=money_evidence_state, evidence_ref=evidence),
         cac=Money("0", lane.currency, source=money_source, provenance=money_source, evidence_state=money_evidence_state, evidence_ref=evidence),
@@ -310,6 +388,9 @@ def _replay_scenario(
             variant_id=offer["variant"],
             evidence_ref=evidence,
         )
+    gate_satisfaction = dict(template.gate_satisfaction)
+    if missing_cost_inputs:
+        gate_satisfaction["economics"] = False
     scenario = replace(
         template,
         candidate_id=candidate_id,
@@ -320,8 +401,11 @@ def _replay_scenario(
         assumptions=assumptions,
         supplier_offer=supplier_offer,
         evidence_state=research["appendix"]["market_lane"]["evidence_state"],
+        gate_satisfaction=gate_satisfaction,
     )
     commerce = run_dry_run_lifecycle(scenario)
+    if missing_cost_inputs:
+        commerce = _mark_missing_cost_economics_unavailable(commerce, missing_cost_inputs)
     commerce_events = lifecycle_events(commerce, workspace_id=workspace_id, occurred_at=0.0)
 
     fulfillment_template = build_named_scenario("customer_return_merchant_paid")
@@ -405,7 +489,9 @@ def _replay_scenario(
     result = {
         "scenario": commerce.scenario_id,
         "candidate_id": candidate_id,
-        "evidence_classes": _scenario_evidence_classes(offer),
+        "evidence_classes": _scenario_evidence_classes(
+            offer, missing_cost_inputs=missing_cost_inputs
+        ),
         "supplier_offer": {
             "offer_id": offer["offer_id"],
             "exact_sku": offer["exact_sku"],
@@ -419,7 +505,10 @@ def _replay_scenario(
             "blockers": list(audit["hard_gates"]),
         },
         "commerce": _commerce_cli_projection(commerce),
-        "fulfillment": _fulfillment_cli_projection(fulfillment_report),
+        "fulfillment": _fulfillment_cli_projection(
+            fulfillment_report,
+            missing_cost_inputs=missing_cost_inputs,
+        ),
         "governor": governor.to_dict(),
         "approval_ledger": _approval_ledger_cli_projection(approval_ledger),
         "client_export": export.to_dict(),
