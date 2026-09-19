@@ -76,7 +76,12 @@ def test_canonical_measure_classifies_or_proves_five_scenarios() -> None:
         assert row["replay_hashes_equal"] is True
         assert row["event_ids_equal"] is True
         assert row["live_actions_taken"] is False
+        assert row["live_attestation"] is False
         assert row["hash_authority"] == "Event.replay_hash"
+        assert row["execution_class"] == "actual_canonical_dry_run"
+        assert row["aggregate_replay_hash_stable"] is True
+        assert row["evidence_state_preserved"] is True
+        assert "p95_ms" in row and "p99_ms" in row
 
 
 def test_arbitration_report_records_owners_and_does_not_claim_optimization() -> None:
