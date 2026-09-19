@@ -65,6 +65,13 @@ export interface ResearchToDecisionAuditRow {
   } | null;
   decision?: string | null;
   next_action?: string | null;
+  action?: string | null;
+  evidence_gaps?: string[];
+  promotion_lifecycle?: Array<{
+    prior_state?: string | null;
+    next_state?: string | null;
+    reason_code?: string | null;
+  }>;
   hard_gates?: string[];
 }
 
@@ -74,6 +81,8 @@ export interface ClientSafeProjectionCandidate {
   title?: string;
   decision?: string | null;
   next_action?: string | null;
+  action?: string | null;
+  promotion_state?: string | null;
   risk_state?: string | null;
   freshness?: string | null;
   confidence?: ResearchToDecisionAuditRow["confidence"];
@@ -281,14 +290,42 @@ function mergeAudit(
     candidate_id: audit?.candidate_id ?? safe?.candidate_id,
     title: audit?.title ?? safe?.title,
     decision: audit?.decision ?? safe?.decision,
-    next_action: audit?.next_action ?? safe?.next_action,
+    next_action: audit?.next_action ?? audit?.action ?? safe?.next_action ?? safe?.action,
     risk_state: audit?.risk_state ?? safe?.risk_state,
     freshness: audit?.freshness ?? safe?.freshness,
     confidence: audit?.confidence ?? safe?.confidence,
     missing_evidence: audit?.missing_evidence ?? safe?.missing_evidence,
+    evidence_gaps: audit?.evidence_gaps,
+    promotion_lifecycle: audit?.promotion_lifecycle,
     hard_gates: audit?.hard_gates ?? safe?.hard_gates,
     evidence_refs: audit?.evidence_refs ?? safe?.evidence_refs,
   };
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    next.push(value);
+  }
+  return next;
+}
+
+function mapPromotionLifecycle(
+  raw: ResearchToDecisionAuditRow["promotion_lifecycle"],
+): RankedCandidateRow["promotionTransitions"] {
+  if (!raw?.length) return [];
+  return raw.map((item) => {
+    const to = item.next_state == null || item.next_state === "" ? null : String(item.next_state);
+    return {
+      from: item.prior_state == null ? null : String(item.prior_state),
+      to,
+      status: to ? "observed" as const : "unavailable" as const,
+      reason: item.reason_code == null ? null : String(item.reason_code),
+    };
+  });
 }
 
 /**
@@ -343,9 +380,14 @@ export function overlayResearchToDecisionAudits(
     const stale = declaredFreshness === "expired" || isStaleFreshness(freshnessLabel);
     const economicsMissing = economicsUnavailable(audit.economics);
     const mappedEconomics = economicsLabel(audit.economics);
-    const decision = audit.decision ?? audit.next_action ?? null;
-    const nextAction = audit.next_action ?? audit.decision ?? null;
+    const decision = audit.decision ?? audit.next_action ?? audit.action ?? null;
+    const nextAction = audit.next_action ?? audit.action ?? audit.decision ?? null;
     const hardGates = Array.isArray(audit.hard_gates) ? [...audit.hard_gates] : [];
+    const missingEvidence = uniqueStrings([
+      ...(Array.isArray(audit.missing_evidence) ? audit.missing_evidence.map(String) : []),
+      ...(Array.isArray(audit.evidence_gaps) ? audit.evidence_gaps.map(String) : []),
+    ]);
+    const promotionTransitions = mapPromotionLifecycle(audit.promotion_lifecycle);
     const promotion = derivePromotionState(
       audit.risk_state ?? audit.lifecycle_state ?? decision ?? row.commercialDecision,
     );
@@ -379,7 +421,7 @@ export function overlayResearchToDecisionAudits(
       supplierOffer: summarizeOffer(audit),
       offerDisposition: offerDispositionFromAudit(audit),
       assumptions: Array.isArray(audit.assumptions) ? [...audit.assumptions] : row.assumptions,
-      missingEvidence: Array.isArray(audit.missing_evidence) ? [...audit.missing_evidence] : row.missingEvidence,
+      missingEvidence: missingEvidence.length ? missingEvidence : row.missingEvidence,
       conflicts: Array.isArray(audit.conflicts) ? [...audit.conflicts] : row.conflicts,
       confidence: overall,
       confidenceSupplier: supplierConf,
@@ -425,6 +467,7 @@ export function overlayResearchToDecisionAudits(
         }
         return cell;
       }),
+      promotionTransitions: promotionTransitions.length ? promotionTransitions : row.promotionTransitions,
     });
   });
 

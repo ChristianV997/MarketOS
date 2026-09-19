@@ -294,6 +294,30 @@ test("compose surfaces loading empty blocked unavailable stale partial success w
   assert.ok(success.controlPlanes.some((slot) => slot.id === "approval_ledger" && slot.status === "unavailable"));
 });
 
+test("#247 backend audit shape maps action, evidence_gaps, promotion_lifecycle, blocked, and expired freshness", async () => {
+  const packet = await loadFixture("accepted-backend-audit-shape.json");
+  const adapted = adaptResearchToDecisionProjection([serverRow()], packet, NOW);
+  assert.equal(adapted.accepted, true);
+  const row = adapted.rows[0];
+  assert.equal(row.sku, "HYDRO-KIT-01");
+  assert.equal(row.nextBestAction, "hold_for_manual_review");
+  assert.equal(row.promotionState, "blocked");
+  assert.ok(row.commercialReviewTags.includes("blocked"));
+  assert.ok(row.missingEvidence.includes("duty_model_unknown"));
+  assert.ok(row.missingEvidence.includes("lane_not_verified"));
+  assert.equal(row.confidence, null);
+  assert.equal(row.confidenceSupplier, 0.4);
+  assert.equal(row.nextActionWorkflow.allowedInReadOnlyCockpit, false);
+  assert.equal(row.freshnessExpiry, "expired");
+  assert.ok(row.commercialReviewTags.includes("stale"));
+  assert.ok(!row.commercialReviewTags.includes("live_validated"));
+  assert.deepEqual(
+    row.promotionTransitions.map((item) => item.to),
+    ["discovered", "promotion_blocked", "launch_authorized_false"],
+  );
+  assert.ok(row.decisionTimeline.every((item) => item.at === null));
+});
+
 test("adapter source remains identity-preserving and fail-closed", async () => {
   const source = await readFile(new URL("lib/overlayResearchToDecision.ts", featureRoot), "utf8");
   assert.match(source, /adaptResearchToDecisionProjection/);

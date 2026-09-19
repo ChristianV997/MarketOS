@@ -118,7 +118,9 @@ The cockpit is a read-only review surface, not a ranked-score editor.
   human-confirmation, and `allowedInReadOnlyCockpit: false`. Future actions stay draft/unavailable
   metadata. No mutation buttons.
 - #247 overlay remains `product-validation-report-v1` and rejects `cross_workspace_rejected`
-  when an operator workspace is known and the packet or audit declares a different workspace. #250 overlay is
+  when an operator workspace is known and the packet or audit declares a different workspace.
+  Candidate `action` aliases `next_action`; `evidence_gaps` join missing evidence; `promotion_lifecycle`
+  is copied as display-only transitions without inventing timeline timestamps. #250 overlay is
   `MarketOS.ClientCommerceProjection.v1` only. Malformed, secret-shaped, duplicate, oversized,
   cross-workspace, or `launch_authorized: true` packets are rejected with the exact warning token.
 - `commerceProjection` is not fetched. Until a cockpit-owned endpoint exists, the hook passes
