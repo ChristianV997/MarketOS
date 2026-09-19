@@ -21,17 +21,21 @@ There is no overlay authority. `data/source_adaptation_corrections_v1.json` is r
 | gstack | reference_only | `a6b3a57512ca6d5c6aa5b68f74f736195021f96e` | docs.ai.standards |
 | Hermes | reference_only | NousResearch/hermes-agent `027d1a8a6043355b7af53b4c0645336b41372b7b` | docs.ai.standards |
 
-## Commit-object verification
+## Immutable Pin Verification
 
-Registry validation checks SHA syntax offline; that is not proof that a Git object exists. A read-only GitHub commit/tag-reference check on 2026-09-18 resolved 23 of 29 catalog pins. The following six remain unverified and block source-governance acceptance:
+Registry validation checks SHA syntax offline; that is not proof that a Git object exists. The earlier catalog sweep recorded 23 of 29 commit objects as resolved. A focused read-only follow-up on 2026-09-19 checked each of the six previously unresolved source records against GitHub commit/tag refs and the license file at the exact commit where available:
 
-- Crawl4AI (`src-crawl4ai`)
-- Hermes (`src-hermes-ecc`)
-- Higgsfield CLI (`src-higgsfield-cli`)
-- Higgsfield Python SDK (`src-higgsfield-python-sdk`)
-- Higgsfield Skills (`src-higgsfield-skills`)
-- Prefect (`src-prefect`)
+| Source | Exact commit | Declared tag | License at pinned commit | Result |
+| --- | --- | --- | --- | --- |
+| Crawl4AI (`src-crawl4ai`) | GitHub commit lookup returned 422; commit page returned 404 | `v0.4.2` ref returned 404 | unavailable without a resolvable commit | unresolved |
+| Hermes (`src-hermes-ecc`) | `027d1a8a6043355b7af53b4c0645336b41372b7b` resolves in `NousResearch/hermes-agent` | `v1.2.0` ref returned 404 | MIT confirmed at the exact commit | partial; declared version tag unresolved |
+| Higgsfield CLI (`src-higgsfield-cli`) | commit lookup/page did not resolve | `v0.3.1` ref returned 404 | unavailable without a resolvable commit | unresolved |
+| Higgsfield Python SDK (`src-higgsfield-python-sdk`) | GitHub commit lookup returned 422; commit page returned 404 | `0.1.0` ref returned 404 | unavailable without a resolvable commit | unresolved |
+| Higgsfield Skills (`src-higgsfield-skills`) | GitHub commit lookup returned 422; commit page returned 404 | `0.12.0` ref returned 404 | unavailable without a resolvable commit | unresolved |
+| Prefect (`src-prefect`) | `c8986edebb2dde3e2a931adbe24d2eaefcb799cb` resolves in `PrefectHQ/prefect` | `3.2.0` points to the exact commit | Apache-2.0 confirmed at the exact commit | verified |
 
-Do not replace these pins with moving branch heads merely to satisfy validation. Resolve the exact reviewed revisions, update the canonical generator and its generated work orders together, and rerun the source-governance contracts before treating this draft as merger-ready.
+The Hermes and Prefect license evidence URLs in the canonical builder now point to the immutable commit paths above; generated registry and work orders are rebuilt from that builder. Prefect is fully verified. Hermes' commit and license are verified, but its recorded `v1.2.0` tag is not; treat the Hermes record as unresolved until the version assertion is corrected from authoritative evidence. The other four source refs and their pinned licenses remain unavailable. Do not replace any revision with a moving branch head or infer a SHA. Keep PR #272 draft and blocked until all six records are fully resolved and focused contracts pass.
+
+Do not replace unresolved pins with moving branch heads merely to satisfy validation. Resolve exact reviewed revisions through authoritative refs, update the canonical generator and generated work orders together, and rerun source-governance contracts before treating this draft as merger-ready.
 
 Rollback: revert PR #272. No live providers, no GPU/desktop runtime, no second registry.

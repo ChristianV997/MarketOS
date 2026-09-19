@@ -160,3 +160,19 @@ def test_placeholder_pins_replaced_for_reference_sources():
     assert hermes.repository_url == "https://github.com/NousResearch/hermes-agent"
     assert hermes.commit_sha == "027d1a8a6043355b7af53b4c0645336b41372b7b"
     assert hermes.adaptation_mode == AdaptationMode.REFERENCE_ONLY.value
+
+
+def test_verified_license_evidence_urls_are_immutable():
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    verified_pins = {
+        "src-hermes-ecc": "027d1a8a6043355b7af53b4c0645336b41372b7b",
+        "src-prefect": "c8986edebb2dde3e2a931adbe24d2eaefcb799cb",
+    }
+
+    for source_id, commit_sha in verified_pins.items():
+        record = registry.get_record(source_id)
+        assert record is not None
+        assert record.commit_sha == commit_sha
+        assert record.license_evidence_url == (
+            f"{record.repository_url}/blob/{commit_sha}/LICENSE"
+        )

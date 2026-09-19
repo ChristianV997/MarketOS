@@ -451,7 +451,7 @@ RECORDS = [
         "version_tag": "v1.2.0",
         "source_type": "git_repository",
         "license": "MIT",
-        "license_evidence_url": "https://github.com/NousResearch/hermes-agent/blob/main/LICENSE",
+        "license_evidence_url": "https://github.com/NousResearch/hermes-agent/blob/027d1a8a6043355b7af53b4c0645336b41372b7b/LICENSE",
         "inspected_paths": [
             "spec/contract_first.md",
             "spec/architecture_decision_records.md"
@@ -482,7 +482,7 @@ RECORDS = [
         "reviewer": "quality-architecture-reviewer",
         "verification_evidence": "docs/ai/OSS_PATTERN_RETROFIT_ADR.md",
         "rejection_reason": None,
-        "last_reviewed_at": "2026-09-17T20:00:00Z"
+        "last_reviewed_at": "2026-09-19T04:27:29Z"
     },
     {
         "source_id": "src-higgsfield-cli",
@@ -1010,7 +1010,7 @@ RECORDS = [
         "version_tag": "3.2.0",
         "source_type": "git_repository",
         "license": "Apache-2.0",
-        "license_evidence_url": "https://github.com/PrefectHQ/prefect/blob/main/LICENSE",
+        "license_evidence_url": "https://github.com/PrefectHQ/prefect/blob/c8986edebb2dde3e2a931adbe24d2eaefcb799cb/LICENSE",
         "inspected_paths": [
             "src/prefect/flows.py",
             "src/prefect/tasks.py"
@@ -1041,7 +1041,7 @@ RECORDS = [
         "reviewer": "quality-architecture-reviewer",
         "verification_evidence": "docs/ai/OSS_PATTERN_RETROFIT_ADR.md",
         "rejection_reason": "Heavy workflow daemon duplicates MarketOS single native event spine; introduces parallel database and execution engine.",
-        "last_reviewed_at": "2026-09-17T20:00:00Z"
+        "last_reviewed_at": "2026-09-19T04:27:29Z"
     },
     {
         "source_id": "src-saleor",
