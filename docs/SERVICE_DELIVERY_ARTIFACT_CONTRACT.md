@@ -163,6 +163,76 @@ reproduction of their logic:
 This is genuine integration evidence, not a reproduction: every check in
 this section imports and executes another team's actual, unmodified code.
 
+### Deeper real-composition verification (lane SERVICE-DELIVERY-REAL-COMPOSITION-V3)
+
+V2's combined-worktree run above proved a single success case plus 5
+negative cases against the real route. This lane rebuilt a fresh combined
+worktree (`origin/main` + #271's head + #277's head + this branch's then-
+current head `ac58dd8`, merged with no conflicts) and widened the real
+(non-reproduced) execution to the full flow the mission specified:
+
+`ClientEngagement -> ClientDataQualityAssessment -> ServiceEconomics
+(backend.economics.kernel) -> ServiceDeliveryArtifact -> TrustOS client
+workspace isolation -> the real #271 GET route -> the real #277/#264
+frontend adapter and compose step`.
+
+- All 4 priority packages x all 15 real, non-pseudo `ClientEngagement`
+  lifecycle states (`eligible`, `data_inadequate`, `scoped`,
+  `evidence_collection`, `analysis`, `draft_ready`, `client_review`,
+  `revision_requested`, `approved`, `delivered`, `paused`, `cancelled`,
+  `rejected`, `renewal_candidate`, `upsell_candidate`) were driven through
+  this producer's real functions, projected, and served through the real,
+  unmodified `api.routes.service_delivery_workbench.workbench()` —
+  **60/60** returned `available_read_only` with the correct
+  `lifecycle_state` and `service_id` round-tripped exactly.
+- The same real route was re-exercised against 6 real negative cases
+  (missing env var, path outside `artifacts/`, malformed JSON, a leaking
+  payload, an unsafe `mutated: true` flag, an unsupported schema version)
+  — **6/6** returned `"unavailable"` with the correct per-case diagnostic.
+  `"unavailable"` is confirmed as a frontend/envelope-level outcome only;
+  it is never emitted as a `ClientEngagement.lifecycle_state`.
+- A 5-engagement, multi-package, multi-currency (MXN + USD), multi-state
+  projection (including a `data_inadequate` and a `cancelled` row) was
+  built by this producer, served through the real route, and piped through
+  the real, unmodified `adaptServiceProjection.ts` and
+  `composeWorkbenchViewModel.ts` — the adapter accepted it
+  (`rejected: false`), all 5 lifecycle states and service IDs round-tripped
+  exactly, `live_endpoint_status` stayed `"available_read_only"`, the
+  composed view model's `surface` was `"partial"` (never `"success"`), and
+  every engagement's `internal_prompt` / `internal_formula` /
+  `private_operator_notes` fields were confirmed `null` (present-but-null
+  is the frontend contract's own shape, not a leak).
+- Exact-value checks against the real kernel output (not the frontend's
+  display copies): `economics.service_fee` matched `row["economics"]["fee"]`
+  to the exact `Decimal` for both MXN and USD; `delivery_cost`,
+  `tooling_cost`, `pass_through_cost`, and `refund_revision_reserve` all
+  shared the engagement's currency; `row["data_quality_state"]` matched
+  `ClientDataQualityAssessment.status` exactly; `row["missing_data"]` was
+  empty only when the assessment reported no missing fields; the capacity
+  signal correctly reported `"unavailable"` (fail-closed) rather than
+  fabricating a number when capacity inputs were not supplied.
+- The real, existing frontend suites (`service-delivery-workbench.test.mjs`,
+  `readonly-cockpit-browser-acceptance.test.mjs`,
+  `service-workbench-producer-acceptance.test.mjs` — **47/47**) and the
+  real, #271-owned `tests/integration/test_service_delivery_workbench_api.py`
+  (**5/5**, importing the real route module directly) ran unmodified in the
+  combined worktree, alongside this module's own suites — **517 passed**
+  combined.
+- No new defect was found in the producer this round. Two mistakes were
+  found and fixed in the throwaway verification harness itself (an assumed
+  adapter return shape, and a naive leak-detection substring check that
+  flagged the frontend's own always-present, always-`null` internal-field
+  keys) — neither harness file was committed or pushed.
+- Environment note, reported for honesty: this sandbox did not have
+  `fastapi`, `scipy`, `scikit-learn`, or `pytest` installed at the start of
+  this lane. They are declared in `requirements.txt` and were installed
+  before any of the real-module execution above could run at all; without
+  them, `api.routes.service_delivery_workbench` cannot even be imported.
+  That means genuine execution was only possible after this install step.
+
+As before, the combined worktree was never pushed and is deleted after use;
+only this file and this branch's own producer/test files are committed.
+
 ## Compatibility rules for future changes to this module
 
 1. Never add a field that duplicates a value already owned by
