@@ -3,7 +3,7 @@ import {
   EVIDENCE_COCKPIT_SCHEMA_VERSION,
   type ClientSafeCockpitExport,
   type FirstPhaseEvidencePacket,
-} from "../contracts/firstPhaseEvidencePacket";
+} from "../contracts/firstPhaseEvidencePacket.ts";
 
 const SECRET_SHAPED = /sk-live-|sk-test-|ghp_|github_pat_|AKIA[0-9A-Z]{16}|bearer\s+[a-z0-9._-]{10,}/i;
 const FORBIDDEN_EXPORT_KEY = /prompt|formula|heuristic|source_code|private_key|provider_payload|internal_notes/;

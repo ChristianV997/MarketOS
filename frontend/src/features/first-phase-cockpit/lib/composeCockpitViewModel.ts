@@ -447,6 +447,8 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
   const mapped = overlayResearchToDecisionProjection(
     mapCandidates(input.benchmark, evidenceMode),
     projection,
+    Date.now(),
+    input.operatorWorkspaceId ?? null,
   );
   const commerce = adaptCommerceProjection(
     mapped.rows,

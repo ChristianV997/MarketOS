@@ -93,7 +93,7 @@ export function CommercialReviewTags({ candidate }: { candidate: RankedCandidate
               ? "border-lime-500/30 text-lime-200"
               : tag === "fixture" || tag === "manual_import" || tag === "simulated"
                 ? "border-amber-500/30 text-amber-200"
-                : tag === "reject" || tag.includes("launch")
+                : tag === "reject" || tag === "blocked" || tag.includes("launch")
                   ? "border-rose-500/30 text-rose-200"
                   : "border-zinc-600 text-zinc-300"
           }`}

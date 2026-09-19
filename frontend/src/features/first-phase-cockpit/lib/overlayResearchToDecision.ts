@@ -4,12 +4,12 @@ import {
   RESEARCH_TO_DECISION_APPENDIX_VERSION,
   type EvidenceClass,
   type RankedCandidateRow,
-} from "../contracts/firstPhaseEvidencePacket";
-import { classifyEvidenceClass } from "./classifyEvidence";
-import { derivePromotionState } from "./derivePromotionState";
-import { containsSecretShapedValue } from "./exportClientSafeReport";
-import { formatFreshnessLabel, isStaleFreshness } from "./freshness";
-import { enrichDecisionReview } from "./mapDecisionReview";
+} from "../contracts/firstPhaseEvidencePacket.ts";
+import { classifyEvidenceClass } from "./classifyEvidence.ts";
+import { derivePromotionState } from "./derivePromotionState.ts";
+import { containsSecretShapedValue } from "./exportClientSafeReport.ts";
+import { formatFreshnessLabel, isStaleFreshness } from "./freshness.ts";
+import { enrichDecisionReview } from "./mapDecisionReview.ts";
 
 export type ProjectionValidationResult =
   | { ok: true; packet: ResearchToDecisionProjection }
@@ -26,6 +26,7 @@ export interface ProjectionAdapterResult {
 
 export interface ResearchToDecisionAuditRow {
   candidate_id?: string;
+  workspace_id?: string | null;
   sku?: string | null;
   supplier_sku?: string | null;
   title?: string;
@@ -69,6 +70,7 @@ export interface ResearchToDecisionAuditRow {
 
 export interface ClientSafeProjectionCandidate {
   candidate_id?: string;
+  workspace_id?: string | null;
   title?: string;
   decision?: string | null;
   next_action?: string | null;
@@ -136,8 +138,36 @@ function indexUniqueAudits(
   return { ok: true, byId };
 }
 
+function declaredWorkspace(record: Record<string, unknown> | null | undefined): string | null {
+  if (!record || record.workspace_id == null) return null;
+  const value = String(record.workspace_id).trim();
+  return value || null;
+}
+
+function rejectsOperatorWorkspace(
+  packet: Record<string, unknown>,
+  appendix: Record<string, unknown>,
+  clientSafe: Record<string, unknown> | null,
+  operatorWorkspaceId: string | null,
+): boolean {
+  if (!operatorWorkspaceId) return false;
+  const packetWorkspace = declaredWorkspace(packet) ?? declaredWorkspace(appendix) ?? declaredWorkspace(clientSafe);
+  if (packetWorkspace && packetWorkspace !== operatorWorkspaceId) return true;
+  const audits = Array.isArray(appendix.candidate_audit) ? appendix.candidate_audit : [];
+  const safes = Array.isArray(clientSafe?.candidates) ? clientSafe.candidates : [];
+  for (const item of [...audits, ...safes]) {
+    const record = asRecord(item);
+    const workspace = declaredWorkspace(record);
+    if (workspace && workspace !== operatorWorkspaceId) return true;
+  }
+  return false;
+}
+
 /** Fail-closed schema gate for the existing product-validation-report projection. Extra fields are ignored. */
-export function validateResearchToDecisionProjection(raw: unknown): ProjectionValidationResult {
+export function validateResearchToDecisionProjection(
+  raw: unknown,
+  operatorWorkspaceId: string | null = null,
+): ProjectionValidationResult {
   if (!raw || typeof raw !== "object") return { ok: false, reason: "projection_not_object" };
   if (containsSecretShapedValue(raw)) return { ok: false, reason: "secret_shaped_value_rejected" };
   const packet = raw as Record<string, unknown>;
@@ -153,6 +183,9 @@ export function validateResearchToDecisionProjection(raw: unknown): ProjectionVa
     return { ok: false, reason: "candidate_audit_malformed" };
   }
   const clientSafe = asRecord(appendix.client_safe_projection);
+  if (rejectsOperatorWorkspace(packet, appendix, clientSafe, operatorWorkspaceId)) {
+    return { ok: false, reason: "cross_workspace_rejected" };
+  }
   if (clientSafe?.launch_authorized === true) {
     return { ok: false, reason: "launch_authorized_rejected" };
   }
@@ -403,6 +436,7 @@ export function adaptResearchToDecisionProjection(
   rows: RankedCandidateRow[],
   raw: unknown,
   nowMs: number = Date.now(),
+  operatorWorkspaceId: string | null = null,
 ): ProjectionAdapterResult {
   if (raw == null) {
     return {
@@ -414,7 +448,7 @@ export function adaptResearchToDecisionProjection(
       unmatchedProjectionIds: [],
     };
   }
-  const validated = validateResearchToDecisionProjection(raw);
+  const validated = validateResearchToDecisionProjection(raw, operatorWorkspaceId);
   if (!validated.ok) {
     return {
       rows,
@@ -457,6 +491,7 @@ export function overlayResearchToDecisionProjection(
   rows: RankedCandidateRow[],
   raw: unknown,
   nowMs: number = Date.now(),
+  operatorWorkspaceId: string | null = null,
 ): ProjectionAdapterResult {
-  return adaptResearchToDecisionProjection(rows, raw, nowMs);
+  return adaptResearchToDecisionProjection(rows, raw, nowMs, operatorWorkspaceId);
 }

@@ -2,7 +2,7 @@ import {
   STABLE_TOP_N,
   type CandidateFilterState,
   type RankedCandidateRow,
-} from "../contracts/firstPhaseEvidencePacket";
+} from "../contracts/firstPhaseEvidencePacket.ts";
 
 export const DEFAULT_CANDIDATE_FILTER: CandidateFilterState = {
   query: "",

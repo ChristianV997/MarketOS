@@ -108,6 +108,7 @@ export const COMMERCIAL_REVIEW_TAGS = [
   "needs_evidence",
   "hold",
   "reject",
+  "blocked",
   "draft_ready",
   "launch_authorized_false",
   "unavailable",

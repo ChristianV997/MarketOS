@@ -7,7 +7,7 @@ import {
   type NextActionWorkflow,
   type PromotionTransition,
   type RankedCandidateRow,
-} from "../contracts/firstPhaseEvidencePacket";
+} from "../contracts/firstPhaseEvidencePacket.ts";
 
 const MUTATION_ACTION = /send_message|place_order|publish_ad|change_price|approve_supplier|issue_refund|mutate/;
 
@@ -64,6 +64,7 @@ export function mapCommercialReviewTags(row: RankedCandidateRow): CommercialRevi
   if (row.promotionState === "needs_evidence" || row.missingEvidence.length > 0) tags.add("needs_evidence");
   if (row.promotionState === "hold") tags.add("hold");
   if (row.promotionState === "reject") tags.add("reject");
+  if (row.promotionState === "blocked") tags.add("blocked");
   if (row.promotionState === "draft_ready") tags.add("draft_ready");
   if (row.promotionState === "unavailable") tags.add("unavailable");
   if (row.evidenceClass === "stale" || (row.freshnessExpiry ?? "").toLowerCase().includes("expir")) {
