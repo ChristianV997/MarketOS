@@ -409,6 +409,34 @@ test("compose fail-closed on #247 launch_authorized, malformed, duplicate, secre
   assert.match(oversized.fingerprint.projectionWarning ?? "", /projection_oversized/);
 });
 
+test("compose maps producer-shaped action, empty evidence_gaps, and promotion_lifecycle through the view model", async () => {
+  const packet = JSON.parse(await readFile(new URL("accepted-producer-shaped-hydroponics-audit.json", matrixRoot), "utf8"));
+  const view = composeWithProjection(["hydroponics-kit", "server-only"], packet);
+  const joined = view.rankedCandidates[0];
+  assert.deepEqual(view.rankedCandidates.map((row) => row.candidateId), ["hydroponics-kit", "server-only"]);
+  assert.equal(joined.nextBestAction, "expand_consumer_research");
+  assert.equal(joined.nextActionWorkflow.action, "expand_consumer_research");
+  assert.equal(joined.commercialDecision, "expand_consumer_research");
+  assert.ok(!joined.missingEvidence.includes("lane_not_verified"));
+  assert.ok(joined.hardGates.includes("no_launch_or_spend_authority"));
+  assert.ok(joined.evidenceReferences.includes("evidence:52e27e00e59f2513"));
+  assert.equal(joined.freshnessExpiry, null);
+  assert.equal(joined.confidence, null);
+  assert.equal(joined.confidenceSupplier, 0.5168);
+  assert.equal(joined.confidenceMarketplace, 0.3879);
+  assert.deepEqual(
+    joined.promotionTransitions.map((item) => item.to),
+    ["discovered", "normalized", "screened", "supplier_claimed", "launch_authorized_false"],
+  );
+  assert.equal(joined.promotionTransitions.at(-1)?.to, "launch_authorized_false");
+  assert.ok(joined.commercialReviewTags.includes("fixture"));
+  assert.ok(!joined.commercialReviewTags.includes("live_validated"));
+  assert.equal(joined.launchAuthorizedFalse, true);
+  assert.ok(joined.decisionTimeline.every((item) => item.at === null));
+  const filtered = filterCandidates(view.rankedCandidates, { ...DEFAULT_CANDIDATE_FILTER, query: "hydroponics" });
+  assert.deepEqual(filtered.map((row) => row.candidateId), ["hydroponics-kit"]);
+});
+
 test("#247 hydroponics screening fixture remains mapped by id", async () => {
   const packet = JSON.parse(await readFile(new URL("accepted-manual-screening.json", matrixRoot), "utf8"));
   assert.equal(packet.appendix.client_safe_projection.launch_authorized, false);

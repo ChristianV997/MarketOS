@@ -172,14 +172,45 @@ function rejectsOperatorWorkspace(
   return false;
 }
 
+const OVERLAY_SECRET_SKIP_APPENDIX_KEYS = new Set([
+  "input_audit",
+  "supplier_offers",
+  "promotion_lifecycle_contract",
+  "integration_contract",
+]);
+
+function overlaySecretScanTarget(
+  packet: Record<string, unknown>,
+  appendix: Record<string, unknown>,
+): unknown {
+  const scannedAppendix: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(appendix)) {
+    if (OVERLAY_SECRET_SKIP_APPENDIX_KEYS.has(key)) continue;
+    scannedAppendix[key] = value;
+  }
+  return {
+    report_version: packet.report_version,
+    workspace_id: packet.workspace_id,
+    appendix: scannedAppendix,
+    executive_summary: packet.executive_summary,
+  };
+}
+
 /** Fail-closed schema gate for the existing product-validation-report projection. Extra fields are ignored. */
 export function validateResearchToDecisionProjection(
   raw: unknown,
   operatorWorkspaceId: string | null = null,
 ): ProjectionValidationResult {
   if (!raw || typeof raw !== "object") return { ok: false, reason: "projection_not_object" };
-  if (containsSecretShapedValue(raw)) return { ok: false, reason: "secret_shaped_value_rejected" };
   const packet = raw as Record<string, unknown>;
+  const appendixForScan = asRecord(packet.appendix);
+  if (
+    containsSecretShapedValue(
+      appendixForScan ? overlaySecretScanTarget(packet, appendixForScan) : packet,
+    )
+  ) {
+    return { ok: false, reason: "secret_shaped_value_rejected" };
+  }
   if (packet.report_version !== PRODUCT_VALIDATION_REPORT_VERSION) {
     return { ok: false, reason: "schema_version_unsupported" };
   }

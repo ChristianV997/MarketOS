@@ -139,6 +139,20 @@ test("accepted #247-shaped screening projection maps by candidate_id without ave
   assert.equal(adapted.rows[0].nextActionWorkflow.allowedInReadOnlyCockpit, false);
 });
 
+test("producer input_audit filesystem labels do not reject overlay candidate_audit", async () => {
+  const packet = await loadFixture("accepted-producer-shaped-hydroponics-audit.json");
+  assert.equal(validateResearchToDecisionProjection(packet).ok, true);
+  const adapted = adaptResearchToDecisionProjection(
+    [serverRow({ candidateId: "hydroponics-kit" }), serverRow({ candidateId: "server-only", rankIndex: 1 })],
+    packet,
+    NOW,
+  );
+  assert.equal(adapted.accepted, true);
+  assert.equal(adapted.rows[0].nextBestAction, "expand_consumer_research");
+  assert.equal(adapted.rows[0].commercialDecision, "expand_consumer_research");
+  assert.deepEqual(adapted.rows.map((row) => row.candidateId), ["hydroponics-kit", "server-only"]);
+});
+
 test("projection matrix rejects unsupported, duplicate, secret, malformed, and launch-authorized packets", async () => {
   assert.equal((await validateResearchToDecisionProjection(await loadFixture("rejected-unsupported-version.json"))).reason, "schema_version_unsupported");
   assert.equal((await validateResearchToDecisionProjection(await loadFixture("rejected-duplicate-ids.json"))).reason, "candidate_identity_duplicate");
