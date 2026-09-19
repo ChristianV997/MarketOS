@@ -553,6 +553,9 @@ def generate_work_order_from_source_record(
     elif record.source_id == "src-great-expectations":
         target_mod = "evaluation/quality.py"
         target_sym = "evaluate_quality"
+    elif record.source_id == "src-crawl4ai":
+        target_mod = "backend/adapters/research/crawl4ai.py"
+        target_sym = "Crawl4AIResearchAdapter"
     elif record.source_id == "src-pyperf":
         target_mod = "scripts/benchmarks/perf_engine.py"
         target_sym = "run_benchmark"
