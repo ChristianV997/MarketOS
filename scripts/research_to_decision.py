@@ -180,10 +180,14 @@ OFFER_FIELDS = frozenset(
         "shipping_method",
         "estimated_landed_cost",
         "fulfillment_method",
+        "human_confirmed",
+        "human_reviewed",
         "field_provenance",
         "warnings",
     }
 )
+TRUE_TEXT = frozenset({"true", "yes", "y", "1"})
+FALSE_TEXT = frozenset({"false", "no", "n", "0"})
 SENSITIVE_KEY = re.compile(r"(api[_-]?key|authorization|body|cookie|header|html|password|payload|private[_-]?key|raw|secret|token|trace|log)", re.I)
 SENSITIVE_VALUE = re.compile(r"(bearer\s+|sk_(?:live|test)_|gh[pousr]_?|xox[baprs]-|-----BEGIN)", re.I)
 
@@ -529,6 +533,22 @@ def _offer_text(row: Mapping[str, Any], names: tuple[str, ...], field: str, issu
     return _text(value, f"supplier_offer.{field}")
 
 
+def _bool_field(row: Mapping[str, Any], names: tuple[str, ...], field: str) -> bool:
+    """Fail-closed boolean: absent means False, and only recognized text/bool
+    forms are accepted -- anything else is a malformed value, not a guess."""
+    value = _row_value(row, *names)
+    if value in (None, ""):
+        return False
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in TRUE_TEXT:
+        return True
+    if text in FALSE_TEXT:
+        return False
+    raise ResearchToDecisionError(f"{field} must be a boolean")
+
+
 def _offer_number(row: Mapping[str, Any], names: tuple[str, ...], field: str, issues: list[str]) -> float | None:
     value = _row_value(row, *names)
     if value in (None, ""):
@@ -571,10 +591,13 @@ def _normalize_supplier_offer(
     if expires_at and datetime.fromisoformat(expires_at.replace("Z", "+00:00")) < datetime.fromisoformat(observed_at.replace("Z", "+00:00")):
         issues.append("offer_expired")
     source = _offer_text(row, ("source_type", "source"), "source", issues) or source_label
-    reference_value = _row_value(row, "source_reference", "document_reference") or source_reference or source_label
+    explicit_reference = _row_value(row, "source_reference", "document_reference") or source_reference
+    document_reference_provided = bool(explicit_reference)
+    reference_value = explicit_reference or source_label
     reference_id = _evidence_reference(reference_value, "supplier_offer.source_reference")
     method_value = _row_value(row, "extraction_method") or extraction_method or "manual_import"
     method = _text(method_value, "supplier_offer.extraction_method", required=True)
+    human_confirmed = _bool_field(row, ("human_confirmed", "human_reviewed"), "supplier_offer.human_confirmed")
     evidence_warnings = _warning_values(_row_value(row, "warnings") or input_warnings, "supplier_offer.warnings")
     evidence_state = _offer_text(row, ("evidence_state",), "evidence_state", issues)
     if evidence_state != "unknown" and evidence_state not in EVIDENCE_STATES:
@@ -618,7 +641,18 @@ def _normalize_supplier_offer(
         "policy_evidence": _offer_text(row, ("policy_evidence",), "policy_evidence", issues),
         "backup_supplier": _offer_text(row, ("backup_supplier",), "backup_supplier", issues),
         "approval_state": approval_state,
-        "evidence": {"captured_at": observed_at, "expires_at": expires_at, "source": source, "reference_id": reference_id, "extraction_method": method, "state": evidence_state, "confidence": confidence, "warnings": evidence_warnings},
+        "evidence": {
+            "captured_at": observed_at,
+            "expires_at": expires_at,
+            "source": source,
+            "reference_id": reference_id,
+            "document_reference_provided": document_reference_provided,
+            "extraction_method": method,
+            "state": evidence_state,
+            "confidence": confidence,
+            "human_confirmed": human_confirmed,
+            "warnings": evidence_warnings,
+        },
         "unknown_fields": sorted(set(row) - OFFER_FIELDS),
     }
     if approval_state == "approved" and any(offer[key] in {"unknown", None} for key in ("sample_state", "rma")):
@@ -654,7 +688,7 @@ def _load_import(path: Path, entry: Mapping[str, Any], role: str, *, lane: Mappi
                 lane=lane,
                 captured_at=captured_at,
                 source_label=label,
-                source_reference=entry.get("source_reference") or path.name,
+                source_reference=entry.get("source_reference"),
                 extraction_method=entry.get("extraction_method") or ("manual_csv_import" if fmt == "csv" else "manual_json_import"),
                 input_warnings=entry.get("warnings"),
             )
@@ -867,8 +901,26 @@ def _promotion_lifecycle(
     add("screened", "screening_completed")
     if offers:
         add("supplier_claimed", "supplier_offer_observed")
-        if all(offer.get("terms_evidence") not in {None, "unknown"} and offer.get("policy_evidence") not in {None, "unknown"} for offer in offers):
+        # A manual transcription (the common case: a human retyping a PDF/
+        # form quotation) stays capped at supplier_claimed. It only earns
+        # supplier_documented once every offer records BOTH a genuine
+        # source document reference (not the generic import-label fallback)
+        # AND an explicit human_confirmed review -- never from non-empty
+        # terms/policy text alone, which a hand-typed "reviewed" note would
+        # trivially satisfy without any of that actually being true.
+        terms_and_policy_present = all(
+            offer.get("terms_evidence") not in {None, "unknown"} and offer.get("policy_evidence") not in {None, "unknown"}
+            for offer in offers
+        )
+        documented = all(
+            offer.get("evidence", {}).get("document_reference_provided") is True
+            and offer.get("evidence", {}).get("human_confirmed") is True
+            for offer in offers
+        )
+        if terms_and_policy_present and documented:
             add("supplier_documented", "supplier_terms_and_policy_present")
+        elif terms_and_policy_present:
+            blockers.add("supplier_offer:human_review_or_document_reference_missing")
         if "conflicting_offer" in offer_issues:
             add("offer_conflicted", "conflicting_supplier_offers_quarantined")
     if evidence_gaps:

@@ -376,3 +376,130 @@ def test_conflicting_same_identity_across_inputs_fails_closed(tmp_path: Path) ->
     assert len(offers) == 2
     assert all(offer["status"] == "quarantined" for offer in offers)
     assert all("conflicting_offer" in offer["issues"] for offer in offers)
+
+
+# ---------------------------------------------------------------------------
+# Manual quotation/form intake (lane SUPPLIER-MANUAL-QUOTE-EVIDENCE-INTAKE-V1):
+# a human-transcribed quote must never earn supplier_documented merely by
+# filling in terms/policy text -- only a genuine document reference AND an
+# explicit human_confirmed review together unlock it.
+# ---------------------------------------------------------------------------
+
+def _manual_quote_manifest(tmp_path: Path, offer: dict, *, candidate_id: str = "quote-candidate") -> dict:
+    evidence = tmp_path / "quote.json"
+    evidence.write_text(json.dumps({"candidate_id": candidate_id, **offer}), encoding="utf-8")
+    return {
+        "captured_at": "2026-09-16T09:00:00-06:00",
+        "lane": dict(LANE),
+        "candidates": [{"candidate_id": candidate_id}],
+        "supplier_inputs": [{"path": "quote.json"}],
+    }
+
+
+def _base_hydroponics_quote() -> dict:
+    return {
+        "supplier": "manual",
+        "offer_id": "HYD-Q-01",
+        "supplier_sku": "HYD-Q-01-SKU",
+        "currency": "MXN",
+        "destination_region": "Mexico",
+        "unit_cost": 32,
+        "shipping_cost": 9,
+        "delivery_min_days": 8,
+        "delivery_max_days": 13,
+        "extraction_method": "manual_pdf_review",
+        "confidence": 0.75,
+        "contract_evidence": "hand-transcribed from supplier PDF quote",
+        "policy_evidence": "return and refund terms transcribed from the same PDF",
+        "return_address": "Mexico return hub",
+        "return_cost_payer": "supplier",
+        "warranty": "12 months, supplier-handled",
+        "rma_process": "email supplier RMA desk",
+        "support_owner": "supplier support",
+        "support_response_sla_hours": 48,
+        "dropshipping_permission": "confirmed in PDF",
+    }
+
+
+def test_hydroponics_manual_quote_form_without_human_confirmation_caps_at_supplier_claimed(tmp_path: Path) -> None:
+    """A hand-transcribed hydroponics quote with full terms/policy text but no
+    document reference and no human_confirmed stays a claim, not a document."""
+    offer = _base_hydroponics_quote()
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hydroponics-quote")
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    audit = report["appendix"]["candidate_audit"][0]
+    states = {item["next_state"] for item in audit["promotion_lifecycle"]}
+    assert "supplier_claimed" in states
+    assert "supplier_documented" not in states
+    blocking = {condition for item in audit["promotion_lifecycle"] for condition in item["blocking_conditions"]}
+    assert "supplier_offer:human_review_or_document_reference_missing" in blocking
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert offer_record["evidence"]["human_confirmed"] is False
+    assert offer_record["evidence"]["document_reference_provided"] is False
+
+
+def test_smart_pet_manual_quote_form_with_confirmation_and_document_reference_earns_supplier_documented(tmp_path: Path) -> None:
+    """The same shape of hand-transcribed quote legitimately promotes once a
+    real source document reference and an explicit human review are both on
+    record -- proving the gate is closeable, not just closed."""
+    offer = _base_hydroponics_quote()
+    offer.update({
+        "offer_id": "PET-Q-01",
+        "supplier_sku": "PET-Q-01-SKU",
+        "source_reference": "manual:smart-pet-feeder-quote.pdf",
+        "human_confirmed": True,
+    })
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="smart-pet-quote")
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    audit = report["appendix"]["candidate_audit"][0]
+    states = {item["next_state"] for item in audit["promotion_lifecycle"]}
+    assert "supplier_documented" in states
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert offer_record["evidence"]["human_confirmed"] is True
+    assert offer_record["evidence"]["document_reference_provided"] is True
+    assert offer_record["evidence"]["reference_id"].startswith("evidence:")
+
+
+def test_manual_quote_form_rejects_a_malformed_human_confirmed_value(tmp_path: Path) -> None:
+    offer = _base_hydroponics_quote()
+    offer["human_confirmed"] = "maybe"
+    manifest = _manual_quote_manifest(tmp_path, offer)
+    with pytest.raises(ResearchToDecisionError, match="human_confirmed must be a boolean"):
+        build_research_to_decision(manifest, base_dir=tmp_path)
+
+
+def test_manual_quote_form_missing_sku_is_rejected_with_an_actionable_error(tmp_path: Path) -> None:
+    offer = _base_hydroponics_quote()
+    del offer["supplier_sku"]
+    manifest = _manual_quote_manifest(tmp_path, offer)
+    with pytest.raises(ResearchToDecisionError, match="supplier offer identity requires offer_id and exact supplier_sku"):
+        build_research_to_decision(manifest, base_dir=tmp_path)
+
+
+def test_manual_quote_form_missing_support_owner_is_a_quarantine_issue(tmp_path: Path) -> None:
+    offer = _base_hydroponics_quote()
+    del offer["support_owner"]
+    manifest = _manual_quote_manifest(tmp_path, offer)
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert offer_record["support"]["owner"] == "unknown"
+    assert "support_owner_missing" in offer_record["issues"]
+    assert offer_record["status"] == "quarantined"
+
+
+def test_manual_quote_form_cannot_escalate_evidence_state_or_confidence_into_documentation(tmp_path: Path) -> None:
+    """Claiming a strong evidence_state/confidence and human_confirmed on a
+    manual, self-reported quote still cannot earn supplier_documented without
+    a genuine document reference -- confirmation alone is not enough, and a
+    confident self-report is not evidence."""
+    offer = _base_hydroponics_quote()
+    offer.update({"evidence_state": "observed", "confidence": 0.99, "human_confirmed": True})
+    manifest = _manual_quote_manifest(tmp_path, offer)
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    audit = report["appendix"]["candidate_audit"][0]
+    states = {item["next_state"] for item in audit["promotion_lifecycle"]}
+    assert "supplier_documented" not in states
+    assert "live_validated" not in states
+    assert "manually_approved" not in states
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert offer_record["evidence"]["document_reference_provided"] is False
