@@ -67,7 +67,11 @@ export function mapCommercialReviewTags(row: RankedCandidateRow): CommercialRevi
   if (row.promotionState === "blocked") tags.add("blocked");
   if (row.promotionState === "draft_ready") tags.add("draft_ready");
   if (row.promotionState === "unavailable") tags.add("unavailable");
-  if (row.evidenceClass === "stale" || (row.freshnessExpiry ?? "").toLowerCase().includes("expir")) {
+  if (
+    row.evidenceClass === "stale"
+    || (row.freshnessExpiry ?? "").toLowerCase().includes("expir")
+    || row.pillarCells.some((cell) => cell.pillarId === "freshness" && cell.evidenceClass === "stale")
+  ) {
     tags.add("stale");
   }
   if (row.evidenceMode === "fixture_only") tags.add("fixture");

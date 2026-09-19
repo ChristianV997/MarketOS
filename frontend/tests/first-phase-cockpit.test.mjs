@@ -29,6 +29,7 @@ const FATAL_PROJECTION_WARNINGS = new Set([
   "launch_authorized_rejected",
   "replay_identity_invalid",
   "appendix_required",
+  "cross_workspace_rejected",
 ]);
 
 function deriveState(input, overlay) {

@@ -110,6 +110,7 @@ Reference-only; no vendored code and no second data layer.
 The cockpit is a read-only review surface, not a ranked-score editor.
 
 - Timeline kinds are always rendered; missing projection fields stay `unavailable` with `at: null`.
+  Declared `freshness: expired` is copied as a stale label when `evidence_expiry` is absent; no timestamp is invented.
 - Promotion tags distinguish screening / needs_evidence / hold / reject / blocked /
   draft_ready / launch_authorized_false / unavailable / stale / fixture / manual_import /
   simulated / live_readonly / live_validated. Weaker evidence is never upgraded.

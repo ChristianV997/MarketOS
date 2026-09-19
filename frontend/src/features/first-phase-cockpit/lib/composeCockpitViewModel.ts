@@ -3,7 +3,7 @@ import type {
   Phase1Readiness,
   PublicMarketBenchmarkView,
   ResearchPortfolioSummaryView,
-} from "@/lib/canonicalEventsApi";
+} from "../../../lib/canonicalEventsApi.ts";
 import type {
   CandidatePillarCell,
   ControlPlaneSlot,
@@ -14,13 +14,13 @@ import type {
   FirstPhaseEvidencePacket,
   PillarId,
   RankedCandidateRow,
-} from "../contracts/firstPhaseEvidencePacket";
-import { classifyEvidenceClass } from "./classifyEvidence";
-import { derivePromotionState } from "./derivePromotionState";
-import { formatFreshnessLabel } from "./freshness";
-import { enrichDecisionReview } from "./mapDecisionReview";
-import { overlayResearchToDecisionProjection } from "./overlayResearchToDecision";
-import { adaptCommerceProjection } from "./overlayCommerceProjection";
+} from "../contracts/firstPhaseEvidencePacket.ts";
+import { classifyEvidenceClass } from "./classifyEvidence.ts";
+import { derivePromotionState } from "./derivePromotionState.ts";
+import { formatFreshnessLabel } from "./freshness.ts";
+import { enrichDecisionReview } from "./mapDecisionReview.ts";
+import { overlayResearchToDecisionProjection } from "./overlayResearchToDecision.ts";
+import { adaptCommerceProjection } from "./overlayCommerceProjection.ts";
 
 export interface ComposeCockpitInput {
   phase1Readiness: Phase1Readiness | null;

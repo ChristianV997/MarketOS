@@ -395,7 +395,8 @@ export function overlayResearchToDecisionAudits(
         ? `marketplace_evidence_count_${competitionCount}`
         : row.competitionSummary,
       replayIdentity: options.replayIdentity ?? row.replayIdentity,
-      freshnessExpiry: expiry,
+      evidenceClass: stale ? "stale" : row.evidenceClass,
+      freshnessExpiry: expiry ?? (stale ? "expired" : row.freshnessExpiry),
       supplierEvidenceClass: supplierClass,
       consumerEvidenceClass: consumerClass,
       economicsUnavailable: economicsMissing,
