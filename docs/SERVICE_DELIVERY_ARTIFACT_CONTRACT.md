@@ -233,6 +233,55 @@ frontend adapter and compose step`.
 As before, the combined worktree was never pushed and is deleted after use;
 only this file and this branch's own producer/test files are committed.
 
+### Untested-corner audit (lane SERVICE-PRODUCER-ROUTE-WORKBENCH-CONTRACT-V4)
+
+V3's matrix started every engagement's walk from `screening`, and only ever
+used MXN and USD. This lane rebuilt the combined worktree again (same
+heads: main `e6a2e88`, #271 `6afb459`, #277 `ac00d2e`, #275 `ac1d302`,
+merged with no conflicts) specifically to close those two gaps, and to
+re-verify from source (not from PR descriptions) that no duplicate
+economics/catalog authority exists and that `data_inadequate` genuinely
+blocks deliverable content — rather than re-running checks V3 already
+covered.
+
+- **Raw `intake` state** (a fresh `ClientEngagement`'s actual starting
+  state, never previously exercised end to end): built and served through
+  the real route for all 4 packages — `available_read_only`,
+  `lifecycle_state: "intake"` on every row. Piped through the real
+  frontend adapter, `normalizeLifecycle()`'s existing rule (backend
+  `intake` + `data_inadequate=true` → displayed `data_inadequate`) fired
+  correctly, and the composed view model's `surface` was `"blocked"` —
+  never a false "ready" state. This is the adapter's own pre-existing
+  logic; nothing here needed a change.
+- **CAD**, not just MXN/USD: a full `draft_ready` engagement was built and
+  priced in CAD end to end (kernel → producer → real route → real
+  adapter). `economics.service_fee` and `row["economics"]["fee"]["amount_label"]`
+  matched exactly, currency stayed `"CAD"` at every layer, and the real
+  `backend.economics.kernel.calculate_service_economics` was independently
+  confirmed to raise `CurrencyMismatchError` when called directly with a
+  USD fee and a CAD ad-spend value — currency mixing fails closed at the
+  canonical kernel, not by convention in this producer.
+- **Catalog-duplication check, from source**: `evaluation.companyos.service_delivery.default_service_delivery_packages()`
+  calls `catalog[package_id] = package_map(default_service_catalog())[package_id]`
+  and wraps that catalog-owned `ServicePackage` (price band included)
+  in a `ClientFacingServicePackage` — it does not redefine prices. Only
+  delivery-cost assumptions (labor/tooling/pass-through/reserve, not price
+  or economics authority) are added at this layer. No second service
+  catalog or price book exists.
+- **`data_inadequate` blocks deliverable content, from source**:
+  `build_client_service_deliverable()` short-circuits on
+  `data_quality.data_inadequate or economics is None` and emits a
+  "no diagnostic is produced until the missing evidence below is supplied"
+  body instead of package-specific analysis — confirmed by reading the
+  function, not inferred from its name.
+- Full regression after this audit: 517 Python tests (combined worktree,
+  including the real #271-owned integration test) and 47 real frontend
+  tests — unchanged, all passing.
+
+No producer, route, or adapter defect was found. No code file needed a
+change; this section documents new evidence, and the combined worktree
+(again, never pushed) was deleted after use.
+
 ## Compatibility rules for future changes to this module
 
 1. Never add a field that duplicates a value already owned by
