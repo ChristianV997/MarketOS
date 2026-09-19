@@ -121,6 +121,16 @@ export function adaptServiceProjection(raw: unknown, generatedAt = "fixture"): A
     return unavailableResult("secret_or_cross_workspace_field_rejected", generatedAt);
   }
 
+  if (record.status === "rate_limited") {
+    return unavailableResult("service_delivery_projection_rate_limited", generatedAt);
+  }
+  if (record.engagements !== undefined && !Array.isArray(record.engagements)) {
+    return unavailableResult("malformed_artifact: engagements must be an array", generatedAt);
+  }
+  if (record.packages !== undefined && !Array.isArray(record.packages)) {
+    return unavailableResult("malformed_artifact: packages must be an array", generatedAt);
+  }
+
   const version = String(record.schema_version ?? record.schemaVersion ?? record.report_version ?? "");
   const inputContract = version === SERVICE_DELIVERY_PLANE_REPORT_VERSION
     ? SERVICE_DELIVERY_PLANE_REPORT_VERSION
@@ -411,7 +421,10 @@ function adaptEngagement(
       internal_prompt: record.internal_prompt == null ? null : String(record.internal_prompt),
       internal_formula: record.internal_formula == null ? null : String(record.internal_formula),
       updated_at: String(record.updated_at ?? "offline-fixture"),
-      stale: Boolean(record.stale),
+      stale: Boolean(record.stale) || (Array.isArray(record.stale_fields) && record.stale_fields.length > 0),
+      renewal_state: record.renewal_state == null ? null : String(record.renewal_state),
+      approval_state: record.approval_state == null ? null : String(record.approval_state),
+      delivery_state: record.delivery_state == null ? null : String(record.delivery_state),
     },
   };
 }
@@ -478,8 +491,8 @@ function displayMoney(raw: unknown): ServiceEngagement["economics"]["fee"] {
   return {
     amount_label: String(amount),
     currency: String(record.currency ?? "USD"),
-    evidence_class: normalizeEvidenceClass(record.evidence_class),
-    source: record.source === "backend_service_economics" ? "backend_service_economics" : "unavailable",
+    evidence_class: normalizeEvidenceClass(record.evidence_class ?? record.evidence_state),
+    source: "backend_service_economics",
     display_only: true,
   };
 }

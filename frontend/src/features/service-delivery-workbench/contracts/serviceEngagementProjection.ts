@@ -177,6 +177,10 @@ export type ServiceEngagement = {
   internal_formula: string | null;
   updated_at: string;
   stale: boolean;
+  /** Copied #261/#275 labels. Display only; not a workflow engine. */
+  renewal_state: string | null;
+  approval_state: string | null;
+  delivery_state: string | null;
 };
 
 export type ServiceEngagementProjection = {

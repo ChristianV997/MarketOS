@@ -169,6 +169,7 @@ export function EngagementWorkflow({
         {(engagement.lifecycle_state === "renewal_candidate" || engagement.lifecycle_state === "upsell_candidate") && (
           <p className="text-indigo-200">
             Renewal/upsell candidate is advisory only. The workbench cannot create a new engagement or send outreach.
+            Copied renewal_state={engagement.renewal_state ?? "unavailable"}; approval_state={engagement.approval_state ?? "unavailable"}; delivery_state={engagement.delivery_state ?? "unavailable"}.
           </p>
         )}
         {engagement.lifecycle_state === "unavailable" && (

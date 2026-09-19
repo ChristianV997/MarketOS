@@ -61,3 +61,5 @@ Route: `/operator/services` (read-only).
 ## Overlap
 
 Does not implement `evaluation/companyos/service_delivery.py` (#261) or `evaluation/companyos/service_delivery_projection.py` (#275). Does not edit `api/routes/service_delivery_workbench.py` or `backend/api.py` (#271). `apiBase.ts` remains the #213-shaped helper.
+
+#271 GET envelopes (`service_delivery_projection_not_configured`, `available_read_only` + `read_only_artifact_projection`, `packages[]` engagement rows, 429 `rate_limited`) are adapted by the same consumer. #261 `Money.to_dict()` `amount` copies become display labels; they are never recomputed. Renewal/upsell metadata (`renewal_state`, `approval_state`, `delivery_state`) are copied for display only.

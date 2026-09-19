@@ -9,6 +9,8 @@ const LIFECYCLES = [
   "delivered",
   "cancelled",
   "rejected",
+  "renewal_candidate",
+  "upsell_candidate",
 ] as const;
 
 /** Sanitized #275 `service-delivery-plane-v1` envelope for frontend consume tests. */
@@ -104,6 +106,9 @@ export function buildProducerPlaneEnvelope(overrides: Record<string, unknown> = 
       rationale: "This workbench is read-only and does not execute CompanyOS transitions.",
     },
     deliverable_ids: [`del-${index + 1}`],
+    renewal_state: lifecycle === "renewal_candidate" ? "eligible" : lifecycle === "upsell_candidate" ? "upsell_review" : "not_applicable",
+    approval_state: lifecycle === "approved" || lifecycle === "delivered" || lifecycle === "renewal_candidate" || lifecycle === "upsell_candidate" ? "approved" : "not_requested",
+    delivery_state: lifecycle === "delivered" || lifecycle === "renewal_candidate" || lifecycle === "upsell_candidate" ? "complete" : "not_started",
   }));
 
   return {

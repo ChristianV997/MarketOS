@@ -22,6 +22,8 @@ const REQUIRED_LIFECYCLES = [
   "delivered",
   "cancelled",
   "rejected",
+  "renewal_candidate",
+  "upsell_candidate",
 ];
 
 function viewFor(projection, selectedId = null) {
@@ -189,4 +191,96 @@ test("keyboard skip-link live region table and mobile semantics remain in source
   assert.match(table, /overflow-x-auto/);
   assert.match(table, /scope="col"/);
   assert.match(table, /Filtering does not re-rank/);
+  assert.match(table, /focus-visible:outline/);
+  const css = await readFile(new URL("../src/index.css", import.meta.url), "utf8");
+  assert.match(css, /prefers-reduced-motion/);
+});
+
+test("#271 unavailable GET envelope never becomes success", () => {
+  const result = adaptServiceProjection({
+    schema_version: "service-engagement-projection-v1",
+    availability: "unavailable",
+    live_endpoint: "/api/service-delivery/workbench",
+    live_endpoint_status: "unavailable",
+    read_only: true,
+    generated_at: "deterministic",
+    engagements: [],
+    diagnostics: ["service_delivery_projection_not_configured"],
+    input_contract: "unknown",
+    network_calls: false,
+    mutated: false,
+  });
+  assert.equal(result.rejected, false);
+  assert.equal(result.projection.live_endpoint_status, "unavailable");
+  const view = viewFor(result.projection);
+  assert.equal(view.surface, "unavailable");
+  assert.notEqual(view.surface, "success");
+  assert.equal(view.liveEndpointUnavailable, true);
+});
+
+test("#271 read-only wrap of #275 stays available_read_only without live_validated", () => {
+  const wrapped = {
+    ...buildProducerPlaneEnvelope({ live_endpoint_status: "available_read_only" }),
+    live_endpoint: "/api/service-delivery/workbench",
+    diagnostics: ["#275 producer envelope for frontend consume tests", "read_only_artifact_projection"],
+  };
+  const result = adaptServiceProjection(wrapped);
+  assert.equal(result.projection.live_endpoint_status, "available_read_only");
+  assert.match(result.projection.diagnostics.join(" "), /read_only_artifact_projection/);
+  const view = viewFor(result.projection, "eng-prod-2");
+  assert.equal(view.liveEndpointUnavailable, false);
+  assert.notEqual(view.surface, "success");
+  assert.equal(view.surface, "partial");
+});
+
+test("malformed and rate-limited payloads stay unavailable", () => {
+  assert.equal(adaptServiceProjection(null).rejection_reason, "malformed_artifact: payload is not an object");
+  assert.equal(adaptServiceProjection({
+    schema_version: "service-engagement-projection-v1",
+    engagements: "not-an-array",
+  }).rejection_reason, "malformed_artifact: engagements must be an array");
+  const limited = adaptServiceProjection({ status: "rate_limited", read_only: true, mutated: false });
+  assert.equal(limited.rejection_reason, "service_delivery_projection_rate_limited");
+  assert.equal(viewFor(limited.projection).surface, "unavailable");
+});
+
+test("#271 packages[] engagement rows and #261 Money fee copies are consumed without recalculation", () => {
+  const result = adaptServiceProjection({
+    report_version: "service-delivery-plane-v1",
+    schema_version: "service-delivery-plane-v1",
+    availability: "manual_import",
+    live_endpoint_status: "available_read_only",
+    read_only: true,
+    network_calls: false,
+    mutated: false,
+    packages: [{
+      engagement_id: "eng-pkg-1",
+      package_id: "product-validation-sprint",
+      lifecycle_state: "draft_ready",
+      fee: {
+        amount: "350.00",
+        currency: "USD",
+        source: "service_delivery_plane",
+        evidence_state: "assumed",
+      },
+      renewal_state: "not_applicable",
+      approval_state: "not_requested",
+      delivery_state: "not_started",
+    }],
+  });
+  assert.equal(result.rejected, false);
+  assert.equal(result.projection.engagements[0].economics.fee.amount_label, "350.00");
+  assert.equal(result.projection.engagements[0].economics.fee.source, "backend_service_economics");
+  assert.equal(result.projection.engagements[0].economics.frontend_calculates, false);
+  assert.equal(result.projection.engagements[0].renewal_state, "not_applicable");
+});
+
+test("renewal and upsell metadata survive mapping as display copies", () => {
+  const result = adaptServiceProjection(buildProducerPlaneEnvelope());
+  const renewal = result.projection.engagements.find((row) => row.lifecycle_state === "renewal_candidate");
+  const upsell = result.projection.engagements.find((row) => row.lifecycle_state === "upsell_candidate");
+  assert.equal(renewal.renewal_state, "eligible");
+  assert.equal(upsell.renewal_state, "upsell_review");
+  assert.equal(renewal.delivery_state, "complete");
+  assert.equal(upsell.approval_state, "approved");
 });
