@@ -72,6 +72,49 @@ def test_commerce_boundary_is_seventeen_not_cli_thirty_seven() -> None:
     assert CLI_COMMERCE_PLUS_FULFILLMENT_EVENT_COUNT == 37
     assert CLI_COMMERCE_PLUS_FULFILLMENT_EVENT_COUNT - COMMERCE_LIFECYCLE_EVENT_COUNT == 20
 
+    # When canonical imports exist, verify the 17 + 20 = 37 composition and repeat identity
+    try:
+        from evaluation.commerce.dry_run_events import lifecycle_events
+        from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
+        from evaluation.commerce.dry_run_scenarios import hydroponics_positive_candidate
+        from evaluation.commerce.fulfillment_risk_lifecycle import (
+            FixtureFulfillmentAdapter,
+            build_named_scenario,
+            run_fulfillment_risk_dry_run,
+        )
+    except Exception:
+        return
+
+    commerce_report = run_dry_run_lifecycle(hydroponics_positive_candidate())
+    commerce_events = lifecycle_events(commerce_report, workspace_id="ws-conformance-17")
+    assert len(commerce_events) == 17
+
+    fulfillment_scenario = build_named_scenario("customer_return_merchant_paid")
+    fulfillment_report = run_fulfillment_risk_dry_run(
+        fulfillment_scenario, adapter=FixtureFulfillmentAdapter.complete()
+    )
+    assert len(fulfillment_report.events) == 20
+
+    combined_events = (*commerce_events, *fulfillment_report.events)
+    assert len(combined_events) == 37
+
+    # Repeat run produces identical Event.replay_hash sequences
+    commerce_report2 = run_dry_run_lifecycle(hydroponics_positive_candidate())
+    commerce_events2 = lifecycle_events(commerce_report2, workspace_id="ws-conformance-17")
+    fulfillment_report2 = run_fulfillment_risk_dry_run(
+        fulfillment_scenario, adapter=FixtureFulfillmentAdapter.complete()
+    )
+    combined_events2 = (*commerce_events2, *fulfillment_report2.events)
+
+    hashes1 = [event.replay_hash() for event in combined_events]
+    hashes2 = [event.replay_hash() for event in combined_events2]
+    assert hashes1 == hashes2
+    assert len(hashes1) == 37
+    assert all(bool(h) for h in hashes1)
+
+    assert commerce_report.live_actions_taken is False
+    assert commerce_report2.live_actions_taken is False
+
 
 def test_canonical_measure_classifies_or_proves_five_scenarios() -> None:
     report = measure_canonical_scenarios()

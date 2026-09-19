@@ -48,6 +48,14 @@ def build_report() -> dict[str, Any]:
     except IntegratedReplayPerfError as exc:
         matrix = {"schema": "integrated-replay-arbitration-v2", "error": str(exc)}
         failure = "bound_or_timeout"
+    missing_infra = [
+        "Windows operator checkout",
+        "GitHub Actions runner (ci_unavailable)",
+        "full-repo quality gate execution",
+        "CoderOS probe/health",
+    ]
+    if matrix.get("canonical", {}).get("status") != "actual":
+        missing_infra.append("canonical evaluation.commerce imports in this sandbox")
     return {
         "schema": "integrated-replay-arbitration-v2",
         "repository": "ChristianV997/MarketOS",
@@ -62,13 +70,7 @@ def build_report() -> dict[str, Any]:
         "arbitration": matrix,
         "failure_class": failure,
         "ci": "ci_unavailable",
-        "missing_infrastructure": [
-            "Windows operator checkout",
-            "GitHub Actions runner (ci_unavailable)",
-            "full-repo quality gate execution",
-            "canonical evaluation.commerce imports in this sandbox",
-            "CoderOS probe/health",
-        ],
+        "missing_infrastructure": missing_infra,
         "rollback": "close draft PR / delete exclusive files; Event and kernel untouched",
     }
 
