@@ -442,6 +442,18 @@ def test_consolidated_replay_is_byte_identical_and_missing_supplier_proof_stays_
     assert first["commerce"]["promoted_to_launch"] is False
 
 
+@pytest.mark.parametrize("fixture_name,builder_name", _CONSOLIDATED_REPLAY_FIXTURES)
+def test_each_consolidated_scenario_has_stable_canonical_event_replay_identity(fixture_name, builder_name):
+    first = run_consolidated_scenario(fixture_name, builder_name)
+    second = run_consolidated_scenario(fixture_name, builder_name)
+
+    assert first["event_count"] == 37
+    assert first["event_ids"] == second["event_ids"]
+    assert first["event_replay_hashes"] == second["event_replay_hashes"]
+    assert first["event_replay_hashes"] == first["event_summary"]["hash_sequence"]
+    assert first["replay_hash"] == second["replay_hash"]
+
+
 _REQUIRED_EVIDENCE_BLOCKERS = (
     ("smart_pet_support_risk.json", "smart_pet_support_burden_candidate", "support_owner"),
     ("solar_4g_blocked.json", "solar_4g_security_blocked_candidate", "compliance"),
