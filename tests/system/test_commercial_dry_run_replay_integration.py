@@ -49,7 +49,11 @@ from evaluation.companyos.service_engagement import build_service_engagement
 from evaluation.readiness import evaluate_product
 from evaluation.contracts import DataQuality, ProductCandidate, SupplierOffer
 from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
-from scripts.run_commercial_replay_integration import run_consolidated_scenario
+from scripts.run_commercial_replay_integration import (
+    EVIDENCE_CLASS_VOCABULARY,
+    run_consolidated_scenario,
+    run_scenarios,
+)
 
 _EXPECTED_STAGES = {
     "hydroponics_positive_candidate": "scale_candidate",
@@ -380,6 +384,16 @@ def test_consolidated_replay_carries_research_through_mexico_fulfillment_and_saf
 
     assert result["research"]["market_lane"]["destination_country"] == "Mexico"
     assert result["research"]["market_lane"]["currency"] == "MXN"
+    assert result["evidence_classes"]["runner"] == "actual_executed"
+    assert result["evidence_classes"]["research_input"] == "fixture"
+    assert result["evidence_classes"]["supplier_evidence"] in {"manual_import", "unavailable"}
+    assert result["evidence_classes"]["economics"] == "derived"
+    assert result["evidence_classes"]["commerce_lifecycle"] == "simulated_or_planned"
+    assert result["evidence_classes"]["fulfillment_lifecycle"] == "simulated_or_planned"
+    assert result["evidence_classes"]["governor"] == "simulated_or_planned"
+    assert result["evidence_classes"]["approval_ledger"] == "simulated_or_planned"
+    assert result["evidence_classes"]["trustos_export"] == "actual_executed"
+    assert result["evidence_classes"]["ci"] == "ci_unavailable"
     assert result["commerce"]["commerce_packet"]["dry_run"] is True
     assert result["commerce"]["commerce_packet"]["live_actions_taken"] is False
     assert tuple(step["step"] for step in result["commerce"]["steps"]) == _EXPECTED_COMMERCE_STEPS
@@ -462,6 +476,17 @@ _REQUIRED_EVIDENCE_BLOCKERS = (
     ("walking_pad_deferred.json", "high_ticket_deferred_candidate", "return_route"),
     ("walking_pad_deferred.json", "high_ticket_deferred_candidate", "warranty_route"),
 )
+
+
+def test_dogfood_summary_exposes_the_canonical_evidence_vocabulary():
+    summary = run_scenarios()
+
+    assert summary["result"] == "actual"
+    assert summary["evidence_classification"] == "fixture"
+    assert summary["evidence_class_vocabulary"] == list(EVIDENCE_CLASS_VOCABULARY)
+    assert len(summary["rows"]) == 5
+    assert all(row["evidence_classes"]["runner"] == "actual_executed" for row in summary["rows"])
+    assert all(row["evidence_classes"]["ci"] == "ci_unavailable" for row in summary["rows"])
 
 
 @pytest.mark.parametrize("fixture_name,builder_name,required_blocker", _REQUIRED_EVIDENCE_BLOCKERS)

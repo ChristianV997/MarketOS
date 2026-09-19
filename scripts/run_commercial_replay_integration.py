@@ -73,10 +73,36 @@ _REPLAY_INPUTS: tuple[tuple[str, str], ...] = (
     ("walking_pad_deferred.json", "high_ticket_deferred_candidate"),
 )
 
+EVIDENCE_CLASS_VOCABULARY: tuple[str, ...] = (
+    "actual_executed",
+    "fixture",
+    "manual_import",
+    "derived",
+    "simulated_or_planned",
+    "unavailable",
+    "ci_unavailable",
+)
+
 
 def _canonical_fingerprint(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _scenario_evidence_classes(offer: dict[str, Any] | None) -> dict[str, str]:
+    """Classify each evidence boundary without changing existing status fields."""
+    return {
+        "runner": "actual_executed",
+        "research_input": "fixture",
+        "supplier_evidence": "manual_import" if offer is not None else "unavailable",
+        "economics": "derived",
+        "commerce_lifecycle": "simulated_or_planned",
+        "fulfillment_lifecycle": "simulated_or_planned",
+        "governor": "simulated_or_planned",
+        "approval_ledger": "simulated_or_planned",
+        "trustos_export": "actual_executed",
+        "ci": "ci_unavailable",
+    }
 
 
 def _commerce_cli_projection(report: Any) -> dict[str, Any]:
@@ -379,6 +405,7 @@ def _replay_scenario(
     result = {
         "scenario": commerce.scenario_id,
         "candidate_id": candidate_id,
+        "evidence_classes": _scenario_evidence_classes(offer),
         "supplier_offer": {
             "offer_id": offer["offer_id"],
             "exact_sku": offer["exact_sku"],
@@ -458,6 +485,7 @@ def run_scenarios() -> dict[str, Any]:
     return {
         "result": "actual" if rows else "unavailable",
         "evidence_classification": "fixture",
+        "evidence_class_vocabulary": list(EVIDENCE_CLASS_VOCABULARY),
         "rows": rows,
     }
 
@@ -532,6 +560,7 @@ def main() -> int:
     args = parser.parse_args()
     report = {
         "schema": "commercial-replay-performance-integration-v2",
+        "evidence_class_vocabulary": list(EVIDENCE_CLASS_VOCABULARY),
         "repository": "ChristianV997/MarketOS",
         "commit": _git_sha(),
         "base_sha": _base_sha(),
