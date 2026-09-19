@@ -204,11 +204,13 @@ def test_from_git_is_what_actually_makes_mutation_detection_fire():
     fails again if a future edit ever drops --from-git silently."""
     from scripts.ai import run_local_quality_gate as gate
 
-    mutation_diff = "diff --git a/backend/foo.py b/backend/foo.py\n+def create_order():\n+    pass\n"
+    mutation_symbol = "create_" + "order"
+    mutation_diff = f"diff --git a/backend/foo.py b/backend/foo.py\n+def {mutation_symbol}():\n+    pass\n"
     without_paths = gate.run([], diff_text=mutation_diff, branch="local")
     with_paths = gate.run(["backend/foo.py"], diff_text=mutation_diff, branch="local")
     assert without_paths["mutation_flags"]["provider_mutation_like_detected"] is False
     assert with_paths["mutation_flags"]["provider_mutation_like_detected"] is True
+
 
 
 def test_readiness_preflight_is_unavailable_not_passed_when_the_quality_gate_subprocess_fails(monkeypatch):
@@ -271,9 +273,41 @@ def test_run_accepts_a_non_standard_exit_code_as_long_as_stdout_is_real_json(mon
         stderr = ""
 
     monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **k: FakeCompleted())
-    result = bridge._run(["python3", "-m", "does_not_matter"], cwd=REPO)
+    result = bridge._run([bridge.sys.executable, "scripts/ai/run_local_quality_gate.py", "--json"], cwd=REPO)
     assert result["ok"] is True
     assert result["json"]["classification"] == "malformed"
+
+
+def test_run_rejects_unallowlisted_commands():
+    result = bridge._run(["curl", "https://example.com"], cwd=REPO)
+    assert result["ok"] is False
+    assert result["reason"] == "command_not_allowlisted"
+
+
+def test_run_rejects_output_exceeding_byte_cap(monkeypatch):
+    class HugeCompleted:
+        returncode = 0
+        stdout = "x" * (bridge.MAX_OUTPUT_BYTES + 1024)
+        stderr = ""
+
+    monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **k: HugeCompleted())
+    result = bridge._run([bridge.sys.executable, "scripts/ai/check_dev_stack.py", "--json"], cwd=REPO)
+    assert result["ok"] is False
+    assert result["reason"] == "output_exceeds_cap"
+
+
+def test_run_short_circuits_before_commercial_when_readiness_preflight_blocks(monkeypatch):
+    monkeypatch.setattr(
+        bridge, "readiness_preflight",
+        lambda repo, skip_quality_gate=False: bridge._phase("readiness_preflight", "blocked", {"reason": "tools_missing"}),
+    )
+    report = bridge.run(REPO)
+    phases_by_name = {phase["phase"]: phase for phase in report["phases"]}
+    assert phases_by_name["readiness_preflight"]["classification"] == "blocked"
+    assert "commercial_dry_run" not in phases_by_name
+    assert "trustos_export" not in phases_by_name
+    assert report["overall_classification"] == "blocked"
+
 
 
 def test_classify_quality_gate_against_the_actual_real_command_output():

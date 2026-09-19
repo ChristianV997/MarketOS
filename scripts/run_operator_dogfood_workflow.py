@@ -87,6 +87,25 @@ CLASSIFICATIONS = frozenset({"passed", "not_run", "unavailable", "ci_unavailable
 # smaller closed vocabulary.
 _SEVERITY = {"passed": 0, "not_run": 1, "ci_unavailable": 1, "unavailable": 2, "blocked": 3, "malformed": 4}
 DEFAULT_TIMEOUT_S = 120.0
+MAX_OUTPUT_BYTES = 10 * 1024 * 1024  # 10 MiB cap
+
+ALLOWLISTED_SCRIPTS = frozenset({
+    "scripts/ai/session_start.py",
+    "scripts/ai/check_dev_stack.py",
+    "scripts/coderos_snapshot.py",
+    "scripts/ai/run_local_quality_gate.py",
+    "scripts/run_commercial_replay_integration.py",
+})
+
+
+def _is_allowlisted(argv: list[str]) -> bool:
+    if not argv:
+        return False
+    for arg in argv[1:]:
+        normalized = arg.replace("\\", "/")
+        if normalized in ALLOWLISTED_SCRIPTS:
+            return True
+    return False
 
 
 def _run(argv: list[str], *, cwd: Path, timeout_s: float = DEFAULT_TIMEOUT_S) -> dict[str, Any]:
@@ -100,6 +119,8 @@ def _run(argv: list[str], *, cwd: Path, timeout_s: float = DEFAULT_TIMEOUT_S) ->
     A script that crashed before printing anything still correctly reports
     "stdout_not_json" here.
     """
+    if not _is_allowlisted(argv):
+        return {"ok": False, "reason": "command_not_allowlisted", "json": None}
     try:
         completed = subprocess.run(
             argv, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -109,8 +130,11 @@ def _run(argv: list[str], *, cwd: Path, timeout_s: float = DEFAULT_TIMEOUT_S) ->
         return {"ok": False, "reason": "executable_not_found", "json": None}
     except subprocess.TimeoutExpired:
         return {"ok": False, "reason": f"timed_out_after_{timeout_s}s", "json": None}
+    stdout = completed.stdout or ""
+    if len(stdout.encode("utf-8", errors="replace")) > MAX_OUTPUT_BYTES:
+        return {"ok": False, "reason": "output_exceeds_cap", "json": None}
     try:
-        parsed = json.loads(completed.stdout)
+        parsed = json.loads(stdout)
     except json.JSONDecodeError:
         return {"ok": False, "reason": "stdout_not_json", "json": None}
     return {"ok": True, "reason": None, "json": parsed}
@@ -250,16 +274,41 @@ def commercial_dry_run(repo: Path) -> dict[str, Any]:
         return _phase("commercial_dry_run", "unavailable", {"reason": scenarios.get("reason", "scenarios_not_actual")})
     rows = scenarios.get("rows") or []
     replay_clean = all(row.get("replay_equal") for row in rows)
-    live_clean = all(not row.get("sequence_issues") and not row.get("live_authority_violations") for row in rows)
+    live_clean = all(
+        not (row.get("sequence_issues") or (row.get("event_summary") or {}).get("sequence_issues"))
+        and not (row.get("live_authority_violations") or (row.get("event_summary") or {}).get("live_authority_violations"))
+        for row in rows
+    )
     if not rows or not replay_clean or not live_clean:
         return _phase(
             "commercial_dry_run", "blocked",
             {"reason": "replay_mismatch_or_live_authority_violation", "row_count": len(rows), "replay_clean": replay_clean, "live_clean": live_clean},
         )
-    summary_rows = [
-        {"scenario": row["scenario"], "achievable_stage": row["achievable_stage"], "promoted_to_launch": row["promoted_to_launch"], "blockers": row["blockers"]}
-        for row in rows
-    ]
+    summary_rows = []
+    for row in rows:
+        scenario = row.get("scenario")
+        commerce = row.get("commerce") or {}
+        research = row.get("research") or {}
+        promotion = commerce.get("promotion") or {}
+        stage = row.get("achievable_stage") or commerce.get("achievable_stage")
+        promoted = (
+            row["promoted_to_launch"]
+            if "promoted_to_launch" in row
+            else commerce.get("promoted_to_launch", False)
+        )
+        blockers = (
+            row["blockers"]
+            if "blockers" in row
+            else promotion.get("blockers")
+            or research.get("blockers")
+            or []
+        )
+        summary_rows.append({
+            "scenario": scenario,
+            "achievable_stage": stage,
+            "promoted_to_launch": bool(promoted),
+            "blockers": list(blockers),
+        })
     return _phase("commercial_dry_run", "passed", {"row_count": len(rows), "rows": summary_rows})
 
 
@@ -385,7 +434,10 @@ def run(repo: Path, *, skip_quality_gate: bool = False, skip_commercial: bool = 
     if state_phase["classification"] in {"blocked", "malformed"}:
         return sanitized_handoff(repo, phases)
 
-    phases.append(readiness_preflight(repo, skip_quality_gate=skip_quality_gate))
+    preflight_phase = readiness_preflight(repo, skip_quality_gate=skip_quality_gate)
+    phases.append(preflight_phase)
+    if preflight_phase["classification"] in {"blocked", "malformed"}:
+        return sanitized_handoff(repo, phases)
 
     if skip_commercial:
         phases.append(_phase("commercial_dry_run", "not_run", {"reason": "--skip-commercial"}))
@@ -394,6 +446,10 @@ def run(repo: Path, *, skip_quality_gate: bool = False, skip_commercial: bool = 
 
     dry_run_phase = commercial_dry_run(repo)
     phases.append(dry_run_phase)
+    if dry_run_phase["classification"] != "passed":
+        phases.append(_phase("trustos_export", "not_run", {"reason": f"commercial_dry_run_{dry_run_phase['classification']}"}))
+        return sanitized_handoff(repo, phases)
+
     rows = dry_run_phase["detail"].get("rows", [])
     phases.append(trustos_export(rows))
 
