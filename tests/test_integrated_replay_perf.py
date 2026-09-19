@@ -13,6 +13,7 @@ from evaluation.perf.integrated_replay import (
     CANONICAL_BUILDERS,
     IntegratedReplayPerfError,
     MAX_CANDIDATES,
+    STEPS,
     arbitrate,
     classify_canonical,
     isolated_field_fingerprint,
@@ -22,6 +23,15 @@ from evaluation.perf.integrated_replay import (
     reject_field_hash_as_canonical,
     sanitized_candidates,
 )
+
+# Comparable boundary locked by #279 tests/system/test_commercial_dry_run_replay_integration.py
+# test_scenario_runs_through_real_builders_and_emits_a_clean_event_trail:
+#   event_count == 17 == 1 started + 15 commerce steps + 1 completed.
+COMMERCE_LIFECYCLE_EVENT_COUNT = 1 + len(STEPS) + 1  # 17
+# #279 scripts/run_commercial_replay_integration.py concatenates
+# lifecycle_events + fulfillment_report.events. That CLI trail is 37
+# (17 commerce + 20 fulfillment). #274 must not absorb fulfillment.
+CLI_COMMERCE_PLUS_FULFILLMENT_EVENT_COUNT = 37
 
 
 def test_classification_does_not_claim_this_module_is_authority() -> None:
@@ -56,6 +66,13 @@ def test_isolated_field_hash_is_rejected_as_canonical_identity() -> None:
     assert first == second
 
 
+def test_commerce_boundary_is_seventeen_not_cli_thirty_seven() -> None:
+    assert COMMERCE_LIFECYCLE_EVENT_COUNT == 17
+    assert len(STEPS) == 15
+    assert CLI_COMMERCE_PLUS_FULFILLMENT_EVENT_COUNT == 37
+    assert CLI_COMMERCE_PLUS_FULFILLMENT_EVENT_COUNT - COMMERCE_LIFECYCLE_EVENT_COUNT == 20
+
+
 def test_canonical_measure_classifies_or_proves_five_scenarios() -> None:
     report = measure_canonical_scenarios()
     assert report["field_hash_rejected_as_identity"] is True
@@ -72,7 +89,9 @@ def test_canonical_measure_classifies_or_proves_five_scenarios() -> None:
     names = [row["scenario"] for row in report["scenarios"]]
     assert names == list(CANONICAL_BUILDERS)
     for row in report["scenarios"]:
-        assert row["event_count"] >= 17
+        # Commerce-only projection. Do not accept the #279 CLI concat of 37.
+        assert row["event_count"] == COMMERCE_LIFECYCLE_EVENT_COUNT
+        assert row["event_count"] != CLI_COMMERCE_PLUS_FULFILLMENT_EVENT_COUNT
         assert row["replay_hashes_equal"] is True
         assert row["event_ids_equal"] is True
         assert row["live_actions_taken"] is False
@@ -103,5 +122,6 @@ def test_arbitration_report_records_owners_and_does_not_claim_optimization() -> 
         assert report["measures_real_commercial_replay"] is True
         assert report["canonical"]["all_replay_stable"] is True
         for row in report["canonical"]["scenarios"]:
+            assert row["event_count"] == COMMERCE_LIFECYCLE_EVENT_COUNT
             assert "p95_ms" in row
             assert "p99_ms" in row
