@@ -4,6 +4,7 @@ import { FUTURE_WORKBENCH_PATH } from "../contracts/serviceEngagementProjection.
 import { adaptServiceProjection } from "../lib/adaptServiceProjection.ts";
 import { composeWorkbenchViewModel } from "../lib/composeWorkbenchViewModel.ts";
 import { EMPTY_FILTERS, type WorkbenchFilters } from "../lib/filterEngagements.ts";
+import { UNSERVED_GET_ENVELOPE } from "../lib/unservedGetEnvelope.ts";
 import { joinApiPath, resolveApiBaseUrl } from "@/lib/apiBase";
 
 /**
@@ -18,20 +19,6 @@ async function probeWorkbenchProjection(): Promise<unknown> {
   }
   return response.json();
 }
-
-const UNSERVED_GET_ENVELOPE = {
-  schema_version: "service-engagement-projection-v1",
-  availability: "unavailable",
-  live_endpoint: FUTURE_WORKBENCH_PATH,
-  live_endpoint_status: "unavailable",
-  read_only: true,
-  generated_at: "unserved",
-  engagements: [],
-  diagnostics: ["canonical_get_not_served"],
-  input_contract: "unknown",
-  network_calls: false,
-  mutated: false,
-} as const;
 
 export function useServiceDeliveryWorkbench() {
   const probe = useQuery({

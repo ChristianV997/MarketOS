@@ -305,7 +305,7 @@ test("unserved GET envelope composes unavailable and is never fixture success", 
 test("workbench hook never substitutes demo fixtures when GET is down", async () => {
   const source = await readFile(new URL("../src/features/service-delivery-workbench/hooks/useServiceDeliveryWorkbench.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /buildDemoProjection/);
-  assert.match(source, /canonical_get_not_served/);
+  assert.match(source, /canonical_get_not_served|UNSERVED_GET_ENVELOPE/);
   assert.match(source, /method: "GET"/);
 });
 
