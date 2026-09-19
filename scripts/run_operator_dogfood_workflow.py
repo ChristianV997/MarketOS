@@ -338,12 +338,31 @@ def trustos_export(dry_run_rows: list[dict[str, Any]]) -> dict[str, Any]:
         for row in dry_run_rows:
             workspace_id = f"dogfood-{row['scenario']}"
             promoted = bool(row["promoted_to_launch"])
+            # A "promoted" row only means the deterministic FIXTURE replay
+            # reached its promotable stage -- it is never a live validation,
+            # a human approval, or a commercial promotion. TrustOS's own
+            # leakage/claim checks are domain-agnostic (they catch secrets
+            # and banned "live"-shaped tokens, not this project's specific
+            # meaning of "promoted"), so this bridge must not hand a
+            # promoted row an empty blockers/evidence_required/
+            # approvals_required list or an evidence_state of "present":
+            # that combination would read to a client as "nothing stands in
+            # the way", laundering a fixture/dry-run result into an
+            # apparent commercial claim. Every export from this bridge
+            # stays conservative regardless of the internal promoted flag.
+            blockers = list(row["blockers"])
+            if not blockers:
+                blockers = (
+                    ["fixture dry-run reached a promotable stage; this is not a live validation, human approval, or commercial promotion"]
+                    if promoted
+                    else ["fixture dry-run did not reach a promotable stage; no specific blocker was recorded by the upstream replay"]
+                )
             payload = {
                 "workspace_id": workspace_id,
                 "status": f"fixture_dry_run_{'promoted' if promoted else 'blocked'}",
-                "blockers": list(row["blockers"]),
-                "evidence_required": [] if promoted else ["resolve the listed blockers with real evidence"],
-                "approvals_required": [] if promoted else ["human review"],
+                "blockers": blockers,
+                "evidence_required": ["confirm with a live-validated run and human review before any commercial action"],
+                "approvals_required": ["human review"],
                 "next_actions": ["proceed to human review before any live action"] if promoted else ["provide missing evidence and rerun the dry-run lifecycle"],
             }
             leakage = check_workspace_leakage(payload, client_safe=True)
@@ -354,12 +373,18 @@ def trustos_export(dry_run_rows: list[dict[str, Any]]) -> dict[str, Any]:
             try:
                 exported = export_client_evidence(
                     workspace=workspace, registry=registry, provenance="fixture://operator-dogfood-readiness-bridge",
-                    evidence_state="present", payload=payload,
+                    evidence_state="requires_review", payload=payload,
                 )
             except ClientWorkspaceExportError as exc:
                 blocked.append({"workspace_id": workspace_id, "reason": exc.code})
                 continue
-            exports.append({"workspace_id": workspace_id, "fingerprint": exported.fingerprint, "redaction_status": exported.redaction_status})
+            exports.append({
+                "workspace_id": workspace_id,
+                "fingerprint": exported.fingerprint,
+                "redaction_status": exported.redaction_status,
+                "evidence_state": exported.evidence_state,
+                "payload": exported.payload,
+            })
 
     if blocked:
         return _phase("trustos_export", "blocked", {"blocked": blocked, "exported_count": len(exports)})

@@ -359,6 +359,87 @@ def test_trustos_export_blocks_when_a_row_carries_a_secret_shaped_blocker():
 
 
 # ---------------------------------------------------------------------------
+# trustos_export claim-integrity regression (lane
+# OPERATOR-DOGFOOD-TRUSTOS-EXPORT-CLAIM-INTEGRITY-V3): a fixture/dry-run
+# result that reached its "promoted_to_launch" stage must never export a
+# client-facing claim of commercial promotion, approval, verification, or
+# evidence presence -- reproduced against PR #283's head before this fix:
+# promoted_to_launch=True with empty blockers exported
+# status="fixture_dry_run_promoted", blockers=[], evidence_required=[],
+# approvals_required=[], evidence_state="present". None of that contains a
+# banned "live" token, so TrustOS's own leakage/claim checks (which are
+# domain-agnostic) let it through -- the fix has to live in this bridge,
+# which is the only place that knows "promoted_to_launch" is a fixture
+# label, not a real commercial event.
+# ---------------------------------------------------------------------------
+
+
+def _exported_payload(phase: dict) -> dict:
+    assert phase["classification"] == "passed"
+    return phase["detail"]["exports"][0]
+
+
+def test_promoted_row_with_empty_blockers_never_exports_a_hollow_readiness_claim():
+    # The exact payload from the older independent review's finding.
+    rows = [{"scenario": "claim_laundering_repro", "achievable_stage": "scale_candidate", "promoted_to_launch": True, "blockers": []}]
+    phase = bridge.trustos_export(rows)
+    export = _exported_payload(phase)
+    payload = export["payload"]
+    assert payload["blockers"] != []
+    assert payload["evidence_required"] != []
+    assert payload["approvals_required"] != []
+    assert export["evidence_state"] != "present"
+    assert export["evidence_state"] not in {"present", "passed"}
+    blob = json.dumps(payload).lower()
+    assert "live" not in blob or "not a live validation" in blob
+
+
+def test_promoted_row_with_real_blockers_keeps_them_and_still_requires_review():
+    # Nearby variant: the row already carries real blockers alongside
+    # promoted_to_launch=True. The fix must not discard genuine blockers --
+    # only fill the gap when a promoted row has none of its own.
+    rows = [{"scenario": "promoted_with_real_blocker", "achievable_stage": "scale_candidate", "promoted_to_launch": True, "blockers": ["margin_below_floor:0.11"]}]
+    export = _exported_payload(bridge.trustos_export(rows))
+    payload = export["payload"]
+    assert payload["blockers"] == ["margin_below_floor:0.11"]
+    assert payload["evidence_required"] != []
+    assert payload["approvals_required"] != []
+    assert export["evidence_state"] == "requires_review"
+
+
+def test_blocked_row_also_never_claims_evidence_present():
+    # Nearby variant: the non-promoted path was already conservative on
+    # blockers/evidence_required/approvals_required before this fix, but
+    # also used evidence_state="present" -- confirm it too is now
+    # requires_review, not just the promoted path.
+    rows = [{"scenario": "blocked_row", "achievable_stage": "economics_screened", "promoted_to_launch": False, "blockers": ["evidence_state_insufficient_for_stage:fixture"]}]
+    export = _exported_payload(bridge.trustos_export(rows))
+    assert export["evidence_state"] == "requires_review"
+    assert export["payload"]["evidence_required"] != []
+    assert export["payload"]["approvals_required"] != []
+
+
+def test_no_export_from_this_bridge_ever_claims_readiness_regardless_of_status_wording():
+    # Altered-status-wording variant: even if a future edit changes the
+    # literal "status" string, the safeguard is on the list emptiness and
+    # evidence_state, not on parsing the status text -- assert that
+    # invariant directly across every row this bridge can produce.
+    rows = [
+        {"scenario": "a", "achievable_stage": "scale_candidate", "promoted_to_launch": True, "blockers": []},
+        {"scenario": "b", "achievable_stage": "scale_candidate", "promoted_to_launch": True, "blockers": ["x"]},
+        {"scenario": "c", "achievable_stage": "economics_screened", "promoted_to_launch": False, "blockers": []},
+        {"scenario": "d", "achievable_stage": "economics_screened", "promoted_to_launch": False, "blockers": ["y"]},
+    ]
+    phase = bridge.trustos_export(rows)
+    assert phase["classification"] == "passed"
+    for export in phase["detail"]["exports"]:
+        assert export["evidence_state"] not in {"present", "passed"}
+        assert export["payload"]["blockers"] != []
+        assert export["payload"]["evidence_required"] != []
+        assert export["payload"]["approvals_required"] != []
+
+
+# ---------------------------------------------------------------------------
 # sanitized_handoff overall-classification (most-severe-wins) logic
 # ---------------------------------------------------------------------------
 
