@@ -48,6 +48,7 @@ export function normalizeEvidenceClass(value: unknown): EvidenceClass {
   if (raw === "public_observed") return "observed";
   if (raw === "fixture_demo" || raw === "fixture_only") return "fixture";
   if (raw === "manual") return "manual_import";
+  if (raw === "sample_verified" || raw === "verified") return "manual_import";
   if (raw === "live" || raw === "live_readonly") return "unavailable";
   return "unavailable";
 }
@@ -134,10 +135,19 @@ export function adaptServiceProjection(raw: unknown, generatedAt = "fixture"): A
   const liveEndpointStatus = record.live_endpoint_status === "available_read_only"
     ? "available_read_only" as const
     : "unavailable" as const;
+  const availability = record.availability === "unavailable"
+    ? "unavailable"
+    : record.availability === "manual_import"
+      ? "manual_import"
+      : record.availability === "partial"
+        ? "partial"
+        : version === SERVICE_DELIVERY_PLANE_REPORT_VERSION
+          ? "manual_import"
+          : "fixture";
   const engagements: ServiceEngagement[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
-    const adapted = adaptEngagement(row);
+    const adapted = adaptEngagement(row, availability);
     if (!adapted.ok) {
       return unavailableResult(adapted.reason, generatedAt, inputContract);
     }
@@ -147,14 +157,6 @@ export function adaptServiceProjection(raw: unknown, generatedAt = "fixture"): A
     seen.add(adapted.engagement.engagement_id);
     engagements.push(adapted.engagement);
   }
-
-  const availability = record.availability === "manual_import"
-    ? "manual_import"
-    : record.availability === "partial"
-      ? "partial"
-      : version === SERVICE_DELIVERY_PLANE_REPORT_VERSION
-        ? "manual_import"
-        : "fixture";
 
   return {
     rejected: false,
@@ -170,7 +172,9 @@ export function adaptServiceProjection(raw: unknown, generatedAt = "fixture"): A
       input_contract: inputContract,
       diagnostics: [
         ...((Array.isArray(record.diagnostics) ? record.diagnostics : []).map((item) => String(item))),
-        "GET /api/service-delivery/workbench is unavailable; this adapter never ranks or recalculates economics.",
+        liveEndpointStatus === "available_read_only"
+          ? "GET /api/service-delivery/workbench is available read-only; this adapter never ranks or recalculates economics."
+          : "GET /api/service-delivery/workbench is unavailable; this adapter never ranks or recalculates economics.",
       ],
     },
   };
@@ -234,7 +238,33 @@ type AdaptEngagementResult =
   | { ok: true; engagement: ServiceEngagement }
   | { ok: false; reason: string };
 
-function adaptEngagement(raw: unknown): AdaptEngagementResult {
+function demoteLiveValidated(
+  value: EvidenceClass,
+  availability: ServiceEngagementProjection["availability"],
+  base: EvidenceClass,
+): EvidenceClass {
+  if (value !== "live_validated") return value;
+  if (
+    availability === "fixture"
+    || availability === "manual_import"
+    || availability === "partial"
+    || availability === "unavailable"
+    || base === "fixture"
+    || base === "manual_import"
+    || base === "simulated"
+    || base === "assumption"
+  ) {
+    if (base === "simulated") return "simulated";
+    if (availability === "fixture" || base === "fixture") return "fixture";
+    return "manual_import";
+  }
+  return value;
+}
+
+function adaptEngagement(
+  raw: unknown,
+  availability: ServiceEngagementProjection["availability"] = "fixture",
+): AdaptEngagementResult {
   const record = asRecord(raw);
   if (!record) return { ok: false, reason: "malformed_artifact: engagement is not an object" };
   if (hasLeakageKeys(record)) {
@@ -255,7 +285,12 @@ function adaptEngagement(raw: unknown): AdaptEngagementResult {
   const intakeData = asRecord(record.intake_data);
   const economics = asRecord(record.economics) ?? {};
   const capacity = asRecord(record.capacity) ?? {};
-  const nba = asRecord(record.next_best_action) ?? {};
+  const nba = asRecord(record.next_best_action);
+  const nbaAction = nba
+    ? String(nba.action ?? "")
+    : typeof record.next_best_action === "string"
+      ? record.next_best_action
+      : "";
   const financial = asRecord(record.financial_readiness) ?? {};
   const evidenceSource = Array.isArray(record.evidence)
     ? record.evidence
@@ -302,15 +337,16 @@ function adaptEngagement(raw: unknown): AdaptEngagementResult {
       },
       evidence: evidenceSource.map((item, index) => {
         const row = asRecord(item) ?? {};
+        const base = normalizeEvidenceClass(row.base_class ?? row.evidence_class ?? row.class);
+        const claimed = neverUpgradeEvidenceClass(base, row.evidence_class ?? row.class);
         return {
           evidence_id: String(row.evidence_id ?? row.reference_id ?? `ev-${index}`),
           title: String(row.title ?? row.label ?? "Evidence item"),
-          evidence_class: neverUpgradeEvidenceClass(
-            normalizeEvidenceClass(row.base_class ?? row.evidence_class ?? row.class),
-            row.evidence_class ?? row.class,
-          ),
-          summary: String(row.summary ?? row.note ?? ""),
-          collected_at: row.collected_at == null ? null : String(row.collected_at),
+          evidence_class: demoteLiveValidated(claimed, availability, base),
+          summary: String(row.summary ?? row.note ?? documentRef(row)),
+          collected_at: row.collected_at == null
+            ? (row.captured_at == null ? null : String(row.captured_at))
+            : String(row.collected_at),
         };
       }),
       financial_readiness: {
@@ -344,14 +380,14 @@ function adaptEngagement(raw: unknown): AdaptEngagementResult {
         : (record.scope ? [String(record.scope)] : []),
       missing_data: missing,
       next_best_action: {
-        action: String(nba.action ?? (dataInadequate
+        action: nbaAction || (dataInadequate
           ? "Collect the missing client records listed on this engagement."
-          : "Review intake and wait for a canonical workbench projection.")),
-        owner: (["operator", "client", "blocked"].includes(String(nba.owner))
-          ? String(nba.owner)
+          : "Review intake and wait for a canonical workbench projection."),
+        owner: (["operator", "client", "blocked"].includes(String(nba?.owner ?? ""))
+          ? String(nba?.owner)
           : dataInadequate ? "client" : "blocked") as "operator" | "client" | "blocked",
         executes_live_action: false,
-        rationale: String(nba.rationale ?? "This workbench is read-only and does not execute CompanyOS transitions."),
+        rationale: String(nba?.rationale ?? "This workbench is read-only and does not execute CompanyOS transitions."),
       },
       creative_assets: Array.isArray(record.creative_assets)
         ? record.creative_assets.map((item) => {
@@ -428,6 +464,10 @@ function mapDeliverables(record: Record<string, unknown>, dataInadequate: boolea
     status: dataInadequate ? "blocked" as const : "not_started" as const,
     blocked_reason: dataInadequate ? "Blocked while the engagement is data_inadequate." : null,
   }));
+}
+
+function documentRef(row: Record<string, unknown>): string {
+  return String(row.document_ref ?? row.note ?? "");
 }
 
 function displayMoney(raw: unknown): ServiceEngagement["economics"]["fee"] {

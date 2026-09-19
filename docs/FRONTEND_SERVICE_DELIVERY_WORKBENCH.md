@@ -13,13 +13,13 @@ Accepted **inputs**:
 | Input version | Source |
 |---|---|
 | `service-engagement-projection-v1` | Existing #264 workbench projection |
-| `service-delivery-plane-v1` | PR #261 `ServiceDeliveryPlaneReport` / `ClientEngagement.to_dict()` copies, including `package_id` aliases |
+| `service-delivery-plane-v1` | PR #275 producer (`evaluation.companyos.service_delivery_projection`) and #261 `ClientEngagement.to_dict()` copies, including `package_id` aliases |
 
 Output schema is always `service-engagement-projection-v1`; endpoint status is `available_read_only` only for a validated sanitized artifact, otherwise `unavailable`.
 
-Canonical probe: `GET /api/service-delivery/workbench` via `#213` `frontend/src/lib/apiBase.ts` (`resolveApiBaseUrl` + `joinApiPath`). The backend route is GET-only and reads only an operator-configured artifact beneath `artifacts/`; there is no second API client and no frontend `ServiceEconomics` calculator.
+Canonical probe: `GET /api/service-delivery/workbench` via `#213` `frontend/src/lib/apiBase.ts` (`resolveApiBaseUrl` + `joinApiPath`). The backend route (#271) is GET-only and reads only an operator-configured artifact beneath `artifacts/`. This frontend lane consumes that envelope; it does not add an endpoint, economics engine, second API client, or new projection schema.
 
-HTTP route: available read-only when `MARKETOS_SERVICE_DELIVERY_PROJECTION` points to a safe artifact; otherwise the response is explicitly `unavailable`. Read-only availability never means live validation, client approval, or mutation authority.
+HTTP route: available read-only when `MARKETOS_SERVICE_DELIVERY_PROJECTION` points to a safe #275 artifact; otherwise the response is explicitly `unavailable`. Read-only availability never means live validation, client approval, or mutation authority. Envelope `availability` of `fixture` / `manual_import` / `partial` never promotes evidence to `live_validated`.
 
 ## State taxonomy
 
@@ -27,7 +27,11 @@ CompanyOS / #261 lifecycle (plus frontend `unavailable`):
 
 `intake` → `screening` → `data_inadequate` | `eligible` → `scoped` → `evidence_collection` → `analysis` → `draft_ready` → `client_review` → `revision_requested` → `approved` → `delivered` → `renewal_candidate` | `upsell_candidate`, plus `paused` / `cancelled` / `rejected` / `unavailable`.
 
-Workbench **surface** states: `loading`, `empty`, `blocked`, `unavailable`, `stale`, `partial`. `success` is not emitted while the live endpoint is down.
+Workbench **surface** states: `loading`, `empty`, `blocked`, `unavailable`, `stale`, `partial`. `success` is never emitted when the endpoint is unavailable or the envelope is fixture/manual/partial.
+
+Selected lifecycle states are displayed as copies: `data_inadequate`, `draft_ready`, `client_review`, `revision_requested`, `approved`, `delivered`, `cancelled`, `rejected` (plus the rest of the CompanyOS vocabulary). They do not grant mutation authority.
+
+Compose bounds the filtered list at 500 rows without re-ranking.
 
 `data_inadequate` is a hard blocker: client-safe export is rejected and lists exact missing client inputs.
 
@@ -49,10 +53,11 @@ Route: `/operator/services` (read-only).
 
 ## Tests and browser/E2E
 
-- `frontend/tests/service-delivery-workbench*.test.mjs` (adapter, export, a11y source contracts, 1/10/100/500 bench).
-- Browser E2E: **not run** in this lane (no mutating journey; source-contract coverage for keyboard/live regions/tables).
-- CoderOS: unavailable on this worktree.
+- `frontend/tests/service-delivery-workbench*.test.mjs`
+- `frontend/tests/service-workbench-producer-acceptance.test.mjs` (#275 envelope consume)
+- `frontend/tests/readonly-cockpit-browser-acceptance.test.mjs`
+- Browser E2E: **unavailable** unless a real harness executes.
 
 ## Overlap
 
-Does not implement `evaluation/companyos/service_delivery.py` (#261). Does not edit first-phase cockpit files (#230). `apiBase.ts` remains the #213-shaped helper; workbench consumes it rather than `api.ts` POST helpers.
+Does not implement `evaluation/companyos/service_delivery.py` (#261) or `evaluation/companyos/service_delivery_projection.py` (#275). Does not edit `api/routes/service_delivery_workbench.py` or `backend/api.py` (#271). `apiBase.ts` remains the #213-shaped helper.

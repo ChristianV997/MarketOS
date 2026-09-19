@@ -32,8 +32,8 @@ export default function ServiceDeliveryWorkbench() {
         <p className="text-sm text-zinc-400">
           Operator review for Product Validation Sprint, Unit Economics + CAC/ROAS Diagnostic,
           Launch Draft Pack, and Managed Acquisition and CRO. Read-only: the canonical GET is
-          unavailable, fixtures/manual/simulated rows are not live client evidence, and
-          draft-ready is not commercially validated.
+          {view.liveEndpointUnavailable ? " unavailable" : " available read-only"}
+          ; fixture/manual/simulated rows are not live client evidence; draft-ready is not commercially validated; economics are backend display copies only.
         </p>
       </header>
 

@@ -6,6 +6,8 @@ import type {
 import { buildClientSafeServiceExport } from "./exportClientSafeEngagement.ts";
 import { filterEngagements, type WorkbenchFilters } from "./filterEngagements.ts";
 
+export const WORKBENCH_FILTER_WINDOW = 500;
+
 export type WorkbenchViewModel = {
   surface: SurfaceState;
   statusMessage: string;
@@ -15,6 +17,7 @@ export type WorkbenchViewModel = {
   exportPreview: ReturnType<typeof buildClientSafeServiceExport> | null;
   liveEndpointUnavailable: boolean;
   diagnostics: string[];
+  bounded: boolean;
 };
 
 export function composeWorkbenchViewModel(input: {
@@ -34,6 +37,7 @@ export function composeWorkbenchViewModel(input: {
       exportPreview: null,
       liveEndpointUnavailable: true,
       diagnostics: [],
+      bounded: false,
     };
   }
 
@@ -48,10 +52,13 @@ export function composeWorkbenchViewModel(input: {
       exportPreview: null,
       liveEndpointUnavailable: true,
       diagnostics: input.errorMessage ? [input.errorMessage] : [],
+      bounded: false,
     };
   }
 
-  const filtered = filterEngagements(input.projection.engagements, input.filters);
+  const filteredAll = filterEngagements(input.projection.engagements, input.filters);
+  const bounded = filteredAll.length > WORKBENCH_FILTER_WINDOW;
+  const filtered = bounded ? filteredAll.slice(0, WORKBENCH_FILTER_WINDOW) : filteredAll;
   const selected = filtered.find((item) => item.engagement_id === input.selectedId)
     ?? filtered[0]
     ?? null;
@@ -78,13 +85,20 @@ export function composeWorkbenchViewModel(input: {
   } else if (selected?.stale) {
     surface = "stale";
     statusMessage = "Selected engagement is stale. Do not treat displayed figures as current proof.";
+  } else if (input.projection.availability === "unavailable") {
+    surface = "unavailable";
+    statusMessage = "Projection availability is unavailable. This is not a success state and grants no mutation authority.";
   } else if (input.projection.availability === "partial" || input.projection.availability === "fixture") {
     surface = "partial";
     statusMessage = `Partial/fixture projection: the endpoint is ${endpointAvailableReadOnly ? "available read-only" : "unavailable"}. These rows are not live-validated commercial proof.`;
   } else if (input.projection.availability === "manual_import") {
     surface = "partial";
-    statusMessage = "Manual-import / #261 plane copy. Not live-validated. Server order is preserved; economics are display copies only.";
+    statusMessage = `${endpointAvailableReadOnly ? "Read-only GET is available" : "Canonical GET remains unavailable"}. Manual-import / #275 plane copy. Not live-validated. Server order is preserved; economics are display copies only.`;
   }
+  if (selected && surface !== "unavailable") {
+    statusMessage = `${statusMessage} Selected lifecycle: ${selected.lifecycle_state}.`;
+  }
+  // Fail-closed: fixture/manual/partial/unavailable envelopes never emit success.
 
   return {
     surface,
@@ -98,6 +112,7 @@ export function composeWorkbenchViewModel(input: {
       ...(input.errorMessage ? [input.errorMessage] : []),
       ...input.projection.diagnostics,
     ],
+    bounded,
   };
 }
 
