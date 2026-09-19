@@ -11,7 +11,6 @@ Validates:
 from __future__ import annotations
 
 from decimal import Decimal
-import pytest
 
 from scripts.benchmarks.benchmark_commercial_replay_lab import (
     EXPECTED_STAGES,
@@ -19,7 +18,6 @@ from scripts.benchmarks.benchmark_commercial_replay_lab import (
     SensitivityMatrixLaboratory,
     ScalingAndProfilerLaboratory,
     StatisticalComparisonLaboratory,
-    SCHEMA_VERSION,
 )
 
 
@@ -93,3 +91,21 @@ def test_profiler_generates_entries():
     for entry in top_entries:
         assert "function" in entry
         assert entry["total_calls"] > 0
+
+
+def test_canonical_replay_integration_safe_invocation():
+    result = ScenarioReplayLaboratory.run_canonical_replay_integration()
+    assert result["status"] in {"available", "unmerged_dependency"}
+    assert result["authority"] == "scripts.run_commercial_replay_integration"
+    if result["status"] == "available":
+        assert result["result"] == "actual"
+        assert result["rows_evaluated"] == 5
+        assert result["all_replay_equal"] is True
+        assert result["all_launch_blocked"] is True
+
+
+def test_adversarial_authority_fail_closed_rejection():
+    res = ScenarioReplayLaboratory.verify_adversarial_authority_rejection()
+    assert res["adversarial_events_tested"] == 2
+    assert res["fail_closed"] is True
+    assert len(res["violations_detected"]) == 2
