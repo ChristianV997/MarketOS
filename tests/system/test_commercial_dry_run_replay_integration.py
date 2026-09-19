@@ -521,7 +521,17 @@ def test_missing_supplier_cost_is_unavailable_in_report_and_canonical_economics_
 def test_missing_supplier_shipping_is_unavailable_but_explicit_zero_is_preserved(monkeypatch):
     import scripts.research_to_decision as research_to_decision
     from scripts.run_commercial_replay_integration import _missing_supplier_cost_inputs
+    from backend.events.repository import InMemoryEventRepository
 
+    captured_events = []
+    append_many = InMemoryEventRepository.append_many
+
+    def capture_events(repository, events):
+        rows = tuple(events)
+        captured_events.extend(rows)
+        return append_many(repository, rows)
+
+    monkeypatch.setattr(InMemoryEventRepository, "append_many", capture_events)
     offer = {"price": {"amount": "12.50"}}
     assert _missing_supplier_cost_inputs(offer, None) == ("supplier_shipping",)
     assert _missing_supplier_cost_inputs(offer, "0") == ()
@@ -557,6 +567,23 @@ def test_missing_supplier_shipping_is_unavailable_but_explicit_zero_is_preserved
     assert result["evidence_classes"]["economics"] == "unavailable"
     assert "economics" in result["commerce"]["promotion"]["blockers"]
     assert "unknown_cost:supplier_shipping" in result["fulfillment"]["reserve_classifications"]
+    assert result["commerce"]["commerce_packet"]["economics"]["status"] == "unavailable"
+    assert "supplier_shipping" not in result["commerce"]["commerce_packet"]["assumptions"]
+    assert "ledger" not in result["event_summary"]
+    economics_event = next(
+        event for event in captured_events
+        if event.event_type == "commerce_dry_run_step_unit_economics"
+    )
+    assert economics_event.payload["status"] == "unavailable"
+    assert economics_event.payload["detail"]["evidence_state"] == "missing"
+    assert "supplier_shipping" in economics_event.payload["detail"]["missing_inputs"]
+    assert "amount" not in economics_event.payload["detail"]
+    assert "contribution_before_cac" not in economics_event.payload["detail"]
+    export_json = json.dumps(result["client_export"]["payload"], sort_keys=True)
+    assert result["client_export"]["payload"]["status"] == "blocked"
+    assert "economics" not in result["client_export"]["payload"]
+    assert "supplier_shipping" not in export_json
+    assert "contribution" not in export_json
 
     def with_zero_shipping(manifest, *, base_dir):
         report = build(manifest, base_dir=base_dir)
