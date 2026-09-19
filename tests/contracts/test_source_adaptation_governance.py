@@ -2,7 +2,7 @@
 for MarketOS source-adaptation registry and governance acceptance pipeline.
 
 Tests:
-1. Canonical schema parsing and record validation across all 28 registered sources.
+1. Canonical schema parsing and record validation across all 29 registered sources.
 2. Deterministic stable hash verification.
 3. Secret-shape detection and redaction.
 4. Fail-closed rejection:
