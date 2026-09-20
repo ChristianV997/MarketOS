@@ -193,6 +193,13 @@ def test_resumed_changed_files_within_allowed_scope_still_resumes():
     assert validate_resume_packet(resume, expected_task_packet=TASK_PACKET) == resume
 
 
+def test_resumed_changed_directory_cannot_expand_a_narrow_file_scope():
+    resume = build_resume_packet(TASK_PACKET, **_resume_kwargs())
+    broadened = dict(resume, changed_files=["scripts/ai"])
+    with pytest.raises(ResumePacketError, match="allowed_scope"):
+        validate_resume_packet(broadened, expected_task_packet=TASK_PACKET)
+
+
 def test_scope_check_is_skipped_without_an_expected_task_packet():
     """Without expected_task_packet, there is no allowed_scope to compare
     against -- this must not crash, only the identity/digest/scope checks
@@ -209,7 +216,7 @@ def test_scope_check_is_skipped_without_an_expected_task_packet():
         ("tests/ai/foo.py", ["tests/ai"], True),
         ("tests/ai_evil/malicious.py", ["tests/ai"], False),
         ("tests/aiEVIL/x.py", ["tests/ai"], False),
-        ("tests/ai", ["tests/ai/foo.py"], True),  # allowed nested under a broader changed path is fine
+        ("tests/ai", ["tests/ai/foo.py"], False),  # an ancestor is broader than the allowed file
         # -- exact match
         ("tests/ai/foo.py", ["tests/ai/foo.py"], True),
         # -- case sensitivity: must fail closed (deny), never fail open.

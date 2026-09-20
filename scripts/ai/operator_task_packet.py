@@ -173,7 +173,7 @@ def _in_scope(path: str, allowed: list[str]) -> bool:
         target = _normalize_path(prefix)
         if not target:
             continue
-        if normalized == target or normalized.startswith(target.rstrip("/") + "/") or target.startswith(normalized.rstrip("/") + "/"):
+        if normalized == target or normalized.startswith(target.rstrip("/") + "/"):
             return True
     return False
 
