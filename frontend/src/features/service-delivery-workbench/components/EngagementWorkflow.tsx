@@ -231,7 +231,9 @@ export function EngagementWorkflow({
         {!exportPreview && <p>No export preview.</p>}
         {exportPreview?.accepted ? (
           <div>
-            <p className="text-emerald-300">Accepted client-safe preview. Internal prompts, formulas, heuristics, credentials, and cross-client data are omitted.</p>
+            <p className="text-sky-200">
+              Redaction-pass draft preview. Not commercial validation. Evidence class and authorization stay as labeled in the JSON. Internal prompts, formulas, heuristics, credentials, and cross-client data are omitted.
+            </p>
             <JsonPreview
               value={exportPreview.payload}
               label="Client-safe export JSON preview"

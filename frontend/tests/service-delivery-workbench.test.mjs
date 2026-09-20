@@ -255,7 +255,9 @@ test("artifact-backed projection is available read-only without becoming live va
   });
   assert.notEqual(view.surface, "success");
   assert.equal(view.liveEndpointUnavailable, false);
-  assert.match(view.statusMessage, /available read-only/i);
+  assert.match(view.statusMessage, /available_read_only/);
+  assert.match(view.statusMessage, /Envelope:/);
+  assert.notEqual(view.surface, "success");
   assert.notEqual(result.projection.engagements[0].evidence[0].evidence_class, "live_validated");
 });
 

@@ -35,9 +35,11 @@ export default function ServiceDeliveryWorkbench() {
         <h1 className="text-xl font-semibold text-zinc-50">Service delivery workbench</h1>
         <p className="text-sm text-zinc-400">
           Operator review for Product Validation Sprint, Unit Economics + CAC/ROAS Diagnostic,
-          Launch Draft Pack, and Managed Acquisition and CRO. Read-only: the canonical GET is
-          {view.liveEndpointUnavailable ? " unavailable" : " available read-only"}
-          ; fixture/manual/simulated rows are not live client evidence; draft-ready is not commercially validated; economics are backend display copies only.
+          Launch Draft Pack, and Managed Acquisition and CRO. GET slot is
+          {view.liveEndpointUnavailable ? " unavailable" : " available_read_only"}
+          ; envelope is {view.envelopeAvailability.replace(/_/g, " ")}.
+          Fixture, manual_import, assumption, and simulated classes are not live client evidence.
+          Draft-ready is not commercially validated. Economics are backend display copies only.
         </p>
       </header>
 
@@ -45,6 +47,8 @@ export default function ServiceDeliveryWorkbench() {
         surface={view.surface}
         message={view.statusMessage}
         diagnostics={view.diagnostics}
+        liveEndpointStatus={view.liveEndpointStatus}
+        envelopeAvailability={view.envelopeAvailability}
       />
 
       <FilterBar

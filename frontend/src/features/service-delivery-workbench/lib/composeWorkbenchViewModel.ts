@@ -16,6 +16,8 @@ export type WorkbenchViewModel = {
   selectedIndex: number;
   exportPreview: ReturnType<typeof buildClientSafeServiceExport> | null;
   liveEndpointUnavailable: boolean;
+  liveEndpointStatus: "unavailable" | "available_read_only";
+  envelopeAvailability: ServiceEngagementProjection["availability"] | "unknown";
   diagnostics: string[];
   bounded: boolean;
   pipelineEmptyCopy: string | null;
@@ -37,6 +39,8 @@ export function composeWorkbenchViewModel(input: {
       selectedIndex: -1,
       exportPreview: null,
       liveEndpointUnavailable: true,
+      liveEndpointStatus: "unavailable",
+      envelopeAvailability: "unknown",
       diagnostics: [],
       bounded: false,
       pipelineEmptyCopy: "Loading the service-delivery workbench.",
@@ -55,6 +59,8 @@ export function composeWorkbenchViewModel(input: {
       selectedIndex: -1,
       exportPreview: null,
       liveEndpointUnavailable: true,
+      liveEndpointStatus: "unavailable",
+      envelopeAvailability: "unknown",
       diagnostics: input.errorMessage ? [input.errorMessage] : [],
       bounded: false,
       pipelineEmptyCopy: unavailable
@@ -76,33 +82,35 @@ export function composeWorkbenchViewModel(input: {
     : -1;
 
   const endpointAvailableReadOnly = input.projection.live_endpoint_status === "available_read_only";
-  // Read-only availability never promotes fixture/manual evidence or enables mutations.
+  const getSlot = endpointAvailableReadOnly ? "available_read_only" : "unavailable";
+  const envelope = input.projection.availability;
+  // GET slot presence never promotes fixture/manual evidence or enables mutations.
   let surface: SurfaceState = "unavailable";
-  let statusMessage = `${filtered.length} engagement(s) in the current filter. Source order is preserved. Canonical GET ${input.projection.live_endpoint} is ${endpointAvailableReadOnly ? "available read-only" : "unavailable"}. Fixture/manual/simulated rows are not live client evidence.`;
-  if (input.projection.availability === "unavailable" && input.projection.engagements.length === 0) {
+  let statusMessage = `${filtered.length} engagement(s) in the current filter. Envelope: ${envelope} (not live_validated). GET slot: ${getSlot}. Source order is preserved. Economics are display copies only.`;
+  if (envelope === "unavailable" && input.projection.engagements.length === 0) {
     surface = "unavailable";
-    statusMessage = `Canonical GET /api/service-delivery/workbench is ${endpointAvailableReadOnly ? "available read-only" : "unavailable"}. No sanitized engagements to review.`;
+    statusMessage = `Envelope: unavailable. GET slot: ${getSlot}. No sanitized engagements to review. This is not a success state.`;
   } else if (input.projection.engagements.length === 0) {
     surface = "empty";
-    statusMessage = "No engagements in the sanitized projection.";
+    statusMessage = `Envelope: ${envelope}. GET slot: ${getSlot}. No engagements in the sanitized projection.`;
   } else if (filtered.length === 0) {
     surface = "empty";
-    statusMessage = "No engagements match the current filters. Clear filters to restore the source list.";
+    statusMessage = `Envelope: ${envelope}. GET slot: ${getSlot}. No engagements match the current filters. Clear filters to restore the source list.`;
   } else if (selected?.eligibility.data_inadequate || selected?.lifecycle_state === "data_inadequate") {
     surface = "blocked";
-    statusMessage = "Selected engagement is data_inadequate. The client must supply the listed records. Draft-ready is not commercially validated.";
+    statusMessage = `Envelope: ${envelope}. GET slot: ${getSlot}. Selected engagement is data_inadequate. Draft-ready is not commercially validated.`;
   } else if (selected?.stale) {
     surface = "stale";
-    statusMessage = "Selected engagement is stale. Do not treat displayed figures as current proof.";
-  } else if (input.projection.availability === "unavailable") {
+    statusMessage = `Envelope: ${envelope}. GET slot: ${getSlot}. Selected engagement is stale. Do not treat displayed figures as current proof.`;
+  } else if (envelope === "unavailable") {
     surface = "unavailable";
-    statusMessage = "Projection availability is unavailable. This is not a success state and grants no mutation authority.";
-  } else if (input.projection.availability === "partial" || input.projection.availability === "fixture") {
+    statusMessage = `Envelope: unavailable. GET slot: ${getSlot}. This is not a success state and grants no mutation authority.`;
+  } else if (envelope === "partial" || envelope === "fixture") {
     surface = "partial";
-    statusMessage = `Partial/fixture projection: the endpoint is ${endpointAvailableReadOnly ? "available read-only" : "unavailable"}. These rows are not live-validated commercial proof.`;
-  } else if (input.projection.availability === "manual_import") {
+    statusMessage = `Envelope: ${envelope} (not live_validated). GET slot: ${getSlot}. These rows are not commercial proof.`;
+  } else if (envelope === "manual_import") {
     surface = "partial";
-    statusMessage = `${endpointAvailableReadOnly ? "Read-only GET is available" : "Canonical GET remains unavailable"}. Manual-import / #275 plane copy. Not live-validated. Server order is preserved; economics are display copies only.`;
+    statusMessage = `Envelope: manual_import (not live_validated). GET slot: ${getSlot}. Plane copy only. Server order is preserved; economics are display copies only.`;
   }
   if (selected && surface !== "unavailable") {
     statusMessage = `${statusMessage} Selected lifecycle: ${selected.lifecycle_state}.`;
@@ -117,6 +125,8 @@ export function composeWorkbenchViewModel(input: {
     selectedIndex,
     exportPreview: selected ? buildClientSafeServiceExport(selected) : null,
     liveEndpointUnavailable: !endpointAvailableReadOnly,
+    liveEndpointStatus: input.projection.live_endpoint_status,
+    envelopeAvailability: envelope,
     diagnostics: [
       ...(input.errorMessage ? [input.errorMessage] : []),
       ...input.projection.diagnostics,

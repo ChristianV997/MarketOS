@@ -22,10 +22,14 @@ export function WorkbenchStatusBanner({
   surface,
   message,
   diagnostics = [],
+  liveEndpointStatus = "unavailable",
+  envelopeAvailability = "unknown",
 }: {
   surface: SurfaceState;
   message: string;
   diagnostics?: string[];
+  liveEndpointStatus?: "unavailable" | "available_read_only";
+  envelopeAvailability?: "fixture" | "unavailable" | "partial" | "manual_import" | "unknown";
 }) {
   return (
     <div
@@ -38,6 +42,11 @@ export function WorkbenchStatusBanner({
         <span className="font-medium uppercase tracking-wide text-[11px]">{surface}</span>
         <span className="ml-2">{message}</span>
       </p>
+      <p className="mt-1 flex flex-wrap gap-2 text-[11px]">
+        <span className="rounded border border-white/10 px-1.5 py-0.5">GET slot: {liveEndpointStatus.replace(/_/g, " ")}</span>
+        <span className="rounded border border-white/10 px-1.5 py-0.5">Envelope: {envelopeAvailability.replace(/_/g, " ")}</span>
+        <span className="rounded border border-white/10 px-1.5 py-0.5">Not live validated · not launch authorized</span>
+      </p>
       {diagnostics.length > 0 ? (
         <ul className="mt-1 list-disc pl-4 text-[11px]">
           {diagnostics.slice(0, 8).map((item) => (
@@ -46,7 +55,7 @@ export function WorkbenchStatusBanner({
         </ul>
       ) : null}
       <p className="mt-1 text-[11px]">
-        Read-only operator workbench. No client accounts, messages, publishing, campaign edits, or charges.
+        Read-only operator workbench. GET slot presence is not commercial validation. No client accounts, messages, publishing, campaign edits, or charges.
       </p>
     </div>
   );
