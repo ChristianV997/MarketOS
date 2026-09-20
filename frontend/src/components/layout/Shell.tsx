@@ -106,7 +106,7 @@ export default function Shell() {
     <div className="flex h-screen bg-[#0a0a0b] text-zinc-100 overflow-hidden">
       <a
         href={`#${OPERATOR_MAIN_ID}`}
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-14 focus:z-[60] focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
       >
         Skip to main content
       </a>
