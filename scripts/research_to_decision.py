@@ -51,6 +51,8 @@ MAX_MANIFEST_BYTES = 128 * 1024
 MAX_RECORDS = 100
 MAX_INPUT_FILES = 24
 MAX_TEXT = 240
+MAX_EVIDENCE_DOCUMENT_BYTES = 256 * 1024
+SUPPORTED_EVIDENCE_DOCUMENT_EXTENSIONS = frozenset({".pdf", ".txt", ".json", ".png", ".jpg", ".jpeg"})
 SUPPORTED_CURRENCIES = frozenset({"AUD", "CAD", "CNY", "EUR", "GBP", "JPY", "MXN", "USD"})
 LIFECYCLE_STATES = frozenset({"candidate", "evidence_collected", "research_ready", "hold", "reject", "no_launch"})
 PROMOTION_LIFECYCLE_STATES = (
@@ -259,6 +261,78 @@ def _operator_supplier_confirmations(values: Sequence[Sequence[str]]) -> set[tup
             raise ResearchToDecisionError("duplicate operator supplier confirmation")
         confirmations.add(confirmation)
     return confirmations
+
+
+def _supplier_document_evidence_bindings(
+    values: Sequence[Sequence[str]],
+    *,
+    evidence_root: Path | None,
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Bind a manual document reference to real, on-disk evidence bytes.
+
+    This proves document *byte integrity* only: that the file at
+    ``reference`` (resolved under ``evidence_root``, never outside it)
+    hashes to the operator-supplied digest. It is deliberately a separate,
+    additional signal from ``_operator_supplier_confirmations``'s
+    ``human_confirmed`` attestation -- a verified digest never sets
+    ``human_confirmed`` by itself, and ``human_confirmed`` never implies a
+    verified digest. Neither implies supplier identity or live validation;
+    both remain local, offline claims about evidence the operator supplied.
+    Raw document content is read only to hash it and is never retained,
+    logged, or included in any returned structure.
+    """
+    if not isinstance(values, (list, tuple)) or len(values) > MAX_RECORDS:
+        raise ResearchToDecisionError("supplier document evidence bindings must be a bounded list")
+    if not values:
+        return {}
+    if evidence_root is None:
+        raise ResearchToDecisionError("supplier document evidence bindings require an evidence root")
+    root = evidence_root.resolve()
+    if not root.is_dir():
+        raise ResearchToDecisionError("supplier evidence root does not exist or is not a directory")
+    bindings: dict[tuple[str, str], dict[str, Any]] = {}
+    for value in values:
+        if not isinstance(value, (list, tuple)) or len(value) != 4:
+            raise ResearchToDecisionError("supplier document evidence binding requires offer_id, exact_sku, reference, and digest")
+        offer_id = _text(value[0], "document_evidence.offer_id", required=True)
+        exact_sku = _text(value[1], "document_evidence.exact_sku", required=True)
+        # ``reference`` must be byte-identical to the offer's own declared
+        # source_reference/document_reference (the same string
+        # --confirm-supplier-document matches against) so a verified digest
+        # binds to the *specific reference the offer claims*, not merely a
+        # same-named file. It goes through the same _reference_text safety
+        # checks as that existing confirmation path (fixture/file/manual
+        # scheme allowlist, no absolute path, no "..", no control chars),
+        # then the scheme prefix (if any) is stripped to resolve a real,
+        # bounded local file under evidence_root.
+        reference = _reference_text(value[2], "document_evidence.reference")
+        expected_digest = _text(value[3], "document_evidence.digest", required=True).strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+            raise ResearchToDecisionError("document_evidence.digest must be a 64-character hex sha256 digest")
+        key = (offer_id, exact_sku)
+        if key in bindings:
+            raise ResearchToDecisionError(f"duplicate supplier document evidence binding for offer {offer_id}/{exact_sku}")
+        relative_path = urlparse(reference).path or reference
+        # Checked on the *unresolved* path, walking every component: once
+        # _resolve() calls Path.resolve() it follows symlinks and returns
+        # the real target, which is never itself a symlink -- so a symlink
+        # check after resolving would be a no-op. This must run first.
+        walked = root
+        for part in Path(relative_path).parts:
+            walked = walked / part
+            if walked.is_symlink():
+                raise ResearchToDecisionError("document_evidence.reference must not be a symlink")
+        resolved = _resolve(root, relative_path, label="document_evidence.reference")
+        if resolved.suffix.lower() not in SUPPORTED_EVIDENCE_DOCUMENT_EXTENSIONS:
+            raise ResearchToDecisionError(f"document_evidence.reference has an unsupported format: {resolved.suffix or 'none'}")
+        size = resolved.stat().st_size
+        if size > MAX_EVIDENCE_DOCUMENT_BYTES:
+            raise ResearchToDecisionError(f"document_evidence.reference exceeds {MAX_EVIDENCE_DOCUMENT_BYTES} bytes")
+        actual_digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        if actual_digest != expected_digest:
+            raise ResearchToDecisionError(f"document_evidence.reference content digest mismatch for offer {offer_id}/{exact_sku}")
+        bindings[key] = {"reference": reference, "document_digest": actual_digest, "document_size_bytes": size}
+    return bindings
 
 
 def _warning_values(value: Any, field: str) -> list[str]:
@@ -588,6 +662,7 @@ def _normalize_supplier_offer(
     input_warnings: Any = None,
     import_evidence_state: str,
     operator_confirmations: set[tuple[str, str, str]],
+    document_evidence_bindings: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     candidate_id = _text(row.get("candidate_id"), "supplier_offer.candidate_id", required=True)
     offer_id_value = _row_value(row, "offer_id", "supplier_offer_id", "supplier_product_id")
@@ -624,6 +699,12 @@ def _normalize_supplier_offer(
     human_confirmed = bool(
         explicit_reference
         and (offer_id, exact_sku, explicit_reference) in operator_confirmations
+    )
+    document_binding = (document_evidence_bindings or {}).get((offer_id, exact_sku))
+    document_bytes_confirmed = bool(
+        document_binding
+        and explicit_reference
+        and document_binding["reference"] == explicit_reference
     )
     evidence_warnings = _warning_values(_row_value(row, "warnings") or input_warnings, "supplier_offer.warnings")
     source_claimed_state = _offer_text(row, ("evidence_state",), "evidence_state", issues)
@@ -682,6 +763,9 @@ def _normalize_supplier_offer(
             "human_confirmed": human_confirmed,
             "human_confirmation_source": "operator_input" if human_confirmed else "none",
             "supplier_claimed_human_confirmation": source_claimed_human_confirmation,
+            "document_bytes_confirmed": document_bytes_confirmed,
+            "document_digest": document_binding["document_digest"] if document_bytes_confirmed else None,
+            "document_size_bytes": document_binding["document_size_bytes"] if document_bytes_confirmed else None,
             "warnings": evidence_warnings,
         },
         "unknown_fields": sorted(set(row) - OFFER_FIELDS),
@@ -702,6 +786,7 @@ def _load_import(
     lane: Mapping[str, Any],
     captured_at: str,
     operator_confirmations: set[tuple[str, str, str]],
+    document_evidence_bindings: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     rows, fmt = _raw_records(path)
     label = _text(entry.get("label") or path.name, f"{role}.label")
@@ -732,6 +817,7 @@ def _load_import(
                 input_warnings=entry.get("warnings"),
                 import_evidence_state="manual" if fmt == "csv" else "fixture",
                 operator_confirmations=operator_confirmations,
+                document_evidence_bindings=document_evidence_bindings,
             )
             for row in rows
         ]
@@ -1116,14 +1202,25 @@ def build_research_to_decision(
     *,
     base_dir: str | Path,
     operator_confirmed_supplier_documents: Sequence[Sequence[str]] = (),
+    supplier_evidence_root: str | Path | None = None,
+    confirmed_supplier_document_evidence: Sequence[Sequence[str]] = (),
 ) -> dict[str, Any]:
     """Build the existing report; confirmations must come from outside imports.
 
     Operator confirmations are local attestations, not authenticated identity
-    or supplier/document verification.
+    or supplier/document verification. ``confirmed_supplier_document_evidence``
+    (``[offer_id, exact_sku, reference, sha256_digest]`` rows, resolved only
+    under ``supplier_evidence_root``) additionally proves that the bytes at
+    ``reference`` match ``sha256_digest`` -- document *byte integrity*, still
+    not supplier identity, human review, or live validation. Both parameters
+    are optional and additive; omitting them reproduces prior behavior
+    exactly (see #279's ``run_commercial_replay_integration.py``, which calls
+    this function without either).
     """
     lane, metadata, captured_at = _validate_manifest(manifest)
     operator_confirmations = _operator_supplier_confirmations(operator_confirmed_supplier_documents)
+    evidence_root = Path(supplier_evidence_root).resolve() if supplier_evidence_root else None
+    document_evidence_bindings = _supplier_document_evidence_bindings(confirmed_supplier_document_evidence, evidence_root=evidence_root)
     base = Path(base_dir).resolve()
     entries_total = sum(len(manifest.get(key, []) or []) for key in ("supplier_inputs", "marketplace_inputs", "consumer_attention_inputs", "observation_inputs")) + (1 if manifest.get("public_market_seed") else 0)
     if entries_total > MAX_INPUT_FILES:
@@ -1148,6 +1245,7 @@ def build_research_to_decision(
                 lane=lane,
                 captured_at=captured_at,
                 operator_confirmations=operator_confirmations,
+                document_evidence_bindings=document_evidence_bindings,
             )
             supplier_conflict_keys.update(
                 _check_record_conflicts(records, role, seen_records, allow_supplier_conflicts=role == "supplier")
@@ -1320,6 +1418,18 @@ def main(argv: list[str] | None = None) -> int:
         metavar=("OFFER_ID", "EXACT_SKU", "REFERENCE"),
         help="local operator attestation after review; must match one manually imported offer exactly",
     )
+    parser.add_argument(
+        "--supplier-evidence-root",
+        help="local directory that --confirm-supplier-document-digest references may resolve under; required only if that flag is used",
+    )
+    parser.add_argument(
+        "--confirm-supplier-document-digest",
+        action="append",
+        nargs=4,
+        default=[],
+        metavar=("OFFER_ID", "EXACT_SKU", "REFERENCE", "SHA256_DIGEST"),
+        help="bind a manual document reference to real evidence bytes under --supplier-evidence-root; proves document byte integrity only, not supplier identity or human review",
+    )
     parser.add_argument("--json", action="store_true", help="emit the existing report as JSON")
     parser.add_argument("--output", help="optional output file; no file is written by default")
     args = parser.parse_args(argv)
@@ -1329,6 +1439,8 @@ def main(argv: list[str] | None = None) -> int:
             manifest,
             base_dir=base_dir,
             operator_confirmed_supplier_documents=args.confirm_supplier_document,
+            supplier_evidence_root=args.supplier_evidence_root,
+            confirmed_supplier_document_evidence=args.confirm_supplier_document_digest,
         )
     except (OSError, ResearchToDecisionError) as exc:
         print(json.dumps({"status": "rejected", "error": str(exc)}, sort_keys=True))
