@@ -44,6 +44,7 @@ PACKAGE_IDS = ("product-validation-sprint", "unit-economics-cac-roas-diagnostic"
 # _ENGAGEMENT_TRANSITIONS graph -- not a re-derivation, just a fixed walk
 # through it for test setup.
 _PATH_TO_STATE: dict[str, tuple[str, ...]] = {
+    "intake": (),
     "eligible": ("screening", "eligible"),
     "data_inadequate": ("screening", "data_inadequate"),
     "cancelled": ("cancelled",),
@@ -89,7 +90,7 @@ def _drive_to_state(package_id: str, target_state: str, *, client_id: str, curre
     dq = assess_client_data_quality({"revenue": {"available": True}} if data_inadequate_target else adequate_intake())
 
     economics = None
-    if not dq.data_inadequate and target_state not in {"cancelled", "rejected"}:
+    if not dq.data_inadequate and target_state not in {"cancelled", "rejected", "intake"}:
         economics = evaluate_engagement_economics(
             pkg, fee=Money(str(pkg.price_min_money.amount), currency), ad_spend=Money("2000", currency),
             roas_before=Decimal("1.4"), roas_after=Decimal("2.1"), cac_before=Money("22", currency), cac_after=Money("16", currency),
@@ -129,11 +130,14 @@ def _reproduce_271_route_validation(payload: dict) -> str:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("package_id", PACKAGE_IDS)
-@pytest.mark.parametrize("target_state", ("eligible", "data_inadequate", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "revision_requested", "approved", "delivered", "paused", "cancelled", "rejected"))
+@pytest.mark.parametrize("target_state", ("intake", "eligible", "data_inadequate", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "revision_requested", "approved", "delivered", "paused", "cancelled", "rejected"))
 def test_every_required_state_is_reachable_and_produces_a_route_compatible_row(package_id, target_state):
     _, pkg, dq, economics, row = _drive_to_state(package_id, target_state, client_id=f"client-{package_id}-{target_state}", registry_path=f"/tmp/never-written-chain-test-{package_id}-{target_state}.json")
     assert row["lifecycle_state"] == target_state
     assert row["service_id"] == pkg.package_id
+    if target_state == "intake":
+        assert row["financial_readiness"]["ready"] is False
+        assert row["economics"]["contribution"] is None
     projection = build_service_engagement_projection([row])
     assert _reproduce_271_route_validation(projection) == "available_read_only"
 
@@ -151,10 +155,10 @@ def test_renewal_and_upsell_metadata_is_present_for_every_package(package_id, ta
 
 
 # ---------------------------------------------------------------------------
-# MXN and USD currency preservation, exact service fee, cost breakdown
+# MXN, USD, and CAD currency preservation, exact service fee, cost breakdown
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("currency", ("USD", "MXN"))
+@pytest.mark.parametrize("currency", ("USD", "MXN", "CAD"))
 @pytest.mark.parametrize("package_id", PACKAGE_IDS)
 def test_currency_is_preserved_exactly_for_every_package(package_id, currency):
     engagement, pkg, dq, economics, row = _drive_to_state(package_id, "draft_ready", client_id=f"client-{package_id}-{currency}", currency=currency, registry_path=f"/tmp/never-written-chain-test-{package_id}-{currency}.json")
@@ -293,6 +297,9 @@ def test_transition_graph_used_by_this_test_matches_the_real_one():
     # Guards against this test file's _PATH_TO_STATE silently drifting from
     # the real transition graph if it is ever changed.
     for target, path in _PATH_TO_STATE.items():
+        if target == "intake":
+            assert path == ()
+            continue
         state = "intake"
         for step in path:
             assert step in _ENGAGEMENT_TRANSITIONS[state], f"{state} -> {step} is not a real transition"
@@ -331,3 +338,37 @@ def test_unavailable_is_a_frontend_only_pseudo_state_not_a_real_engagement_lifec
     empty_projection = build_service_engagement_projection([], availability="unavailable")
     assert empty_projection["engagements"] == []
     assert empty_projection["availability"] == "unavailable"
+
+
+def test_mixed_currency_engagement_fails_closed():
+    from backend.economics import CurrencyMismatchError
+    pkg = packages_by_id()["product-validation-sprint"]
+    with pytest.raises(CurrencyMismatchError):
+        evaluate_engagement_economics(
+            pkg,
+            fee=Money("5000", "USD"),
+            ad_spend=Money("2000", "CAD"),
+            roas_before=Decimal("1.4"),
+            roas_after=Decimal("2.1"),
+            cac_before=Money("22", "USD"),
+            cac_after=Money("16", "USD"),
+        )
+
+
+def test_real_route_loads_chain_projection_when_route_is_available(tmp_path, monkeypatch):
+    try:
+        from api.routes import service_delivery_workbench as route_mod
+    except ImportError:
+        pytest.skip("api.routes.service_delivery_workbench not available")
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    path = artifacts / "test_projection.json"
+    _, _, _, _, row = _drive_to_state("product-validation-sprint", "draft_ready", client_id="client-real-route", registry_path=str(tmp_path / "reg.json"))
+    projection = build_service_engagement_projection([row])
+    path.write_text(json.dumps(projection), encoding="utf-8")
+    monkeypatch.setattr(route_mod, "ARTIFACTS", artifacts.resolve())
+    monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
+    res = route_mod.workbench()
+    assert res["live_endpoint_status"] == "available_read_only"
+    assert len(res["engagements"]) == 1
+    assert res["engagements"][0]["package_id"] == "product-validation-sprint"

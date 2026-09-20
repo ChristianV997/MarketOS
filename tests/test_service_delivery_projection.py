@@ -250,3 +250,37 @@ def test_row_data_quality_state_reflects_the_supplied_assessment_not_a_stale_eng
     artifact = build_service_delivery_artifact(engagement, pkg, economics, dq, deliverable)
     row = build_service_engagement_row(engagement, pkg, dq, economics, artifact)
     assert row["data_quality_state"] == "adequate"
+
+
+def test_cad_currency_is_preserved_through_the_projection():
+    pkg = packages_by_id()["launch-draft-pack"]
+    engagement = create_engagement(client_id="client-cad", workspace=client_workspace("CAD Co"), package=pkg, scope="cad scope")
+    for state in ("screening", "eligible", "scoped", "evidence_collection"):
+        engagement = transition_engagement(engagement, state)
+    dq = assess_client_data_quality(adequate_intake())
+    economics = evaluate_engagement_economics(
+        pkg, fee=Money("15000", "CAD"), ad_spend=Money("35000", "CAD"),
+        roas_before=Decimal("1.5"), roas_after=Decimal("2.2"), cac_before=Money("300", "CAD"), cac_after=Money("200", "CAD"),
+        labor_cost=Money("6000", "CAD"), tooling_cost=Money("800", "CAD"), pass_through_cost=Money("0", "CAD"), refund_revision_reserve=Money("600", "CAD"),
+    )
+    registry = DeliverableRegistry(path="/tmp/never-written-cad-test.json")
+    deliverable = build_client_service_deliverable(engagement, pkg, economics, dq, recommendation="ok", registry=registry)
+    artifact = build_service_delivery_artifact(engagement, pkg, economics, dq, deliverable)
+    row = build_service_engagement_row(engagement, pkg, dq, economics, artifact)
+    assert row["economics"]["fee"]["currency"] == "CAD"
+    assert row["economics"]["contribution"]["currency"] == "CAD"
+
+
+def test_mixed_currency_raises_mismatch_error_in_kernel():
+    from backend.economics import CurrencyMismatchError
+    pkg = packages_by_id()["product-validation-sprint"]
+    with pytest.raises(CurrencyMismatchError):
+        evaluate_engagement_economics(
+            pkg,
+            fee=Money("5000", "CAD"),
+            ad_spend=Money("2000", "USD"),
+            roas_before=Decimal("1.5"),
+            roas_after=Decimal("2.5"),
+            cac_before=Money("20", "CAD"),
+            cac_after=Money("15", "CAD"),
+        )
