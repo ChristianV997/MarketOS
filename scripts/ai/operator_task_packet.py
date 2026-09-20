@@ -415,6 +415,41 @@ def build_resume_packet(
     return resume
 
 
+def _revalidate_resume_fields(raw: dict[str, Any]) -> None:
+    """Re-run the exact field-level safety checks ``build_resume_packet()``
+    applies at construction time, against a resume packet that instead
+    arrived pre-built (loaded from disk, handed off between sessions, or
+    otherwise untrusted).
+
+    Without this, ``validate_resume_packet()`` only checked the packet's
+    schema/required-keys/secret-shape/ownership/digest -- a hand-crafted or
+    tampered packet could carry a path-traversal entry in ``changed_files``
+    (a "widened scope" the digest check does not cover, since digest only
+    pins the *task* packet, not the resume packet's own fields), a
+    malformed ``head_sha``/``base_sha``, or an unsafe ``worktree``/
+    ``branch``/``next_action`` string, and it would pass validation
+    unchanged. Reusing the same helpers (``_text``, ``_string_list``,
+    ``assert_safe_path``, ``_test_record_list``) instead of re-implementing
+    them keeps a loaded resume packet exactly as safe as a freshly built
+    one, fails closed with ``ResumePacketError``, and never silently
+    upgrades or drops a field.
+    """
+    try:
+        for field in ("context_snapshot_replay_hash", "worktree", "branch", "next_action"):
+            _text(raw[field], field)
+        for field in ("head_sha", "base_sha"):
+            value = _text(raw[field], field).lower()
+            if not SHA_RE.fullmatch(value):
+                raise ResumePacketError(f"{field} must be a git SHA")
+        for item in _string_list(raw["changed_files"], "changed_files"):
+            assert_safe_path(item, "changed_files")
+        for field in ("tests_still_required", "open_blockers", "pending_decisions", "public_sources_inspected", "claims_not_yet_proven"):
+            _string_list(raw[field], field)
+        _test_record_list(raw["tests_already_run"], "tests_already_run")
+    except TaskPacketError as exc:
+        raise ResumePacketError(f"resume packet field validation failed: {exc}") from exc
+
+
 def validate_resume_packet(raw: Any, *, expected_task_packet: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate a previously-built resume packet, e.g. loaded from disk.
 
@@ -431,9 +466,7 @@ def validate_resume_packet(raw: Any, *, expected_task_packet: dict[str, Any] | N
         raise ResumePacketError(f"missing fields: {missing}")
     if _secret_like(raw):
         raise ResumePacketError("resume packet contains secret-shaped values")
-    for record in raw.get("tests_already_run", []):
-        if not isinstance(record, dict) or record.get("evidence_classification") not in EVIDENCE_CLASSES:
-            raise ResumePacketError("tests_already_run entries must carry a known evidence_classification")
+    _revalidate_resume_fields(raw)
     if expected_task_packet is not None:
         validated_expected = validate_packet(expected_task_packet)
         if raw.get("agent_id") != validated_expected["agent_id"] or raw.get("lane") != validated_expected["lane"]:

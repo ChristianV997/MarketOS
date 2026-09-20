@@ -137,6 +137,50 @@ def test_missing_required_field_on_a_loaded_resume_packet_is_rejected():
         validate_resume_packet(incomplete)
 
 
+def test_loaded_resume_packet_with_path_traversal_in_changed_files_is_rejected():
+    """A resume packet's changed_files was only ever path-checked at
+    build_resume_packet() time; a hand-crafted/tampered packet loaded from
+    disk or handed off between sessions must be re-checked, not trusted."""
+    resume = build_resume_packet(TASK_PACKET, **_resume_kwargs())
+    tampered = dict(resume, changed_files=["../../../etc/passwd"])
+    with pytest.raises(ResumePacketError, match="stay relative"):
+        validate_resume_packet(tampered)
+
+
+def test_loaded_resume_packet_with_malformed_head_sha_is_rejected():
+    resume = build_resume_packet(TASK_PACKET, **_resume_kwargs())
+    tampered = dict(resume, head_sha="; rm -rf ~")
+    with pytest.raises(ResumePacketError, match="git SHA"):
+        validate_resume_packet(tampered)
+
+
+def test_loaded_resume_packet_with_wrong_field_types_is_rejected_not_silently_accepted():
+    """Adversarial handoff: every RESUME_REQUIRED field except the ones
+    already covered by schema/missing-key/evidence-classification checks
+    must still fail closed with a typed ResumePacketError when its type is
+    wrong -- never silently pass through unvalidated."""
+    resume = build_resume_packet(TASK_PACKET, **_resume_kwargs())
+    for bad_field, bad_value in (
+        ("worktree", 123),
+        ("branch", None),
+        ("changed_files", "not-a-list"),
+        ("open_blockers", {}),
+        ("next_action", 42),
+        ("tests_still_required", "pytest tests/ai"),
+    ):
+        tampered = dict(resume, **{bad_field: bad_value})
+        with pytest.raises(ResumePacketError):
+            validate_resume_packet(tampered)
+
+
+def test_genuine_resume_packet_survives_full_field_revalidation():
+    """The new field-level revalidation must not reject a packet that
+    build_resume_packet() itself produced -- only tampered/malformed ones."""
+    resume = build_resume_packet(TASK_PACKET, **_resume_kwargs())
+    assert validate_resume_packet(resume) == resume
+    assert validate_resume_packet(resume, expected_task_packet=TASK_PACKET) == resume
+
+
 def test_verify_replay_hash_detects_a_tampered_resume_bundle():
     resume = build_resume_packet(TASK_PACKET, **_resume_kwargs())
     genuine_replay_hash = resume["context_snapshot_replay_hash"]

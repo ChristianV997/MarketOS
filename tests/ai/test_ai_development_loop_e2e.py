@@ -35,9 +35,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+
+import pytest
+
 from scripts.ai import execution_bundle as bundle
 from scripts.ai import operator_context_snapshot
-from scripts.ai.operator_task_packet import validate_packet
+from scripts.ai.operator_task_packet import ResumePacketError, validate_packet, validate_resume_packet
 
 
 def _real_snapshot() -> dict:
@@ -189,3 +193,68 @@ def test_a_genuine_failure_survives_the_whole_pipeline_without_being_hidden():
     # execute()'s real output, is what handoff() actually requires.
     evidence_classification = bundle.to_evidence_classification(execution["classifications"][failing_command])
     assert evidence_classification == "failed"
+
+
+def test_a_tampered_real_handoff_artifact_cannot_be_resumed():
+    """End-to-end proof that the resume boundary, not just the builder, is
+    the actual gate: run the real pipeline through handoff() to produce a
+    genuine resume artifact, round-trip it through JSON exactly as a
+    real "save to disk, load back into a new session" resume would, and
+    prove a tampered copy of that real artifact -- a widened/traversal
+    path smuggled into changed_files, or a field with the wrong type --
+    is rejected by validate_resume_packet() at the resume boundary, while
+    the genuine artifact still resumes cleanly."""
+    snapshot = _real_snapshot()
+    task_packet_raw = {
+        "agent_id": "claude-ai-development-loop-consolidation",
+        "source_chat": "Claude",
+        "lane": "marketos-ai-development-loop-consolidation-v1",
+        "objective": "prove a tampered handoff cannot be resumed",
+        "allowed_scope": ["tests/ai/test_ai_development_loop_e2e.py"],
+        "prohibited_scope": ["artifacts/", ".env"],
+        "base_sha": snapshot["HEAD"] or snapshot["origin_main"] or "0" * 40,
+        "worktree": snapshot["repository"]["path"],
+        "dependencies": ["MarketOS.AIContext.v1"],
+        "acceptance_criteria": ["the loop test passes"],
+        "selected_tests": ["python3 -m pytest tests/ai/test_ai_development_loop_e2e.py -q"],
+        "evidence_classification": "not_run",
+        "rollback": "revert the commit that added this test",
+        "next_action": "run the remaining selected tests",
+    }
+    prepared = bundle.prepare(snapshot, task_packet_raw)
+    task_packet = prepared["task_packet"]
+
+    ok_command = "python3 -m pytest tests/ai/test_native_agent_capability.py -q"
+    execution = bundle.execute([ok_command])
+    tests_already_run = [
+        {"command": ok_command, "evidence_classification": bundle.to_evidence_classification(execution["classifications"][ok_command])},
+    ]
+    handoff = bundle.handoff(
+        task_packet,
+        context_snapshot_replay_hash=prepared["context_snapshot_replay_hash"],
+        worktree=task_packet["worktree"],
+        branch=snapshot.get("branch") or "detached",
+        head_sha=task_packet["base_sha"],
+        base_sha=task_packet["base_sha"],
+        changed_files=["tests/ai/test_ai_development_loop_e2e.py"],
+        tests_already_run=tests_already_run,
+        tests_still_required=["python3 -m pytest tests/ai -q"],
+        open_blockers=[],
+        pending_decisions=[],
+        public_sources_inspected=[],
+        claims_not_yet_proven=[],
+        next_action="open the PR",
+    )
+
+    # Round-trip through JSON, exactly as a real "write handoff to disk,
+    # load it back in a resumed session" flow would.
+    resume_from_disk = json.loads(json.dumps(handoff["resume"]))
+    assert validate_resume_packet(resume_from_disk, expected_task_packet=task_packet) == resume_from_disk
+
+    widened_scope_attack = dict(resume_from_disk, changed_files=["../../../etc/passwd"])
+    with pytest.raises(ResumePacketError):
+        validate_resume_packet(widened_scope_attack, expected_task_packet=task_packet)
+
+    malformed_handoff = dict(resume_from_disk, worktree=123, open_blockers="not-a-list")
+    with pytest.raises(ResumePacketError):
+        validate_resume_packet(malformed_handoff, expected_task_packet=task_packet)
