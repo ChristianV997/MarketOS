@@ -1,8 +1,8 @@
 # Commercial replay laboratory certification (#280)
 
-Lane: `grokchat-commercial-replay-laboratory-certifier-v2`  
-PR: [#280](https://github.com/ChristianV997/MarketOS/pull/280) `antigravity/marketos-commercial-replay-benchmark-v1`  
-Schema: `commercial-replay-lab-benchmark-v2`  
+Lane: `grokchat-commercial-replay-laboratory-certifier-v2`
+PR: [#280](https://github.com/ChristianV997/MarketOS/pull/280) `antigravity/marketos-commercial-replay-benchmark-v1`
+Schema: `commercial-replay-lab-benchmark-v2`
 Status: draft, do not merge
 
 ## Ownership (refreshed this session)
@@ -20,7 +20,7 @@ Status: draft, do not merge
 
 `source_certified_plus_github_blob` — **not** a real authenticated MarketOS worktree.
 
-This sandbox cannot `git clone` `ChristianV997/MarketOS` (`could not read Username for 'https://github.com'`).  
+This sandbox cannot `git clone` `ChristianV997/MarketOS` (`could not read Username for 'https://github.com'`).
 `grok` CLI, Hermes, ECC skills, and CoderOS probe are not installed.
 
 A sparse blob tree is **not** equivalent evidence to Phase 1. Do not treat prior sandbox walls as newly measured #280 numbers.

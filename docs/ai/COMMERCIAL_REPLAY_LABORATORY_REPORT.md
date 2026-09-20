@@ -1,10 +1,10 @@
 # Commercial Replay Benchmark & Laboratory Evaluation Report
 
-**Lane:** `MARKETOS-COMMERCIAL-REPLAY-BENCHMARK-V1`  
-**Role:** Antigravity Performance & Evidence-Laboratory Engineer  
-**Schema Version:** `commercial-replay-lab-benchmark-v1`  
-**Evidence Classification:** `fixture` / `simulated` / `derived`  
-**Live Authority:** `blocked` (0 live mutations, 0 provider calls, 0 credentials)  
+**Lane:** `MARKETOS-COMMERCIAL-REPLAY-BENCHMARK-V1`
+**Role:** Antigravity Performance & Evidence-Laboratory Engineer
+**Schema Version:** `commercial-replay-lab-benchmark-v1`
+**Evidence Classification:** `fixture` / `simulated` / `derived`
+**Live Authority:** `blocked` (0 live mutations, 0 provider calls, 0 credentials)
 
 ---
 

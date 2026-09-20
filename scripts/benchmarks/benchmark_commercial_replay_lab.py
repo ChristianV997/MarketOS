@@ -44,13 +44,11 @@ from evaluation.commerce.dry_run_events import lifecycle_events
 from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
 from evaluation.commerce.dry_run_scenarios import SCENARIO_BUILDERS, hydroponics_positive_candidate
 from scripts.benchmarks.lab_certification import (
-    CLI_CONCAT_EVENT_COUNT,
     COMMERCE_LIFECYCLE_EVENT_COUNT,
     MIN_SAMPLES_FOR_TAIL,
     aggregate_replay_hash,
     classify_event_scope,
     percentile_guard,
-    unavailable_import_must_not_certify,
 )
 
 SCHEMA_VERSION = "commercial-replay-lab-benchmark-v1"
