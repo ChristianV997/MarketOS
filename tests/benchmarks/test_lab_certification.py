@@ -12,6 +12,9 @@ from scripts.benchmarks.lab_certification import (
     field_hash_negative_control,
     percentile_guard,
     unavailable_import_must_not_certify,
+    verify_altered_sequence_negative_control,
+    verify_event_count_negative_control,
+    verify_module_not_truncated,
 )
 
 
@@ -22,6 +25,29 @@ def test_seventeen_versus_thirty_seven_scopes_are_not_like_for_like():
     assert classify_event_scope(37) == "cli_concat_commerce_plus_fulfillment"
     assert classify_event_scope(16) == "unexpected"
     assert classify_event_scope(0) == "unexpected"
+
+
+def test_event_count_negative_control():
+    assert verify_event_count_negative_control(17, "commerce_lifecycle") is True
+    assert verify_event_count_negative_control(37, "commerce_lifecycle") is False
+    assert verify_event_count_negative_control(16, "commerce_lifecycle") is False
+
+
+def test_altered_sequence_negative_control():
+    seq1 = ["hash_a", "hash_b", "hash_c"]
+    seq2 = ["hash_a", "hash_tampered", "hash_c"]
+    seq3 = ["hash_b", "hash_a", "hash_c"]
+    assert verify_altered_sequence_negative_control(seq1, seq2) is True
+    assert verify_altered_sequence_negative_control(seq1, seq3) is True
+    assert verify_altered_sequence_negative_control(seq1, seq1) is False
+
+
+def test_module_not_truncated_check():
+    placeholder = "PLACEHOLDER: LAB_RESTORE_REQUIRED = True"
+    assert verify_module_not_truncated(placeholder) is False
+    assert verify_module_not_truncated("short text") is False
+    valid_text = "class ScenarioReplayLaboratory:\n    pass\nclass SensitivityMatrixLaboratory:\n    pass\n" + "\n" * 900
+    assert verify_module_not_truncated(valid_text) is True
 
 
 def test_synthetic_field_hash_is_negative_control():

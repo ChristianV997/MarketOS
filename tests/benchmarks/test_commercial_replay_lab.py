@@ -116,7 +116,9 @@ def test_canonical_replay_integration_safe_invocation():
     assert "invariant_checks" in result
     # Unavailable #279 must not be treated as a 13-point pass.
     if result["status"] == "unmerged_dependency":
-        assert result.get("all_invariants_satisfied") in {True, False}
+        assert result.get("all_invariants_satisfied") is False
+        assert result.get("all_replay_equal") is False
+        assert all(v is False for v in result["invariant_checks"].values())
         return
     assert result["all_invariants_satisfied"] is True
     expected_invariants = {
@@ -141,6 +143,8 @@ def test_canonical_replay_integration_safe_invocation():
         assert result["all_replay_equal"] is True
         assert result["all_launch_blocked"] is True
         assert len(result["scenario_invariants"]) == 5
+        for s_inv in result["scenario_invariants"]:
+            assert "event_scope" in s_inv
 
 
 def test_adversarial_authority_fail_closed_rejection():

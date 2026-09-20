@@ -50,3 +50,25 @@ def percentile_guard(samples: list[float], p: float = 0.95) -> float:
     ordered = sorted(samples)
     idx = min(max(int(round(p * (len(ordered) - 1))), 0), len(ordered) - 1)
     return ordered[idx]
+
+
+def verify_event_count_negative_control(event_count: int, expected_scope: str = "commerce_lifecycle") -> bool:
+    """Verifies that an event count strictly matches the expected scope."""
+    actual_scope = classify_event_scope(event_count)
+    return actual_scope == expected_scope
+
+
+def verify_altered_sequence_negative_control(original_hashes: list[str], altered_hashes: list[str]) -> bool:
+    """Proves that any alteration to event hash sequence changes the aggregate hash."""
+    if original_hashes == altered_hashes:
+        return False
+    return aggregate_replay_hash(original_hashes) != aggregate_replay_hash(altered_hashes)
+
+
+def verify_module_not_truncated(content: str | bytes) -> bool:
+    """Verifies that module text is the complete restored laboratory and not a placeholder."""
+    text = content.decode("utf-8", errors="ignore") if isinstance(content, bytes) else content
+    if "PLACEHOLDER" in text or "LAB_RESTORE_REQUIRED = True" in text:
+        return False
+    lines = text.splitlines()
+    return len(lines) >= 900 and "ScenarioReplayLaboratory" in text and "class SensitivityMatrixLaboratory" in text

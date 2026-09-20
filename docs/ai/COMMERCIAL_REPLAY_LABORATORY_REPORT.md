@@ -28,11 +28,11 @@ The evaluation proves:
 
 | Scenario ID | SKU | Lane | Achievable Stage | Promoted | Events | Replay Equal | Sequence Issues | Live Violations | Wall Clock (ms) |
 |---|---|---|---|:---:|:---:|:---:|:---:|:---:|---:|
-| `hydroponics_positive_candidate` | `hydroponics-nutrient-kit` | `us-domestic-hydro` | `scale_candidate` | ✅ Yes | 17 | ✅ Bit-Identical | 0 | 0 | 3.19 |
-| `smart_pet_support_burden_candidate` | `smart-pet-feeder` | `us-domestic-petfeeder` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.36 |
-| `solar_4g_security_blocked_candidate` | `solar-4g-security-camera` | `us-domestic-solarcam` | `economics_screened` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.90 |
-| `commodity_electronics_rejected_candidate` | `usb-c-cable-3pack` | `us-domestic-usbc-cable` | `supplier_terms_pending` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.19 |
-| `high_ticket_deferred_candidate` | `e-cargo-bike` | `us-domestic-egraded-bike` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.44 |
+| `hydroponics_positive_candidate` | `hydroponics-nutrient-kit` | `us-domestic-hydro` | `scale_candidate` | ✅ Yes | 17 | ✅ Bit-Identical | 0 | 0 | 4.97 |
+| `smart_pet_support_burden_candidate` | `smart-pet-feeder` | `us-domestic-petfeeder` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 4.90 |
+| `solar_4g_security_blocked_candidate` | `solar-4g-security-camera` | `us-domestic-solarcam` | `economics_screened` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 5.65 |
+| `commodity_electronics_rejected_candidate` | `usb-c-cable-3pack` | `us-domestic-usbc-cable` | `supplier_terms_pending` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 4.97 |
+| `high_ticket_deferred_candidate` | `e-cargo-bike` | `us-domestic-egraded-bike` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 4.51 |
 
 ### Scenario Outcome Details & Gate Verification
 
@@ -187,10 +187,9 @@ Evaluated on baseline candidate `hydroponics_positive_candidate` (Retail Price: 
 
 | Grid Points / Dim | Total Evaluations | Wall Clock (ms) | Throughput (evals/sec) | Peak Memory (KB) | Memory / Eval (bytes) |
 |---:|---:|---:|---:|---:|---:|
-| 10 | 70 | 232.47 | 301.1 | 552.6 | 8083.2 |
-| 50 | 350 | 1034.09 | 338.5 | 2767.5 | 8097.0 |
-| 100 | 700 | 1761.61 | 397.4 | 5503.0 | 8050.2 |
-| 250 | 1750 | 4065.94 | 430.4 | 13782.7 | 8064.8 |
+| 10 | 70 | 296.64 | 236.0 | 552.7 | 8085.1 |
+| 50 | 350 | 1441.59 | 242.8 | 2767.5 | 8097.0 |
+| 100 | 700 | 3176.56 | 220.4 | 5503.0 | 8050.2 |
 
 ### Scaling Observations
 - **Throughput:** Sustains a consistent ~120 to ~170 unit evaluations/sec across all scale tiers.
@@ -201,42 +200,44 @@ Evaluated on baseline candidate `hydroponics_positive_candidate` (Retail Price: 
 ## 5. Statistical Performance & Latency Distribution
 
 - **Warm-up Cycles:** 2 complete cycles (executed and discarded before measurement)
-- **Benchmark Iterations:** 5 complete cycles (25 scenario executions)
-- **Mean Cycle Latency:** 11.28 ms
-- **Median / p50 Latency:** 12.37 ms
-- **Min / Max Latency:** 8.95 ms / 13.33 ms
-- **95th Percentile (p95):** 13.33 ms
-- **99th Percentile (p99):** 13.33 ms
-- **Standard Deviation:** 1.82 ms
-- **Variance:** 3.30 ms²
+- **Benchmark Iterations:** 3 complete cycles (15 scenario executions)
+- **Sample Size Category:** Small Sample (n < 20)
+- **Tail Estimation Method:** `sample_maximum_small_n_guard` (using percentile_guard to prevent asymptotic overclaiming on small n)
+- **Mean Cycle Latency:** 19.50 ms
+- **Median / p50 Latency:** 19.74 ms
+- **Min / Max Latency:** 18.51 ms / 20.24 ms
+- **95th Percentile (p95):** 20.24 ms
+- **99th Percentile (p99):** 20.24 ms
+- **Standard Deviation:** 0.73 ms
+- **Variance:** 0.53 ms²
 - **Hash Sequence Drift:** `ZERO DRIFT (PASS)`
 
 ### Per-Scenario Latency Breakdown
 
 | Scenario Builder | Events | Mean Latency (ms) | Median / p50 (ms) | Min (ms) | Max (ms) |
 |---|:---:|---:|---:|---:|---:|
-| `hydroponics_positive_candidate` | 17 | 2.12 | 1.92 | 1.68 | 3.08 |
-| `smart_pet_support_burden_candidate` | 17 | 2.21 | 1.74 | 1.66 | 3.06 |
-| `solar_4g_security_blocked_candidate` | 17 | 2.23 | 2.11 | 1.70 | 3.11 |
-| `commodity_electronics_rejected_candidate` | 17 | 2.51 | 2.43 | 1.72 | 3.09 |
-| `high_ticket_deferred_candidate` | 17 | 2.19 | 1.97 | 1.68 | 3.02 |
+| `hydroponics_positive_candidate` | 17 | 4.12 | 3.99 | 3.96 | 4.42 |
+| `smart_pet_support_burden_candidate` | 17 | 3.85 | 3.87 | 3.75 | 3.94 |
+| `solar_4g_security_blocked_candidate` | 17 | 3.69 | 3.63 | 3.48 | 3.97 |
+| `commodity_electronics_rejected_candidate` | 17 | 3.70 | 3.77 | 3.37 | 3.95 |
+| `high_ticket_deferred_candidate` | 17 | 4.10 | 4.05 | 3.78 | 4.48 |
 
 ### Top CPU Cumulative Bottlenecks (from cProfile)
 
 | Function | Total Calls | Total Time (s) | Cumulative Time (s) |
 |---|---:|---:|---:|
 | `<frozen abc>:117(__instancecheck__)` | 50 | 0.0001 | 0.0002 |
-| `__init__.py:605(__init__)` | 50 | 0.0003 | 0.0018 |
-| `enum.py:187(__get__)` | 25 | 0.0000 | 0.0001 |
-| `__init__.py:682(update)` | 50 | 0.0002 | 0.0015 |
-| `replay_certification.py:18(validate_event_sequence)` | 25 | 0.0004 | 0.0006 |
-| `kernel.py:542(_evidence_state)` | 25 | 0.0016 | 0.0018 |
-| `encoder.py:207(iterencode)` | 425 | 0.0250 | 0.0250 |
-| `events.py:23(_json_safe)` | 11680 | 0.0244 | 0.0332 |
-| `replay_certification.py:35(summarize_workflow)` | 25 | 0.0003 | 0.0004 |
+| `__init__.py:605(__init__)` | 50 | 0.0005 | 0.0021 |
+| `enum.py:187(__get__)` | 25 | 0.0001 | 0.0001 |
+| `__init__.py:682(update)` | 50 | 0.0001 | 0.0016 |
+| `encoder.py:207(iterencode)` | 425 | 0.0289 | 0.0289 |
+| `kernel.py:104(__post_init__)` | 25 | 0.0007 | 0.0048 |
+| `kernel.py:175(__post_init__)` | 1175 | 0.0079 | 0.0654 |
+| `kernel.py:344(__post_init__)` | 25 | 0.0010 | 0.0045 |
 | `enum.py:1325(value)` | 25 | 0.0000 | 0.0000 |
-| `encoder.py:105(__init__)` | 425 | 0.0004 | 0.0004 |
-| `encoder.py:185(encode)` | 425 | 0.0017 | 0.0275 |
+| `encoder.py:105(__init__)` | 425 | 0.0006 | 0.0006 |
+| `encoder.py:185(encode)` | 425 | 0.0022 | 0.0325 |
+| `__init__.py:185(dumps)` | 425 | 0.0028 | 0.0358 |
 
 ---
 
@@ -269,7 +270,7 @@ Moved `text = json.dumps(...)` strictly inside the `if event.aggregate_type == '
 
 ### Review 2: Statistical & Benchmark Rigor
 - **Repeatability:** Zero hash drift confirmed across repeated cycle runs (`hash_drift_detected: False`).
-- **Latency Distribution:** Mean cycle latency 11.28 ms with tightly bounded tail (p95: 13.33 ms, p99: 13.33 ms).
+- **Latency Distribution:** Mean cycle latency 19.50 ms with tightly bounded tail (p95: 20.24 ms, p99: 20.24 ms).
 - **Throughput Stability:** High-throughput execution (~120-170 evals/sec) across all dimension tiers with bounded memory footprint (~8 KB/eval).
 - **Colab Scale Ready:** Supports scaling to 10,000+ deterministic sensitivity combinations via `--scale-max 1500` ($1500 \times 7 = 10,500$ evaluations).
 
