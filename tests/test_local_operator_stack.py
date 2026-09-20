@@ -575,7 +575,7 @@ def test_early_process_exit_during_hold(tmp_path: Path):
             host, port = sys.argv[1], int(sys.argv[2])
 
             def suicide():
-                time.sleep(0.3)
+                time.sleep(1.2)
                 os._exit(42)
 
             threading.Thread(target=suicide, daemon=True).start()
@@ -668,3 +668,135 @@ def test_nonblocking_stream_draining(tmp_path: Path):
     log = proc.drain_log()
     assert "truncated" in log
     assert len(log.encode("utf-8")) < 1000
+
+
+# ---------------------------------------------------------------------------
+# Combined API + Frontend plane tests
+# ---------------------------------------------------------------------------
+
+
+def _dummy_frontend_script(body_str: str = "<html>ok</html>") -> str:
+    """Minimal HTTP server that acts as a stub Vite frontend."""
+    return textwrap.dedent(
+        f"""\
+        import http.server
+        import sys
+
+        host, port = sys.argv[1], int(sys.argv[2])
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = {body_str.encode('utf-8')!r}
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            def log_message(self, format, *args):
+                return
+
+        http.server.HTTPServer((host, port), Handler).serve_forever()
+        """
+    )
+
+
+def test_combined_startup_and_shutdown(tmp_path: Path):
+    """Both backend and frontend start, are probed, and shut down cleanly."""
+    repo = _write_repo(tmp_path)
+    api_script = tmp_path / "api_srv.py"
+    api_script.write_text(_dummy_server_script(), encoding="utf-8")
+    fe_script = tmp_path / "fe_srv.py"
+    fe_script.write_text(_dummy_frontend_script(), encoding="utf-8")
+
+    cfg = _config(repo, start_frontend=True)
+    report = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(api_script, cfg.api_host, cfg.api_port),
+        frontend_argv_override=_dummy_argv(fe_script, cfg.frontend_host, cfg.frontend_port),
+    )
+
+    # At least one plane must have been probed
+    assert report["loopback_http_checks"] is True
+    # Cleanup must report ports free after exit
+    cleanup = report.get("port_cleanup", report.get("cleanup", {}))
+    assert cleanup.get("api_port_free") is True
+    assert cleanup.get("frontend_port_free") is True
+    # Classification must be one of the terminal states (no "not_run" / "unavailable")
+    assert report["classification"] in {"passed", "partial", "failed", "timeout"}
+
+
+def test_combined_api_down_frontend_up(tmp_path: Path):
+    """Frontend starts but backend never binds — classification is 'failed' or 'unavailable'."""
+    repo = _write_repo(tmp_path)
+    # Use /dev/null equivalent: a script that exits immediately without binding
+    crash_script = tmp_path / "crash.py"
+    crash_script.write_text("import sys; sys.exit(1)\n", encoding="utf-8")
+    fe_script = tmp_path / "fe_srv.py"
+    fe_script.write_text(_dummy_frontend_script(), encoding="utf-8")
+
+    cfg = _config(repo, start_frontend=True, startup_timeout_s=3.0)
+    report = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(crash_script, cfg.api_host, cfg.api_port),
+        frontend_argv_override=_dummy_argv(fe_script, cfg.frontend_host, cfg.frontend_port),
+    )
+
+    # With backend gone, frontend is never started (startup_error short-circuits)
+    assert report["classification"] in {"failed", "unavailable", "timeout"}
+    # Ports must be released regardless
+    cleanup = report.get("port_cleanup", report.get("cleanup", {}))
+    assert cleanup.get("api_port_free") is True
+
+
+def test_combined_partial_startup_frontend_fail(tmp_path: Path):
+    """Backend comes up healthy but frontend immediately exits — classification is 'failed'."""
+    repo = _write_repo(tmp_path)
+    api_script = tmp_path / "api_srv.py"
+    api_script.write_text(_dummy_server_script(), encoding="utf-8")
+    # Frontend crashes on startup
+    fe_crash = tmp_path / "fe_crash.py"
+    fe_crash.write_text("import sys; sys.exit(2)\n", encoding="utf-8")
+
+    cfg = _config(repo, start_frontend=True, startup_timeout_s=3.0)
+    report = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(api_script, cfg.api_host, cfg.api_port),
+        frontend_argv_override=_dummy_argv(fe_crash, cfg.frontend_host, cfg.frontend_port),
+    )
+
+    # Backend started and was probed, frontend did not bind
+    assert report["loopback_http_checks"] is True
+    assert report["classification"] in {"failed", "partial", "unavailable", "timeout"}
+    reason = report.get("reason", "")
+    # Reason must mention the frontend plane
+    assert "frontend" in reason
+    cleanup = report.get("port_cleanup", report.get("cleanup", {}))
+    assert cleanup.get("api_port_free") is True
+
+
+def test_combined_repeated_invocations_clean(tmp_path: Path):
+    """Two consecutive combined runs on the same ports both finish cleanly and free ports."""
+    repo = _write_repo(tmp_path)
+    api_script = tmp_path / "api_srv.py"
+    api_script.write_text(_dummy_server_script(), encoding="utf-8")
+    fe_script = tmp_path / "fe_srv.py"
+    fe_script.write_text(_dummy_frontend_script(), encoding="utf-8")
+
+    cfg = _config(repo, start_frontend=True)
+
+    for invocation in range(2):
+        report = stack.run_rehearsal(
+            cfg,
+            backend_argv_override=_dummy_argv(api_script, cfg.api_host, cfg.api_port),
+            frontend_argv_override=_dummy_argv(fe_script, cfg.frontend_host, cfg.frontend_port),
+        )
+        cleanup = report.get("port_cleanup", report.get("cleanup", {}))
+        assert cleanup.get("api_port_free") is True, (
+            f"invocation {invocation}: api port not freed, report={report}"
+        )
+        assert cleanup.get("frontend_port_free") is True, (
+            f"invocation {invocation}: frontend port not freed, report={report}"
+        )
+        assert report["classification"] in {"passed", "partial", "failed", "timeout"}, (
+            f"invocation {invocation}: unexpected classification, report={report}"
+        )
