@@ -15,13 +15,18 @@ export function PipelineTable({
   return (
     <section aria-labelledby="pipeline-heading" className="overflow-hidden rounded-lg border border-white/[0.06]">
       <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
-        <h2 id="pipeline-heading" className="text-sm font-semibold text-zinc-100">Service pipeline</h2>
+        <h2 id="pipeline-heading" tabIndex={-1} className="text-sm font-semibold text-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">Service pipeline</h2>
         <p className="text-[11px] text-zinc-400">Arrow keys move selection</p>
       </div>
       {rows.length === 0 ? (
         <p className="p-4 text-sm text-zinc-400">No engagements match. Clear filters to recover the source list.</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div
+          className="overflow-x-auto"
+          tabIndex={0}
+          role="region"
+          aria-label="Scrollable service pipeline table"
+        >
           <table className="min-w-full text-left text-sm">
             <caption className="sr-only">Server-ordered service engagements. Filtering does not re-rank.</caption>
             <thead className="bg-[#111113] text-[11px] uppercase tracking-widest text-zinc-400">

@@ -181,7 +181,7 @@ test("keyboard skip-link live region table and mobile semantics remain in source
   const table = await readFile(new URL("../src/features/service-delivery-workbench/components/PipelineTable.tsx", import.meta.url), "utf8");
   const chrome = await readFile(new URL("../src/features/service-delivery-workbench/components/WorkbenchChrome.tsx", import.meta.url), "utf8");
   assert.match(page, /Skip to service pipeline/);
-  assert.match(page, /overflow-x-hidden/);
+  assert.match(page, /overflow-x-auto/);
   assert.match(page, /md:p-5/);
   assert.match(chrome, /aria-live="polite"/);
   assert.match(table, /ArrowDown/);

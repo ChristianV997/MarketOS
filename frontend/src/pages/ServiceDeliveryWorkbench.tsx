@@ -20,7 +20,7 @@ export default function ServiceDeliveryWorkbench() {
   }, [view.selected?.engagement_id]);
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-4 overflow-x-hidden p-3 md:p-5">
+    <div className="mx-auto flex max-w-7xl flex-col gap-4 overflow-x-auto p-3 md:p-5">
       <a
         href="#pipeline-heading"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
@@ -37,9 +37,18 @@ export default function ServiceDeliveryWorkbench() {
         </p>
       </header>
 
-      <WorkbenchStatusBanner surface={view.surface} message={view.statusMessage} />
+      <WorkbenchStatusBanner
+        surface={view.surface}
+        message={view.statusMessage}
+        diagnostics={view.diagnostics}
+      />
 
-      <FilterBar filters={filters} onChange={setFilters} count={view.filtered.length} />
+      <FilterBar
+        filters={filters}
+        onChange={setFilters}
+        count={view.filtered.length}
+        bounded={view.bounded}
+      />
 
       <div ref={tableRef}>
         <PipelineTable

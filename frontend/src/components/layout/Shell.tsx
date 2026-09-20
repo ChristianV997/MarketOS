@@ -48,6 +48,12 @@ export default function Shell() {
 
   return (
     <div className="flex h-screen bg-[#0a0a0b] text-zinc-100 overflow-hidden">
+      <a
+        href="#operator-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
+      >
+        Skip to main content
+      </a>
       <Sidebar />
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -86,7 +92,7 @@ export default function Shell() {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-auto">
+        <main id="operator-main" tabIndex={-1} className="flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
           <Outlet />
         </main>
       </div>

@@ -44,6 +44,20 @@ test("workbench secondary text uses zinc-400, not zinc-500, against the dark pan
   assert.match(chrome, /placeholder:text-zinc-400/);
   assert.doesNotMatch(chrome, /opacity-80/);
   assert.match(page, /focus:text-zinc-50/);
+  assert.match(page, /href="#pipeline-heading"/);
+});
+
+test("skip link targets a focusable pipeline heading and the table overflow is keyboard reachable", async () => {
+  const table = await readFile(tableUrl, "utf8");
+  const page = await readFile(pageUrl, "utf8");
+  const shell = await readFile(new URL("../src/components/layout/Shell.tsx", import.meta.url), "utf8");
+  assert.match(table, /id="pipeline-heading" tabIndex=\{-1\}/);
+  assert.match(table, /aria-label="Scrollable service pipeline table"/);
+  assert.match(shell, /href="#operator-main"/);
+  assert.match(shell, /id="operator-main"/);
+  assert.match(shell, /tabIndex=\{-1\}/);
+  assert.match(page, /overflow-x-auto/);
+  assert.doesNotMatch(page, /overflow-x-hidden/);
 });
 
 test("pipeline rows are native table rows with a named button, not row widgets", async () => {
@@ -61,6 +75,13 @@ test("pipeline rows are native table rows with a named button, not row widgets",
   assert.match(table, /Home/);
   assert.match(table, /End/);
   assert.match(page, /button\[aria-pressed='true'\]/);
+});
+
+test("unserved GET JSON including HTTP error bodies is adapted, never demo-substituted", async () => {
+  const hook = await readFile(new URL("../src/features/service-delivery-workbench/hooks/useServiceDeliveryWorkbench.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(hook, /buildDemoProjection/);
+  assert.match(hook, /response.json\(\)\.catch/);
+  assert.match(hook, /method: "GET"/);
 });
 
 test("JSON previews are bounded, wrapping, and keyboard-focusable regions", async () => {

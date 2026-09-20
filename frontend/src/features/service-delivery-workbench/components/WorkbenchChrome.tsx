@@ -21,9 +21,11 @@ const SURFACE_STYLES: Record<SurfaceState, string> = {
 export function WorkbenchStatusBanner({
   surface,
   message,
+  diagnostics = [],
 }: {
   surface: SurfaceState;
   message: string;
+  diagnostics?: string[];
 }) {
   return (
     <div
@@ -36,6 +38,13 @@ export function WorkbenchStatusBanner({
         <span className="font-medium uppercase tracking-wide text-[11px]">{surface}</span>
         <span className="ml-2">{message}</span>
       </p>
+      {diagnostics.length > 0 ? (
+        <ul className="mt-1 list-disc pl-4 text-[11px]">
+          {diagnostics.slice(0, 8).map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : null}
       <p className="mt-1 text-[11px]">
         Read-only operator workbench. No client accounts, messages, publishing, campaign edits, or charges.
       </p>
@@ -47,10 +56,12 @@ export function FilterBar({
   filters,
   onChange,
   count,
+  bounded = false,
 }: {
   filters: WorkbenchFilters;
   onChange: (next: WorkbenchFilters) => void;
   count: number;
+  bounded?: boolean;
 }) {
   return (
     <form
@@ -116,7 +127,10 @@ export function FilterBar({
         </select>
       </label>
       <div className="md:col-span-4 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
-        <p>{count} visible · source order unchanged</p>
+        <p>
+          {count} visible · source order unchanged
+          {bounded ? " · list bounded at 500 rows; additional matches are not shown" : ""}
+        </p>
         <button
           type="button"
           className="rounded-md border border-white/[0.08] px-2 py-1 text-zinc-200 hover:bg-white/[0.04] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"

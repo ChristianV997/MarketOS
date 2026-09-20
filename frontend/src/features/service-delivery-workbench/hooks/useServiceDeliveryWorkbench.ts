@@ -15,6 +15,8 @@ async function probeWorkbenchProjection(): Promise<unknown> {
   const url = joinApiPath(resolveApiBaseUrl(), FUTURE_WORKBENCH_PATH);
   const response = await fetch(url, { method: "GET" });
   if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    if (body && typeof body === "object") return body;
     throw new Error(`${response.status} ${FUTURE_WORKBENCH_PATH}`);
   }
   return response.json();
