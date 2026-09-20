@@ -482,4 +482,5 @@ test("mobile ranked cards share desktop keyboard handlers", async () => {
   assert.equal((panel.match(/onKeyDown=\{\(event\) => handleKeyDown\(event, absoluteIndex\)\}/g) || []).length, 2);
   assert.match(panel, /previousSelectedId/);
   assert.match(panel, /data-candidate-id=\{candidate.candidateId\}/);
+  assert.match(panel, /tabIndex=\{candidate.candidateId === activeId \? 0 : -1\}/);
 });

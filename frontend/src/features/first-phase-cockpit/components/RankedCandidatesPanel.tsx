@@ -178,6 +178,7 @@ export function RankedCandidatesPanel({
                 type="button"
                 data-candidate-id={candidate.candidateId}
                 data-candidate-index={absoluteIndex}
+                tabIndex={candidate.candidateId === activeId ? 0 : -1}
                 aria-pressed={selected}
                 onClick={() => {
                   detailFocusRequested.current = true;
