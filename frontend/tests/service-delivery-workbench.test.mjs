@@ -161,14 +161,35 @@ test("surface states include empty blocked unavailable loading stale partial suc
     isLoading: true, errorMessage: null, projection: null, filters: EMPTY_FILTERS, selectedId: null,
   });
   assert.equal(loading.surface, "loading");
+  assert.match(loading.pipelineEmptyCopy, /Loading the service-delivery workbench/);
   const empty = composeWorkbenchViewModel({
     isLoading: false, errorMessage: null, projection: null, filters: EMPTY_FILTERS, selectedId: null,
   });
   assert.equal(empty.surface, "empty");
+  assert.match(empty.pipelineEmptyCopy, /No sanitized service-engagement projection/);
   const unavailable = composeWorkbenchViewModel({
     isLoading: false, errorMessage: "boom", projection: null, filters: EMPTY_FILTERS, selectedId: null,
   });
   assert.equal(unavailable.surface, "unavailable");
+  assert.match(unavailable.pipelineEmptyCopy, /Demo fixtures are not substituted/);
+  assert.doesNotMatch(unavailable.pipelineEmptyCopy, /Clear filters/);
+});
+
+test("unserved GET envelope keeps the pipeline copy unavailable instead of filter-empty", () => {
+  const envelope = httpErrorUnavailableEnvelope(502, { error: "bad_gateway" });
+  const adapted = adaptServiceProjection(envelope);
+  assert.equal(adapted.rejected, false);
+  const view = composeWorkbenchViewModel({
+    isLoading: false,
+    errorMessage: null,
+    projection: adapted.projection,
+    filters: EMPTY_FILTERS,
+    selectedId: null,
+  });
+  assert.equal(view.surface, "unavailable");
+  assert.equal(view.filtered.length, 0);
+  assert.match(view.pipelineEmptyCopy, /Demo fixtures are not substituted/);
+  assert.doesNotMatch(view.pipelineEmptyCopy, /Clear filters/);
 });
 
 test("component sources expose required accessibility contracts", async () => {

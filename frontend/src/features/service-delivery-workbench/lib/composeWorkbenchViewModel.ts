@@ -18,6 +18,7 @@ export type WorkbenchViewModel = {
   liveEndpointUnavailable: boolean;
   diagnostics: string[];
   bounded: boolean;
+  pipelineEmptyCopy: string | null;
 };
 
 export function composeWorkbenchViewModel(input: {
@@ -38,14 +39,17 @@ export function composeWorkbenchViewModel(input: {
       liveEndpointUnavailable: true,
       diagnostics: [],
       bounded: false,
+      pipelineEmptyCopy: "Loading the service-delivery workbench.",
     };
   }
 
   if (!input.projection) {
+    const statusMessage = input.errorMessage
+      ?? "No sanitized service-engagement projection is available.";
+    const unavailable = Boolean(input.errorMessage);
     return {
-      surface: input.errorMessage ? "unavailable" : "empty",
-      statusMessage: input.errorMessage
-        ?? "No sanitized service-engagement projection is available.",
+      surface: unavailable ? "unavailable" : "empty",
+      statusMessage,
       filtered: [],
       selected: null,
       selectedIndex: -1,
@@ -53,6 +57,9 @@ export function composeWorkbenchViewModel(input: {
       liveEndpointUnavailable: true,
       diagnostics: input.errorMessage ? [input.errorMessage] : [],
       bounded: false,
+      pipelineEmptyCopy: unavailable
+        ? "Canonical GET /api/service-delivery/workbench is unavailable. Demo fixtures are not substituted."
+        : "No sanitized service-engagement projection is available.",
     };
   }
 
@@ -115,6 +122,13 @@ export function composeWorkbenchViewModel(input: {
       ...input.projection.diagnostics,
     ],
     bounded,
+    pipelineEmptyCopy: filtered.length > 0
+      ? null
+      : surface === "unavailable"
+        ? "Canonical GET /api/service-delivery/workbench is unavailable. Demo fixtures are not substituted."
+        : statusMessage.includes("Clear filters")
+          ? "No engagements match. Clear filters to recover the source list."
+          : "No engagements in the sanitized projection.",
   };
 }
 

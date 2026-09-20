@@ -70,6 +70,8 @@ test("pipeline rows are native table rows with a named button, not row widgets",
   assert.doesNotMatch(table, /role="row"/);
   assert.match(table, /type="button"/);
   assert.match(table, /aria-pressed=\{selected\}/);
+  assert.match(table, /emptyCopy/);
+  assert.doesNotMatch(table, /No engagements match\. Clear filters to recover the source list\./);
   assert.match(table, /aria-current=\{selected \? "true" : undefined\}/);
   assert.match(table, /ArrowDown/);
   assert.match(table, /Home/);

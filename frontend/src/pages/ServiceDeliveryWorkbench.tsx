@@ -59,6 +59,7 @@ export default function ServiceDeliveryWorkbench() {
             const next = moveSelection(view.filtered, view.selected?.engagement_id ?? null, delta);
             if (next) setSelectedId(next);
           }}
+          emptyCopy={view.pipelineEmptyCopy ?? "No engagements in the sanitized projection."}
         />
       </div>
 

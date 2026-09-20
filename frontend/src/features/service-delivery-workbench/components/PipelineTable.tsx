@@ -6,11 +6,13 @@ export function PipelineTable({
   selectedId,
   onSelect,
   onMove,
+  emptyCopy,
 }: {
   rows: ServiceEngagement[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onMove: (delta: number) => void;
+  emptyCopy: string;
 }) {
   return (
     <section aria-labelledby="pipeline-heading" className="overflow-hidden rounded-lg border border-white/[0.06]">
@@ -19,7 +21,7 @@ export function PipelineTable({
         <p className="text-[11px] text-zinc-400">Arrow keys move selection</p>
       </div>
       {rows.length === 0 ? (
-        <p className="p-4 text-sm text-zinc-400">No engagements match. Clear filters to recover the source list.</p>
+        <p className="p-4 text-sm text-zinc-400">{emptyCopy}</p>
       ) : (
         <div
           className="overflow-x-auto"
