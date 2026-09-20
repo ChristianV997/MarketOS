@@ -328,7 +328,10 @@ export interface ClientSafeCockpitExport {
   pillars: Array<{
     pillar_id: PillarId;
     status: EvidencePillar["status"];
+    evidence_class: EvidenceClass;
+    evidence_mode: EvidenceMode | null;
     summary: string;
+    launch_authorized: false;
     blocked_reasons: string[];
   }>;
   control_planes: Array<{

@@ -215,7 +215,17 @@ export function CandidateDetailPanel({
           <li key={cell.pillarId} className="rounded border border-zinc-800 bg-zinc-950/40 p-2 text-xs">
             <div className="flex items-center justify-between gap-2">
               <span className="text-zinc-200">{cell.label}</span>
-              <span className="text-[10px] text-zinc-400">{cell.status} · {cell.evidenceClass.replace(/_/g, " ")}</span>
+              <span className="text-[10px] text-zinc-400">
+                {cell.status === "available"
+                  ? "slot present (read-only)"
+                  : cell.status === "partial"
+                    ? "slot present"
+                    : cell.status === "blocked"
+                      ? "blocked"
+                      : "slot missing"}
+                {" · "}
+                {cell.evidenceClass.replace(/_/g, " ")}
+              </span>
             </div>
             <p className="mt-1 text-zinc-400">
               {cell.score !== null ? `${(cell.score * 100).toFixed(0)}%` : "—"}

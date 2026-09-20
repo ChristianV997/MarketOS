@@ -57,6 +57,9 @@ function deriveState(input, overlay) {
     overlay?.rankedCount ?? (Array.isArray(input.benchmark?.candidates) ? input.benchmark.candidates.length : 0);
   if (rankedCount === 0) return "empty";
   if (overlay?.evidenceMode === "unknown") return "partial";
+  if (overlay?.evidenceMode && ["fixture_only", "manual", "simulated", "unknown"].includes(overlay.evidenceMode)) {
+    return "partial";
+  }
   return "success";
 }
 

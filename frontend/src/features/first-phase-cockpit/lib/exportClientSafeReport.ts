@@ -103,7 +103,10 @@ export function buildClientSafeExport(
     pillars: packet.pillars.map((pillar) => ({
       pillar_id: pillar.id,
       status: pillar.status,
+      evidence_class: pillar.evidenceClass,
+      evidence_mode: pillar.evidenceMode,
       summary: pillar.summary,
+      launch_authorized: false,
       blocked_reasons: [...pillar.blockedReasons],
     })),
     control_planes: packet.controlPlanes.map((slot) => ({

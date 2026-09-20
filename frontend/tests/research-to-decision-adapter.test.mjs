@@ -300,7 +300,7 @@ test("compose surfaces loading empty blocked unavailable stale partial success w
     isLoading: false,
     researchToDecisionProjection: await loadFixture("accepted-manual-screening.json"),
   });
-  assert.equal(success.state, "success");
+  assert.equal(success.state, "partial");
   assert.deepEqual(success.rankedCandidates.map((row) => row.candidateId), ["hydroponics-kit"]);
   assert.equal(success.rankedCandidates[0].sku, "HYDRO-KIT-01");
   assert.ok(success.controlPlanes.some((slot) => slot.id === "trustos" && slot.status === "unavailable"));
