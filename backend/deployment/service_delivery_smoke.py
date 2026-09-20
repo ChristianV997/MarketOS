@@ -573,19 +573,12 @@ def classify_service_delivery_ci(
     Distinguishes zero-step runner allocation failures from code execution failures.
     Zero-step CI is NEVER converted into a test failure or test pass; it is 'ci_unavailable'.
     """
-    ann_text = " ".join(annotations or []).lower()
-    is_billing_or_runner_limit = any(
-        kw in ann_text
-        for kw in ("payment", "spending limit", "billing", "runner was not allocated", "job was not started")
-    )
-
     if runner_id == 0 or total_steps == 0:
-        if is_billing_or_runner_limit:
-            reason = "GitHub Actions runner was not allocated due to spending limit or billing block."
-            root_cause = "github_actions_runner_allocation_failure"
-        else:
-            reason = "CI runner was not allocated or no steps executed."
-            root_cause = "ci_unavailable_zero_steps"
+        # Free-form annotations are untrusted diagnostics, not structured
+        # proof of why GitHub did not allocate a runner. Preserve the
+        # unavailable classification and leave cause attribution explicit.
+        reason = "CI runner was not allocated or no steps executed; cause is unverified."
+        root_cause = "ci_unavailable_zero_steps"
         state = "ci_unavailable"
     elif ci_status in {"failed", "failure"}:
         state = "failed"

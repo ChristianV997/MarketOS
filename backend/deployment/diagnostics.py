@@ -205,13 +205,10 @@ def diagnose_zero_step_ci(
     annotations: list[str] | None = None,
 ) -> DiagnosticResult:
     """Diagnose zero-step or unavailable CI pipeline."""
-    ann_text = " ".join(annotations or []).lower()
-    is_billing = any(kw in ann_text for kw in ("payment", "spending limit", "billing", "runner was not allocated", "job was not started"))
     zero_runner = runner_id is not None and runner_id == 0
     if ci_status in {"ci_unavailable", "unavailable"} or steps_executed == 0 or zero_runner:
         msg = f"Continuous Integration reported '{ci_status}' with {steps_executed} steps executed."
-        if is_billing or zero_runner:
-            msg += " Root cause: GitHub Actions runner was not allocated due to spending limit or billing block."
+        msg += " Runner allocation or workflow startup is unavailable; cause is unverified."
         return DiagnosticResult(
             code="zero_step_ci",
             category="continuous_integration",
@@ -222,7 +219,8 @@ def diagnose_zero_step_ci(
                 "ci_status": ci_status,
                 "steps_executed": steps_executed,
                 "runner_id": runner_id,
-                "runner_allocation_blocked": is_billing or zero_runner,
+                "runner_assigned": runner_id is not None and runner_id > 0,
+                "cause_verified": False,
             },
         )
 

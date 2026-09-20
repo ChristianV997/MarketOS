@@ -38,9 +38,8 @@ def artifacts_tmp(tmp_path: Path):
     return art
 
 
-def test_ci_zero_step_runner_allocation_failure_is_ci_unavailable():
-    """Zero-step CI or runner allocation failures are classified as ci_unavailable, never failed."""
-    # Billing limit / spending limit blocked runner
+def test_ci_zero_step_annotation_does_not_infer_billing_cause():
+    """Zero-step CI stays unavailable; free-form annotations do not prove a billing cause."""
     res = classify_service_delivery_ci(
         runner_id=0,
         total_steps=0,
@@ -49,9 +48,10 @@ def test_ci_zero_step_runner_allocation_failure_is_ci_unavailable():
         annotations=["The job was not started because recent account payments have failed or your spending limit needs to be increased."],
     )
     assert res["state"] == "ci_unavailable"
-    assert res["root_cause"] == "github_actions_runner_allocation_failure"
+    assert res["root_cause"] == "ci_unavailable_zero_steps"
     assert res["is_zero_step"] is True
-    assert "spending limit" in res["classification_reason"]
+    assert "unverified" in res["classification_reason"]
+    assert "spending limit" not in res["classification_reason"]
 
     # Standard zero-step
     res2 = classify_service_delivery_ci(runner_id=0, total_steps=0, ci_status="ci_unavailable", logs_available=False)
@@ -110,8 +110,8 @@ def test_ci_executed_failure_without_logs_remains_failed(ci_status):
     assert res["root_cause"] == "ci_test_failure"
 
 
-def test_diagnose_zero_step_ci_with_billing_annotations():
-    """Diagnostic check identifies runner allocation issues honestly."""
+def test_diagnose_zero_step_ci_does_not_infer_billing_from_annotation_text():
+    """A free-form billing annotation does not establish the true CI failure cause."""
     res = diagnose_zero_step_ci(
         ci_status="failure",
         steps_executed=0,
@@ -119,8 +119,10 @@ def test_diagnose_zero_step_ci_with_billing_annotations():
         annotations=["spending limit needs to be increased"],
     )
     assert res.status == "detected"
-    assert res.failure_details["runner_allocation_blocked"] is True
-    assert "spending limit" in res.message
+    assert res.failure_details["runner_assigned"] is False
+    assert res.failure_details["cause_verified"] is False
+    assert "unverified" in res.message
+    assert "spending limit" not in res.message
 
 
 def test_service_delivery_projection_validation_passed(artifacts_tmp: Path):
