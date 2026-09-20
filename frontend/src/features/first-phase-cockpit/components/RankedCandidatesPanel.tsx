@@ -206,6 +206,9 @@ export function RankedCandidatesPanel({
                   {candidate.promotionState.replace(/_/g, " ")} ·{" "}
                   {candidate.nextBestAction?.replace(/_/g, " ") ?? "no next action"}
                 </p>
+                <p className="mt-1 text-[11px] text-zinc-200">
+                  Decision {candidate.commercialDecision?.replace(/_/g, " ") ?? "unavailable"}
+                </p>
                 <p className="mt-1 text-[11px] text-amber-200/90">
                   {(candidate.commercialReviewTags ?? []).join(" · ").replace(/_/g, " ") || "review tags unavailable"}
                 </p>
@@ -318,8 +321,8 @@ export function RankedCandidatesPanel({
                   <td className="px-2 py-2 text-zinc-400">{attention?.status ?? "unavailable"}</td>
                   <td className="px-2 py-2">{candidate.evidenceClass.replace(/_/g, " ")}</td>
                   <td className="px-2 py-2">{candidate.promotionState.replace(/_/g, " ")}</td>
-                  <td className="px-2 py-2">{candidate.nextBestAction?.replace(/_/g, " ") ?? "—"}</td>
-                  <td className="px-2 py-2">{candidate.commercialDecision?.replace(/_/g, " ") ?? "—"}</td>
+                  <td className="px-2 py-2">{candidate.nextBestAction?.replace(/_/g, " ") ?? "unavailable"}</td>
+                  <td className="px-2 py-2">{candidate.commercialDecision?.replace(/_/g, " ") ?? "unavailable"}</td>
                   <td className="px-2 py-2">{candidate.riskLevel ?? "—"}</td>
                   <td className="px-2 py-2 text-[10px] text-zinc-400">
                     {(candidate.commercialReviewTags ?? []).slice(0, 3).join(" · ").replace(/_/g, " ") || "—"}

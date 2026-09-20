@@ -149,7 +149,7 @@ export function CandidateDetailPanel({
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
           <dt className="text-zinc-400">Hard gates</dt>
           <dd className="mt-1 text-zinc-200">
-            {candidate.hardGates.length ? candidate.hardGates.join(" · ") : "none listed"}
+            {candidate.hardGates.length ? candidate.hardGates.join(" · ") : "unavailable"}
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
@@ -198,7 +198,7 @@ export function CandidateDetailPanel({
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
           <h4 className="text-zinc-400">Missing evidence</h4>
           <p className="mt-1 text-zinc-300">
-            {candidate.missingEvidence.length ? candidate.missingEvidence.join(" · ") : "none listed"}
+            {candidate.missingEvidence.length ? candidate.missingEvidence.join(" · ") : "unavailable"}
           </p>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">

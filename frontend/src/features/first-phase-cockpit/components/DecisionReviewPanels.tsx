@@ -73,7 +73,7 @@ export function NextActionWorkflowPanel({ candidate }: { candidate: RankedCandid
         </div>
       </dl>
       <p className="mt-2 text-[11px] text-zinc-400">
-        Missing evidence: {workflow.missingEvidence.length ? workflow.missingEvidence.join(" · ").replace(/_/g, " ") : "none listed"}
+        Missing evidence: {workflow.missingEvidence.length ? workflow.missingEvidence.join(" · ").replace(/_/g, " ") : "unavailable"}
       </p>
       <p className="sr-only">
         No cockpit control can send messages, place orders, publish ads, change prices, approve suppliers, or issue refunds.

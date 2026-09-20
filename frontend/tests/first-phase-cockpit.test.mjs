@@ -675,6 +675,13 @@ test("accessibility and focus contracts are present", async () => {
   assert.match(banner, /aria-live="polite"/);
   assert.match(banner, /Fixture evidence is screening-only/);
   assert.match(banner, /not live validated/);
+  assert.doesNotMatch(page, /text-zinc-500/);
+  assert.doesNotMatch(table, /text-zinc-500/);
+  assert.doesNotMatch(detail, /text-zinc-500/);
+  assert.match(detail, /unavailable/);
+  assert.match(table, /Decision \{candidate.commercialDecision/);
+  assert.match(table, /commercialDecision\?\.replace\(\/_\/g, " "\) \?\? "unavailable"/);
+  assert.match(detail, /hardGates.length \? candidate.hardGates.join\(" · "\) : "unavailable"/);
 });
 
 test("demo fixture and control planes avoid secrets and document unavailable slots", async () => {
