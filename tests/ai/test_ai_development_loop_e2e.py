@@ -320,3 +320,81 @@ def test_a_real_handoff_naming_an_out_of_scope_file_cannot_be_resumed():
 
     # The genuine artifact, unmodified, must still resume.
     assert validate_resume_packet(resume_from_disk, expected_task_packet=task_packet) == resume_from_disk
+
+
+def test_a_symlink_escape_in_a_real_handoff_cannot_be_resumed(tmp_path: Path):
+    """Full chain (real snapshot -> prepare -> execute -> handoff), then a
+    filesystem-aware resume check against a real, on-disk worktree layout
+    that mirrors the handoff's changed_files -- proving a lexically
+    in-scope entry that is actually a symlink escaping the worktree is
+    rejected, while the identical, non-symlinked layout still resumes.
+
+    The symlink is planted in a synthetic tmp_path mirror of the worktree,
+    never in the real shared checkout this test runs from -- only the
+    resume-boundary filesystem check (validate_resume_packet(root=...))
+    needs a real directory to resolve against; the snapshot/prepare/
+    execute phases above run against the real, unmodified repository.
+    """
+    snapshot = _real_snapshot()
+    task_packet_raw = {
+        "agent_id": "claude-ai-development-loop-consolidation",
+        "source_chat": "Claude",
+        "lane": "marketos-ai-development-loop-consolidation-v1",
+        "objective": "prove a symlink-escaped changed_files entry cannot be resumed",
+        "allowed_scope": ["tests/ai/test_ai_development_loop_e2e.py"],
+        "prohibited_scope": ["artifacts/", ".env"],
+        "base_sha": snapshot["HEAD"] or snapshot["origin_main"] or "0" * 40,
+        "worktree": snapshot["repository"]["path"],
+        "dependencies": ["MarketOS.AIContext.v1"],
+        "acceptance_criteria": ["the loop test passes"],
+        "selected_tests": ["python3 -m pytest tests/ai/test_ai_development_loop_e2e.py -q"],
+        "evidence_classification": "not_run",
+        "rollback": "revert the commit that added this test",
+        "next_action": "run the remaining selected tests",
+    }
+    prepared = bundle.prepare(snapshot, task_packet_raw)
+    task_packet = prepared["task_packet"]
+
+    ok_command = "python3 -m pytest tests/ai/test_native_agent_capability.py -q"
+    execution = bundle.execute([ok_command])
+    tests_already_run = [
+        {"command": ok_command, "evidence_classification": bundle.to_evidence_classification(execution["classifications"][ok_command])},
+    ]
+    changed = "tests/ai/test_ai_development_loop_e2e.py"
+    handoff = bundle.handoff(
+        task_packet,
+        context_snapshot_replay_hash=prepared["context_snapshot_replay_hash"],
+        worktree=task_packet["worktree"],
+        branch=snapshot.get("branch") or "detached",
+        head_sha=task_packet["base_sha"],
+        base_sha=task_packet["base_sha"],
+        changed_files=[changed],
+        tests_already_run=tests_already_run,
+        tests_still_required=[],
+        open_blockers=[],
+        pending_decisions=[],
+        public_sources_inspected=[],
+        claims_not_yet_proven=[],
+        next_action="open the PR",
+    )
+    resume_from_disk = json.loads(json.dumps(handoff["resume"]))
+
+    # A synthetic mirror worktree: the same relative path exists, but as a
+    # real symlink pointing outside the mirror root.
+    tampered_root = tmp_path / "tampered-worktree"
+    (tampered_root / "tests" / "ai").mkdir(parents=True)
+    outside_target = tmp_path / "outside-elsewhere.py"
+    outside_target.write_text("marker = True\n", encoding="utf-8")
+    try:
+        (tampered_root / changed).symlink_to(outside_target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is not permitted on this platform/filesystem")
+    with pytest.raises(ResumePacketError, match="escapes the worktree root"):
+        validate_resume_packet(resume_from_disk, expected_task_packet=task_packet, root=tampered_root)
+
+    # An identical mirror, but with a real, ordinary (non-symlinked) file
+    # at the same path, must still resume cleanly.
+    clean_root = tmp_path / "clean-worktree"
+    (clean_root / "tests" / "ai").mkdir(parents=True)
+    (clean_root / changed).write_text("# real file\n", encoding="utf-8")
+    assert validate_resume_packet(resume_from_disk, expected_task_packet=task_packet, root=clean_root) == resume_from_disk
