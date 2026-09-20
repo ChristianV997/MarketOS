@@ -17,7 +17,9 @@ import argparse
 import cProfile
 import json
 import math
+import platform
 import pstats
+import subprocess
 import sys
 import time
 import tracemalloc
@@ -44,14 +46,35 @@ from evaluation.commerce.dry_run_events import lifecycle_events
 from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
 from evaluation.commerce.dry_run_scenarios import SCENARIO_BUILDERS, hydroponics_positive_candidate
 from scripts.benchmarks.lab_certification import (
+    CLI_CONCAT_EVENT_COUNT,
     COMMERCE_LIFECYCLE_EVENT_COUNT,
     MIN_SAMPLES_FOR_TAIL,
+    THIRTEEN_INVARIANT_KEYS,
     aggregate_replay_hash,
     classify_event_scope,
+    classify_evidence,
+    fail_closed_pr279_certification,
+    inspect_replay_cli_source,
     percentile_guard,
 )
 
-SCHEMA_VERSION = "commercial-replay-lab-benchmark-v1"
+SCHEMA_VERSION = "commercial-replay-lab-benchmark-v3"
+
+
+def _git_head() -> str:
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=_REPO_ROOT,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+            .decode("utf-8")
+            .strip()
+        )
+    except Exception:  # noqa: BLE001
+        return "unavailable"
 
 EXPECTED_STAGES = {
     "hydroponics_positive_candidate": "scale_candidate",
@@ -179,6 +202,14 @@ class ScenarioReplayLaboratory:
 
             first_hashes = [e.replay_hash() for e in first_events]
             second_hashes = [e.replay_hash() for e in second_events]
+            if len(first_events) != COMMERCE_LIFECYCLE_EVENT_COUNT or len(second_events) != COMMERCE_LIFECYCLE_EVENT_COUNT:
+                raise ValueError(
+                    "refusing non-17 commerce trail: "
+                    f"{builder.__name__} first={len(first_events)} "
+                    f"({classify_event_scope(len(first_events))}) "
+                    f"second={len(second_events)} "
+                    f"({classify_event_scope(len(second_events))})"
+                )
             summary = replay_summary(first_events)
 
             first_dict = first_report.to_dict()
@@ -216,7 +247,7 @@ class ScenarioReplayLaboratory:
                     live_actions_taken=first_report.live_actions_taken,
                     wall_ms=elapsed_ms,
                     output_bytes=output_bytes,
-                    evidence_classification="fixture",
+                    evidence_classification=classify_evidence(evidence_state),
                     event_scope=classify_event_scope(len(first_events)),
                     first_hash_sequence=tuple(first_hashes),
                     second_hash_sequence=tuple(second_hashes),
@@ -248,157 +279,138 @@ class ScenarioReplayLaboratory:
         }
         return {
             "checks": checks,
-            "all_passed": all(checks.values()),
+            "all_passed": bool(records) and all(checks.values()),
             "scenarios_certified": len(records),
         }
 
     @staticmethod
     def run_canonical_replay_integration() -> dict[str, Any]:
-        """Invokes the canonical PR #279 replay integration path if available.
+        """Observe PR #279 concat CLI if present. Never self-certify a 17-event CLI.
 
-        Maintains PR #279 as the single replay authority, certifying:
-        1. Identical event IDs
-        2. Identical event ordering
-        3. Monotonic sequence timestamps
-        4. Identical Event.replay_hash sequence
-        5. Identical aggregate replay hash
-        6. Zero sequence violations
-        7. Zero live authority violations
-        8. live_actions_taken is False
-        9. launch_authorized is False (no live attestation)
-        10. Governor outcome simulated (offline policy)
-        11. Approval ledger simulated (external_action_authorized is False)
-        12. TrustOS export sanitized (validated_no_sensitive_fields)
-        13. Zero provider mutations, 0 provider calls, 0 credentials, 0 DB writes
+        The 13-point set (governor / ledger / TrustOS export) is #279-owned.
+        Main's commerce-only CLI importing successfully is not a 13-point pass.
         """
+        cli_path = _REPO_ROOT / "scripts" / "run_commercial_replay_integration.py"
+        inspection = inspect_replay_cli_source(cli_path)
+        if inspection.get("status") != "available":
+            return fail_closed_pr279_certification(
+                "unmerged_dependency",
+                "PR #279 CLI is not present in this tree.",
+                cli_inspection=inspection,
+            )
+        if not inspection.get("is_pr279_concat"):
+            return fail_closed_pr279_certification(
+                "commerce_only_cli_not_pr279",
+                "This tree's scripts/run_commercial_replay_integration.py is the "
+                "commerce-only (17-event) CLI. 37-event concat and 13-point "
+                "governor/ledger/TrustOS certification belong to unmerged PR #279.",
+                cli_inspection=inspection,
+            )
         try:
             from scripts.run_commercial_replay_integration import run_scenarios as canonical_run_scenarios  # type: ignore
             canonical_results = canonical_run_scenarios()
             rows = canonical_results.get("rows", [])
-
-            is_pr279_consolidated = any(r.get("governor") is not None for r in rows)
-
-            invariant_checks: dict[str, bool] = {
-                "all_event_ids_identical": True,
-                "all_ordering_identical": True,
-                "monotonic_timestamps": True,
-                "all_hash_sequences_identical": True,
-                "all_replay_hashes_identical": True,
-                "no_sequence_violations": True,
-                "no_live_authority_violations": True,
-                "live_actions_taken_false": True,
-                "live_attestation_false": True,
-                "governor_simulated": True,
-                "approval_ledger_simulated": True,
-                "trustos_export_sanitized": True,
-                "no_mutations": True,
-            }
-
-            scenario_invariants: list[dict[str, Any]] = []
-
-            for row in rows:
-                scenario_name = row.get("scenario", "")
-                candidate_id = row.get("candidate_id", "")
-
-                # Check sequence issues
-                seq_issues = row.get("sequence_issues") or row.get("event_summary", {}).get("sequence_issues", [])
-                if len(seq_issues) > 0:
-                    invariant_checks["no_sequence_violations"] = False
-                    if any("duplicate" in str(iss) for iss in seq_issues):
-                        invariant_checks["all_event_ids_identical"] = False
-                    if any("monotonic" in str(iss) for iss in seq_issues):
-                        invariant_checks["monotonic_timestamps"] = False
-
-                # Check live authority violations
-                live_viol = row.get("live_authority_violations") or row.get("event_summary", {}).get("live_authority_violations", [])
-                if len(live_viol) > 0:
-                    invariant_checks["no_live_authority_violations"] = False
-
-                # Live actions taken
-                if row.get("live_actions_taken", False) is not False:
-                    invariant_checks["live_actions_taken_false"] = False
-
-                # Live attestation / launch authorization
-                if row.get("launch_authorized", False) is not False:
-                    invariant_checks["live_attestation_false"] = False
-
-                # Replay equal
-                if not row.get("replay_equal", False):
-                    invariant_checks["all_replay_hashes_identical"] = False
-
-                # If PR #279 consolidated details are present:
-                if is_pr279_consolidated:
-                    ev_summary = row.get("event_summary", {})
-                    gov = row.get("governor", {})
-                    ledger = row.get("approval_ledger", {})
-                    export_data = row.get("client_export", {})
-
-                    if not gov.get("simulated_only", False) or gov.get("outcome") != "soft_block":
-                        invariant_checks["governor_simulated"] = False
-                    if ledger.get("external_action_authorized", True) is not False or not ledger.get("safety_summary", {}).get("read_only", False):
-                        invariant_checks["approval_ledger_simulated"] = False
-                    if export_data.get("redaction_status") != "validated_no_sensitive_fields":
-                        invariant_checks["trustos_export_sanitized"] = False
-                    if row.get("external_mutations", 0) != 0 or row.get("provider_calls", 0) != 0 or row.get("credentials_used", 0) != 0 or row.get("database_writes", 0) != 0:
-                        invariant_checks["no_mutations"] = False
-                    if row.get("event_replay_hashes") != ev_summary.get("hash_sequence"):
-                        invariant_checks["all_hash_sequences_identical"] = False
-
-                scenario_invariants.append({
-                    "scenario": scenario_name,
-                    "candidate_id": candidate_id,
-                    "event_count": row.get("event_count", 0),
-                    "event_scope": classify_event_scope(row.get("event_count", 0)),
-                    "replay_hash": row.get("replay_hash", ""),
-                    "replay_equal": row.get("replay_equal", False),
-                    "launch_authorized": row.get("launch_authorized", False),
-                    "live_actions_taken": row.get("live_actions_taken", False),
-                    "governor_outcome": row.get("governor", {}).get("outcome", "simulated") if row.get("governor") else "simulated",
-                    "approval_ledger_authorized": row.get("approval_ledger", {}).get("external_action_authorized", False) if row.get("approval_ledger") else False,
-                    "client_export_redaction": row.get("client_export", {}).get("redaction_status", "validated_no_sensitive_fields") if row.get("client_export") else "validated_no_sensitive_fields",
-                    "wall_ms": row.get("wall_ms", 0.0),
-                })
-
-            all_invariants_satisfied = all(invariant_checks.values()) and len(rows) > 0
-
-            return {
-                "status": "available",
-                "authority": "scripts.run_commercial_replay_integration",
-                "mode": "pr279_consolidated" if is_pr279_consolidated else "canonical_dry_run",
-                "result": canonical_results.get("result", "unknown"),
-                "rows_evaluated": len(rows),
-                "all_replay_equal": all(row.get("replay_equal", False) for row in rows),
-                "all_launch_blocked": all(not row.get("launch_authorized", False) for row in rows),
-                "invariant_checks": invariant_checks,
-                "all_invariants_satisfied": all_invariants_satisfied,
-                "scenario_invariants": scenario_invariants,
-            }
         except ImportError:
-            return {
-                "status": "unmerged_dependency",
-                "authority": "scripts.run_commercial_replay_integration",
-                "note": "PR #279 is unmerged on base; validated via integration worktree.",
-                "rows_evaluated": 0,
-                "all_replay_equal": False,
-                "all_launch_blocked": True,
-                "invariant_checks": {
-                    "all_event_ids_identical": False,
-                    "all_ordering_identical": False,
-                    "monotonic_timestamps": False,
-                    "all_hash_sequences_identical": False,
-                    "all_replay_hashes_identical": False,
-                    "no_sequence_violations": False,
-                    "no_live_authority_violations": False,
-                    "live_actions_taken_false": False,
-                    "live_attestation_false": False,
-                    "governor_simulated": False,
-                    "approval_ledger_simulated": False,
-                    "trustos_export_sanitized": False,
-                    "no_mutations": False,
-                },
-                "all_invariants_satisfied": False,
-                "scenario_invariants": [],
-            }
+            return fail_closed_pr279_certification(
+                "unmerged_dependency",
+                "PR #279 concat CLI source is present but import failed.",
+                cli_inspection=inspection,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return fail_closed_pr279_certification(
+                "unavailable",
+                f"PR #279 concat CLI raised {type(exc).__name__}: {exc}",
+                cli_inspection=inspection,
+            )
+
+        event_counts = [int(row.get("event_count") or 0) for row in rows]
+        if not rows or any(count != CLI_CONCAT_EVENT_COUNT for count in event_counts):
+            return fail_closed_pr279_certification(
+                "truncated_or_wrong_scope",
+                "PR #279 concat CLI did not emit 37 events per row; refusing 13-point certification.",
+                cli_inspection=inspection,
+                rows_evaluated=len(rows),
+            )
+
+        invariant_checks: dict[str, bool] = {key: True for key in THIRTEEN_INVARIANT_KEYS}
+        scenario_invariants: list[dict[str, Any]] = []
+
+        for row in rows:
+            seq_issues = row.get("sequence_issues") or row.get("event_summary", {}).get("sequence_issues", [])
+            if len(seq_issues) > 0:
+                invariant_checks["no_sequence_violations"] = False
+                if any("duplicate" in str(iss) for iss in seq_issues):
+                    invariant_checks["all_event_ids_identical"] = False
+                if any("monotonic" in str(iss) for iss in seq_issues):
+                    invariant_checks["monotonic_timestamps"] = False
+
+            live_viol = row.get("live_authority_violations") or row.get("event_summary", {}).get("live_authority_violations", [])
+            if len(live_viol) > 0:
+                invariant_checks["no_live_authority_violations"] = False
+
+            if row.get("live_actions_taken", False) is not False:
+                invariant_checks["live_actions_taken_false"] = False
+            if row.get("launch_authorized", False) is not False:
+                invariant_checks["live_attestation_false"] = False
+            if not row.get("replay_equal", False):
+                invariant_checks["all_replay_hashes_identical"] = False
+
+            ev_summary = row.get("event_summary") or {}
+            gov = row.get("governor")
+            ledger = row.get("approval_ledger")
+            export_data = row.get("client_export")
+            if not isinstance(gov, dict) or not gov.get("simulated_only", False) or gov.get("outcome") != "soft_block":
+                invariant_checks["governor_simulated"] = False
+            if (
+                not isinstance(ledger, dict)
+                or ledger.get("external_action_authorized", True) is not False
+                or not (ledger.get("safety_summary") or {}).get("read_only", False)
+            ):
+                invariant_checks["approval_ledger_simulated"] = False
+            if not isinstance(export_data, dict) or export_data.get("redaction_status") != "validated_no_sensitive_fields":
+                invariant_checks["trustos_export_sanitized"] = False
+            if (
+                row.get("external_mutations", 0) != 0
+                or row.get("provider_calls", 0) != 0
+                or row.get("credentials_used", 0) != 0
+                or row.get("database_writes", 0) != 0
+            ):
+                invariant_checks["no_mutations"] = False
+            hashes = row.get("event_replay_hashes")
+            if hashes != ev_summary.get("hash_sequence"):
+                invariant_checks["all_hash_sequences_identical"] = False
+
+            scenario_invariants.append({
+                "scenario": row.get("scenario", ""),
+                "candidate_id": row.get("candidate_id", ""),
+                "event_count": row.get("event_count", 0),
+                "event_scope": classify_event_scope(int(row.get("event_count") or 0)),
+                "replay_hash": row.get("replay_hash", ""),
+                "replay_equal": row.get("replay_equal", False),
+                "launch_authorized": row.get("launch_authorized", False),
+                "live_actions_taken": row.get("live_actions_taken", False),
+                "governor_outcome": gov.get("outcome") if isinstance(gov, dict) else None,
+                "approval_ledger_authorized": ledger.get("external_action_authorized") if isinstance(ledger, dict) else None,
+                "client_export_redaction": export_data.get("redaction_status") if isinstance(export_data, dict) else None,
+                "wall_ms": row.get("wall_ms", 0.0),
+            })
+
+        all_invariants_satisfied = all(invariant_checks.values()) and len(rows) > 0
+        return {
+            "status": "available",
+            "authority": "scripts.run_commercial_replay_integration",
+            "mode": "pr279_concat",
+            "result": canonical_results.get("result", "unknown"),
+            "note": "Certified against the 37-event #279 concat CLI only.",
+            "rows_evaluated": len(rows),
+            "all_replay_equal": all(row.get("replay_equal", False) for row in rows),
+            "all_launch_blocked": all(not row.get("launch_authorized", False) for row in rows),
+            "invariant_checks": invariant_checks,
+            "all_invariants_satisfied": all_invariants_satisfied,
+            "scenario_invariants": scenario_invariants,
+            "cli_inspection": inspection,
+        }
+
 
     @staticmethod
     def verify_adversarial_authority_rejection() -> dict[str, Any]:
@@ -665,6 +677,10 @@ class StatisticalComparisonLaboratory:
                 s_start = time.perf_counter()
                 rep = run_dry_run_lifecycle(builder())
                 evs = lifecycle_events(rep, workspace_id=f"ws-{builder.__name__}")
+                if len(evs) != COMMERCE_LIFECYCLE_EVENT_COUNT:
+                    raise ValueError(
+                        f"refusing non-17 commerce trail in stats: {builder.__name__} got {len(evs)}"
+                    )
                 h_seq = [e.replay_hash() for e in evs]
                 current_hashes.append(aggregate_replay_hash(h_seq))
                 s_elapsed = (time.perf_counter() - s_start) * 1000
@@ -744,11 +760,11 @@ def generate_laboratory_report(
 
     md.append("# Commercial Replay Benchmark & Laboratory Evaluation Report")
     md.append("")
-    md.append("**Lane:** `MARKETOS-COMMERCIAL-REPLAY-BENCHMARK-V1`  ")
-    md.append("**Role:** Antigravity Performance & Evidence-Laboratory Engineer  ")
-    md.append(f"**Schema Version:** `{SCHEMA_VERSION}`  ")
-    md.append(f"**Evidence Classification:** `fixture` / `simulated` / `derived`  ")
-    md.append("**Live Authority:** `blocked` (0 live mutations, 0 provider calls, 0 credentials)  ")
+    md.append("**Lane:** `MARKETOS-COMMERCIAL-REPLAY-BENCHMARK-V1`")
+    md.append("**Role:** Antigravity Performance & Evidence-Laboratory Engineer")
+    md.append(f"**Schema Version:** `{SCHEMA_VERSION}`")
+    md.append("**Evidence Classification:** per-scenario `observed` / `fixture` / `assumed` (never live)")
+    md.append("**Live Authority:** `blocked` (0 live mutations, 0 provider calls, 0 credentials)")
     md.append("")
     md.append("---")
     md.append("")
@@ -756,15 +772,31 @@ def generate_laboratory_report(
     md.append("")
     md.append("This report documents the rigorous laboratory validation of MarketOS commercial dry-run replay,")
     md.append("deterministic hash repeatability, 7-dimensional sensitivity analysis, and performance scaling.")
-    md.append("The evaluation proves:")
-    md.append("1. **Canonical Replay Authority Conformance**: Integrates seamlessly with PR #279 (`scripts/run_commercial_replay_integration.py`) as the canonical replay authority without maintaining duplicate replay engines or parallel event models.")
-    md.append("2. **100% Deterministic Replay Stability**: Across all 5 canonical scenarios, double-run replay produces bit-identical event hash sequences and identical achievable stages.")
-    md.append("3. **Zero Authority Leakage & Fail-Closed Adversarial Defense**: All 17 lifecycle events per scenario produce 0 sequence violations and 0 live authority violations; adversarial authority injection is reliably rejected.")
-    md.append("4. **13-Point Invariant Certification**: Certified all 13 canonical safety and replay invariants across both direct scenario executions and PR #279 consolidated workflows.")
-    md.append("5. **Separated Warm-Up & Robust Statistical Profiling**: Latency distributions measured after warm-up cycle separation show tight tail bounds (mean, p50, p95, p99, variance) and zero hash sequence drift.")
-    md.append("6. **7-Dimensional Sensitivity Boundedness**: Comprehensive parametric exploration across CAC, shipping, FX, returns, defects, warranty, and delivery delay demonstrates strict monotonic margin degradation and linear exposure scaling without kernel exceptions.")
-    md.append("7. **Linear Memory & Throughput Scaling**: Evaluation throughput scales linearly (~120-300 evaluations/second) with bounded memory allocation (~8.0-9.5 KB per evaluation point).")
-    md.append("8. **Safe Kernel Optimization**: Identified and resolved unnecessary JSON serialization in `assert_no_live_authority`, cutting non-advisory certification overhead while maintaining 100% semantic and hash equivalence.")
+    md.append("The evaluation reports fixture/dry-run measurements. It does not claim commercial validation.")
+    md.append("1. **Event scope:** this laboratory measures the 17-event commerce lifecycle (start + 15 `LIFECYCLE_STEPS` + completion). 37 events exist only as PR #279 CLI concatenation (`tuple((*commerce_events, *fulfillment_events))`) and are not like-for-like.")
+    integration_status = (canonical_integration or {}).get("status", "unobserved")
+    integration_certified = bool((canonical_integration or {}).get("all_invariants_satisfied"))
+    md.append(
+        f"2. **PR #279 13-point set:** status `{integration_status}`; "
+        f"all_invariants_satisfied=`{integration_certified}`. "
+        "A commerce-only CLI import is not a 13-point pass."
+    )
+    md.append("3. **Deterministic 17-event replay:** dual-run `Event.replay_hash` sequences and aggregate sequence hashes are recorded per scenario.")
+    md.append("4. **Zero live authority on the 17-event trail:** sequence issues and live-authority violations must be empty; adversarial advisory payloads fail closed.")
+    if stats_summary.is_small_sample:
+        md.append(
+            f"5. **Warm-up + small-sample tails:** {stats_summary.warmup_cycles} warm-up cycles discarded; "
+            f"n={stats_summary.iterations} timed cycles. p95/p99 are **sample maxima** "
+            f"(`{stats_summary.tail_estimation_method}`), not independent tail estimates."
+        )
+    else:
+        md.append(
+            f"5. **Warm-up + empirical percentiles:** {stats_summary.warmup_cycles} warm-up cycles discarded; "
+            f"n={stats_summary.iterations} timed cycles. Tail method `{stats_summary.tail_estimation_method}`."
+        )
+    md.append("6. **7-dimensional sensitivity:** kernel sweep on hydroponics fixture assumptions (CAC, shipping, FX, returns, defects, warranty, delivery delay). Not Event-path work.")
+    md.append("7. **Scaling / tracemalloc:** kernel evaluation throughput only. Not a measurement of `Event.replay_hash`.")
+    md.append("8. **Production Event hash path:** unchanged. The #280 `assert_no_live_authority` patch only scopes JSON dumps to advisory events.")
     md.append("")
     md.append("---")
     md.append("")
@@ -788,30 +820,41 @@ def generate_laboratory_report(
         md.append(f"- **Achieved Stage:** `{row.achievable_stage}` (Expected: `{EXPECTED_STAGES[row.scenario_id]}`)")
         md.append(f"- **Blockers Encountered:** `{list(row.blockers) if row.blockers else 'None (Fully Promoted)'}`")
         md.append(f"- **Terminal Event Replay Hash:** `{row.first_replay_hash}`")
-        md.append(f"- **Replay Match:** `100% Bit-Identical` (`{row.first_replay_hash == row.second_replay_hash}`)")
+        md.append(f"- **Aggregate `Event.replay_hash` sequence:** `{row.aggregate_first_hash}`")
+        md.append(f"- **Evidence:** `{row.evidence_classification}` (builder `{row.evidence_state}`)")
+        md.append(f"- **Event scope:** `{row.event_scope}` ({row.event_count} events)")
+        md.append(f"- **Replay Match:** dual-run sequences equal `{row.first_hash_sequence == row.second_hash_sequence}`")
         md.append("")
 
     md.append("---")
     md.append("")
     md.append("## 2. Canonical Safety Invariants Certification Matrix")
     md.append("")
-    md.append("All 13 commercial replay safety invariants certified across canonical lifecycle executions:")
+    if integration_certified:
+        md.append("13-point #279 concat-CLI invariants were observed and passed on this run.")
+    else:
+        md.append(
+            f"13-point #279 concat-CLI invariants are **not certified** on this tree "
+            f"(status `{integration_status}`). Governor / ledger / TrustOS fields are unobserved "
+            "on the commerce-only CLI and default closed."
+        )
     md.append("")
-    md.append("| Safety Invariant | Target Requirement | Certification Status | Verified Authority & Evidence Path |")
+    md.append("| Safety Invariant | Target Requirement | Certification Status | Evidence |")
     md.append("|---|---|:---:|---|")
-    md.append("| **1. Bit-Identical Event IDs** | Deterministic UUID generation across dual runs | ✅ PASS | Verified across all 5 canonical scenarios |")
-    md.append("| **2. Deterministic Ordering** | Stable chronological lifecycle sequence | ✅ PASS | `validate_event_sequence` zero sequence jitter |")
-    md.append("| **3. Monotonic Timestamps** | `occurred_at` monotonically non-decreasing | ✅ PASS | `validate_event_sequence` reported 0 non-monotonic timestamps |")
-    md.append("| **4. Bit-Identical Hash Sequence** | Identical `Event.replay_hash` per lifecycle step | ✅ PASS | 100% match on all 17/17 lifecycle events |")
-    md.append("| **5. Bit-Identical Aggregate Hash** | Stable SHA256 aggregate fingerprint | ✅ PASS | Verified across dual append replay executions |")
-    md.append("| **6. Zero Sequence Violations** | No duplicate IDs, no missing workspace IDs | ✅ PASS | `sequence_issues == []` for all 5 scenarios |")
-    md.append("| **7. Zero Live Authority Violations** | No live tokens or advisory leaks | ✅ PASS | `live_authority_violations == []` for all events |")
-    md.append("| **8. Zero Live Actions** | `live_actions_taken == False` | ✅ PASS | Enforced across all commerce and post-order stages |")
-    md.append("| **9. Zero Live Attestation** | `launch_authorized == False` | ✅ PASS | Promotion ceiling enforced on fixture evidence |")
-    md.append("| **10. Offline Execution Governor** | Simulated policy gate (`soft_block`) | ✅ PASS | CompanyOS governor prevents automated ad spend |")
-    md.append("| **11. Simulated Approval Ledger** | `external_action_authorized == False` | ✅ PASS | Read-only audit trail; simulation count = 1 |")
-    md.append("| **12. Sanitized Workspace Export** | `validated_no_sensitive_fields` | ✅ PASS | TrustOS leakage checker strips internal source/formulas |")
-    md.append("| **13. Zero External Mutations** | 0 provider calls, 0 credentials, 0 DB writes | ✅ PASS | Strict fail-closed isolation maintained |")
+    observed_seventeen = {
+        "Bit-Identical Event.replay_hash sequence (17)": "PASS" if scenario_records and all(r.first_hash_sequence == r.second_hash_sequence and r.event_count == 17 for r in scenario_records) else "FAIL",
+        "Aggregate sequence hash stable": "PASS" if scenario_records and all(r.aggregate_first_hash == r.aggregate_second_hash and r.aggregate_first_hash for r in scenario_records) else "FAIL",
+        "Zero sequence violations (17)": "PASS" if scenario_records and all(not r.sequence_issues for r in scenario_records) else "FAIL",
+        "Zero live authority violations (17)": "PASS" if scenario_records and all(not r.live_authority_violations for r in scenario_records) else "FAIL",
+        "live_actions_taken is False": "PASS" if scenario_records and all(r.live_actions_taken is False for r in scenario_records) else "FAIL",
+    }
+    for name, status in observed_seventeen.items():
+        md.append(f"| **{name}** | 17-event commerce lab | {status} | `ScenarioReplayLaboratory.run_scenarios` |")
+    checks = (canonical_integration or {}).get("invariant_checks") or {}
+    for key in THIRTEEN_INVARIANT_KEYS:
+        flag = checks.get(key)
+        label = "PASS" if flag is True and integration_certified else "NOT CERTIFIED"
+        md.append(f"| `{key}` | #279 13-point set | {label} | status `{integration_status}` |")
     md.append("")
 
     md.append("---")
@@ -843,8 +886,19 @@ def generate_laboratory_report(
 
     md.append("")
     md.append("### Scaling Observations")
-    md.append("- **Throughput:** Sustains a consistent ~120 to ~170 unit evaluations/sec across all scale tiers.")
-    md.append("- **Memory Footprint:** Peak allocation scales strictly linearly with zero memory leaks. Garbage collection reclaims all ephemeral `Money` and `UnitEconomicsResult` instances cleanly.")
+    if scaling_records:
+        throughputs = [sc.evals_per_sec for sc in scaling_records]
+        mems = [sc.bytes_per_eval for sc in scaling_records]
+        md.append(
+            f"- **Throughput (this run, single-shot per scale point):** "
+            f"{min(throughputs):.1f} to {max(throughputs):.1f} kernel evals/sec. "
+            "Not Event.replay_hash throughput; not Monte Carlo."
+        )
+        md.append(
+            f"- **Memory / eval (tracemalloc, kernel sweep):** "
+            f"{min(mems):.1f} to {max(mems):.1f} bytes. n=1 per scale point; not a leak proof."
+        )
+    md.append("- **Warm-up:** scaling points are cold/single-shot. Warmed timings live only in section 5.")
     md.append("")
     md.append("---")
     md.append("")
@@ -857,8 +911,10 @@ def generate_laboratory_report(
     md.append(f"- **Mean Cycle Latency:** {stats_summary.mean_cycle_ms:.2f} ms")
     md.append(f"- **Median / p50 Latency:** {stats_summary.p50_cycle_ms:.2f} ms")
     md.append(f"- **Min / Max Latency:** {stats_summary.min_cycle_ms:.2f} ms / {stats_summary.max_cycle_ms:.2f} ms")
-    md.append(f"- **95th Percentile (p95):** {stats_summary.p95_cycle_ms:.2f} ms")
-    md.append(f"- **99th Percentile (p99):** {stats_summary.p99_cycle_ms:.2f} ms")
+    md.append(f"- **95th Percentile (p95):** {stats_summary.p95_cycle_ms:.2f} ms"
+              + (" *(sample maximum; n<20)*" if stats_summary.is_small_sample else ""))
+    md.append(f"- **99th Percentile (p99):** {stats_summary.p99_cycle_ms:.2f} ms"
+              + (" *(sample maximum; n<20)*" if stats_summary.is_small_sample else ""))
     md.append(f"- **Standard Deviation:** {stats_summary.stddev_cycle_ms:.2f} ms")
     md.append(f"- **Variance:** {stats_summary.variance_cycle_ms:.2f} ms²")
     md.append(f"- **Hash Sequence Drift:** `{'DETECTED (FAIL)' if stats_summary.hash_drift_detected else 'ZERO DRIFT (PASS)'}`")
@@ -911,7 +967,9 @@ def generate_laboratory_report(
     md.append("")
     md.append("### Review 2: Statistical & Benchmark Rigor")
     md.append(f"- **Repeatability:** Zero hash drift confirmed across repeated cycle runs (`hash_drift_detected: {stats_summary.hash_drift_detected}`).")
-    md.append(f"- **Latency Distribution:** Mean cycle latency {stats_summary.mean_cycle_ms:.2f} ms with tightly bounded tail (p95: {stats_summary.p95_cycle_ms:.2f} ms, p99: {stats_summary.p99_cycle_ms:.2f} ms).")
+    md.append(f"- **Latency Distribution:** Mean cycle latency {stats_summary.mean_cycle_ms:.2f} ms; "
+              f"p95 {stats_summary.p95_cycle_ms:.2f} ms / p99 {stats_summary.p99_cycle_ms:.2f} ms "
+              f"via `{stats_summary.tail_estimation_method}`.")
     md.append("- **Throughput Stability:** High-throughput execution (~120-170 evals/sec) across all dimension tiers with bounded memory footprint (~8 KB/eval).")
     md.append("- **Colab Scale Ready:** Supports scaling to 10,000+ deterministic sensitivity combinations via `--scale-max 1500` ($1500 \\times 7 = 10,500$ evaluations).")
     md.append("")
@@ -1005,8 +1063,18 @@ def main() -> int:
 
     output_payload = {
         "schema": SCHEMA_VERSION,
-        "evidence_classification": "fixture",
+        "evidence_classification": "per_scenario",
         "live_authority": "blocked",
+        "event_scope": "commerce_lifecycle_17",
+        "cli_concat_37_owner": "PR #279 only",
+        "environment": {
+            "git_head": _git_head(),
+            "python": sys.version.split()[0],
+            "platform": platform.platform(),
+            "warmup": max(1, args.warmup),
+            "runs": max(3, args.runs),
+            "scale_max": args.scale_max,
+        },
         "scenarios_evaluated": len(scenarios),
         "all_replays_equal": all(s.replay_equal for s in scenarios),
         "all_stages_matched": all(s.achievable_stage == EXPECTED_STAGES[s.scenario_id] for s in scenarios),
@@ -1031,6 +1099,8 @@ def main() -> int:
         print(f"- Scaling Max Throughput: {max(s.evals_per_sec for s in scaling):.1f} evals/sec")
         print(f"- Report written to: {report_path}")
 
+    if not scenario_invariants["all_passed"]:
+        return 1
     return 0
 
 

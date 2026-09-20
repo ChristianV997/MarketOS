@@ -2,8 +2,8 @@
 
 **Lane:** `MARKETOS-COMMERCIAL-REPLAY-BENCHMARK-V1`
 **Role:** Antigravity Performance & Evidence-Laboratory Engineer
-**Schema Version:** `commercial-replay-lab-benchmark-v1`
-**Evidence Classification:** `fixture` / `simulated` / `derived`
+**Schema Version:** `commercial-replay-lab-benchmark-v3`
+**Evidence Classification:** per-scenario `observed` / `fixture` / `assumed` (never live)
 **Live Authority:** `blocked` (0 live mutations, 0 provider calls, 0 credentials)
 
 ---
@@ -12,15 +12,15 @@
 
 This report documents the rigorous laboratory validation of MarketOS commercial dry-run replay,
 deterministic hash repeatability, 7-dimensional sensitivity analysis, and performance scaling.
-The evaluation proves:
-1. **Canonical Replay Authority Conformance**: Integrates seamlessly with PR #279 (`scripts/run_commercial_replay_integration.py`) as the canonical replay authority without maintaining duplicate replay engines or parallel event models.
-2. **100% Deterministic Replay Stability**: Across all 5 canonical scenarios, double-run replay produces bit-identical event hash sequences and identical achievable stages.
-3. **Zero Authority Leakage & Fail-Closed Adversarial Defense**: All 17 lifecycle events per scenario produce 0 sequence violations and 0 live authority violations; adversarial authority injection is reliably rejected.
-4. **13-Point Invariant Certification**: Certified all 13 canonical safety and replay invariants across both direct scenario executions and PR #279 consolidated workflows.
-5. **Separated Warm-Up & Robust Statistical Profiling**: Latency distributions measured after warm-up cycle separation show tight tail bounds (mean, p50, p95, p99, variance) and zero hash sequence drift.
-6. **7-Dimensional Sensitivity Boundedness**: Comprehensive parametric exploration across CAC, shipping, FX, returns, defects, warranty, and delivery delay demonstrates strict monotonic margin degradation and linear exposure scaling without kernel exceptions.
-7. **Linear Memory & Throughput Scaling**: Evaluation throughput scales linearly (~120-300 evaluations/second) with bounded memory allocation (~8.0-9.5 KB per evaluation point).
-8. **Safe Kernel Optimization**: Identified and resolved unnecessary JSON serialization in `assert_no_live_authority`, cutting non-advisory certification overhead while maintaining 100% semantic and hash equivalence.
+The evaluation reports fixture/dry-run measurements. It does not claim commercial validation.
+1. **Event scope:** this laboratory measures the 17-event commerce lifecycle (start + 15 `LIFECYCLE_STEPS` + completion). 37 events exist only as PR #279 CLI concatenation (`tuple((*commerce_events, *fulfillment_events))`) and are not like-for-like.
+2. **PR #279 13-point set:** status `commerce_only_cli_not_pr279`; all_invariants_satisfied=`False`. A commerce-only CLI import is not a 13-point pass.
+3. **Deterministic 17-event replay:** dual-run `Event.replay_hash` sequences and aggregate sequence hashes are recorded per scenario.
+4. **Zero live authority on the 17-event trail:** sequence issues and live-authority violations must be empty; adversarial advisory payloads fail closed.
+5. **Warm-up + small-sample tails:** 2 warm-up cycles discarded; n=5 timed cycles. p95/p99 are **sample maxima** (`sample_maximum_small_n_guard`), not independent tail estimates.
+6. **7-dimensional sensitivity:** kernel sweep on hydroponics fixture assumptions (CAC, shipping, FX, returns, defects, warranty, delivery delay). Not Event-path work.
+7. **Scaling / tracemalloc:** kernel evaluation throughput only. Not a measurement of `Event.replay_hash`.
+8. **Production Event hash path:** unchanged. The #280 `assert_no_live_authority` patch only scopes JSON dumps to advisory events.
 
 ---
 
@@ -28,11 +28,11 @@ The evaluation proves:
 
 | Scenario ID | SKU | Lane | Achievable Stage | Promoted | Events | Replay Equal | Sequence Issues | Live Violations | Wall Clock (ms) |
 |---|---|---|---|:---:|:---:|:---:|:---:|:---:|---:|
-| `hydroponics_positive_candidate` | `hydroponics-nutrient-kit` | `us-domestic-hydro` | `scale_candidate` | ✅ Yes | 17 | ✅ Bit-Identical | 0 | 0 | 4.97 |
-| `smart_pet_support_burden_candidate` | `smart-pet-feeder` | `us-domestic-petfeeder` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 4.90 |
-| `solar_4g_security_blocked_candidate` | `solar-4g-security-camera` | `us-domestic-solarcam` | `economics_screened` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 5.65 |
-| `commodity_electronics_rejected_candidate` | `usb-c-cable-3pack` | `us-domestic-usbc-cable` | `supplier_terms_pending` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 4.97 |
-| `high_ticket_deferred_candidate` | `e-cargo-bike` | `us-domestic-egraded-bike` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 4.51 |
+| `hydroponics_positive_candidate` | `hydroponics-nutrient-kit` | `us-domestic-hydro` | `scale_candidate` | ✅ Yes | 17 | ✅ Bit-Identical | 0 | 0 | 1.79 |
+| `smart_pet_support_burden_candidate` | `smart-pet-feeder` | `us-domestic-petfeeder` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 1.51 |
+| `solar_4g_security_blocked_candidate` | `solar-4g-security-camera` | `us-domestic-solarcam` | `economics_screened` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 1.58 |
+| `commodity_electronics_rejected_candidate` | `usb-c-cable-3pack` | `us-domestic-usbc-cable` | `supplier_terms_pending` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 1.65 |
+| `high_ticket_deferred_candidate` | `e-cargo-bike` | `us-domestic-egraded-bike` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 1.57 |
 
 ### Scenario Outcome Details & Gate Verification
 
@@ -41,57 +41,77 @@ The evaluation proves:
 - **Achieved Stage:** `scale_candidate` (Expected: `scale_candidate`)
 - **Blockers Encountered:** `None (Fully Promoted)`
 - **Terminal Event Replay Hash:** `20cb02d5de4c57a01525fc94efd18ce2681e4b8ba4083c2aa59d71ffd17ef783`
-- **Replay Match:** `100% Bit-Identical` (`True`)
+- **Aggregate `Event.replay_hash` sequence:** `6fb5335152136dd144dce4f9409c9556b73586e2000909d341642b322e448043`
+- **Evidence:** `observed` (builder `observed`)
+- **Event scope:** `commerce_lifecycle` (17 events)
+- **Replay Match:** dual-run sequences equal `True`
 
 #### Scenario: `smart_pet_support_burden_candidate`
 - **Candidate ID:** `smart-pet-feeder`
 - **Achieved Stage:** `supplier_validated` (Expected: `supplier_validated`)
 - **Blockers Encountered:** `['support_owner', 'unknown_support_owner']`
 - **Terminal Event Replay Hash:** `122f7c13b66bfda7abd14adf443b98de763b3fb8ee7ef63f66a9bb810c93941d`
-- **Replay Match:** `100% Bit-Identical` (`True`)
+- **Aggregate `Event.replay_hash` sequence:** `454324ce4704c1e2c962c966e72a93f3bdc21179cd55db2f8d65441b772095ac`
+- **Evidence:** `observed` (builder `observed`)
+- **Event scope:** `commerce_lifecycle` (17 events)
+- **Replay Match:** dual-run sequences equal `True`
 
 #### Scenario: `solar_4g_security_blocked_candidate`
 - **Candidate ID:** `solar-4g-security-camera`
 - **Achieved Stage:** `economics_screened` (Expected: `economics_screened`)
 - **Blockers Encountered:** `['compliance', 'evidence_state_insufficient_for_stage:fixture', 'support_owner', 'unknown_support_owner']`
 - **Terminal Event Replay Hash:** `056abd6082b649d5edd04a1959c48b2b3598d5e8f00b38ce86a49c798e094354`
-- **Replay Match:** `100% Bit-Identical` (`True`)
+- **Aggregate `Event.replay_hash` sequence:** `44ea844bac5e4822416ca71cb9ebf59af8b3c46b4a1ceb01a56a86cae538f3e9`
+- **Evidence:** `fixture` (builder `fixture`)
+- **Event scope:** `commerce_lifecycle` (17 events)
+- **Replay Match:** dual-run sequences equal `True`
 
 #### Scenario: `commodity_electronics_rejected_candidate`
 - **Candidate ID:** `usb-c-cable-3pack`
 - **Achieved Stage:** `supplier_terms_pending` (Expected: `supplier_terms_pending`)
 - **Blockers Encountered:** `['competition', 'economics']`
 - **Terminal Event Replay Hash:** `7fc7b5d9f737091ec58bf397376b03daad7b788e2a1b0f5afd9e21b28c5789ee`
-- **Replay Match:** `100% Bit-Identical` (`True`)
+- **Aggregate `Event.replay_hash` sequence:** `b19c522f0ecc954a268a7369634f1013f49f2b9f2387250fc396805416131aa4`
+- **Evidence:** `observed` (builder `observed`)
+- **Event scope:** `commerce_lifecycle` (17 events)
+- **Replay Match:** dual-run sequences equal `True`
 
 #### Scenario: `high_ticket_deferred_candidate`
 - **Candidate ID:** `e-cargo-bike`
 - **Achieved Stage:** `supplier_validated` (Expected: `supplier_validated`)
 - **Blockers Encountered:** `['return_route', 'unknown_return_owner', 'unknown_warranty_owner', 'warranty_route']`
 - **Terminal Event Replay Hash:** `ba495e3bec2db1958fb92e5ca57976dafcda152587a672ddedf132de3cdb885f`
-- **Replay Match:** `100% Bit-Identical` (`True`)
+- **Aggregate `Event.replay_hash` sequence:** `f9d709c9366b35985f15cbf0018e741a530f5250567a335a7407d471d37c13fe`
+- **Evidence:** `observed` (builder `observed`)
+- **Event scope:** `commerce_lifecycle` (17 events)
+- **Replay Match:** dual-run sequences equal `True`
 
 ---
 
 ## 2. Canonical Safety Invariants Certification Matrix
 
-All 13 commercial replay safety invariants certified across canonical lifecycle executions:
+13-point #279 concat-CLI invariants are **not certified** on this tree (status `commerce_only_cli_not_pr279`). Governor / ledger / TrustOS fields are unobserved on the commerce-only CLI and default closed.
 
-| Safety Invariant | Target Requirement | Certification Status | Verified Authority & Evidence Path |
+| Safety Invariant | Target Requirement | Certification Status | Evidence |
 |---|---|:---:|---|
-| **1. Bit-Identical Event IDs** | Deterministic UUID generation across dual runs | ✅ PASS | Verified across all 5 canonical scenarios |
-| **2. Deterministic Ordering** | Stable chronological lifecycle sequence | ✅ PASS | `validate_event_sequence` zero sequence jitter |
-| **3. Monotonic Timestamps** | `occurred_at` monotonically non-decreasing | ✅ PASS | `validate_event_sequence` reported 0 non-monotonic timestamps |
-| **4. Bit-Identical Hash Sequence** | Identical `Event.replay_hash` per lifecycle step | ✅ PASS | 100% match on all 17/17 lifecycle events |
-| **5. Bit-Identical Aggregate Hash** | Stable SHA256 aggregate fingerprint | ✅ PASS | Verified across dual append replay executions |
-| **6. Zero Sequence Violations** | No duplicate IDs, no missing workspace IDs | ✅ PASS | `sequence_issues == []` for all 5 scenarios |
-| **7. Zero Live Authority Violations** | No live tokens or advisory leaks | ✅ PASS | `live_authority_violations == []` for all events |
-| **8. Zero Live Actions** | `live_actions_taken == False` | ✅ PASS | Enforced across all commerce and post-order stages |
-| **9. Zero Live Attestation** | `launch_authorized == False` | ✅ PASS | Promotion ceiling enforced on fixture evidence |
-| **10. Offline Execution Governor** | Simulated policy gate (`soft_block`) | ✅ PASS | CompanyOS governor prevents automated ad spend |
-| **11. Simulated Approval Ledger** | `external_action_authorized == False` | ✅ PASS | Read-only audit trail; simulation count = 1 |
-| **12. Sanitized Workspace Export** | `validated_no_sensitive_fields` | ✅ PASS | TrustOS leakage checker strips internal source/formulas |
-| **13. Zero External Mutations** | 0 provider calls, 0 credentials, 0 DB writes | ✅ PASS | Strict fail-closed isolation maintained |
+| **Bit-Identical Event.replay_hash sequence (17)** | 17-event commerce lab | PASS | `ScenarioReplayLaboratory.run_scenarios` |
+| **Aggregate sequence hash stable** | 17-event commerce lab | PASS | `ScenarioReplayLaboratory.run_scenarios` |
+| **Zero sequence violations (17)** | 17-event commerce lab | PASS | `ScenarioReplayLaboratory.run_scenarios` |
+| **Zero live authority violations (17)** | 17-event commerce lab | PASS | `ScenarioReplayLaboratory.run_scenarios` |
+| **live_actions_taken is False** | 17-event commerce lab | PASS | `ScenarioReplayLaboratory.run_scenarios` |
+| `all_event_ids_identical` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `all_ordering_identical` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `monotonic_timestamps` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `all_hash_sequences_identical` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `all_replay_hashes_identical` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `no_sequence_violations` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `no_live_authority_violations` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `live_actions_taken_false` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `live_attestation_false` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `governor_simulated` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `approval_ledger_simulated` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `trustos_export_sanitized` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `no_mutations` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
 
 ---
 
@@ -187,57 +207,58 @@ Evaluated on baseline candidate `hydroponics_positive_candidate` (Retail Price: 
 
 | Grid Points / Dim | Total Evaluations | Wall Clock (ms) | Throughput (evals/sec) | Peak Memory (KB) | Memory / Eval (bytes) |
 |---:|---:|---:|---:|---:|---:|
-| 10 | 70 | 296.64 | 236.0 | 552.7 | 8085.1 |
-| 50 | 350 | 1441.59 | 242.8 | 2767.5 | 8097.0 |
-| 100 | 700 | 3176.56 | 220.4 | 5503.0 | 8050.2 |
+| 10 | 70 | 43.53 | 1608.0 | 500.4 | 7320.4 |
+| 50 | 350 | 253.55 | 1380.4 | 2519.4 | 7371.2 |
+| 100 | 700 | 424.63 | 1648.5 | 4991.9 | 7302.4 |
 
 ### Scaling Observations
-- **Throughput:** Sustains a consistent ~120 to ~170 unit evaluations/sec across all scale tiers.
-- **Memory Footprint:** Peak allocation scales strictly linearly with zero memory leaks. Garbage collection reclaims all ephemeral `Money` and `UnitEconomicsResult` instances cleanly.
+- **Throughput (this run, single-shot per scale point):** 1380.4 to 1648.5 kernel evals/sec. Not Event.replay_hash throughput; not Monte Carlo.
+- **Memory / eval (tracemalloc, kernel sweep):** 7302.4 to 7371.2 bytes. n=1 per scale point; not a leak proof.
+- **Warm-up:** scaling points are cold/single-shot. Warmed timings live only in section 5.
 
 ---
 
 ## 5. Statistical Performance & Latency Distribution
 
 - **Warm-up Cycles:** 2 complete cycles (executed and discarded before measurement)
-- **Benchmark Iterations:** 3 complete cycles (15 scenario executions)
+- **Benchmark Iterations:** 5 complete cycles (25 scenario executions)
 - **Sample Size Category:** Small Sample (n < 20)
 - **Tail Estimation Method:** `sample_maximum_small_n_guard` (using percentile_guard to prevent asymptotic overclaiming on small n)
-- **Mean Cycle Latency:** 19.50 ms
-- **Median / p50 Latency:** 19.74 ms
-- **Min / Max Latency:** 18.51 ms / 20.24 ms
-- **95th Percentile (p95):** 20.24 ms
-- **99th Percentile (p99):** 20.24 ms
-- **Standard Deviation:** 0.73 ms
-- **Variance:** 0.53 ms²
+- **Mean Cycle Latency:** 4.98 ms
+- **Median / p50 Latency:** 5.02 ms
+- **Min / Max Latency:** 4.86 ms / 5.02 ms
+- **95th Percentile (p95):** 5.02 ms *(sample maximum; n<20)*
+- **99th Percentile (p99):** 5.02 ms *(sample maximum; n<20)*
+- **Standard Deviation:** 0.06 ms
+- **Variance:** 0.00 ms²
 - **Hash Sequence Drift:** `ZERO DRIFT (PASS)`
 
 ### Per-Scenario Latency Breakdown
 
 | Scenario Builder | Events | Mean Latency (ms) | Median / p50 (ms) | Min (ms) | Max (ms) |
 |---|:---:|---:|---:|---:|---:|
-| `hydroponics_positive_candidate` | 17 | 4.12 | 3.99 | 3.96 | 4.42 |
-| `smart_pet_support_burden_candidate` | 17 | 3.85 | 3.87 | 3.75 | 3.94 |
-| `solar_4g_security_blocked_candidate` | 17 | 3.69 | 3.63 | 3.48 | 3.97 |
-| `commodity_electronics_rejected_candidate` | 17 | 3.70 | 3.77 | 3.37 | 3.95 |
-| `high_ticket_deferred_candidate` | 17 | 4.10 | 4.05 | 3.78 | 4.48 |
+| `hydroponics_positive_candidate` | 17 | 1.02 | 1.01 | 0.96 | 1.08 |
+| `smart_pet_support_burden_candidate` | 17 | 0.98 | 0.98 | 0.96 | 1.02 |
+| `solar_4g_security_blocked_candidate` | 17 | 0.98 | 0.98 | 0.95 | 1.01 |
+| `commodity_electronics_rejected_candidate` | 17 | 1.00 | 1.01 | 0.96 | 1.02 |
+| `high_ticket_deferred_candidate` | 17 | 0.99 | 0.97 | 0.95 | 1.08 |
 
 ### Top CPU Cumulative Bottlenecks (from cProfile)
 
 | Function | Total Calls | Total Time (s) | Cumulative Time (s) |
 |---|---:|---:|---:|
-| `<frozen abc>:117(__instancecheck__)` | 50 | 0.0001 | 0.0002 |
-| `__init__.py:605(__init__)` | 50 | 0.0005 | 0.0021 |
-| `enum.py:187(__get__)` | 25 | 0.0001 | 0.0001 |
-| `__init__.py:682(update)` | 50 | 0.0001 | 0.0016 |
-| `encoder.py:207(iterencode)` | 425 | 0.0289 | 0.0289 |
-| `kernel.py:104(__post_init__)` | 25 | 0.0007 | 0.0048 |
-| `kernel.py:175(__post_init__)` | 1175 | 0.0079 | 0.0654 |
-| `kernel.py:344(__post_init__)` | 25 | 0.0010 | 0.0045 |
-| `enum.py:1325(value)` | 25 | 0.0000 | 0.0000 |
-| `encoder.py:105(__init__)` | 425 | 0.0006 | 0.0006 |
-| `encoder.py:185(encode)` | 425 | 0.0022 | 0.0325 |
-| `__init__.py:185(dumps)` | 425 | 0.0028 | 0.0358 |
+| `dry_run_scenarios.py:223(high_ticket_deferred_candidate)` | 5 | 0.0001 | 0.0014 |
+| `dry_run_lifecycle.py:134(<listcomp>)` | 25 | 0.0000 | 0.0000 |
+| `dry_run_lifecycle.py:184(<dictcomp>)` | 25 | 0.0000 | 0.0001 |
+| `dry_run_lifecycle.py:118(_assumptions_payload)` | 25 | 0.0003 | 0.0006 |
+| `dry_run_lifecycle.py:222(<dictcomp>)` | 25 | 0.0000 | 0.0001 |
+| `dry_run_lifecycle.py:138(run_dry_run_lifecycle)` | 25 | 0.0007 | 0.0263 |
+| `dry_run_scenarios.py:182(commodity_electronics_rejected_candidate)` | 5 | 0.0001 | 0.0014 |
+| `business_model_economics.py:33(calculate_offer_economics)` | 25 | 0.0000 | 0.0211 |
+| `promotion.py:90(max_stage_for_evidence_state)` | 25 | 0.0000 | 0.0000 |
+| `canonical.py:59(<genexpr>)` | 985 | 0.0002 | 0.0003 |
+| `canonical.py:56(__post_init__)` | 25 | 0.0001 | 0.0006 |
+| `canonical.py:66(to_dict)` | 50 | 0.0001 | 0.0001 |
 
 ---
 
@@ -270,7 +291,7 @@ Moved `text = json.dumps(...)` strictly inside the `if event.aggregate_type == '
 
 ### Review 2: Statistical & Benchmark Rigor
 - **Repeatability:** Zero hash drift confirmed across repeated cycle runs (`hash_drift_detected: False`).
-- **Latency Distribution:** Mean cycle latency 19.50 ms with tightly bounded tail (p95: 20.24 ms, p99: 20.24 ms).
+- **Latency Distribution:** Mean cycle latency 4.98 ms; p95 5.02 ms / p99 5.02 ms via `sample_maximum_small_n_guard`.
 - **Throughput Stability:** High-throughput execution (~120-170 evals/sec) across all dimension tiers with bounded memory footprint (~8 KB/eval).
 - **Colab Scale Ready:** Supports scaling to 10,000+ deterministic sensitivity combinations via `--scale-max 1500` ($1500 \times 7 = 10,500$ evaluations).
 

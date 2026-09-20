@@ -11,14 +11,25 @@ Validates:
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 
+from backend.contracts.events import Event
+from evaluation.commerce.dry_run_events import lifecycle_events
+from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
+from evaluation.commerce.dry_run_scenarios import hydroponics_positive_candidate
 from scripts.benchmarks.benchmark_commercial_replay_lab import (
     EXPECTED_STAGES,
     ScenarioReplayLaboratory,
     SensitivityMatrixLaboratory,
     ScalingAndProfilerLaboratory,
     StatisticalComparisonLaboratory,
+)
+from scripts.benchmarks.lab_certification import (
+    PUBLISHED_COMMERCE_AGGREGATE_HASHES,
+    aggregate_replay_hash,
+    field_hash_negative_control,
+    unavailable_import_must_not_certify,
 )
 
 
@@ -31,6 +42,13 @@ def test_scenario_replay_laboratory_all_five_scenarios():
         assert rec.first_replay_hash == rec.second_replay_hash
         assert rec.first_replay_hash != ""
         assert rec.event_count == 17
+        assert rec.event_scope == "commerce_lifecycle"
+        assert rec.evidence_classification in {"observed", "fixture", "assumed"}
+        assert rec.evidence_classification != "live_readonly"
+        assert len(rec.first_hash_sequence) == 17
+        assert rec.first_hash_sequence == rec.second_hash_sequence
+        assert rec.aggregate_first_hash == rec.aggregate_second_hash
+        assert rec.aggregate_first_hash == PUBLISHED_COMMERCE_AGGREGATE_HASHES[rec.scenario_id]
         assert rec.achievable_stage == EXPECTED_STAGES[rec.scenario_id]
         assert rec.live_authority_violations == ()
         assert rec.live_actions_taken is False
@@ -41,6 +59,9 @@ def test_scenario_replay_laboratory_all_five_scenarios():
     cert = ScenarioReplayLaboratory.verify_scenario_invariants(records)
     assert cert["all_passed"] is True
     assert cert["scenarios_certified"] == 5
+    by_id = {rec.scenario_id: rec for rec in records}
+    assert by_id["hydroponics_positive_candidate"].evidence_classification == "observed"
+    assert by_id["solar_4g_security_blocked_candidate"].evidence_classification == "fixture"
 
 
 def test_sensitivity_matrix_laboratory_7d_completeness():
@@ -98,6 +119,10 @@ def test_statistical_comparison_laboratory_warmup_and_metrics():
         assert s_metric["mean_ms"] > 0
         assert s_metric["p50_ms"] > 0
         assert s_metric["min_ms"] <= s_metric["max_ms"]
+    assert summary.is_small_sample is True
+    assert summary.tail_estimation_method == "sample_maximum_small_n_guard"
+    assert summary.p95_cycle_ms == summary.max_cycle_ms
+    assert summary.p99_cycle_ms == summary.max_cycle_ms
 
 
 def test_profiler_generates_entries():
@@ -109,42 +134,28 @@ def test_profiler_generates_entries():
         assert entry["total_calls"] > 0
 
 
-def test_canonical_replay_integration_safe_invocation():
+def test_canonical_replay_integration_does_not_self_certify_commerce_only_cli():
     result = ScenarioReplayLaboratory.run_canonical_replay_integration()
-    assert result["status"] in {"available", "unmerged_dependency"}
     assert result["authority"] == "scripts.run_commercial_replay_integration"
-    assert "invariant_checks" in result
-    # Unavailable #279 must not be treated as a 13-point pass.
-    if result["status"] == "unmerged_dependency":
+    assert result["status"] in {
+        "available",
+        "unmerged_dependency",
+        "commerce_only_cli_not_pr279",
+        "truncated_or_wrong_scope",
+        "unavailable",
+    }
+    assert unavailable_import_must_not_certify(result["status"], result.get("all_invariants_satisfied"))
+    if result["status"] != "available":
         assert result.get("all_invariants_satisfied") is False
         assert result.get("all_replay_equal") is False
         assert all(v is False for v in result["invariant_checks"].values())
         return
+    assert result["mode"] == "pr279_concat"
     assert result["all_invariants_satisfied"] is True
-    expected_invariants = {
-        "all_event_ids_identical",
-        "all_ordering_identical",
-        "monotonic_timestamps",
-        "all_hash_sequences_identical",
-        "all_replay_hashes_identical",
-        "no_sequence_violations",
-        "no_live_authority_violations",
-        "live_actions_taken_false",
-        "live_attestation_false",
-        "governor_simulated",
-        "approval_ledger_simulated",
-        "trustos_export_sanitized",
-        "no_mutations",
-    }
-    assert set(result["invariant_checks"].keys()) == expected_invariants
-    if result["status"] == "available":
-        assert result["result"] == "actual"
-        assert result["rows_evaluated"] == 5
-        assert result["all_replay_equal"] is True
-        assert result["all_launch_blocked"] is True
-        assert len(result["scenario_invariants"]) == 5
-        for s_inv in result["scenario_invariants"]:
-            assert "event_scope" in s_inv
+    assert result["rows_evaluated"] == 5
+    for s_inv in result["scenario_invariants"]:
+        assert s_inv["event_count"] == 37
+        assert s_inv["event_scope"] == "cli_concat_commerce_plus_fulfillment"
 
 
 def test_adversarial_authority_fail_closed_rejection():
@@ -152,3 +163,48 @@ def test_adversarial_authority_fail_closed_rejection():
     assert res["adversarial_events_tested"] == 2
     assert res["fail_closed"] is True
     assert len(res["violations_detected"]) == 2
+
+
+def test_altered_intermediate_event_replay_hash_changes_aggregate():
+    report = run_dry_run_lifecycle(hydroponics_positive_candidate())
+    events = lifecycle_events(report, workspace_id="ws-tamper")
+    assert len(events) == 17
+    original = [event.replay_hash() for event in events]
+    mid = events[8]
+    tampered = Event(
+        mid.event_id,
+        mid.workspace_id,
+        mid.aggregate_type,
+        mid.aggregate_id,
+        mid.event_type,
+        mid.schema_version,
+        mid.occurred_at,
+        payload={**mid.payload, "tamper": "altered-intermediate"},
+        metadata=dict(mid.metadata),
+        source=mid.source,
+        correlation_id=mid.correlation_id,
+        causation_id=mid.causation_id,
+    )
+    altered = list(original)
+    altered[8] = tampered.replay_hash()
+    assert altered[8] != original[8]
+    assert aggregate_replay_hash(altered) != aggregate_replay_hash(original)
+    field = field_hash_negative_control(mid.payload)
+    assert not original[8].startswith("field-hash:")
+    assert field != original[8]
+
+
+def test_wrong_event_counts_fail_scenario_invariants():
+    records = ScenarioReplayLaboratory.run_scenarios()
+    base = records[0]
+    for count in (16, 18, 20, 37):
+        poisoned = replace(base, event_count=count, event_scope="commerce_lifecycle")
+        cert = ScenarioReplayLaboratory.verify_scenario_invariants([poisoned])
+        assert cert["all_passed"] is False
+        assert cert["checks"]["all_event_counts_match_scope"] is False
+
+
+def test_empty_records_do_not_vacuously_pass_invariants():
+    cert = ScenarioReplayLaboratory.verify_scenario_invariants([])
+    assert cert["all_passed"] is False
+    assert cert["scenarios_certified"] == 0
