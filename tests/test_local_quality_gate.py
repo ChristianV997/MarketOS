@@ -275,6 +275,35 @@ def test_ci_evidence_file_missing_logs_are_unavailable(monkeypatch, tmp_path):
     assert report["ci"]["diagnostic_state"] == "logs_unavailable_after_execution"
 
 
+def test_ci_evidence_executed_failure_with_missing_logs_preserves_failure(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    evidence_path = _write_ci_evidence(
+        root,
+        run={"status": "completed", "conclusion": "failure"},
+        extra_job_fields={
+            "conclusion": "failure",
+            "required_check_status": "failure",
+            "logs_available": False,
+        },
+    )
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert error is None
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        runner=_passing_runner,
+    )
+    assert report["ci"]["status"] == "failed"
+    assert report["ci"]["classification"] == gate.CLASS_FAILURE_ORIGIN_UNVERIFIED
+    assert report["ci"]["jobs"][0]["logs_available"] is False
+    assert report["ci"]["diagnostic_state"] == "executed_failure"
+
+
 def test_ci_evidence_file_rejects_raw_log_fields_as_malformed(tmp_path, capsys):
     evidence_path = _write_ci_evidence(tmp_path, extra_job_fields={"stdout": "secret-like raw log"})
     evidence, error = gate.load_ci_evidence(evidence_path)

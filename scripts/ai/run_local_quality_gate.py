@@ -790,9 +790,6 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
         elif job["steps_executed"] == 0:
             diagnostic_state = "job_created_zero_steps"
             job_status, reason = "unavailable", "ci_report_has_no_executed_steps"
-        elif not job["logs_available"]:
-            diagnostic_state = "logs_unavailable_after_execution"
-            job_status, reason = "unavailable", "ci_logs_unavailable"
         elif job["status"] != "completed":
             diagnostic_state = "job_queued_without_runner" if not runner_assigned else "job_created_zero_steps"
             job_status, reason = "unavailable", "ci_job_not_completed"
@@ -802,6 +799,9 @@ def _ci_evidence_snapshot(ci_result: Mapping[str, Any]) -> dict[str, Any]:
         elif job["conclusion"] != "success" or job["required_check_status"] != "success":
             diagnostic_state = "executed_failure"
             job_status, reason = "failed", "ci_required_check_failed"
+        elif not job["logs_available"]:
+            diagnostic_state = "logs_unavailable_after_execution"
+            job_status, reason = "unavailable", "ci_logs_unavailable"
         else:
             diagnostic_state = "executed_success"
             job_status, reason = "passed", "observed_ci_success"
