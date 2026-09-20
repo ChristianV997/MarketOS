@@ -9,8 +9,10 @@ import re
 
 import pytest
 
+from evaluation.source_governance.consolidation_rules import SYNTHETIC_COMMIT_SHAS
 from evaluation.source_governance.registry import (
     AdaptationMode,
+    AdaptationWorkOrder,
     SourceAdaptationRegistry,
     WorkOrderRegistry,
 )
@@ -20,6 +22,7 @@ from evaluation.source_governance.validator import (
     validate_source_work_order_correspondence,
     validate_work_order,
 )
+from scripts.ai.build_source_adaptation_registry import build_and_save
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -334,3 +337,235 @@ def test_work_order_adaptation_mode_mismatch_fails_closed():
     tampered_wo = AdaptationWorkOrder.from_dict(tampered)
     errs = validate_source_work_order_correspondence(registry, [tampered_wo, *known[1:]])
     assert any("work_order_adaptation_mode_mismatch" in e for e in errs)
+
+
+# =============================================================================
+# ADVERSARIAL REGRESSION SUITE
+# Covers: unresolved-pin network egress, canonical-authority usurpation,
+# mutation-guard enforcement, synthetic-SHA production-readiness block,
+# work-order license mismatch, simultaneous mode+license discrepancy,
+# cross-platform byte reproducibility, and deterministic builder idempotency.
+# =============================================================================
+
+
+def test_unresolved_ref_network_egress_fails_closed():
+    """Assert that live network egress on an unresolved source (src-crawl4ai)
+    is intercepted fail-closed by validate_source_record."""
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    crawl4ai_rec = registry.get_record("src-crawl4ai").to_dict()
+
+    crawl4ai_rec["data_network_behavior"]["network_mode"] = "live_network"
+    errs = validate_source_record(crawl4ai_rec)
+    assert any("unbounded_network_rejected" in e for e in errs), (
+        f"Expected unbounded_network_rejected for live_network mode, got: {errs}"
+    )
+
+    crawl4ai_rec["data_network_behavior"]["network_mode"] = "unmetered_live"
+    errs2 = validate_source_record(crawl4ai_rec)
+    assert any("unbounded_network_rejected" in e for e in errs2), (
+        f"Expected unbounded_network_rejected for unmetered_live mode, got: {errs2}"
+    )
+
+
+def test_unresolved_ref_cannot_usurp_canonical_authority():
+    """Assert that an integrated source cannot displace protected canonical authorities."""
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    crawl4ai_rec = registry.get_record("src-crawl4ai").to_dict()
+
+    for protected_auth in (
+        "backend.events.spine",
+        "backend.finance",
+        "evaluation.trustos",
+        "evaluation.companyos.approval_ledger",
+    ):
+        tampered = dict(crawl4ai_rec)
+        tampered["marketos_target_authority"] = protected_auth
+        errs = validate_source_record(tampered)
+        assert any("duplicate_authority_rejected" in e for e in errs), (
+            f"Expected duplicate_authority_rejected for {protected_auth}, got: {errs}"
+        )
+
+
+def test_work_order_missing_mutation_guard_fails_closed():
+    """Assert that a work order without live-credential/mutation prohibition triggers
+    unprotected_change_boundary fail-closed."""
+    wo_registry = WorkOrderRegistry.load_from_file(_WORK_ORDERS_PATH)
+    crawl4ai_wo = wo_registry.get_work_order("wo-crawl4ai")
+    assert crawl4ai_wo is not None
+
+    tampered = crawl4ai_wo.to_dict()
+    tampered["prohibited_changes"] = ["do_not_modify_unrelated_files"]
+    errs = validate_work_order(tampered)
+    assert any("unprotected_change_boundary" in e for e in errs), (
+        f"Expected unprotected_change_boundary when mutation guards stripped, got: {errs}"
+    )
+
+
+def test_synthetic_pins_cannot_claim_production_readiness():
+    """Assert that sources with synthetic/placeholder commit SHAs fail validate_source_record."""
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+
+    for sid in ("src-crawl4ai", "src-higgsfield-cli"):
+        base_rec = registry.get_record(sid).to_dict()
+        for synth_sha in SYNTHETIC_COMMIT_SHAS:
+            tampered = dict(base_rec)
+            tampered["commit_sha"] = synth_sha
+            tampered["revision"] = synth_sha
+            errs = validate_source_record(tampered)
+            assert any("synthetic_commit_sha" in e for e in errs), (
+                f"Expected synthetic_commit_sha for {synth_sha} in {sid}, got: {errs}"
+            )
+
+    records = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
+    for r in records:
+        assert r["commit_sha"] not in SYNTHETIC_COMMIT_SHAS, (
+            f"{r['source_id']} contains synthetic commit SHA {r['commit_sha']!r}"
+        )
+
+
+def test_work_order_license_mismatch_fails_closed():
+    """Assert that a license discrepancy between a work order and its registry record
+    triggers work_order_license_mismatch fail-closed."""
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    wo_registry = WorkOrderRegistry.load_from_file(_WORK_ORDERS_PATH)
+    known = list(wo_registry.work_orders.values())
+
+    # index 3 == wo-crawl4ai (alphabetical sort of work orders)
+    tampered_dict = known[3].to_dict()
+    assert tampered_dict["source_id"] == "src-crawl4ai", (
+        f"Expected src-crawl4ai at index 3, got: {tampered_dict['source_id']}"
+    )
+    original_license = tampered_dict["license"]
+    tampered_dict["license"] = "MIT"
+    tampered_wo = AdaptationWorkOrder.from_dict(tampered_dict)
+    work_orders_with_tampered = [
+        tampered_wo if wo.work_order_id == "wo-crawl4ai" else wo for wo in known
+    ]
+    errs = validate_source_work_order_correspondence(registry, work_orders_with_tampered)
+    assert any("work_order_license_mismatch" in e for e in errs), (
+        f"Expected work_order_license_mismatch, got: {errs}"
+    )
+    assert any(f"'{original_license}'" in e for e in errs), (
+        f"Expected original license {original_license!r} in error message, got: {errs}"
+    )
+
+    for sid, rec in registry.records.items():
+        wid = f"wo-{sid.removeprefix('src-')}"
+        wo = wo_registry.get_work_order(wid)
+        assert wo is not None, f"Missing work order {wid}"
+        assert wo.license == rec.license, (
+            f"License divergence in {wid}: wo '{wo.license}' != rec '{rec.license}'"
+        )
+        assert wo.adaptation_mode == rec.adaptation_mode, (
+            f"Mode divergence in {wid}: wo '{wo.adaptation_mode}' != rec '{rec.adaptation_mode}'"
+        )
+
+
+def test_work_order_simultaneous_mode_and_license_discrepancy():
+    """Assert that simultaneous adaptation_mode + license tampering both emit
+    distinct fail-closed errors, and that a restrictive license in an active work order
+    triggers incompatible_license_in_work_order."""
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    wo_registry = WorkOrderRegistry.load_from_file(_WORK_ORDERS_PATH)
+    known = list(wo_registry.work_orders.values())
+
+    # index 0 == wo-airbyte
+    tampered_dict = known[0].to_dict()
+    assert tampered_dict["source_id"] == "src-airbyte"
+    tampered_dict["adaptation_mode"] = "integrate"
+    tampered_dict["license"] = "MIT"
+    tampered_wo = AdaptationWorkOrder.from_dict(tampered_dict)
+    errs = validate_source_work_order_correspondence(registry, [tampered_wo, *known[1:]])
+    assert any("work_order_adaptation_mode_mismatch" in e for e in errs), (
+        f"Expected mode mismatch, got: {errs}"
+    )
+    assert any("work_order_license_mismatch" in e for e in errs), (
+        f"Expected license mismatch, got: {errs}"
+    )
+
+    # index 3 == wo-crawl4ai (integrate mode) — tamper to restrictive license
+    crawl4ai_dict = known[3].to_dict()
+    assert crawl4ai_dict["adaptation_mode"] == "integrate"
+    crawl4ai_dict["license"] = "AGPL-3.0"
+    wo_errs = validate_work_order(crawl4ai_dict)
+    assert any("incompatible_license_in_work_order" in e for e in wo_errs), (
+        f"Expected incompatible_license_in_work_order for AGPL-3.0 in active mode, got: {wo_errs}"
+    )
+
+
+def test_builder_lf_line_endings_and_cross_platform_byte_reproducibility(tmp_path):
+    """Ensure build_and_save() enforces LF line endings and produces byte-for-byte
+    identical output to the tracked canonical files on any OS platform."""
+
+    def _git_blob_sha1(data):
+        header = f"blob {len(data)}\0".encode("ascii")
+        return hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
+
+    temp_reg = tmp_path / "source_adaptation_registry.json"
+    temp_wo = tmp_path / "source_adaptation_work_orders.json"
+
+    rec_count, wo_count = build_and_save(temp_reg, temp_wo)
+    assert rec_count == 29
+    assert wo_count == 29
+
+    gen_reg_bytes = temp_reg.read_bytes()
+    gen_wo_bytes = temp_wo.read_bytes()
+
+    # Strict absence of CRLF and stray CR — must hold even on Windows
+    assert b"\r\n" not in gen_reg_bytes, "Builder injected CRLF into registry"
+    assert b"\r" not in gen_reg_bytes, "Builder injected stray CR into registry"
+    assert b"\r\n" not in gen_wo_bytes, "Builder injected CRLF into work orders"
+    assert b"\r" not in gen_wo_bytes, "Builder injected stray CR into work orders"
+
+    # Exact canonical byte length and SHA-256
+    assert len(gen_reg_bytes) == _CANONICAL_REGISTRY_BYTES
+    assert len(gen_wo_bytes) == _CANONICAL_WORK_ORDERS_BYTES
+    assert hashlib.sha256(gen_reg_bytes).hexdigest() == _CANONICAL_REGISTRY_SHA256
+    assert hashlib.sha256(gen_wo_bytes).hexdigest() == _CANONICAL_WORK_ORDERS_SHA256
+
+    # Git blob SHA-1 matches LF-normalized working tree
+    tracked_reg_lf = _REGISTRY_PATH.read_bytes().replace(b"\r\n", b"\n")
+    tracked_wo_lf = _WORK_ORDERS_PATH.read_bytes().replace(b"\r\n", b"\n")
+    assert _git_blob_sha1(gen_reg_bytes) == _git_blob_sha1(tracked_reg_lf)
+    assert _git_blob_sha1(gen_wo_bytes) == _git_blob_sha1(tracked_wo_lf)
+
+    # Adversarial: CRLF injection alters byte count, SHA-256, and blob hash
+    polluted = gen_reg_bytes.replace(b"\n", b"\r\n")
+    assert len(polluted) > len(gen_reg_bytes)
+    assert hashlib.sha256(polluted).hexdigest() != _CANONICAL_REGISTRY_SHA256
+    assert _git_blob_sha1(polluted) != _git_blob_sha1(gen_reg_bytes)
+
+
+def test_deterministic_builder_output_matches_tracked_files(tmp_path):
+    """Verify build_and_save() is bit-for-bit identical to tracked canonical files
+    and is idempotent across two consecutive executions."""
+    temp_reg = tmp_path / "registry.json"
+    temp_wo = tmp_path / "work_orders.json"
+
+    build_and_save(temp_reg, temp_wo)
+
+    gen_reg = temp_reg.read_bytes()
+    gen_wo = temp_wo.read_bytes()
+
+    tracked_reg = _REGISTRY_PATH.read_bytes().replace(b"\r\n", b"\n")
+    tracked_wo = _WORK_ORDERS_PATH.read_bytes().replace(b"\r\n", b"\n")
+
+    assert gen_reg == tracked_reg, (
+        "Builder registry bytes do not match tracked data/source_adaptation_registry.json"
+    )
+    assert gen_wo == tracked_wo, (
+        "Builder work orders bytes do not match tracked data/source_adaptation_work_orders.json"
+    )
+
+    reg = SourceAdaptationRegistry.load_from_file(temp_reg)
+    wo_reg = WorkOrderRegistry.load_from_file(temp_wo)
+    assert len(reg.records) == 29
+    assert len(wo_reg.work_orders) == 29
+    assert reg.compute_stable_hash() == _CANONICAL_STABLE_HASH
+
+    # Idempotency: second execution must produce byte-identical output
+    temp_reg2 = tmp_path / "registry_second.json"
+    temp_wo2 = tmp_path / "work_orders_second.json"
+    build_and_save(temp_reg2, temp_wo2)
+    assert temp_reg2.read_bytes() == gen_reg
+    assert temp_wo2.read_bytes() == gen_wo
