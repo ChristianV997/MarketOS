@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import errno
 import hashlib
 import json
+import os
 import re
+import stat as stat_module
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -263,6 +266,69 @@ def _operator_supplier_confirmations(values: Sequence[Sequence[str]]) -> set[tup
     return confirmations
 
 
+def _open_verified_evidence_file(resolved: Path, *, label: str) -> tuple[int, os.stat_result]:
+    """Open ``resolved`` exactly once and validate the *same open file
+    descriptor* that will be hashed -- never a separate stat-by-path call
+    followed by a separate open-by-path call. That split is the actual
+    TOCTOU gap: two filesystem accesses to the same path string, with no
+    guarantee the second one still sees what the first one measured. This
+    function performs a single ``os.open()`` and derives every subsequent
+    check (regular-file status, size) from ``os.fstat()`` on that resulting
+    descriptor, so nothing between the check and the read can change what
+    was checked -- both operate on the same open kernel object, not on the
+    path.
+
+    On POSIX, ``os.O_NOFOLLOW`` is additionally included, which makes the
+    open itself atomically fail (``ELOOP``) if the final path component is
+    a symlink at the instant of the call -- closing the window between the
+    caller's earlier per-component symlink walk and this open. Windows
+    exposes no ``O_NOFOLLOW``-equivalent flag through ``os.open()`` (Python
+    does not define ``os.O_NOFOLLOW`` there at all), so that specific
+    final-component race is NOT closed on Windows by this function alone;
+    the caller's pre-open walk-based symlink/reparse-point check is the
+    only mitigation available there, and a swap landing exactly between
+    that check and this open is a disclosed, unfixed-by-stdlib residual
+    limitation on Windows only (see ``_supplier_document_evidence_bindings``
+    for the full disclosure). This is never silently claimed to be closed
+    on Windows.
+    """
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    nonblocking = hasattr(os, "O_NONBLOCK")
+    if nonblocking:
+        # A plain blocking open() on a FIFO with no writer on the other
+        # end hangs forever -- a real denial-of-service the moment a
+        # caller places a named pipe inside the evidence root (confirmed
+        # by direct reproduction). O_NONBLOCK makes the open return
+        # immediately instead; the descriptor is then confirmed to be a
+        # regular file (a FIFO fails that check and is rejected) and the
+        # flag is cleared again below before any read happens, since
+        # nonblocking mode has no defined effect on a genuine regular file.
+        flags |= os.O_NONBLOCK
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise ResearchToDecisionError(f"{label} must not be a symlink") from exc
+        raise ResearchToDecisionError(f"{label} could not be opened: {exc.strerror or exc}") from exc
+    try:
+        file_stat = os.fstat(fd)
+        if not stat_module.S_ISREG(file_stat.st_mode):
+            raise ResearchToDecisionError(f"{label} must be a regular file")
+        if nonblocking:
+            import fcntl
+
+            current_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, current_flags & ~os.O_NONBLOCK)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, file_stat
+
+
 def _supplier_document_evidence_bindings(
     values: Sequence[Sequence[str]],
     *,
@@ -280,6 +346,26 @@ def _supplier_document_evidence_bindings(
     both remain local, offline claims about evidence the operator supplied.
     Raw document content is read only to hash it and is never retained,
     logged, or included in any returned structure.
+
+    Secure-read guarantee: the file is opened exactly once
+    (``_open_verified_evidence_file``), and the regular-file check, size
+    cap, and hashed bytes all come from that single open descriptor --
+    there is no separate stat-then-open sequence against the path string
+    for the file itself. On POSIX this additionally uses ``O_NOFOLLOW``,
+    so a symlink swapped in for the final path component between the
+    walk-check below and the open fails the open itself rather than being
+    silently followed. This is NOT "race-free" in an unqualified sense:
+    (1) on Windows, no O_NOFOLLOW-equivalent exists via the standard
+    library, so a symlink/reparse-point swap landing exactly between the
+    walk-check and the open is not caught there -- disclosed, not fixed,
+    consistent with this tool's single-local-operator threat model, not a
+    concurrent-attacker network service; (2) the per-component walk-check
+    for *intermediate* directories (a symlinked parent) has its own,
+    structurally unavoidable race without ``openat``-style relative opens,
+    which Python's standard library does not portably expose -- also
+    disclosed, not fixed. What IS eliminated on every platform: the split
+    between "checked via the path" and "read via the path" for the final
+    file itself, which was the concrete, reproduced gap.
     """
     if not isinstance(values, (list, tuple)) or len(values) > MAX_RECORDS:
         raise ResearchToDecisionError("supplier document evidence bindings must be a bounded list")
@@ -325,11 +411,20 @@ def _supplier_document_evidence_bindings(
         resolved = _resolve(root, relative_path, label="document_evidence.reference")
         if resolved.suffix.lower() not in SUPPORTED_EVIDENCE_DOCUMENT_EXTENSIONS:
             raise ResearchToDecisionError(f"document_evidence.reference has an unsupported format: {resolved.suffix or 'none'}")
-        size = resolved.stat().st_size
-        if size > MAX_EVIDENCE_DOCUMENT_BYTES:
-            raise ResearchToDecisionError(f"document_evidence.reference exceeds {MAX_EVIDENCE_DOCUMENT_BYTES} bytes")
-        with resolved.open("rb") as evidence_file:
-            document_bytes = evidence_file.read(MAX_EVIDENCE_DOCUMENT_BYTES + 1)
+        # Open exactly once; every check below (regular-file, size, and the
+        # bytes that get hashed) comes from that same descriptor -- see
+        # _open_verified_evidence_file's docstring for the exact guarantee
+        # and its disclosed Windows/intermediate-symlink limitations.
+        fd, file_stat = _open_verified_evidence_file(resolved, label="document_evidence.reference")
+        try:
+            if file_stat.st_size > MAX_EVIDENCE_DOCUMENT_BYTES:
+                raise ResearchToDecisionError(f"document_evidence.reference exceeds {MAX_EVIDENCE_DOCUMENT_BYTES} bytes")
+            with os.fdopen(fd, "rb") as evidence_file:
+                fd = -1  # evidence_file now owns the descriptor; do not close it twice
+                document_bytes = evidence_file.read(MAX_EVIDENCE_DOCUMENT_BYTES + 1)
+        finally:
+            if fd >= 0:
+                os.close(fd)
         if len(document_bytes) > MAX_EVIDENCE_DOCUMENT_BYTES:
             raise ResearchToDecisionError(f"document_evidence.reference exceeds {MAX_EVIDENCE_DOCUMENT_BYTES} bytes")
         size = len(document_bytes)

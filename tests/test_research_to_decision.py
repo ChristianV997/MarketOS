@@ -4,11 +4,17 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
 
-from scripts.research_to_decision import ResearchToDecisionError, build_research_to_decision, main
+from scripts.research_to_decision import (
+    ResearchToDecisionError,
+    _open_verified_evidence_file,
+    build_research_to_decision,
+    main,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -973,3 +979,189 @@ def test_document_digest_confirmation_omitted_reproduces_prior_behavior_exactly(
         manifest, base_dir=tmp_path, supplier_evidence_root=None, confirmed_supplier_document_evidence=()
     )
     assert report_without_new_params == report_with_empty_new_params
+
+
+# ---------------------------------------------------------------------------
+# Secure-read boundary: _open_verified_evidence_file (TOCTOU closure).
+#
+# These exercise the open-once/fstat-based read directly, distinct from the
+# path-level tests above (path traversal, root escape, reference matching).
+# The security question here is narrower and more concrete: once a path has
+# already been deemed safe to resolve, does the code that turns it into
+# hashed bytes ever perform a *separate* filesystem check-then-read against
+# the path string (the actual TOCTOU gap), or does it validate and read the
+# same open object throughout? No test here relies on real timing/sleeps --
+# each one proves the property deterministically, either by exercising the
+# real filesystem object type directly or by simulating "the earlier check
+# didn't catch it" and confirming the open-time guarantee still holds.
+# ---------------------------------------------------------------------------
+
+
+def test_secure_open_accepts_a_valid_in_root_regular_file(tmp_path: Path) -> None:
+    doc = tmp_path / "doc.pdf"
+    doc.write_bytes(b"genuine evidence bytes")
+    fd, file_stat = _open_verified_evidence_file(doc, label="x")
+    try:
+        assert file_stat.st_size == len(b"genuine evidence bytes")
+        assert os.read(fd, 1024) == b"genuine evidence bytes"
+    finally:
+        os.close(fd)
+
+
+def test_secure_open_rejects_a_symlinked_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "target.pdf"
+    target.write_bytes(b"data")
+    link = tmp_path / "link.pdf"
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError):
+        pytest.skip("this platform/runner cannot create symlinks (no Developer Mode / privilege)")
+    with pytest.raises(ResearchToDecisionError, match="symlink"):
+        _open_verified_evidence_file(link, label="x")
+
+
+def test_secure_open_rejects_a_directory() -> None:
+    with pytest.raises(ResearchToDecisionError, match="regular file"):
+        _open_verified_evidence_file(Path(__file__).resolve().parent, label="x")
+
+
+def test_secure_open_rejects_a_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(ResearchToDecisionError):
+        _open_verified_evidence_file(tmp_path / "does-not-exist.pdf", label="x")
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only; os.mkfifo does not exist on this platform")
+def test_secure_open_rejects_a_named_pipe_without_hanging(tmp_path: Path) -> None:
+    """Non-regular-file rejection must never block: a plain blocking
+    open() on a FIFO with no writer on the other end hangs forever, which
+    would itself be a denial-of-service the moment a caller placed a named
+    pipe inside the evidence root. This test times out (via pytest-timeout
+    if installed, or simply hangs the run and is visible in CI) rather
+    than silently passing if that regression is reintroduced -- it does
+    not itself use a sleep/timing race, it proves the call returns at
+    all."""
+    fifo = tmp_path / "pipe"
+    os.mkfifo(fifo)
+    with pytest.raises(ResearchToDecisionError, match="regular file"):
+        _open_verified_evidence_file(fifo, label="x")
+
+
+def test_secure_open_rejects_symlink_even_when_the_pre_open_walk_check_is_bypassed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deterministic proof that the open-time guarantee does not depend on
+    the caller's earlier walk-based symlink check having run correctly --
+    it is a second, independent layer. Simulates "the walk-check already
+    missed this" (e.g. because the file was replaced by a symlink in the
+    window between that check and this open) by monkeypatching
+    Path.is_symlink to always report False, then proving
+    _open_verified_evidence_file itself still refuses to follow the
+    symlink, via O_NOFOLLOW at open time."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("O_NOFOLLOW is POSIX-only -- on Windows this specific race is a disclosed, unfixed-by-stdlib limitation")
+    target = tmp_path / "target.pdf"
+    target.write_bytes(b"data")
+    link = tmp_path / "link.pdf"
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError):
+        pytest.skip("this platform/runner cannot create symlinks (no Developer Mode / privilege)")
+    monkeypatch.setattr(Path, "is_symlink", lambda self: False)
+    with pytest.raises(ResearchToDecisionError, match="symlink"):
+        _open_verified_evidence_file(link, label="x")
+
+
+def test_secure_open_without_o_nonblock_or_o_nofollow_still_reads_a_genuine_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Simulates the Windows code path on this (POSIX) test runner: with
+    O_NOFOLLOW/O_NONBLOCK unavailable, a genuine in-root regular file must
+    still open and read correctly -- the platform-specific denial
+    behavior only removes a guarantee, it must never break the ordinary
+    valid-file path."""
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    monkeypatch.delattr(os, "O_NONBLOCK", raising=False)
+    doc = tmp_path / "doc.pdf"
+    doc.write_bytes(b"still readable without the posix-only flags")
+    fd, file_stat = _open_verified_evidence_file(doc, label="x")
+    try:
+        assert os.read(fd, 1024) == b"still readable without the posix-only flags"
+    finally:
+        os.close(fd)
+
+
+def test_secure_open_without_o_nofollow_relies_solely_on_the_pre_open_walk_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Confirms the disclosed Windows limitation is real and precisely
+    scoped: with O_NOFOLLOW simulated unavailable, _open_verified_evidence_file
+    alone (i.e. without the caller's pre-open walk-check) does NOT reject a
+    symlink -- proving the walk-check in _supplier_document_evidence_bindings
+    is load-bearing on that platform, not redundant, and that this
+    function never silently claims a guarantee it cannot provide there."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("already running on a platform without O_NOFOLLOW; nothing to simulate")
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    target = tmp_path / "target.pdf"
+    target.write_bytes(b"data")
+    link = tmp_path / "link.pdf"
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError):
+        pytest.skip("this platform/runner cannot create symlinks (no Developer Mode / privilege)")
+    fd, file_stat = _open_verified_evidence_file(link, label="x")
+    os.close(fd)  # reaching here at all is the point: no guarantee without O_NOFOLLOW
+
+
+def test_document_digest_binding_rejects_a_symlinked_parent_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A symlinked *intermediate directory* on the path to the evidence
+    file -- distinct from the file itself being a symlink -- must also be
+    rejected by the per-component walk-check, which walks every path part
+    including intermediate directories, not just the final component."""
+    evidence_root = tmp_path / "evidence"
+    real_dir = evidence_root / "real_subdir"
+    real_dir.mkdir(parents=True)
+    real_file = real_dir / "quote.pdf"
+    real_file.write_bytes(_SYNTHETIC_QUOTE_BYTES)
+    digest = hashlib.sha256(_SYNTHETIC_QUOTE_BYTES).hexdigest()
+    linked_dir = evidence_root / "linked_subdir"
+    try:
+        linked_dir.symlink_to(real_dir, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        is_symlink = Path.is_symlink
+        monkeypatch.setattr(Path, "is_symlink", lambda path: path == linked_dir or is_symlink(path))
+    offer = _base_hydroponics_quote()
+    offer.update({"offer_id": "HYD-DOC-05", "supplier_sku": "HYD-DOC-05-SKU", "source_reference": "manual:linked_subdir/quote.pdf"})
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hyd-doc-5")
+    with pytest.raises(ResearchToDecisionError, match="symlink"):
+        build_research_to_decision(
+            manifest,
+            base_dir=tmp_path,
+            supplier_evidence_root=evidence_root,
+            confirmed_supplier_document_evidence=[("HYD-DOC-05", "HYD-DOC-05-SKU", "manual:linked_subdir/quote.pdf", digest)],
+        )
+
+
+def test_document_digest_binding_rejects_reference_pointing_at_a_directory(tmp_path: Path) -> None:
+    """A reference resolving to a directory rather than a file must be
+    rejected, not silently mishandled. _resolve()'s own is_file() check is
+    the first line of defense (raising "does not exist" for a directory,
+    since is_file() is False for one) -- _open_verified_evidence_file's
+    S_ISREG check is the deeper, race-closing layer for the case where a
+    regular file is swapped for a directory/non-regular node *after*
+    _resolve() looked at it (see the _open_verified_evidence_file-level
+    tests above for that property proven directly, without _resolve() in
+    the way)."""
+    evidence_root = tmp_path / "evidence"
+    as_dir = evidence_root / "not_a_file.pdf"
+    as_dir.mkdir(parents=True)
+    offer = _base_hydroponics_quote()
+    offer.update({"offer_id": "HYD-DOC-06", "supplier_sku": "HYD-DOC-06-SKU", "source_reference": "manual:not_a_file.pdf"})
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hyd-doc-6")
+    with pytest.raises(ResearchToDecisionError, match="does not exist"):
+        build_research_to_decision(
+            manifest,
+            base_dir=tmp_path,
+            supplier_evidence_root=evidence_root,
+            confirmed_supplier_document_evidence=[("HYD-DOC-06", "HYD-DOC-06-SKU", "manual:not_a_file.pdf", "0" * 64)],
+        )
