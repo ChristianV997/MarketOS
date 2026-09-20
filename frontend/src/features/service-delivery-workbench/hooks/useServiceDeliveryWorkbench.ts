@@ -40,17 +40,30 @@ export function useServiceDeliveryWorkbench() {
   const [filters, setFilters] = useState<WorkbenchFilters>(EMPTY_FILTERS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const view = composeWorkbenchViewModel({
-    isLoading: probe.isLoading,
-    errorMessage: adapted.rejected
-      ? adapted.rejection_reason
-      : probe.isError
-        ? `Canonical ${FUTURE_WORKBENCH_PATH} unavailable (${probe.error instanceof Error ? probe.error.message : "error"}). This is not a fixture success state.`
-        : null,
-    projection,
-    filters,
-    selectedId,
-  });
+  const view = useMemo(
+    () =>
+      composeWorkbenchViewModel({
+        isLoading: probe.isLoading,
+        errorMessage: adapted.rejected
+          ? adapted.rejection_reason
+          : probe.isError
+            ? `Canonical ${FUTURE_WORKBENCH_PATH} unavailable (${probe.error instanceof Error ? probe.error.message : "error"}). This is not a fixture success state.`
+            : null,
+        projection,
+        filters,
+        selectedId,
+      }),
+    [
+      probe.isLoading,
+      probe.isError,
+      probe.error,
+      adapted.rejected,
+      adapted.rejection_reason,
+      projection,
+      filters,
+      selectedId,
+    ],
+  );
 
   return {
     projection,

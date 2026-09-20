@@ -56,7 +56,9 @@ export function composeWorkbenchViewModel(input: {
     };
   }
 
-  const filteredAll = filterEngagements(input.projection.engagements, input.filters);
+  const filteredAll = filterEngagements(input.projection.engagements, input.filters, {
+    maxResults: WORKBENCH_FILTER_WINDOW + 1,
+  });
   const bounded = filteredAll.length > WORKBENCH_FILTER_WINDOW;
   const filtered = bounded ? filteredAll.slice(0, WORKBENCH_FILTER_WINDOW) : filteredAll;
   const selected = filtered.find((item) => item.engagement_id === input.selectedId)

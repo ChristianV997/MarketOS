@@ -25,26 +25,33 @@ export const EMPTY_FILTERS: WorkbenchFilters = {
 export function filterEngagements(
   engagements: readonly ServiceEngagement[],
   filters: WorkbenchFilters,
+  options?: { maxResults?: number },
 ): ServiceEngagement[] {
   const query = filters.query.trim().toLowerCase();
-  return engagements.filter((item) => {
-    if (filters.serviceId !== "all" && item.service_id !== filters.serviceId) return false;
-    if (filters.lifecycle !== "all" && item.lifecycle_state !== filters.lifecycle) return false;
+  const maxResults = options?.maxResults;
+  const matched: ServiceEngagement[] = [];
+  for (const item of engagements) {
+    if (filters.serviceId !== "all" && item.service_id !== filters.serviceId) continue;
+    if (filters.lifecycle !== "all" && item.lifecycle_state !== filters.lifecycle) continue;
     if (
       filters.evidenceClass !== "all"
       && !item.evidence.some((entry) => entry.evidence_class === filters.evidenceClass)
     ) {
-      return false;
+      continue;
     }
-    if (!query) return true;
-    const haystack = [
-      item.engagement_id,
-      item.intake.display_name,
-      item.intake.client_id,
-      item.service_id,
-      item.lifecycle_state,
-      item.next_best_action.action,
-    ].join(" ").toLowerCase();
-    return haystack.includes(query);
-  });
+    if (query) {
+      const haystack = [
+        item.engagement_id,
+        item.intake.display_name,
+        item.intake.client_id,
+        item.service_id,
+        item.lifecycle_state,
+        item.next_best_action.action,
+      ].join(" ").toLowerCase();
+      if (!haystack.includes(query)) continue;
+    }
+    matched.push(item);
+    if (maxResults !== undefined && matched.length >= maxResults) break;
+  }
+  return matched;
 }

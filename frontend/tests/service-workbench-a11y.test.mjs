@@ -82,6 +82,14 @@ test("unserved GET JSON including HTTP error bodies is adapted, never demo-subst
   assert.doesNotMatch(hook, /buildDemoProjection/);
   assert.match(hook, /response.json\(\)\.catch/);
   assert.match(hook, /method: "GET"/);
+  assert.match(hook, /useMemo/);
+});
+
+test("compose filter stops after the display window plus one bounded marker", async () => {
+  const compose = await readFile(new URL("../src/features/service-delivery-workbench/lib/composeWorkbenchViewModel.ts", import.meta.url), "utf8");
+  const filter = await readFile(new URL("../src/features/service-delivery-workbench/lib/filterEngagements.ts", import.meta.url), "utf8");
+  assert.match(compose, /maxResults: WORKBENCH_FILTER_WINDOW \+ 1/);
+  assert.match(filter, /maxResults/);
 });
 
 test("JSON previews are bounded, wrapping, and keyboard-focusable regions", async () => {
