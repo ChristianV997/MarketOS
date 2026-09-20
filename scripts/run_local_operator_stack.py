@@ -17,7 +17,9 @@ Safety:
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
+import math
 import os
 import re
 import shutil
@@ -27,6 +29,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,6 +47,12 @@ DEFAULT_FRONTEND_PORT = 5173
 DEFAULT_STARTUP_TIMEOUT_S = 30.0
 DEFAULT_REQUEST_TIMEOUT_S = 2.0
 DEFAULT_LOG_CAP_BYTES = 8192
+MAX_STARTUP_TIMEOUT_S = 120.0
+MAX_REQUEST_TIMEOUT_S = 30.0
+MAX_HOLD_S = 300.0
+SAFE_PROCESS_ENV_KEYS = frozenset(
+    {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "COMSPEC", "PATHEXT"}
+)
 CLASSIFICATIONS = frozenset(
     {"passed", "partial", "unavailable", "blocked", "timeout", "failed", "not_run", "surface_absent"}
 )
@@ -89,6 +98,13 @@ SECRET_ENV_KEYS = (
 _SECRET_RE = re.compile(
     r"(?i)(api[_-]?key|access[_-]?token|authorization|password|secret|bearer\s+\S+|sk-(?:live|proj)-[A-Za-z0-9]+|ghp_[A-Za-z0-9]+)"
 )
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Keep loopback smoke probes from following redirects to remote hosts."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 class LocalOperatorStackError(Exception):
@@ -173,17 +189,55 @@ def cap_log(text: str, cap_bytes: int) -> str:
 
 
 def fixture_environ(base: Mapping[str, str] | None = None) -> dict[str, str]:
-    env = dict(os.environ if base is None else base)
-    for key in SECRET_ENV_KEYS:
-        env.pop(key, None)
+    source = os.environ if base is None else base
+    env = {
+        key: value
+        for key, value in source.items()
+        if key.upper() in SAFE_PROCESS_ENV_KEYS and key.upper() not in SECRET_ENV_KEYS
+    }
     env["MARKETOS_MVP_MODE"] = "1"
     env["MARKETOS_PUBLIC_COMMERCE_RUNS"] = "0"
     env["ORCHESTRATOR_HANDLES_CYCLES"] = "true"
-    env["ALLOWED_ORIGINS"] = env.get("ALLOWED_ORIGINS") or "http://127.0.0.1:5173"
-    env["CYCLES_PER_MINUTE"] = env.get("CYCLES_PER_MINUTE") or "1"
+    env["ALLOWED_ORIGINS"] = "http://127.0.0.1:5173"
+    env["CYCLES_PER_MINUTE"] = "1"
     env["MARKETOS_ALLOW_LIVE"] = "0"
     env["MARKETOS_LIVE_PROVIDERS"] = "0"
     return env
+
+
+def _is_loopback_host(host: str) -> bool:
+    if not isinstance(host, str):
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host.casefold() == "localhost"
+
+
+def validate_stack_config(config: StackConfig) -> list[str]:
+    """Reject non-local binds and unbounded ports, timeouts, or log caps."""
+    errors: list[str] = []
+    for field_name, host in (("api", config.api_host), ("frontend", config.frontend_host)):
+        if not _is_loopback_host(host):
+            errors.append(f"{field_name}_host_not_loopback")
+    for field_name, port in (("api", config.api_port), ("frontend", config.frontend_port)):
+        if type(port) is not int or not 1 <= port <= 65535:
+            errors.append(f"{field_name}_port_out_of_range")
+    for field_name, value, maximum in (
+        ("startup_timeout", config.startup_timeout_s, MAX_STARTUP_TIMEOUT_S),
+        ("request_timeout", config.request_timeout_s, MAX_REQUEST_TIMEOUT_S),
+    ):
+        if type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= maximum:
+            errors.append(f"{field_name}_out_of_range")
+    if (
+        type(config.hold_s) not in (int, float)
+        or not math.isfinite(config.hold_s)
+        or not 0 <= config.hold_s <= MAX_HOLD_S
+    ):
+        errors.append("hold_s_out_of_range")
+    if type(config.log_cap_bytes) is not int or not 256 <= config.log_cap_bytes <= 65536:
+        errors.append("log_cap_bytes_out_of_range")
+    return errors
 
 
 def backend_argv(config: StackConfig) -> list[str]:
@@ -225,6 +279,11 @@ class ManagedProcess:
 
     def start(self, *, cwd: Path, env: Mapping[str, str]) -> None:
         try:
+            process_options: dict[str, Any] = {}
+            if os.name == "nt":
+                process_options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            else:
+                process_options["start_new_session"] = True
             self.proc = subprocess.Popen(
                 self.argv,
                 cwd=str(cwd),
@@ -234,7 +293,7 @@ class ManagedProcess:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                start_new_session=True,
+                **process_options,
             )
         except FileNotFoundError as exc:
             raise LocalOperatorStackError(f"{self.name}_executable_not_found:{exc}") from exc
@@ -251,20 +310,45 @@ class ManagedProcess:
             return "not_started"
         if self.proc.poll() is not None:
             return "already_exited"
-        try:
-            os.killpg(self.proc.pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError, OSError):
+        if os.name == "nt":
             try:
-                self.proc.terminate()
-            except OSError:
-                pass
+                self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+            except (AttributeError, OSError, ValueError):
+                try:
+                    self.proc.terminate()
+                except OSError:
+                    pass
+        else:
+            try:
+                os.killpg(self.proc.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                try:
+                    self.proc.terminate()
+                except OSError:
+                    pass
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline and self.proc.poll() is None:
             time.sleep(0.05)
         if self.proc.poll() is None:
-            try:
-                os.killpg(self.proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
+            if os.name == "nt":
+                taskkill = shutil.which("taskkill")
+                if taskkill:
+                    try:
+                        subprocess.run(
+                            [taskkill, "/PID", str(self.proc.pid), "/T", "/F"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            check=False,
+                            timeout=2.0,
+                        )
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+            else:
+                try:
+                    os.killpg(self.proc.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError, OSError):
+                    pass
+            if self.proc.poll() is None:
                 try:
                     self.proc.kill()
                 except OSError:
@@ -273,7 +357,7 @@ class ManagedProcess:
                 self.proc.wait(timeout=1.0)
             except subprocess.TimeoutExpired:
                 pass
-            return "killed"
+            return "killed" if self.proc.poll() is not None else "cleanup_failed"
         return "terminated"
 
     def drain_log(self) -> str:
@@ -287,9 +371,38 @@ class ManagedProcess:
 
 
 def http_get(url: str, timeout_s: float) -> dict[str, Any]:
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        parsed.port
+    except ValueError:
+        parsed = None
+    if (
+        parsed is None
+        or parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or not _is_loopback_host(parsed.hostname)
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or type(timeout_s) not in (int, float)
+        or not math.isfinite(timeout_s)
+        or not 0 < timeout_s <= MAX_REQUEST_TIMEOUT_S
+    ):
+        return {
+            "url": "<redacted>" if parsed is not None and (parsed.username or parsed.password) else None,
+            "http_status": None,
+            "classification": classify("blocked"),
+            "bytes": 0,
+            "reason": "unsafe_or_unbounded_http_probe",
+        }
     request = urllib.request.Request(url, method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            _NoRedirectHandler(),
+        )
+        with opener.open(request, timeout=timeout_s) as response:
             body = response.read(2048)
             return {
                 "url": url,
@@ -302,6 +415,8 @@ def http_get(url: str, timeout_s: float) -> dict[str, Any]:
         if status == 404:
             kind = "surface_absent"
         elif 400 <= status < 500:
+            kind = "failed"
+        elif 300 <= status < 400:
             kind = "failed"
         else:
             kind = "unavailable"
@@ -334,6 +449,7 @@ def preflight(config: StackConfig) -> dict[str, Any]:
         "frontend": port_bind_conflict(config.frontend_host, config.frontend_port),
     }
     return {
+        "configuration_valid": True,
         "python": python_ok,
         "uvicorn_importable": uvicorn_spec,
         "npm": bool(npm),
@@ -430,7 +546,16 @@ def run_rehearsal(
 ) -> dict[str, Any]:
     factory = process_factory or default_factory
     env = fixture_environ(environ)
-    checks = preflight(config)
+    config_errors = validate_stack_config(config)
+    checks = (
+        preflight(config)
+        if not config_errors
+        else {
+            "configuration_valid": False,
+            "configuration_errors": config_errors,
+            "occupied_ports": {"api": False, "frontend": False},
+        }
+    )
     planned = {
         "backend": backend_argv_override or backend_argv(config),
         "frontend": frontend_argv_override or frontend_argv(config),
@@ -442,6 +567,10 @@ def run_rehearsal(
         "read_only": True,
         "mutated": False,
         "network_calls": False,
+        # network_calls remains the external-network contract; only loopback HTTP is permitted.
+        "external_network_calls": False,
+        "network_scope": "loopback_only",
+        "loopback_http_checks": False,
         "live_providers": False,
         "ports": {
             "api": {"host": config.api_host, "port": config.api_port},
@@ -464,6 +593,11 @@ def run_rehearsal(
             "note": "Do not duplicate Cursor UI tests; open these routes after --hold.",
         },
     }
+
+    if config_errors:
+        report["classification"] = classify("blocked")
+        report["reason"] = "invalid_stack_config:" + ",".join(config_errors)
+        return report
 
     if checks["occupied_ports"]["api"] and config.start_backend:
         report["classification"] = classify("blocked")
@@ -518,6 +652,7 @@ def run_rehearsal(
                 startup_error = "frontend_startup_timeout" if code is None else f"frontend_exited:{code}"
 
         report["surfaces"] = smoke_surfaces(config, backend_up=backend_up, frontend_up=frontend_up)
+        report["loopback_http_checks"] = backend_up or frontend_up
         if startup_error == "backend_startup_timeout" or startup_error == "frontend_startup_timeout":
             report["classification"] = classify("timeout")
             report["reason"] = startup_error
@@ -540,9 +675,12 @@ def run_rehearsal(
         logs: dict[str, str] = {}
         for item in managed:
             cleanup[item.name] = item.terminate()
-            logs[item.name] = item.drain_log()
+            logs[item.name] = "" if cleanup[item.name] == "cleanup_failed" else item.drain_log()
         report["cleanup"] = cleanup
         report["logs"] = logs
+        if any(status == "cleanup_failed" for status in cleanup.values()):
+            report["classification"] = classify("failed")
+            report["reason"] = "process_cleanup_failed"
     return report
 
 

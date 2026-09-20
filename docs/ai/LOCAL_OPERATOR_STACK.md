@@ -28,8 +28,12 @@ everything down, prints one JSON report.
 Hold the stack for a Cursor browser pass:
 
 ```bash
-python scripts/run_local_operator_stack.py --json --hold 600
+python scripts/run_local_operator_stack.py --json --hold 60
 ```
+
+`--hold` is capped at 300 seconds; larger values are rejected before any
+process is started. Bind addresses are restricted to `localhost` or loopback
+IP addresses, and startup/request timeouts are bounded.
 
 Plan only (no processes):
 
@@ -76,9 +80,13 @@ http://127.0.0.1:5173/operator/events
 ## Safety
 
 - Fixture env: `MARKETOS_MVP_MODE=1`, `MARKETOS_PUBLIC_COMMERCE_RUNS=0`, live flags off.
-- Known credential env keys are stripped before spawn.
+- Child processes receive a small OS-runtime environment allowlist, not a copy
+  of the operator environment. Fixture origins and cycle limits are fixed.
+- External network calls are disabled. HTTP smoke checks are loopback-only,
+  bypass proxies, and do not follow redirects.
 - Logs are regex-redacted and capped at 8 KiB.
-- Process groups receive SIGTERM then SIGKILL on every exit path.
+- Child process groups are stopped on every exit path; Windows uses a control
+  event followed by bounded process-tree termination when necessary.
 - No writes to `artifacts/`, `.env`, credentials, or tracked fixtures.
 - Missing uvicorn/npm/package.json reports `unavailable`.
 
