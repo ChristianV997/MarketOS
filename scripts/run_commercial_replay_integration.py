@@ -8,7 +8,9 @@ or import evaluation.perf.commerce_engine as a production path.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
+import inspect
 import json
 import platform
 import subprocess
@@ -89,18 +91,88 @@ def _canonical_fingerprint(value: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _supplier_evidence_class(offer: dict[str, Any] | None) -> str:
+    if offer is None:
+        return "unavailable"
+    evidence = offer.get("evidence")
+    if not isinstance(evidence, dict):
+        return "unavailable"
+    state = evidence.get("state")
+    if state == "fixture":
+        return "fixture"
+    if state == "manual":
+        return "manual_import"
+    if state == "derived":
+        return "derived"
+    return "unavailable"
+
+
+def _compliance_evaluation(destination_country: Any) -> dict[str, Any]:
+    """Ask the existing TrustOS overlay; unknown product facts stay blocked."""
+    countries = {
+        "mexico": "mexico",
+        "mx": "mexico",
+        "united states": "united_states",
+        "united_states": "united_states",
+        "usa": "united_states",
+        "canada": "canada",
+    }
+    market = countries.get(str(destination_country).strip().casefold(), "unknown")
+    try:
+        from evaluation.trustos.mexico_product_compliance import (
+            MexicoProductCompliancePacket,
+            evaluate_mexico_product_compliance,
+        )
+
+        decision = evaluate_mexico_product_compliance(
+            MexicoProductCompliancePacket(
+                market=market,
+                product_family="unknown_family",
+                sku_model_exact="",
+            )
+        )
+        gate_satisfaction = decision.promotion_gate_satisfaction()
+        satisfied = gate_satisfaction.get("compliance") is True
+        blockers = sorted(set(decision.blockers))
+        if not satisfied and not blockers:
+            blockers = ["compliance_evidence_required"]
+        return {
+            "status": "satisfied" if satisfied else "needs_evidence",
+            "gate_satisfaction": {"compliance": satisfied},
+            "blockers": blockers,
+            "evidence_classification": "derived" if satisfied else "unavailable",
+            "live_lookup_performed": False,
+        }
+    except Exception:  # noqa: BLE001 - missing/broken authority fails closed
+        return {
+            "status": "unavailable",
+            "gate_satisfaction": {"compliance": False},
+            "blockers": ["compliance_evaluator_unavailable"],
+            "evidence_classification": "unavailable",
+            "live_lookup_performed": False,
+        }
+
+
 def _scenario_evidence_classes(
     offer: dict[str, Any] | None,
     *,
     missing_cost_inputs: tuple[str, ...] = (),
+    research_evidence_state: str = "fixture",
+    compliance_evidence_class: str = "unavailable",
 ) -> dict[str, str]:
     """Classify each evidence boundary without changing existing status fields."""
+    research_state_class = {
+        "fixture": "fixture",
+        "manual": "manual_import",
+        "derived": "derived",
+    }.get(research_evidence_state, "unavailable")
     return {
         "runner": "actual_executed",
-        "research_input": "fixture",
-        "supplier_evidence": "manual_import" if offer is not None else "unavailable",
+        "research_input": research_state_class,
+        "supplier_evidence": _supplier_evidence_class(offer),
         "economics": "unavailable" if missing_cost_inputs else "derived",
         "economics_calculation": "actual_executed",
+        "compliance": compliance_evidence_class,
         "commerce_lifecycle": "simulated_or_planned",
         "fulfillment_lifecycle": "simulated_or_planned",
         "governor": "simulated_or_planned",
@@ -243,10 +315,14 @@ def _approval_ledger_cli_projection(report: Any) -> dict[str, Any]:
 
 
 def _research_evidence(report: dict[str, Any], offer: dict[str, Any], lane: dict[str, Any]):
-    from backend.economics.kernel import EvidenceRef
+    from backend.economics.kernel import EVIDENCE_STATES, EvidenceRef
 
     evidence = offer["evidence"]
     confidence = evidence.get("confidence")
+    source_state = evidence.get("state")
+    kernel_state = "assumed" if source_state == "manual" else source_state
+    if kernel_state not in EVIDENCE_STATES:
+        kernel_state = "unknown"
     return EvidenceRef(
         evidence["reference_id"],
         source_type=evidence["source"],
@@ -255,7 +331,7 @@ def _research_evidence(report: dict[str, Any], offer: dict[str, Any], lane: dict
         captured_at=evidence["captured_at"],
         valid_until=evidence.get("expires_at") or "",
         extraction_method=evidence["extraction_method"],
-        evidence_state=evidence["state"],
+        evidence_state=kernel_state,
         confidence=None if confidence in (None, "unknown") else Decimal(str(confidence)),
         warnings=tuple(evidence.get("warnings", ())),
     )
@@ -287,6 +363,9 @@ def _replay_scenario(
     builder_name: str,
     workspace_id: str,
     registry_path: str,
+    research_manifest: dict[str, Any] | None = None,
+    manifest_base_dir: Path | None = None,
+    operator_confirmations: tuple[tuple[str, str, str], ...] = (),
 ) -> dict[str, Any]:
     from backend.contracts.events import Event
     from backend.economics.kernel import EvidenceRef, Money
@@ -314,7 +393,7 @@ def _replay_scenario(
     )
     from evaluation.companyos.approval_ledger import build_approval_ledger, simulate_action
     from evaluation.trustos.client_workspace_isolation import export_client_evidence
-    from scripts.research_to_decision import build_research_to_decision
+    from scripts.research_to_decision import build_research_to_decision, load_manifest
 
     builders: dict[str, Callable[[], Any]] = {
         "commodity_electronics_rejected_candidate": commodity_electronics_rejected_candidate,
@@ -324,8 +403,22 @@ def _replay_scenario(
         "solar_4g_security_blocked_candidate": solar_4g_security_blocked_candidate,
     }
     fixture_dir = ROOT / "tests" / "fixtures" / "research_to_decision"
-    manifest = json.loads((fixture_dir / fixture_name).read_text(encoding="utf-8"))
-    research = build_research_to_decision(manifest, base_dir=fixture_dir)
+    if research_manifest is None:
+        manifest, manifest_base_dir = load_manifest(fixture_dir / fixture_name)
+    else:
+        manifest = research_manifest
+    builder_parameters = inspect.signature(build_research_to_decision).parameters
+    operator_contract_available = "operator_confirmed_supplier_documents" in builder_parameters
+    if research_manifest is not None and not operator_contract_available:
+        raise RuntimeError("operator attestation contract unavailable")
+    research_kwargs: dict[str, Any] = {}
+    if operator_contract_available:
+        research_kwargs["operator_confirmed_supplier_documents"] = operator_confirmations
+    research = build_research_to_decision(
+        manifest,
+        base_dir=manifest_base_dir or fixture_dir,
+        **research_kwargs,
+    )
     candidate_id = manifest["candidates"][0]["candidate_id"]
     audit = next(item for item in research["appendix"]["candidate_audit"] if item["candidate_id"] == candidate_id)
     offer = next(
@@ -337,6 +430,8 @@ def _replay_scenario(
         ),
         None,
     )
+    if _supplier_evidence_class(offer) == "unavailable":
+        offer = None
     if offer is not None:
         evidence = _research_evidence(research, offer, research["appendix"]["market_lane"])
     else:
@@ -350,13 +445,26 @@ def _replay_scenario(
             evidence_state="missing",
         )
     lane = _research_lane(research["appendix"]["market_lane"], evidence)
+    supplier_evidence_state = (
+        offer.get("evidence", {}).get("state")
+        if offer is not None and offer.get("evidence", {}).get("state") in {"fixture", "manual", "derived"}
+        else "missing"
+    )
+    compliance = _compliance_evaluation(
+        research["appendix"]["market_lane"].get("destination_country")
+    )
     template = builders[builder_name]()
     price_value = manifest["candidates"][0].get("target_sell_price") or (offer["price"]["amount"] if offer else "0")
     product_cost_value = offer["price"]["amount"] if offer else "0"
     shipping_value = offer["shipping"]["cost"] if offer else None
     missing_cost_inputs = _missing_supplier_cost_inputs(offer, shipping_value)
-    money_evidence_state = "fixture" if offer is not None else "missing"
-    money_source = "fixture" if offer is not None else "missing"
+    money_evidence_state = "assumed" if supplier_evidence_state == "manual" else supplier_evidence_state
+    money_source = {
+        "fixture": "fixture",
+        "manual": "manual",
+        "derived": "derived",
+        "missing": "missing",
+    }[supplier_evidence_state]
     product_cost_missing = "product_cost" in missing_cost_inputs
     product_cost = Money(
         str("0" if product_cost_missing else product_cost_value), lane.currency,
@@ -366,7 +474,7 @@ def _replay_scenario(
         evidence_state="missing" if product_cost_missing else money_evidence_state,
     )
     price = Money(
-        str(price_value), lane.currency, source="fixture", provenance="fixture",
+        str(price_value), lane.currency, source=money_source, provenance=money_source,
         evidence_ref=evidence, evidence_state=money_evidence_state,
     )
     assumptions = replace(
@@ -396,6 +504,7 @@ def _replay_scenario(
     gate_satisfaction = dict(template.gate_satisfaction)
     if missing_cost_inputs:
         gate_satisfaction["economics"] = False
+    gate_satisfaction.update(compliance["gate_satisfaction"])
     scenario = replace(
         template,
         candidate_id=candidate_id,
@@ -405,7 +514,7 @@ def _replay_scenario(
         lane=lane,
         assumptions=assumptions,
         supplier_offer=supplier_offer,
-        evidence_state=research["appendix"]["market_lane"]["evidence_state"],
+        evidence_state=supplier_evidence_state,
         gate_satisfaction=gate_satisfaction,
     )
     commerce = run_dry_run_lifecycle(scenario)
@@ -472,12 +581,28 @@ def _replay_scenario(
             workspace_type="client_service",
         )
     )
-    blockers = sorted(set(audit["hard_gates"]) | set(commerce.promotion.blockers) | set(fulfillment_report.blockers))
-    evidence_required = sorted(set(audit["missing_evidence"]) | {"human_review_before_external_action"})
+    blockers = sorted(
+        set(audit["hard_gates"])
+        | set(commerce.promotion.blockers)
+        | set(fulfillment_report.blockers)
+        | set(compliance["blockers"])
+    )
+    evidence_required = sorted(
+        set(audit["missing_evidence"])
+        | set(compliance["blockers"])
+        | {"human_review_before_external_action"}
+    )
+    supplier_class = _supplier_evidence_class(offer)
+    provenance_scheme = {
+        "fixture": "fixture",
+        "manual_import": "manual",
+        "derived": "derived",
+        "unavailable": "offline",
+    }[supplier_class]
     export = export_client_evidence(
         workspace=workspace,
         registry=registry,
-        provenance=f"fixture://commercial-replay/{commerce.scenario_id}",
+        provenance=f"{provenance_scheme}://commercial-replay/{commerce.scenario_id}",
         # TrustOS uses its own bounded export status vocabulary; the source
         # fixture state remains explicit in the surrounding result.
         evidence_state="requires_review",
@@ -494,8 +619,13 @@ def _replay_scenario(
     result = {
         "scenario": commerce.scenario_id,
         "candidate_id": candidate_id,
+        "supplier_evidence_state": supplier_evidence_state,
+        "compliance": compliance,
         "evidence_classes": _scenario_evidence_classes(
-            offer, missing_cost_inputs=missing_cost_inputs
+            offer,
+            missing_cost_inputs=missing_cost_inputs,
+            research_evidence_state=research["appendix"]["market_lane"].get("evidence_state", "unknown"),
+            compliance_evidence_class=compliance["evidence_classification"],
         ),
         "supplier_offer": {
             "offer_id": offer["offer_id"],
@@ -507,6 +637,10 @@ def _replay_scenario(
             "market_lane": research["appendix"]["market_lane"],
             "freshness": audit["freshness"],
             "promotion_state": audit["promotion_lifecycle"][-1]["next_state"],
+            "supplier_documented": any(
+                item["next_state"] == "supplier_documented"
+                for item in audit["promotion_lifecycle"]
+            ),
             "blockers": list(audit["hard_gates"]),
         },
         "commerce": _commerce_cli_projection(commerce),
@@ -536,7 +670,7 @@ def _replay_scenario(
         "provider_calls": False,
         "credentials_used": False,
         "database_writes": False,
-        "evidence_classification": "fixture",
+        "evidence_classification": supplier_class,
     }
     if summary["sequence_issues"] or summary["live_authority_violations"]:
         raise RuntimeError("canonical replay event validation failed")
@@ -554,7 +688,109 @@ def run_consolidated_scenario(fixture_name: str, builder_name: str) -> dict[str,
         )
 
 
-def run_scenarios() -> dict[str, Any]:
+def run_operator_scenario(
+    manifest_path: str | Path,
+    *,
+    candidate_id: str,
+    scenario_template: str,
+    operator_confirmations: tuple[tuple[str, str, str], ...] = (),
+) -> dict[str, Any]:
+    """Run one bounded operator manifest through the existing replay path.
+
+    The manifest and exact local attestations are normalized only by the
+    existing research-to-decision authority. The selected scenario template
+    is explicit; candidate titles/categories are never used for routing.
+    """
+    try:
+        from scripts.research_to_decision import (
+            build_research_to_decision,
+            load_manifest,
+        )
+
+        if "operator_confirmed_supplier_documents" not in inspect.signature(
+            build_research_to_decision
+        ).parameters:
+            return {
+                "result": "unavailable",
+                "evidence_classification": "unavailable",
+                "reason": "supplier_attestation_contract_unavailable",
+            }
+        manifest, base_dir = load_manifest(manifest_path)
+        candidates = manifest.get("candidates")
+        if (
+            not isinstance(candidates, list)
+            or len(candidates) != 1
+            or not isinstance(candidates[0], dict)
+            or candidates[0].get("candidate_id") != candidate_id
+        ):
+            return {
+                "result": "unavailable",
+                "evidence_classification": "unavailable",
+                "reason": "operator_candidate_rejected",
+            }
+        from evaluation.commerce.dry_run_scenarios import SCENARIO_BUILDERS
+
+        if not any(builder.__name__ == scenario_template for builder in SCENARIO_BUILDERS):
+            return {
+                "result": "unavailable",
+                "evidence_classification": "unavailable",
+                "reason": "operator_template_rejected",
+            }
+        replay_rows = []
+        for _ in range(2):
+            with tempfile.TemporaryDirectory(prefix="marketos-commercial-replay-") as temporary_dir:
+                replay_rows.append(
+                    _replay_scenario(
+                        fixture_name="",
+                        builder_name=scenario_template,
+                        workspace_id="workspace_commercial_replay_operator",
+                        registry_path=str(Path(temporary_dir) / "workspaces.json"),
+                        research_manifest=copy.deepcopy(manifest),
+                        manifest_base_dir=base_dir,
+                        operator_confirmations=operator_confirmations,
+                    )
+                )
+        first_bytes = json.dumps(
+            replay_rows[0], sort_keys=True, separators=(",", ":"), default=str
+        ).encode("utf-8")
+        second_bytes = json.dumps(
+            replay_rows[1], sort_keys=True, separators=(",", ":"), default=str
+        ).encode("utf-8")
+        row = {**replay_rows[0], "replay_equal": first_bytes == second_bytes}
+        return {
+            "result": "actual",
+            "evidence_classification": row["evidence_classes"]["supplier_evidence"],
+            "evidence_class_vocabulary": list(EVIDENCE_CLASS_VOCABULARY),
+            "rows": [row],
+        }
+    except Exception:  # noqa: BLE001 - never reflect paths or imported values
+        return {
+            "result": "unavailable",
+            "evidence_classification": "unavailable",
+            "reason": "operator_manifest_rejected",
+        }
+
+
+def run_scenarios(
+    *,
+    manifest_path: str | Path | None = None,
+    candidate_id: str | None = None,
+    scenario_template: str | None = None,
+    operator_confirmations: tuple[tuple[str, str, str], ...] = (),
+) -> dict[str, Any]:
+    if manifest_path is not None or candidate_id is not None or scenario_template is not None or operator_confirmations:
+        if manifest_path is None or not candidate_id or not scenario_template:
+            return {
+                "result": "unavailable",
+                "evidence_classification": "unavailable",
+                "reason": "operator_manifest_rejected",
+            }
+        return run_operator_scenario(
+            manifest_path,
+            candidate_id=candidate_id,
+            scenario_template=scenario_template,
+            operator_confirmations=operator_confirmations,
+        )
     try:
         from evaluation.commerce.dry_run_scenarios import SCENARIO_BUILDERS
     except Exception as exc:  # noqa: BLE001
@@ -656,6 +892,16 @@ def isolated_perf_note() -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--candidate-id")
+    parser.add_argument("--scenario-template", choices=tuple(dict.fromkeys(name for _, name in _REPLAY_INPUTS)))
+    parser.add_argument(
+        "--confirm-supplier-document",
+        action="append",
+        nargs=3,
+        default=[],
+        metavar=("OFFER_ID", "EXACT_SKU", "REFERENCE"),
+    )
     args = parser.parse_args()
     report = {
         "schema": "commercial-replay-performance-integration-v2",
@@ -669,7 +915,12 @@ def main() -> int:
             "platform": platform.platform(),
             "windows_operator_packet": "unavailable",
         },
-        "scenarios": run_scenarios(),
+        "scenarios": run_scenarios(
+            manifest_path=args.manifest,
+            candidate_id=args.candidate_id,
+            scenario_template=args.scenario_template,
+            operator_confirmations=tuple(tuple(item) for item in args.confirm_supplier_document),
+        ),
         "service_clients": run_service_clients(),
         "isolated_perf_harness_255": isolated_perf_note(),
         "ci": "ci_unavailable",

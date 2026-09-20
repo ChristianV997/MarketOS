@@ -24,7 +24,9 @@ store module.
 from __future__ import annotations
 
 import json
+import csv
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -52,6 +54,7 @@ from evaluation.trustos.client_workspace_isolation import check_workspace_leakag
 from scripts.run_commercial_replay_integration import (
     EVIDENCE_CLASS_VOCABULARY,
     run_consolidated_scenario,
+    run_operator_scenario,
     run_scenarios,
 )
 
@@ -386,7 +389,7 @@ def test_consolidated_replay_carries_research_through_mexico_fulfillment_and_saf
     assert result["research"]["market_lane"]["currency"] == "MXN"
     assert result["evidence_classes"]["runner"] == "actual_executed"
     assert result["evidence_classes"]["research_input"] == "fixture"
-    assert result["evidence_classes"]["supplier_evidence"] in {"manual_import", "unavailable"}
+    assert result["evidence_classes"]["supplier_evidence"] in {"fixture", "manual_import", "unavailable"}
     assert result["evidence_classes"]["economics"] == (
         "derived" if result["supplier_offer"] is not None else "unavailable"
     )
@@ -573,7 +576,7 @@ def test_missing_supplier_shipping_is_unavailable_but_explicit_zero_is_preserved
     assert economics_step["status"] == "unavailable"
     assert "supplier_shipping" in economics_step["detail"]["missing_inputs"]
     assert "contribution_margin" not in economics_step["detail"]
-    assert result["evidence_classes"]["supplier_evidence"] == "manual_import"
+    assert result["evidence_classes"]["supplier_evidence"] == "fixture"
     assert result["evidence_classes"]["economics"] == "unavailable"
     assert "economics" in result["commerce"]["promotion"]["blockers"]
     assert "unknown_cost:supplier_shipping" in result["fulfillment"]["reserve_classifications"]
@@ -773,6 +776,195 @@ def test_dogfood_summary_exposes_the_canonical_evidence_vocabulary():
     assert len(summary["rows"]) == 5
     assert all(row["evidence_classes"]["runner"] == "actual_executed" for row in summary["rows"])
     assert all(row["evidence_classes"]["ci"] == "ci_unavailable" for row in summary["rows"])
+
+
+def test_fixture_supplier_offer_stays_fixture_in_replay_summary_and_export():
+    result = run_consolidated_scenario(
+        "hydroponics_promising.json", "hydroponics_positive_candidate"
+    )
+
+    assert result["supplier_evidence_state"] == "fixture"
+    assert result["evidence_classes"]["supplier_evidence"] == "fixture"
+    assert result["client_export"]["evidence_state"] == "requires_review"
+    assert result["client_export"]["provenance"].startswith("fixture://")
+
+
+def test_unknown_compliance_blocks_promotion_in_event_and_trustos_export(monkeypatch):
+    from backend.events.repository import InMemoryEventRepository
+
+    captured_events = []
+    append_many = InMemoryEventRepository.append_many
+
+    def capture_events(repository, events):
+        rows = tuple(events)
+        captured_events.extend(rows)
+        return append_many(repository, rows)
+
+    monkeypatch.setattr(InMemoryEventRepository, "append_many", capture_events)
+    result = run_consolidated_scenario(
+        "hydroponics_promising.json", "hydroponics_positive_candidate"
+    )
+
+    compliance_gate = next(
+        gate for gate in result["commerce"]["promotion"]["gates"]
+        if gate["gate_id"] == "compliance"
+    )
+    completion = next(
+        event for event in captured_events
+        if event.event_type == "commerce_dry_run_completed"
+    )
+    assert compliance_gate["satisfied"] is False
+    assert result["compliance"]["gate_satisfaction"]["compliance"] is False
+    assert "compliance" in result["commerce"]["promotion"]["blockers"]
+    assert any("compliance" in blocker for blocker in completion.payload["blockers"])
+    assert result["client_export"]["evidence_state"] == "requires_review"
+    assert any(
+        "compliance" in blocker
+        for blocker in result["client_export"]["payload"]["blockers"]
+    )
+
+
+def test_operator_manifest_preserves_exact_local_attestation_without_live_promotion(tmp_path):
+    candidate_id = "synthetic-dogfood-candidate"
+    offer_id = "SYN-Q-01"
+    exact_sku = "SYN-Q-01-SKU"
+    reference = "manual:synthetic-quote.pdf"
+    manifest = json.loads(
+        (Path(__file__).resolve().parents[1] / "fixtures" / "research_to_decision" / "hydroponics_promising.json")
+        .read_text(encoding="utf-8")
+    )
+    manifest["candidates"] = [{"candidate_id": candidate_id, "target_sell_price": "500"}]
+    manifest["supplier_inputs"] = [{"path": "manual.csv"}]
+    manifest["marketplace_inputs"] = []
+    manifest["consumer_attention_inputs"] = []
+    manifest["observation_inputs"] = []
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    offer = {
+        "candidate_id": candidate_id,
+        "supplier": "synthetic supplier",
+        "source_type": "manual_operator_input",
+        "offer_id": offer_id,
+        "supplier_sku": exact_sku,
+        "variant": "synthetic standard",
+        "currency": "MXN",
+        "destination_region": "Mexico",
+        "unit_cost": "32.50",
+        "shipping_cost": "9.00",
+        "shipping_method": "synthetic quoted delivery",
+        "stock_status": "available in synthetic fixture",
+        "warehouse_region": "Mexico",
+        "delivery_min_days": "8",
+        "delivery_max_days": "13",
+        "tracking_available": "yes",
+        "blind_shipping": "yes",
+        "packaging": "plain synthetic packaging",
+        "return_address": "synthetic Mexico return point",
+        "return_cost_payer": "supplier",
+        "warranty": "12 months synthetic terms",
+        "rma_process": "synthetic email RMA process",
+        "refund_sla_days": "30",
+        "support_owner": "synthetic supplier support",
+        "support_response_sla_hours": "48",
+        "dropshipping_permission": "manually transcribed permission",
+        "marketplace_permission": "review required",
+        "sample_state": "not ordered",
+        "contract_evidence": "synthetic manually transcribed quote",
+        "policy_evidence": "synthetic manually transcribed policy",
+        "backup_supplier": "unknown",
+        "approval_state": "quote_verified",
+        "confidence": "0.75",
+        "source_reference": reference,
+        "human_confirmed": True,
+        "evidence_state": "observed",
+        "extraction_method": "manual_fixture_transcription",
+    }
+    with (tmp_path / "manual.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(offer))
+        writer.writeheader()
+        writer.writerow(offer)
+
+    unconfirmed = run_operator_scenario(
+        manifest_path,
+        candidate_id=candidate_id,
+        scenario_template="hydroponics_positive_candidate",
+    )
+    if unconfirmed["result"] == "unavailable":
+        assert unconfirmed["reason"] == "supplier_attestation_contract_unavailable"
+        return
+
+    assert unconfirmed["result"] == "actual"
+    unconfirmed_row = unconfirmed["rows"][0]
+    assert unconfirmed_row["evidence_classes"]["supplier_evidence"] == "manual_import"
+    assert unconfirmed_row["supplier_evidence_state"] == "manual"
+    assert unconfirmed_row["research"]["supplier_documented"] is False
+
+    confirmation = ((offer_id, exact_sku, reference),)
+    confirmed = run_operator_scenario(
+        manifest_path,
+        candidate_id=candidate_id,
+        scenario_template="hydroponics_positive_candidate",
+        operator_confirmations=confirmation,
+    )
+    replay = confirmed["rows"][0]
+    again = run_operator_scenario(
+        manifest_path,
+        candidate_id=candidate_id,
+        scenario_template="hydroponics_positive_candidate",
+        operator_confirmations=confirmation,
+    )["rows"][0]
+
+    assert replay["research"]["supplier_documented"] is True
+    assert replay["evidence_classes"]["supplier_evidence"] == "manual_import"
+    assert replay["supplier_evidence_state"] == "manual"
+    assert replay["commerce"]["commerce_packet"]["economics"]["product_cost"]["evidence_state"] == "assumed"
+    assert replay["commerce"]["commerce_packet"]["economics"]["product_cost"]["source"] == "manual"
+    assert replay["commerce"]["promoted_to_launch"] is False
+    assert replay["launch_authorized"] is False
+    assert replay["client_export"]["evidence_state"] == "requires_review"
+    assert replay["client_export"]["provenance"].startswith("manual://")
+    assert replay["replay_hash"] == again["replay_hash"]
+    assert replay["event_replay_hashes"] == again["event_replay_hashes"]
+    assert replay["second_append_idempotent_count"] == replay["event_count"]
+    assert replay["replay_equal"] is True
+    encoded = json.dumps(confirmed, sort_keys=True)
+    assert str(manifest_path) not in encoded
+    assert offer_id not in json.dumps(replay["client_export"]["payload"], sort_keys=True)
+
+    # Exercise the real operator bridge as well as the runner directly. On a
+    # standalone #279 checkout the bridge may predate these optional inputs;
+    # the full composite worktree must execute this positive end-to-end path.
+    try:
+        from scripts import run_operator_dogfood_workflow as operator_bridge
+    except ImportError:
+        return
+    import inspect
+
+    if "manifest_path" not in inspect.signature(operator_bridge.commercial_dry_run).parameters:
+        return
+    bridge_phase = operator_bridge.commercial_dry_run(
+        Path(__file__).resolve().parents[2],
+        manifest_path=manifest_path,
+        candidate_id=candidate_id,
+        scenario_template="hydroponics_positive_candidate",
+        operator_confirmations=confirmation,
+    )
+    assert bridge_phase["classification"] == "passed"
+    bridge_row = bridge_phase["detail"]["rows"][0]
+    assert bridge_row["supplier_evidence_class"] == "manual_import"
+    assert bridge_row["compliance_gate_satisfied"] is False
+    export_phase = operator_bridge.trustos_export([bridge_row])
+    assert export_phase["classification"] == "passed"
+    exported = export_phase["detail"]["exports"][0]
+    assert exported["provenance"] == "manual://operator-confirmation"
+    assert exported["supplier_evidence_class"] == "manual_import"
+    assert exported["evidence_state"] == "requires_review"
+    assert exported["compliance_gate_satisfied"] is False
+    assert "compliance" in " ".join(exported["payload"]["blockers"])
+    export_json = json.dumps(exported["payload"], sort_keys=True)
+    assert offer_id not in export_json
+    assert exact_sku not in export_json
+    assert str(manifest_path) not in export_json
 
 
 @pytest.mark.parametrize("fixture_name,builder_name,required_blocker", _REQUIRED_EVIDENCE_BLOCKERS)
