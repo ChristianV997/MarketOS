@@ -95,12 +95,36 @@ def test_canonical_registry_and_work_orders_are_complete_and_one_to_one():
     )
 
 
-def test_registry_points_crawl4ai_at_existing_adapter():
+def test_unverified_crawl4ai_pin_stays_deferred():
     registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
     rec = registry.get_record("src-crawl4ai")
     assert rec is not None
     assert rec.marketos_target_authority == "backend.adapters.research.crawl4ai"
-    assert rec.adaptation_mode == AdaptationMode.INTEGRATE.value
+    assert rec.adaptation_mode == AdaptationMode.DEFER.value
+    assert rec.integration_status == "deferred"
+
+
+def test_unverified_crawl4ai_pin_cannot_be_activated():
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    rec = registry.get_record("src-crawl4ai")
+    assert rec is not None
+    tampered = rec.to_dict()
+    tampered["adaptation_mode"] = AdaptationMode.INTEGRATE.value
+    tampered["integration_status"] = "accepted"
+    errors = validate_source_record(tampered)
+    assert any("unverified_source_pin_not_eligible_for_adoption" in error for error in errors)
+
+    work_orders = WorkOrderRegistry.load_from_file(_WORK_ORDERS_PATH)
+    work_order = work_orders.get_work_order("wo-crawl4ai")
+    assert work_order is not None
+    assert any("immutable upstream commit and version tag" in change for change in work_order.required_changes)
+    tampered_work_order = work_order.to_dict()
+    tampered_work_order["adaptation_mode"] = AdaptationMode.INTEGRATE.value
+    work_order_errors = validate_work_order(tampered_work_order)
+    assert any(
+        "unverified_source_pin_not_eligible_for_adoption" in error
+        for error in work_order_errors
+    )
 
 
 def test_stale_scouting_crawl4ai_authority_is_rejected():
@@ -193,11 +217,11 @@ def test_verified_license_evidence_urls_are_immutable():
 # Tracked-byte lock: GitHub Contents API / PR-body hashes previously claimed
 # 55,544 and 61,094 bytes. The actual git blobs on this branch are smaller.
 # Pin the working-tree SHA-256 so a truncated rewrite cannot pass JSON-parse-only tests.
-_CANONICAL_REGISTRY_BYTES = 54393
-_CANONICAL_REGISTRY_SHA256 = "af801a6fe28676c26f6199cf08b8c7b53032ca588e8865a1f6bc96367ee6714a"
-_CANONICAL_WORK_ORDERS_BYTES = 59536
-_CANONICAL_WORK_ORDERS_SHA256 = "14374a79338cce19f114dd6b2c9b5a3ef2276783da48768eb4d67a08bf301d19"
-_CANONICAL_STABLE_HASH = "2be9683dec56e233f7feb6188e069438f8a11a9830db902f45c75b08e4e03793"
+_CANONICAL_REGISTRY_BYTES = 54423
+_CANONICAL_REGISTRY_SHA256 = "447757bba178226e759e89f0e0803b9cc8ba1d6003c9e08439ffbf845c311bbc"
+_CANONICAL_WORK_ORDERS_BYTES = 59693
+_CANONICAL_WORK_ORDERS_SHA256 = "e12e9cc190ed457e70c1aa5e41e14ea2c782a29ec48d72e1ebaa3fb4898831dc"
+_CANONICAL_STABLE_HASH = "882bb2ee9d604d6ee5af05cb2125ad68a2b1fea56a3f23630150869c56e2e727"
 
 _REQUIRED_VALIDATOR_SYMBOLS = frozenset({
     "validate_registry",
@@ -379,6 +403,7 @@ def test_unresolved_ref_cannot_usurp_canonical_authority():
         "evaluation.companyos.approval_ledger",
     ):
         tampered = dict(crawl4ai_rec)
+        tampered["adaptation_mode"] = AdaptationMode.INTEGRATE.value
         tampered["marketos_target_authority"] = protected_auth
         errs = validate_source_record(tampered)
         assert any("duplicate_authority_rejected" in e for e in errs), (
@@ -483,9 +508,10 @@ def test_work_order_simultaneous_mode_and_license_discrepancy():
         f"Expected license mismatch, got: {errs}"
     )
 
-    # index 3 == wo-crawl4ai (integrate mode) — tamper to restrictive license
+    # index 3 == wo-crawl4ai (deferred mode); simulate activation plus a restrictive license.
     crawl4ai_dict = known[3].to_dict()
-    assert crawl4ai_dict["adaptation_mode"] == "integrate"
+    assert crawl4ai_dict["adaptation_mode"] == "defer"
+    crawl4ai_dict["adaptation_mode"] = "integrate"
     crawl4ai_dict["license"] = "AGPL-3.0"
     wo_errs = validate_work_order(crawl4ai_dict)
     assert any("incompatible_license_in_work_order" in e for e in wo_errs), (

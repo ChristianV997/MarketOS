@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any, Dict, List, Optional, Set
 
-from .consolidation_rules import extra_record_errors
+from .consolidation_rules import extra_record_errors, unverified_source_pin_errors
 from .registry import (
     AdaptationMode,
     AdaptationWorkOrder,
@@ -311,6 +311,7 @@ def validate_work_order(
         errors.append(f"missing_commit_sha_in_work_order in {wid}")
     elif not _HEX_40_RE.match(wo.commit_sha.strip()):
         errors.append(f"malformed_commit_sha_in_work_order in {wid}: Must be 40-character hex SHA")
+    errors.extend(unverified_source_pin_errors(wo.source_id, wo.commit_sha, wo.adaptation_mode))
     if not wo.inspected_paths or len(wo.inspected_paths) == 0:
         errors.append(f"missing_inspected_paths_in_work_order in {wid}")
     elif any(p.startswith("..") or p.startswith("/") or "\\" in p for p in wo.inspected_paths):

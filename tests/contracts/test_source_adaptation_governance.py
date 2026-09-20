@@ -107,9 +107,8 @@ def test_canonical_registry_loads_and_passes_validation():
     assert summary["total_sources"] == len(registry.records)
     assert "copy_pattern" in summary["modes"]
     assert "emulate" in summary["modes"]
-    assert "integrate" in summary["modes"]
-    assert "reject" in summary["modes"]
     assert "defer" in summary["modes"]
+    assert "reject" in summary["modes"]
     assert "reference_only" in summary["modes"]
 
 
@@ -123,7 +122,7 @@ def test_stable_hash_is_deterministic_and_bit_identical():
 
     assert len(hash1) == 64
     assert hash1 == hash2
-    assert hash1 == "2be9683dec56e233f7feb6188e069438f8a11a9830db902f45c75b08e4e03793"
+    assert hash1 == "882bb2ee9d604d6ee5af05cb2125ad68a2b1fea56a3f23630150869c56e2e727"
 
 
 

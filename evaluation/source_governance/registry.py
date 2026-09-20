@@ -588,7 +588,12 @@ def generate_work_order_from_source_record(
         req_changes.append(f"Enforce negative regression test blocking {record.source_id}")
         proh_changes.append(f"do_not_vendor_{record.source_id}")
     elif record.adaptation_mode == AdaptationMode.DEFER.value:
-        req_changes.append(f"Maintain deferred status until required infrastructure is approved")
+        if record.source_id == "src-crawl4ai":
+            req_changes.append(
+                "Verify the immutable upstream commit and version tag against authoritative sources before enabling an active mode"
+            )
+        else:
+            req_changes.append("Maintain deferred status until required infrastructure is approved")
 
     # Review state determination
     if record.adaptation_mode in (AdaptationMode.COPY_PATTERN.value, AdaptationMode.EMULATE.value):

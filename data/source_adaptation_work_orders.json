@@ -185,12 +185,14 @@
       "telemetry_mode": "disabled",
       "data_persistence": "none"
     },
-    "adaptation_mode": "integrate",
+    "adaptation_mode": "defer",
     "marketos_target_module": "backend/adapters/research/crawl4ai.py",
     "marketos_target_symbol": "Crawl4AIResearchAdapter",
     "target_boundary_authority": "backend.adapters.research.crawl4ai",
     "duplicate_authority_result": "passed_no_duplicate",
-    "required_changes": [],
+    "required_changes": [
+      "Verify the immutable upstream commit and version tag against authoritative sources before enabling an active mode"
+    ],
     "prohibited_changes": [
       "do_not_enable_live_credentials",
       "do_not_introduce_desktop_control_ipc",
@@ -202,12 +204,12 @@
       "git diff --check"
     ],
     "expected_artifacts": [],
-    "rollback_deactivation_strategy": "Delete backend/adapters/research/crawl4ai.py; fall back to static HTML parser.",
+    "rollback_deactivation_strategy": "Keep the existing adapter unchanged; do not expand or re-approve it until the upstream pin and tag are verified.",
     "attribution_notice": "Preserve Apache-2.0 copyright notices in THIRD_PARTY_NOTICES.md.",
     "source_freshness_days": 0,
     "review_state": "deferred",
     "evidence_classification": "none",
-    "work_order_hash": "042f019979489056e734b6f1ecf6e0ae5f3dcab846e43d6c30458a5dba183ad6"
+    "work_order_hash": "6c3fe9dcbe4d935a513de1097e6c54f3c2c4736d2d05a63a44920e2ac1680da1"
   },
   {
     "work_order_id": "wo-dagster",

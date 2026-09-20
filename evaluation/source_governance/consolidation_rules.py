@@ -17,6 +17,18 @@ SYNTHETIC_COMMIT_SHAS = frozenset({
     "1a8b9c0d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b",
     "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
 })
+UNVERIFIED_INTEGRATION_PINS = frozenset({
+    ("src-crawl4ai", "b04ed9f3a941a96509272f3bc14be85f5767736a"),
+})
+
+
+def unverified_source_pin_errors(source_id: str, sha: str, mode: str) -> list[str]:
+    if (source_id, sha) in UNVERIFIED_INTEGRATION_PINS and mode in {"integrate", "copy_pattern", "emulate"}:
+        return [
+            f"unverified_source_pin_not_eligible_for_adoption in {source_id}: "
+            "verify the immutable upstream revision before enabling an active mode"
+        ]
+    return []
 
 
 def extra_record_errors(record: Mapping[str, Any]) -> list[str]:
@@ -25,6 +37,7 @@ def extra_record_errors(record: Mapping[str, Any]) -> list[str]:
     mode = str(record.get("adaptation_mode", ""))
     sha = str(record.get("commit_sha") or record.get("revision") or "")
     errors: list[str] = []
+    errors.extend(unverified_source_pin_errors(sid, sha, mode))
     if target in STALE_TARGET_AUTHORITIES:
         errors.append(
             f"stale_target_authority in {sid}: '{target}' relocated to {STALE_TARGET_AUTHORITIES[target]}"
