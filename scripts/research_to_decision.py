@@ -328,7 +328,12 @@ def _supplier_document_evidence_bindings(
         size = resolved.stat().st_size
         if size > MAX_EVIDENCE_DOCUMENT_BYTES:
             raise ResearchToDecisionError(f"document_evidence.reference exceeds {MAX_EVIDENCE_DOCUMENT_BYTES} bytes")
-        actual_digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        with resolved.open("rb") as evidence_file:
+            document_bytes = evidence_file.read(MAX_EVIDENCE_DOCUMENT_BYTES + 1)
+        if len(document_bytes) > MAX_EVIDENCE_DOCUMENT_BYTES:
+            raise ResearchToDecisionError(f"document_evidence.reference exceeds {MAX_EVIDENCE_DOCUMENT_BYTES} bytes")
+        size = len(document_bytes)
+        actual_digest = hashlib.sha256(document_bytes).hexdigest()
         if actual_digest != expected_digest:
             raise ResearchToDecisionError(f"document_evidence.reference content digest mismatch for offer {offer_id}/{exact_sku}")
         bindings[key] = {"reference": reference, "document_digest": actual_digest, "document_size_bytes": size}

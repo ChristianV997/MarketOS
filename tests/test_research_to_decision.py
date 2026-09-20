@@ -760,7 +760,18 @@ def test_document_digest_binding_rejects_path_traversal(tmp_path: Path) -> None:
         )
 
 
-def test_document_digest_binding_rejects_symlink_escaping_the_root(tmp_path: Path) -> None:
+def _create_symlink_or_simulate(monkeypatch: pytest.MonkeyPatch, link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError):
+        # Windows runners without Developer Mode or symlink privilege cannot
+        # create a link. Simulate the filesystem's symlink observation so the
+        # production rejection path is still executed rather than skipped.
+        is_symlink = Path.is_symlink
+        monkeypatch.setattr(Path, "is_symlink", lambda path: path == link or is_symlink(path))
+
+
+def test_document_digest_binding_rejects_symlink_escaping_the_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A symlink inside the evidence root pointing outside it must never
     resolve -- caught by the same root-containment check the manifest path
     resolver already uses."""
@@ -769,7 +780,7 @@ def test_document_digest_binding_rejects_symlink_escaping_the_root(tmp_path: Pat
     outside = tmp_path / "outside.pdf"
     outside.write_bytes(_SYNTHETIC_QUOTE_BYTES)
     link = evidence_root / "link.pdf"
-    link.symlink_to(outside)
+    _create_symlink_or_simulate(monkeypatch, link, outside)
     digest = hashlib.sha256(_SYNTHETIC_QUOTE_BYTES).hexdigest()
     offer = _base_hydroponics_quote()
     offer.update({"offer_id": "HYD-DOC-04", "supplier_sku": "HYD-DOC-04-SKU", "source_reference": "manual:link.pdf"})
@@ -783,7 +794,7 @@ def test_document_digest_binding_rejects_symlink_escaping_the_root(tmp_path: Pat
         )
 
 
-def test_document_digest_binding_rejects_symlink_within_the_root(tmp_path: Path) -> None:
+def test_document_digest_binding_rejects_symlink_within_the_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A symlink that stays inside the evidence root (so the root-
     containment check alone would not catch it) must still be rejected --
     a symlink is never treated as the evidence file itself."""
@@ -791,7 +802,7 @@ def test_document_digest_binding_rejects_symlink_within_the_root(tmp_path: Path)
     evidence_root.mkdir()
     real_file, digest = _write_evidence_document(evidence_root, "real.pdf")
     link = evidence_root / "link.pdf"
-    link.symlink_to(real_file)
+    _create_symlink_or_simulate(monkeypatch, link, real_file)
     offer = _base_hydroponics_quote()
     offer.update({"offer_id": "HYD-DOC-04B", "supplier_sku": "HYD-DOC-04B-SKU", "source_reference": "manual:link.pdf"})
     manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hyd-doc-4b")
