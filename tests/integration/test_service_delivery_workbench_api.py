@@ -44,8 +44,10 @@ def _make_row(package_id: str, target_state: str, client_id: str, *, currency: s
     path_to_state = {
         "intake": (),
         "data_inadequate": ("screening", "data_inadequate"),
+        "eligible": ("screening", "eligible"),
         "draft_ready": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready"),
         "client_review": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review"),
+        "approved": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "approved"),
         "delivered": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "approved", "delivered"),
         "cancelled": ("cancelled",),
         "rejected": ("screening", "rejected"),
@@ -123,15 +125,23 @@ def test_workbench_rejects_internal_fields(monkeypatch, tmp_path):
     assert "internal_prompt" not in str(report)
 
 
-def test_workbench_route_is_registered():
-    from backend.api import app
-    paths = set()
-    for route in app.routes:
-        if getattr(route, "path", None):
-            paths.add(route.path)
-        original = getattr(route, "original_router", None)
-        paths.update(item.path for item in getattr(original, "routes", ()) if getattr(item, "path", None))
-    assert "/api/service-delivery/workbench" in paths
+def test_workbench_route_is_registered(monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.delenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", raising=False)
+    api_source = Path(__file__).resolve().parents[2] / "backend" / "api.py"
+    text = api_source.read_text(encoding="utf-8")
+    assert "api.routes.service_delivery_workbench" in text
+    assert "include_router(_service_delivery_workbench_router)" in text
+    app = FastAPI()
+    app.include_router(module.router)
+    client = TestClient(app)
+    response = client.get("/api/service-delivery/workbench")
+    assert response.status_code == 200
+    assert response.json()["live_endpoint"] == "/api/service-delivery/workbench"
+    assert response.json()["live_endpoint_status"] == "unavailable"
+    denied = client.post("/api/service-delivery/workbench")
+    assert denied.status_code == 405
 
 
 @pytest.mark.skipif(not _HAS_PRODUCER, reason="evaluation.companyos.service_delivery_projection not available on this branch")
@@ -148,6 +158,11 @@ def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, t
         _make_row("managed-acquisition-cro", "draft_ready", "client-mxn", currency="MXN", registry_path=reg_path),
         _make_row("product-validation-sprint", "intake", "client-intake", currency="USD", registry_path=reg_path),
         _make_row("launch-draft-pack", "cancelled", "client-cancelled", currency="USD", registry_path=reg_path),
+        _make_row("product-validation-sprint", "eligible", "client-eligible", currency="USD", registry_path=reg_path),
+        _make_row("launch-draft-pack", "client_review", "client-review", currency="CAD", registry_path=reg_path),
+        _make_row("managed-acquisition-cro", "approved", "client-approved", currency="MXN", registry_path=reg_path),
+        _make_row("unit-economics-cac-roas-diagnostic", "delivered", "client-delivered", currency="USD", registry_path=reg_path),
+        _make_row("product-validation-sprint", "rejected", "client-rejected", currency="USD", registry_path=reg_path),
     ]
     real_projection = build_service_engagement_projection(
         rows,
@@ -164,7 +179,7 @@ def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, t
     assert direct_report["read_only"] is True
     assert direct_report["network_calls"] is False
     assert direct_report["mutated"] is False
-    assert len(direct_report["engagements"]) == 6
+    assert len(direct_report["engagements"]) == 11
 
     # Test via FastAPI TestClient
     app = FastAPI()
@@ -174,7 +189,7 @@ def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, t
     assert response.status_code == 200
     http_payload = response.json()
     assert http_payload["live_endpoint_status"] == "available_read_only"
-    assert len(http_payload["engagements"]) == 6
+    assert len(http_payload["engagements"]) == 11
 
     # Verify server ordering
     assert [e["engagement_id"] for e in http_payload["engagements"]] == [r["engagement_id"] for r in rows]
@@ -284,3 +299,220 @@ def test_workbench_rejects_deeply_nested_leakage_inside_engagements(monkeypatch,
     assert report["live_endpoint_status"] == "unavailable"
     assert "service_delivery_projection_failed_workspace_isolation" in report["diagnostics"]
     assert "sk-live" not in str(report)
+
+
+def _write_projection(monkeypatch, tmp_path, payload: dict, name: str = "projection.json"):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir(exist_ok=True)
+    path = artifacts / name
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
+    monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
+    return path
+
+
+def _display_economics(currency: str | None, *, contribution: bool):
+    fee = None if currency is None else {
+        "amount_label": "100",
+        "currency": currency,
+        "evidence_class": "assumption",
+        "source": "backend_service_economics",
+        "display_only": True,
+    }
+    contrib = None
+    if contribution and currency is not None:
+        contrib = {
+            "amount_label": "40",
+            "currency": currency,
+            "evidence_class": "assumption",
+            "source": "backend_service_economics",
+            "display_only": True,
+        }
+    return {
+        "authority": "backend_service_economics",
+        "frontend_calculates": False,
+        "fee": fee,
+        "contribution": contrib,
+        "contribution_unavailable_reason": None if contrib else "No sanitized contribution copy was supplied.",
+        "planning_assumption_note": "Display copies only.",
+    }
+
+
+def _handcrafted_row(
+    engagement_id: str,
+    lifecycle: str,
+    *,
+    currency: str | None = "USD",
+    contribution: bool = True,
+    stale: bool = False,
+    client_id: str = "client-a",
+):
+    return {
+        "engagement_id": engagement_id,
+        "client_id": client_id,
+        "workspace_id": f"ws-{client_id}",
+        "service_id": "product-validation-sprint",
+        "lifecycle_state": lifecycle,
+        "economics": _display_economics(currency, contribution=contribution),
+        "financial_readiness": {"ready": contribution, "missing": [], "note": "Display copies only."},
+        "stale": stale,
+        "next_best_action": {
+            "action": "Review",
+            "owner": "operator",
+            "executes_live_action": False,
+            "rationale": "Read-only.",
+        },
+    }
+
+
+def _safe_envelope(rows: list, *, availability: str = "manual_import", version: str = "service-delivery-plane-v1"):
+    return {
+        "schema_version": version,
+        "report_version": version,
+        "availability": availability,
+        "generated_at": "deterministic",
+        "read_only": True,
+        "network_calls": False,
+        "mutated": False,
+        "engagements": rows,
+        "diagnostics": [],
+    }
+
+
+@pytest.mark.parametrize("lifecycle", [
+    "intake", "data_inadequate", "eligible", "draft_ready", "client_review",
+    "approved", "delivered", "cancelled", "rejected",
+])
+def test_workbench_serves_supported_lifecycle_states_without_recalculating(monkeypatch, tmp_path, lifecycle):
+    contribution = lifecycle not in {"intake", "data_inadequate", "cancelled", "rejected"}
+    row = _handcrafted_row(f"eng-{lifecycle}", lifecycle, contribution=contribution, stale=(lifecycle == "intake"))
+    _write_projection(monkeypatch, tmp_path, _safe_envelope([row], availability="partial" if lifecycle == "intake" else "manual_import"))
+    app = FastAPI()
+    app.include_router(module.router)
+    payload = TestClient(app).get("/api/service-delivery/workbench").json()
+    assert payload["live_endpoint_status"] == "available_read_only"
+    served = payload["engagements"][0]
+    assert served["lifecycle_state"] == lifecycle
+    assert served["economics"]["frontend_calculates"] is False
+    if contribution:
+        assert served["economics"]["contribution"]["amount_label"] == "40"
+    else:
+        assert served["economics"]["contribution"] is None
+    if lifecycle == "intake":
+        assert served["stale"] is True
+        assert payload["availability"] == "partial"
+
+
+@pytest.mark.parametrize("currency", ["USD", "CAD", "MXN"])
+def test_workbench_preserves_currency_labels_without_conversion(monkeypatch, tmp_path, currency):
+    row = _handcrafted_row(f"eng-{currency}", "draft_ready", currency=currency)
+    _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
+    app = FastAPI()
+    app.include_router(module.router)
+    served = TestClient(app).get("/api/service-delivery/workbench").json()["engagements"][0]
+    assert served["economics"]["fee"]["currency"] == currency
+    assert served["economics"]["contribution"]["currency"] == currency
+
+
+def test_workbench_keeps_missing_contribution_missing(monkeypatch, tmp_path):
+    row = _handcrafted_row("eng-missing", "draft_ready", contribution=False)
+    _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
+    app = FastAPI()
+    app.include_router(module.router)
+    served = TestClient(app).get("/api/service-delivery/workbench").json()["engagements"][0]
+    assert served["economics"]["fee"]["currency"] == "USD"
+    assert served["economics"]["contribution"] is None
+    assert served["economics"]["frontend_calculates"] is False
+
+
+def test_workbench_rejects_currency_mismatch_in_display_economics(monkeypatch, tmp_path):
+    row = _handcrafted_row("eng-mix", "draft_ready", currency="USD")
+    row["economics"]["contribution"]["currency"] = "CAD"
+    _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
+    report = module.workbench()
+    assert report["live_endpoint_status"] == "unavailable"
+    assert "service_delivery_projection_currency_mismatch" in report["diagnostics"]
+    assert report["engagements"] == []
+
+
+def test_workbench_rejects_duplicate_engagement_ids(monkeypatch, tmp_path):
+    rows = [
+        _handcrafted_row("eng-dup", "eligible", client_id="client-a"),
+        _handcrafted_row("eng-dup", "approved", client_id="client-b"),
+    ]
+    _write_projection(monkeypatch, tmp_path, _safe_envelope(rows))
+    report = module.workbench()
+    assert report["live_endpoint_status"] == "unavailable"
+    assert "service_delivery_projection_duplicate_engagement_id" in report["diagnostics"]
+
+
+def test_workbench_rejects_missing_engagement_id(monkeypatch, tmp_path):
+    row = _handcrafted_row("eng-ok", "eligible")
+    row.pop("engagement_id")
+    _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
+    report = module.workbench()
+    assert report["live_endpoint_status"] == "unavailable"
+    assert "service_delivery_projection_row_missing_engagement_id" in report["diagnostics"]
+
+
+def test_workbench_rejects_non_object_row(monkeypatch, tmp_path):
+    _write_projection(monkeypatch, tmp_path, _safe_envelope(["not-an-object"]))
+    report = module.workbench()
+    assert report["live_endpoint_status"] == "unavailable"
+    assert "service_delivery_projection_row_must_be_object" in report["diagnostics"]
+
+
+def test_workbench_rejects_oversized_byte_payload(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    path = artifacts / "huge.json"
+    path.write_bytes(b"{" + (b"a" * (module.MAX_PROJECTION_BYTES + 1)))
+    monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
+    monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
+    report = module.workbench()
+    assert report["live_endpoint_status"] == "unavailable"
+    assert "service_delivery_projection_oversized" in report["diagnostics"]
+
+
+def test_workbench_rejects_more_than_max_engagements(monkeypatch, tmp_path):
+    rows = [
+        _handcrafted_row(f"eng-{index}", "eligible", client_id=f"client-{index}")
+        for index in range(module.MAX_ENGAGEMENTS + 1)
+    ]
+    _write_projection(monkeypatch, tmp_path, _safe_envelope(rows))
+    report = module.workbench()
+    assert report["live_endpoint_status"] == "unavailable"
+    assert "service_delivery_projection_oversized" in report["diagnostics"]
+
+
+def test_workbench_rejects_cross_client_marker_fields(monkeypatch, tmp_path):
+    row = _handcrafted_row("eng-cross", "eligible")
+    row["cross_client_reference"] = "other-client-id"
+    _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
+    report = module.workbench()
+    assert report["live_endpoint_status"] == "unavailable"
+    assert "service_delivery_projection_failed_workspace_isolation" in report["diagnostics"]
+    assert "other-client-id" not in str(report)
+
+
+def test_workbench_source_order_is_preserved_across_clients(monkeypatch, tmp_path):
+    rows = [
+        _handcrafted_row("eng-z", "delivered", client_id="client-z"),
+        _handcrafted_row("eng-a", "intake", contribution=False, client_id="client-a"),
+        _handcrafted_row("eng-m", "client_review", currency="MXN", client_id="client-m"),
+    ]
+    _write_projection(monkeypatch, tmp_path, _safe_envelope(rows))
+    app = FastAPI()
+    app.include_router(module.router)
+    payload = TestClient(app).get("/api/service-delivery/workbench").json()
+    assert [item["engagement_id"] for item in payload["engagements"]] == ["eng-z", "eng-a", "eng-m"]
+    assert payload["engagements"][2]["economics"]["fee"]["currency"] == "MXN"
+
+
+def test_workbench_does_not_claim_live_validation(monkeypatch, tmp_path):
+    _write_projection(monkeypatch, tmp_path, _safe_envelope([]))
+    payload = module.workbench()
+    assert payload["live_endpoint_status"] == "available_read_only"
+    assert payload["network_calls"] is False
+    assert payload["mutated"] is False
+    assert payload.get("availability") != "live_validated"
