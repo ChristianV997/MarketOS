@@ -6,19 +6,25 @@ Validates:
 3. 7-dimensional sensitivity matrix executes cleanly across all 7 dimensions.
 4. Scaling profiler returns valid timings and positive throughput.
 5. Statistical comparison with separated warm-up produces 0 hash drift, p50/p95/variance, and scenario metrics.
-6. Canonical replay integration verifies all 13 safety invariants when available and conforms to schema.
-7. Fail-closed rejection of adversarial authority payloads.
+6. Canonical replay integration does not certify #279 invariants when the CLI is unmerged.
+7. Fail-closed rejection of adversarial authority payloads and lab negative controls.
+8. Commerce lifecycle is 17 events; 37 is #279 CLI concat only.
 """
 from __future__ import annotations
 
 from decimal import Decimal
 
 from scripts.benchmarks.benchmark_commercial_replay_lab import (
+    CLI_CONCAT_EVENT_COUNT,
+    COMMERCE_LIFECYCLE_EVENT_COUNT,
     EXPECTED_STAGES,
     ScenarioReplayLaboratory,
     SensitivityMatrixLaboratory,
     ScalingAndProfilerLaboratory,
     StatisticalComparisonLaboratory,
+    aggregate_replay_hash,
+    classify_event_scope,
+    field_hash_negative_control,
 )
 
 
@@ -30,17 +36,45 @@ def test_scenario_replay_laboratory_all_five_scenarios():
         assert rec.replay_equal is True
         assert rec.first_replay_hash == rec.second_replay_hash
         assert rec.first_replay_hash != ""
-        assert rec.event_count == 17
+        assert rec.event_count == COMMERCE_LIFECYCLE_EVENT_COUNT
+        assert rec.event_scope == "commerce_lifecycle"
         assert rec.achievable_stage == EXPECTED_STAGES[rec.scenario_id]
         assert rec.live_authority_violations == ()
         assert rec.live_actions_taken is False
         assert rec.sequence_issues == ()
         assert rec.wall_ms > 0
         assert rec.output_bytes > 0
+        assert len(rec.hash_sequence) == COMMERCE_LIFECYCLE_EVENT_COUNT
+        assert rec.aggregate_replay_hash == aggregate_replay_hash(list(rec.hash_sequence))
+        assert len(rec.event_ids) == COMMERCE_LIFECYCLE_EVENT_COUNT
+        assert rec.event_ids[0].endswith(":started")
+        assert rec.event_ids[-1].endswith(":completed")
+        assert rec.evidence_classification in {"observed", "fixture", "assumed", "unknown"}
+        assert rec.evidence_classification != "live_readonly"
 
     cert = ScenarioReplayLaboratory.verify_scenario_invariants(records)
     assert cert["all_passed"] is True
     assert cert["scenarios_certified"] == 5
+    assert cert["cli_concat_not_measured_here"] is True
+
+
+def test_seventeen_versus_thirty_seven_scopes_are_not_like_for_like():
+    assert COMMERCE_LIFECYCLE_EVENT_COUNT == 17
+    assert CLI_CONCAT_EVENT_COUNT == 37
+    assert classify_event_scope(17) == "commerce_lifecycle"
+    assert classify_event_scope(37) == "cli_concat_commerce_plus_fulfillment"
+    assert classify_event_scope(16) == "unexpected"
+    assert classify_event_scope(0) == "unexpected"
+
+
+def test_synthetic_field_hash_is_negative_control():
+    control = field_hash_negative_control({"event_id": "x", "payload": {"a": 1}})
+    assert control.startswith("field-hash:")
+    records = ScenarioReplayLaboratory.run_scenarios()
+    for rec in records:
+        assert rec.aggregate_replay_hash != control
+        assert rec.first_replay_hash != control
+        assert not rec.first_replay_hash.startswith("field-hash:")
 
 
 def test_sensitivity_matrix_laboratory_7d_completeness():
@@ -114,7 +148,6 @@ def test_canonical_replay_integration_safe_invocation():
     assert result["status"] in {"available", "unmerged_dependency"}
     assert result["authority"] == "scripts.run_commercial_replay_integration"
     assert "invariant_checks" in result
-    assert result["all_invariants_satisfied"] is True
 
     expected_invariants = {
         "all_event_ids_identical",
@@ -133,12 +166,24 @@ def test_canonical_replay_integration_safe_invocation():
     }
     assert set(result["invariant_checks"].keys()) == expected_invariants
 
-    if result["status"] == "available":
-        assert result["result"] == "actual"
-        assert result["rows_evaluated"] == 5
-        assert result["all_replay_equal"] is True
-        assert result["all_launch_blocked"] is True
-        assert len(result["scenario_invariants"]) == 5
+    if result["status"] == "unmerged_dependency":
+        assert result["all_invariants_satisfied"] is False
+        assert result["certification_state"] == "not_executed"
+        assert result["rows_evaluated"] == 0
+        return
+
+    assert result["result"] == "actual"
+    assert result["rows_evaluated"] == 5
+    assert result["all_replay_equal"] is True
+    assert result["all_launch_blocked"] is True
+    assert len(result["scenario_invariants"]) == 5
+    if result.get("mode") == "pr279_consolidated":
+        assert result["all_invariants_satisfied"] is True
+        counts = {row["event_count"] for row in result["scenario_invariants"]}
+        assert counts == {CLI_CONCAT_EVENT_COUNT}
+    else:
+        assert result["all_invariants_satisfied"] is False
+        assert result.get("certification_state") == "commerce_subset"
 
 
 def test_adversarial_authority_fail_closed_rejection():
@@ -146,3 +191,13 @@ def test_adversarial_authority_fail_closed_rejection():
     assert res["adversarial_events_tested"] == 2
     assert res["fail_closed"] is True
     assert len(res["violations_detected"]) == 2
+
+
+def test_adversarial_lab_negative_controls():
+    res = ScenarioReplayLaboratory.verify_adversarial_lab_failures()
+    assert res["all_passed"] is True
+    assert res["cases"]["wrong_event_count"] is True
+    assert res["cases"]["synthetic_identity_rejected"] is True
+    assert res["cases"]["invalid_sample_shape"] is True
+    assert res["cases"]["evidence_escalation_denied"] is True
+    assert res["cases"]["truncated_symbol"] is True
