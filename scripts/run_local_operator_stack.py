@@ -27,6 +27,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -51,7 +52,18 @@ MAX_STARTUP_TIMEOUT_S = 120.0
 MAX_REQUEST_TIMEOUT_S = 30.0
 MAX_HOLD_S = 300.0
 SAFE_PROCESS_ENV_KEYS = frozenset(
-    {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "COMSPEC", "PATHEXT"}
+    {
+        "PATH",
+        "SYSTEMROOT",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "COMSPEC",
+        "PATHEXT",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "USERPROFILE",
+    }
 )
 CLASSIFICATIONS = frozenset(
     {"passed", "partial", "unavailable", "blocked", "timeout", "failed", "not_run", "surface_absent"}
@@ -95,8 +107,15 @@ SECRET_ENV_KEYS = (
     "SUPABASE_SERVICE_ROLE_KEY",
     "SUPABASE_ANON_KEY",
 )
-_SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|access[_-]?token|authorization|password|secret|bearer\s+\S+|sk-(?:live|proj)-[A-Za-z0-9]+|ghp_[A-Za-z0-9]+)"
+_SECRET_PATTERNS = (
+    # Key-value assignments like key: value or key=value
+    re.compile(
+        r'(?i)\b((?:api[_-]?key|access[_-]?token|authorization|password|secret)\s*[:=]\s*)(["\']?)([^"\'\s,;&]+)\2'
+    ),
+    # Bearer tokens
+    re.compile(r'(?i)\b(bearer\s+)([A-Za-z0-9_\-\.+=/]+)'),
+    # Standalone sk-... and ghp_...
+    re.compile(r'\b(sk-(?:live|proj)-[A-Za-z0-9_\-]+|ghp_[A-Za-z0-9_\-]+)\b'),
 )
 
 
@@ -174,10 +193,23 @@ def wait_port(host: str, port: int, timeout_s: float) -> bool:
     return False
 
 
+def wait_port_free(host: str, port: int, timeout_s: float = 2.0) -> bool:
+    """Wait until host:port is no longer in use."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if not port_in_use(host, port):
+            return True
+        time.sleep(0.05)
+    return not port_in_use(host, port)
+
+
 def redact(text: str) -> str:
     if not text:
         return ""
-    return _SECRET_RE.sub("[redacted]", text)
+    result = _SECRET_PATTERNS[0].sub(r'\1\2[redacted]\2', text)
+    result = _SECRET_PATTERNS[1].sub(r'\1[redacted]', result)
+    result = _SECRET_PATTERNS[2].sub(r'[redacted]', result)
+    return result
 
 
 def cap_log(text: str, cap_bytes: int) -> str:
@@ -276,6 +308,25 @@ class ManagedProcess:
     argv: list[str]
     proc: subprocess.Popen[str] | None = None
     log_cap_bytes: int = DEFAULT_LOG_CAP_BYTES
+    _log_chunks: list[str] = field(default_factory=list, repr=False)
+    _log_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _reader_thread: threading.Thread | None = field(default=None, repr=False)
+
+    def _read_stream(self) -> None:
+        if self.proc is None or self.proc.stdout is None:
+            return
+        try:
+            for line in iter(self.proc.stdout.readline, ""):
+                with self._log_lock:
+                    self._log_chunks.append(line)
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                if self.proc and self.proc.stdout:
+                    self.proc.stdout.close()
+            except (OSError, ValueError):
+                pass
 
     def start(self, *, cwd: Path, env: Mapping[str, str]) -> None:
         try:
@@ -295,6 +346,9 @@ class ManagedProcess:
                 errors="replace",
                 **process_options,
             )
+            self._log_chunks.clear()
+            self._reader_thread = threading.Thread(target=self._read_stream, daemon=True)
+            self._reader_thread.start()
         except FileNotFoundError as exc:
             raise LocalOperatorStackError(f"{self.name}_executable_not_found:{exc}") from exc
         except OSError as exc:
@@ -308,8 +362,23 @@ class ManagedProcess:
     def terminate(self, timeout_s: float = 2.0) -> str:
         if self.proc is None:
             return "not_started"
+        pid = self.proc.pid
         if self.proc.poll() is not None:
+            if os.name == "nt":
+                taskkill = shutil.which("taskkill")
+                if taskkill:
+                    try:
+                        subprocess.run(
+                            [taskkill, "/PID", str(pid), "/T", "/F"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            check=False,
+                            timeout=2.0,
+                        )
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
             return "already_exited"
+
         if os.name == "nt":
             try:
                 self.proc.send_signal(signal.CTRL_BREAK_EVENT)
@@ -320,54 +389,56 @@ class ManagedProcess:
                     pass
         else:
             try:
-                os.killpg(self.proc.pid, signal.SIGTERM)
+                os.killpg(pid, signal.SIGTERM)
             except (ProcessLookupError, PermissionError, OSError):
                 try:
                     self.proc.terminate()
                 except OSError:
                     pass
-        deadline = time.monotonic() + timeout_s
+
+        deadline = time.monotonic() + min(timeout_s, 1.0)
         while time.monotonic() < deadline and self.proc.poll() is None:
             time.sleep(0.05)
-        if self.proc.poll() is None:
-            if os.name == "nt":
-                taskkill = shutil.which("taskkill")
-                if taskkill:
-                    try:
-                        subprocess.run(
-                            [taskkill, "/PID", str(self.proc.pid), "/T", "/F"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            check=False,
-                            timeout=2.0,
-                        )
-                    except (OSError, subprocess.TimeoutExpired):
-                        pass
-            else:
+
+        if os.name == "nt":
+            taskkill = shutil.which("taskkill")
+            if taskkill:
                 try:
-                    os.killpg(self.proc.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError, OSError):
+                    subprocess.run(
+                        [taskkill, "/PID", str(pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                        timeout=2.0,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
                     pass
+        else:
             if self.proc.poll() is None:
                 try:
-                    self.proc.kill()
-                except OSError:
+                    os.killpg(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError, OSError):
                     pass
+
+        if self.proc.poll() is None:
             try:
-                self.proc.wait(timeout=1.0)
-            except subprocess.TimeoutExpired:
+                self.proc.kill()
+            except OSError:
                 pass
-            return "killed" if self.proc.poll() is not None else "cleanup_failed"
-        return "terminated"
+
+        try:
+            self.proc.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            pass
+
+        return "terminated" if self.proc.poll() is not None else "cleanup_failed"
 
     def drain_log(self) -> str:
-        if self.proc is None or self.proc.stdout is None:
-            return ""
-        try:
-            chunk = self.proc.stdout.read() or ""
-        except OSError:
-            chunk = ""
-        return cap_log(redact(chunk), self.log_cap_bytes)
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=0.5)
+        with self._log_lock:
+            text = "".join(self._log_chunks)
+        return cap_log(redact(text), self.log_cap_bytes)
 
 
 def http_get(url: str, timeout_s: float) -> dict[str, Any]:
@@ -403,20 +474,52 @@ def http_get(url: str, timeout_s: float) -> dict[str, Any]:
             _NoRedirectHandler(),
         )
         with opener.open(request, timeout=timeout_s) as response:
-            body = response.read(2048)
-            return {
+            body = response.read(4096)
+            status = int(response.status)
+            kind = "passed" if 200 <= status < 400 else "failed"
+            payload_info: dict[str, Any] = {}
+
+            # Validate health and ready responses
+            path = (parsed.path or "").rstrip("/")
+            if path == "/health":
+                try:
+                    data = json.loads(body.decode("utf-8", errors="replace"))
+                    payload_info["json_valid"] = True
+                    if not isinstance(data, dict) or data.get("ok") is not True:
+                        kind = "failed"
+                        payload_info["error"] = "malformed_health_payload"
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    kind = "failed"
+                    payload_info["json_valid"] = False
+                    payload_info["error"] = "malformed_health_payload"
+            elif path == "/ready":
+                try:
+                    data = json.loads(body.decode("utf-8", errors="replace"))
+                    payload_info["json_valid"] = True
+                    if not isinstance(data, dict) or data.get("ready") is not True:
+                        kind = "failed"
+                        payload_info["error"] = "malformed_ready_payload"
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    kind = "failed"
+                    payload_info["json_valid"] = False
+                    payload_info["error"] = "malformed_ready_payload"
+
+            row: dict[str, Any] = {
                 "url": url,
-                "http_status": int(response.status),
-                "classification": classify("passed" if 200 <= response.status < 400 else "failed"),
+                "http_status": status,
+                "classification": classify(kind),
                 "bytes": len(body),
             }
+            if payload_info:
+                row["payload_validation"] = payload_info
+                if "error" in payload_info and kind == "failed":
+                    row["reason"] = payload_info["error"]
+            return row
     except urllib.error.HTTPError as exc:
         status = int(exc.code)
         if status == 404:
             kind = "surface_absent"
-        elif 400 <= status < 500:
-            kind = "failed"
-        elif 300 <= status < 400:
+        elif 300 <= status < 600:
             kind = "failed"
         else:
             kind = "unavailable"
@@ -429,6 +532,35 @@ def http_get(url: str, timeout_s: float) -> dict[str, Any]:
         return {"url": url, "http_status": None, "classification": classify(kind), "bytes": 0, "reason": reason}
     except OSError as exc:
         return {"url": url, "http_status": None, "classification": classify("unavailable"), "bytes": 0, "reason": str(exc)}
+
+
+def wait_health_ready(
+    host: str,
+    port: int,
+    path: str,
+    timeout_s: float,
+    *,
+    request_timeout_s: float = 1.0,
+    check_process: Callable[[], int | None] | None = None,
+) -> tuple[bool, str | None]:
+    """Poll a health/ready endpoint until it returns passed, or times out/crashes."""
+    deadline = time.monotonic() + timeout_s
+    last_reason: str | None = None
+    while time.monotonic() < deadline:
+        if check_process:
+            code = check_process()
+            if code is not None:
+                return False, f"process_exited:{code}"
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        url = f"http://{host}:{port}{path}"
+        row = http_get(url, min(request_timeout_s, max(0.1, remaining)))
+        if row["classification"] == "passed":
+            return True, None
+        last_reason = row.get("reason") or f"http_{row.get('http_status')}"
+        time.sleep(0.05)
+    return False, last_reason or "readiness_timeout"
 
 
 def preflight(config: StackConfig) -> dict[str, Any]:
@@ -509,15 +641,18 @@ def _overall(rows: list[dict[str, Any]], *, backend_started: bool, frontend_star
     health = next((row for row in rows if row["name"] == "health"), None)
     if backend_started and health and health["classification"] == "passed":
         workbench = next((row for row in rows if row["name"] == "workbench_api"), None)
-        if workbench and workbench["classification"] == "surface_absent":
-            return "partial"
         if any(row["classification"] == "timeout" for row in rows if row["plane"] == "api"):
             return "timeout"
-        if frontend_started and any(
+        if frontend_started:
+            frontend_passed = any(row["classification"] == "passed" for row in rows if row["plane"] == "frontend")
+            frontend_failed = any(row["classification"] == "failed" for row in rows if row["plane"] == "frontend")
+            if not frontend_passed and frontend_failed:
+                return "failed"
+        if workbench and workbench["classification"] == "surface_absent":
+            return "partial"
+        if frontend_started and not any(
             row["classification"] == "passed" for row in rows if row["plane"] == "frontend"
         ):
-            return "passed"
-        if frontend_started:
             return "partial"
         return "passed"
     if any(row["classification"] == "timeout" for row in rows):
@@ -599,13 +734,14 @@ def run_rehearsal(
         report["reason"] = "invalid_stack_config:" + ",".join(config_errors)
         return report
 
+    occupied_reasons: list[str] = []
     if checks["occupied_ports"]["api"] and config.start_backend:
-        report["classification"] = classify("blocked")
-        report["reason"] = f"api_port_occupied:{config.api_host}:{config.api_port}"
-        return report
+        occupied_reasons.append(f"api_port_occupied:{config.api_host}:{config.api_port}")
     if checks["occupied_ports"]["frontend"] and config.start_frontend:
+        occupied_reasons.append(f"frontend_port_occupied:{config.frontend_host}:{config.frontend_port}")
+    if occupied_reasons:
         report["classification"] = classify("blocked")
-        report["reason"] = f"frontend_port_occupied:{config.frontend_host}:{config.frontend_port}"
+        report["reason"] = ",".join(occupied_reasons)
         return report
 
     if config.dry_run:
@@ -613,13 +749,27 @@ def run_rehearsal(
         report["reason"] = "dry_run_commands_documented_not_started"
         return report
 
+    if not checks["python"]:
+        report["classification"] = classify("unavailable")
+        report["reason"] = "python_missing"
+        return report
     if config.start_backend and not checks["backend_api_module"]:
         report["classification"] = classify("unavailable")
         report["reason"] = "backend_api_module_missing"
         return report
+    if config.start_backend and not checks["uvicorn_importable"]:
+        report["classification"] = classify("unavailable")
+        report["reason"] = "uvicorn_not_importable"
+        return report
+
     if config.start_frontend and not checks["frontend_package_json"]:
         report["classification"] = classify("unavailable")
         report["reason"] = "frontend_package_json_missing"
+        return report
+    if config.start_frontend and not checks["node"]:
+        report["classification"] = classify("unavailable")
+        report["reason"] = "node_missing"
+        report["surfaces"] = smoke_surfaces(config, backend_up=False, frontend_up=False)
         return report
     if config.start_frontend and not checks["npm"]:
         report["classification"] = classify("unavailable")
@@ -637,10 +787,27 @@ def run_rehearsal(
             backend.start(cwd=config.repo, env=env)
             managed.append(backend)
             if wait_port(config.api_host, config.api_port, config.startup_timeout_s):
-                backend_up = True
+                ready_ok, ready_err = wait_health_ready(
+                    config.api_host,
+                    config.api_port,
+                    "/health",
+                    timeout_s=min(config.startup_timeout_s, 10.0),
+                    request_timeout_s=config.request_timeout_s,
+                    check_process=backend.poll,
+                )
+                if ready_ok:
+                    backend_up = True
+                else:
+                    code = backend.poll()
+                    startup_error = (
+                        f"backend_exited:{code}"
+                        if code is not None
+                        else ("backend_startup_timeout" if ready_err == "readiness_timeout" else f"backend_readiness_failed:{ready_err}")
+                    )
             else:
                 code = backend.poll()
                 startup_error = "backend_startup_timeout" if code is None else f"backend_exited:{code}"
+
         if config.start_frontend and startup_error is None:
             frontend = factory("frontend", planned["frontend"], config.log_cap_bytes)
             frontend.start(cwd=config.repo, env=env)
@@ -664,7 +831,17 @@ def run_rehearsal(
                 _overall(report["surfaces"], backend_started=backend_up, frontend_started=frontend_up)
             )
         if config.hold_s > 0 and report["classification"] in {"passed", "partial"}:
-            time.sleep(config.hold_s)
+            deadline = time.monotonic() + config.hold_s
+            while time.monotonic() < deadline:
+                for item in managed:
+                    code = item.poll()
+                    if code is not None:
+                        report["classification"] = classify("failed")
+                        report["reason"] = f"{item.name}_exited_during_hold:{code}"
+                        break
+                if report["classification"] == "failed":
+                    break
+                time.sleep(min(0.2, max(0.02, deadline - time.monotonic())))
     except LocalOperatorStackError as exc:
         report["classification"] = classify("unavailable")
         report["reason"] = str(exc)
@@ -678,9 +855,20 @@ def run_rehearsal(
             logs[item.name] = "" if cleanup[item.name] == "cleanup_failed" else item.drain_log()
         report["cleanup"] = cleanup
         report["logs"] = logs
+
+        port_cleanup: dict[str, bool] = {}
+        if config.start_backend:
+            port_cleanup["api_port_free"] = wait_port_free(config.api_host, config.api_port, 2.0)
+        if config.start_frontend:
+            port_cleanup["frontend_port_free"] = wait_port_free(config.frontend_host, config.frontend_port, 2.0)
+        report["port_cleanup"] = port_cleanup
+
         if any(status == "cleanup_failed" for status in cleanup.values()):
             report["classification"] = classify("failed")
             report["reason"] = "process_cleanup_failed"
+        elif any(not free for free in port_cleanup.values()):
+            report["classification"] = classify("failed")
+            report["reason"] = "port_cleanup_failed"
     return report
 
 

@@ -38,7 +38,7 @@ def _occupy(host: str, port: int) -> socket.socket:
     return sock
 
 
-def _dummy_server_script(secret_line: str = "") -> str:
+def _dummy_server_script(secret_line: str = "", body_str: str = '{"ok": true}') -> str:
     extra = f"print({secret_line!r}, flush=True)\n" if secret_line else ""
     return textwrap.dedent(
         f"""
@@ -50,9 +50,9 @@ def _dummy_server_script(secret_line: str = "") -> str:
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
-                body = b'ok'
+                body = {body_str.encode('utf-8')!r}
                 self.send_response(200)
-                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -107,6 +107,7 @@ def test_fixture_environ_strips_secrets():
             "OPENAI_API_KEY": "sk-live-abc",
             "AWS_SECRET_ACCESS_KEY": "sentinel-secret",
             "PATH": "/bin",
+            "APPDATA": "/appdata",
             "FOO": "1",
             "ALLOWED_ORIGINS": "https://untrusted.example",
             "CYCLES_PER_MINUTE": "999",
@@ -115,6 +116,8 @@ def test_fixture_environ_strips_secrets():
     assert "OPENAI_API_KEY" not in env
     assert "AWS_SECRET_ACCESS_KEY" not in env
     assert "FOO" not in env
+    assert env["PATH"] == "/bin"
+    assert env["APPDATA"] == "/appdata"
     assert env["MARKETOS_MVP_MODE"] == "1"
     assert env["MARKETOS_PUBLIC_COMMERCE_RUNS"] == "0"
     assert env["MARKETOS_ALLOW_LIVE"] == "0"
@@ -333,3 +336,335 @@ def test_cli_dry_run_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     body = stack.json.loads(captured.out)
     assert body["schema"] == stack.SCHEMA
     assert body["classification"] == "not_run"
+
+
+def test_both_ports_occupied_blocked(tmp_path: Path):
+    repo = _write_repo(tmp_path)
+    api_port = _free_port()
+    frontend_port = _free_port()
+    holder_api = _occupy("127.0.0.1", api_port)
+    holder_fe = _occupy("127.0.0.1", frontend_port)
+    try:
+        cfg = _config(repo, api_port=api_port, frontend_port=frontend_port)
+        report = stack.run_rehearsal(cfg)
+        assert report["classification"] == "blocked"
+        assert "api_port_occupied" in report["reason"]
+        assert "frontend_port_occupied" in report["reason"]
+    finally:
+        holder_api.close()
+        holder_fe.close()
+
+
+def test_missing_uvicorn_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo = _write_repo(tmp_path)
+    import importlib.util
+
+    orig_find_spec = importlib.util.find_spec
+
+    def mock_find_spec(name, *args, **kwargs):
+        if name == "uvicorn":
+            return None
+        return orig_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", mock_find_spec)
+    cfg = _config(repo, start_frontend=False)
+    report = stack.run_rehearsal(cfg)
+    assert report["classification"] == "unavailable"
+    assert report["reason"] == "uvicorn_not_importable"
+
+
+def test_missing_node_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo = _write_repo(tmp_path)
+    import shutil
+
+    orig_which = shutil.which
+
+    def mock_which(cmd, *args, **kwargs):
+        if cmd == "node":
+            return None
+        return orig_which(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "which", mock_which)
+    cfg = _config(repo, start_backend=False, start_frontend=True)
+    report = stack.run_rehearsal(cfg)
+    assert report["classification"] == "unavailable"
+    assert report["reason"] == "node_missing"
+
+
+def test_missing_python_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo = _write_repo(tmp_path)
+    monkeypatch.setattr(sys, "executable", "")
+    cfg = _config(repo, start_backend=False, start_frontend=False)
+    report = stack.run_rehearsal(cfg)
+    assert report["classification"] == "unavailable"
+    assert report["reason"] == "python_missing"
+
+
+def test_api_500_response_is_failed(tmp_path: Path):
+    repo = _write_repo(tmp_path)
+    server_script = tmp_path / "server_500.py"
+    server_script.write_text(
+        textwrap.dedent(
+            """
+            import http.server
+            import sys
+
+            host, port = sys.argv[1], int(sys.argv[2])
+            class Handler(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(500)
+                    self.send_header("Content-Type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(b"internal error")
+                def log_message(self, format, *args):
+                    return
+
+            http.server.HTTPServer((host, port), Handler).serve_forever()
+            """
+        ),
+        encoding="utf-8",
+    )
+    cfg = _config(repo, start_frontend=False, startup_timeout_s=2.0)
+    report = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(server_script, cfg.api_host, cfg.api_port),
+    )
+    assert report["classification"] == "failed"
+    assert "backend_readiness_failed" in report["reason"]
+
+
+def test_frontend_500_response_is_failed(tmp_path: Path):
+    repo = _write_repo(tmp_path)
+    ok_script = tmp_path / "server_ok.py"
+    ok_script.write_text(_dummy_server_script(), encoding="utf-8")
+    fe_500_script = tmp_path / "fe_500.py"
+    fe_500_script.write_text(
+        textwrap.dedent(
+            """
+            import http.server
+            import sys
+
+            host, port = sys.argv[1], int(sys.argv[2])
+            class Handler(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(500)
+                    self.send_header("Content-Type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(b"frontend crash")
+                def log_message(self, format, *args):
+                    return
+
+            http.server.HTTPServer((host, port), Handler).serve_forever()
+            """
+        ),
+        encoding="utf-8",
+    )
+    cfg = _config(repo, startup_timeout_s=3.0)
+    report = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(ok_script, cfg.api_host, cfg.api_port),
+        frontend_argv_override=_dummy_argv(fe_500_script, cfg.frontend_host, cfg.frontend_port),
+    )
+    assert report["classification"] == "failed"
+
+
+def test_delayed_readiness_succeeds(tmp_path: Path):
+    repo = _write_repo(tmp_path)
+    delayed_script = tmp_path / "delayed_server.py"
+    delayed_script.write_text(
+        textwrap.dedent(
+            """
+            import http.server
+            import sys
+
+            host, port = sys.argv[1], int(sys.argv[2])
+            counter = {"calls": 0}
+
+            class Handler(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    counter["calls"] += 1
+                    if counter["calls"] <= 2:
+                        self.send_response(503)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(b'{"ready": false, "reason": "initializing"}')
+                    else:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(b'{"ok": true}')
+                def log_message(self, format, *args):
+                    return
+
+            http.server.HTTPServer((host, port), Handler).serve_forever()
+            """
+        ),
+        encoding="utf-8",
+    )
+    cfg = _config(repo, start_frontend=False, startup_timeout_s=3.0)
+    report = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(delayed_script, cfg.api_host, cfg.api_port),
+    )
+    assert report["classification"] in {"passed", "partial"}
+    health = next(row for row in report["surfaces"] if row["name"] == "health")
+    assert health["classification"] == "passed"
+
+
+def test_malformed_health_non_json_is_failed(tmp_path: Path):
+    repo = _write_repo(tmp_path)
+    bad_script = tmp_path / "bad_health.py"
+    bad_script.write_text(
+        textwrap.dedent(
+            """
+            import http.server
+            import sys
+
+            host, port = sys.argv[1], int(sys.argv[2])
+            class Handler(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html")
+                    self.end_headers()
+                    self.wfile.write(b"<html><body>502 Bad Gateway Nginx</body></html>")
+                def log_message(self, format, *args):
+                    return
+
+            http.server.HTTPServer((host, port), Handler).serve_forever()
+            """
+        ),
+        encoding="utf-8",
+    )
+    cfg = _config(repo, start_frontend=False, startup_timeout_s=2.0)
+    report = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(bad_script, cfg.api_host, cfg.api_port),
+    )
+    assert report["classification"] == "failed"
+    assert "malformed_health_payload" in report["reason"]
+
+
+def test_malformed_health_ok_false_is_failed(tmp_path: Path):
+    repo = _write_repo(tmp_path)
+    degraded_script = tmp_path / "degraded_health.py"
+    degraded_script.write_text(
+        _dummy_server_script(body_str='{"ok": false, "reason": "database_down"}'),
+        encoding="utf-8",
+    )
+    cfg = _config(repo, start_frontend=False, startup_timeout_s=2.0)
+    report = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(degraded_script, cfg.api_host, cfg.api_port),
+    )
+    assert report["classification"] == "failed"
+    assert "malformed_health_payload" in report["reason"]
+
+
+def test_early_process_exit_during_hold(tmp_path: Path):
+    repo = _write_repo(tmp_path)
+    exit_soon_script = tmp_path / "exit_soon.py"
+    exit_soon_script.write_text(
+        textwrap.dedent(
+            """
+            import http.server
+            import os
+            import sys
+            import threading
+            import time
+
+            host, port = sys.argv[1], int(sys.argv[2])
+
+            def suicide():
+                time.sleep(0.3)
+                os._exit(42)
+
+            threading.Thread(target=suicide, daemon=True).start()
+
+            class Handler(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"ok": true}')
+                def log_message(self, format, *args):
+                    return
+
+            http.server.HTTPServer((host, port), Handler).serve_forever()
+            """
+        ),
+        encoding="utf-8",
+    )
+    cfg = _config(repo, start_frontend=False, hold_s=2.0)
+    report = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(exit_soon_script, cfg.api_host, cfg.api_port),
+    )
+    assert report["classification"] == "failed"
+    assert "exited_during_hold" in report["reason"]
+
+
+def test_repeated_invocations_clean(tmp_path: Path):
+    repo = _write_repo(tmp_path)
+    script = tmp_path / "dummy_http.py"
+    script.write_text(_dummy_server_script(), encoding="utf-8")
+    port = _free_port()
+    cfg = _config(repo, api_port=port, start_frontend=False)
+
+    report1 = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(script, cfg.api_host, cfg.api_port),
+    )
+    assert report1["classification"] in {"passed", "partial"}
+    assert report1["port_cleanup"]["api_port_free"] is True
+
+    report2 = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=_dummy_argv(script, cfg.api_host, cfg.api_port),
+    )
+    assert report2["classification"] in {"passed", "partial"}
+    assert report2["port_cleanup"]["api_port_free"] is True
+
+
+def test_secret_redaction_comprehensive():
+    k1, v1 = "pass" + "word", "supersecretpassword123"
+    k2, v2 = "api_" + "key", "sk-proj-abcdef123456"
+    k3, v3 = "authori" + "zation", "bearer secrettoken"
+    samples = [
+        (f"{k1}={v1}", f"{k1}=[redacted]"),
+        (f"{k2}: '{v2}'", f"{k2}: '[redacted]'"),
+        (f'{k3} = "{v3}"', f'{k3} = "bearer [redacted]"'),
+        ("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xyz", "Bearer [redacted]"),
+        ("sk-live-abcdef1234567890", "[redacted]"),
+        ("ghp_1234567890abcdef1234567890abcdef", "[redacted]"),
+    ]
+    for text, expected in samples:
+        redacted = stack.redact(text)
+        assert expected in redacted
+        assert "supersecretpassword123" not in redacted
+        assert "sk-proj-abcdef123456" not in redacted
+        assert "secrettoken" not in redacted
+        assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in redacted
+
+
+def test_nonblocking_stream_draining(tmp_path: Path):
+    spam_script = tmp_path / "spam.py"
+    spam_script.write_text(
+        textwrap.dedent(
+            """
+            import sys
+            # Write 100KB which exceeds standard OS pipe buffer size
+            for _ in range(1000):
+                sys.stdout.write("x" * 100 + "\\n")
+            sys.stdout.flush()
+            """
+        ),
+        encoding="utf-8",
+    )
+    proc = stack.ManagedProcess(name="spam", argv=[sys.executable, str(spam_script)], log_cap_bytes=512)
+    proc.start(cwd=tmp_path, env={})
+    time.sleep(0.5)
+    code = proc.poll()
+    assert code == 0
+    log = proc.drain_log()
+    assert "truncated" in log
+    assert len(log.encode("utf-8")) < 1000

@@ -77,18 +77,33 @@ http://127.0.0.1:5173/operator/first-phase
 http://127.0.0.1:5173/operator/events
 ```
 
-## Safety
+## Safety & Process Invariants
 
 - Fixture env: `MARKETOS_MVP_MODE=1`, `MARKETOS_PUBLIC_COMMERCE_RUNS=0`, live flags off.
-- Child processes receive a small OS-runtime environment allowlist, not a copy
-  of the operator environment. Fixture origins and cycle limits are fixed.
-- External network calls are disabled. HTTP smoke checks are loopback-only,
-  bypass proxies, and do not follow redirects.
-- Logs are regex-redacted and capped at 8 KiB.
-- Child process groups are stopped on every exit path; Windows uses a control
-  event followed by bounded process-tree termination when necessary.
+- Child processes receive a safe OS-runtime environment allowlist (`PATH`, `SYSTEMROOT`, `WINDIR`, `TEMP`, `TMP`, `COMSPEC`, `PATHEXT`, `APPDATA`, `LOCALAPPDATA`, `USERPROFILE`), never a copy of the operator environment. Live flags, credentials, and tokens are stripped.
+- External network calls are disabled. HTTP smoke checks are loopback-only, bypass proxies, and do not follow redirects.
+- Sensitive credentials, authorization headers, passwords, and API keys are regex-redacted (preserving key names, redacting secret values) and logs are capped at 8 KiB.
+- Child process pipes are consumed concurrently via daemon threads to prevent OS pipe-buffer deadlocks.
+- Child process groups and trees are terminated on every exit path; on Windows, `CTRL_BREAK_EVENT` is followed by tree kill (`taskkill /PID <pid> /T /F`) to eliminate grandchild processes (such as `node.exe` under `npm.cmd`).
+- Verification confirms that both API and frontend loopback ports are completely free upon exit (`port_cleanup: {api_port_free, frontend_port_free}`).
+- Active polling monitors child processes during `--hold`; if a process crashes during hold, the rehearsal cleanly terminates and reports `failed` with `{process}_exited_during_hold`.
 - No writes to `artifacts/`, `.env`, credentials, or tracked fixtures.
-- Missing uvicorn/npm/package.json reports `unavailable`.
+
+## Failure Matrix Coverage (11 Scenarios)
+
+| Scenario | Behavior / Detection | Classification |
+| --- | --- | --- |
+| 1. Occupied port | Detects active socket listener on API or frontend port | `blocked` with `{service}_port_occupied` |
+| 2. Missing runtime | Missing Python, unimportable Uvicorn, missing Node, missing npm, missing package.json, or missing api.py | `unavailable` with `{component}_missing` / `uvicorn_not_importable` |
+| 3. API fails | Non-200 / HTTP 500 error on `/health` or `/ready` | `failed` with `backend_readiness_failed` |
+| 4. Frontend fails | Process crash or HTTP 500 across frontend surfaces | `failed` |
+| 5. Delayed readiness | Polls `/health` with bounded retries while application initializes | Passes when ready before timeout; `timeout` if deadline exceeded |
+| 6. Malformed health | `/health` returning non-JSON, empty body, or JSON with `{"ok": false}` | `failed` with `malformed_health_payload` |
+| 7. Early process exit | Process terminates unexpectedly during startup or `--hold` | `failed` with `{process}_exited:{code}` or `exited_during_hold` |
+| 8. Repeated invocation | Back-to-back rehearsal runs on identical ports | Passes cleanly with zero port collisions or socket leaks |
+| 9. Cleanup verification | Terminated processes, dead child trees, free ports confirmed | Guaranteed in `finally:` with `port_cleanup` status |
+| 10. Output redaction/caps | Credential values replaced with `[redacted]`, logs capped at 8 KiB | Verified across keys, bearer tokens, and standalone hashes |
+| 11. Dry-run non-spawn | Plans commands and preflights runtime without binding or spawning | `not_run` |
 
 ## Tests
 
@@ -96,11 +111,8 @@ http://127.0.0.1:5173/operator/events
 python -m pytest -q tests/test_local_operator_stack.py
 ```
 
-Covers dry-run, occupied ports, missing package/module, delayed readiness /
-timeout, backend unavailable, frontend process exit, log redaction/caps,
-404-as-surface_absent, and successful dummy-server startup + cleanup.
+Covers all 11 matrix scenarios: dry-run, occupied ports, missing packages/modules/executables, delayed readiness, malformed health payloads, API/frontend 500 errors, early process exit during startup and hold, repeated invocation, process tree cleanup, nonblocking pipe draining, and secret redaction.
 
 ## Rollback
 
-Delete the four exclusive files or close the draft PR. No schema migration.
-`start-local` behavior is unchanged.
+Delete the three exclusive files (`scripts/run_local_operator_stack.py`, `tests/test_local_operator_stack.py`, `docs/ai/LOCAL_OPERATOR_STACK.md`) or close the draft PR. No schema migration. `start-local` print-only behavior is unchanged.
