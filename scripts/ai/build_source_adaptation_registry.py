@@ -1138,7 +1138,7 @@ RECORDS = [
         "commit_sha": "9fde38c0cd1f437774ba48da695bcdfb88c242e1",
         "version_tag": "1.8.0",
         "source_type": "git_repository",
-        "license": "BSL-1.1",
+        "license": "MIT",
         "license_evidence_url": "https://github.com/temporalio/temporal/blob/master/LICENSE",
         "inspected_paths": [
             "service/history/workflow/engine.go",
@@ -1162,14 +1162,14 @@ RECORDS = [
         "adaptation_mode": "reject",
         "marketos_target_authority": "none",
         "expected_benefit": "Distributed durable execution and workflow replay engine.",
-        "compatibility_status": "incompatible_license",
+        "compatibility_status": "incompatible_architecture",
         "integration_status": "rejected",
         "attribution_requirement": "Not applicable (rejected source).",
         "rollback_strategy": "Zero in-tree code footprint; prohibited from in-tree linking.",
         "owner": "antigravity-source-adaptation-governance-owner",
         "reviewer": "quality-architecture-reviewer",
         "verification_evidence": "docs/ai/OSS_PATTERN_RETROFIT_ADR.md",
-        "rejection_reason": "Non-permissive BSL-1.1 server license and duplicate workflow orchestrator; violates single event spine invariant.",
+        "rejection_reason": "Duplicate external workflow orchestrator and state engine; violates MarketOS single canonical event spine invariant (backend.events.spine). Upstream license is permissive MIT, but rejected fail-closed on architectural invariant grounds.",
         "last_reviewed_at": "2026-09-17T20:00:00Z"
     },
     {
@@ -1276,7 +1276,7 @@ def build_and_save(target_path: Path, work_orders_path: Path | None = None) -> t
     target_path.parent.mkdir(parents=True, exist_ok=True)
     # Sort deterministically by source_id
     sorted_records = sorted(RECORDS, key=lambda x: x["source_id"])
-    with open(target_path, "w", encoding="utf-8") as f:
+    with open(target_path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(sorted_records, f, indent=2, ensure_ascii=False)
         f.write("\n")
     print(f"Successfully generated {len(sorted_records)} source records into {target_path}")

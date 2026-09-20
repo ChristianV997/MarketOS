@@ -190,11 +190,11 @@ def test_verified_license_evidence_urls_are_immutable():
 # Tracked-byte lock: GitHub Contents API / PR-body hashes previously claimed
 # 55,544 and 61,094 bytes. The actual git blobs on this branch are smaller.
 # Pin the working-tree SHA-256 so a truncated rewrite cannot pass JSON-parse-only tests.
-_CANONICAL_REGISTRY_BYTES = 54269
-_CANONICAL_REGISTRY_SHA256 = "a248b83b28189143096d4c32213e4b3a297e4981c0185f7bdb559c6b64c12647"
-_CANONICAL_WORK_ORDERS_BYTES = 59535
-_CANONICAL_WORK_ORDERS_SHA256 = "b62badaed1c09691a56e8f4d2fc0274d0823e2024500fe271cb577f1f1f9abdf"
-_CANONICAL_STABLE_HASH = "faf789e185374adb6cfe167b8bb85fcdd55afb6597d00ab943f405899fce8c56"
+_CANONICAL_REGISTRY_BYTES = 54393
+_CANONICAL_REGISTRY_SHA256 = "af801a6fe28676c26f6199cf08b8c7b53032ca588e8865a1f6bc96367ee6714a"
+_CANONICAL_WORK_ORDERS_BYTES = 59536
+_CANONICAL_WORK_ORDERS_SHA256 = "14374a79338cce19f114dd6b2c9b5a3ef2276783da48768eb4d67a08bf301d19"
+_CANONICAL_STABLE_HASH = "2be9683dec56e233f7feb6188e069438f8a11a9830db902f45c75b08e4e03793"
 
 _REQUIRED_VALIDATOR_SYMBOLS = frozenset({
     "validate_registry",
@@ -213,14 +213,17 @@ _CONSOLIDATION_RULES_BYTE_FLOOR = 400
 def test_tracked_registry_bytes_and_raw_sha256_match_git_blobs():
     registry_bytes = _REGISTRY_PATH.read_bytes()
     work_order_bytes = _WORK_ORDERS_PATH.read_bytes()
-    assert len(registry_bytes) == _CANONICAL_REGISTRY_BYTES
-    assert len(work_order_bytes) == _CANONICAL_WORK_ORDERS_BYTES
-    assert hashlib.sha256(registry_bytes).hexdigest() == _CANONICAL_REGISTRY_SHA256
-    assert hashlib.sha256(work_order_bytes).hexdigest() == _CANONICAL_WORK_ORDERS_SHA256
-    assert registry_bytes.startswith(b"[\n")
-    assert registry_bytes.endswith(b"\n]\n") or registry_bytes.endswith(b"}]\n")
-    assert work_order_bytes.startswith(b"[\n")
-    assert work_order_bytes.endswith(b"\n]\n") or work_order_bytes.endswith(b"}]\n")
+    # Normalize CRLF to LF for Windows file checkouts so git blob comparison is portable
+    norm_registry_bytes = registry_bytes.replace(b"\r\n", b"\n")
+    norm_work_order_bytes = work_order_bytes.replace(b"\r\n", b"\n")
+    assert len(norm_registry_bytes) == _CANONICAL_REGISTRY_BYTES
+    assert len(norm_work_order_bytes) == _CANONICAL_WORK_ORDERS_BYTES
+    assert hashlib.sha256(norm_registry_bytes).hexdigest() == _CANONICAL_REGISTRY_SHA256
+    assert hashlib.sha256(norm_work_order_bytes).hexdigest() == _CANONICAL_WORK_ORDERS_SHA256
+    assert norm_registry_bytes.startswith(b"[\n")
+    assert norm_registry_bytes.endswith(b"\n]\n") or norm_registry_bytes.endswith(b"}]\n")
+    assert norm_work_order_bytes.startswith(b"[\n")
+    assert norm_work_order_bytes.endswith(b"\n]\n") or norm_work_order_bytes.endswith(b"}]\n")
     registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
     assert registry.compute_stable_hash() == _CANONICAL_STABLE_HASH
 
@@ -298,3 +301,36 @@ def test_canonical_registry_and_work_orders_correspond_one_to_one():
     assert validate_source_work_order_correspondence(
         registry, list(wo_registry.work_orders.values())
     ) == []
+
+
+def test_temporal_license_correction_preserves_fail_closed_rejection():
+    """Temporal is correctly documented as MIT but must remain rejected fail-closed on architecture grounds."""
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    rec = registry.get_record("src-temporal")
+    assert rec is not None
+    assert rec.license == "MIT"
+    assert rec.compatibility_status == "incompatible_architecture"
+    assert rec.adaptation_mode == AdaptationMode.REJECT.value
+    assert "single canonical event spine invariant" in rec.rejection_reason
+
+    # Adversarial test: attempting to integrate Temporal into event spine fails closed
+    adversarial_rec = rec.to_dict()
+    adversarial_rec["adaptation_mode"] = "integrate"
+    adversarial_rec["marketos_target_authority"] = "backend.events.spine"
+    errs = validate_source_record(adversarial_rec)
+    assert any("duplicate_authority_rejected" in e for e in errs)
+
+
+def test_work_order_adaptation_mode_mismatch_fails_closed():
+    """Mismatched adaptation_mode between registry record and work order must fail closed."""
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    wo_registry = WorkOrderRegistry.load_from_file(_WORK_ORDERS_PATH)
+    known = list(wo_registry.work_orders.values())
+    tampered = known[0].to_dict()
+    # Change wo-airbyte from reject to integrate
+    tampered["adaptation_mode"] = "integrate"
+    from evaluation.source_governance.registry import AdaptationWorkOrder
+
+    tampered_wo = AdaptationWorkOrder.from_dict(tampered)
+    errs = validate_source_work_order_correspondence(registry, [tampered_wo, *known[1:]])
+    assert any("work_order_adaptation_mode_mismatch" in e for e in errs)

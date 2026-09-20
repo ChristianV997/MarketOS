@@ -289,7 +289,7 @@ class SourceAdaptationRegistry:
     def save_to_file(self, path: str | Path) -> None:
         p = Path(path).resolve()
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "w", encoding="utf-8") as f:
+        with open(p, "w", encoding="utf-8", newline="\n") as f:
             json.dump(self.to_list(), f, indent=2, ensure_ascii=False)
             f.write("\n")
 
@@ -669,6 +669,6 @@ class WorkOrderRegistry:
     def save_to_file(self, path: str | Path) -> None:
         p = Path(path).resolve()
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "w", encoding="utf-8") as f:
+        with open(p, "w", encoding="utf-8", newline="\n") as f:
             json.dump(self.to_list(), f, indent=2, ensure_ascii=False)
             f.write("\n")

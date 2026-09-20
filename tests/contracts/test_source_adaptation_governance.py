@@ -123,7 +123,7 @@ def test_stable_hash_is_deterministic_and_bit_identical():
 
     assert len(hash1) == 64
     assert hash1 == hash2
-    assert hash1 == "faf789e185374adb6cfe167b8bb85fcdd55afb6597d00ab943f405899fce8c56"
+    assert hash1 == "2be9683dec56e233f7feb6188e069438f8a11a9830db902f45c75b08e4e03793"
 
 
 

@@ -1454,8 +1454,8 @@
     "repository_url": "https://github.com/temporalio/temporal",
     "commit_sha": "9fde38c0cd1f437774ba48da695bcdfb88c242e1",
     "version_tag": "1.8.0",
-    "license": "BSL-1.1",
-    "compatibility_status": "incompatible_license",
+    "license": "MIT",
+    "compatibility_status": "incompatible_architecture",
     "inspected_paths": [
       "service/history/workflow/engine.go",
       "common/persistence/data_interfaces.go"
@@ -1499,7 +1499,7 @@
     "source_freshness_days": 0,
     "review_state": "rejected",
     "evidence_classification": "none",
-    "work_order_hash": "a0d12a0d09b16dbe3d293b0ff661f3ef35fc2bbffb67a5ccc81c98e929641787"
+    "work_order_hash": "100810464e885e9164851d4833ac18e6b71a0659c858e43c588b93f77dfd32e9"
   },
   {
     "work_order_id": "wo-vendure",

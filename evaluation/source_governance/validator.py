@@ -225,7 +225,7 @@ def validate_source_record(
     else:
         for protected in PROTECTED_CANONICAL_AUTHORITIES:
             if target_auth.lower() == protected:
-                if rec.adaptation_mode in (AdaptationMode.INTEGRATE.value,) and "orchestrator" in sid.lower():
+                if rec.adaptation_mode in (AdaptationMode.INTEGRATE.value,):
                     errors.append(f"duplicate_authority_rejected in {sid}: External source cannot replace canonical {protected}")
             if "duplicate" in target_auth.lower() or "parallel" in target_auth.lower():
                 errors.append(f"duplicate_authority_rejected in {sid}: Cannot establish parallel authority for {target_auth}")
@@ -330,7 +330,7 @@ def validate_work_order(
         if not wo.target_boundary_authority.strip() or wo.target_boundary_authority.lower() in ("none", "n/a"):
             errors.append(f"missing_target_boundary_authority in {wid}: Active adaptation requires target_boundary_authority")
         for protected in PROTECTED_CANONICAL_AUTHORITIES:
-            if wo.target_boundary_authority.lower() == protected and wo.adaptation_mode == AdaptationMode.INTEGRATE.value and "orchestrator" in wo.source_id.lower():
+            if wo.target_boundary_authority.lower() == protected and wo.adaptation_mode == AdaptationMode.INTEGRATE.value:
                 errors.append(f"duplicate_authority_in_work_order in {wid}: Cannot replace canonical {protected}")
     if wo.security_surface.desktop_control_risk or wo.security_surface.local_ipc:
         if wo.adaptation_mode not in (AdaptationMode.REJECT.value, AdaptationMode.DEFER.value, AdaptationMode.REFERENCE_ONLY.value):
@@ -407,6 +407,16 @@ def validate_source_work_order_correspondence(
                 errors.append(
                     f"work_order_commit_mismatch in {wid}: "
                     f"work-order pin {wo.commit_sha} != registry {rec.commit_sha}"
+                )
+            if wo.adaptation_mode and rec.adaptation_mode and wo.adaptation_mode != rec.adaptation_mode:
+                errors.append(
+                    f"work_order_adaptation_mode_mismatch in {wid}: "
+                    f"work-order mode '{wo.adaptation_mode}' != registry '{rec.adaptation_mode}'"
+                )
+            if wo.license and rec.license and wo.license != rec.license:
+                errors.append(
+                    f"work_order_license_mismatch in {wid}: "
+                    f"work-order license '{wo.license}' != registry '{rec.license}'"
                 )
         if sid.startswith("src-") and wid:
             expected_wo = f"wo-{sid[len('src-'):]}"

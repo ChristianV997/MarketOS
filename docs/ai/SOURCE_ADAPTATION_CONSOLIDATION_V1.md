@@ -22,9 +22,9 @@ single source of truth. Executing the builder against this branch is
 bit-for-bit identical to the tracked files.
 
 | File | Size (bytes) | Git blob SHA | Records | Raw SHA256 | Canonical Sorted-Key SHA256 | Stable Content Hash |
-| --- | ---: | --- | ---: | --- | --- | --- |
-| `data/source_adaptation_registry.json` | 54,269 | `1249d925d310d24b28e5be56ac9e8d95e98a63f3` | 29 | `a248b83b28189143096d4c32213e4b3a297e4981c0185f7bdb559c6b64c12647` | `1e0db9350cc50ef9965ed97163bc5b9a7070ee816c853da3790ffa4ac2f21981` | `faf789e185374adb6cfe167b8bb85fcdd55afb6597d00ab943f405899fce8c56` |
-| `data/source_adaptation_work_orders.json` | 59,535 | `10a0545a9e30683630b32d89030bed9a9cd32753` | 29 | `b62badaed1c09691a56e8f4d2fc0274d0823e2024500fe271cb577f1f1f9abdf` | `7fff93c3bcf604dcf3505ed33fb6db16ea75e8a8783a1ffa909d78ab0936a0f2` | work-order registry stable hash `ebfa075870f2c5a8d3b29c67b45970708e736cb26fb3f4f7b80a8e7a65dd56fd` |
+| --- | ---: | --- | --- | ---: | --- | --- |
+| `data/source_adaptation_registry.json` | 54,393 | `4b7b0dbe2c41834db575fc26ee1d3b603cfddc34` | 29 | `af801a6fe28676c26f6199cf08b8c7b53032ca588e8865a1f6bc96367ee6714a` | `08cd9984bd7071411be15aae6c11093d2de2337ba6f0c04d0e079738cef88242` | `2be9683dec56e233f7feb6188e069438f8a11a9830db902f45c75b08e4e03793` |
+| `data/source_adaptation_work_orders.json` | 59,536 | `9cbef45172703a0518e1013058f9ed4c98841a96` | 29 | `14374a79338cce19f114dd6b2c9b5a3ef2276783da48768eb4d67a08bf301d19` | `daaaccfe41fa461273bf75f0206d818ec308c3b76a5216d39b066d8d3baeed84` | work-order registry stable hash `585cbdd2286e087c27ac2a3bfa1b29d59e35474d342a0946de4ecc4f6fc950ee` |
 
 Do not conflate these:
 
@@ -37,7 +37,7 @@ Superseded claims (not the tracked blobs):
 - PR-body / prior doc sizes `55,544` / `61,094` with raw SHA-256 `0de36a93…` / `4349bde0…` do **not** match `HEAD:data/source_adaptation_*.json`.
 - Earlier draft sizes `54,227` with raw `56b7076c…` were a truncated payload in commit `7248a8ab` and were recovered.
 
-The checked-out branch contains the fully restored 29-record catalog and 29 matching work orders (`src-<id>` -> `wo-<id>`), with stable content hash `faf789e1…` matching `tests/contracts/test_source_adaptation_governance.py`.
+The checked-out branch contains the fully restored 29-record catalog and 29 matching work orders (`src-<id>` -> `wo-<id>`), with stable content hash `2be9683d…` matching `tests/contracts/test_source_adaptation_governance.py`.
 
 ## Applied pins
 
@@ -67,7 +67,7 @@ license endpoints (not pretty-printed connector JSON):
 | Higgsfield TS SDK (`src-higgsfield-ts-sdk`) | `e3f274249962417e21f6566d4eecec6d8491d11c` confirmed; tag `0.2.6` matches | `0.2.6` | GitHub license API 404; declared MIT unverified at pin | **partial**; license unresolved |
 | Prefect (`src-prefect`) | `c8986edebb2dde3e2a931adbe24d2eaefcb799cb` confirmed | `3.2.0` matches | Apache-2.0 confirmed | verified (rejected fail-closed) |
 | gstack (`src-gstack`) | `a6b3a57512ca6d5c6aa5b68f74f736195021f96e` confirmed | `main-pinned` | MIT confirmed | verified (reference_only) |
-| Temporal (`src-temporal`) | `9fde38c0cd1f437774ba48da695bcdfb88c242e1` confirmed; tag `v1.8.0` matches | declared `1.8.0` | **LICENSE at pin is MIT**, registry still says `BSL-1.1` | **license field unresolved/incorrect**; rejection kept via event-spine invariant |
+| Temporal (`src-temporal`) | `9fde38c0cd1f437774ba48da695bcdfb88c242e1` confirmed; tag `v1.8.0` matches | declared `1.8.0` | **LICENSE at pin is MIT**; corrected in registry. Rejection maintained fail-closed on architecture grounds (single event spine invariant). | verified (rejected fail-closed on architecture grounds) |
 | CoderOS (`src-coderos`) | `b980e90b49ea7c0639094f3060ced5aaf772a571` confirmed | `frozen-control-plane` | GitHub SPDX MIT; registry `Proprietary-Internal` (internal classification) | commit verified; license classification policy, not retargeted |
 | Remaining 18 sources (airbyte, chatwoot, dagster, dlt, duckdb, firecrawl, great-expectations, higgsfield-mcp-bridge, medusa, n8n, opa, openlineage, otel-python, polars, pyperf, saleor, scrapy, vendure) | pinned commit resolves and declared tag matches (or intentional `main-pinned`) | see registry | SPDX or LICENSE file present; ELv2/AGPL/Sustainable Use recorded as `NOASSERTION`/`Other` on GitHub but fail-closed reject already applied | verified |
 
