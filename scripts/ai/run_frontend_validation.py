@@ -21,6 +21,16 @@ MAX_STEP_OUTPUT_BYTES = 16384
 SAFE_ENVIRONMENT_KEYS = frozenset(
     {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "COMSPEC", "PATHEXT"}
 )
+EXPECTED_FRONTEND_SCRIPTS = {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test",
+    "build": "tsc && vite build",
+}
+FRONTEND_SCRIPT_HOOKS = frozenset(
+    f"{prefix}{name}"
+    for name in EXPECTED_FRONTEND_SCRIPTS
+    for prefix in ("pre", "post")
+)
 
 
 def _npm() -> str:
@@ -35,6 +45,24 @@ def _child_environment(base: dict[str, str] | None = None) -> dict[str, str]:
     """Pass only OS runtime variables; do not forward operator credentials to npm."""
     source = os.environ if base is None else base
     return {key: value for key, value in source.items() if key.upper() in SAFE_ENVIRONMENT_KEYS}
+
+
+def _frontend_script_error(frontend: Path) -> str | None:
+    """Reject package commands and npm hooks outside this runner's fixed contract."""
+    try:
+        manifest = json.loads((frontend / "package.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "frontend_manifest_invalid"
+    scripts = manifest.get("scripts") if isinstance(manifest, dict) else None
+    if not isinstance(scripts, dict):
+        return "frontend_scripts_missing"
+    for name, expected in EXPECTED_FRONTEND_SCRIPTS.items():
+        if scripts.get(name) != expected:
+            return f"frontend_script_not_allowlisted:{name}"
+    for hook in sorted(FRONTEND_SCRIPT_HOOKS):
+        if hook in scripts:
+            return f"frontend_lifecycle_script_not_allowlisted:{hook}"
+    return None
 
 
 def _stop_process_tree(process: subprocess.Popen[bytes]) -> None:
@@ -177,7 +205,7 @@ def classify_step(name: str, result: dict[str, Any]) -> str:
     return "source"
 
 
-def run_frontend_validation(root: Path, *, skip_ci: bool = False) -> dict[str, Any]:
+def run_frontend_validation(root: Path) -> dict[str, Any]:
     frontend = root / "frontend"
     lockfile = frontend / "package-lock.json"
     npm = _npm()
@@ -203,6 +231,12 @@ def run_frontend_validation(root: Path, *, skip_ci: bool = False) -> dict[str, A
         report["status"] = "failed"
         report["failure_class"] = "configuration"
         report["reason"] = "package_lock_missing"
+        return report
+    script_error = _frontend_script_error(frontend)
+    if script_error:
+        report["status"] = "failed"
+        report["failure_class"] = "configuration"
+        report["reason"] = script_error
         return report
     if not npm:
         report["status"] = "unavailable"
@@ -240,10 +274,9 @@ def run_frontend_validation(root: Path, *, skip_ci: bool = False) -> dict[str, A
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", default=str(REPOSITORY_ROOT))
-    parser.add_argument("--skip-ci", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
-    report = run_frontend_validation(Path(args.repository), skip_ci=args.skip_ci)
+    report = run_frontend_validation(Path(args.repository))
     if args.json:
         print(json.dumps(report, indent=2))
     else:

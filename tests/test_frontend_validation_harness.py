@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 import pytest
 
 from scripts.ai import run_frontend_validation, select_tests
 from scripts.ai import run_local_quality_gate as gate
+
+SAFE_NPM_SCRIPTS = {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test",
+    "build": "tsc && vite build",
+}
 
 
 def test_frontend_selector_runs_validation_harness():
@@ -34,7 +41,7 @@ def test_validation_harness_fails_closed_without_lockfile(tmp_path):
     frontend = tmp_path / "frontend"
     frontend.mkdir()
     (frontend / "package.json").write_text("{}", encoding="utf-8")
-    report = run_frontend_validation.run_frontend_validation(tmp_path, skip_ci=True)
+    report = run_frontend_validation.run_frontend_validation(tmp_path)
     assert report["status"] == "failed"
     assert report["failure_class"] == "configuration"
     assert report["mutated"] is False
@@ -44,7 +51,7 @@ def test_validation_harness_fails_closed_without_lockfile(tmp_path):
 def test_validation_harness_missing_node_modules_is_unavailable_without_install(tmp_path, monkeypatch):
     frontend = tmp_path / "frontend"
     frontend.mkdir()
-    (frontend / "package.json").write_text("{}", encoding="utf-8")
+    (frontend / "package.json").write_text(json.dumps({"scripts": SAFE_NPM_SCRIPTS}), encoding="utf-8")
     (frontend / "package-lock.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(run_frontend_validation, "_npm", lambda: "npm")
     monkeypatch.setattr(run_frontend_validation, "_run", lambda *args, **kwargs: pytest.fail("must not install"))
@@ -55,6 +62,36 @@ def test_validation_harness_missing_node_modules_is_unavailable_without_install(
     assert report["dependency_installation"] == "not_attempted"
     assert report["steps"] == []
     assert Path(report["frontend"]).name == "frontend"
+
+
+@pytest.mark.parametrize(
+    ("scripts", "reason"),
+    [
+        (
+            {**SAFE_NPM_SCRIPTS, "test": "node --test && curl https://example.invalid"},
+            "frontend_script_not_allowlisted:test",
+        ),
+        (
+            {**SAFE_NPM_SCRIPTS, "pretest": "curl https://example.invalid"},
+            "frontend_lifecycle_script_not_allowlisted:pretest",
+        ),
+    ],
+)
+def test_validation_harness_rejects_unreviewed_npm_commands(tmp_path, monkeypatch, scripts, reason):
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text(json.dumps({"scripts": scripts}), encoding="utf-8")
+    (frontend / "package-lock.json").write_text("{}", encoding="utf-8")
+    (frontend / "node_modules").mkdir()
+    monkeypatch.setattr(run_frontend_validation, "_npm", lambda: "npm")
+    monkeypatch.setattr(run_frontend_validation, "_run", lambda *args, **kwargs: pytest.fail("must fail closed"))
+
+    report = run_frontend_validation.run_frontend_validation(tmp_path)
+
+    assert report["status"] == "failed"
+    assert report["failure_class"] == "configuration"
+    assert report["reason"] == reason
+    assert report["steps"] == []
 
 
 def test_validation_child_environment_is_allowlisted():
@@ -93,7 +130,7 @@ def test_validation_command_timeout_is_classified(tmp_path):
 def test_validation_report_does_not_include_raw_output(tmp_path, monkeypatch):
     frontend = tmp_path / "frontend"
     frontend.mkdir()
-    (frontend / "package.json").write_text("{}", encoding="utf-8")
+    (frontend / "package.json").write_text(json.dumps({"scripts": SAFE_NPM_SCRIPTS}), encoding="utf-8")
     (frontend / "package-lock.json").write_text("{}", encoding="utf-8")
     (frontend / "node_modules").mkdir()
     monkeypatch.setattr(run_frontend_validation, "_npm", lambda: "npm")
