@@ -279,6 +279,38 @@ def test_export_rejection_when_upstream_claims_present(tmp_path: Path, monkeypat
     assert report["phases"][2]["detail"]["reason"] == "export_claim_rejected"
 
 
+def test_real_trustos_export_allows_explicit_false_live_flags():
+    phase = vertical.export_rows([
+        {
+            "scenario": "fixture_candidate",
+            "candidate_id": "cand-001",
+            "promoted_to_launch": False,
+            "blockers": ["operator_vertical_dry_run"],
+            "evidence_classes": {"research_input": "fixture", "compliance": "unavailable"},
+        }
+    ])
+
+    assert phase["classification"] == "passed"
+    export = phase["detail"]["exports"][0]
+    assert export["evidence_state"] == "requires_review"
+    assert export["payload"]["live_validated"] is False
+    assert export["payload"]["launch_authorized"] is False
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        {"live_validated": True},
+        {"nested": {"live_validated": True}},
+        {"launch_authorized": True},
+        {"evidence_state": "live_validated"},
+        {"status": "launch_authorized"},
+    ],
+)
+def test_export_claim_scanner_blocks_positive_or_ambiguous_nested_claims(claim):
+    assert vertical._forbid_live_claims(claim)
+
+
 def test_repeated_execution_is_deterministic(tmp_path: Path, monkeypatch):
     path = _manifest(tmp_path)
 

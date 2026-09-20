@@ -255,18 +255,33 @@ def invoke_replay(
 
 
 def _forbid_live_claims(payload: Mapping[str, Any]) -> list[str]:
-    issues: list[str] = []
-    blob = json.dumps(payload, default=str).lower()
-    if payload.get("evidence_state") in FORBIDDEN_EVIDENCE:
-        issues.append("forbidden_evidence_state")
-    status = str(payload.get("status") or "").lower()
-    if any(token in status for token in FORBIDDEN_STATUS_TOKENS):
-        issues.append("forbidden_status_token")
-    if "live_validated" in blob:
-        issues.append("live_validated_token")
-    if payload.get("launch_authorized") is True:
-        issues.append("launch_authorization")
-    return issues
+    issues: set[str] = set()
+
+    def inspect(value: Any) -> None:
+        if isinstance(value, Mapping):
+            evidence_state = value.get("evidence_state")
+            if isinstance(evidence_state, str) and evidence_state.casefold() in FORBIDDEN_EVIDENCE:
+                issues.add("forbidden_evidence_state")
+            status = value.get("status")
+            if isinstance(status, str) and any(
+                token in status.casefold() for token in FORBIDDEN_STATUS_TOKENS
+            ):
+                issues.add("forbidden_status_token")
+            # The key itself is not a claim: this bridge deliberately emits
+            # live_validated=false and launch_authorized=false. Only a value
+            # other than the explicit boolean False is unsafe/ambiguous.
+            if "live_validated" in value and value["live_validated"] is not False:
+                issues.add("live_validated_claim")
+            if "launch_authorized" in value and value["launch_authorized"] is not False:
+                issues.add("launch_authorization")
+            for nested in value.values():
+                inspect(nested)
+        elif isinstance(value, (list, tuple)):
+            for nested in value:
+                inspect(nested)
+
+    inspect(payload)
+    return sorted(issues)
 
 
 def export_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
