@@ -198,16 +198,30 @@ def diagnose_unavailable_ollama(host: str = "127.0.0.1", port: int = 11434) -> D
     )
 
 
-def diagnose_zero_step_ci(ci_status: str = "ci_unavailable", steps_executed: int = 0) -> DiagnosticResult:
+def diagnose_zero_step_ci(
+    ci_status: str = "ci_unavailable",
+    steps_executed: int = 0,
+    runner_id: int | None = None,
+    annotations: list[str] | None = None,
+) -> DiagnosticResult:
     """Diagnose zero-step or unavailable CI pipeline."""
-    if ci_status in {"ci_unavailable", "unavailable"} or steps_executed == 0:
+    zero_runner = runner_id is not None and runner_id == 0
+    if ci_status in {"ci_unavailable", "unavailable"} or steps_executed == 0 or zero_runner:
+        msg = f"Continuous Integration reported '{ci_status}' with {steps_executed} steps executed."
+        msg += " Runner allocation or workflow startup is unavailable; cause is unverified."
         return DiagnosticResult(
             code="zero_step_ci",
             category="continuous_integration",
             status="detected",
-            message=f"Continuous Integration reported '{ci_status}' with {steps_executed} steps executed.",
+            message=msg,
             remediation="Remote CI cannot validate PRs in zero-step mode. Run `python scripts/ai/run_local_quality_gate.py --from-git` and `python scripts/ai/session_finish.py --dry-run` locally before submitting.",
-            failure_details={"ci_status": ci_status, "steps_executed": steps_executed},
+            failure_details={
+                "ci_status": ci_status,
+                "steps_executed": steps_executed,
+                "runner_id": runner_id,
+                "runner_assigned": runner_id is not None and runner_id > 0,
+                "cause_verified": False,
+            },
         )
 
     return DiagnosticResult(
@@ -216,7 +230,7 @@ def diagnose_zero_step_ci(ci_status: str = "ci_unavailable", steps_executed: int
         status="ok",
         message=f"CI is active ({ci_status}, {steps_executed} steps).",
         remediation="No action required.",
-        failure_details={"ci_status": ci_status, "steps_executed": steps_executed},
+        failure_details={"ci_status": ci_status, "steps_executed": steps_executed, "runner_id": runner_id},
     )
 
 
@@ -370,9 +384,69 @@ def diagnose_invalid_environment_contract(
     )
 
 
+def diagnose_service_delivery_readiness(
+    environ: Mapping[str, str] | None = None,
+    base_url: str | None = None,
+) -> DiagnosticResult:
+    """Diagnose readiness of service delivery workbench projection and router."""
+    env = os.environ if environ is None else environ
+    proj_val = env.get("MARKETOS_SERVICE_DELIVERY_PROJECTION", "")
+
+    # Check route availability
+    route_installed = False
+    try:
+        import importlib
+        importlib.import_module("api.routes.service_delivery_workbench")
+        route_installed = True
+    except ModuleNotFoundError:
+        route_installed = False
+
+    if not proj_val and not route_installed:
+        return DiagnosticResult(
+            code="service_delivery_readiness",
+            category="service_delivery",
+            status="detected",
+            message="Service delivery workbench route is unmerged (PR #271) and projection is unconfigured.",
+            remediation="Merge PR #271 and configure MARKETOS_SERVICE_DELIVERY_PROJECTION pointing to an artifact under artifacts/.",
+            failure_details={"route_installed": False, "projection_configured": False},
+        )
+
+    if not proj_val:
+        return DiagnosticResult(
+            code="service_delivery_readiness",
+            category="service_delivery",
+            status="detected",
+            message="Service delivery projection is not configured (MARKETOS_SERVICE_DELIVERY_PROJECTION is unset).",
+            remediation="Run `python scripts/generate_service_delivery_projection.py` and set MARKETOS_SERVICE_DELIVERY_PROJECTION.",
+            failure_details={"route_installed": route_installed, "projection_configured": False},
+        )
+
+    from backend.deployment.service_delivery_smoke import validate_service_delivery_projection
+    proj_report = validate_service_delivery_projection(path=proj_val, environ=env)
+    if proj_report["status"] != "passed":
+        return DiagnosticResult(
+            code="service_delivery_readiness",
+            category="service_delivery",
+            status="detected",
+            message=f"Service delivery projection validation returned '{proj_report['status']}': {proj_report.get('reason')}",
+            remediation=f"Resolve projection issue: {proj_report.get('message')}",
+            failure_details=proj_report,
+        )
+
+    return DiagnosticResult(
+        code="service_delivery_readiness",
+        category="service_delivery",
+        status="ok",
+        message="Service delivery projection and contract are valid.",
+        remediation="No action required.",
+        failure_details={"route_installed": route_installed, "projection_status": "passed"},
+    )
+
+
 def run_all_diagnostics(
     environ: Mapping[str, str] | None = None,
     mode: str = "local_dry_run",
+    include_service_delivery: bool = False,
 ) -> dict[str, Any]:
     """Execute all diagnostic checks and aggregate results."""
     results = [
@@ -387,6 +461,8 @@ def run_all_diagnostics(
         diagnose_port_collision(3000),
         diagnose_invalid_environment_contract(environ=environ, mode=mode),
     ]
+    if include_service_delivery:
+        results.append(diagnose_service_delivery_readiness(environ=environ))
 
     detected = [r for r in results if r.status == "detected"]
     ok = [r for r in results if r.status == "ok"]
@@ -417,5 +493,6 @@ __all__ = [
     "diagnose_failed_healthcheck",
     "diagnose_port_collision",
     "diagnose_invalid_environment_contract",
+    "diagnose_service_delivery_readiness",
     "run_all_diagnostics",
 ]
