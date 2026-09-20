@@ -113,6 +113,7 @@ class ScenarioReplayRecord:
     second_hash_sequence: tuple[str, ...] = ()
     aggregate_first_hash: str = ""
     aggregate_second_hash: str = ""
+    hash_authority: str = "Event.replay_hash"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -253,6 +254,7 @@ class ScenarioReplayLaboratory:
                     second_hash_sequence=tuple(second_hashes),
                     aggregate_first_hash=aggregate_replay_hash(first_hashes),
                     aggregate_second_hash=aggregate_replay_hash(second_hashes),
+                    hash_authority="Event.replay_hash",
                 )
             )
         return records

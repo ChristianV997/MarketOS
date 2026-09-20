@@ -10,7 +10,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-COMMERCE_LIFECYCLE_EVENT_COUNT = 17
+from evaluation.commerce.dry_run_lifecycle import LIFECYCLE_STEPS
+
+COMMERCE_LIFECYCLE_EVENT_COUNT = 1 + len(LIFECYCLE_STEPS) + 1
 FULFILLMENT_EVENT_COUNT = 20
 CLI_CONCAT_EVENT_COUNT = 37
 MIN_SAMPLES_FOR_TAIL = 20

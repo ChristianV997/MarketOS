@@ -49,6 +49,7 @@ def test_scenario_replay_laboratory_all_five_scenarios():
         assert rec.first_hash_sequence == rec.second_hash_sequence
         assert rec.aggregate_first_hash == rec.aggregate_second_hash
         assert rec.aggregate_first_hash == PUBLISHED_COMMERCE_AGGREGATE_HASHES[rec.scenario_id]
+        assert rec.hash_authority == "Event.replay_hash"
         assert rec.achievable_stage == EXPECTED_STAGES[rec.scenario_id]
         assert rec.live_authority_violations == ()
         assert rec.live_actions_taken is False

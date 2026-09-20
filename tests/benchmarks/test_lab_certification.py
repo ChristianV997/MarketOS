@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from evaluation.commerce.dry_run_lifecycle import LIFECYCLE_STEPS
 from scripts.benchmarks.lab_certification import (
     CLI_CONCAT_EVENT_COUNT,
     COMMERCE_LIFECYCLE_EVENT_COUNT,
@@ -32,6 +33,7 @@ _PR279_SHA = "0dd413969b5c822f0bcbfa1764ea9fb9eecc9a57"
 
 
 def test_seventeen_versus_thirty_seven_scopes_are_not_like_for_like():
+    assert COMMERCE_LIFECYCLE_EVENT_COUNT == 1 + len(LIFECYCLE_STEPS) + 1
     assert COMMERCE_LIFECYCLE_EVENT_COUNT == 17
     assert CLI_CONCAT_EVENT_COUNT == 37
     assert classify_event_scope(17) == "commerce_lifecycle"
