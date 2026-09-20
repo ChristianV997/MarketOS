@@ -490,7 +490,9 @@ function displayMoney(raw: unknown): ServiceEngagement["economics"]["fee"] {
   if (amount == null) return null;
   return {
     amount_label: String(amount),
-    currency: String(record.currency ?? "USD"),
+    currency: record.currency == null || String(record.currency).trim() === ""
+      ? "unavailable"
+      : String(record.currency),
     evidence_class: normalizeEvidenceClass(record.evidence_class ?? record.evidence_state),
     source: "backend_service_economics",
     display_only: true,

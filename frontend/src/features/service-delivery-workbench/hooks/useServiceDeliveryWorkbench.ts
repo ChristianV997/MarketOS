@@ -4,7 +4,7 @@ import { FUTURE_WORKBENCH_PATH } from "../contracts/serviceEngagementProjection.
 import { adaptServiceProjection } from "../lib/adaptServiceProjection.ts";
 import { composeWorkbenchViewModel } from "../lib/composeWorkbenchViewModel.ts";
 import { EMPTY_FILTERS, type WorkbenchFilters } from "../lib/filterEngagements.ts";
-import { UNSERVED_GET_ENVELOPE } from "../lib/unservedGetEnvelope.ts";
+import { httpErrorUnavailableEnvelope, UNSERVED_GET_ENVELOPE } from "../lib/unservedGetEnvelope.ts";
 import { joinApiPath, resolveApiBaseUrl } from "@/lib/apiBase";
 
 /**
@@ -16,8 +16,7 @@ async function probeWorkbenchProjection(): Promise<unknown> {
   const response = await fetch(url, { method: "GET" });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    if (body && typeof body === "object") return body;
-    throw new Error(`${response.status} ${FUTURE_WORKBENCH_PATH}`);
+    return httpErrorUnavailableEnvelope(response.status, body);
   }
   return response.json();
 }

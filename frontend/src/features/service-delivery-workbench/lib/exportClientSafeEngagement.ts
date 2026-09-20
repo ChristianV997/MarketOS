@@ -5,9 +5,10 @@ import {
 } from "../contracts/serviceEngagementProjection.ts";
 
 const SECRET_SHAPED = /sk-live-|sk-test-|ghp_|github_pat_|AKIA[0-9A-Z]{16}|bearer\s+[a-z0-9._-]{10,}/i;
-const FORBIDDEN_KEY = /(prompt|formula|heuristic|source_code|private_key|provider_payload|internal_notes|credential|cross_client)/i;
+const FORBIDDEN_KEY = /(prompt|formula|heuristic|source_code|private_key|provider_payload|internal_notes|private_note|credential|cross_client|cross_workspace)/i;
 const PATH_SHAPED = /(^|[\\/])(users|home|documents|marketos)[\\/]/i;
 const HTML_SHAPED = /<\/?[a-z][\s\S]*>/i;
+const FORMULA_SHAPED = /\b(?:contribution|fee|labor|tooling)\s*=\s*/i;
 
 export const EXPORT_OMIT_KEYS = [
   "internal_prompt",
@@ -22,7 +23,7 @@ export const EXPORT_OMIT_KEYS = [
 
 export function containsSecretShapedValue(value: unknown): boolean {
   if (typeof value === "string") {
-    return SECRET_SHAPED.test(value) || PATH_SHAPED.test(value) || HTML_SHAPED.test(value);
+    return SECRET_SHAPED.test(value) || PATH_SHAPED.test(value) || HTML_SHAPED.test(value) || FORMULA_SHAPED.test(value);
   }
   if (Array.isArray(value)) return value.some(containsSecretShapedValue);
   if (value && typeof value === "object") {
