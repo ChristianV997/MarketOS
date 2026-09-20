@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   useBenchmarkMatrix,
   usePhase1Readiness,
@@ -27,23 +28,38 @@ export function useFirstPhaseEvidenceCockpit(): {
     || research.isLoading;
 
   const researchPortfolio = research.data?.portfolios?.[0] ?? null;
-  const packet = composeCockpitViewModel({
-    phase1Readiness: phase1Readiness.data ?? null,
-    benchmark: benchmark.data ?? null,
-    publicMarket: publicMarket.data ?? null,
-    researchPortfolio,
-    readinessError: Boolean(phase1Readiness.error),
-    benchmarkError: Boolean(benchmark.error),
-    publicMarketError: Boolean(publicMarket.error),
-    researchError: Boolean(research.error),
-    isLoading,
-    researchToDecisionProjection: extractExistingResearchToDecisionProjection(
-      undefined,
+  const packet = useMemo(
+    () =>
+      composeCockpitViewModel({
+        phase1Readiness: phase1Readiness.data ?? null,
+        benchmark: benchmark.data ?? null,
+        publicMarket: publicMarket.data ?? null,
+        researchPortfolio,
+        readinessError: Boolean(phase1Readiness.error),
+        benchmarkError: Boolean(benchmark.error),
+        publicMarketError: Boolean(publicMarket.error),
+        researchError: Boolean(research.error),
+        isLoading,
+        researchToDecisionProjection: extractExistingResearchToDecisionProjection(
+          undefined,
+          researchPortfolio,
+        ),
+        commerceProjection: undefined,
+        operatorWorkspaceId: researchPortfolio?.workspace_id ?? null,
+      }),
+    [
+      phase1Readiness.data,
+      phase1Readiness.error,
+      benchmark.data,
+      benchmark.error,
+      publicMarket.data,
+      publicMarket.error,
+      research.data,
+      research.error,
       researchPortfolio,
-    ),
-    commerceProjection: undefined,
-    operatorWorkspaceId: researchPortfolio?.workspace_id ?? null,
-  });
+      isLoading,
+    ],
+  );
 
   return {
     packet,

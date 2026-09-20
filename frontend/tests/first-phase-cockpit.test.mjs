@@ -703,6 +703,7 @@ test("route wiring and api base authority remain unchanged", async () => {
   assert.match(mainSource, /\/operator\/first-phase/);
   assert.match(hookSource, /usePhase1Readiness/);
   assert.match(hookSource, /useResearchPortfolios/);
+  assert.match(hookSource, /useMemo/);
   assert.doesNotMatch(hookSource, /research_to_decision\.py|fetchResearchToDecision/);
   assert.match(apiBase, /VITE_API_BASE_URL/);
 });

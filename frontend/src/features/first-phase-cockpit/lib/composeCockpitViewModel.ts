@@ -457,7 +457,9 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     input.commerceProjection,
     input.operatorWorkspaceId ?? null,
   );
-  const rankedCandidates = commerce.rows.map(enrichDecisionReview);
+  const rankedCandidates = commerce.accepted
+    ? commerce.rows.map(enrichDecisionReview)
+    : commerce.rows;
   const commerceFatal = commerce.warning && commerce.warning !== "commerce_client_projection_unavailable"
     ? commerce.warning
     : null;

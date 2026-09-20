@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { CandidateFilterState, RankedCandidateRow } from "../contracts/firstPhaseEvidencePacket";
 import { STABLE_TOP_N } from "../contracts/firstPhaseEvidencePacket";
 import { uniqueDecisions } from "../lib/filterCandidates";
@@ -17,7 +18,7 @@ export function CockpitToolbar({
   onExport: () => void;
   exportDisabled: boolean;
 }) {
-  const decisions = uniqueDecisions(candidates);
+  const decisions = useMemo(() => uniqueDecisions(candidates), [candidates]);
 
   return (
     <section
