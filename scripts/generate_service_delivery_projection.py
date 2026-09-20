@@ -70,6 +70,59 @@ def _draft_ready_example(package_id: str, client_id: str, registry: DeliverableR
     return build_service_engagement_row(engagement, pkg, dq, economics, artifact)
 
 
+def _example_at_state(
+    package_id: str,
+    client_id: str,
+    registry: DeliverableRegistry,
+    *,
+    target_state: str,
+    currency: str | None = None,
+) -> dict:
+    packages = {p.package_id: p for p in default_service_delivery_packages()}
+    pkg = packages[package_id]
+    billed = currency or pkg.currency
+    engagement = create_engagement(
+        client_id=client_id,
+        workspace=ClientWorkspace(name=client_id, workspace_type="client_service"),
+        package=pkg,
+        scope=f"Example engagement ({target_state})",
+    )
+    path = {
+        "intake": (),
+        "eligible": ("screening", "eligible"),
+        "data_inadequate": ("screening", "data_inadequate"),
+        "client_review": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review"),
+        "approved": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "approved"),
+        "delivered": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready", "client_review", "approved", "delivered"),
+        "cancelled": ("cancelled",),
+        "rejected": ("screening", "rejected"),
+        "draft_ready": ("screening", "eligible", "scoped", "evidence_collection", "analysis", "draft_ready"),
+    }[target_state]
+    refs = (EvidenceRef(f"ev-{client_id}", source_type="manual_import", evidence_state="fixture", captured_at="offline-deterministic"),)
+    for state in path:
+        if state == "analysis":
+            engagement = transition_engagement(engagement, state, evidence_set=refs)
+        else:
+            engagement = transition_engagement(engagement, state)
+    data_inadequate = target_state == "data_inadequate"
+    dq = assess_client_data_quality({"revenue": {"available": True}} if data_inadequate else _adequate_intake())
+    economics = None
+    if not data_inadequate and target_state not in {"cancelled", "rejected", "intake"}:
+        economics = evaluate_engagement_economics(
+            pkg, fee=Money(str(pkg.price_min_money.amount), billed), ad_spend=Money("2000", billed),
+            roas_before=Decimal("1.2"), roas_after=Decimal("1.6"),
+            cac_before=Money("30", billed), cac_after=Money("24", billed),
+            labor_cost=Money(str(pkg.labor_cost.amount), billed),
+            tooling_cost=Money(str(pkg.tooling_cost.amount), billed),
+            pass_through_cost=Money(str(pkg.optional_pass_through_cost.amount), billed),
+            refund_revision_reserve=Money(str(pkg.refund_revision_reserve.amount), billed),
+            evidence_refs=refs,
+        )
+    deliverable = build_client_service_deliverable(engagement, pkg, economics, dq, recommendation="Fixture example.", registry=registry)
+    artifact = build_service_delivery_artifact(engagement, pkg, economics, dq, deliverable, evidence_refs=refs)
+    return build_service_engagement_row(engagement, pkg, dq, economics, artifact)
+
+
 def _data_inadequate_example(package_id: str, client_id: str, registry: DeliverableRegistry) -> dict:
     packages = {p.package_id: p for p in default_service_delivery_packages()}
     pkg = packages[package_id]
@@ -91,8 +144,13 @@ def build_examples() -> list[dict]:
     return [
         _draft_ready_example("product-validation-sprint", "example-client-alpha", registry),
         _data_inadequate_example("unit-economics-cac-roas-diagnostic", "example-client-beta", registry),
-        _draft_ready_example("launch-draft-pack", "example-client-gamma", registry),
-        _draft_ready_example("managed-acquisition-cro", "example-client-delta", registry),
+        _example_at_state("launch-draft-pack", "example-client-gamma-cad", registry, target_state="client_review", currency="CAD"),
+        _example_at_state("managed-acquisition-cro", "example-client-delta-mxn", registry, target_state="draft_ready", currency="MXN"),
+        _example_at_state("product-validation-sprint", "example-client-eligible", registry, target_state="eligible"),
+        _example_at_state("launch-draft-pack", "example-client-approved", registry, target_state="approved"),
+        _example_at_state("unit-economics-cac-roas-diagnostic", "example-client-delivered", registry, target_state="delivered"),
+        _example_at_state("product-validation-sprint", "example-client-cancelled", registry, target_state="cancelled"),
+        _example_at_state("managed-acquisition-cro", "example-client-rejected", registry, target_state="rejected"),
     ]
 
 

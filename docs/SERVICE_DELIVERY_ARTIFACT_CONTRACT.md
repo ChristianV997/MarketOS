@@ -90,10 +90,18 @@ directly regression-tested
 
 `evaluation.companyos.service_delivery_projection` is the producer that
 turns engagement + package + data-quality + economics + artifact objects
-into the `service-delivery-plane-v1`-shaped envelope the existing,
-untouched frontend adapter (`adaptServiceProjection.ts`) already knows how
-to consume, and that PR #271's read-only `GET /api/service-delivery/workbench`
-route (also untouched here) already knows how to validate and serve.
+into the `service-delivery-plane-v1`-shaped envelope the documented
+frontend adapter already knows how to consume. PR #271 owns
+`GET /api/service-delivery/workbench`. This branch and #271 are siblings of
+`main`; producer tests may mirror GET validation to prove envelope
+compatibility, but that mirror is not a merged route and is not a second
+API.
+
+The GET contract (owned by #271) fail-closes on missing/unsafe artifacts,
+unsupported schema versions, leakage, non-object rows, missing/duplicate
+`engagement_id`, display-economics currency mismatch, and oversized
+payloads. This producer never recalculates money, never upgrades evidence
+to live validation, and never emits POST or provider calls.
 
 This module does not reimplement that adapter's translation logic — it
 only supplies keys the adapter already reads (`evidence_set[].evidence_class`,

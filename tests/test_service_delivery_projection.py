@@ -271,6 +271,24 @@ def test_cad_currency_is_preserved_through_the_projection():
     assert row["economics"]["contribution"]["currency"] == "CAD"
 
 
+def test_stale_intake_fields_mark_the_row_stale_without_inventing_amounts():
+    pkg = packages_by_id()["product-validation-sprint"]
+    engagement = create_engagement(client_id="client-stale", workspace=client_workspace(), package=pkg, scope="stale intake")
+    engagement = transition_engagement(engagement, "screening")
+    intake = adequate_intake()
+    intake["orders"] = {"available": True, "as_of_days_ago": 400}
+    dq = assess_client_data_quality(intake, max_age_days=90)
+    registry = DeliverableRegistry(path="/tmp/never-written-stale-projection-test.json")
+    deliverable = build_client_service_deliverable(engagement, pkg, None, dq, registry=registry)
+    artifact = build_service_delivery_artifact(engagement, pkg, None, dq, deliverable)
+    row = build_service_engagement_row(engagement, pkg, dq, None, artifact)
+    assert row["stale"] is True
+    assert row["economics"]["contribution"] is None
+    projection = build_service_engagement_projection([row], availability="partial")
+    assert projection["availability"] == "partial"
+    assert projection["engagements"][0]["economics"]["frontend_calculates"] is False
+
+
 def test_mixed_currency_raises_mismatch_error_in_kernel():
     from backend.economics import CurrencyMismatchError
     pkg = packages_by_id()["product-validation-sprint"]

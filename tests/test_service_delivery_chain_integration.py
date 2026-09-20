@@ -106,12 +106,14 @@ def _drive_to_state(package_id: str, target_state: str, *, client_id: str, curre
 
 
 def _reproduce_271_route_validation(payload: dict) -> str:
-    """Reproduces api/routes/service_delivery_workbench.py's exact
-    validation (from its PR #271 diff) since that module is not yet merged
-    into main and cannot be imported directly. Returns "available_read_only"
-    or "unavailable" -- never anything else, matching the route's own two
-    literal outcomes."""
+    """Contract mirror of PR #271 GET validation. #271 is a sibling of
+    origin/main, not an ancestor of this branch; this function is not the
+    live route and is not a merged dependency.
+
+    Returns "available_read_only" or "unavailable".
+    """
     supported_versions = {"service-engagement-projection-v1", "service-delivery-plane-v1"}
+    max_engagements = 500
     version = str(payload.get("schema_version", payload.get("report_version", "")))
     if version not in supported_versions:
         return "unavailable"
@@ -122,6 +124,28 @@ def _reproduce_271_route_validation(payload: dict) -> str:
     rows = payload.get("engagements", payload.get("packages", []))
     if not isinstance(rows, list):
         return "unavailable"
+    if len(rows) > max_engagements:
+        return "unavailable"
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            return "unavailable"
+        engagement_id = row.get("engagement_id")
+        if engagement_id is None or str(engagement_id).strip() == "":
+            return "unavailable"
+        key = str(engagement_id)
+        if key in seen:
+            return "unavailable"
+        seen.add(key)
+        economics = row.get("economics")
+        currencies = []
+        if isinstance(economics, dict):
+            for money_key in ("fee", "contribution"):
+                money = economics.get(money_key)
+                if isinstance(money, dict) and money.get("currency"):
+                    currencies.append(str(money["currency"]))
+        if currencies and len(set(currencies)) > 1:
+            return "unavailable"
     return "available_read_only"
 
 
