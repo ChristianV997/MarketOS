@@ -258,3 +258,65 @@ def test_a_tampered_real_handoff_artifact_cannot_be_resumed():
     malformed_handoff = dict(resume_from_disk, worktree=123, open_blockers="not-a-list")
     with pytest.raises(ResumePacketError):
         validate_resume_packet(malformed_handoff, expected_task_packet=task_packet)
+
+
+def test_a_real_handoff_naming_an_out_of_scope_file_cannot_be_resumed():
+    """Distinct from path-traversal/malformed-type rejection above: this
+    changed_files entry is a perfectly well-formed, safe, relative path --
+    it is simply not inside the task packet's allowed_scope. That must be
+    rejected too, through the real prepare -> execute -> handoff pipeline,
+    with the resume packet's task_packet_digest matching the (unmodified)
+    task packet the whole way -- proving digest equality alone does not
+    imply the resumed edits stayed in scope."""
+    snapshot = _real_snapshot()
+    task_packet_raw = {
+        "agent_id": "claude-ai-development-loop-consolidation",
+        "source_chat": "Claude",
+        "lane": "marketos-ai-development-loop-consolidation-v1",
+        "objective": "prove an in-scope-syntax but out-of-allowed_scope file cannot be resumed",
+        "allowed_scope": ["tests/ai/test_ai_development_loop_e2e.py"],
+        "prohibited_scope": ["artifacts/", ".env"],
+        "base_sha": snapshot["HEAD"] or snapshot["origin_main"] or "0" * 40,
+        "worktree": snapshot["repository"]["path"],
+        "dependencies": ["MarketOS.AIContext.v1"],
+        "acceptance_criteria": ["the loop test passes"],
+        "selected_tests": ["python3 -m pytest tests/ai/test_ai_development_loop_e2e.py -q"],
+        "evidence_classification": "not_run",
+        "rollback": "revert the commit that added this test",
+        "next_action": "run the remaining selected tests",
+    }
+    prepared = bundle.prepare(snapshot, task_packet_raw)
+    task_packet = prepared["task_packet"]
+
+    ok_command = "python3 -m pytest tests/ai/test_native_agent_capability.py -q"
+    execution = bundle.execute([ok_command])
+    tests_already_run = [
+        {"command": ok_command, "evidence_classification": bundle.to_evidence_classification(execution["classifications"][ok_command])},
+    ]
+    handoff = bundle.handoff(
+        task_packet,
+        context_snapshot_replay_hash=prepared["context_snapshot_replay_hash"],
+        worktree=task_packet["worktree"],
+        branch=snapshot.get("branch") or "detached",
+        head_sha=task_packet["base_sha"],
+        base_sha=task_packet["base_sha"],
+        changed_files=["tests/ai/test_ai_development_loop_e2e.py"],
+        tests_already_run=tests_already_run,
+        tests_still_required=[],
+        open_blockers=[],
+        pending_decisions=[],
+        public_sources_inspected=[],
+        claims_not_yet_proven=[],
+        next_action="open the PR",
+    )
+    resume_from_disk = json.loads(json.dumps(handoff["resume"]))
+
+    # Same task packet, same digest, same identity/lane -- only the
+    # resume packet's own changed_files is widened past allowed_scope.
+    scope_widened = dict(resume_from_disk, changed_files=["backend/commerce/checkout.py"])
+    assert scope_widened["task_packet_digest"] == resume_from_disk["task_packet_digest"]
+    with pytest.raises(ResumePacketError, match="allowed_scope"):
+        validate_resume_packet(scope_widened, expected_task_packet=task_packet)
+
+    # The genuine artifact, unmodified, must still resume.
+    assert validate_resume_packet(resume_from_disk, expected_task_packet=task_packet) == resume_from_disk

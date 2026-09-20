@@ -150,6 +150,34 @@ def assert_safe_path(path: str, field: str) -> str:
     return value
 
 
+def _in_scope(path: str, allowed: list[str]) -> bool:
+    """True when ``path`` is ``allowed`` itself or nested under it.
+
+    The canonical scope-matching rule shared by every consumer that must
+    ask "is this path inside allowed_scope": the resume boundary here,
+    ``agent_output_eval.evaluate_report`` (which imports this instead of
+    keeping its own copy), and ``execution_bundle.pr_check``. A single
+    implementation means a scope-widening bug only has one place to hide,
+    and only one place to fix.
+
+    Both sides are compared with a trailing "/" boundary so
+    ``allowed=["tests/ai"]`` matches ``"tests/ai/x.py"`` but never
+    ``"tests/ai_evil/x.py"`` (a bare ``startswith`` without the boundary
+    would conflate the two). Callers must pass already safety-checked
+    paths (see ``assert_safe_path``): this function is pure string
+    prefix-matching and performs no path traversal, absolute-path, or
+    filesystem/symlink resolution of its own.
+    """
+    normalized = _normalize_path(path)
+    for prefix in allowed:
+        target = _normalize_path(prefix)
+        if not target:
+            continue
+        if normalized == target or normalized.startswith(target.rstrip("/") + "/") or target.startswith(normalized.rstrip("/") + "/"):
+            return True
+    return False
+
+
 def _secret_like(value: Any) -> bool:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -480,6 +508,17 @@ def validate_resume_packet(raw: Any, *, expected_task_packet: dict[str, Any] | N
             # build_resume_packet() time is the only thing that pins the
             # resume to the exact task packet it committed to.
             raise ResumePacketError("resume packet task_packet_digest does not match the expected task packet")
+        out_of_scope = [item for item in raw.get("changed_files", []) if not _in_scope(item, validated_expected["allowed_scope"])]
+        if out_of_scope:
+            # The digest check above only proves the resume packet was
+            # built from *this exact* task packet -- it says nothing about
+            # whether the resume packet's own changed_files stayed inside
+            # that task packet's allowed_scope. Without this, a resumed
+            # agent could hand back a resume packet naming edits to files
+            # entirely outside what it was authorized to touch while every
+            # other check (schema, ownership, digest, path-safety of each
+            # individual changed_files entry) still passed.
+            raise ResumePacketError(f"resume packet changed_files exceed allowed_scope: {out_of_scope}")
     return raw
 
 

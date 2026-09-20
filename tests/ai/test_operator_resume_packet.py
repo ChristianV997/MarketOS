@@ -2,6 +2,7 @@ import pytest
 
 from scripts.ai.operator_task_packet import (
     ResumePacketError,
+    _in_scope,
     build_resume_packet,
     diff_resume_state,
     validate_resume_packet,
@@ -171,6 +172,61 @@ def test_loaded_resume_packet_with_wrong_field_types_is_rejected_not_silently_ac
         tampered = dict(resume, **{bad_field: bad_value})
         with pytest.raises(ResumePacketError):
             validate_resume_packet(tampered)
+
+
+def test_resumed_changed_files_outside_allowed_scope_is_rejected():
+    """The concrete gap: task_packet_digest equality proves the resume
+    packet was built from this exact task packet, but says nothing about
+    whether the resume packet's own changed_files stayed inside that task
+    packet's allowed_scope. A resumed agent handing back edits to a file
+    it was never authorized to touch must be rejected here, not silently
+    accepted because every other check (schema, ownership, digest,
+    per-entry path safety) happened to pass."""
+    resume = build_resume_packet(TASK_PACKET, **_resume_kwargs())
+    out_of_scope = dict(resume, changed_files=["backend/commerce/checkout.py"])
+    with pytest.raises(ResumePacketError, match="allowed_scope"):
+        validate_resume_packet(out_of_scope, expected_task_packet=TASK_PACKET)
+
+
+def test_resumed_changed_files_within_allowed_scope_still_resumes():
+    resume = build_resume_packet(TASK_PACKET, **_resume_kwargs())
+    assert validate_resume_packet(resume, expected_task_packet=TASK_PACKET) == resume
+
+
+def test_scope_check_is_skipped_without_an_expected_task_packet():
+    """Without expected_task_packet, there is no allowed_scope to compare
+    against -- this must not crash, only the identity/digest/scope checks
+    that require it are skipped (unchanged from before this fix)."""
+    resume = build_resume_packet(TASK_PACKET, **_resume_kwargs(changed_files=["backend/commerce/checkout.py"]))
+    assert validate_resume_packet(resume) == resume
+
+
+@pytest.mark.parametrize(
+    ("path", "allowed", "expected"),
+    [
+        # -- prefix confusion: a sibling directory that merely shares a
+        # string prefix must never be treated as inside scope.
+        ("tests/ai/foo.py", ["tests/ai"], True),
+        ("tests/ai_evil/malicious.py", ["tests/ai"], False),
+        ("tests/aiEVIL/x.py", ["tests/ai"], False),
+        ("tests/ai", ["tests/ai/foo.py"], True),  # allowed nested under a broader changed path is fine
+        # -- exact match
+        ("tests/ai/foo.py", ["tests/ai/foo.py"], True),
+        # -- case sensitivity: must fail closed (deny), never fail open.
+        ("TESTS/AI/foo.py", ["tests/ai"], False),
+        # -- traversal: never admitted regardless of allowed_scope content
+        # (assert_safe_path rejects it earlier in the real flow; _in_scope
+        # itself must also never treat it as in-scope on its own).
+        ("../../../etc/passwd", ["tests/ai"], False),
+        # -- degenerate allowed_scope entries never act as a wildcard.
+        ("anything/at/all.py", [""], False),
+        ("anything/at/all.py", ["."], False),
+        # -- unrelated top-level directories.
+        ("backend/commerce/checkout.py", ["tests/ai"], False),
+    ],
+)
+def test_in_scope_property_table(path, allowed, expected):
+    assert _in_scope(path, allowed) is expected
 
 
 def test_genuine_resume_packet_survives_full_field_revalidation():
