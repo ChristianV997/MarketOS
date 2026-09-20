@@ -1021,7 +1021,10 @@ def test_secure_open_rejects_a_symlinked_file(tmp_path: Path, monkeypatch: pytes
 
 
 def test_secure_open_rejects_a_directory() -> None:
-    with pytest.raises(ResearchToDecisionError, match="regular file"):
+    # POSIX typically opens a directory descriptor and lets fstat reject it;
+    # Windows may deny os.open() before a descriptor is returned. Both paths
+    # must fail closed with the public domain error.
+    with pytest.raises(ResearchToDecisionError):
         _open_verified_evidence_file(Path(__file__).resolve().parent, label="x")
 
 
