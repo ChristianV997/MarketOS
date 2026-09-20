@@ -470,7 +470,8 @@ def _candidate(candidate_id: str, market: Mapping[str, Any] | None, supplier: Ma
     score = ProductOpportunityScore(candidate_id, m, s, c, combined, confidence, grade, recommendation, risk, {"marketplace_weight": 0.4 if use_consumer_weight else 0.55, "supplier_weight": 0.35 if use_consumer_weight else 0.45, "consumer_weight": 0.25 if use_consumer_weight else 0.0, "raw_marketplace": m, "raw_supplier": s, "raw_consumer": c})
     action = _plan(candidate_id, recommendation.code)
     hooks = tuple(item.get("hook", "") for item in consumer_score.get("creative_hooks", []) if isinstance(item, Mapping) and item.get("hook"))
-    market_access = build_market_access_section({"id": candidate_id}, market_access_evidence)
+    offering_kind = (market or {}).get("offering_kind") or (supplier or {}).get("offering_kind") or (consumer or {}).get("offering_kind")
+    market_access = build_market_access_section({"id": candidate_id, "offering_kind": offering_kind}, market_access_evidence)
     result = ProductOpportunityCandidate(candidate_id, title, query, score, thresholds, economics, matrix, hooks, tuple(consumer_voc.get("pain_points", [])), tuple(consumer_voc.get("objections", [])), tuple(consumer_score.get("recommended_ad_angles", [])), tuple(risk.supplier_risks), tuple(risk.marketplace_risks), tuple(risk.consumer_risks), market_access)
     return result, action
 
