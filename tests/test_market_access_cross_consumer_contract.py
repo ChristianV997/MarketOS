@@ -62,7 +62,7 @@ def test_product_validation_report_matches_the_same_evaluator_backed_result():
     report = generate_product_validation_report(benchmark=benchmark, readiness=readiness, deployment=deployment, market_access_evidence={CANDIDATE_ID: _NEEDS_EVIDENCE_MX}).to_dict()
     direct = _normalized(build_market_access_section({"id": CANDIDATE_ID}, _NEEDS_EVIDENCE_MX))
     report_section = next(item for item in report["market_access"] if item["candidate_id"] == CANDIDATE_ID)
-    assert _normalized({"jurisdictions": report_section["jurisdictions"], "overall_status": report_section["overall_status"]}) == direct
+    assert _normalized({"jurisdictions": report_section["jurisdictions"], "overall_status": report_section["overall_status"], "offering_kind": report_section["offering_kind"]}) == direct
 
 
 def test_full_chain_stays_safe_at_trustos_export():

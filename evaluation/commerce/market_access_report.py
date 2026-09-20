@@ -66,6 +66,35 @@ _EVIDENCE_CLASS_FIELD_BY_REQUIREMENT: dict[str, str | None] = {
 CUSTOMS_IMPORT_FAMILIES = frozenset({"import_customs", "tax_invoicing"})
 _TUPLE_FIELDS = ("radio_bands_observed",)
 
+# MarketOS recommends goods, services, and hybrids. The canonical evaluator
+# above only ever modeled goods (import/customs/telecom/NOM requirements);
+# no canonical evaluator for Mexican service-sector licensing exists yet.
+# ``offering_kind`` is read from the candidate dict and defaults to
+# "goods" when absent -- this keeps every existing goods-only caller of
+# this module byte-for-byte unchanged. It is never inferred from a title,
+# category label, or any other free-text field.
+OFFERING_KINDS: tuple[str, ...] = ("goods", "service", "hybrid", "unknown")
+DEFAULT_OFFERING_KIND = "goods"
+
+# Requirements that only exist because a physical good is being imported,
+# labeled, or radio-homologated. A service-only offering has no such good,
+# so these are definitively not_applicable -- not a guess, a direct
+# consequence of there being nothing to classify/label/homologate.
+_GOODS_PHYSICAL_REQUIREMENTS = frozenset({
+    "mx_hs_classification", "mx_pedimento", "mx_immex",
+    "mx_nom_electrical_safety", "mx_nom_labeling", "mx_nom_electrical_installations",
+    "mx_telecom_homologation", "mx_nom_208_radio",
+})
+# Requirements whose *current* modeling in the canonical evaluator is
+# goods-shaped (consumer packaging/instructivo, sector permits for
+# nutrients/hazardous inputs) and for which no service-sector evaluator
+# exists. These must stay not_assessed for a service -- never
+# not_applicable (we cannot prove they don't apply) and never satisfied.
+_SERVICE_UNSUPPORTED_REQUIREMENTS = frozenset({
+    "mx_lfpc_profeco", "mx_infraestructura_calidad",
+    "mx_ley_general_salud", "mx_cofepris_sector", "mx_semarnat_sector",
+})
+
 _source_refs_cache: dict[str, tuple[str, ...]] | None = None
 
 
@@ -190,6 +219,96 @@ def _jurisdiction_section(jurisdiction: str, evidence: Mapping[str, Any] | None)
     }
 
 
+def _recognized_offering_kind(candidate: Mapping[str, Any] | None) -> tuple[str, bool]:
+    """Return (offering_kind, was_recognized). Absent -> "goods" (the
+    default every existing goods-only caller already assumes). Anything
+    supplied that isn't one of OFFERING_KINDS fails closed to "unknown"
+    rather than being guessed at or silently ignored."""
+    raw = (candidate or {}).get("offering_kind")
+    if raw in (None, ""):
+        return DEFAULT_OFFERING_KIND, True
+    value = str(raw).strip().lower()
+    if value in OFFERING_KINDS:
+        return value, True
+    return "unknown", False
+
+
+def _unassessed_offering_section(jurisdiction: str, reason: str, next_action: str) -> dict[str, Any]:
+    return {
+        "jurisdiction": jurisdiction,
+        "jurisdiction_code": JURISDICTION_CODES.get(jurisdiction, jurisdiction),
+        "assessment_state": "not_assessed",
+        "requirements": (),
+        "requirement_domains": (),
+        "customs_import_considerations": (),
+        "promotion_gate": {"gate_id": "compliance", "satisfied": False},
+        "warnings": (reason,),
+        "blockers": (),
+        "next_human_action": next_action,
+        "not_legal_advice": True,
+    }
+
+
+def _override_requirement_for_service(item: dict[str, Any]) -> dict[str, Any]:
+    if item["requirement_id"] in _GOODS_PHYSICAL_REQUIREMENTS:
+        return {
+            **item, "status": "not_applicable", "evidence_state": "missing", "blocker": "",
+            "note": "Not applicable: this offering is declared service-only, so there is no physical good to classify, label, or homologate.",
+        }
+    if item["requirement_id"] in _SERVICE_UNSUPPORTED_REQUIREMENTS:
+        return {
+            **item, "status": "not_assessed", "evidence_state": "missing", "blocker": "",
+            "note": "No canonical evaluator exists yet for this Mexican service-sector requirement; treat as unassessed, never as cleared.",
+        }
+    return item
+
+
+def _apply_service_offering(section: dict[str, Any]) -> dict[str, Any]:
+    """Re-derive the Mexico section for a declared service-only offering.
+
+    Goods-only requirements (customs classification, pedimento, IMMEX,
+    electrical/labeling NOMs, telecom homologation) become not_applicable
+    -- there is no physical good. Requirements this codebase only models
+    for goods today (sector permits, LFPC/PROFECO consumer labeling,
+    infraestructura de la calidad) become not_assessed -- unsupported, not
+    cleared. Fiscal requirements (RFC/CFDI/IVA) are jurisdiction-wide sale
+    duties, not goods-specific, so they are left exactly as the canonical
+    evaluator computed them.
+    """
+    requirements = tuple(_override_requirement_for_service(item) for item in section["requirements"])
+    if any(item["status"] == "needs_evidence" for item in requirements):
+        assessment_state = "needs_evidence"
+    elif any(item["status"] == "not_assessed" for item in requirements):
+        assessment_state = "not_assessed"
+    else:
+        assessment_state = "compliant"
+    gate_satisfied = all(item["status"] in {"satisfied", "not_applicable"} for item in requirements)
+    warnings = tuple(dict.fromkeys((
+        *section["warnings"],
+        "service_offering_customs_and_physical_requirements_not_applicable",
+        "service_offering_sector_requirements_not_assessed_no_evaluator_exists",
+    )))
+    return {
+        **section,
+        "assessment_state": assessment_state,
+        "requirements": requirements,
+        "requirement_domains": tuple(sorted({item["family"] for item in requirements if item["status"] not in {"not_assessed", "not_applicable"}})),
+        "customs_import_considerations": (),
+        "promotion_gate": {"gate_id": section["promotion_gate"]["gate_id"], "satisfied": gate_satisfied},
+        "warnings": warnings,
+        "next_human_action": "This offering is declared service-only: customs/telecom/physical-labeling requirements do not apply, but Mexican service-sector licensing/health/environmental rules are not yet covered by any evaluator here and must be reviewed by a lawyer before launch. Fiscal (RFC/CFDI/IVA) requirements still apply and are shown above.",
+    }
+
+
+def _apply_hybrid_offering(section: dict[str, Any]) -> dict[str, Any]:
+    """A hybrid offering's goods component is assessed exactly as for a
+    pure good (unchanged) -- there is nothing else to base that on -- but
+    the section must never imply the service component was also covered,
+    since no service evaluator exists."""
+    warnings = tuple(dict.fromkeys((*section["warnings"], "hybrid_offering_service_component_not_assessed_no_evaluator_exists")))
+    return {**section, "warnings": warnings}
+
+
 def build_market_access_section(candidate: Mapping[str, Any], evidence: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Build the full multi-jurisdiction market-access section for one candidate.
 
@@ -198,14 +317,42 @@ def build_market_access_section(candidate: Mapping[str, Any], evidence: Mapping[
     ``MexicoProductCompliancePacket`` (minus ``market``, which is set here).
     Nothing is fetched, inferred, or guessed beyond what the canonical
     evaluator already does with that evidence.
+
+    ``candidate.get("offering_kind")`` (goods/service/hybrid/unknown,
+    defaulting to "goods" when absent) gates which Mexico requirements are
+    even applicable -- goods rules are never run against a declared
+    service, and a declared/unrecognized "unknown" offering is reported
+    not_assessed rather than defaulting to goods.
     """
-    del candidate  # reserved for future candidate-level product-family inference; not guessed today.
+    offering_kind, recognized = _recognized_offering_kind(candidate)
     evidence = dict(evidence or {})
     jurisdictions = tuple(_jurisdiction_section(jurisdiction, evidence.get(jurisdiction)) for jurisdiction in JURISDICTIONS)
+
+    if offering_kind == "unknown":
+        reason = "unrecognized_offering_kind_treated_as_unknown" if not recognized else "offering_kind_unknown"
+        next_action = "Declare offering_kind (goods/service/hybrid) so the applicable Mexico requirements can be determined; an unknown offering type is never assessed."
+        jurisdictions = tuple(
+            _unassessed_offering_section(item["jurisdiction"], reason, next_action) if item["jurisdiction"] == ASSESSED_JURISDICTION else item
+            for item in jurisdictions
+        )
+    elif offering_kind == "service":
+        jurisdictions = tuple(
+            _apply_service_offering(item) if item["jurisdiction"] == ASSESSED_JURISDICTION else item
+            for item in jurisdictions
+        )
+    elif offering_kind == "hybrid":
+        jurisdictions = tuple(
+            _apply_hybrid_offering(item) if item["jurisdiction"] == ASSESSED_JURISDICTION else item
+            for item in jurisdictions
+        )
+    # offering_kind == "goods" (the default): jurisdictions are left exactly
+    # as the canonical evaluator produced them -- zero behavior change.
+
     mexico_section = next(item for item in jurisdictions if item["jurisdiction"] == ASSESSED_JURISDICTION)
     return {
         "jurisdictions": jurisdictions,
         "overall_status": mexico_section["assessment_state"],
+        "offering_kind": offering_kind,
     }
 
 
