@@ -9,7 +9,7 @@ property, or storefront.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any, Mapping
 
 VERSION = "site-draft-builder-v1"
@@ -431,6 +431,7 @@ class SiteDraftPack:
     risk_review: SiteRiskReview
     operator_notes: tuple[str, ...]
     client_summary: str
+    market_access: Mapping[str, Any] = field(default_factory=dict)
     read_only: bool = True
     network_calls: bool = False
     mutated: bool = False
@@ -626,7 +627,8 @@ def build_site_draft_pack(*, launch_draft_pack: Mapping[str, Any] | None = None,
     evidence_mode = _text(synthesis.get("evidence_mode") or launch.get("evidence_mode") or "fixture_demo", 50)
     summary = f"{title} has a {selected_type} blueprint for {context['business_name']} based on {evidence_mode} evidence. It is implementation-ready planning material, not a published site or launch authorization."
     notes = ("No network calls were made.", "No route, domain, hosting, analytics, or platform mutation occurred.", "Replace every TBD field and complete approval blockers before implementation.")
-    return SiteDraftPack(VERSION, "deterministic", candidate_id, title, context["business_type"], selected_type, evidence_mode, "launch_draft_pack" if launch else "not_supplied", "opportunity_synthesis" if synthesis else "not_supplied", strategy, route_manifest, site_map, navigation, pages, _section_library(), catalog, _cms_models(), lead, seo, analytics, conversion, payloads, readiness, approval, _risks(context, readiness), notes, summary)
+    market_access = launch.get("market_access") or synthesis.get("market_access") or {}
+    return SiteDraftPack(VERSION, "deterministic", candidate_id, title, context["business_type"], selected_type, evidence_mode, "launch_draft_pack" if launch else "not_supplied", "opportunity_synthesis" if synthesis else "not_supplied", strategy, route_manifest, site_map, navigation, pages, _section_library(), catalog, _cms_models(), lead, seo, analytics, conversion, payloads, readiness, approval, _risks(context, readiness), notes, summary, market_access=market_access)
 
 
 def markdown(pack: Mapping[str, Any]) -> str:
