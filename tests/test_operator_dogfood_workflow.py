@@ -129,6 +129,30 @@ def test_classify_quality_gate_maps_the_real_ci_unavailable_shape():
     classification, detail = bridge._classify_quality_gate(document)
     assert classification == "ci_unavailable"
     assert detail["ci_classification"] == "ci_unavailable"
+    assert detail["returncode"] is None
+
+
+def test_classify_quality_gate_preserves_failure_when_ci_is_unavailable():
+    document = {
+        "classification": "ci_unavailable",
+        "status": "failed",
+        "ci": {"classification": "ci_unavailable", "status": "unavailable"},
+        "checks": [{"name": "pytest", "status": "failed"}],
+        "planning_summary": {
+            "mutation_flags": {"provider_mutation_like_detected": False},
+            "secret_or_artifact_flags": {"artifacts_detected": False, "credential_file_detected": False, "secret_value_like_detected": False},
+        },
+    }
+    classification, detail = bridge._classify_quality_gate(document)
+    assert classification == "blocked"
+    assert detail["gate_status"] == "failed"
+
+
+def test_classify_quality_gate_preserves_malformed_exit_document():
+    document = {"classification": "malformed", "status": "configuration_error"}
+    classification, detail = bridge._classify_quality_gate(document)
+    assert classification == "malformed"
+    assert detail["top_classification"] == "malformed"
 
 
 def test_classify_quality_gate_blocks_on_a_real_mutation_flag():
@@ -276,6 +300,7 @@ def test_run_accepts_a_non_standard_exit_code_as_long_as_stdout_is_real_json(mon
     result = bridge._run([bridge.sys.executable, "scripts/ai/run_local_quality_gate.py", "--json"], cwd=REPO)
     assert result["ok"] is True
     assert result["json"]["classification"] == "malformed"
+    assert result["returncode"] == 3
 
 
 def test_run_rejects_unallowlisted_commands():

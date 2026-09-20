@@ -137,7 +137,7 @@ def _run(argv: list[str], *, cwd: Path, timeout_s: float = DEFAULT_TIMEOUT_S) ->
         parsed = json.loads(stdout)
     except json.JSONDecodeError:
         return {"ok": False, "reason": "stdout_not_json", "json": None}
-    return {"ok": True, "reason": None, "json": parsed}
+    return {"ok": True, "reason": None, "returncode": completed.returncode, "json": parsed}
 
 
 def _phase(name: str, classification: str, detail: dict[str, Any]) -> dict[str, Any]:
@@ -173,7 +173,11 @@ def state_collision_check(repo: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _classify_quality_gate(document: dict[str, Any] | None) -> tuple[str, dict[str, Any]]:
+def _classify_quality_gate(
+    document: dict[str, Any] | None,
+    *,
+    returncode: int | None = None,
+) -> tuple[str, dict[str, Any]]:
     """The local quality gate's own well-documented sandbox findings
     (ci_unavailable, pre-existing toolchain mismatches) are informational
     for this bridge, never a hard blocker -- every merged PR in this
@@ -199,9 +203,60 @@ def _classify_quality_gate(document: dict[str, Any] | None) -> tuple[str, dict[s
         return "blocked", {"mutation_flags": mutation_flags, "secret_or_artifact_flags": secret_flags}
     ci_classification = (document.get("ci") or {}).get("classification")
     top_classification = document.get("classification")
+    gate_status = document.get("status")
+    hard_failure_states = {"failed", "failure", "timed_out", "collection_failed"}
+    malformed_states = {"malformed", "configuration_error"}
+    observed_states = {str(value).lower() for value in (gate_status, top_classification) if value is not None}
+    for check in document.get("checks", []):
+        if isinstance(check, dict) and check.get("status") is not None:
+            observed_states.add(str(check["status"]).lower())
+    if observed_states & malformed_states or returncode == 3:
+        return "malformed", {
+            "gate_status": gate_status,
+            "top_classification": top_classification,
+            "returncode": returncode,
+        }
+    if observed_states & hard_failure_states or returncode == 1:
+        return "blocked", {
+            "gate_status": gate_status,
+            "top_classification": top_classification,
+            "returncode": returncode,
+        }
     if "ci_unavailable" in {ci_classification, top_classification}:
-        return "ci_unavailable", {"ci_classification": ci_classification, "top_classification": top_classification}
-    return "passed", {"ci_classification": ci_classification, "top_classification": top_classification}
+        if gate_status in {None, "blocked", "unavailable", "not_run"} and returncode in {None, 0, 2}:
+            return "ci_unavailable", {
+                "ci_classification": ci_classification,
+                "top_classification": top_classification,
+                "gate_status": gate_status,
+                "returncode": returncode,
+            }
+    if returncode not in {None, 0}:
+        return "unavailable", {
+            "ci_classification": ci_classification,
+            "top_classification": top_classification,
+            "gate_status": gate_status,
+            "returncode": returncode,
+        }
+    if top_classification in {"not_run", "unavailable"}:
+        return top_classification, {
+            "ci_classification": ci_classification,
+            "top_classification": top_classification,
+            "gate_status": gate_status,
+            "returncode": returncode,
+        }
+    if top_classification == "passed" and gate_status in {None, "passed"}:
+        return "passed", {
+            "ci_classification": ci_classification,
+            "top_classification": top_classification,
+            "gate_status": gate_status,
+            "returncode": returncode,
+        }
+    return "unavailable", {
+        "ci_classification": ci_classification,
+        "top_classification": top_classification,
+        "gate_status": gate_status,
+        "returncode": returncode,
+    }
 
 
 def readiness_preflight(repo: Path, *, skip_quality_gate: bool) -> dict[str, Any]:
@@ -239,7 +294,9 @@ def readiness_preflight(repo: Path, *, skip_quality_gate: bool) -> dict[str, Any
         # directly by calling the underlying run_local_quality_gate.run()
         # with and without changed paths on an identical diff).
         gate_result = _run([sys.executable, "scripts/ai/run_local_quality_gate.py", "--from-git", "--json"], cwd=repo, timeout_s=180.0)
-        quality_gate_classification, quality_gate_detail = _classify_quality_gate(gate_result["json"])
+        quality_gate_classification, quality_gate_detail = _classify_quality_gate(
+            gate_result["json"], returncode=gate_result.get("returncode")
+        )
 
     # CoderOS is explicitly optional, read-only tooling (per this bridge's
     # own scope) -- its own "unavailable" never blocks the phase. The
