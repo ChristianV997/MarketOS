@@ -302,6 +302,11 @@ def validate_work_order(
         seen_ids.add(wid)
     if not wo.source_id.strip():
         errors.append(f"missing_source_id_in_work_order in {wid}")
+    valid_modes = {m.value for m in AdaptationMode}
+    if wo.adaptation_mode not in valid_modes:
+        errors.append(
+            f"unsupported_adaptation_mode in {wid}: '{wo.adaptation_mode}' is not in {sorted(valid_modes)}"
+        )
     if not wo.commit_sha.strip():
         errors.append(f"missing_commit_sha_in_work_order in {wid}")
     elif not _HEX_40_RE.match(wo.commit_sha.strip()):
@@ -373,6 +378,44 @@ def validate_target_boundary_collisions(
                     )
                 else:
                     seen_module_symbols[key] = wo.work_order_id
+    return errors
+
+
+def validate_source_work_order_correspondence(
+    registry: SourceAdaptationRegistry,
+    work_orders: List[AdaptationWorkOrder],
+) -> List[str]:
+    """Fail closed when work-order source_ids do not 1:1 match the canonical registry."""
+    errors: List[str] = []
+    reg_ids = set(registry.records.keys())
+    wo_source_ids: Set[str] = set()
+    for wo in work_orders:
+        sid = wo.source_id.strip()
+        wid = wo.work_order_id.strip()
+        if not sid:
+            continue
+        if sid in wo_source_ids:
+            errors.append(f"duplicate_source_id_in_work_orders: {sid}")
+        wo_source_ids.add(sid)
+        if sid not in reg_ids:
+            errors.append(
+                f"unknown_source_id in {wid or 'work_order'}: '{sid}' is not in the canonical registry"
+            )
+        else:
+            rec = registry.records[sid]
+            if wo.commit_sha and rec.commit_sha and wo.commit_sha != rec.commit_sha:
+                errors.append(
+                    f"work_order_commit_mismatch in {wid}: "
+                    f"work-order pin {wo.commit_sha} != registry {rec.commit_sha}"
+                )
+        if sid.startswith("src-") and wid:
+            expected_wo = f"wo-{sid[len('src-'):]}"
+            if wid != expected_wo:
+                errors.append(
+                    f"work_order_id_mismatch in {wid}: expected '{expected_wo}' for source '{sid}'"
+                )
+    for sid in sorted(reg_ids - wo_source_ids):
+        errors.append(f"missing_work_order_for_source: '{sid}' has no 1:1 work order")
     return errors
 
 

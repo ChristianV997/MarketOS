@@ -12,14 +12,32 @@ There is no overlay authority. `data/source_adaptation_corrections_v1.json` is r
 
 ## Canonical Payload & Hash Audit
 
-The canonical builder `scripts/ai/build_source_adaptation_registry.py` is the single source of truth for both the registry and adaptation work orders. Executing the builder produces bit-for-bit identical outputs:
+Hashes below are from the tracked git blobs in an exclusive checkout of
+`grok/marketos-source-adaptation-consolidation-v1`, measured with SHA-256 of
+raw file bytes and `git cat-file -s` / `git rev-parse HEAD:<path>`. PR-body
+hashes and artifact copies are not authority.
 
-| File | Size (bytes) | Records | Raw SHA256 | Canonical Sorted-Key SHA256 | Stable Content Hash |
-| --- | ---: | ---: | --- | --- | --- |
-| `data/source_adaptation_registry.json` | 55,544 | 29 | `0de36a93d64ad9cbbb2427159792a83da9ee18cdc5a9890d05dff1b62e5cac9b` | `1e0db9350cc50ef9965ed97163bc5b9a7070ee816c853da3790ffa4ac2f21981` | `faf789e185374adb6cfe167b8bb85fcdd55afb6597d00ab943f405899fce8c56` |
-| `data/source_adaptation_work_orders.json` | 61,094 | 29 | `4349bde089a25a8379bba4b4804f8a7496a23eb1da51324f93880b0e6785ea0e` | `7fff93c3bcf604dcf3505ed33fb6db16ea75e8a8783a1ffa909d78ab0936a0f2` | N/A (per-order hashes) |
+The canonical builder `scripts/ai/build_source_adaptation_registry.py` is the
+single source of truth. Executing the builder against this branch is
+bit-for-bit identical to the tracked files.
 
-Note on earlier claims: Earlier draft PR descriptions cited temporary artifact hashes (`54,227 bytes`, raw `56b7076c...`, sorted `c70b723d...`) from a transient broken-payload state in commit `7248a8ab`. The actual checked-out branch contains the fully restored 29-record catalog and 29 matching work orders (`src-<id>` -> `wo-<id>`), with stable content hash `faf789e1...` matching the golden contract test in `tests/contracts/test_source_adaptation_governance.py`.
+| File | Size (bytes) | Git blob SHA | Records | Raw SHA256 | Canonical Sorted-Key SHA256 | Stable Content Hash |
+| --- | ---: | --- | ---: | --- | --- | --- |
+| `data/source_adaptation_registry.json` | 54,269 | `1249d925d310d24b28e5be56ac9e8d95e98a63f3` | 29 | `a248b83b28189143096d4c32213e4b3a297e4981c0185f7bdb559c6b64c12647` | `1e0db9350cc50ef9965ed97163bc5b9a7070ee816c853da3790ffa4ac2f21981` | `faf789e185374adb6cfe167b8bb85fcdd55afb6597d00ab943f405899fce8c56` |
+| `data/source_adaptation_work_orders.json` | 59,535 | `10a0545a9e30683630b32d89030bed9a9cd32753` | 29 | `b62badaed1c09691a56e8f4d2fc0274d0823e2024500fe271cb577f1f1f9abdf` | `7fff93c3bcf604dcf3505ed33fb6db16ea75e8a8783a1ffa909d78ab0936a0f2` | work-order registry stable hash `ebfa075870f2c5a8d3b29c67b45970708e736cb26fb3f4f7b80a8e7a65dd56fd` |
+
+Do not conflate these:
+
+- **Raw SHA-256** hashes the exact tracked bytes (pretty-printed JSON + trailing newline).
+- **Canonical sorted-key SHA-256** hashes `json.dumps(obj, sort_keys=True, separators=(",", ":"))`.
+- **Stable content hash** is `SourceAdaptationRegistry.compute_stable_hash()` (`sort_keys=True, indent=2`).
+
+Superseded claims (not the tracked blobs):
+
+- PR-body / prior doc sizes `55,544` / `61,094` with raw SHA-256 `0de36a93…` / `4349bde0…` do **not** match `HEAD:data/source_adaptation_*.json`.
+- Earlier draft sizes `54,227` with raw `56b7076c…` were a truncated payload in commit `7248a8ab` and were recovered.
+
+The checked-out branch contains the fully restored 29-record catalog and 29 matching work orders (`src-<id>` -> `wo-<id>`), with stable content hash `faf789e1…` matching `tests/contracts/test_source_adaptation_governance.py`.
 
 ## Applied pins
 
@@ -34,19 +52,27 @@ Note on earlier claims: Earlier draft PR descriptions cited temporary artifact h
 
 ## Immutable Pin & Upstream Verification Audit
 
-Registry validation checks SHA syntax offline; that is not proof that a Git object exists. A focused read-only verification checked all records against primary upstream GitHub refs, tags, and license files:
+Registry validation checks SHA syntax offline; that is not proof that a Git
+object exists. Re-verified 2026-09-20 against primary GitHub commit, tag, and
+license endpoints (not pretty-printed connector JSON):
 
-| Source | Exact commit | Declared tag | License at pinned commit | Result |
+| Source | Exact commit | Declared tag | License at pin / GitHub SPDX | Result |
 | --- | --- | --- | --- | --- |
-| Crawl4AI (`src-crawl4ai`) | GitHub commit lookup returned 422; commit page returned 404 | `v0.4.2` ref returned 404 | Apache-2.0 confirmed upstream | blocked / unresolved pin |
-| Hermes (`src-hermes-ecc`) | `027d1a8a6043355b7af53b4c0645336b41372b7b` resolves in `NousResearch/hermes-agent` | `v1.2.0` ref returned 404 | MIT confirmed at the exact commit | partial; tag unresolved |
-| Higgsfield CLI (`src-higgsfield-cli`) | `dc7e2d274bf7aa112ce8d76a085b3bc91aa08415` confirmed on `higgsfield-ai/cli` | `v0.3.1` tag does not match commit (`dc7e2d2` belongs to `v1.1.25`) | MIT confirmed at the exact commit | partial; tag mismatch |
-| Higgsfield GPU (`src-higgsfield-gpu-orchestration`) | `9576d37618c028f992cb42307e33292da1220407` confirmed on `higgsfield-ai/higgsfield` | `v0.0.4-rc` points to exact commit | Apache-2.0 confirmed at the exact commit | verified (rejected fail-closed) |
-| Higgsfield Python SDK (`src-higgsfield-python-sdk`) | GitHub commit lookup returned 422; commit page returned 404 | `0.1.0` is PyPI package version; repo has no git tags | Apache-2.0 confirmed upstream | blocked / unresolved pin |
-| Higgsfield Skills (`src-higgsfield-skills`) | GitHub commit lookup returned 422; commit page returned 404 | `0.12.0` is in-tree `VERSION` file, not a git tag | MIT confirmed upstream | blocked / unpinned tag |
-| Prefect (`src-prefect`) | `c8986edebb2dde3e2a931adbe24d2eaefcb799cb` resolves in `PrefectHQ/prefect` | `3.2.0` points to the exact commit | Apache-2.0 confirmed at the exact commit | verified (rejected fail-closed) |
-| gstack (`src-gstack`) | `a6b3a57512ca6d5c6aa5b68f74f736195021f96e` resolves in `garrytan/gstack` | `main-pinned` (PR #2882) | MIT confirmed at the exact commit | verified (reference_only) |
-| Temporal (`src-temporal`) | `9fde38c0cd1f437774ba48da695bcdfb88c242e1` resolves in `temporalio/temporal` | `1.8.0` | Upstream is MIT (not BSL-1.1); rejection mandatory via architecture invariant | architectural rejection preserved |
+| Crawl4AI (`src-crawl4ai`) | GitHub commit lookup 422; SHA `b04ed9f3…` not on `unclecode/crawl4ai` | `v0.4.2` ref not found (repo tags are `v0.7+`) | Apache-2.0 confirmed on default branch | **unresolved pin** (kept; do not retarget to HEAD) |
+| Hermes (`src-hermes-ecc`) | `027d1a8a6043355b7af53b4c0645336b41372b7b` resolves in `NousResearch/hermes-agent` | `v1.2.0` not present (upstream uses `v2026.x.y`) | MIT confirmed | **partial**; tag unresolved |
+| Higgsfield CLI (`src-higgsfield-cli`) | SHA `dc7e2d27…` 422 on `higgsfield-ai/cli` | `v0.3.1` not among listed tags | MIT on default branch | **unresolved pin** (kept) |
+| Higgsfield GPU (`src-higgsfield-gpu-orchestration`) | `9576d37618c028f992cb42307e33292da1220407` confirmed | `v0.0.4-rc` matches commit | Apache-2.0 confirmed | verified (rejected fail-closed) |
+| Higgsfield Python SDK (`src-higgsfield-python-sdk`) | SHA `aefd1ca4…` 422 on `higgsfield-ai/higgsfield-client` | `0.1.0` not a git tag | Apache-2.0 on default branch | **unresolved pin** (kept) |
+| Higgsfield Skills (`src-higgsfield-skills`) | SHA `d0714066…` 422 on `higgsfield-ai/skills` | `0.12.0` not a git tag | MIT on default branch | **unresolved pin** (kept) |
+| Higgsfield TS SDK (`src-higgsfield-ts-sdk`) | `e3f274249962417e21f6566d4eecec6d8491d11c` confirmed; tag `0.2.6` matches | `0.2.6` | GitHub license API 404; declared MIT unverified at pin | **partial**; license unresolved |
+| Prefect (`src-prefect`) | `c8986edebb2dde3e2a931adbe24d2eaefcb799cb` confirmed | `3.2.0` matches | Apache-2.0 confirmed | verified (rejected fail-closed) |
+| gstack (`src-gstack`) | `a6b3a57512ca6d5c6aa5b68f74f736195021f96e` confirmed | `main-pinned` | MIT confirmed | verified (reference_only) |
+| Temporal (`src-temporal`) | `9fde38c0cd1f437774ba48da695bcdfb88c242e1` confirmed; tag `v1.8.0` matches | declared `1.8.0` | **LICENSE at pin is MIT**, registry still says `BSL-1.1` | **license field unresolved/incorrect**; rejection kept via event-spine invariant |
+| CoderOS (`src-coderos`) | `b980e90b49ea7c0639094f3060ced5aaf772a571` confirmed | `frozen-control-plane` | GitHub SPDX MIT; registry `Proprietary-Internal` (internal classification) | commit verified; license classification policy, not retargeted |
+| Remaining 18 sources (airbyte, chatwoot, dagster, dlt, duckdb, firecrawl, great-expectations, higgsfield-mcp-bridge, medusa, n8n, opa, openlineage, otel-python, polars, pyperf, saleor, scrapy, vendure) | pinned commit resolves and declared tag matches (or intentional `main-pinned`) | see registry | SPDX or LICENSE file present; ELv2/AGPL/Sustainable Use recorded as `NOASSERTION`/`Other` on GitHub but fail-closed reject already applied | verified |
+
+Unresolved items are left in place. Do not replace them with moving branch heads merely to satisfy validation. Resolve exact reviewed revisions through authoritative refs, update the canonical generator and generated work orders together, and rerun source-governance contracts before treating this draft as merger-ready.
+
 
 ## Architectural Invariants & Policy Enforcement
 

@@ -29,6 +29,7 @@ from evaluation.source_governance.registry import (
 from evaluation.source_governance.validator import (
     generate_evidence_bundle,
     validate_registry,
+    validate_source_work_order_correspondence,
     validate_target_boundary_collisions,
     validate_work_order,
 )
@@ -220,6 +221,12 @@ def main() -> int:
         for wo in wo_registry.work_orders.values():
             wo_errors.extend(validate_work_order(wo))
         wo_errors.extend(validate_target_boundary_collisions(list(wo_registry.work_orders.values())))
+        if registry is not None:
+            wo_errors.extend(
+                validate_source_work_order_correspondence(
+                    registry, list(wo_registry.work_orders.values())
+                )
+            )
         is_wo_valid = len(wo_errors) == 0
         wo_res = {
             "valid": is_wo_valid,
@@ -246,6 +253,22 @@ def main() -> int:
 
     res = run_validation(reg_path, max_freshness_days=args.max_freshness_days)
     is_valid = res["valid"]
+
+    default_wo = Path("data/source_adaptation_work_orders.json")
+    if not args.hash and default_wo.exists() and registry is not None:
+        try:
+            wo_registry = WorkOrderRegistry.load_from_file(default_wo.resolve())
+            corr = validate_source_work_order_correspondence(
+                registry, list(wo_registry.work_orders.values())
+            )
+            if corr:
+                res.setdefault("errors", []).extend(corr)
+                res["valid"] = False
+                is_valid = False
+        except Exception as e:
+            res.setdefault("errors", []).append(f"Failed to load work orders for correspondence: {e}")
+            res["valid"] = False
+            is_valid = False
 
     # Always redact secret-shaped tokens in outputs
     sanitized_res = redact_secrets(res)

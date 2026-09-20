@@ -1,16 +1,25 @@
 """Focused corrections for source-adaptation consolidation v1."""
 from __future__ import annotations
 
+import ast
+import hashlib
 import json
 from pathlib import Path
 import re
+
+import pytest
 
 from evaluation.source_governance.registry import (
     AdaptationMode,
     SourceAdaptationRegistry,
     WorkOrderRegistry,
 )
-from evaluation.source_governance.validator import validate_registry, validate_source_record
+from evaluation.source_governance.validator import (
+    validate_registry,
+    validate_source_record,
+    validate_source_work_order_correspondence,
+    validate_work_order,
+)
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -176,3 +185,116 @@ def test_verified_license_evidence_urls_are_immutable():
         assert record.license_evidence_url == (
             f"{record.repository_url}/blob/{commit_sha}/LICENSE"
         )
+
+
+# Tracked-byte lock: GitHub Contents API / PR-body hashes previously claimed
+# 55,544 and 61,094 bytes. The actual git blobs on this branch are smaller.
+# Pin the working-tree SHA-256 so a truncated rewrite cannot pass JSON-parse-only tests.
+_CANONICAL_REGISTRY_BYTES = 54269
+_CANONICAL_REGISTRY_SHA256 = "a248b83b28189143096d4c32213e4b3a297e4981c0185f7bdb559c6b64c12647"
+_CANONICAL_WORK_ORDERS_BYTES = 59535
+_CANONICAL_WORK_ORDERS_SHA256 = "b62badaed1c09691a56e8f4d2fc0274d0823e2024500fe271cb577f1f1f9abdf"
+_CANONICAL_STABLE_HASH = "faf789e185374adb6cfe167b8bb85fcdd55afb6597d00ab943f405899fce8c56"
+
+_REQUIRED_VALIDATOR_SYMBOLS = frozenset({
+    "validate_registry",
+    "validate_source_record",
+    "validate_work_order",
+    "validate_target_boundary_collisions",
+    "validate_source_work_order_correspondence",
+    "generate_evidence_bundle",
+})
+_REQUIRED_CLI_SYMBOLS = frozenset({"run_validation", "main"})
+_VALIDATOR_BYTE_FLOOR = 18000
+_CLI_BYTE_FLOOR = 8000
+_CONSOLIDATION_RULES_BYTE_FLOOR = 400
+
+
+def test_tracked_registry_bytes_and_raw_sha256_match_git_blobs():
+    registry_bytes = _REGISTRY_PATH.read_bytes()
+    work_order_bytes = _WORK_ORDERS_PATH.read_bytes()
+    assert len(registry_bytes) == _CANONICAL_REGISTRY_BYTES
+    assert len(work_order_bytes) == _CANONICAL_WORK_ORDERS_BYTES
+    assert hashlib.sha256(registry_bytes).hexdigest() == _CANONICAL_REGISTRY_SHA256
+    assert hashlib.sha256(work_order_bytes).hexdigest() == _CANONICAL_WORK_ORDERS_SHA256
+    assert registry_bytes.startswith(b"[\n")
+    assert registry_bytes.endswith(b"\n]\n") or registry_bytes.endswith(b"}]\n")
+    assert work_order_bytes.startswith(b"[\n")
+    assert work_order_bytes.endswith(b"\n]\n") or work_order_bytes.endswith(b"}]\n")
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    assert registry.compute_stable_hash() == _CANONICAL_STABLE_HASH
+
+
+def test_truncated_registry_json_fail_closed(tmp_path: Path):
+    raw = _REGISTRY_PATH.read_bytes()
+    truncated = raw[: len(raw) // 2]
+    assert truncated != raw
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(truncated.decode("utf-8"))
+    truncated_path = tmp_path / "source_adaptation_registry.json"
+    truncated_path.write_bytes(truncated)
+    with pytest.raises(json.JSONDecodeError):
+        SourceAdaptationRegistry.load_from_file(truncated_path)
+
+
+def test_truncated_work_orders_json_fail_closed(tmp_path: Path):
+    raw = _WORK_ORDERS_PATH.read_bytes()
+    truncated = raw[: len(raw) // 2]
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(truncated.decode("utf-8"))
+    truncated_path = tmp_path / "source_adaptation_work_orders.json"
+    truncated_path.write_bytes(truncated)
+    with pytest.raises(json.JSONDecodeError):
+        WorkOrderRegistry.load_from_file(truncated_path)
+
+
+def test_validator_and_cli_are_complete_not_import_stubs():
+    validator_path = _REPO_ROOT / "evaluation" / "source_governance" / "validator.py"
+    cli_path = _REPO_ROOT / "scripts" / "ai" / "validate_source_adaptation_registry.py"
+    rules_path = _REPO_ROOT / "evaluation" / "source_governance" / "consolidation_rules.py"
+    assert validator_path.stat().st_size >= _VALIDATOR_BYTE_FLOOR
+    assert cli_path.stat().st_size >= _CLI_BYTE_FLOOR
+    assert rules_path.stat().st_size >= _CONSOLIDATION_RULES_BYTE_FLOOR
+
+    validator_tree = ast.parse(validator_path.read_text(encoding="utf-8"))
+    cli_tree = ast.parse(cli_path.read_text(encoding="utf-8"))
+    rules_tree = ast.parse(rules_path.read_text(encoding="utf-8"))
+
+    def fn_names(tree: ast.AST) -> set[str]:
+        return {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+    assert _REQUIRED_VALIDATOR_SYMBOLS <= fn_names(validator_tree)
+    assert _REQUIRED_CLI_SYMBOLS <= fn_names(cli_tree)
+    assert "extra_record_errors" in fn_names(rules_tree)
+
+
+def test_unknown_source_id_in_work_order_fail_closed():
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    wo_registry = WorkOrderRegistry.load_from_file(_WORK_ORDERS_PATH)
+    known = list(wo_registry.work_orders.values())
+    ghost = known[0].to_dict()
+    ghost["source_id"] = "src-does-not-exist"
+    ghost["work_order_id"] = "wo-does-not-exist"
+    from evaluation.source_governance.registry import AdaptationWorkOrder
+
+    ghost_wo = AdaptationWorkOrder.from_dict(ghost)
+    errs = validate_source_work_order_correspondence(registry, [*known, ghost_wo])
+    assert any("unknown_source_id" in e for e in errs)
+    assert any("src-does-not-exist" in e for e in errs)
+
+    missing = known[1:]
+    missing_errs = validate_source_work_order_correspondence(registry, missing)
+    assert any("missing_work_order_for_source" in e for e in missing_errs)
+
+    mode_ghost = known[0].to_dict()
+    mode_ghost["adaptation_mode"] = "invented_mode"
+    mode_errs = validate_work_order(mode_ghost)
+    assert any("unsupported_adaptation_mode" in e for e in mode_errs)
+
+
+def test_canonical_registry_and_work_orders_correspond_one_to_one():
+    registry = SourceAdaptationRegistry.load_from_file(_REGISTRY_PATH)
+    wo_registry = WorkOrderRegistry.load_from_file(_WORK_ORDERS_PATH)
+    assert validate_source_work_order_correspondence(
+        registry, list(wo_registry.work_orders.values())
+    ) == []
