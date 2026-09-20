@@ -351,6 +351,40 @@ def _merge_classifications(results: list[dict[str, Any]]) -> dict[str, str]:
     return merged
 
 
+# COMMAND_CLASSES (this module's per-command execution outcome) and
+# operator_task_packet.EVIDENCE_CLASSES (a resume packet's per-test
+# evidence_classification) are deliberately separate closed vocabularies --
+# one describes what actually happened when a command ran, the other
+# describes the epistemic status of a piece of evidence. They are not the
+# same set ("passed"/"executed"/"skipped"/"timed_out" have no EVIDENCE_CLASSES
+# equivalent), so a caller cannot pass one where the other is required.
+# This is the one narrow, explicit translation between them -- without it,
+# execute()'s real output could never be recorded in a handoff()'s
+# tests_already_run at all.
+_COMMAND_TO_EVIDENCE_CLASSIFICATION = {
+    "executed": "actual",
+    "passed": "actual",
+    "failed": "failed",
+    "unavailable": "unavailable",
+    "not_run": "not_run",
+    "skipped": "not_run",
+    "malformed": "malformed",
+    "timed_out": "blocked",
+    "ci_unavailable": "ci_unavailable",
+}
+
+
+def to_evidence_classification(command_classification: str) -> str:
+    """Translate one execute() COMMAND_CLASSES value into the
+    operator_task_packet.EVIDENCE_CLASSES value a resume packet's
+    tests_already_run entry requires. Raises on an unrecognized input
+    rather than guessing."""
+    try:
+        return _COMMAND_TO_EVIDENCE_CLASSIFICATION[command_classification]
+    except KeyError:
+        raise ExecutionBundleError(f"unknown command classification: {command_classification!r}") from None
+
+
 # ---------------------------------------------------------------------------
 # Phase 5: evaluate
 # ---------------------------------------------------------------------------
@@ -468,6 +502,7 @@ __all__ = [
     "render_command",
     "run_allowlisted",
     "execute",
+    "to_evidence_classification",
     "evaluate",
     "handoff",
     "pr_check",

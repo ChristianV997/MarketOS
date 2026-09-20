@@ -90,6 +90,34 @@ def test_dirty_canonical_and_stale_base(tmp_path: Path):
     assert "unsafe_target_paths" in document["blockers"]
     assert "branch_conflict" in document["blockers"]
     assert document["safe_to_edit"] is False
+    # A "branch_conflict" blocker is useless as evidence in a resume/handoff
+    # packet unless the document also records what was actually expected --
+    # found by an independent state-machine review, not by the primary diff.
+    assert document["expected_branch"] == "other"
+    assert document["branch"] == "grok/demo"
+
+
+def test_expected_branch_is_recorded_even_when_it_matches(tmp_path: Path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    payloads = {
+        ("rev-parse", "--show-toplevel"): str(root),
+        ("rev-parse", "--is-inside-work-tree"): "true",
+        ("rev-parse", "HEAD"): "aaa111",
+        ("rev-parse", "--abbrev-ref", "HEAD"): "main",
+        ("rev-parse", "origin/main"): "aaa111",
+        ("merge-base", "HEAD", "origin/main"): "aaa111",
+        ("status", "--porcelain"): "",
+        ("worktree", "list", "--porcelain"): f"worktree {root}\nHEAD aaa111\nbranch refs/heads/main\n",
+    }
+    document, _code = evaluate_safety(root, expected_branch="main", git_runner=_git_factory(payloads))
+    assert "branch_conflict" not in document["blockers"]
+    assert document["expected_branch"] == "main"
+
+
+def test_expected_branch_is_none_when_not_supplied(tmp_path: Path):
+    document, _code = evaluate_safety(tmp_path, git_runner=_git_factory({}))
+    assert document["expected_branch"] is None
 
 
 def test_unavailable_git(monkeypatch, tmp_path: Path):
