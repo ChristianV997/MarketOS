@@ -68,6 +68,8 @@ test("route changes close an open drawer so the next page is not trapped", () =>
 
 test("skip-to-main landmark is in the shared shell, not a page-only duplicate contract", () => {
   assert.match(shellSrc, /Skip to main content/);
+  assert.match(shellSrc, /focus:opacity-100/);
+  assert.doesNotMatch(shellSrc, /sr-only focus:not-sr-only/);
   assert.match(shellSrc, new RegExp(`id=\\{OPERATOR_MAIN_ID\\}|id="${OPERATOR_MAIN_ID}"`));
   assert.equal(OPERATOR_MAIN_ID, "operator-main");
   assert.equal(SIDEBAR_NAV_ID, "operator-sidebar-nav");
