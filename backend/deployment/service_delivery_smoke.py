@@ -18,6 +18,7 @@ Never enables live mutations, provider network calls, or credential storage.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import platform
@@ -82,6 +83,13 @@ FORBIDDEN_VALUE_MARKERS = (
     "-----begin private key-----",
     "-----begin rsa private key-----",
 )
+
+
+class _NoRedirectHandler(urllib_request.HTTPRedirectHandler):
+    """Prevent an explicitly local smoke probe from being redirected elsewhere."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def is_path_under_artifacts(
@@ -365,20 +373,68 @@ def probe_service_delivery_workbench(
     """Probe the service delivery workbench endpoint over HTTP or via in-process module."""
     if base_url:
         clean_base = base_url.rstrip("/")
-        url = f"{clean_base}{ENDPOINT_PATH}"
-        parsed = urllib_parse.urlsplit(url)
-        if parsed.scheme not in ("http", "https"):
+        try:
+            parsed_base = urllib_parse.urlsplit(clean_base)
+            hostname = parsed_base.hostname
+            # Accessing .port validates malformed and out-of-range port syntax.
+            parsed_base.port
+        except ValueError:
             return {
                 "mode": "http",
                 "status": "blocked",
                 "status_code": None,
-                "url": url,
-                "reason": "unsupported_url_scheme",
-                "detail": f"URL scheme '{parsed.scheme}' is blocked. Only http and https are allowed.",
+                "url": None,
+                "reason": "invalid_base_url",
+                "detail": "The endpoint base URL is malformed.",
             }
+        if parsed_base.scheme not in ("http", "https"):
+            return {
+                "mode": "http",
+                "status": "blocked",
+                "status_code": None,
+                "url": None,
+                "reason": "unsupported_url_scheme",
+                "detail": f"URL scheme '{parsed_base.scheme}' is blocked. Only http and https are allowed.",
+            }
+        if parsed_base.username or parsed_base.password or parsed_base.query or parsed_base.fragment:
+            return {
+                "mode": "http",
+                "status": "blocked",
+                "status_code": None,
+                "url": "<redacted>",
+                "reason": "unsafe_base_url",
+                "detail": "Credentials, query strings, and fragments are not allowed in the endpoint base URL.",
+            }
+        if not hostname:
+            return {
+                "mode": "http",
+                "status": "blocked",
+                "status_code": None,
+                "url": None,
+                "reason": "invalid_base_url",
+                "detail": "The endpoint base URL must include a host.",
+            }
+        try:
+            loopback_host = ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            loopback_host = hostname.casefold() == "localhost"
+        if not loopback_host:
+            return {
+                "mode": "http",
+                "status": "blocked",
+                "status_code": None,
+                "url": None,
+                "reason": "non_loopback_endpoint_blocked",
+                "detail": "Network probes are restricted to localhost and loopback IP addresses.",
+            }
+        url = f"{clean_base}{ENDPOINT_PATH}"
         http_req = urllib_request.Request(url, method="GET", headers={"Accept": "application/json"})
         try:
-            with urllib_request.urlopen(http_req, timeout=timeout_seconds) as response:  # nosec B310: validated scheme
+            opener = urllib_request.build_opener(
+                urllib_request.ProxyHandler({}),
+                _NoRedirectHandler(),
+            )
+            with opener.open(http_req, timeout=timeout_seconds) as response:
                 raw = response.read(65536).decode("utf-8")
                 status_code = response.status
                 try:
@@ -398,8 +454,11 @@ def probe_service_delivery_workbench(
                     "status_code": status_code,
                     "url": url,
                     "reason": "ok" if status_code == 200 else f"http_status_{status_code}",
-                    "response": payload if isinstance(payload, dict) else {"data": payload},
-                    "live_endpoint_status": payload.get("live_endpoint_status", "unknown") if isinstance(payload, dict) else "unknown",
+                    "response_shape": (
+                        "object" if isinstance(payload, dict)
+                        else "array" if isinstance(payload, list)
+                        else "scalar"
+                    ),
                 }
         except urllib_error.HTTPError as exc:
             if exc.code == 404:
@@ -520,22 +579,26 @@ def classify_service_delivery_ci(
         for kw in ("payment", "spending limit", "billing", "runner was not allocated", "job was not started")
     )
 
-    if runner_id == 0 or total_steps == 0 or not logs_available:
+    if runner_id == 0 or total_steps == 0:
         if is_billing_or_runner_limit:
             reason = "GitHub Actions runner was not allocated due to spending limit or billing block."
             root_cause = "github_actions_runner_allocation_failure"
         else:
-            reason = "CI runners are inactive, steps count is zero, or build logs are inaccessible."
+            reason = "CI runner was not allocated or no steps executed."
             root_cause = "ci_unavailable_zero_steps"
+        state = "ci_unavailable"
+    elif ci_status in {"failed", "failure"}:
+        state = "failed"
+        reason = "One or more CI steps executed and failed; inaccessible logs do not change that conclusion."
+        root_cause = "ci_test_failure"
+    elif not logs_available:
+        reason = "CI logs are inaccessible, so a successful or unknown conclusion cannot be verified."
+        root_cause = "ci_logs_unavailable"
         state = "ci_unavailable"
     elif ci_status == "passed" or ci_status == "success":
         state = "passed"
         reason = "CI pipeline executed all steps and completed with accessible audit logs."
         root_cause = "ci_passed"
-    elif ci_status == "failed":
-        state = "failed"
-        reason = "One or more CI test steps executed and failed."
-        root_cause = "ci_test_failure"
     else:
         state = "ci_unavailable"
         reason = f"CI status '{ci_status}' cannot be promoted without verified logs."

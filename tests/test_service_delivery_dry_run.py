@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
+from urllib.request import Request
 
 import pytest
 
@@ -93,6 +95,19 @@ def test_ci_success_without_logs_is_ci_unavailable():
     )
     assert res["state"] == "ci_unavailable"
     assert "inaccessible" in res["classification_reason"]
+
+
+@pytest.mark.parametrize("ci_status", ["failed", "failure"])
+def test_ci_executed_failure_without_logs_remains_failed(ci_status):
+    """Unavailable logs must not erase an executed runner's reported failure."""
+    res = classify_service_delivery_ci(
+        runner_id=12345,
+        total_steps=15,
+        ci_status=ci_status,
+        logs_available=False,
+    )
+    assert res["state"] == "failed"
+    assert res["root_cause"] == "ci_test_failure"
 
 
 def test_diagnose_zero_step_ci_with_billing_annotations():
@@ -426,6 +441,56 @@ def test_probe_service_delivery_workbench_ssrf_blocked():
     assert res["reason"] == "unsupported_url_scheme"
 
 
+@pytest.mark.parametrize("base_url", ["https://example.invalid", "http://192.0.2.10:8080"])
+def test_probe_service_delivery_workbench_non_loopback_blocked(base_url):
+    """Remote endpoint probes are blocked without making a network request."""
+    res = probe_service_delivery_workbench(base_url=base_url)
+    assert res["status"] == "blocked"
+    assert res["reason"] == "non_loopback_endpoint_blocked"
+
+
+def test_probe_service_delivery_workbench_redacts_url_credentials():
+    """Userinfo and query strings cannot be included in probe reports."""
+    res = probe_service_delivery_workbench(
+        base_url="http://probe-user:sentinel-42@127.0.0.1:3000?marker=sentinel-42"
+    )
+    assert res["status"] == "blocked"
+    assert res["reason"] == "unsafe_base_url"
+    assert "sentinel-42" not in json.dumps(res)
+
+
+def test_probe_service_delivery_workbench_does_not_follow_redirects():
+    """A loopback probe cannot redirect the request to a non-loopback host."""
+    captured_handlers = []
+
+    class RedirectingOpener:
+        def open(self, request, timeout):
+            raise HTTPError(request.full_url, 302, "redirect", {}, None)
+
+    def fake_build_opener(*handlers):
+        captured_handlers.extend(handlers)
+        return RedirectingOpener()
+
+    with patch(
+        "backend.deployment.service_delivery_smoke.urllib_request.build_opener",
+        side_effect=fake_build_opener,
+    ):
+        res = probe_service_delivery_workbench(base_url="http://127.0.0.1:3000")
+
+    assert res["status"] == "failed"
+    assert res["status_code"] == 302
+    redirect_handler = next(handler for handler in captured_handlers if handler.__class__.__name__ == "_NoRedirectHandler")
+    redirect_request = Request("http://127.0.0.1:3000/api/service-delivery/workbench")
+    assert redirect_handler.redirect_request(
+        redirect_request,
+        None,
+        302,
+        "Found",
+        {"Location": "https://example.invalid/collect"},
+        "https://example.invalid/collect",
+    ) is None
+
+
 def test_probe_service_delivery_workbench_invalid_json_fails():
     """HTTP endpoint returning HTML or non-JSON payload returns failed status."""
     class FakeResponse:
@@ -437,10 +502,47 @@ def test_probe_service_delivery_workbench_invalid_json_fails():
         def __exit__(self, *args):
             pass
 
-    with patch("urllib.request.urlopen", return_value=FakeResponse()):
+    class FakeOpener:
+        def open(self, request, timeout):
+            return FakeResponse()
+
+    with patch(
+        "backend.deployment.service_delivery_smoke.urllib_request.build_opener",
+        return_value=FakeOpener(),
+    ):
         res = probe_service_delivery_workbench(base_url="http://127.0.0.1:3000")
         assert res["status"] == "failed"
         assert res["reason"] == "invalid_json_endpoint_response"
+
+
+def test_probe_service_delivery_workbench_does_not_retain_response_payload():
+    """Valid endpoint bodies are parsed for shape but never copied into the report."""
+    class FakeResponse:
+        status = 200
+
+        def read(self, n):
+            return b'{"field":"marker-value-42"}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            return FakeResponse()
+
+    with patch(
+        "backend.deployment.service_delivery_smoke.urllib_request.build_opener",
+        return_value=FakeOpener(),
+    ):
+        res = probe_service_delivery_workbench(base_url="http://127.0.0.1:3000")
+
+    assert res["status"] == "passed"
+    assert res["response_shape"] == "object"
+    assert "response" not in res
+    assert "marker-value-42" not in json.dumps(res)
 
 
 def test_ci_failure_override_propagates_to_overall_status_and_exit_code(artifacts_tmp: Path):

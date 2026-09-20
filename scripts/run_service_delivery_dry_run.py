@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("--json", action="store_true", help="Output machine-readable JSON (default)")
     output_group.add_argument("--summary", action="store_true", help="Output human-readable summary")
-    parser.add_argument("--base-url", type=str, default=None, help="Backend API base URL (e.g. http://127.0.0.1:3000)")
+    parser.add_argument("--base-url", type=str, default=None, help="Optional local backend URL; only localhost/loopback is permitted")
     parser.add_argument("--projection-path", type=str, default=None, help="Path to service delivery projection JSON")
     parser.add_argument("--env-mode", type=str, default="local_dry_run", help="Deployment environment mode")
     parser.add_argument("--timeout", type=float, default=2.0, help="Endpoint probe timeout in seconds")
