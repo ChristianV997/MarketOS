@@ -503,7 +503,6 @@ def _section(section_type: str, title: str, hooks: list[str], pains: list[str], 
 
 def _page(spec: Mapping[str, Any], title: str, context: Mapping[str, Any], hooks: list[str], pains: list[str], site_type: str) -> PageDraft:
     sections = tuple(_section(item, title, hooks, pains, site_type) for item in _section_types(str(spec["page_type"]), site_type))
-    slug = str(spec["route"]).replace("/", " ").strip() or "home"
     return PageDraft(str(spec["page_id"]), str(spec["page_type"]), str(spec["route"]), str(spec["purpose"]), context["target_customer"], sections, _text(f"{spec['title']} | {context['brand_name']}", 70), _text(f"Draft page for {spec['purpose']}. Confirm claims, policies, and assets before publishing.", 155), _text(title, 70), tuple(dict.fromkeys([_text(title, 70), _text(context["industry"], 70), _text(context["target_customer"], 70)])), str(spec["conversion_goal"]), ("Approved hero asset", "Approved logo/brand asset", "Policy or proof asset where applicable"), ("Evidence is fixture/manual unless supplied otherwise.", "Unknowns remain visibly marked TBD."), ("Human approval required for copy, claims, assets, SEO, and publishing." ,))
 
 
