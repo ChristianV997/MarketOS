@@ -12,9 +12,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -93,8 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="MarketOS Service Delivery Deployment Dry-Run and Smoke Check",
     )
-    parser.add_argument("--json", action="store_true", help="Output machine-readable JSON")
-    parser.add_argument("--summary", action="store_true", help="Output human-readable summary")
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("--json", action="store_true", help="Output machine-readable JSON (default)")
+    output_group.add_argument("--summary", action="store_true", help="Output human-readable summary")
     parser.add_argument("--base-url", type=str, default=None, help="Backend API base URL (e.g. http://127.0.0.1:3000)")
     parser.add_argument("--projection-path", type=str, default=None, help="Path to service delivery projection JSON")
     parser.add_argument("--env-mode", type=str, default="local_dry_run", help="Deployment environment mode")

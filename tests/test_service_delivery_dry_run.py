@@ -5,7 +5,6 @@ Service Delivery deployment dry-run and release smoke validation.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -295,3 +294,195 @@ def test_cli_runner_script(capsys):
     assert data["schema"] == "MarketOS.ServiceDeliverySmoke.v1"
     assert data["read_only"] is True
     assert data["mutated"] is False
+
+
+def test_projection_payload_invariants_reject_truthy_strings(artifacts_tmp: Path):
+    """Projection with truthy string or int for network_calls/mutated must be blocked."""
+    # 1. Truthy string
+    payload1 = {
+        "schema_version": "service-engagement-projection-v1",
+        "read_only": True,
+        "network_calls": "true",
+        "mutated": False,
+        "engagements": [],
+    }
+    f1 = artifacts_tmp / "truthy_str.json"
+    f1.write_text(json.dumps(payload1), encoding="utf-8")
+    res1 = validate_service_delivery_projection(path=f1, artifacts_root=artifacts_tmp)
+    assert res1["status"] == "blocked"
+    assert res1["reason"] == "unsafe_service_delivery_projection"
+
+    # 2. Integer 1
+    payload2 = {
+        "schema_version": "service-engagement-projection-v1",
+        "read_only": True,
+        "network_calls": False,
+        "mutated": 1,
+        "engagements": [],
+    }
+    f2 = artifacts_tmp / "int_mutation.json"
+    f2.write_text(json.dumps(payload2), encoding="utf-8")
+    res2 = validate_service_delivery_projection(path=f2, artifacts_root=artifacts_tmp)
+    assert res2["status"] == "blocked"
+    assert res2["reason"] == "unsafe_service_delivery_projection"
+
+    # 3. String read_only
+    payload3 = {
+        "schema_version": "service-engagement-projection-v1",
+        "read_only": "true",
+        "network_calls": False,
+        "mutated": False,
+        "engagements": [],
+    }
+    f3 = artifacts_tmp / "str_readonly.json"
+    f3.write_text(json.dumps(payload3), encoding="utf-8")
+    res3 = validate_service_delivery_projection(path=f3, artifacts_root=artifacts_tmp)
+    assert res3["status"] == "blocked"
+    assert res3["reason"] == "unsafe_service_delivery_projection"
+
+
+def test_projection_payload_invariants_reject_omitted_flags(artifacts_tmp: Path):
+    """Projection missing network_calls or mutated fields must fail-closed."""
+    payload = {
+        "schema_version": "service-engagement-projection-v1",
+        "read_only": True,
+        "engagements": [],
+    }
+    f = artifacts_tmp / "missing_flags.json"
+    f.write_text(json.dumps(payload), encoding="utf-8")
+    res = validate_service_delivery_projection(path=f, artifacts_root=artifacts_tmp)
+    assert res["status"] == "blocked"
+    assert res["reason"] == "unsafe_service_delivery_projection"
+
+
+def test_projection_file_size_bounded(artifacts_tmp: Path, monkeypatch):
+    """Files exceeding maximum allowed size must be rejected prior to parsing."""
+    import backend.deployment.service_delivery_smoke as smoke_mod
+    monkeypatch.setattr(smoke_mod, "MAX_PROJECTION_BYTES", 100)
+
+    f = artifacts_tmp / "oversized.json"
+    f.write_text(json.dumps({"schema_version": "service-engagement-projection-v1", "padding": "x" * 200}), encoding="utf-8")
+    res = validate_service_delivery_projection(path=f, artifacts_root=artifacts_tmp)
+    assert res["status"] == "malformed"
+    assert res["reason"] == "service_delivery_projection_file_too_large"
+
+
+def test_projection_directory_as_path_rejected(artifacts_tmp: Path):
+    """Passing a directory instead of an artifact file fails closed."""
+    subdir = artifacts_tmp / "subdir"
+    subdir.mkdir()
+    res = validate_service_delivery_projection(path=subdir, artifacts_root=artifacts_tmp)
+    assert res["status"] == "unavailable"
+    assert res["reason"] == "service_delivery_projection_is_directory"
+    assert res["is_artifact_safe"] is False
+
+    # Passing the root artifacts directory directly is rejected by allow_root=False
+    res_root = validate_service_delivery_projection(path=artifacts_tmp, artifacts_root=artifacts_tmp)
+    assert res_root["status"] == "blocked"
+    assert res_root["reason"] == "projection_path_outside_artifacts"
+
+
+def test_is_path_under_artifacts_null_byte_handled():
+    """Null byte in path must not cause unhandled ValueError crash."""
+    assert is_path_under_artifacts("artifacts/test.json\0.txt") is False
+
+
+def test_is_path_under_artifacts_windows_backslash_normalized(artifacts_tmp: Path):
+    """Windows backslashes resolve safely under artifacts."""
+    f = artifacts_tmp / "nested" / "proj.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("{}", encoding="utf-8")
+    rel_win = f"artifacts\\nested\\proj.json"
+    assert is_path_under_artifacts(rel_win, artifacts_root=artifacts_tmp) is True
+
+
+def test_projection_workspace_isolation_detects_secret_values(artifacts_tmp: Path):
+    """Projection containing secret values (Bearer token, API key) must be rejected."""
+    payload = {
+        "schema_version": "service-engagement-projection-v1",
+        "read_only": True,
+        "network_calls": False,
+        "mutated": False,
+        "engagements": [
+            {
+                "package_id": "product-validation-sprint",
+                "notes": "Authorization: Bearer sk-live-secret-99998888",
+            }
+        ],
+    }
+    f = artifacts_tmp / "bearer_leak.json"
+    f.write_text(json.dumps(payload), encoding="utf-8")
+    res = validate_service_delivery_projection(path=f, artifacts_root=artifacts_tmp)
+    assert res["status"] == "failed"
+    assert res["reason"] == "service_delivery_projection_failed_workspace_isolation"
+    assert res["leakage_detected"] is True
+    assert any("forbidden_value_marker" in str(d) for d in res["leakage_details"])
+
+
+def test_probe_service_delivery_workbench_ssrf_blocked():
+    """Arbitrary URL schemes (such as file://) are blocked before making requests."""
+    res = probe_service_delivery_workbench(base_url="file:///etc/passwd")
+    assert res["status"] == "blocked"
+    assert res["reason"] == "unsupported_url_scheme"
+
+
+def test_probe_service_delivery_workbench_invalid_json_fails():
+    """HTTP endpoint returning HTML or non-JSON payload returns failed status."""
+    class FakeResponse:
+        status = 200
+        def read(self, n):
+            return b"<html><body>Not JSON</body></html>"
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    with patch("urllib.request.urlopen", return_value=FakeResponse()):
+        res = probe_service_delivery_workbench(base_url="http://127.0.0.1:3000")
+        assert res["status"] == "failed"
+        assert res["reason"] == "invalid_json_endpoint_response"
+
+
+def test_ci_failure_override_propagates_to_overall_status_and_exit_code(artifacts_tmp: Path):
+    """Executed CI failure propagates to overall_status='failed' and exit code 1."""
+    report = run_service_delivery_smoke(
+        environ={},
+        artifacts_root=artifacts_tmp,
+        ci_override={
+            "runner_id": 100,
+            "total_steps": 10,
+            "ci_status": "failed",
+            "logs_available": True,
+        },
+    )
+    assert report.overall_status == "failed"
+    assert any("ci_failed" in b for b in report.blockers)
+
+    # CLI exit code 1
+    exit_code = cli_main(["--ci-status", "failed", "--ci-steps", "10", "--ci-runner-id", "100", "--ci-logs"])
+    assert exit_code == 1
+
+
+def test_cli_summary_mode(capsys):
+    """CLI --summary mode outputs human-readable component headers and returns 0."""
+    exit_code = cli_main(["--summary"])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "MarketOS Service Delivery Deployment Dry-Run" in captured.out
+    assert "Component Checks" in captured.out
+    assert "Container Runtime" in captured.out
+
+
+def test_cli_output_outside_artifacts_rejected(capsys):
+    """CLI --output path outside artifacts directory returns exit code 1."""
+    exit_code = cli_main(["--output", "../outside.json"])
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "must resolve under artifacts/" in captured.err
+
+
+def test_cli_mutation_flags_return_exit_code_1(monkeypatch):
+    """Active live mutation flag in environment causes CLI to exit with code 1."""
+    monkeypatch.setenv("MARKETOS_ENABLE_LIVE_ACTIONS", "1")
+    exit_code = cli_main(["--json"])
+    assert exit_code == 1

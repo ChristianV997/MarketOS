@@ -21,14 +21,12 @@ import hashlib
 import json
 import os
 import platform
-import shutil
 import socket
 import sys
-import urllib.error
-import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
+from urllib import error as urllib_error, parse as urllib_parse, request as urllib_request
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -37,17 +35,15 @@ if str(ROOT) not in sys.path:
 from backend.deployment.environment_contract import (
     MUTATION_FLAG_KEYS,
     is_truthy,
-    validate_environment,
 )
 from backend.deployment.diagnostics import (
-    DiagnosticResult,
     diagnose_missing_docker,
     diagnose_missing_runner,
-    diagnose_zero_step_ci,
 )
 
 ARTIFACTS_DIR = (ROOT / "artifacts").resolve()
 ENDPOINT_PATH = "/api/service-delivery/workbench"
+MAX_PROJECTION_BYTES = 5 * 1024 * 1024  # 5 MB safety bound
 SUPPORTED_PROJECTION_VERSIONS = frozenset({
     "service-engagement-projection-v1",
     "service-delivery-plane-v1",
@@ -57,21 +53,65 @@ FORBIDDEN_WORKSPACE_LEAK_KEYS = frozenset({
     "internal_prompts",
     "internal_formula",
     "internal_formulas",
+    "internal_heuristic",
     "internal_heuristics",
+    "internal_scoring_formula",
+    "internal_strategy_note",
+    "internal_pricing_note",
+    "internal_upsell_note",
+    "internal_agent_instruction",
+    "source_code",
     "raw_provider_payload",
     "cross_client_data",
+    "cross_client_learning",
+    "api_key",
+    "access_token",
+    "authorization",
+    "credentials",
+    "password",
+    "token",
+    "private_key",
+    "secret",
 })
+FORBIDDEN_VALUE_MARKERS = (
+    "bearer sk-",
+    "bearer ghp_",
+    "sk-live-",
+    "sk-proj-",
+    "ghp_",
+    "-----begin private key-----",
+    "-----begin rsa private key-----",
+)
 
 
-def is_path_under_artifacts(path: Path | str, artifacts_root: Path | None = None) -> bool:
+def is_path_under_artifacts(
+    path: Path | str,
+    artifacts_root: Path | None = None,
+    *,
+    allow_root: bool = False,
+) -> bool:
     """Verify that a path resolves safely within the artifacts directory without traversal."""
-    if not path:
+    if not path or "\0" in str(path):
         return False
-    root = artifacts_root or ARTIFACTS_DIR
+    root = (artifacts_root or ARTIFACTS_DIR).resolve()
     try:
-        resolved = Path(path).resolve() if Path(path).is_absolute() else (ROOT / path).resolve()
-        return resolved == root or root in resolved.parents
-    except OSError:
+        clean_path = str(path).replace("\\", "/")
+        if Path(clean_path).is_absolute():
+            resolved = Path(clean_path).resolve()
+        elif artifacts_root:
+            if clean_path == "artifacts":
+                resolved = root
+            elif clean_path.startswith("artifacts/"):
+                resolved = (root / clean_path[len("artifacts/"):]).resolve()
+            else:
+                resolved = (root / clean_path).resolve()
+        else:
+            resolved = (ROOT / clean_path).resolve()
+
+        if allow_root:
+            return resolved == root or root in resolved.parents
+        return root in resolved.parents
+    except (OSError, ValueError):
         return False
 
 
@@ -88,14 +128,18 @@ def check_projection_workspace_isolation(payload: Any) -> list[str]:
         from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
         leaks = check_workspace_leakage(payload, client_safe=True)
         if leaks:
-            if isinstance(leaks, list):
-                findings.extend(str(x) for x in leaks)
+            if isinstance(leaks, (list, tuple)):
+                for x in leaks:
+                    if hasattr(x, "data_class") and hasattr(x, "field_path"):
+                        findings.append(f"{x.data_class}:{x.field_path}")
+                    else:
+                        findings.append(str(x))
             else:
                 findings.append("client_workspace_leakage_detected")
     except (ImportError, Exception):
         pass
 
-    # Recursive dictionary key check
+    # Recursive dictionary key and string value inspection
     def _inspect_node(node: Any, current_path: str = ""):
         if isinstance(node, dict):
             for k, v in node.items():
@@ -107,6 +151,12 @@ def check_projection_workspace_isolation(payload: Any) -> list[str]:
         elif isinstance(node, (list, tuple)):
             for idx, item in enumerate(node):
                 _inspect_node(item, f"{current_path}[{idx}]")
+        elif isinstance(node, str):
+            v_lower = node.lower()
+            for marker in FORBIDDEN_VALUE_MARKERS:
+                if marker in v_lower:
+                    findings.append(f"forbidden_value_marker:{current_path or 'root'}")
+                    break
 
     _inspect_node(payload)
     return sorted(set(findings))
@@ -119,7 +169,7 @@ def validate_service_delivery_projection(
 ) -> dict[str, Any]:
     """Validate that the service-delivery projection artifact is safely configured and formatted."""
     env = os.environ if environ is None else environ
-    root = artifacts_root or ARTIFACTS_DIR
+    root = (artifacts_root or ARTIFACTS_DIR).resolve()
     raw_path = path if path is not None else env.get("MARKETOS_SERVICE_DELIVERY_PROJECTION", "")
 
     if not raw_path:
@@ -149,8 +199,9 @@ def validate_service_delivery_projection(
             "leakage_details": [],
         }
 
-    resolved_path = Path(raw_path).resolve() if Path(raw_path).is_absolute() else (ROOT / raw_path).resolve()
-    if not resolved_path.is_file():
+    clean_raw = str(raw_path).replace("\\", "/")
+    resolved_path = Path(clean_raw).resolve() if Path(clean_raw).is_absolute() else (ROOT / clean_raw).resolve()
+    if not resolved_path.exists():
         return {
             "status": "unavailable",
             "reason": "service_delivery_projection_file_not_found",
@@ -162,10 +213,51 @@ def validate_service_delivery_projection(
             "leakage_detected": False,
             "leakage_details": [],
         }
+    if resolved_path.is_dir():
+        return {
+            "status": "unavailable",
+            "reason": "service_delivery_projection_is_directory",
+            "message": f"Projection path '{resolved_path}' is a directory, not an artifact file.",
+            "path": str(resolved_path),
+            "is_artifact_safe": False,
+            "row_count": 0,
+            "schema_version": "unknown",
+            "leakage_detected": False,
+            "leakage_details": [],
+        }
+    if not resolved_path.is_file():
+        return {
+            "status": "unavailable",
+            "reason": "service_delivery_projection_not_a_regular_file",
+            "message": f"Projection path '{resolved_path}' is not a regular file.",
+            "path": str(resolved_path),
+            "is_artifact_safe": False,
+            "row_count": 0,
+            "schema_version": "unknown",
+            "leakage_detected": False,
+            "leakage_details": [],
+        }
+
+    try:
+        st_size = resolved_path.stat().st_size
+    except OSError:
+        st_size = 0
+    if st_size > MAX_PROJECTION_BYTES:
+        return {
+            "status": "malformed",
+            "reason": "service_delivery_projection_file_too_large",
+            "message": f"Projection file size ({st_size} bytes) exceeds maximum allowed bound of {MAX_PROJECTION_BYTES} bytes.",
+            "path": str(resolved_path),
+            "is_artifact_safe": True,
+            "row_count": 0,
+            "schema_version": "unknown",
+            "leakage_detected": False,
+            "leakage_details": [],
+        }
 
     try:
         content = json.loads(resolved_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         return {
             "status": "malformed",
             "reason": "service_delivery_projection_invalid_json",
@@ -206,12 +298,16 @@ def validate_service_delivery_projection(
             "leakage_details": [],
         }
 
-    # Verify read-only guarantees in payload
-    if payload.get("read_only") is not True or payload.get("network_calls") is True or payload.get("mutated") is True:
+    # Verify read-only guarantees in payload strictly (strict bool: True, False, False)
+    if (
+        payload.get("read_only") is not True
+        or payload.get("network_calls") is not False
+        or payload.get("mutated") is not False
+    ):
         return {
             "status": "blocked",
             "reason": "unsafe_service_delivery_projection",
-            "message": "Projection payload violates read-only safety invariants (read_only!=True, network_calls==True, or mutated==True).",
+            "message": "Projection payload violates read-only safety invariants: read_only must be True, network_calls must be False, mutated must be False.",
             "path": str(resolved_path),
             "is_artifact_safe": True,
             "row_count": 0,
@@ -268,16 +364,34 @@ def probe_service_delivery_workbench(
 ) -> dict[str, Any]:
     """Probe the service delivery workbench endpoint over HTTP or via in-process module."""
     if base_url:
-        url = f"{base_url.rstrip('/')}{ENDPOINT_PATH}"
-        request = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+        clean_base = base_url.rstrip("/")
+        url = f"{clean_base}{ENDPOINT_PATH}"
+        parsed = urllib_parse.urlsplit(url)
+        if parsed.scheme not in ("http", "https"):
+            return {
+                "mode": "http",
+                "status": "blocked",
+                "status_code": None,
+                "url": url,
+                "reason": "unsupported_url_scheme",
+                "detail": f"URL scheme '{parsed.scheme}' is blocked. Only http and https are allowed.",
+            }
+        http_req = urllib_request.Request(url, method="GET", headers={"Accept": "application/json"})
         try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # nosec B310: operator-supplied URL
+            with urllib_request.urlopen(http_req, timeout=timeout_seconds) as response:  # nosec B310: validated scheme
                 raw = response.read(65536).decode("utf-8")
                 status_code = response.status
                 try:
                     payload = json.loads(raw)
                 except ValueError:
-                    payload = {"raw": raw[:200]}
+                    return {
+                        "mode": "http",
+                        "status": "failed",
+                        "status_code": status_code,
+                        "url": url,
+                        "reason": "invalid_json_endpoint_response",
+                        "detail": "HTTP response could not be parsed as JSON.",
+                    }
                 return {
                     "mode": "http",
                     "status": "passed" if status_code == 200 else "failed",
@@ -287,7 +401,7 @@ def probe_service_delivery_workbench(
                     "response": payload if isinstance(payload, dict) else {"data": payload},
                     "live_endpoint_status": payload.get("live_endpoint_status", "unknown") if isinstance(payload, dict) else "unknown",
                 }
-        except urllib.error.HTTPError as exc:
+        except urllib_error.HTTPError as exc:
             if exc.code == 404:
                 return {
                     "mode": "http",
@@ -323,7 +437,7 @@ def probe_service_delivery_workbench(
                 "reason": "connection_timed_out",
                 "detail": f"Request exceeded timeout of {timeout_seconds}s.",
             }
-        except (OSError, urllib.error.URLError) as exc:
+        except (OSError, urllib_error.URLError) as exc:
             return {
                 "mode": "http",
                 "status": "unavailable",
@@ -350,14 +464,23 @@ def probe_service_delivery_workbench(
                 "live_endpoint_status": availability,
                 "detail": "api.routes.service_delivery_workbench is installed and callable.",
             }
-    except ModuleNotFoundError:
+    except ModuleNotFoundError as exc:
+        if exc.name in {"api.routes.service_delivery_workbench", "api.routes"}:
+            return {
+                "mode": "in_process",
+                "status": "unavailable",
+                "status_code": None,
+                "url": ENDPOINT_PATH,
+                "reason": "service_delivery_route_not_installed",
+                "detail": "api.routes.service_delivery_workbench is not installed on this checkout (PR #271 unmerged).",
+            }
         return {
             "mode": "in_process",
-            "status": "unavailable",
+            "status": "failed",
             "status_code": None,
             "url": ENDPOINT_PATH,
-            "reason": "service_delivery_route_not_installed",
-            "detail": "api.routes.service_delivery_workbench is not installed on this checkout (PR #271 unmerged).",
+            "reason": "route_dependency_import_error",
+            "detail": f"Route sub-dependency failed to import: {exc}",
         }
     except Exception as exc:
         return {
@@ -455,6 +578,7 @@ class ServiceDeliverySmokeReport:
             "environment_mode": self.environment_mode,
             "overall_status": self.overall_status,
             "read_only": self.read_only,
+            "network_calls": self.network_calls,
             "mutated": self.mutated,
             "projection_status": self.projection_check.get("status"),
             "projection_reason": self.projection_check.get("reason"),
@@ -539,6 +663,9 @@ def run_service_delivery_smoke(
             ci_status="ci_unavailable",
             logs_available=False,
         )
+    if ci_eval["state"] == "failed":
+        blockers.append(f"ci_failed: {ci_eval['classification_reason']}")
+        remediations.append("Investigate failing test step in CI build logs.")
 
     # Resolve overall status
     if any("live_mutations_forbidden" in b for b in blockers) or proj_check["status"] == "blocked":
@@ -575,6 +702,7 @@ def run_service_delivery_smoke(
 
 
 __all__ = [
+    "MAX_PROJECTION_BYTES",
     "ServiceDeliverySmokeReport",
     "is_path_under_artifacts",
     "check_projection_workspace_isolation",
