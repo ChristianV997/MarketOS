@@ -14,7 +14,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 
 # Allow direct ``python scripts/research_to_decision.py`` execution from any cwd.
@@ -180,10 +180,14 @@ OFFER_FIELDS = frozenset(
         "shipping_method",
         "estimated_landed_cost",
         "fulfillment_method",
+        "human_confirmed",
+        "human_reviewed",
         "field_provenance",
         "warnings",
     }
 )
+TRUE_TEXT = frozenset({"true", "yes", "y", "1"})
+FALSE_TEXT = frozenset({"false", "no", "n", "0"})
 SENSITIVE_KEY = re.compile(r"(api[_-]?key|authorization|body|cookie|header|html|password|payload|private[_-]?key|raw|secret|token|trace|log)", re.I)
 SENSITIVE_VALUE = re.compile(r"(bearer\s+|sk_(?:live|test)_|gh[pousr]_?|xox[baprs]-|-----BEGIN)", re.I)
 
@@ -238,6 +242,23 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
 def _evidence_reference(value: Any, field: str, *, allow_url_query: bool = False) -> str:
     reference = _reference_text(value, field, allow_url_query=allow_url_query)
     return f"evidence:{hashlib.sha256(reference.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _operator_supplier_confirmations(values: Sequence[Sequence[str]]) -> set[tuple[str, str, str]]:
+    if not isinstance(values, (list, tuple)) or len(values) > MAX_RECORDS:
+        raise ResearchToDecisionError("operator supplier confirmations must be a bounded list")
+    confirmations: set[tuple[str, str, str]] = set()
+    for value in values:
+        if not isinstance(value, (list, tuple)) or len(value) != 3:
+            raise ResearchToDecisionError("operator supplier confirmation requires offer_id, exact_sku, and document_reference")
+        offer_id = _text(value[0], "operator_confirmation.offer_id", required=True)
+        exact_sku = _text(value[1], "operator_confirmation.exact_sku", required=True)
+        reference = _reference_text(value[2], "operator_confirmation.document_reference")
+        confirmation = (offer_id, exact_sku, reference)
+        if confirmation in confirmations:
+            raise ResearchToDecisionError("duplicate operator supplier confirmation")
+        confirmations.add(confirmation)
+    return confirmations
 
 
 def _warning_values(value: Any, field: str) -> list[str]:
@@ -529,6 +550,22 @@ def _offer_text(row: Mapping[str, Any], names: tuple[str, ...], field: str, issu
     return _text(value, f"supplier_offer.{field}")
 
 
+def _bool_field(row: Mapping[str, Any], names: tuple[str, ...], field: str) -> bool:
+    """Fail-closed boolean: absent means False, and only recognized text/bool
+    forms are accepted -- anything else is a malformed value, not a guess."""
+    value = _row_value(row, *names)
+    if value in (None, ""):
+        return False
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in TRUE_TEXT:
+        return True
+    if text in FALSE_TEXT:
+        return False
+    raise ResearchToDecisionError(f"{field} must be a boolean")
+
+
 def _offer_number(row: Mapping[str, Any], names: tuple[str, ...], field: str, issues: list[str]) -> float | None:
     value = _row_value(row, *names)
     if value in (None, ""):
@@ -549,12 +586,16 @@ def _normalize_supplier_offer(
     source_reference: Any = None,
     extraction_method: Any = None,
     input_warnings: Any = None,
+    import_evidence_state: str,
+    operator_confirmations: set[tuple[str, str, str]],
 ) -> dict[str, Any]:
     candidate_id = _text(row.get("candidate_id"), "supplier_offer.candidate_id", required=True)
-    offer_id = _row_value(row, "offer_id", "supplier_offer_id", "supplier_product_id")
-    exact_sku = _row_value(row, "supplier_sku", "sku")
-    if not offer_id or not exact_sku:
+    offer_id_value = _row_value(row, "offer_id", "supplier_offer_id", "supplier_product_id")
+    exact_sku_value = _row_value(row, "supplier_sku", "sku")
+    if not offer_id_value or not exact_sku_value:
         raise ResearchToDecisionError("supplier offer identity requires offer_id and exact supplier_sku")
+    offer_id = _text(offer_id_value, "supplier_offer.offer_id", required=True)
+    exact_sku = _text(exact_sku_value, "supplier_offer.exact_sku", required=True)
     malformed_nested = [key for key, value in row.items() if key in OFFER_FIELDS - {"field_provenance", "warnings"} and isinstance(value, (Mapping, list, tuple))]
     if malformed_nested:
         raise ResearchToDecisionError(f"malformed nested supplier offer fields: {', '.join(sorted(malformed_nested))}")
@@ -571,14 +612,24 @@ def _normalize_supplier_offer(
     if expires_at and datetime.fromisoformat(expires_at.replace("Z", "+00:00")) < datetime.fromisoformat(observed_at.replace("Z", "+00:00")):
         issues.append("offer_expired")
     source = _offer_text(row, ("source_type", "source"), "source", issues) or source_label
-    reference_value = _row_value(row, "source_reference", "document_reference") or source_reference or source_label
+    explicit_reference = _row_value(row, "source_reference", "document_reference") or source_reference
+    if explicit_reference:
+        explicit_reference = _reference_text(explicit_reference, "supplier_offer.source_reference")
+    document_reference_provided = bool(explicit_reference)
+    reference_value = explicit_reference or source_label
     reference_id = _evidence_reference(reference_value, "supplier_offer.source_reference")
     method_value = _row_value(row, "extraction_method") or extraction_method or "manual_import"
     method = _text(method_value, "supplier_offer.extraction_method", required=True)
+    source_claimed_human_confirmation = _bool_field(row, ("human_confirmed", "human_reviewed"), "supplier_offer.human_confirmed")
+    human_confirmed = bool(
+        explicit_reference
+        and (offer_id, exact_sku, explicit_reference) in operator_confirmations
+    )
     evidence_warnings = _warning_values(_row_value(row, "warnings") or input_warnings, "supplier_offer.warnings")
-    evidence_state = _offer_text(row, ("evidence_state",), "evidence_state", issues)
-    if evidence_state != "unknown" and evidence_state not in EVIDENCE_STATES:
-        raise ResearchToDecisionError(f"unsupported supplier offer evidence_state: {evidence_state}")
+    source_claimed_state = _offer_text(row, ("evidence_state",), "evidence_state", issues)
+    if source_claimed_state != "unknown" and source_claimed_state not in EVIDENCE_STATES:
+        raise ResearchToDecisionError(f"unsupported supplier offer evidence_state: {source_claimed_state}")
+    evidence_state = import_evidence_state
     confidence_value = _row_value(row, "confidence", "source_confidence")
     confidence = 0.0 if confidence_value in (None, "") else _number(confidence_value, "supplier_offer.confidence", minimum=0.0, maximum=1.0)
     if confidence_value in (None, ""):
@@ -618,7 +669,21 @@ def _normalize_supplier_offer(
         "policy_evidence": _offer_text(row, ("policy_evidence",), "policy_evidence", issues),
         "backup_supplier": _offer_text(row, ("backup_supplier",), "backup_supplier", issues),
         "approval_state": approval_state,
-        "evidence": {"captured_at": observed_at, "expires_at": expires_at, "source": source, "reference_id": reference_id, "extraction_method": method, "state": evidence_state, "confidence": confidence, "warnings": evidence_warnings},
+        "evidence": {
+            "captured_at": observed_at,
+            "expires_at": expires_at,
+            "source": source,
+            "reference_id": reference_id,
+            "document_reference_provided": document_reference_provided,
+            "extraction_method": method,
+            "state": evidence_state,
+            "source_claimed_state": source_claimed_state,
+            "confidence": confidence,
+            "human_confirmed": human_confirmed,
+            "human_confirmation_source": "operator_input" if human_confirmed else "none",
+            "supplier_claimed_human_confirmation": source_claimed_human_confirmation,
+            "warnings": evidence_warnings,
+        },
         "unknown_fields": sorted(set(row) - OFFER_FIELDS),
     }
     if approval_state == "approved" and any(offer[key] in {"unknown", None} for key in ("sample_state", "rma")):
@@ -629,7 +694,15 @@ def _normalize_supplier_offer(
     return offer
 
 
-def _load_import(path: Path, entry: Mapping[str, Any], role: str, *, lane: Mapping[str, Any], captured_at: str) -> tuple[list[Any], dict[str, Any]]:
+def _load_import(
+    path: Path,
+    entry: Mapping[str, Any],
+    role: str,
+    *,
+    lane: Mapping[str, Any],
+    captured_at: str,
+    operator_confirmations: set[tuple[str, str, str]],
+) -> tuple[list[Any], dict[str, Any]]:
     rows, fmt = _raw_records(path)
     label = _text(entry.get("label") or path.name, f"{role}.label")
     _validate_rows(rows, label=label, role=role)
@@ -654,9 +727,11 @@ def _load_import(path: Path, entry: Mapping[str, Any], role: str, *, lane: Mappi
                 lane=lane,
                 captured_at=captured_at,
                 source_label=label,
-                source_reference=entry.get("source_reference") or path.name,
+                source_reference=entry.get("source_reference"),
                 extraction_method=entry.get("extraction_method") or ("manual_csv_import" if fmt == "csv" else "manual_json_import"),
                 input_warnings=entry.get("warnings"),
+                import_evidence_state="manual" if fmt == "csv" else "fixture",
+                operator_confirmations=operator_confirmations,
             )
             for row in rows
         ]
@@ -867,8 +942,24 @@ def _promotion_lifecycle(
     add("screened", "screening_completed")
     if offers:
         add("supplier_claimed", "supplier_offer_observed")
-        if all(offer.get("terms_evidence") not in {None, "unknown"} and offer.get("policy_evidence") not in {None, "unknown"} for offer in offers):
+        # Only manual-import evidence can reach supplier_documented, and then
+        # only when an out-of-payload operator input matches every offer's
+        # exact offer ID, SKU, and explicit reference. Supplier-file booleans
+        # and references remain claims, not operator attestations.
+        terms_and_policy_present = all(
+            offer.get("terms_evidence") not in {None, "unknown"} and offer.get("policy_evidence") not in {None, "unknown"}
+            for offer in offers
+        )
+        documented = all(
+            offer.get("evidence", {}).get("document_reference_provided") is True
+            and offer.get("evidence", {}).get("human_confirmed") is True
+            and offer.get("evidence", {}).get("state") == "manual"
+            for offer in offers
+        )
+        if terms_and_policy_present and documented:
             add("supplier_documented", "supplier_terms_and_policy_present")
+        elif terms_and_policy_present:
+            blockers.add("supplier_offer:human_review_or_document_reference_missing")
         if "conflicting_offer" in offer_issues:
             add("offer_conflicted", "conflicting_supplier_offers_quarantined")
     if evidence_gaps:
@@ -1020,8 +1111,19 @@ def _candidate_audit(
     return rows
 
 
-def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | Path) -> dict[str, Any]:
+def build_research_to_decision(
+    manifest: Mapping[str, Any],
+    *,
+    base_dir: str | Path,
+    operator_confirmed_supplier_documents: Sequence[Sequence[str]] = (),
+) -> dict[str, Any]:
+    """Build the existing report; confirmations must come from outside imports.
+
+    Operator confirmations are local attestations, not authenticated identity
+    or supplier/document verification.
+    """
     lane, metadata, captured_at = _validate_manifest(manifest)
+    operator_confirmations = _operator_supplier_confirmations(operator_confirmed_supplier_documents)
     base = Path(base_dir).resolve()
     entries_total = sum(len(manifest.get(key, []) or []) for key in ("supplier_inputs", "marketplace_inputs", "consumer_attention_inputs", "observation_inputs")) + (1 if manifest.get("public_market_seed") else 0)
     if entries_total > MAX_INPUT_FILES:
@@ -1039,7 +1141,14 @@ def build_research_to_decision(manifest: Mapping[str, Any], *, base_dir: str | P
     for key, role, destination in (("supplier_inputs", "supplier", supplier_records), ("marketplace_inputs", "marketplace", marketplace_records), ("consumer_attention_inputs", "consumer_attention", consumer_records)):
         for entry in _input_entries(manifest, key):
             path = _resolve(base, entry.get("path"), label=f"{key}.path")
-            records, audit = _load_import(path, entry, role, lane=lane, captured_at=captured_at)
+            records, audit = _load_import(
+                path,
+                entry,
+                role,
+                lane=lane,
+                captured_at=captured_at,
+                operator_confirmations=operator_confirmations,
+            )
             supplier_conflict_keys.update(
                 _check_record_conflicts(records, role, seen_records, allow_supplier_conflicts=role == "supplier")
             )
@@ -1203,12 +1312,24 @@ def load_manifest(path: str | Path) -> tuple[dict[str, Any], Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, help="relative-input manifest JSON")
+    parser.add_argument(
+        "--confirm-supplier-document",
+        action="append",
+        nargs=3,
+        default=[],
+        metavar=("OFFER_ID", "EXACT_SKU", "REFERENCE"),
+        help="local operator attestation after review; must match one manually imported offer exactly",
+    )
     parser.add_argument("--json", action="store_true", help="emit the existing report as JSON")
     parser.add_argument("--output", help="optional output file; no file is written by default")
     args = parser.parse_args(argv)
     try:
         manifest, base_dir = load_manifest(args.manifest)
-        report = build_research_to_decision(manifest, base_dir=base_dir)
+        report = build_research_to_decision(
+            manifest,
+            base_dir=base_dir,
+            operator_confirmed_supplier_documents=args.confirm_supplier_document,
+        )
     except (OSError, ResearchToDecisionError) as exc:
         print(json.dumps({"status": "rejected", "error": str(exc)}, sort_keys=True))
         return 2

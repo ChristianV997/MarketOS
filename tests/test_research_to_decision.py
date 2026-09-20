@@ -1,12 +1,13 @@
 """Focused tests for the bounded offline research-to-decision seam."""
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
 import pytest
 
-from scripts.research_to_decision import ResearchToDecisionError, build_research_to_decision
+from scripts.research_to_decision import ResearchToDecisionError, build_research_to_decision, main
 
 
 ROOT = Path(__file__).resolve().parent
@@ -86,12 +87,12 @@ def test_promotion_lifecycle_is_auditable_and_replay_stable() -> None:
         "normalized",
         "screened",
         "supplier_claimed",
-        "supplier_documented",
         "sample_required",
         "direct_ship_required",
         "promotion_blocked",
         "launch_authorized_false",
     }
+    assert "supplier_documented" not in {item["next_state"] for item in transitions}
     for item in transitions:
         assert set(item) == {
             "candidate_id",
@@ -376,3 +377,279 @@ def test_conflicting_same_identity_across_inputs_fails_closed(tmp_path: Path) ->
     assert len(offers) == 2
     assert all(offer["status"] == "quarantined" for offer in offers)
     assert all("conflicting_offer" in offer["issues"] for offer in offers)
+
+
+# ---------------------------------------------------------------------------
+# Manual quotation/form intake (lane SUPPLIER-MANUAL-QUOTE-EVIDENCE-INTAKE-V1):
+# a human-transcribed quote must never earn supplier_documented merely by
+# filling in terms/policy text -- only a genuine document reference AND an
+# external local operator attestation for that exact offer/SKU/reference can
+# unlock the manual-import state.
+# ---------------------------------------------------------------------------
+
+def _manual_quote_manifest(
+    tmp_path: Path,
+    offer: dict,
+    *,
+    candidate_id: str = "quote-candidate",
+    file_format: str = "json",
+) -> dict:
+    evidence = tmp_path / f"quote.{file_format}"
+    row = {"candidate_id": candidate_id, **offer}
+    if file_format == "csv":
+        with evidence.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(row))
+            writer.writeheader()
+            writer.writerow(row)
+    else:
+        evidence.write_text(json.dumps(row), encoding="utf-8")
+    return {
+        "captured_at": "2026-09-16T09:00:00-06:00",
+        "lane": dict(LANE),
+        "candidates": [{"candidate_id": candidate_id}],
+        "supplier_inputs": [{"path": evidence.name}],
+    }
+
+
+def _base_hydroponics_quote() -> dict:
+    return {
+        "supplier": "manual",
+        "offer_id": "HYD-Q-01",
+        "supplier_sku": "HYD-Q-01-SKU",
+        "currency": "MXN",
+        "destination_region": "Mexico",
+        "unit_cost": 32,
+        "shipping_cost": 9,
+        "delivery_min_days": 8,
+        "delivery_max_days": 13,
+        "extraction_method": "manual_pdf_review",
+        "confidence": 0.75,
+        "contract_evidence": "hand-transcribed from supplier PDF quote",
+        "policy_evidence": "return and refund terms transcribed from the same PDF",
+        "return_address": "Mexico return hub",
+        "return_cost_payer": "supplier",
+        "warranty": "12 months, supplier-handled",
+        "rma_process": "email supplier RMA desk",
+        "support_owner": "supplier support",
+        "support_response_sla_hours": 48,
+        "dropshipping_permission": "confirmed in PDF",
+    }
+
+
+def test_hydroponics_manual_quote_form_without_human_confirmation_caps_at_supplier_claimed(tmp_path: Path) -> None:
+    """A hand-transcribed hydroponics quote with full terms/policy text but no
+    document reference and no human_confirmed stays a claim, not a document."""
+    offer = _base_hydroponics_quote()
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hydroponics-quote")
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    audit = report["appendix"]["candidate_audit"][0]
+    states = {item["next_state"] for item in audit["promotion_lifecycle"]}
+    assert "supplier_claimed" in states
+    assert "supplier_documented" not in states
+    blocking = {condition for item in audit["promotion_lifecycle"] for condition in item["blocking_conditions"]}
+    assert "supplier_offer:human_review_or_document_reference_missing" in blocking
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert offer_record["evidence"]["human_confirmed"] is False
+    assert offer_record["evidence"]["document_reference_provided"] is False
+
+
+def test_supplier_json_cannot_self_attest_document_review(tmp_path: Path) -> None:
+    """A supplier-controlled JSON reference and boolean remain source claims."""
+    offer = _base_hydroponics_quote()
+    offer.update({
+        "offer_id": "PET-Q-01",
+        "supplier_sku": "PET-Q-01-SKU",
+        "source_reference": "manual:smart-pet-feeder-quote.pdf",
+        "human_confirmed": True,
+        "evidence_state": "observed",
+    })
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="smart-pet-quote")
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    audit = report["appendix"]["candidate_audit"][0]
+    states = {item["next_state"] for item in audit["promotion_lifecycle"]}
+    assert "supplier_claimed" in states
+    assert "supplier_documented" not in states
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert offer_record["evidence"]["human_confirmed"] is False
+    assert offer_record["evidence"]["supplier_claimed_human_confirmation"] is True
+    assert offer_record["evidence"]["state"] == "fixture"
+    assert offer_record["evidence"]["source_claimed_state"] == "observed"
+    assert offer_record["evidence"]["document_reference_provided"] is True
+    assert offer_record["evidence"]["reference_id"].startswith("evidence:")
+
+
+def test_fixture_json_stays_at_fixture_ceiling_after_operator_confirmation(tmp_path: Path) -> None:
+    offer = _base_hydroponics_quote()
+    offer.update({
+        "offer_id": "PET-FIXTURE-01",
+        "supplier_sku": "PET-FIXTURE-01-SKU",
+        "source_reference": "manual:smart-pet-feeder-quote.pdf",
+    })
+    manifest = _manual_quote_manifest(tmp_path, offer, file_format="json")
+    report = build_research_to_decision(
+        manifest,
+        base_dir=tmp_path,
+        operator_confirmed_supplier_documents=[
+            ("PET-FIXTURE-01", "PET-FIXTURE-01-SKU", "manual:smart-pet-feeder-quote.pdf")
+        ],
+    )
+    states = {item["next_state"] for item in report["appendix"]["candidate_audit"][0]["promotion_lifecycle"]}
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert "supplier_documented" not in states
+    assert offer_record["evidence"]["state"] == "fixture"
+    assert offer_record["evidence"]["human_confirmed"] is True
+
+
+def test_supplier_csv_cannot_self_attest_document_review(tmp_path: Path) -> None:
+    offer = _base_hydroponics_quote()
+    offer.update({
+        "offer_id": "PET-CSV-01",
+        "supplier_sku": "PET-CSV-01-SKU",
+        "source_reference": "manual:smart-pet-feeder-quote.pdf",
+        "human_confirmed": "true",
+        "evidence_state": "observed",
+    })
+    manifest = _manual_quote_manifest(tmp_path, offer, file_format="csv")
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    states = {item["next_state"] for item in report["appendix"]["candidate_audit"][0]["promotion_lifecycle"]}
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert "supplier_documented" not in states
+    assert offer_record["evidence"]["human_confirmed"] is False
+    assert offer_record["evidence"]["supplier_claimed_human_confirmation"] is True
+    assert offer_record["evidence"]["state"] == "manual"
+    assert offer_record["evidence"]["source_claimed_state"] == "observed"
+
+
+def test_local_operator_attestation_is_bound_to_exact_offer_sku_and_reference(tmp_path: Path) -> None:
+    offer = _base_hydroponics_quote()
+    offer.update({
+        "offer_id": "PET-Q-01",
+        "supplier_sku": "PET-Q-01-SKU",
+        "source_reference": "manual:smart-pet-feeder-quote.pdf",
+        "human_confirmed": True,
+    })
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="smart-pet-quote", file_format="csv")
+    report = build_research_to_decision(
+        manifest,
+        base_dir=tmp_path,
+        operator_confirmed_supplier_documents=[("PET-Q-01", "PET-Q-01-SKU", "manual:smart-pet-feeder-quote.pdf")],
+    )
+    audit = report["appendix"]["candidate_audit"][0]
+    states = {item["next_state"] for item in audit["promotion_lifecycle"]}
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert "supplier_documented" in states
+    assert offer_record["evidence"]["state"] == "manual"
+    assert offer_record["evidence"]["human_confirmed"] is True
+    assert offer_record["evidence"]["human_confirmation_source"] == "operator_input"
+    assert offer_record["evidence"]["supplier_claimed_human_confirmation"] is True
+
+
+def test_cli_operator_confirmation_is_separate_from_imported_quote(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    offer = _base_hydroponics_quote()
+    offer.update({
+        "offer_id": "PET-CLI-01",
+        "supplier_sku": "PET-CLI-01-SKU",
+        "source_reference": "manual:smart-pet-feeder-quote.pdf",
+        "human_confirmed": True,
+    })
+    manifest = _manual_quote_manifest(tmp_path, offer, file_format="csv")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = main([
+        "--manifest", str(manifest_path),
+        "--confirm-supplier-document", "PET-CLI-01", "PET-CLI-01-SKU", "manual:smart-pet-feeder-quote.pdf",
+        "--json",
+    ])
+
+    assert result == 0
+    report = json.loads(capsys.readouterr().out)
+    states = {
+        item["next_state"]
+        for item in report["appendix"]["candidate_audit"][0]["promotion_lifecycle"]
+    }
+    assert "supplier_documented" in states
+    assert report["appendix"]["supplier_offers"][0]["evidence"]["human_confirmation_source"] == "operator_input"
+
+
+@pytest.mark.parametrize(
+    "confirmation",
+    [
+        ("OTHER-OFFER", "PET-Q-01-SKU", "manual:smart-pet-feeder-quote.pdf"),
+        ("PET-Q-01", "OTHER-SKU", "manual:smart-pet-feeder-quote.pdf"),
+        ("PET-Q-01", "PET-Q-01-SKU", "manual:other-quote.pdf"),
+    ],
+)
+def test_operator_confirmation_must_match_exact_sku_and_document_reference(
+    tmp_path: Path, confirmation: tuple[str, str, str]
+) -> None:
+    offer = _base_hydroponics_quote()
+    offer.update({
+        "offer_id": "PET-Q-01",
+        "supplier_sku": "PET-Q-01-SKU",
+        "source_reference": "manual:smart-pet-feeder-quote.pdf",
+    })
+    manifest = _manual_quote_manifest(tmp_path, offer, file_format="csv")
+    report = build_research_to_decision(
+        manifest,
+        base_dir=tmp_path,
+        operator_confirmed_supplier_documents=[confirmation],
+    )
+    states = {item["next_state"] for item in report["appendix"]["candidate_audit"][0]["promotion_lifecycle"]}
+    assert "supplier_documented" not in states
+
+
+def test_supplier_import_preserves_explicit_zero_costs_as_manual_values(tmp_path: Path) -> None:
+    offer = _base_hydroponics_quote()
+    offer.update({"unit_cost": 0, "shipping_cost": 0})
+    manifest = _manual_quote_manifest(tmp_path, offer, file_format="csv")
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    normalized = report["appendix"]["supplier_offers"][0]
+    assert normalized["price"]["amount"] == 0
+    assert normalized["shipping"]["cost"] == 0
+    assert normalized["evidence"]["state"] == "manual"
+
+
+def test_manual_quote_form_rejects_a_malformed_human_confirmed_value(tmp_path: Path) -> None:
+    offer = _base_hydroponics_quote()
+    offer["human_confirmed"] = "maybe"
+    manifest = _manual_quote_manifest(tmp_path, offer)
+    with pytest.raises(ResearchToDecisionError, match="human_confirmed must be a boolean"):
+        build_research_to_decision(manifest, base_dir=tmp_path)
+
+
+def test_manual_quote_form_missing_sku_is_rejected_with_an_actionable_error(tmp_path: Path) -> None:
+    offer = _base_hydroponics_quote()
+    del offer["supplier_sku"]
+    manifest = _manual_quote_manifest(tmp_path, offer)
+    with pytest.raises(ResearchToDecisionError, match="supplier offer identity requires offer_id and exact supplier_sku"):
+        build_research_to_decision(manifest, base_dir=tmp_path)
+
+
+def test_manual_quote_form_missing_support_owner_is_a_quarantine_issue(tmp_path: Path) -> None:
+    offer = _base_hydroponics_quote()
+    del offer["support_owner"]
+    manifest = _manual_quote_manifest(tmp_path, offer)
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert offer_record["support"]["owner"] == "unknown"
+    assert "support_owner_missing" in offer_record["issues"]
+    assert offer_record["status"] == "quarantined"
+
+
+def test_manual_quote_form_cannot_escalate_evidence_state_or_confidence_into_documentation(tmp_path: Path) -> None:
+    """Claiming a strong evidence_state/confidence and human_confirmed on a
+    manual, self-reported quote still cannot earn supplier_documented without
+    a genuine document reference -- confirmation alone is not enough, and a
+    confident self-report is not evidence."""
+    offer = _base_hydroponics_quote()
+    offer.update({"evidence_state": "observed", "confidence": 0.99, "human_confirmed": True})
+    manifest = _manual_quote_manifest(tmp_path, offer)
+    report = build_research_to_decision(manifest, base_dir=tmp_path)
+    audit = report["appendix"]["candidate_audit"][0]
+    states = {item["next_state"] for item in audit["promotion_lifecycle"]}
+    assert "supplier_documented" not in states
+    assert "live_validated" not in states
+    assert "manually_approved" not in states
+    offer_record = report["appendix"]["supplier_offers"][0]
+    assert offer_record["evidence"]["document_reference_provided"] is False
