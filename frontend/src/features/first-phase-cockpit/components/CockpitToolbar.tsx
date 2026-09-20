@@ -99,7 +99,7 @@ export function CockpitToolbar({
           Export client-safe JSON
         </button>
       </div>
-      <p className="mt-3 text-[11px] text-zinc-500" aria-live="polite">
+      <p className="mt-3 text-[11px] text-zinc-400" aria-live="polite">
         Showing {filteredCount} of {candidates.length} candidates · server order preserved · filters never re-rank
       </p>
     </section>

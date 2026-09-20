@@ -257,7 +257,8 @@ test("keyboard helpers and reduced-motion documentation remain in source", async
   assert.match(review, /Human next-action workflow/);
   assert.match(table, /md:hidden/);
   assert.match(table, /hidden overflow-x-auto md:block/);
-  assert.match(table, /aria-colcount=\{14\}/);
+  assert.match(table, /aria-pressed=\{selected\}/);
+  assert.match(table, /Scrollable ranked candidates table/);
   assert.match(compose, /never sort or re-rank/);
   assert.match(compose, /adaptCommerceProjection/);
   assert.match(compose, /operatorWorkspaceId/);

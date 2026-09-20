@@ -73,6 +73,7 @@ export interface OverlayDiagnostics {
   unmatchedServerIds: string[];
   unmatchedProjectionIds: string[];
   rankedCount: number;
+  evidenceMode?: EvidenceMode;
 }
 
 /** Prefer an explicit overlay; otherwise reuse extra report fields already on the #213 portfolio object. */
@@ -125,6 +126,7 @@ export function deriveState(
     overlay?.rankedCount
     ?? (Array.isArray(input.benchmark?.candidates) ? input.benchmark.candidates.length : 0);
   if (rankedCount === 0) return "empty";
+  if (overlay?.evidenceMode === "unknown") return "partial";
   return "success";
 }
 
@@ -466,6 +468,7 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     unmatchedServerIds: mapped.unmatchedServerIds,
     unmatchedProjectionIds: mapped.unmatchedProjectionIds,
     rankedCount: rankedCandidates.length,
+    evidenceMode,
   });
   const pillars = buildPillars(input, evidenceMode);
   const warnings = [

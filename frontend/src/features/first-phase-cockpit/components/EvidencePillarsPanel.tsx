@@ -3,7 +3,7 @@ import type { EvidencePillar } from "../contracts/firstPhaseEvidencePacket";
 const STATUS_STYLE: Record<EvidencePillar["status"], string> = {
   available: "border-emerald-500/30 text-emerald-300",
   partial: "border-amber-500/30 text-amber-300",
-  unavailable: "border-zinc-600/30 text-zinc-500",
+  unavailable: "border-zinc-600/30 text-zinc-400",
   blocked: "border-red-500/30 text-red-300",
 };
 
@@ -29,24 +29,24 @@ export function EvidencePillarsPanel({ pillars }: { pillars: EvidencePillar[] })
             </div>
             <p className="mt-2 text-xs text-zinc-400">{pillar.summary}</p>
             {pillar.provenance && (
-              <p className="mt-1 text-[11px] text-zinc-500">
+              <p className="mt-1 text-[11px] text-zinc-400">
                 Provenance: {pillar.provenance.replace(/_/g, " ")}
               </p>
             )}
             {pillar.freshness && (
-              <p className="mt-1 text-[11px] text-zinc-500">Freshness: {pillar.freshness}</p>
+              <p className="mt-1 text-[11px] text-zinc-400">Freshness: {pillar.freshness}</p>
             )}
             {pillar.sourceFamily && (
-              <p className="mt-1 text-[11px] text-zinc-500">
+              <p className="mt-1 text-[11px] text-zinc-400">
                 Source family: {pillar.sourceFamily.replace(/_/g, " ")}
               </p>
             )}
             {pillar.evidenceMode && (
-              <p className="mt-1 text-[11px] text-zinc-500">
+              <p className="mt-1 text-[11px] text-zinc-400">
                 Evidence mode: {pillar.evidenceMode.replace(/_/g, " ")}
               </p>
             )}
-            <p className="mt-1 text-[11px] text-zinc-500">
+            <p className="mt-1 text-[11px] text-zinc-400">
               Evidence class: {pillar.evidenceClass.replace(/_/g, " ")}
             </p>
             {pillar.blockedReasons.length > 0 && (

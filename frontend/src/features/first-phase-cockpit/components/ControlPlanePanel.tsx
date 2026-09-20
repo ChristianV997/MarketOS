@@ -1,7 +1,7 @@
 import type { ControlPlaneSlot } from "../contracts/firstPhaseEvidencePacket";
 
 const STATUS_STYLE: Record<ControlPlaneSlot["status"], string> = {
-  unavailable: "border-zinc-600/40 text-zinc-500",
+  unavailable: "border-zinc-600/40 text-zinc-400",
   fixture: "border-amber-500/30 text-amber-200",
   simulated: "border-sky-500/30 text-sky-200",
   stale: "border-orange-500/30 text-orange-200",
@@ -13,7 +13,7 @@ export function ControlPlanePanel({ slots }: { slots: ControlPlaneSlot[] }) {
   return (
     <section className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-4" aria-label="Control planes">
       <h3 className="text-sm font-medium text-zinc-100">TrustOS, Governor, and Approval Ledger</h3>
-      <p className="mt-1 text-xs text-zinc-500">
+      <p className="mt-1 text-xs text-zinc-400">
         Read-only slots. No launch, ads, orders, payment, publishing, or messaging authority is granted in the browser.
       </p>
       <div className="mt-3 grid gap-3 md:grid-cols-3" role="list">
@@ -44,7 +44,7 @@ export function ControlPlanePanel({ slots }: { slots: ControlPlaneSlot[] }) {
               </p>
             )}
             {slot.notes.map((note) => (
-              <p key={note} className="mt-1 text-[11px] text-zinc-500">{note}</p>
+              <p key={note} className="mt-1 text-[11px] text-zinc-400">{note}</p>
             ))}
           </article>
         ))}
