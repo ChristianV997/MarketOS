@@ -58,6 +58,7 @@ import argparse
 import csv
 import json
 import sys
+import tempfile
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
@@ -69,7 +70,7 @@ if str(ROOT) not in sys.path:
 from backend.deliverables.registry import DeliverableRegistry  # noqa: E402
 from backend.economics import CurrencyMismatchError, EconomicsError, EvidenceRef, Money  # noqa: E402
 from backend.workspaces.client_workspace import ClientWorkspace  # noqa: E402
-from backend.workspaces.registry import WorkspaceRegistry, get_workspace_registry  # noqa: E402
+from backend.workspaces.registry import WorkspaceRegistry  # noqa: E402
 from evaluation.companyos.service_delivery import (  # noqa: E402
     REQUIRED_CLIENT_DATA_FIELDS,
     assess_client_data_quality,
@@ -258,6 +259,11 @@ def run(
     """
     _reject_secret_shaped_recursive(raw, field_name="intake")
     consent = _require_consent(raw)
+    if workspace_registry is None or deliverable_registry is None:
+        raise IntakeError(
+            "explicit workspace and deliverable registries are required; "
+            "callers must not implicitly write to shared registries"
+        )
 
     client_id = str(raw.get("client_id") or "")
     package_id = str(raw.get("package_id") or "")
@@ -271,7 +277,7 @@ def run(
     package = packages[package_id]
 
     workspace_name = str(raw.get("workspace_name") or client_id)
-    registry = workspace_registry or get_workspace_registry()
+    registry = workspace_registry
     workspace = registry.by_name(workspace_name)
     if workspace is None:
         workspace = registry.register(ClientWorkspace(name=workspace_name, workspace_type="client_service", dry_run_default=True))
@@ -339,10 +345,17 @@ def run(
             if assessment.data_inadequate
             else "Review the client-safe deliverable below with a human before any client communication."
         ),
-        "rollback": "This intake is entirely local and dry-run: no client message, payment, or provider action was taken. The registered workspace identity (name/type only, no business data) and the redacted deliverable are the only local state written, both via existing registries; delete their state files to fully roll back.",
-        "read_only": True,
+        "rollback": (
+            "No external action was taken. This run writes local workspace and deliverable registry state. "
+            "The default CLI paths are temporary and removed when the process exits; explicitly supplied "
+            "registry paths persist. Do not delete shared registry files to roll back; use isolated paths "
+            "for disposable runs."
+        ),
+        "read_only": False,
         "network_calls": False,
-        "mutated": False,
+        "mutated": True,
+        "mutation_scope": "local_workspace_and_deliverable_registries",
+        "external_actions": False,
     }
 
 
@@ -390,19 +403,29 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--intake-json", type=Path, required=True)
     parser.add_argument("--data-quality-csv", type=Path)
-    parser.add_argument("--workspace-registry-path", type=Path, help="local registry file; defaults to the shared WorkspaceRegistry state path")
-    parser.add_argument("--deliverable-registry-path", type=Path, help="local registry file; defaults to the shared DeliverableRegistry state path")
+    parser.add_argument(
+        "--workspace-registry-path", type=Path,
+        help="local registry file; explicit paths persist, omission uses a temporary isolated registry",
+    )
+    parser.add_argument(
+        "--deliverable-registry-path", type=Path,
+        help="local registry file; explicit paths persist, omission uses a temporary isolated registry",
+    )
     parser.add_argument("--generated-at", default="offline-deterministic")
     args = parser.parse_args(argv)
     try:
         raw = load_intake_file(args.intake_json)
         data_quality_override = load_data_quality_csv(args.data_quality_csv) if args.data_quality_csv else None
-        workspace_registry = WorkspaceRegistry(str(args.workspace_registry_path)) if args.workspace_registry_path else None
-        deliverable_registry = DeliverableRegistry(str(args.deliverable_registry_path)) if args.deliverable_registry_path else None
-        report = run(
-            raw, data_quality_override=data_quality_override, workspace_registry=workspace_registry,
-            deliverable_registry=deliverable_registry, generated_at=args.generated_at,
-        )
+        with tempfile.TemporaryDirectory(prefix="marketos-client-service-intake-") as temporary_registry_dir:
+            temporary_root = Path(temporary_registry_dir)
+            workspace_path = args.workspace_registry_path or temporary_root / "workspaces.json"
+            deliverable_path = args.deliverable_registry_path or temporary_root / "deliverables.json"
+            workspace_registry = WorkspaceRegistry(str(workspace_path))
+            deliverable_registry = DeliverableRegistry(str(deliverable_path))
+            report = run(
+                raw, data_quality_override=data_quality_override, workspace_registry=workspace_registry,
+                deliverable_registry=deliverable_registry, generated_at=args.generated_at,
+            )
     except IntakeError as exc:
         print(json.dumps({"schema": SCHEMA, "classification": "malformed", "error": str(exc)}, indent=2))
         return 2

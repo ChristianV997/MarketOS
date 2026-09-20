@@ -81,6 +81,22 @@ def test_adequate_data_reaches_eligible_with_real_computed_economics(tmp_path: P
     assert derived["contribution"]["currency"] == "USD"
 
 
+def test_report_truthfully_discloses_local_registry_mutation(tmp_path: Path):
+    ws_registry, dl_registry = _registries(tmp_path)
+    report = bridge.run(_base_intake(), workspace_registry=ws_registry, deliverable_registry=dl_registry)
+
+    assert report["read_only"] is False
+    assert report["mutated"] is True
+    assert report["mutation_scope"] == "local_workspace_and_deliverable_registries"
+    assert report["external_actions"] is False
+    assert "Do not delete shared registry files" in report["rollback"]
+
+
+def test_run_requires_explicit_registries_to_avoid_shared_state_writes():
+    with pytest.raises(bridge.IntakeError, match="explicit workspace and deliverable registries"):
+        bridge.run(_base_intake())
+
+
 def test_missing_fields_reach_data_inadequate_never_eligible(tmp_path: Path):
     ws_registry, dl_registry = _registries(tmp_path)
     intake = _base_intake(data_fields={"orders": {"available": True}}, client_id="client-synthetic-002", workspace_name="Synthetic Test Workspace Two")
@@ -493,6 +509,36 @@ def test_cli_exit_code_zero_for_eligible(tmp_path: Path, capsys):
     assert exit_code == 0
     captured = json.loads(capsys.readouterr().out)
     assert captured["classification"] == "eligible"
+
+
+def test_cli_default_registries_are_temporary_and_removed(tmp_path: Path, capsys, monkeypatch):
+    intake_path = tmp_path / "intake.json"
+    intake_path.write_text(json.dumps(_base_intake()), encoding="utf-8")
+    workspace_paths: list[Path] = []
+    deliverable_paths: list[Path] = []
+    real_workspace_registry = bridge.WorkspaceRegistry
+    real_deliverable_registry = bridge.DeliverableRegistry
+
+    def workspace_registry(path):
+        workspace_paths.append(Path(path))
+        return real_workspace_registry(str(path))
+
+    def deliverable_registry(path):
+        deliverable_paths.append(Path(path))
+        return real_deliverable_registry(str(path))
+
+    monkeypatch.setattr(bridge, "WorkspaceRegistry", workspace_registry)
+    monkeypatch.setattr(bridge, "DeliverableRegistry", deliverable_registry)
+
+    assert bridge.main(["--intake-json", str(intake_path)]) == 0
+    report = json.loads(capsys.readouterr().out)
+
+    assert report["mutated"] is True
+    assert len(workspace_paths) == len(deliverable_paths) == 1
+    assert workspace_paths[0].parent == deliverable_paths[0].parent
+    assert "marketos-client-service-intake-" in workspace_paths[0].parent.name
+    assert not workspace_paths[0].exists()
+    assert not deliverable_paths[0].exists()
 
 
 def test_cli_exit_code_zero_for_data_inadequate(tmp_path: Path, capsys):
