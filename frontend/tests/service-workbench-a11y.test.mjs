@@ -77,6 +77,8 @@ test("pipeline rows are native table rows with a named button, not row widgets",
   assert.match(table, /Home/);
   assert.match(table, /End/);
   assert.match(page, /button\[aria-pressed='true'\]/);
+  assert.match(page, /movePipelineFocus/);
+  assert.match(page, /Filter\/auto-select must not steal focus from the search field/);
 });
 
 test("unserved GET JSON including HTTP error bodies is adapted, never demo-substituted", async () => {

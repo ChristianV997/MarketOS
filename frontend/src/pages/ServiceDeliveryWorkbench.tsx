@@ -9,12 +9,16 @@ export default function ServiceDeliveryWorkbench() {
   const { view, filters, setFilters, setSelectedId, recovery } = useServiceDeliveryWorkbench();
   const tableRef = useRef<HTMLDivElement>(null);
   const skipInitialFocus = useRef(true);
+  const movePipelineFocus = useRef(false);
 
   useEffect(() => {
     if (skipInitialFocus.current) {
       skipInitialFocus.current = false;
       return;
     }
+    // Filter/auto-select must not steal focus from the search field.
+    if (!movePipelineFocus.current) return;
+    movePipelineFocus.current = false;
     const selected = tableRef.current?.querySelector<HTMLElement>("button[aria-pressed='true']");
     selected?.focus();
   }, [view.selected?.engagement_id]);
@@ -54,10 +58,16 @@ export default function ServiceDeliveryWorkbench() {
         <PipelineTable
           rows={view.filtered}
           selectedId={view.selected?.engagement_id ?? null}
-          onSelect={setSelectedId}
+          onSelect={(id) => {
+            movePipelineFocus.current = true;
+            setSelectedId(id);
+          }}
           onMove={(delta) => {
             const next = moveSelection(view.filtered, view.selected?.engagement_id ?? null, delta);
-            if (next) setSelectedId(next);
+            if (next) {
+              movePipelineFocus.current = true;
+              setSelectedId(next);
+            }
           }}
           emptyCopy={view.pipelineEmptyCopy ?? "No engagements in the sanitized projection."}
         />
