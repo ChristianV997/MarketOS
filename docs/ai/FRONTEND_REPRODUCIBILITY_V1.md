@@ -13,10 +13,12 @@ npm test
 npm run build
 ```
 
-`npm ci` must be used for a clean locked install. `--ignore-scripts` prevents
-dependency lifecycle scripts from becoming an implicit execution authority.
-There is no `lint` script because no supported linter configuration is
-committed.
+The validation harness never installs dependencies or accesses the network. It
+reports `unavailable` when `frontend/node_modules` is absent. If dependency
+provisioning is separately approved in a controlled environment, use `npm ci`
+with the committed lockfile and `--ignore-scripts`; dependency lifecycle
+scripts must not become an implicit execution authority. There is no `lint`
+script because no supported linter configuration is committed.
 
 The Node tests verify lockfile alignment, unsafe script markers, API base-url
 sharing, bounded websocket reconnect/teardown semantics, Vite proxy coverage,
@@ -52,7 +54,7 @@ use. `VITE_POSTHOG_KEY` is default-off.
 
 ## Evidence classification
 
-- `npm ci`: real local dependency installation from the committed lockfile
+- dependency installation: `not_run` by the validation harness
 - `npm run typecheck`: real TypeScript compiler result
 - `npm test`: real Node test result for the reproducibility contract
 - `npm run build`: real TypeScript plus Vite production bundle result

@@ -7,13 +7,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import shutil
 import subprocess
-import sys
+import threading
 from pathlib import Path
 from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+MAX_STEP_TIMEOUT_S = 120.0
+MAX_STEP_OUTPUT_BYTES = 16384
+SAFE_ENVIRONMENT_KEYS = frozenset(
+    {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "COMSPEC", "PATHEXT"}
+)
 
 
 def _npm() -> str:
@@ -24,17 +31,135 @@ def _npm() -> str:
     return ""
 
 
-def _run(command: list[str], cwd: Path) -> dict[str, Any]:
-    completed = subprocess.run(command, cwd=str(cwd), capture_output=True, text=True, check=False, shell=False)
+def _child_environment(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Pass only OS runtime variables; do not forward operator credentials to npm."""
+    source = os.environ if base is None else base
+    return {key: value for key, value in source.items() if key.upper() in SAFE_ENVIRONMENT_KEYS}
+
+
+def _stop_process_tree(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        except (AttributeError, OSError, ValueError):
+            try:
+                process.terminate()
+            except OSError:
+                pass
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                process.terminate()
+            except OSError:
+                pass
+    try:
+        process.wait(timeout=1.0)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    if os.name == "nt":
+        taskkill = shutil.which("taskkill")
+        if taskkill:
+            try:
+                subprocess.run(
+                    [taskkill, "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=2.0,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    if process.poll() is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=2.0)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _run(command: list[str], cwd: Path, *, timeout_s: float = MAX_STEP_TIMEOUT_S) -> dict[str, Any]:
+    process_options: dict[str, Any] = {}
+    if os.name == "nt":
+        process_options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        process_options["start_new_session"] = True
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(cwd),
+            env=_child_environment(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            shell=False,
+            **process_options,
+        )
+    except OSError as exc:
+        return {
+            "command": command,
+            "exit_code": 127,
+            "stdout_tail": str(exc)[-MAX_STEP_OUTPUT_BYTES:],
+            "stderr_tail": "",
+            "output_bytes": 0,
+            "output_truncated": False,
+            "timed_out": False,
+        }
+
+    tail = bytearray()
+    output_size = 0
+
+    def collect_output() -> None:
+        nonlocal output_size
+        if process.stdout is None:
+            return
+        while True:
+            chunk = process.stdout.read(1024)
+            if not chunk:
+                return
+            output_size += len(chunk)
+            tail.extend(chunk)
+            if len(tail) > MAX_STEP_OUTPUT_BYTES:
+                del tail[:-MAX_STEP_OUTPUT_BYTES]
+
+    reader = threading.Thread(target=collect_output, daemon=True)
+    reader.start()
+    timed_out = False
+    try:
+        process.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _stop_process_tree(process)
+    reader.join(timeout=2.0)
+    if process.stdout is not None:
+        process.stdout.close()
+    output = bytes(tail).decode("utf-8", errors="replace")
     return {
         "command": command,
-        "exit_code": completed.returncode,
-        "stdout_tail": (completed.stdout or "")[-2000:],
-        "stderr_tail": (completed.stderr or "")[-2000:],
+        "exit_code": 124 if timed_out else process.returncode if process.returncode is not None else 127,
+        "stdout_tail": output,
+        "stderr_tail": "",
+        "output_bytes": output_size,
+        "output_truncated": output_size > MAX_STEP_OUTPUT_BYTES,
+        "timed_out": timed_out,
     }
 
 
 def classify_step(name: str, result: dict[str, Any]) -> str:
+    if result.get("timed_out"):
+        return "timed_out"
     if result["exit_code"] == 0:
         return "passed"
     combined = f"{result.get('stdout_tail', '')}\n{result.get('stderr_tail', '')}".lower()
@@ -67,6 +192,7 @@ def run_frontend_validation(root: Path, *, skip_ci: bool = False) -> dict[str, A
         "failure_class": None,
         "mutated": False,
         "network_providers": False,
+        "dependency_installation": "not_attempted",
     }
     if not frontend.is_dir() or not (frontend / "package.json").is_file():
         report["status"] = "failed"
@@ -79,34 +205,33 @@ def run_frontend_validation(root: Path, *, skip_ci: bool = False) -> dict[str, A
         report["reason"] = "package_lock_missing"
         return report
     if not npm:
-        report["status"] = "failed"
+        report["status"] = "unavailable"
         report["failure_class"] = "dependency"
         report["reason"] = "npm_missing"
         return report
 
-    need_ci = not skip_ci and not (frontend / "node_modules").is_dir()
-    if need_ci:
-        ci = _run([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"], frontend)
-        ci["name"] = "npm_ci"
-        ci["failure_class"] = classify_step("npm_ci", ci) if ci["exit_code"] else None
-        report["steps"].append(ci)
-        if ci["exit_code"] != 0:
-            report["status"] = "failed"
-            report["failure_class"] = "dependency"
-            return report
-    elif not (frontend / "node_modules").is_dir():
-        report["status"] = "failed"
+    if not (frontend / "node_modules").is_dir():
+        report["status"] = "unavailable"
         report["failure_class"] = "dependency"
-        report["reason"] = "node_modules_missing_skip_ci"
+        report["reason"] = "node_modules_missing_install_not_attempted"
         return report
 
     for script in ("typecheck", "test", "build"):
         result = _run([npm, "run", script], frontend)
         result["name"] = script
         result["failure_class"] = classify_step(script, result) if result["exit_code"] else None
+        # Keep command conclusions and bounded metadata; do not expose raw tool output in reports.
+        result.pop("stdout_tail", None)
+        result.pop("stderr_tail", None)
         report["steps"].append(result)
         if result["exit_code"] != 0:
-            report["status"] = "failed"
+            report["status"] = (
+                "timed_out"
+                if result["failure_class"] == "timed_out"
+                else "unavailable"
+                if result["failure_class"] == "dependency"
+                else "failed"
+            )
             report["failure_class"] = result["failure_class"]
             return report
     return report
