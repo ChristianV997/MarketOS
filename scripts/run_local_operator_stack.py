@@ -143,7 +143,9 @@ class StackConfig:
     hold_s: float = 0.0
     start_backend: bool = True
     start_frontend: bool = True
-    dry_run: bool = False
+    # Starting services and probing loopback are opt-in. A bare invocation is
+    # a plan-only report and must not bind, connect, or spawn child processes.
+    dry_run: bool = True
     fixture_only: bool = True
 
 
@@ -576,10 +578,14 @@ def preflight(config: StackConfig) -> dict[str, Any]:
     node = shutil.which("node")
     frontend_pkg = (config.repo / "frontend" / "package.json").is_file()
     api_module = (config.repo / "backend" / "api.py").is_file()
-    occupied = {
-        "api": port_bind_conflict(config.api_host, config.api_port),
-        "frontend": port_bind_conflict(config.frontend_host, config.frontend_port),
-    }
+    occupied = (
+        {"api": None, "frontend": None}
+        if config.dry_run
+        else {
+            "api": port_bind_conflict(config.api_host, config.api_port),
+            "frontend": port_bind_conflict(config.frontend_host, config.frontend_port),
+        }
+    )
     return {
         "configuration_valid": True,
         "python": python_ok,
@@ -735,9 +741,9 @@ def run_rehearsal(
         return report
 
     occupied_reasons: list[str] = []
-    if checks["occupied_ports"]["api"] and config.start_backend:
+    if checks["occupied_ports"]["api"] is True and config.start_backend:
         occupied_reasons.append(f"api_port_occupied:{config.api_host}:{config.api_port}")
-    if checks["occupied_ports"]["frontend"] and config.start_frontend:
+    if checks["occupied_ports"]["frontend"] is True and config.start_frontend:
         occupied_reasons.append(f"frontend_port_occupied:{config.frontend_host}:{config.frontend_port}")
     if occupied_reasons:
         report["classification"] = classify("blocked")
@@ -884,7 +890,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hold", type=float, default=0.0, help="seconds to keep processes after smoke")
     parser.add_argument("--backend-only", action="store_true")
     parser.add_argument("--frontend-only", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
+    execution = parser.add_mutually_exclusive_group()
+    execution.add_argument(
+        "--execute",
+        action="store_true",
+        help="start fixture-only local services and perform loopback probes (opt-in)",
+    )
+    execution.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="plan only; this is also the default",
+    )
     parser.add_argument("--json", action="store_true")
     return parser
 
@@ -905,7 +921,7 @@ def main(argv: list[str] | None = None) -> int:
         hold_s=args.hold,
         start_backend=not args.frontend_only,
         start_frontend=not args.backend_only,
-        dry_run=args.dry_run,
+        dry_run=not args.execute,
     )
     report = run_rehearsal(config)
     print(json.dumps(report, indent=2, sort_keys=True))

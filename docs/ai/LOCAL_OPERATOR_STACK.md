@@ -16,29 +16,34 @@ reuse. This lane adds that runner only.
 
 ## One command
 
-From a disposable worktree of this branch:
+From a disposable worktree of this branch, the default command is plan-only and
+does not inspect sockets, start processes, or make HTTP requests:
 
 ```bash
 python scripts/run_local_operator_stack.py --json
 ```
 
-Starts fixture-only backend + frontend, smokes the real GET surfaces, shuts
-everything down, prints one JSON report.
+To explicitly start fixture-only backend + frontend, smoke loopback GET
+surfaces, shut everything down, and print one JSON report, pass `--execute`:
+
+```bash
+python scripts/run_local_operator_stack.py --execute --json
+```
 
 Hold the stack for a Cursor browser pass:
 
 ```bash
-python scripts/run_local_operator_stack.py --json --hold 60
+python scripts/run_local_operator_stack.py --execute --json --hold 60
 ```
 
 `--hold` is capped at 300 seconds; larger values are rejected before any
 process is started. Bind addresses are restricted to `localhost` or loopback
 IP addresses, and startup/request timeouts are bounded.
 
-Plan only (no processes):
+Plan only (the default; `--dry-run` is accepted for clarity):
 
 ```bash
-python scripts/run_local_operator_stack.py --dry-run --json
+python scripts/run_local_operator_stack.py --json
 ```
 
 ## Ports and routes
@@ -103,7 +108,7 @@ http://127.0.0.1:5173/operator/events
 | 8. Repeated invocation | Back-to-back rehearsal runs on identical ports | Passes cleanly with zero port collisions or socket leaks |
 | 9. Cleanup verification | Terminated processes, dead child trees, free ports confirmed | Guaranteed in `finally:` with `port_cleanup` status |
 | 10. Output redaction/caps | Credential values replaced with `[redacted]`, logs capped at 8 KiB | Verified across keys, bearer tokens, and standalone hashes |
-| 11. Dry-run non-spawn | Plans commands and preflights runtime without binding or spawning | `not_run` |
+| 11. Dry-run non-spawn | Plans commands and checks runtime availability without socket probes or spawning | `not_run` |
 
 ## Tests
 

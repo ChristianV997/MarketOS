@@ -77,6 +77,9 @@ def _write_repo(tmp_path: Path, *, frontend: bool = True, backend: bool = True) 
 def _config(tmp_path: Path, **kwargs) -> stack.StackConfig:
     api_port = kwargs.pop("api_port", _free_port())
     frontend_port = kwargs.pop("frontend_port", _free_port())
+    # Runtime integration cases explicitly opt into loopback/process behavior;
+    # production callers remain plan-only unless they pass --execute.
+    kwargs.setdefault("dry_run", False)
     return stack.StackConfig(
         repo=tmp_path,
         api_port=api_port,
@@ -150,13 +153,22 @@ def test_unbounded_or_invalid_config_is_blocked(tmp_path: Path, kwargs, reason):
     assert reason in report["reason"]
 
 
-def test_dry_run_does_not_bind(tmp_path: Path):
+def test_dry_run_does_not_bind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo = _write_repo(tmp_path)
-    cfg = _config(repo, dry_run=True)
+    cfg = stack.StackConfig(repo=repo, api_port=3000, frontend_port=5173, dry_run=True)
+    probes: list[tuple[str, int]] = []
+
+    def unexpected_probe(host: str, port: int) -> bool:
+        probes.append((host, port))
+        raise AssertionError("dry-run must not inspect local sockets")
+
+    monkeypatch.setattr(stack, "port_bind_conflict", unexpected_probe)
+    monkeypatch.setattr(stack, "port_in_use", unexpected_probe)
     report = stack.run_rehearsal(cfg)
     assert report["classification"] == "not_run"
     assert report["dry_run"] is True
-    assert stack.port_in_use(cfg.api_host, cfg.api_port) is False
+    assert report["preflight"]["occupied_ports"] == {"api": None, "frontend": None}
+    assert probes == []
 
 
 def test_occupied_api_port_is_blocked(tmp_path: Path):
@@ -336,6 +348,39 @@ def test_cli_dry_run_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     body = stack.json.loads(captured.out)
     assert body["schema"] == stack.SCHEMA
     assert body["classification"] == "not_run"
+
+
+def test_cli_defaults_to_socket_free_dry_run(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch):
+    repo = _write_repo(tmp_path)
+
+    def unexpected_probe(host: str, port: int) -> bool:
+        raise AssertionError("default CLI invocation must not inspect local sockets")
+
+    monkeypatch.setattr(stack, "port_bind_conflict", unexpected_probe)
+    monkeypatch.setattr(stack, "port_in_use", unexpected_probe)
+    code = stack.main(["--repo", str(repo), "--json", "--backend-only"])
+    body = stack.json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert body["dry_run"] is True
+    assert body["classification"] == "not_run"
+    assert body["preflight"]["occupied_ports"] == {"api": None, "frontend": None}
+
+
+def test_cli_execute_is_explicit_opt_in(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch):
+    repo = _write_repo(tmp_path)
+    captured: dict[str, stack.StackConfig] = {}
+
+    def capture_config(config: stack.StackConfig) -> dict[str, str]:
+        captured["config"] = config
+        return {"classification": "not_run"}
+
+    monkeypatch.setattr(stack, "run_rehearsal", capture_config)
+    code = stack.main(["--repo", str(repo), "--execute", "--json", "--backend-only"])
+    capsys.readouterr()
+
+    assert code == 0
+    assert captured["config"].dry_run is False
 
 
 def test_both_ports_occupied_blocked(tmp_path: Path):
