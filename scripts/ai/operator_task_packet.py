@@ -124,15 +124,58 @@ def _normalize_path(path: str) -> str:
     return value
 
 
+# pathlib.Path resolves to PosixPath on a Linux/macOS host, which never
+# treats a drive letter as absolute ("C:/Windows/System32".is_absolute() ==
+# False there) -- so a Windows-shaped absolute path slips past
+# candidate.is_absolute() whenever this validator runs on a non-Windows
+# host (as it does in this sandbox). A task packet's paths must be rejected
+# the same way regardless of which OS is validating them. A UNC share
+# ("//server/share/...") needs no separate check here: PosixPath already
+# treats a leading "//" as absolute (POSIX reserves exactly two leading
+# slashes for implementation-defined, but in practice always "is
+# absolute", behavior), so candidate.is_absolute() alone already covers
+# it -- do not remove that line under the assumption only the explicit
+# drive-letter check below matters.
+WINDOWS_DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:/")
+
+
 def assert_safe_path(path: str, field: str) -> str:
     value = _normalize_path(_text(path, field))
     candidate = Path(value)
-    if candidate.is_absolute() or ".." in candidate.parts:
+    if candidate.is_absolute() or ".." in candidate.parts or WINDOWS_DRIVE_ABSOLUTE.match(value):
         raise TaskPacketError(f"{field} must stay relative without '..'")
     lowered = value.lower()
     if any(marker in lowered for marker in PROHIBITED_PATH_MARKERS):
         raise TaskPacketError(f"{field} targets a sensitive or excluded path")
     return value
+
+
+def _in_scope(path: str, allowed: list[str]) -> bool:
+    """True when ``path`` is ``allowed`` itself or nested under it.
+
+    The canonical scope-matching rule shared by every consumer that must
+    ask "is this path inside allowed_scope": the resume boundary here,
+    ``agent_output_eval.evaluate_report`` (which imports this instead of
+    keeping its own copy), and ``execution_bundle.pr_check``. A single
+    implementation means a scope-widening bug only has one place to hide,
+    and only one place to fix.
+
+    Both sides are compared with a trailing "/" boundary so
+    ``allowed=["tests/ai"]`` matches ``"tests/ai/x.py"`` but never
+    ``"tests/ai_evil/x.py"`` (a bare ``startswith`` without the boundary
+    would conflate the two). Callers must pass already safety-checked
+    paths (see ``assert_safe_path``): this function is pure string
+    prefix-matching and performs no path traversal, absolute-path, or
+    filesystem/symlink resolution of its own.
+    """
+    normalized = _normalize_path(path)
+    for prefix in allowed:
+        target = _normalize_path(prefix)
+        if not target:
+            continue
+        if normalized == target or normalized.startswith(target.rstrip("/") + "/"):
+            return True
+    return False
 
 
 def _secret_like(value: Any) -> bool:
@@ -400,6 +443,41 @@ def build_resume_packet(
     return resume
 
 
+def _revalidate_resume_fields(raw: dict[str, Any]) -> None:
+    """Re-run the exact field-level safety checks ``build_resume_packet()``
+    applies at construction time, against a resume packet that instead
+    arrived pre-built (loaded from disk, handed off between sessions, or
+    otherwise untrusted).
+
+    Without this, ``validate_resume_packet()`` only checked the packet's
+    schema/required-keys/secret-shape/ownership/digest -- a hand-crafted or
+    tampered packet could carry a path-traversal entry in ``changed_files``
+    (a "widened scope" the digest check does not cover, since digest only
+    pins the *task* packet, not the resume packet's own fields), a
+    malformed ``head_sha``/``base_sha``, or an unsafe ``worktree``/
+    ``branch``/``next_action`` string, and it would pass validation
+    unchanged. Reusing the same helpers (``_text``, ``_string_list``,
+    ``assert_safe_path``, ``_test_record_list``) instead of re-implementing
+    them keeps a loaded resume packet exactly as safe as a freshly built
+    one, fails closed with ``ResumePacketError``, and never silently
+    upgrades or drops a field.
+    """
+    try:
+        for field in ("context_snapshot_replay_hash", "worktree", "branch", "next_action"):
+            _text(raw[field], field)
+        for field in ("head_sha", "base_sha"):
+            value = _text(raw[field], field).lower()
+            if not SHA_RE.fullmatch(value):
+                raise ResumePacketError(f"{field} must be a git SHA")
+        for item in _string_list(raw["changed_files"], "changed_files"):
+            assert_safe_path(item, "changed_files")
+        for field in ("tests_still_required", "open_blockers", "pending_decisions", "public_sources_inspected", "claims_not_yet_proven"):
+            _string_list(raw[field], field)
+        _test_record_list(raw["tests_already_run"], "tests_already_run")
+    except TaskPacketError as exc:
+        raise ResumePacketError(f"resume packet field validation failed: {exc}") from exc
+
+
 def validate_resume_packet(raw: Any, *, expected_task_packet: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate a previously-built resume packet, e.g. loaded from disk.
 
@@ -416,13 +494,31 @@ def validate_resume_packet(raw: Any, *, expected_task_packet: dict[str, Any] | N
         raise ResumePacketError(f"missing fields: {missing}")
     if _secret_like(raw):
         raise ResumePacketError("resume packet contains secret-shaped values")
-    for record in raw.get("tests_already_run", []):
-        if not isinstance(record, dict) or record.get("evidence_classification") not in EVIDENCE_CLASSES:
-            raise ResumePacketError("tests_already_run entries must carry a known evidence_classification")
+    _revalidate_resume_fields(raw)
     if expected_task_packet is not None:
         validated_expected = validate_packet(expected_task_packet)
         if raw.get("agent_id") != validated_expected["agent_id"] or raw.get("lane") != validated_expected["lane"]:
             raise ResumePacketError("resume packet ownership does not match the expected task packet")
+        if raw.get("task_packet_digest") != _packet_digest(validated_expected):
+            # Same agent_id/lane alone does not prove the task packet is the
+            # one this resume was actually built from -- a resumed session
+            # could otherwise present a task packet with a widened
+            # allowed_scope (or altered prohibited_scope/base_sha/etc.) that
+            # still passes the ownership check above. The digest recorded at
+            # build_resume_packet() time is the only thing that pins the
+            # resume to the exact task packet it committed to.
+            raise ResumePacketError("resume packet task_packet_digest does not match the expected task packet")
+        out_of_scope = [item for item in raw.get("changed_files", []) if not _in_scope(item, validated_expected["allowed_scope"])]
+        if out_of_scope:
+            # The digest check above only proves the resume packet was
+            # built from *this exact* task packet -- it says nothing about
+            # whether the resume packet's own changed_files stayed inside
+            # that task packet's allowed_scope. Without this, a resumed
+            # agent could hand back a resume packet naming edits to files
+            # entirely outside what it was authorized to touch while every
+            # other check (schema, ownership, digest, path-safety of each
+            # individual changed_files entry) still passed.
+            raise ResumePacketError(f"resume packet changed_files exceed allowed_scope: {out_of_scope}")
     return raw
 
 

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.ai import run_local_quality_gate as gate
+from scripts.ai import pr_readiness_report
 
 
 def test_no_changes_is_clear_and_offline():
@@ -172,8 +173,8 @@ def _write_ci_evidence(tmp_path: Path, *, run=None, required_jobs=None, jobs=Non
     payload = {
         "schema": gate.CI_EVIDENCE_SCHEMA,
         "run": run or {"status": "completed", "conclusion": "success"},
-        "required_jobs": required_jobs or [job["name"]],
-        "jobs": jobs or [job],
+        "required_jobs": required_jobs if required_jobs is not None else [job["name"]],
+        "jobs": jobs if jobs is not None else [job],
     }
     path = tmp_path / "ci-evidence.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -199,6 +200,7 @@ def test_ci_evidence_file_reports_observed_required_success(monkeypatch, tmp_pat
     assert report["ci"]["classification"] == gate.CLASS_PASS
     assert report["ci"]["executed_steps"] == 4
     assert report["ci"]["jobs"][0]["runner_assigned"] is True
+    assert report["ci"]["diagnostic_state"] == "executed_success"
 
 
 def test_ci_evidence_file_preserves_executed_failure(monkeypatch, tmp_path):
@@ -223,6 +225,7 @@ def test_ci_evidence_file_preserves_executed_failure(monkeypatch, tmp_path):
     assert report["ci"]["status"] == "failed"
     assert report["ci"]["classification"] == gate.CLASS_FAILURE_ORIGIN_UNVERIFIED
     assert report["exit_code"] == gate.EXIT_FAILED
+    assert report["ci"]["diagnostic_state"] == "executed_failure"
 
 
 def test_ci_evidence_file_zero_steps_and_runnerless_are_unavailable(monkeypatch, tmp_path):
@@ -245,7 +248,8 @@ def test_ci_evidence_file_zero_steps_and_runnerless_are_unavailable(monkeypatch,
     )
     assert report["ci"]["status"] == "unavailable"
     assert report["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
-    assert report["ci"]["jobs"][0]["reason"] == "runner_unassigned"
+    assert report["ci"]["jobs"][0]["reason"] == "ci_report_has_no_executed_steps"
+    assert report["ci"]["diagnostic_state"] == "job_created_zero_steps"
     assert report["ready_for_supervised_use"] is False
     assert report["exit_code"] == gate.EXIT_UNAVAILABLE
 
@@ -268,6 +272,36 @@ def test_ci_evidence_file_missing_logs_are_unavailable(monkeypatch, tmp_path):
     assert report["ci"]["status"] == "unavailable"
     assert report["ci"]["jobs"][0]["reason"] == "ci_logs_unavailable"
     assert report["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
+    assert report["ci"]["diagnostic_state"] == "logs_unavailable_after_execution"
+
+
+def test_ci_evidence_executed_failure_with_missing_logs_preserves_failure(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    evidence_path = _write_ci_evidence(
+        root,
+        run={"status": "completed", "conclusion": "failure"},
+        extra_job_fields={
+            "conclusion": "failure",
+            "required_check_status": "failure",
+            "logs_available": False,
+        },
+    )
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert error is None
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        runner=_passing_runner,
+    )
+    assert report["ci"]["status"] == "failed"
+    assert report["ci"]["classification"] == gate.CLASS_FAILURE_ORIGIN_UNVERIFIED
+    assert report["ci"]["jobs"][0]["logs_available"] is False
+    assert report["ci"]["diagnostic_state"] == "executed_failure"
 
 
 def test_ci_evidence_file_rejects_raw_log_fields_as_malformed(tmp_path, capsys):
@@ -298,7 +332,7 @@ def test_ci_evidence_file_is_bounded(tmp_path):
 def test_ci_evidence_file_cli_path_is_deterministic_and_fail_closed(monkeypatch, tmp_path, capsys):
     _all_tools_available(monkeypatch)
     root = _configured_root(tmp_path)
-    evidence_path = _write_ci_evidence(root, extra_job_fields={"runner_id": None})
+    evidence_path = _write_ci_evidence(root, extra_job_fields={"runner_id": None, "steps_executed": 0, "logs_available": False})
     exit_code = gate.main([
         "--repository", str(root),
         "--ci-evidence-file", str(evidence_path),
@@ -310,6 +344,7 @@ def test_ci_evidence_file_cli_path_is_deterministic_and_fail_closed(monkeypatch,
     assert exit_code == gate.EXIT_UNAVAILABLE
     assert payload["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
     assert payload["ci"]["jobs"][0]["runner_assigned"] is False
+    assert payload["ci"]["diagnostic_state"] == "job_created_zero_steps"
     assert payload["ready_for_supervised_use"] is False
 
 
@@ -477,9 +512,10 @@ def test_ci_evidence_partial_required_jobs_preserve_failure_and_unavailability(m
     assert ci_jobs["agentic-quality-gate"]["status"] == "passed"
     assert ci_jobs["test"]["status"] == "failed"
     assert ci_jobs["quality-advisory"]["status"] == "unavailable"
-    assert ci_jobs["semgrep-policy"]["reason"] == "runner_unassigned"
+    assert ci_jobs["semgrep-policy"]["reason"] == "ci_report_has_no_executed_steps"
     assert report["ci"]["status"] == "unavailable"
     assert report["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
+    assert report["ci"]["diagnostic_state"] == "mixed"
     assert gate.CLASS_FAILURE_ORIGIN_UNVERIFIED in report["failure_classes"]
     assert report["ready_for_supervised_use"] is False
 
@@ -507,6 +543,84 @@ def test_ci_evidence_missing_required_job_is_unavailable(monkeypatch, tmp_path):
     assert missing["reason"] == "required_ci_job_missing"
     assert report["ci"]["classification"] == gate.CLASS_CI_UNAVAILABLE
     assert report["ready_for_supervised_use"] is False
+
+
+def test_ci_evidence_workflow_never_created_is_unavailable(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    evidence_path = _write_ci_evidence(
+        root,
+        run={"status": "not_created", "conclusion": "pending"},
+        jobs=[],
+    )
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert error is None
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        runner=_passing_runner,
+    )
+    assert report["ci"]["status"] == "unavailable"
+    assert report["ci"]["diagnostic_state"] == "workflow_never_created"
+    assert report["ci"]["operator_action"].startswith("verify pull-request workflow")
+    assert report["ready_for_supervised_use"] is False
+
+
+def test_ci_evidence_queued_without_runner_is_distinct_from_completed_zero_steps(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    root = _configured_root(tmp_path)
+    evidence_path = _write_ci_evidence(
+        root,
+        run={"status": "in_progress", "conclusion": "pending"},
+        extra_job_fields={
+            "status": "queued", "runner_id": None, "runner_name": "", "steps_executed": 0,
+            "logs_available": False, "conclusion": "pending", "required_check_status": "pending",
+        },
+    )
+    evidence, error = gate.load_ci_evidence(evidence_path)
+
+    assert error is None
+    report = gate.run_quality_gate(
+        root,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        runner=_passing_runner,
+    )
+    assert report["ci"]["diagnostic_state"] == "job_queued_without_runner"
+    assert report["ci"]["jobs"][0]["diagnostic_state"] == "job_queued_without_runner"
+
+
+def test_ci_evidence_rejects_contradictory_runner_steps_and_netlify_required_jobs(tmp_path):
+    contradictory_path = _write_ci_evidence(tmp_path, extra_job_fields={"runner_id": None, "steps_executed": 2})
+    contradictory, error = gate.load_ci_evidence(contradictory_path)
+    assert contradictory["diagnostic_state"] == "malformed_metadata"
+    assert error == "malformed_ci_evidence"
+
+    contradictory_job_root = tmp_path / "contradictory-job"
+    contradictory_job_root.mkdir()
+    contradictory_job_path = _write_ci_evidence(contradictory_job_root, extra_job_fields={
+        "status": "queued", "conclusion": "failure", "required_check_status": "failure",
+    })
+    contradictory_job, error = gate.load_ci_evidence(contradictory_job_path)
+    assert contradictory_job["diagnostic_state"] == "malformed_metadata"
+    assert error == "malformed_ci_evidence"
+
+    netlify_root = tmp_path / "netlify"
+    netlify_root.mkdir()
+    netlify_path = _write_ci_evidence(netlify_root)
+    payload = json.loads(netlify_path.read_text(encoding="utf-8"))
+    payload["required_jobs"] = ["netlify/deploy-preview"]
+    payload["jobs"][0]["name"] = "netlify/deploy-preview"
+    netlify_path.write_text(json.dumps(payload), encoding="utf-8")
+    netlify, error = gate.load_ci_evidence(netlify_path)
+    assert netlify["diagnostic_state"] == "malformed_metadata"
+    assert error == "malformed_ci_evidence"
 
 
 def test_real_gate_reports_stable_order_and_observed_evidence(monkeypatch, tmp_path):
@@ -973,7 +1087,141 @@ def test_timeout_is_not_a_pass(monkeypatch, tmp_path):
     assert pytest_result["status"] == "timed_out"
     assert pytest_result["classification"] == gate.CLASS_TIMEOUT
     assert pytest_result["execution_status"] == "timed_out"
-    assert report["status"] == "failed"
+    assert report["status"] == "timed_out"
+
+
+def test_legacy_ci_timeout_remains_timed_out(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "timed_out", "executed_steps": 2},
+        runner=_passing_runner,
+    )
+
+    assert report["ci"]["status"] == "timed_out"
+    assert report["ci"]["classification"] == gate.CLASS_TIMEOUT
+    assert report["status"] == "timed_out"
+    assert report["exit_code"] == gate.EXIT_FAILED
+    assert report["ready_for_supervised_use"] is False
+
+
+def test_sanitized_ci_timeout_remains_timed_out(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    evidence_path = _write_ci_evidence(tmp_path)
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    payload["run"]["conclusion"] = "timed_out"
+    payload["jobs"][0]["conclusion"] = "timed_out"
+    payload["jobs"][0]["required_check_status"] = "timed_out"
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence, error = gate.load_ci_evidence(evidence_path)
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result=evidence,
+        ci_evidence_error=error,
+        runner=_passing_runner,
+    )
+
+    assert error is None
+    assert report["ci"]["status"] == "timed_out"
+    assert report["ci"]["classification"] == gate.CLASS_TIMEOUT
+    assert report["status"] == "timed_out"
+
+
+def test_malformed_legacy_ci_metadata_fails_closed(monkeypatch, tmp_path):
+    _all_tools_available(monkeypatch)
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": "not-a-ci-status", "executed_steps": 1},
+        runner=_passing_runner,
+    )
+
+    assert report["ci"]["status"] == "malformed"
+    assert report["classification"] == gate.CLASS_MALFORMED_CONFIGURATION
+    assert report["status"] == "configuration_error"
+    assert report["exit_code"] == gate.EXIT_CONFIGURATION
+
+
+@pytest.mark.parametrize(
+    ("ci_status", "steps", "expected_status", "expected_classification"),
+    [
+        ("success", 0, "unavailable", gate.CLASS_CI_UNAVAILABLE),
+        ("failure", 0, "unavailable", gate.CLASS_CI_UNAVAILABLE),
+        ("unavailable", 4, "unavailable", gate.CLASS_CI_UNAVAILABLE),
+        ("failure", 4, "failed", gate.CLASS_FAILURE_ORIGIN_UNVERIFIED),
+        ("timed_out", 4, "timed_out", gate.CLASS_TIMEOUT),
+    ],
+)
+def test_legacy_ci_evidence_state_matrix(monkeypatch, tmp_path, ci_status, steps, expected_status, expected_classification):
+    _all_tools_available(monkeypatch)
+    report = gate.run_quality_gate(
+        tmp_path,
+        generated_at="2026-08-27T12:00:00+00:00",
+        execute=True,
+        changed_paths=[],
+        ci_result={"status": ci_status, "executed_steps": steps},
+        runner=_passing_runner,
+    )
+
+    assert report["ci"]["status"] == expected_status
+    assert report["ci"]["classification"] == expected_classification
+
+
+@pytest.mark.parametrize(
+    ("status", "ci_status", "ci_classification", "diagnostic_state", "ready", "blocking"),
+    [
+        ("passed", "passed", gate.CLASS_PASS, "executed_success", True, False),
+        ("failed", "failed", gate.CLASS_FAILURE_ORIGIN_UNVERIFIED, "executed_failure", False, True),
+        ("timed_out", "timed_out", gate.CLASS_TIMEOUT, "executed_timeout", False, True),
+        ("unavailable", "unavailable", gate.CLASS_CI_UNAVAILABLE, "evidence_not_queried", False, True),
+        ("configuration_error", "malformed", gate.CLASS_MALFORMED_CONFIGURATION, "malformed_metadata", False, True),
+    ],
+)
+def test_readiness_state_matrix_remains_fail_closed(status, ci_status, ci_classification, diagnostic_state, ready, blocking):
+    projection = pr_readiness_report._quality_gate_projection({
+        "schema": gate.QUALITY_GATE_SCHEMA,
+        "status": status,
+        "classification": ci_classification,
+        "ci": {"status": ci_status, "classification": ci_classification, "diagnostic_state": diagnostic_state},
+        "baseline_delta": {"status": "passed", "controls": []},
+        "phase": "final",
+        "ready_for_supervised_use": ready,
+        "checks": [],
+    })
+
+    assert projection["blocking"] is blocking
+    assert projection["ci_diagnostic_state"] == diagnostic_state
+    assert projection["ci_operator_action"]
+
+
+def test_readiness_surfaces_executed_ci_timeout():
+    projection = pr_readiness_report._quality_gate_projection({
+        "schema": gate.QUALITY_GATE_SCHEMA,
+        "status": "timed_out",
+        "classification": gate.CLASS_TIMEOUT,
+        "ci": {
+            "status": "timed_out",
+            "classification": gate.CLASS_TIMEOUT,
+            "jobs": [{"name": "test", "status": "timed_out", "steps_executed": 4}],
+        },
+        "baseline_delta": {"status": "passed", "controls": []},
+        "phase": "final",
+        "ready_for_supervised_use": False,
+        "checks": [],
+    })
+
+    assert projection["blocking"] is True
+    assert "ci:timed_out" in projection["blocking_reasons"]
+    assert projection["baseline_delta"]["candidate_executed_failure"] == ["ci:test"]
 
 
 def test_windows_timeout_terminates_descendants_without_waiting(monkeypatch, tmp_path):
@@ -1095,6 +1343,7 @@ def test_dry_run_and_cli_baseline_are_not_false_successes(tmp_path, capsys):
     assert payload["status"] == "not_run"
     assert payload["classification"] == gate.CLASS_CI_UNAVAILABLE
     assert payload["ready_for_supervised_use"] is False
+    assert payload["operator_action"] == "collect sanitized CI run and job metadata before final attestation"
 
     bad_baseline = tmp_path / "bad-baseline.json"
     bad_baseline.write_text("not-json", encoding="utf-8")
