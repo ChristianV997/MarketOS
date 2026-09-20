@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import subprocess
 import sys
 from pathlib import Path
 
@@ -11,11 +13,17 @@ if str(ROOT) not in sys.path:
 
 from evaluation.perf.integrated_replay import (
     CANONICAL_BUILDERS,
+    CLI_CONCAT_EVENT_COUNT,
+    COMMERCE_LIFECYCLE_EVENT_COUNT,
+    FULFILLMENT_EVENT_COUNT,
     IntegratedReplayPerfError,
     MAX_CANDIDATES,
+    REQUIRED_SYMBOLS,
     STEPS,
     arbitrate,
     classify_canonical,
+    describe_event_scopes,
+    inspect_replay_cli_source,
     isolated_field_fingerprint,
     live_attestation,
     measure_canonical_scenarios,
@@ -24,14 +32,16 @@ from evaluation.perf.integrated_replay import (
     sanitized_candidates,
 )
 
-# Comparable boundary locked by #279 tests/system/test_commercial_dry_run_replay_integration.py
-# test_scenario_runs_through_real_builders_and_emits_a_clean_event_trail:
-#   event_count == 17 == 1 started + 15 commerce steps + 1 completed.
-COMMERCE_LIFECYCLE_EVENT_COUNT = 1 + len(STEPS) + 1  # 17
-# #279 scripts/run_commercial_replay_integration.py concatenates
-# lifecycle_events + fulfillment_report.events. That CLI trail is 37
-# (17 commerce + 20 fulfillment). #274 must not absorb fulfillment.
-CLI_COMMERCE_PLUS_FULFILLMENT_EVENT_COUNT = 37
+THIS_CLI = ROOT / "scripts" / "run_commercial_replay_integration.py"
+THIS_MODULE = ROOT / "evaluation" / "perf" / "integrated_replay.py"
+PR279_CLI_REF = "origin/codex/marketos-commercial-replay-consolidation-v1:scripts/run_commercial_replay_integration.py"
+MIN_MODULE_BYTES = 16_000  # refuse truncated placeholders (prior Contents-API stubs)
+
+
+def _canonical_or_skip() -> None:
+    info = classify_canonical()
+    if info["status"] != "importable":
+        pytest.skip(f"canonical Event path unavailable: {info['missing']}")
 
 
 def test_classification_does_not_claim_this_module_is_authority() -> None:
@@ -39,7 +49,12 @@ def test_classification_does_not_claim_this_module_is_authority() -> None:
     assert info["this_module_authority"] is False
     assert info["hash_authority"].endswith("Event.replay_hash")
     assert "#280" in info["laboratory_owner"]
+    assert info["this_harness_event_count"] == 17
+    assert info["cli_concat_event_count"] == 37
     assert info["status"] in {"importable", "unavailable"}
+    if info["status"] == "unavailable":
+        assert info["missing"]
+        assert info["economics_delegation"] == "unavailable"
 
 
 def test_fixture_states_cannot_upgrade_live() -> None:
@@ -66,75 +81,147 @@ def test_isolated_field_hash_is_rejected_as_canonical_identity() -> None:
     assert first == second
 
 
-def test_commerce_boundary_is_seventeen_not_cli_thirty_seven() -> None:
-    assert COMMERCE_LIFECYCLE_EVENT_COUNT == 17
-    assert len(STEPS) == 15
-    assert CLI_COMMERCE_PLUS_FULFILLMENT_EVENT_COUNT == 37
-    assert CLI_COMMERCE_PLUS_FULFILLMENT_EVENT_COUNT - COMMERCE_LIFECYCLE_EVENT_COUNT == 20
+def test_tempting_synthetic_hash_is_not_event_identity() -> None:
+    _canonical_or_skip()
+    from evaluation.commerce.dry_run_events import lifecycle_events
+    from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
+    from evaluation.commerce.dry_run_scenarios import hydroponics_positive_candidate
 
-    # When canonical imports exist, verify the 17 + 20 = 37 composition and repeat identity
+    events = lifecycle_events(
+        run_dry_run_lifecycle(hydroponics_positive_candidate()),
+        workspace_id="ws-synthetic",
+        occurred_at=0.0,
+    )
+    event_hash = events[0].replay_hash()
+    tempting = hashlib.sha256(events[0].event_id.encode("utf-8")).hexdigest()
+    field = isolated_field_fingerprint([events[0].event_id], ["observed"])
+    assert tempting != event_hash
+    assert field != event_hash
+    assert event_hash == events[0].replay_hash()
+
+
+def test_module_is_not_a_truncated_success_stub() -> None:
+    import evaluation.perf.integrated_replay as module
+
+    blob = THIS_MODULE.read_bytes()
+    assert len(blob) >= MIN_MODULE_BYTES
+    for name in REQUIRED_SYMBOLS:
+        assert hasattr(module, name), f"missing symbol {name} (truncated module)"
+        assert name.encode("utf-8") in blob
+    info = classify_canonical()
+    if info["status"] == "unavailable":
+        report = measure_canonical_scenarios()
+        assert report["status"] == "unavailable"
+        assert report["scenarios"] == []
+        assert report["all_replay_stable"] is False
+
+
+def test_steps_lock_to_lifecycle_authority() -> None:
+    from evaluation.commerce.dry_run_lifecycle import LIFECYCLE_STEPS
+
+    assert STEPS == LIFECYCLE_STEPS
+    assert COMMERCE_LIFECYCLE_EVENT_COUNT == 1 + len(LIFECYCLE_STEPS) + 1 == 17
+    assert CLI_CONCAT_EVENT_COUNT == 37
+    assert FULFILLMENT_EVENT_COUNT == 20
+    assert CLI_CONCAT_EVENT_COUNT - COMMERCE_LIFECYCLE_EVENT_COUNT == FULFILLMENT_EVENT_COUNT
+
+
+def test_this_branch_cli_does_not_concat_fulfillment() -> None:
+    verdict = inspect_replay_cli_source(THIS_CLI.read_text(encoding="utf-8"))
+    assert verdict["concatenates_fulfillment"] is False
+    assert verdict["defines_replay_scenario"] is False
+    assert verdict["implied_count"] == COMMERCE_LIFECYCLE_EVENT_COUNT
+
+
+def test_pr279_cli_source_concatenates_seventeen_plus_twenty() -> None:
     try:
-        from evaluation.commerce.dry_run_events import lifecycle_events
-        from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
-        from evaluation.commerce.dry_run_scenarios import hydroponics_positive_candidate
-        from evaluation.commerce.fulfillment_risk_lifecycle import (
-            FixtureFulfillmentAdapter,
-            build_named_scenario,
-            run_fulfillment_risk_dry_run,
-        )
-    except Exception:
-        return
+        src = subprocess.check_output(
+            ["git", "show", PR279_CLI_REF],
+            cwd=ROOT,
+            timeout=5,
+            stderr=subprocess.DEVNULL,
+        ).decode("utf-8")
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        pytest.skip(f"#279 CLI ref not readable: {exc}")
+    verdict = inspect_replay_cli_source(src)
+    assert verdict["concatenates_fulfillment"] is True
+    assert verdict["names_customer_return_merchant_paid"] is True
+    assert verdict["defines_replay_scenario"] is True
+    assert verdict["implied_count"] == CLI_CONCAT_EVENT_COUNT == 37
+    assert verdict["second_spine_if_measured_here"] is False
 
-    commerce_report = run_dry_run_lifecycle(hydroponics_positive_candidate())
-    commerce_events = lifecycle_events(commerce_report, workspace_id="ws-conformance-17")
-    assert len(commerce_events) == 17
 
-    fulfillment_scenario = build_named_scenario("customer_return_merchant_paid")
-    fulfillment_report = run_fulfillment_risk_dry_run(
-        fulfillment_scenario, adapter=FixtureFulfillmentAdapter.complete()
+def test_commerce_boundary_is_seventeen_not_cli_thirty_seven() -> None:
+    _canonical_or_skip()
+    scopes = describe_event_scopes(
+        cli_source=THIS_CLI.read_text(encoding="utf-8"),
     )
-    assert len(fulfillment_report.events) == 20
+    assert scopes["observed_commerce_count"] == COMMERCE_LIFECYCLE_EVENT_COUNT == 17
+    assert scopes["observed_fulfillment_count"] == FULFILLMENT_EVENT_COUNT == 20
+    assert scopes["observed_commerce_count"] + scopes["observed_fulfillment_count"] == 37
+    assert scopes["this_harness_measures"] == 17
+    assert scopes["duplicates_279_runner"] is False
+    assert scopes["observed_commerce_suffixes"][0] == "started"
+    assert scopes["observed_commerce_suffixes"][-1] == "completed"
+    assert scopes["observed_commerce_suffixes"][1:-1] == list(STEPS)
+    assert scopes["this_branch_cli"]["concatenates_fulfillment"] is False
 
-    combined_events = (*commerce_events, *fulfillment_report.events)
-    assert len(combined_events) == 37
 
-    # Repeat run produces identical Event.replay_hash sequences
-    commerce_report2 = run_dry_run_lifecycle(hydroponics_positive_candidate())
-    commerce_events2 = lifecycle_events(commerce_report2, workspace_id="ws-conformance-17")
-    fulfillment_report2 = run_fulfillment_risk_dry_run(
-        fulfillment_scenario, adapter=FixtureFulfillmentAdapter.complete()
+def test_replay_mismatch_is_detected_on_identity() -> None:
+    _canonical_or_skip()
+    from evaluation.commerce.dry_run_events import lifecycle_events
+    from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
+    from evaluation.commerce.dry_run_scenarios import hydroponics_positive_candidate
+
+    first = lifecycle_events(
+        run_dry_run_lifecycle(hydroponics_positive_candidate()),
+        workspace_id="ws-mismatch-a",
+        occurred_at=0.0,
     )
-    combined_events2 = (*commerce_events2, *fulfillment_report2.events)
-
-    hashes1 = [event.replay_hash() for event in combined_events]
-    hashes2 = [event.replay_hash() for event in combined_events2]
-    assert hashes1 == hashes2
-    assert len(hashes1) == 37
-    assert all(bool(h) for h in hashes1)
-
-    assert commerce_report.live_actions_taken is False
-    assert commerce_report2.live_actions_taken is False
+    second = lifecycle_events(
+        run_dry_run_lifecycle(hydroponics_positive_candidate()),
+        workspace_id="ws-mismatch-a",
+        occurred_at=0.0,
+    )
+    # Same envelope identity must match.
+    assert [event.replay_hash() for event in first] == [event.replay_hash() for event in second]
+    # occurred_at is part of Event.canonical_json, so hashes must move.
+    third = lifecycle_events(
+        run_dry_run_lifecycle(hydroponics_positive_candidate()),
+        workspace_id="ws-mismatch-a",
+        occurred_at=1.0,
+    )
+    assert [event.replay_hash() for event in first] != [event.replay_hash() for event in third]
+    other_ws = lifecycle_events(
+        run_dry_run_lifecycle(hydroponics_positive_candidate()),
+        workspace_id="ws-mismatch-b",
+        occurred_at=0.0,
+    )
+    assert [event.replay_hash() for event in first] != [event.replay_hash() for event in other_ws]
 
 
 def test_canonical_measure_classifies_or_proves_five_scenarios() -> None:
     report = measure_canonical_scenarios()
     assert report["field_hash_rejected_as_identity"] is True
     assert report["event_hash_authority"].endswith("Event.replay_hash")
+    assert report["this_harness_event_count"] == COMMERCE_LIFECYCLE_EVENT_COUNT
     if report["status"] == "unavailable":
         assert report["scenarios"] == []
         assert report["no_live_upgrade"] is True
+        assert report["all_replay_stable"] is False
         return
     assert report["status"] == "actual"
     assert report["all_replay_stable"] is True
     assert report["all_sequences_clean"] is True
     assert report["no_live_upgrade"] is True
     assert report["no_live_authority"] is True
+    assert report["environment"]["warmup"] == 1
+    assert report["environment"]["repeats"] == 5
     names = [row["scenario"] for row in report["scenarios"]]
     assert names == list(CANONICAL_BUILDERS)
     for row in report["scenarios"]:
-        # Commerce-only projection. Do not accept the #279 CLI concat of 37.
         assert row["event_count"] == COMMERCE_LIFECYCLE_EVENT_COUNT
-        assert row["event_count"] != CLI_COMMERCE_PLUS_FULFILLMENT_EVENT_COUNT
+        assert row["event_count"] != CLI_CONCAT_EVENT_COUNT
         assert row["replay_hashes_equal"] is True
         assert row["event_ids_equal"] is True
         assert row["live_actions_taken"] is False
@@ -143,7 +230,11 @@ def test_canonical_measure_classifies_or_proves_five_scenarios() -> None:
         assert row["execution_class"] == "actual_canonical_dry_run"
         assert row["aggregate_replay_hash_stable"] is True
         assert row["evidence_state_preserved"] is True
+        assert row["warmup"] == 1
+        assert row["n"] == 5
         assert "p95_ms" in row and "p99_ms" in row
+        suffixes = [event_id.split(":")[-1] for event_id in row["event_ids"]]
+        assert suffixes == ["started", *STEPS, "completed"]
 
 
 def test_arbitration_report_records_owners_and_does_not_claim_optimization() -> None:
@@ -154,9 +245,11 @@ def test_arbitration_report_records_owners_and_does_not_claim_optimization() -> 
     assert report["optimization_changes_event_replay_hash"] is False
     assert report["second_replay_path"] is False
     assert report["verdict"]["production_optimization_applied"] is False
+    assert report["verdict"]["this_harness_event_count"] == 17
     assert report["identity_arbitration"]["field_hash_is_canonical"] is False
     assert report["isolated_scale_note"]["survives_event_replay_hash"] is False
     assert report["laboratory_280_readonly"]["touched_in_this_pr"] is False
+    assert report["event_scopes"]["duplicates_279_runner"] is False
     assert report["evidence_classification"] in {"unavailable", "actual", "fixture"}
     if report["canonical"]["status"] == "unavailable":
         assert report["measures_real_commercial_replay"] is False

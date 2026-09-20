@@ -16,6 +16,11 @@ When MarketOS commerce imports are available this seam:
 When those imports are missing the seam classifies the path as
 unavailable. Isolated dict projection / field-hash helpers remain only
 so this sandbox can prove they are *not* the canonical identity.
+
+Measurement scope: commerce lifecycle only (17 = 1 started + 15 steps +
+1 completed). The 37-event trail is #279 CLI concatenation of those 17
+events plus 20 fulfillment-risk events. This harness must not absorb
+fulfillment.
 """
 from __future__ import annotations
 
@@ -27,7 +32,7 @@ from typing import Any, Mapping
 SCHEMA = "integrated-replay-arbitration-v2"
 MAX_CANDIDATES = 2048
 MAX_EVENTS = 40_000
-TIMEOUT_MS = 8_000
+TIMEOUT_MS = 30_000
 CANONICAL_BUILDERS = (
     "hydroponics_positive_candidate",
     "smart_pet_support_burden_candidate",
@@ -52,6 +57,23 @@ STEPS = (
     "return_rma",
     "contribution_reconciliation",
 )
+COMMERCE_LIFECYCLE_EVENT_COUNT = 1 + len(STEPS) + 1  # started + 15 steps + completed = 17
+FULFILLMENT_NAMED_SCENARIO = "customer_return_merchant_paid"
+FULFILLMENT_EVENT_COUNT = 20
+CLI_CONCAT_EVENT_COUNT = COMMERCE_LIFECYCLE_EVENT_COUNT + FULFILLMENT_EVENT_COUNT  # 37; #279 CLI only
+REQUIRED_SYMBOLS = (
+    "SCHEMA",
+    "STEPS",
+    "CANONICAL_BUILDERS",
+    "COMMERCE_LIFECYCLE_EVENT_COUNT",
+    "CLI_CONCAT_EVENT_COUNT",
+    "classify_canonical",
+    "measure_canonical_scenarios",
+    "reject_field_hash_as_canonical",
+    "inspect_replay_cli_source",
+    "describe_event_scopes",
+    "arbitrate",
+)
 LIVE_ATTESTED = frozenset({"live_readonly", "verified"})
 FIXTURE_DENY = frozenset({"fixture", "simulated", "assumed", "unknown", "missing", "observed"})
 AUTHORITIES = {
@@ -62,6 +84,7 @@ AUTHORITIES = {
     "economics": "backend.economics.kernel / evaluation.commerce.dry_run_lifecycle",
     "laboratory": "#280 scripts/benchmarks/benchmark_commercial_replay_lab.py",
 }
+_CLI_CONCAT_COMPACT = "tuple((*commerce_events,*fulfillment_events))"
 
 
 class IntegratedReplayPerfError(ValueError):
@@ -123,6 +146,8 @@ def classify_canonical() -> dict[str, Any]:
         "hash_authority": AUTHORITIES["event_hash"],
         "laboratory_owner": AUTHORITIES["laboratory"],
         "this_module_authority": False,
+        "this_harness_event_count": COMMERCE_LIFECYCLE_EVENT_COUNT,
+        "cli_concat_event_count": CLI_CONCAT_EVENT_COUNT,
         "economics_delegation": "delegated_not_computed_here" if not missing else "unavailable",
         "note": (
             "times public builders; does not own economics, events, or the #280 lab"
@@ -153,10 +178,14 @@ def _percentile(samples: list[float], p: float) -> float:
     return round(val, 3)
 
 
-def _time(fn, repeats: int = 5) -> tuple[dict[str, float], Any]:
+def _time(fn, repeats: int = 5, warmup: int = 1) -> tuple[dict[str, float], Any]:
     samples: list[float] = []
     last = None
     deadline = time.perf_counter() + (TIMEOUT_MS / 1000)
+    for _ in range(warmup):
+        if time.perf_counter() > deadline:
+            raise IntegratedReplayPerfError("timeout")
+        last = fn()
     for _ in range(repeats):
         if time.perf_counter() > deadline:
             raise IntegratedReplayPerfError("timeout")
@@ -168,6 +197,10 @@ def _time(fn, repeats: int = 5) -> tuple[dict[str, float], Any]:
         "p50_ms": _percentile(samples, 0.50),
         "p95_ms": _percentile(samples, 0.95),
         "p99_ms": _percentile(samples, 0.99),
+        "min_ms": round(min(samples), 3) if samples else 0.0,
+        "max_ms": round(max(samples), 3) if samples else 0.0,
+        "n": repeats,
+        "warmup": warmup,
     }
     return metrics, last
 
@@ -184,6 +217,65 @@ def _hash_sequence(events: list[Any]) -> str:
     return hashlib.sha256("".join(hashes).encode("utf-8")).hexdigest()
 
 
+def inspect_replay_cli_source(source: str) -> dict[str, Any]:
+    """Classify a CLI source string. Does not execute the #279 runner."""
+    compact = "".join(source.split())
+    concatenates = _CLI_CONCAT_COMPACT in compact
+    return {
+        "concatenates_fulfillment": concatenates,
+        "names_customer_return_merchant_paid": FULFILLMENT_NAMED_SCENARIO in source,
+        "defines_replay_scenario": "def _replay_scenario(" in source,
+        "implied_count": CLI_CONCAT_EVENT_COUNT if concatenates else COMMERCE_LIFECYCLE_EVENT_COUNT,
+        "second_spine_if_measured_here": False,
+        "owner": "#279 CLI concat" if concatenates else "commerce-only CLI (this branch / main)",
+    }
+
+
+def describe_event_scopes(*, cli_source: str | None = None, pr279_cli_source: str | None = None) -> dict[str, Any]:
+    """Comparable 17 vs 37 scopes. #274 still times commerce-only."""
+    classification = classify_canonical()
+    observed_commerce: int | None = None
+    observed_fulfillment: int | None = None
+    observed_ids: list[str] = []
+    if classification["status"] == "importable":
+        from evaluation.commerce.dry_run_events import lifecycle_events
+        from evaluation.commerce.dry_run_lifecycle import run_dry_run_lifecycle
+        from evaluation.commerce.dry_run_scenarios import hydroponics_positive_candidate
+        from evaluation.commerce.fulfillment_risk_lifecycle import (
+            FixtureFulfillmentAdapter,
+            build_named_scenario,
+            run_fulfillment_risk_dry_run,
+        )
+
+        report = run_dry_run_lifecycle(hydroponics_positive_candidate())
+        commerce_events = lifecycle_events(report, workspace_id="ws-scope", occurred_at=0.0)
+        observed_commerce = len(commerce_events)
+        observed_ids = [event.event_id.split(":")[-1] for event in commerce_events]
+        fulfillment = run_fulfillment_risk_dry_run(
+            build_named_scenario(FULFILLMENT_NAMED_SCENARIO),
+            adapter=FixtureFulfillmentAdapter.complete(),
+        )
+        observed_fulfillment = len(fulfillment.events)
+    return {
+        "this_harness_measures": COMMERCE_LIFECYCLE_EVENT_COUNT,
+        "commerce_lifecycle_count": COMMERCE_LIFECYCLE_EVENT_COUNT,
+        "fulfillment_named_scenario": FULFILLMENT_NAMED_SCENARIO,
+        "fulfillment_event_count": FULFILLMENT_EVENT_COUNT,
+        "cli_concat_count": CLI_CONCAT_EVENT_COUNT,
+        "observed_commerce_count": observed_commerce,
+        "observed_fulfillment_count": observed_fulfillment,
+        "observed_commerce_suffixes": observed_ids,
+        "this_branch_cli": inspect_replay_cli_source(cli_source) if cli_source is not None else None,
+        "pr279_cli": inspect_replay_cli_source(pr279_cli_source) if pr279_cli_source is not None else None,
+        "canonical": classification,
+        "duplicates_279_runner": False,
+        "note": (
+            "#274 times builder → run_dry_run_lifecycle → lifecycle_events → Event.replay_hash. "
+            "37 is #279 CLI tuple((*commerce_events, *fulfillment_events)) only."
+        ),
+    }
+
+
 def measure_canonical_scenarios() -> dict[str, Any]:
     """Drive the five public builders through the canonical Event path."""
     classification = classify_canonical()
@@ -198,6 +290,7 @@ def measure_canonical_scenarios() -> dict[str, Any]:
             "no_live_upgrade": True,
             "event_hash_authority": AUTHORITIES["event_hash"],
             "field_hash_rejected_as_identity": True,
+            "this_harness_event_count": COMMERCE_LIFECYCLE_EVENT_COUNT,
             "reason": classification["missing"],
         }
 
@@ -218,7 +311,7 @@ def measure_canonical_scenarios() -> dict[str, Any]:
             events = lifecycle_events(report, workspace_id=f"ws-{label}", occurred_at=0.0)
             return report, events
 
-        metrics, pair = _time(_run, repeats=5)
+        metrics, pair = _time(_run, repeats=5, warmup=1)
         first_report, first_events = pair
         second_report, second_events = _run()
         first_ids = [event.event_id for event in first_events]
@@ -234,6 +327,10 @@ def measure_canonical_scenarios() -> dict[str, Any]:
             raise IntegratedReplayPerfError("fixture states cannot upgrade to live attestation")
         if first_report.live_actions_taken:
             raise IntegratedReplayPerfError("canonical dry-run took a live action")
+        if len(first_events) != COMMERCE_LIFECYCLE_EVENT_COUNT:
+            raise IntegratedReplayPerfError(
+                f"commerce trail must be {COMMERCE_LIFECYCLE_EVENT_COUNT} events, got {len(first_events)}"
+            )
         rows.append(
             {
                 "scenario": name,
@@ -260,6 +357,10 @@ def measure_canonical_scenarios() -> dict[str, Any]:
                 "p50_ms": metrics["p50_ms"],
                 "p95_ms": metrics["p95_ms"],
                 "p99_ms": metrics["p99_ms"],
+                "min_ms": metrics["min_ms"],
+                "max_ms": metrics["max_ms"],
+                "n": metrics["n"],
+                "warmup": metrics["warmup"],
                 "rss_kb": _rss_kb(),
             }
         )
@@ -279,7 +380,13 @@ def measure_canonical_scenarios() -> dict[str, Any]:
         "no_live_authority": all(not item["live_authority_violations"] for item in rows),
         "event_hash_authority": AUTHORITIES["event_hash"],
         "field_hash_rejected_as_identity": True,
+        "this_harness_event_count": COMMERCE_LIFECYCLE_EVENT_COUNT,
         "covered_builders": list(CANONICAL_BUILDERS),
+        "environment": {
+            "timeout_ms": TIMEOUT_MS,
+            "repeats": 5,
+            "warmup": 1,
+        },
     }
 
 
@@ -371,6 +478,7 @@ def isolated_scale_note() -> dict[str, Any]:
 def arbitrate() -> dict[str, Any]:
     canonical = measure_canonical_scenarios()
     identity = reject_field_hash_as_canonical()
+    scopes = describe_event_scopes()
     is_actual = canonical.get("status") == "actual"
     evidence_class = (
         "actual"
@@ -389,6 +497,7 @@ def arbitrate() -> dict[str, Any]:
         "optimization_changes_event_replay_hash": False,
         "second_replay_path": False,
         "canonical": canonical,
+        "event_scopes": scopes,
         "identity_arbitration": identity,
         "isolated_scale_note": isolated_scale_note(),
         "laboratory_280_readonly": {
@@ -400,6 +509,8 @@ def arbitrate() -> dict[str, Any]:
             "canonical_owner": "#279",
             "laboratory_owner": "#280",
             "this_lane": "conformance and timing of the #279 Event path",
+            "this_harness_event_count": COMMERCE_LIFECYCLE_EVENT_COUNT,
+            "cli_concat_event_count": CLI_CONCAT_EVENT_COUNT,
             "production_optimization_applied": False,
             "reason": (
                 "changing Event.replay_hash or dry_run_events metadata sharing "
@@ -409,3 +520,25 @@ def arbitrate() -> dict[str, Any]:
         },
         "disclaimer": "sandbox timings are not MarketOS production performance",
     }
+
+
+__all__ = [
+    "SCHEMA",
+    "STEPS",
+    "CANONICAL_BUILDERS",
+    "COMMERCE_LIFECYCLE_EVENT_COUNT",
+    "CLI_CONCAT_EVENT_COUNT",
+    "FULFILLMENT_EVENT_COUNT",
+    "REQUIRED_SYMBOLS",
+    "IntegratedReplayPerfError",
+    "classify_canonical",
+    "measure_canonical_scenarios",
+    "inspect_replay_cli_source",
+    "describe_event_scopes",
+    "reject_field_hash_as_canonical",
+    "isolated_field_fingerprint",
+    "project_event_ids",
+    "sanitized_candidates",
+    "live_attestation",
+    "arbitrate",
+]

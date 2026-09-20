@@ -61,6 +61,7 @@ def build_report() -> dict[str, Any]:
         "repository": "ChristianV997/MarketOS",
         "commit": _git_sha(),
         "command": "python scripts/run_integrated_replay_perf.py --json",
+        "measures": "commerce lifecycle_events only (17); 37 is #279 CLI concat",
         "environment": {
             "python": sys.version.split()[0],
             "platform": platform.platform(),
