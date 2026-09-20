@@ -33,7 +33,7 @@ export function CockpitToolbar({
               value={filter.query}
               onChange={(event) => onFilterChange({ ...filter, query: event.target.value })}
               placeholder="Title, decision, action…"
-              className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+              className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
               aria-controls="ranked-candidates-table"
             />
           </label>

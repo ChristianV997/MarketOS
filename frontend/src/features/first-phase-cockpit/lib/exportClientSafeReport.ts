@@ -6,7 +6,7 @@ import {
 } from "../contracts/firstPhaseEvidencePacket.ts";
 
 const SECRET_SHAPED = /sk-live-|sk-test-|ghp_|github_pat_|AKIA[0-9A-Z]{16}|bearer\s+[a-z0-9._-]{10,}/i;
-const FORBIDDEN_EXPORT_KEY = /prompt|formula|heuristic|source_code|private_key|provider_payload|internal_notes/;
+const FORBIDDEN_EXPORT_KEY = /prompt|formula|heuristic|source_code|private_key|provider_payload|internal_notes|private_note|cross_client|cross_workspace/;
 const PATH_SHAPED = /(^|[\\/])(users|home|documents|marketos)[\\/]/i;
 
 /** Reject strings that look like secrets before export or display. */
@@ -47,6 +47,10 @@ export function buildClientSafeExport(
     packet.fingerprint.schemaVersion === EVIDENCE_COCKPIT_SCHEMA_VERSION
       ? EVIDENCE_COCKPIT_SCHEMA_VERSION
       : "composed-live";
+
+  if (packet.fingerprint.evidenceMode === "unknown") {
+    throw new Error("client_safe_export_rejected_unknown_evidence");
+  }
 
   const payload: ClientSafeCockpitExport = {
     export_version: CLIENT_SAFE_EXPORT_VERSION,

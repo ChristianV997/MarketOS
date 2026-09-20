@@ -69,10 +69,10 @@ export default function Shell() {
             >
               {phase}
             </span>
-            <span className="text-xs text-zinc-500 font-mono">
+            <span className="text-xs text-zinc-400 font-mono">
               cycle <span className="text-zinc-300">{cycles.toLocaleString()}</span>
             </span>
-            <span className="text-xs text-zinc-500 font-mono">
+            <span className="text-xs text-zinc-400 font-mono">
               ROAS <span className={roas >= 1.2 ? "text-emerald-400" : "text-red-400"}>{roas.toFixed(2)}×</span>
             </span>
           </div>
@@ -85,7 +85,7 @@ export default function Shell() {
                 connected ? "bg-emerald-400 animate-pulse-slow" : "bg-red-500"
               )}
             />
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-[11px] text-zinc-400">
               {connected ? "live" : "reconnecting"}
             </span>
           </div>

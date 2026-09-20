@@ -87,7 +87,7 @@ export default function FirstPhaseEvidenceCockpitPage() {
       {/* Launch Draft Pack / Higgsfield creative assets: deferred. No frontend display adapter until a cockpit-owned read-only contract exists on this page. */}
       <a
         href="#ranked-candidates-table"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-50"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
       >
         Skip to ranked candidates
       </a>

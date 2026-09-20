@@ -15,6 +15,10 @@ import {
 import { adaptCommerceProjection } from "../src/features/first-phase-cockpit/lib/overlayCommerceProjection.ts";
 import { adaptResearchToDecisionProjection } from "../src/features/first-phase-cockpit/lib/overlayResearchToDecision.ts";
 import { windowCandidates } from "../src/features/first-phase-cockpit/lib/windowCandidates.ts";
+import {
+  buildClientSafeExport,
+  containsSecretShapedValue,
+} from "../src/features/first-phase-cockpit/lib/exportClientSafeReport.ts";
 
 const featureRoot = new URL("../src/features/first-phase-cockpit/", import.meta.url);
 const matrixRoot = new URL("../src/features/first-phase-cockpit/fixtures/projection-matrix/", import.meta.url);
@@ -450,4 +454,32 @@ test("export payload includes timeline and forbids live mutation flags", async (
   assert.match(exporter, /decision_timeline/);
   assert.match(exporter, /launch_authorized_false/);
   assert.match(exporter, /mutated: false/);
+});
+
+test("client-safe export rejects private notes, cross-client keys, and unknown evidence", () => {
+  assert.equal(containsSecretShapedValue({ private_note: "operator only" }), true);
+  assert.equal(containsSecretShapedValue({ private_notes: "operator only" }), true);
+  assert.equal(containsSecretShapedValue({ cross_client_data: "other-workspace" }), true);
+  const packet = composeWithProjection(["cand-espresso-01"], undefined);
+  const accepted = buildClientSafeExport(packet, "2026-09-20T00:00:00Z");
+  assert.equal(accepted.read_only, true);
+  const unknownPacket = {
+    ...packet,
+    fingerprint: {
+      ...packet.fingerprint,
+      evidenceMode: "unknown",
+    },
+  };
+  assert.throws(
+    () => buildClientSafeExport(unknownPacket, "2026-09-20T00:00:00Z"),
+    /client_safe_export_rejected_unknown_evidence/,
+  );
+});
+
+test("mobile ranked cards share desktop keyboard handlers", async () => {
+  const panel = await readFile(new URL("components/RankedCandidatesPanel.tsx", featureRoot), "utf8");
+  assert.match(panel, /md:hidden/);
+  assert.equal((panel.match(/onKeyDown=\{\(event\) => handleKeyDown\(event, absoluteIndex\)\}/g) || []).length, 2);
+  assert.match(panel, /previousSelectedId/);
+  assert.match(panel, /data-candidate-id=\{candidate.candidateId\}/);
 });

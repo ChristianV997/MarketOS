@@ -42,7 +42,9 @@ export function RankedCandidatesPanel({
   onWindowStartChange: (start: number) => void;
 }) {
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const detailFocusRequested = useRef(false);
+  const previousSelectedId = useRef<string | null>(selectedId);
 
   const alignedStart = useMemo(
     () => ensureSelectionInWindow(candidates, selectedId, windowStart, CANDIDATE_WINDOW_SIZE),
@@ -63,6 +65,15 @@ export function RankedCandidatesPanel({
     detailFocusRequested.current = false;
     const detail = document.getElementById("candidate-detail-panel");
     detail?.focus();
+  }, [selectedId]);
+
+  useEffect(() => {
+    const previous = previousSelectedId.current;
+    previousSelectedId.current = selectedId;
+    if (selectedId || !previous) return;
+    const button = listRef.current?.querySelector<HTMLElement>(`button[data-candidate-id="${previous}"]`)
+      ?? tbodyRef.current?.querySelector<HTMLElement>(`button[data-candidate-id="${previous}"]`);
+    button?.focus();
   }, [selectedId]);
 
   if (!candidates.length) {
@@ -153,6 +164,7 @@ export function RankedCandidatesPanel({
 
       {/* Mobile card list */}
       <ul
+        ref={listRef}
         className="mt-3 space-y-2 md:hidden"
         aria-labelledby="ranked-candidates-heading"
       >
@@ -164,11 +176,14 @@ export function RankedCandidatesPanel({
             <li key={candidate.candidateId}>
               <button
                 type="button"
+                data-candidate-id={candidate.candidateId}
+                data-candidate-index={absoluteIndex}
                 aria-pressed={selected}
                 onClick={() => {
                   detailFocusRequested.current = true;
                   onSelect(candidate.candidateId);
                 }}
+                onKeyDown={(event) => handleKeyDown(event, absoluteIndex)}
                 className={`w-full rounded border p-3 text-left text-xs outline-none focus-visible:ring-1 focus-visible:ring-indigo-400 ${
                   selected
                     ? "border-indigo-500/40 bg-indigo-500/10"
@@ -256,6 +271,7 @@ export function RankedCandidatesPanel({
                   <th scope="row" className="px-2 py-2 font-medium">
                     <button
                       type="button"
+                      data-candidate-id={candidate.candidateId}
                       data-candidate-index={absoluteIndex}
                       tabIndex={tabIndex}
                       aria-pressed={selected}
