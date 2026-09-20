@@ -74,6 +74,19 @@ def test_ownership_change_between_task_packet_and_resume_is_rejected():
         validate_resume_packet(resume, expected_task_packet=hijacked_task)
 
 
+def test_scope_widened_after_resume_is_rejected_even_with_matching_agent_and_lane():
+    """A resumed session must not be able to swap in a task packet with a
+    wider allowed_scope (same agent_id/lane) than the one the resume
+    packet's task_packet_digest actually committed to -- that would let a
+    resumed run silently expand its approved paths. The ownership check
+    alone (agent_id/lane match) does not catch this; the recorded
+    task_packet_digest must be re-verified against expected_task_packet."""
+    resume = build_resume_packet(TASK_PACKET, **_resume_kwargs())
+    widened_task = dict(TASK_PACKET, allowed_scope=[*TASK_PACKET["allowed_scope"], "backend/"])
+    with pytest.raises(ResumePacketError, match="digest"):
+        validate_resume_packet(resume, expected_task_packet=widened_task)
+
+
 def test_test_records_must_carry_a_known_evidence_classification():
     with pytest.raises(ResumePacketError):
         build_resume_packet(TASK_PACKET, **_resume_kwargs(tests_already_run=["pytest ran and passed, trust me"]))

@@ -438,6 +438,15 @@ def validate_resume_packet(raw: Any, *, expected_task_packet: dict[str, Any] | N
         validated_expected = validate_packet(expected_task_packet)
         if raw.get("agent_id") != validated_expected["agent_id"] or raw.get("lane") != validated_expected["lane"]:
             raise ResumePacketError("resume packet ownership does not match the expected task packet")
+        if raw.get("task_packet_digest") != _packet_digest(validated_expected):
+            # Same agent_id/lane alone does not prove the task packet is the
+            # one this resume was actually built from -- a resumed session
+            # could otherwise present a task packet with a widened
+            # allowed_scope (or altered prohibited_scope/base_sha/etc.) that
+            # still passes the ownership check above. The digest recorded at
+            # build_resume_packet() time is the only thing that pins the
+            # resume to the exact task packet it committed to.
+            raise ResumePacketError("resume packet task_packet_digest does not match the expected task packet")
     return raw
 
 
