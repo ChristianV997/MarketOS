@@ -11,7 +11,7 @@ stores artifacts, makes legal/tax conclusions, or performs external actions.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
 DOMAINS = (
@@ -511,7 +511,8 @@ def build_trust_controls() -> tuple[TrustControl, ...]:
     )
     for domain, pack_id, key, description, action, professional in extras:
         controls.append(TrustControl(f"control-{pack_id}-{key}", key.replace("_", " ").title(), domain, pack_id, description, (action,), ("management", "risk_approval", "operations"), ("global",), "high" if professional else "medium", (TrustEvidenceRequirement(f"{key}_evidence", f"Evidence for {key.replace('_', ' ')}", True, 180, professional),), "needs_professional_review" if professional else "soft_block", "professional review or founder exception where applicable", ("TrustOS readiness policy",), 180, "risk_approval", professional, "planned"))
-    return tuple(controls)
+    from .mexico_product_compliance import build_mexico_trust_controls
+    return tuple(controls) + build_mexico_trust_controls()
 
 
 def build_policy_packs_from_controls(controls: Sequence[TrustControl]) -> tuple[TrustControlPack, ...]:
