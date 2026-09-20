@@ -69,6 +69,11 @@ Ruff is advisory (`ARCHITECTURE_CONTRACT.md`). If `ruff` is missing, record `una
 python scripts/deployment_smoke_check.py --local --json
 python scripts/mvp_readiness.py --json
 
+# Service delivery deployment dry-run and release smoke
+python scripts/run_service_delivery_dry_run.py --summary
+python scripts/run_service_delivery_dry_run.py --json
+python scripts/deployment_smoke_check.py --service-delivery --json
+
 # Actionable failure diagnostics (covers 11 failure modes)
 python scripts/deployment_diagnostics.py --mode local_dry_run --json
 

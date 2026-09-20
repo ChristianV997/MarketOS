@@ -71,3 +71,24 @@ Readiness: `blocked_live`.
 - Colab benchmark matrix: `scripts/run_high_value_path_harness.py --colab-matrix` measures 8 bounded paths with 100% deterministic bit-identity.
 - Promotion rehearsal bundle: `backend.deployment.promotion_rehearsal` composes the environment contract, failure diagnostics, container checks, harness summary, CoderOS status, and CI classification into a sanitized deterministic bundle.
 - Scenario fixtures: `backend.deployment.promotion_fixtures` covers deployment edge cases without credentials, providers, network, or mutations.
+
+## 7. Service delivery deployment dry-run seam
+
+The service-delivery workbench deployment dry-run path (`scripts/run_service_delivery_dry_run.py`) provides safe, read-only validation of the service delivery application and its dependencies without mutating platform state or storing credentials:
+
+- **Projection artifact validation**: Checks that `MARKETOS_SERVICE_DELIVERY_PROJECTION` points to a valid file strictly under `artifacts/`. Fails closed if traversal is attempted (`blocked`), if schema version is unsupported (`malformed`), or if workspace leakage (`internal_prompt`, `internal_formula`) is present (`failed`).
+- **Workbench endpoint probe**: Checks in-process router availability by default. An optional HTTP probe is restricted to localhost/loopback, disables proxy and redirect handling, and rejects URL credentials, query strings, and fragments. It never probes remote staging or production endpoints. If the route is unmerged (PR #271), reports `unavailable` with clean diagnostics rather than crashing.
+- **CI evidence classification**: Strictly distinguishes zero-step CI (`ci_unavailable` due to GitHub Actions billing/spending limits blocking runner allocation) from real code execution failure (`failed`) or verified passes (`passed`). Zero steps executed can never be upgraded to a pass or downgraded to a code defect.
+- **Reproducibility commands**:
+  - Windows PowerShell:
+    ```powershell
+    python scripts/run_service_delivery_dry_run.py --summary
+    python scripts/run_service_delivery_dry_run.py --json
+    python scripts/deployment_smoke_check.py --service-delivery --json
+    ```
+  - Cross-platform / Linux:
+    ```bash
+    python scripts/run_service_delivery_dry_run.py --summary
+    python scripts/run_service_delivery_dry_run.py --json
+    python scripts/deployment_smoke_check.py --service-delivery --json
+    ```

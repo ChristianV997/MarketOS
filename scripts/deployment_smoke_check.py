@@ -69,7 +69,7 @@ def _get_status(base: str, path: str) -> int:
         return response.status
 
 
-def build_report(*, environ: dict[str, str] | None = None, env_file: str | None = None, backend_url: str | None = None, frontend_url: str | None = None, profile: str | None = None) -> dict[str, Any]:
+def build_report(*, environ: dict[str, str] | None = None, env_file: str | None = None, backend_url: str | None = None, frontend_url: str | None = None, profile: str | None = None, check_service_delivery: bool = False) -> dict[str, Any]:
     values = _env_file(env_file) if env_file else (dict(os.environ) if environ is None else environ)
     report: dict[str, Any] = {"status": "passed", "network_calls": bool(backend_url or frontend_url), "mutated": False, "checks": [], "next_actions": [], "profile": profile or "local"}
     try:
@@ -144,6 +144,29 @@ def build_report(*, environ: dict[str, str] | None = None, env_file: str | None 
         except (OSError, ValueError, urllib.error.URLError) as exc:
             report["frontend_endpoint"] = {"status": "failed", "path": "/operator/events", "detail": type(exc).__name__}
             if report["status"] != "failed": report["status"] = "partial"
+    if check_service_delivery:
+        from backend.deployment.service_delivery_smoke import (
+            probe_service_delivery_workbench,
+            validate_service_delivery_projection,
+        )
+        proj_res = validate_service_delivery_projection(environ=values)
+        report["checks"].append({
+            "name": "service_delivery_projection",
+            "status": proj_res["status"],
+            "reason": proj_res.get("reason"),
+            "path": proj_res.get("path"),
+        })
+        if proj_res["status"] in {"failed", "blocked", "malformed"}:
+            report["status"] = "failed"
+        if backend_url:
+            wb_res = probe_service_delivery_workbench(base_url=backend_url)
+            report["checks"].append({
+                "name": "service_delivery_workbench_endpoint",
+                "status": wb_res["status"],
+                "reason": wb_res.get("reason"),
+            })
+            if wb_res["status"] == "failed":
+                report["status"] = "failed"
     if missing: report["status"] = "partial" if report["status"] != "failed" else report["status"]
     if missing: report["next_actions"].append("Set required server/frontend deployment variables with safe values.")
     report["next_actions"].extend(["Build frontend with cd frontend && npm run build.", "Probe /health, /ready, /api/events/readiness, and /operator/events after deployment.", "Keep public and Supabase gates off until operator review."])
@@ -165,14 +188,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file")
     parser.add_argument("--backend-url")
     parser.add_argument("--frontend-url")
+    parser.add_argument("--service-delivery", action="store_true", help="Include service delivery workbench checks")
     parser.add_argument("--profile", choices=("railway", "vercel", "render"))
     parser.add_argument("--output")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--json", action="store_true")
     mode.add_argument("--markdown", action="store_true")
     args = parser.parse_args(argv)
-    if not (args.local or args.env_file or args.backend_url or args.frontend_url or args.profile): parser.error("select --local, --env-file, a URL, or --profile")
-    report = build_report(env_file=args.env_file, backend_url=args.backend_url, frontend_url=args.frontend_url, profile=args.profile)
+    if not (args.local or args.env_file or args.backend_url or args.frontend_url or args.profile or args.service_delivery): parser.error("select --local, --env-file, a URL, --service-delivery, or --profile")
+    report = build_report(env_file=args.env_file, backend_url=args.backend_url, frontend_url=args.frontend_url, profile=args.profile, check_service_delivery=args.service_delivery)
     rendered = markdown_report(report) if args.markdown else json.dumps(report, sort_keys=True, indent=2) + "\n"
     if args.output:
         target = (ROOT / args.output).resolve();
