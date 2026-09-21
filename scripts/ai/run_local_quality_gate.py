@@ -560,6 +560,8 @@ def _safe_frontend_script(script: Any) -> bool:
         command = tokens[0].replace("\\", "/").rsplit("/", 1)[-1] if tokens else ""
         if command not in SAFE_FRONTEND_COMMANDS:
             return False
+        if command == "node" and tokens[1:] != ["--experimental-strip-types", "--test"]:
+            return False
     return True
 
 

@@ -24,6 +24,11 @@ def test_frontend_selector_runs_validation_harness():
 
 def test_node_test_script_is_allowlisted():
     assert gate._safe_frontend_script("node --experimental-strip-types --test") is True
+    assert gate._safe_frontend_script("node -e \"require('https').get('https://example.invalid')\"") is False
+    assert gate._safe_frontend_script("node ./scripts/arbitrary.mjs") is False
+    assert gate._safe_frontend_script(
+        "node --experimental-strip-types --test && node -e \"process.env\""
+    ) is False
     assert gate._safe_frontend_script("python -c \"print('vitest')\"") is False
 
 
@@ -98,12 +103,24 @@ def test_validation_child_environment_is_allowlisted():
     env = run_frontend_validation._child_environment(
         {
             "PATH": "/safe/bin",
+            "USERPROFILE": r"C:\Users\Operator",
+            "APPDATA": r"C:\Users\Operator\AppData\Roaming",
+            "LOCALAPPDATA": r"C:\Users\Operator\AppData\Local",
+            "HOMEDRIVE": "C:",
+            "HOMEPATH": r"\Users\Operator",
             "AWS_SECRET_ACCESS_KEY": "sentinel-secret",
             "OPENAI_API_KEY": "sentinel-secret",
             "FOO": "unrelated",
         }
     )
-    assert env == {"PATH": "/safe/bin"}
+    assert env == {
+        "PATH": "/safe/bin",
+        "USERPROFILE": r"C:\Users\Operator",
+        "APPDATA": r"C:\Users\Operator\AppData\Roaming",
+        "LOCALAPPDATA": r"C:\Users\Operator\AppData\Local",
+        "HOMEDRIVE": "C:",
+        "HOMEPATH": r"\Users\Operator",
+    }
 
 
 def test_validation_command_output_is_bounded(tmp_path):

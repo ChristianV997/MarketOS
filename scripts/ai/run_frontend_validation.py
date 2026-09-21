@@ -19,7 +19,21 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MAX_STEP_TIMEOUT_S = 120.0
 MAX_STEP_OUTPUT_BYTES = 16384
 SAFE_ENVIRONMENT_KEYS = frozenset(
-    {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "COMSPEC", "PATHEXT"}
+    {
+        "PATH",
+        "SYSTEMROOT",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "COMSPEC",
+        "PATHEXT",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "HOME",
+        "APPDATA",
+        "LOCALAPPDATA",
+    }
 )
 EXPECTED_FRONTEND_SCRIPTS = {
     "typecheck": "tsc --noEmit",
