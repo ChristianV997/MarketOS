@@ -8,10 +8,12 @@ import {
   NAV_TOGGLE_ID,
   OPERATOR_MAIN_ID,
   SIDEBAR_NAV_ID,
+  SKIP_TO_MAIN_ID,
   isDrawerMode,
   navigationToggleLabel,
   shouldCloseDrawerOnKey,
   shouldCloseDrawerOnRouteChange,
+  shouldCloseDrawerOnSkip,
   sidebarIsInert,
 } from "../src/components/layout/sidebarDrawer.ts";
 
@@ -38,7 +40,8 @@ test("named toggle labels and expanded contract", () => {
   assert.match(shellSrc, /aria-controls=\{SIDEBAR_NAV_ID\}/);
   assert.match(shellSrc, new RegExp(`id=\\{NAV_TOGGLE_ID\\}|id="${NAV_TOGGLE_ID}"`));
   assert.match(shellSrc, /type="button"/);
-  assert.match(shellSrc, /md:hidden/);
+  assert.match(shellSrc, /id=\{NAV_TOGGLE_ID\}/);
+  assert.match(shellSrc, /className="md:hidden inline-flex/);
 });
 
 test("Escape closes only an open mobile drawer", () => {
@@ -66,13 +69,25 @@ test("route changes close an open drawer so the next page is not trapped", () =>
   assert.match(shellSrc, /setNavOpen\(false\)/);
 });
 
-test("skip-to-main landmark is in the shared shell, not a page-only duplicate contract", () => {
-  assert.match(shellSrc, /Skip to main content/);
+test("skip-to-main is first useful tab stop below the live-status header", () => {
+  const headerIdx = shellSrc.indexOf("<header");
+  const headerEnd = shellSrc.indexOf("</header>");
+  const skipIdx = shellSrc.indexOf("Skip to main content");
+  const mainIdx = shellSrc.indexOf("<main");
+  assert.ok(headerIdx > 0 && skipIdx > headerEnd && skipIdx < mainIdx);
+  assert.match(shellSrc, /relative flex h-screen/);
+  assert.match(shellSrc, /absolute left-3 top-14/);
   assert.match(shellSrc, /focus:opacity-100/);
   assert.doesNotMatch(shellSrc, /sr-only focus:not-sr-only/);
   assert.match(shellSrc, new RegExp(`id=\\{OPERATOR_MAIN_ID\\}|id="${OPERATOR_MAIN_ID}"`));
+  assert.match(shellSrc, new RegExp(`id=\\{SKIP_TO_MAIN_ID\\}`));
   assert.equal(OPERATOR_MAIN_ID, "operator-main");
+  assert.equal(SKIP_TO_MAIN_ID, "operator-skip-to-main");
   assert.equal(SIDEBAR_NAV_ID, "operator-sidebar-nav");
+  assert.equal(shouldCloseDrawerOnSkip(true, true), true);
+  assert.equal(shouldCloseDrawerOnSkip(true, false), false);
+  assert.match(shellSrc, /onClick=\{closeDrawerFromSkip\}/);
+  assert.match(shellSrc, /shouldCloseDrawerOnSkip/);
 });
 
 test("narrow overlay leaves the live-status header above the scrim", () => {
@@ -85,6 +100,8 @@ test("narrow overlay leaves the live-status header above the scrim", () => {
   assert.match(sidebarSrc, /md:static/);
   assert.match(shellSrc, /reconnecting/);
   assert.match(shellSrc, /ROAS/);
+  assert.match(shellSrc, /min-w-0 flex-1 overflow-auto/);
+  assert.match(shellSrc, /overflow-x-auto/);
 });
 
 test("drawer does not install a focus trap", () => {

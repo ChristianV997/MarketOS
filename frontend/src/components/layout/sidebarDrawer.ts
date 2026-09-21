@@ -10,6 +10,7 @@ export const SIDEBAR_NAV_ID = "operator-sidebar-nav";
 export const OPERATOR_MAIN_ID = "operator-main";
 export const NAV_TOGGLE_ID = "operator-nav-toggle";
 export const NAV_SCRIM_ID = "operator-nav-scrim";
+export const SKIP_TO_MAIN_ID = "operator-skip-to-main";
 
 export function isDrawerMode(viewportWidth: number): boolean {
   return viewportWidth <= DRAWER_MAX_WIDTH_PX;
@@ -32,4 +33,9 @@ export function sidebarIsInert(drawerMode: boolean, open: boolean): boolean {
 
 export function shouldCloseDrawerOnRouteChange(drawerMode: boolean, open: boolean): boolean {
   return drawerMode && open;
+}
+
+/** Skip-to-main must not leave a mobile drawer covering the landmark. */
+export function shouldCloseDrawerOnSkip(drawerMode: boolean, open: boolean): boolean {
+  return shouldCloseDrawerOnRouteChange(drawerMode, open);
 }
