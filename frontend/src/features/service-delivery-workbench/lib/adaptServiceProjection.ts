@@ -368,8 +368,8 @@ function adaptEngagement(
       economics: {
         authority: "backend_service_economics",
         frontend_calculates: false,
-        fee: displayMoney(economics.fee ?? record.fee),
-        contribution: displayMoney(economics.contribution ?? record.contribution),
+        fee: displayMoney(economics.fee ?? record.fee, availability),
+        contribution: displayMoney(economics.contribution ?? record.contribution, availability),
         contribution_unavailable_reason: (economics.contribution ?? record.contribution)
           ? null
           : String(economics.contribution_unavailable_reason ?? "No sanitized contribution copy was supplied."),
@@ -483,17 +483,22 @@ function documentRef(row: Record<string, unknown>): string {
   return String(row.document_ref ?? row.note ?? "");
 }
 
-function displayMoney(raw: unknown): ServiceEngagement["economics"]["fee"] {
+function displayMoney(
+  raw: unknown,
+  availability: ServiceEngagementProjection["availability"],
+): ServiceEngagement["economics"]["fee"] {
   const record = asRecord(raw);
   if (!record) return null;
   const amount = record.amount_label ?? record.amount ?? record.value;
   if (amount == null) return null;
+  const base = normalizeEvidenceClass(record.evidence_class ?? record.evidence_state ?? "assumption");
+  const claimed = neverUpgradeEvidenceClass(base, record.evidence_class ?? record.evidence_state);
   return {
     amount_label: String(amount),
     currency: record.currency == null || String(record.currency).trim() === ""
       ? "unavailable"
       : String(record.currency),
-    evidence_class: normalizeEvidenceClass(record.evidence_class ?? record.evidence_state),
+    evidence_class: demoteLiveValidated(claimed, availability, base),
     source: "backend_service_economics",
     display_only: true,
   };

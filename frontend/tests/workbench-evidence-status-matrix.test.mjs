@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import { adaptServiceProjection } from "../src/features/service-delivery-workbench/lib/adaptServiceProjection.ts";
 import { composeWorkbenchViewModel } from "../src/features/service-delivery-workbench/lib/composeWorkbenchViewModel.ts";
+import { buildClientSafeServiceExport } from "../src/features/service-delivery-workbench/lib/exportClientSafeEngagement.ts";
 import { EMPTY_FILTERS } from "../src/features/service-delivery-workbench/lib/filterEngagements.ts";
 import { buildDemoProjection } from "../src/features/service-delivery-workbench/fixtures/buildFixtures.ts";
 import { buildProducerPlaneEnvelope } from "../src/features/service-delivery-workbench/fixtures/producerPlaneEnvelope.ts";
@@ -82,4 +83,35 @@ test("workbench chrome splits GET slot from envelope vocabulary", async () => {
   assert.match(workflow, /Redaction-pass draft preview/);
   assert.doesNotMatch(workflow, /Accepted client-safe preview/);
   assert.doesNotMatch(page, /method:\s*["']POST["']/);
+});
+
+test("manual_import economics cannot export live_validated even if the GET row claims it", () => {
+  const plane = buildProducerPlaneEnvelope();
+  const poisoned = {
+    ...plane,
+    live_endpoint_status: "available_read_only",
+    engagements: plane.engagements.map((row, index) => {
+      if (index !== 4) return row;
+      return {
+        ...row,
+        economics: {
+          ...row.economics,
+          fee: { ...row.economics.fee, evidence_class: "live_validated" },
+          contribution: row.economics.contribution
+            ? { ...row.economics.contribution, evidence_class: "live_validated" }
+            : row.economics.contribution,
+        },
+      };
+    }),
+  };
+  const adapted = adaptServiceProjection(poisoned, "live-get");
+  assert.equal(adapted.rejected, false);
+  const target = adapted.projection.engagements[4];
+  assert.equal(target.lifecycle_state, "approved");
+  assert.notEqual(target.economics.fee?.evidence_class, "live_validated");
+  assert.notEqual(target.economics.contribution?.evidence_class, "live_validated");
+  const exported = buildClientSafeServiceExport(target);
+  assert.equal(exported.accepted, true);
+  assert.notEqual(exported.payload?.economics?.fee?.evidence_class, "live_validated");
+  assert.doesNotMatch(JSON.stringify(exported.payload?.economics ?? {}), /"live_validated"/);
 });
