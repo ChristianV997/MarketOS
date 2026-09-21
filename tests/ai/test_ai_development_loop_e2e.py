@@ -398,3 +398,98 @@ def test_a_symlink_escape_in_a_real_handoff_cannot_be_resumed(tmp_path: Path):
     (clean_root / "tests" / "ai").mkdir(parents=True)
     (clean_root / changed).write_text("# real file\n", encoding="utf-8")
     assert validate_resume_packet(resume_from_disk, expected_task_packet=task_packet, root=clean_root) == resume_from_disk
+
+
+def test_the_real_production_resume_entrypoint_closes_the_full_chain(tmp_path: Path):
+    """The tests above call validate_resume_packet() directly -- proving
+    the validator itself is sound, but not that anything in production
+    actually calls it. Before execution_bundle.resume() existed, nothing
+    did: handoff() only ever builds a resume packet, nothing in this
+    codebase's production code ever consumed one back (verified by
+    tracing every call site of validate_resume_packet, all in tests).
+    This test drives the real snapshot -> prepare -> execute -> handoff ->
+    resume chain through that actual production entrypoint, proving root
+    is mandatory there (no call shape reaches root=None) and that a
+    symlink-escape attack on a real handoff artifact is rejected through
+    resume() itself, not just through validate_resume_packet called
+    directly by the test."""
+    snapshot = _real_snapshot()
+    task_packet_raw = {
+        "agent_id": "claude-ai-development-loop-consolidation",
+        "source_chat": "Claude",
+        "lane": "marketos-ai-development-loop-consolidation-v1",
+        "objective": "prove the real production resume() entrypoint closes the chain",
+        "allowed_scope": ["tests/ai/test_ai_development_loop_e2e.py"],
+        "prohibited_scope": ["artifacts/", ".env"],
+        "base_sha": snapshot["HEAD"] or snapshot["origin_main"] or "0" * 40,
+        "worktree": snapshot["repository"]["path"],
+        "dependencies": ["MarketOS.AIContext.v1"],
+        "acceptance_criteria": ["the loop test passes"],
+        "selected_tests": ["python3 -m pytest tests/ai/test_ai_development_loop_e2e.py -q"],
+        "evidence_classification": "not_run",
+        "rollback": "revert the commit that added this test",
+        "next_action": "run the remaining selected tests",
+    }
+    prepared = bundle.prepare(snapshot, task_packet_raw)
+    task_packet = prepared["task_packet"]
+
+    ok_command = "python3 -m pytest tests/ai/test_native_agent_capability.py -q"
+    execution = bundle.execute([ok_command])
+    tests_already_run = [
+        {"command": ok_command, "evidence_classification": bundle.to_evidence_classification(execution["classifications"][ok_command])},
+    ]
+    changed = "tests/ai/test_ai_development_loop_e2e.py"
+    handoff = bundle.handoff(
+        task_packet,
+        context_snapshot_replay_hash=prepared["context_snapshot_replay_hash"],
+        worktree=task_packet["worktree"],
+        branch=snapshot.get("branch") or "detached",
+        head_sha=task_packet["base_sha"],
+        base_sha=task_packet["base_sha"],
+        changed_files=[changed],
+        tests_already_run=tests_already_run,
+        tests_still_required=[],
+        open_blockers=[],
+        pending_decisions=[],
+        public_sources_inspected=[],
+        claims_not_yet_proven=[],
+        next_action="open the PR",
+    )
+    resume_from_disk = json.loads(json.dumps(handoff["resume"]))
+    real_root = Path(task_packet["worktree"])
+
+    # Legitimate resume through the real production entrypoint, against
+    # the real checked-out worktree, with the caller's own live head_sha
+    # (never read from the packet).
+    result = bundle.resume(real_root, resume_from_disk, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+    assert result["phase"] == "resume"
+    assert result["stale"] is False
+
+    # root has no default anywhere in this call chain -- there is no way
+    # to reach resume() without supplying it, and passing it explicitly
+    # as the wrong type (never None, since Python would raise for the
+    # attribute access inside validate_resume_packet's root.resolve()
+    # long before reaching a meaningful error otherwise) is rejected with
+    # a precise diagnostic, not a silent bypass.
+    with pytest.raises(bundle.ExecutionBundleError, match="Path root"):
+        bundle.resume(None, resume_from_disk, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+    # A stale head_sha -- the caller's live HEAD no longer matches what
+    # the resume packet recorded -- is a hard rejection through resume(),
+    # not merely a warning the way build_resume_packet's own comparison is.
+    with pytest.raises(ResumePacketError, match="head_sha"):
+        bundle.resume(real_root, resume_from_disk, expected_task_packet=task_packet, current_head_sha="f" * 40)
+
+    # A synthetic mirror worktree with a real symlink escaping the mirror
+    # root at the handoff's own changed_files path, run through resume()
+    # itself (not validate_resume_packet called directly).
+    tampered_root = tmp_path / "tampered-worktree-via-resume"
+    (tampered_root / "tests" / "ai").mkdir(parents=True)
+    outside_target = tmp_path / "outside-elsewhere-via-resume.py"
+    outside_target.write_text("marker = True\n", encoding="utf-8")
+    try:
+        (tampered_root / changed).symlink_to(outside_target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is not permitted on this platform/filesystem")
+    with pytest.raises(ResumePacketError, match="escapes the worktree root"):
+        bundle.resume(tampered_root, resume_from_disk, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
