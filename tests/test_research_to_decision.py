@@ -1242,8 +1242,14 @@ def test_win32_open_accepts_a_valid_in_root_regular_file(tmp_path: Path, monkeyp
     doc.write_bytes(b"genuine windows-path evidence bytes")
     real_fd_holder: dict[str, int] = {}
 
-    def fake_open_osfhandle(handle: int, _flags: int) -> int:
+    def fake_open_osfhandle(handle: int, flags: int) -> int:
         assert handle == _FAKE_WIN32_HANDLE
+        assert flags & os.O_RDONLY == os.O_RDONLY
+        # Explicit binary mode must always be requested -- _open_osfhandle
+        # defaults to CRLF/Ctrl-Z text-mode translation without it, which
+        # would silently corrupt the hashed bytes of a genuine binary
+        # evidence file (see the O_BINARY comment at the call site).
+        assert flags & getattr(os, "O_BINARY", 0) == getattr(os, "O_BINARY", 0)
         fd = os.open(doc, os.O_RDONLY)
         real_fd_holder["fd"] = fd
         return fd

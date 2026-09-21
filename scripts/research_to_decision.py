@@ -417,7 +417,13 @@ def _open_verified_evidence_file_windows(resolved: Path, *, label: str) -> tuple
         # closest available same-handle approximation of "regular file"
         # and is the same test a caller could not bypass by racing the
         # path, since it reads the handle, not the path.
-        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+        # os.O_BINARY (Windows-only; absent on this Linux sandbox, hence
+        # getattr) is passed explicitly rather than relying on
+        # _open_osfhandle's CRT-documented binary-unless-O_TEXT default:
+        # hashed evidence bytes must never go through CRLF/Ctrl-Z text-mode
+        # translation, and this removes any doubt rather than depending on
+        # an unverified-on-real-Windows default.
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
         # open_osfhandle takes ownership of the Win32 handle once it
         # succeeds; CloseHandle must not also run below, or the fd's
         # eventual os.close() would double-close the same handle.
