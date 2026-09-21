@@ -5,13 +5,20 @@ import csv
 import hashlib
 import json
 import os
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
+import scripts.research_to_decision as rtd
 from scripts.research_to_decision import (
     ResearchToDecisionError,
     _open_verified_evidence_file,
+    _open_verified_evidence_file_windows,
+    _WIN32_FILE_ATTRIBUTE_DIRECTORY,
+    _WIN32_FILE_ATTRIBUTE_REPARSE_POINT,
+    _WIN32_INVALID_HANDLE_VALUE,
     build_research_to_decision,
     main,
 )
@@ -1168,3 +1175,215 @@ def test_document_digest_binding_rejects_reference_pointing_at_a_directory(tmp_p
             supplier_evidence_root=evidence_root,
             confirmed_supplier_document_evidence=[("HYD-DOC-06", "HYD-DOC-06-SKU", "manual:not_a_file.pdf", "0" * 64)],
         )
+
+
+# ---------------------------------------------------------------------------
+# Windows secure-read path: _open_verified_evidence_file_windows.
+#
+# This sandbox is Linux; ``ctypes.WinDLL`` does not exist here at all, so the
+# real Win32 syscalls (CreateFileW, GetFileInformationByHandle, CloseHandle)
+# cannot be executed or verified by these tests, on this run, or in this
+# repository's CI (every workflow under .github/workflows/ runs on
+# ubuntu-latest only -- there is no Windows runner to fall back to). What
+# CAN be verified deterministically, and is verified below, is every line of
+# _open_verified_evidence_file_windows's own branching and descriptor-
+# ownership logic: the fake kernel32 installed via _win32_kernel32_dll (the
+# one seam that is genuinely Windows-only) drives that real Python function
+# body through each path, exactly as a real CreateFileW/GetFileInformation-
+# ByHandle response would. This is proof of the Python-level contract only
+# -- never sleep-based, never a substitute for real Windows CI execution.
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_win32_kernel32(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    create_file_result: int,
+    attributes: int = 0,
+    get_file_information_result: bool = True,
+) -> dict[str, list]:
+    calls: dict[str, list] = {"close_handle": [], "create_file": [], "get_file_information": []}
+
+    class _FakeKernel32:
+        def CreateFileW(self, *args: object) -> int:
+            calls["create_file"].append(args)
+            return create_file_result
+
+        def GetFileInformationByHandle(self, handle: int, info_ptr: object) -> bool:
+            calls["get_file_information"].append(handle)
+            if not get_file_information_result:
+                return False
+            info_ptr.contents.dwFileAttributes = attributes
+            return True
+
+        def CloseHandle(self, handle: int) -> bool:
+            calls["close_handle"].append(handle)
+            return True
+
+    monkeypatch.setattr(rtd, "_win32_kernel32_dll", lambda: _FakeKernel32())
+    return calls
+
+
+def _install_fake_msvcrt(monkeypatch: pytest.MonkeyPatch, *, open_osfhandle) -> None:
+    monkeypatch.setitem(sys.modules, "msvcrt", types.SimpleNamespace(open_osfhandle=open_osfhandle))
+
+
+_FAKE_WIN32_HANDLE = 4242
+
+
+def test_win32_open_accepts_a_valid_in_root_regular_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Success path: CreateFileW returns a handle, the fake's attributes
+    report neither a reparse point nor a directory, and the resulting fd
+    (wired here to a real POSIX fd over a real file, since the fake Win32
+    handle is only a sentinel int) reads the genuine bytes. CloseHandle
+    must never run once ownership has transferred to the fd -- a real
+    Windows double-close on the same handle is undefined behavior."""
+    doc = tmp_path / "doc.pdf"
+    doc.write_bytes(b"genuine windows-path evidence bytes")
+    real_fd_holder: dict[str, int] = {}
+
+    def fake_open_osfhandle(handle: int, _flags: int) -> int:
+        assert handle == _FAKE_WIN32_HANDLE
+        fd = os.open(doc, os.O_RDONLY)
+        real_fd_holder["fd"] = fd
+        return fd
+
+    calls = _install_fake_win32_kernel32(monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, attributes=0)
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=fake_open_osfhandle)
+    fd, file_stat = _open_verified_evidence_file_windows(doc, label="x")
+    try:
+        assert fd == real_fd_holder["fd"]
+        assert file_stat.st_size == len(b"genuine windows-path evidence bytes")
+        assert os.read(fd, 1024) == b"genuine windows-path evidence bytes"
+        assert calls["close_handle"] == []  # ownership transferred to the fd, not closed separately
+    finally:
+        os.close(fd)
+
+
+def test_win32_open_rejects_a_final_component_reparse_point(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Windows analogue of O_NOFOLLOW: CreateFileW with
+    FILE_FLAG_OPEN_REPARSE_POINT opens the reparse point itself rather
+    than following it, and GetFileInformationByHandle on that same handle
+    reports FILE_ATTRIBUTE_REPARSE_POINT -- this must be rejected before
+    msvcrt.open_osfhandle (i.e. before any read) ever runs, and the raw
+    handle must be closed since it never became an fd."""
+    doc = tmp_path / "link.pdf"
+    doc.write_bytes(b"placeholder")
+
+    def fake_open_osfhandle(*_args: object) -> int:
+        raise AssertionError("must not convert a rejected reparse-point handle to an fd")
+
+    calls = _install_fake_win32_kernel32(
+        monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, attributes=_WIN32_FILE_ATTRIBUTE_REPARSE_POINT
+    )
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=fake_open_osfhandle)
+    with pytest.raises(ResearchToDecisionError, match="symlink"):
+        _open_verified_evidence_file_windows(doc, label="x")
+    assert calls["close_handle"] == [_FAKE_WIN32_HANDLE]
+
+
+def test_win32_open_rejects_a_directory_reparse_point_junction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A junction (directory reparse point) reports both
+    FILE_ATTRIBUTE_REPARSE_POINT and FILE_ATTRIBUTE_DIRECTORY;
+    the reparse-point check runs first and must still reject it, with
+    the handle closed rather than leaked."""
+    calls = _install_fake_win32_kernel32(
+        monkeypatch,
+        create_file_result=_FAKE_WIN32_HANDLE,
+        attributes=_WIN32_FILE_ATTRIBUTE_REPARSE_POINT | _WIN32_FILE_ATTRIBUTE_DIRECTORY,
+    )
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=lambda *_a: (_ for _ in ()).throw(AssertionError("unreachable")))
+    with pytest.raises(ResearchToDecisionError, match="symlink"):
+        _open_verified_evidence_file_windows(tmp_path, label="x")
+    assert calls["close_handle"] == [_FAKE_WIN32_HANDLE]
+
+
+def test_win32_open_rejects_a_plain_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A directory that is not a reparse point (FILE_ATTRIBUTE_DIRECTORY
+    only) must also be rejected -- Windows has no S_ISREG-equivalent bit,
+    so "not a directory and not a reparse point" is the closest same-
+    handle approximation of "regular file" available."""
+    calls = _install_fake_win32_kernel32(monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, attributes=_WIN32_FILE_ATTRIBUTE_DIRECTORY)
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=lambda *_a: (_ for _ in ()).throw(AssertionError("unreachable")))
+    with pytest.raises(ResearchToDecisionError, match="regular file"):
+        _open_verified_evidence_file_windows(tmp_path, label="x")
+    assert calls["close_handle"] == [_FAKE_WIN32_HANDLE]
+
+
+def test_win32_open_rejects_when_create_file_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CreateFileW itself returning INVALID_HANDLE_VALUE (e.g. the file
+    was removed, or access is denied) must fail closed with no handle to
+    close -- CloseHandle must not be called on a value that never
+    represented an open handle."""
+    calls = _install_fake_win32_kernel32(monkeypatch, create_file_result=_WIN32_INVALID_HANDLE_VALUE)
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=lambda *_a: (_ for _ in ()).throw(AssertionError("unreachable")))
+    with pytest.raises(ResearchToDecisionError, match="could not be opened"):
+        _open_verified_evidence_file_windows(tmp_path / "missing.pdf", label="x")
+    assert calls["close_handle"] == []
+
+
+def test_win32_open_rejects_when_get_file_information_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful CreateFileW followed by a failing
+    GetFileInformationByHandle (e.g. the file vanished between the two
+    calls) must fail closed rather than proceeding with unknown
+    attributes, and must still close the handle it did obtain."""
+    calls = _install_fake_win32_kernel32(monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, get_file_information_result=False)
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=lambda *_a: (_ for _ in ()).throw(AssertionError("unreachable")))
+    with pytest.raises(ResearchToDecisionError, match="could not be inspected"):
+        _open_verified_evidence_file_windows(tmp_path, label="x")
+    assert calls["close_handle"] == [_FAKE_WIN32_HANDLE]
+
+
+def test_win32_open_same_handle_read_survives_a_path_level_file_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deterministic (non-sleep) proof of the invariant the whole design
+    relies on: once the handle/fd is obtained, replacing what the *path*
+    points to must not change what the *already-open descriptor* reads.
+    The fake wires the sentinel Win32 handle to a real POSIX fd (the only
+    kind of descriptor this Linux sandbox can actually exercise), opened
+    before the path is overwritten; the read after replacement still
+    returns the original bytes, because a POSIX fd (like a Windows handle
+    on the same file) is bound to the underlying file object, not the
+    directory entry. This demonstrates the closure principle without
+    requiring real Win32 execution, but is not itself proof that
+    CreateFileW/GetFileInformationByHandle behave identically on real
+    Windows -- that remains unverified in this project (see module
+    docstring above)."""
+    doc = tmp_path / "doc.pdf"
+    doc.write_bytes(b"original bytes bound to the handle")
+
+    def fake_open_osfhandle(handle: int, _flags: int) -> int:
+        return os.open(doc, os.O_RDONLY)
+
+    _install_fake_win32_kernel32(monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, attributes=0)
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=fake_open_osfhandle)
+    fd, file_stat = _open_verified_evidence_file_windows(doc, label="x")
+    try:
+        assert file_stat.st_size == len(b"original bytes bound to the handle")
+        # os.replace (not an in-place write) swaps in a genuinely different
+        # inode at the same path -- an in-place write/truncate would mutate
+        # the very inode the open descriptor already points to and would
+        # therefore prove nothing about a *replacement* race.
+        replacement = tmp_path / "replacement.pdf"
+        replacement.write_bytes(b"REPLACED CONTENT, different inode, same path")
+        os.replace(replacement, doc)
+        assert os.read(fd, 1024) == b"original bytes bound to the handle"
+    finally:
+        os.close(fd)
+
+
+def test_win32_open_dispatches_from_the_shared_entry_point_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_open_verified_evidence_file itself must route to the Windows
+    implementation when sys.platform reports win32, not only when called
+    directly -- proving the dispatch, not just the Windows function in
+    isolation."""
+    monkeypatch.setattr(rtd.sys, "platform", "win32")
+    sentinel = object()
+
+    def fake_windows_open(resolved: Path, *, label: str):
+        assert label == "x"
+        return sentinel
+
+    monkeypatch.setattr(rtd, "_open_verified_evidence_file_windows", fake_windows_open)
+    assert rtd._open_verified_evidence_file(Path("irrelevant"), label="x") is sentinel
