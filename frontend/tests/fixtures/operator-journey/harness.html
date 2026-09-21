@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarketOS operator journey harness (fixture-only)</title>
+    <style>
+      :root {
+        --bg: #09090b;
+        --fg: #f4f4f5;
+        --muted: #a1a1aa;
+        --line: #3f3f46;
+        --accent: #818cf8;
+        --warn: #fbbf24;
+        --bad: #f87171;
+      }
+      * { box-sizing: border-box; }
+      @media (prefers-reduced-motion: reduce) {
+        * { animation: none !important; transition: none !important; }
+      }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        line-height: 1.45;
+      }
+      .sr-only:not(:focus):not(:focus-visible) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      a.skip:focus {
+        position: fixed;
+        left: 0.75rem;
+        top: 0.75rem;
+        z-index: 20;
+        background: var(--accent);
+        color: #111;
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.25rem;
+      }
+      header, main, aside {
+        padding: 1rem 1.25rem;
+      }
+      h1 { font-size: 1.25rem; margin: 0 0 0.35rem; }
+      .muted { color: var(--muted); font-size: 0.85rem; }
+      .banner {
+        border: 1px solid var(--line);
+        border-radius: 0.5rem;
+        padding: 0.75rem 1rem;
+        margin: 0.75rem 0;
+      }
+      .banner[data-tone="warn"] { border-color: #854d0e; color: var(--warn); }
+      .banner[data-tone="bad"] { border-color: #7f1d1d; color: var(--bad); }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid var(--line); padding: 0.4rem 0.55rem; text-align: left; }
+      th { color: var(--muted); font-weight: 600; }
+      button, select, input {
+        background: #18181b;
+        color: var(--fg);
+        border: 1px solid var(--line);
+        border-radius: 0.35rem;
+        padding: 0.35rem 0.55rem;
+      }
+      button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible, [tabindex]:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.75rem 0; }
+      .desktop-only { display: none; }
+      .mobile-only { display: block; }
+      @media (min-width: 768px) {
+        .desktop-only { display: block; }
+        .mobile-only { display: none; }
+      }
+      #network-log {
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 0.75rem;
+        white-space: pre-wrap;
+        border: 1px solid var(--line);
+        border-radius: 0.35rem;
+        padding: 0.5rem;
+        max-height: 10rem;
+        overflow: auto;
+      }
+      .hidden { display: none !important; }
+      .export-preview {
+        border: 1px dashed var(--line);
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        margin-top: 0.75rem;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip sr-only" id="skip-link" href="#main-target">Skip to main content</a>
+    <header>
+      <h1 id="route-title">Operator journey harness</h1>
+      <p class="muted" id="route-subtitle">
+        Fixture/manual/simulated evidence only. Not live validated. GET-only acceptance path.
+      </p>
+      <p class="muted">Viewport class: <span id="viewport-label">unknown</span></p>
+    </header>
+    <main>
+      <div id="status-banner" class="banner" role="status" aria-live="polite" data-tone="warn">
+        Booting fixture harness…
+      </div>
+
+      <section id="panel-services" class="route-panel hidden" aria-label="Service workbench fixture">
+        <a class="skip sr-only" href="#service-pipeline">Skip to service pipeline</a>
+        <div class="toolbar">
+          <label for="svc-filter">Filter</label>
+          <input id="svc-filter" type="search" placeholder="engagement id or title" />
+          <label for="svc-order">Order note</label>
+          <select id="svc-order" aria-label="Display order note">
+            <option value="server">Server order preserved</option>
+          </select>
+          <button type="button" id="svc-export">Safe export preview</button>
+        </div>
+        <div id="main-target-services"></div>
+        <div class="mobile-only" id="service-pipeline-mobile" role="listbox" aria-label="Service pipeline mobile"></div>
+        <div class="desktop-only" id="service-pipeline">
+          <table role="grid" aria-label="Service pipeline">
+            <caption>Server-ordered engagements. Selection is read-only.</caption>
+            <thead>
+              <tr role="row">
+                <th scope="col" role="columnheader">Engagement</th>
+                <th scope="col" role="columnheader">Lifecycle</th>
+                <th scope="col" role="columnheader">Evidence</th>
+                <th scope="col" role="columnheader">Next action</th>
+              </tr>
+            </thead>
+            <tbody id="svc-rows"></tbody>
+          </table>
+        </div>
+        <div id="svc-export-preview" class="export-preview hidden" role="region" aria-label="Export preview"></div>
+      </section>
+
+      <section id="panel-first-phase" class="route-panel hidden" aria-label="First-phase cockpit fixture">
+        <a class="skip sr-only" href="#ranked-candidates-table">Skip to ranked candidates</a>
+        <div class="toolbar">
+          <label for="fp-filter">Filter</label>
+          <input id="fp-filter" type="search" placeholder="candidate title" />
+          <button type="button" id="fp-export">Safe export preview</button>
+        </div>
+        <div id="main-target-first-phase"></div>
+        <div class="mobile-only" id="ranked-candidates-mobile" role="listbox" aria-label="Ranked candidates mobile"></div>
+        <div class="desktop-only" id="ranked-candidates-table">
+          <table role="grid" aria-label="Ranked candidates">
+            <caption>Server-ordered sanitized candidates.</caption>
+            <thead>
+              <tr role="row">
+                <th scope="col" role="columnheader">Rank</th>
+                <th scope="col" role="columnheader">Candidate</th>
+                <th scope="col" role="columnheader">Class</th>
+                <th scope="col" role="columnheader">Decision</th>
+              </tr>
+            </thead>
+            <tbody id="fp-rows"></tbody>
+          </table>
+        </div>
+        <div id="fp-export-preview" class="export-preview hidden" role="region" aria-label="Export preview"></div>
+      </section>
+
+      <section id="panel-events" class="route-panel hidden" aria-label="Operator events fixture">
+        <a class="skip sr-only" href="#events-table">Skip to events table</a>
+        <div class="toolbar">
+          <label for="ev-source">Source</label>
+          <select id="ev-source">
+            <option value="jsonl">jsonl (fixture)</option>
+            <option value="manual">manual</option>
+          </select>
+          <button type="button" id="ev-refresh">Refresh (GET)</button>
+        </div>
+        <div id="main-target-events"></div>
+        <div id="events-table" class="desktop-only">
+          <table>
+            <caption>Read-only event timeline. No mutation controls on this acceptance path.</caption>
+            <thead>
+              <tr>
+                <th scope="col">Type</th>
+                <th scope="col">Provenance</th>
+                <th scope="col">Summary</th>
+              </tr>
+            </thead>
+            <tbody id="ev-rows"></tbody>
+          </table>
+        </div>
+        <ul class="mobile-only" id="events-mobile" aria-label="Events mobile list"></ul>
+        <p class="muted">Public Commerce MVP POST control is intentionally omitted from this acceptance harness.</p>
+      </section>
+
+      <aside aria-label="Request method evidence">
+        <h2 class="muted" style="font-size:0.95rem;margin:0 0 0.35rem">Network method log</h2>
+        <div id="network-log" aria-live="polite">[]</div>
+      </aside>
+    </main>
+    <script>
+      window.__mosRequests = [];
+      window.__mosConsoleErrors = [];
+      window.__mosAcceptance = { route: null, apiMode: null, surface: null, evidence: [] };
+
+      const params = new URLSearchParams(location.search);
+      const route = params.get("route") || "services";
+      const apiMode = params.get("api") || "ok-fixture";
+      window.__mosAcceptance.route = route;
+      window.__mosAcceptance.apiMode = apiMode;
+
+      function labelViewport() {
+        const w = window.innerWidth;
+        const label = w < 768 ? "mobile" : w < 1280 ? "tablet" : "desktop";
+        document.getElementById("viewport-label").textContent = `${label} (${w}px)`;
+        return label;
+      }
+      labelViewport();
+      window.addEventListener("resize", labelViewport);
+
+      const origFetch = window.fetch.bind(window);
+      window.fetch = async (input, init = {}) => {
+        const method = String((init && init.method) || "GET").toUpperCase();
+        const url = String(input);
+        const entry = { method, url, at: Date.now() };
+        window.__mosRequests.push(entry);
+        document.getElementById("network-log").textContent = JSON.stringify(window.__mosRequests, null, 2);
+        return origFetch(input, init);
+      };
+
+      window.addEventListener("error", (event) => {
+        window.__mosConsoleErrors.push(String(event.message || event.error || "error"));
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        window.__mosConsoleErrors.push(String(event.reason || "unhandledrejection"));
+      });
+
+      const titles = {
+        services: ["Service Delivery Workbench", "/operator/services fixture"],
+        "first-phase": ["First-phase Evidence Cockpit", "/operator/first-phase fixture"],
+        events: ["Operator Event Dashboard", "/operator/events fixture"],
+      };
+      const titlePair = titles[route] || titles.services;
+      document.getElementById("route-title").textContent = titlePair[0];
+      document.getElementById("route-subtitle").textContent = titlePair[1] + " · fixture/manual/simulated · not live proof";
+      document.getElementById("skip-link").setAttribute(
+        "href",
+        route === "services" ? "#service-pipeline" : route === "first-phase" ? "#ranked-candidates-table" : "#events-table",
+      );
+      const panelId = route === "first-phase" ? "panel-first-phase" : route === "events" ? "panel-events" : "panel-services";
+      document.getElementById(panelId).classList.remove("hidden");
+      const targetAlias =
+        route === "first-phase" ? "main-target-first-phase" : route === "events" ? "main-target-events" : "main-target-services";
+      document.getElementById(targetAlias).id = "main-target";
+
+      const banner = document.getElementById("status-banner");
+      function setSurface(surface, message, tone) {
+        window.__mosAcceptance.surface = surface;
+        banner.dataset.surface = surface;
+        banner.dataset.tone = tone || "warn";
+        banner.textContent = message;
+      }
+
+      const fixtureRows = {
+        services: [
+          { id: "eng-ok", title: "Hydroponics sprint", lifecycle: "draft_ready", evidence: "fixture", action: "hold for review" },
+          { id: "eng-blocked", title: "Category-only brief", lifecycle: "data_inadequate", evidence: "manual", action: "request client records" },
+          { id: "eng-sim", title: "Simulated packing kit", lifecycle: "in_review", evidence: "simulated", action: "do not treat as live" },
+          { id: "eng-unknown", title: "Unknown provenance SKU", lifecycle: "in_review", evidence: "unknown", action: "classify evidence" },
+        ],
+        "first-phase": [
+          { rank: 1, id: "c-1", title: "Hydroponics kit", evidence: "fixture", decision: "hold_for_manual_review" },
+          { rank: 2, id: "c-2", title: "Blocked retailer-dominant", evidence: "manual", decision: "reject_retailer_dominance" },
+          { rank: 3, id: "c-3", title: "Simulated candle set", evidence: "simulated", decision: "hold_for_manual_review" },
+          { rank: 4, id: "c-4", title: "Unknown class SKU", evidence: "unknown", decision: "hold_for_manual_review" },
+        ],
+        events: [
+          { type: "commerce.run.recorded", provenance: "fixture", summary: "Fixture commerce run (not live)" },
+          { type: "research.portfolio.summary", provenance: "manual", summary: "Manual portfolio note" },
+          { type: "competition.summary", provenance: "simulated", summary: "Simulated competitor snapshot" },
+          { type: "evidence.unknown", provenance: "unknown", summary: "Unclassified evidence marker" },
+        ],
+      };
+
+      async function loadApi() {
+        if (apiMode === "down") {
+          setSurface("unavailable", "API down (connection refused simulation). Route remains unavailable — not demo-success.", "bad");
+          return null;
+        }
+        const url = `/__mock_api/${route}?mode=${encodeURIComponent(apiMode)}`;
+        try {
+          const response = await fetch(url, { method: "GET" });
+          if (response.status === 429) {
+            setSurface("unavailable", "API returned 429. Showing unavailable — not demo-success.", "bad");
+            return null;
+          }
+          if (response.status >= 500) {
+            setSurface("unavailable", `API returned ${response.status}. Showing unavailable — not demo-success.`, "bad");
+            return null;
+          }
+          if (!response.ok) {
+            setSurface("unavailable", `API returned ${response.status}. Showing unavailable — not demo-success.`, "bad");
+            return null;
+          }
+          const text = await response.text();
+          if (apiMode === "malformed") {
+            setSurface("unavailable", "Malformed API response rejected. Showing unavailable — not demo-success.", "bad");
+            return null;
+          }
+          try {
+            return JSON.parse(text);
+          } catch (err) {
+            setSurface("unavailable", "Malformed JSON rejected. Showing unavailable — not demo-success.", "bad");
+            return null;
+          }
+        } catch (err) {
+          setSurface("unavailable", "API unreachable. Showing unavailable — not demo-success.", "bad");
+          return null;
+        }
+      }
+
+      function renderServices(payload) {
+        const rows = (payload && payload.engagements) || fixtureRows.services;
+        window.__mosAcceptance.evidence = rows.map((row) => row.evidence);
+        const blocked = rows.some((row) => row.lifecycle === "data_inadequate");
+        if (blocked) {
+          setSurface("blocked", "Blocked/data_inadequate row present. Fixture/manual/simulated/unknown evidence never become live proof.", "warn");
+        } else {
+          setSurface("partial", "Fixture board loaded. Not live validated.", "warn");
+        }
+        const tbody = document.getElementById("svc-rows");
+        const mobile = document.getElementById("service-pipeline-mobile");
+        tbody.innerHTML = "";
+        mobile.innerHTML = "";
+        rows.forEach((row, index) => {
+          const tr = document.createElement("tr");
+          tr.setAttribute("role", "row");
+          tr.tabIndex = 0;
+          tr.dataset.id = row.id;
+          if (index === 0) tr.setAttribute("aria-selected", "true");
+          tr.innerHTML = `<td role="gridcell">${row.title}</td><td role="gridcell">${row.lifecycle}</td><td role="gridcell">${row.evidence}</td><td role="gridcell">${row.action}</td>`;
+          tbody.appendChild(tr);
+          const li = document.createElement("li");
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.setAttribute("role", "option");
+          btn.textContent = `${row.title} · ${row.evidence} · ${row.lifecycle}`;
+          li.appendChild(btn);
+          mobile.appendChild(li);
+        });
+        document.getElementById("svc-filter").addEventListener("input", (event) => {
+          const needle = String(event.target.value || "").toLowerCase();
+          Array.from(tbody.querySelectorAll("tr")).forEach((tr) => {
+            tr.style.display = tr.textContent.toLowerCase().includes(needle) ? "" : "none";
+          });
+        });
+        document.getElementById("svc-export").addEventListener("click", () => {
+          const preview = document.getElementById("svc-export-preview");
+          preview.classList.remove("hidden");
+          const inadequate = rows.find((row) => row.lifecycle === "data_inadequate");
+          preview.textContent = inadequate
+            ? "Export preview rejected: data_inadequate. Missing client records. Not a complete deliverable. No secrets/prompts/formulas included."
+            : "Export preview (client-safe): titles and lifecycle only. No secrets, prompts, formulas, heuristics, or paths.";
+        });
+      }
+
+      function renderFirstPhase(payload) {
+        const rows = (payload && payload.candidates) || fixtureRows["first-phase"];
+        window.__mosAcceptance.evidence = rows.map((row) => row.evidence);
+        const blocked = rows.some((row) => String(row.decision).includes("reject") || row.evidence === "unknown");
+        setSurface(blocked ? "blocked" : "partial", "Cockpit fixture loaded. Fixture/manual/simulated/unknown never upgrade to live_validated.", "warn");
+        const tbody = document.getElementById("fp-rows");
+        const mobile = document.getElementById("ranked-candidates-mobile");
+        tbody.innerHTML = "";
+        mobile.innerHTML = "";
+        rows.forEach((row, index) => {
+          const tr = document.createElement("tr");
+          tr.setAttribute("role", "row");
+          tr.tabIndex = 0;
+          if (index === 0) tr.setAttribute("aria-selected", "true");
+          tr.innerHTML = `<td role="gridcell">${row.rank}</td><td role="gridcell">${row.title}</td><td role="gridcell">${row.evidence}</td><td role="gridcell">${row.decision}</td>`;
+          tbody.appendChild(tr);
+          const li = document.createElement("li");
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.setAttribute("role", "option");
+          if (index === 0) btn.setAttribute("aria-selected", "true");
+          btn.textContent = `#${row.rank} ${row.title} · ${row.evidence}`;
+          li.appendChild(btn);
+          mobile.appendChild(li);
+        });
+        document.getElementById("fp-filter").addEventListener("input", (event) => {
+          const needle = String(event.target.value || "").toLowerCase();
+          Array.from(tbody.querySelectorAll("tr")).forEach((tr) => {
+            tr.style.display = tr.textContent.toLowerCase().includes(needle) ? "" : "none";
+          });
+        });
+        document.getElementById("fp-export").addEventListener("click", () => {
+          const preview = document.getElementById("fp-export-preview");
+          preview.classList.remove("hidden");
+          preview.textContent = "Client-safe export preview: ranked titles + decisions. Rejects secrets, prompts, formulas, heuristics, paths.";
+        });
+      }
+
+      function renderEvents(payload) {
+        const rows = (payload && payload.events) || fixtureRows.events;
+        window.__mosAcceptance.evidence = rows.map((row) => row.provenance);
+        setSurface("partial", "Operator events fixture loaded. GET refresh only. POST public-run control omitted.", "warn");
+        const tbody = document.getElementById("ev-rows");
+        const mobile = document.getElementById("events-mobile");
+        tbody.innerHTML = "";
+        mobile.innerHTML = "";
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${row.type}</td><td>${row.provenance}</td><td>${row.summary}</td>`;
+          tbody.appendChild(tr);
+          const li = document.createElement("li");
+          li.textContent = `${row.type} · ${row.provenance}`;
+          mobile.appendChild(li);
+        });
+        document.getElementById("ev-refresh").addEventListener("click", () => {
+          void loadApi().then((again) => {
+            if (again) renderEvents(again);
+          });
+        });
+      }
+
+      loadApi().then((payload) => {
+        if (apiMode === "down" || apiMode === "429" || apiMode === "500" || apiMode === "malformed") {
+          return;
+        }
+        if (route === "first-phase") renderFirstPhase(payload);
+        else if (route === "events") renderEvents(payload);
+        else renderServices(payload);
+      });
+
+      window.__mosAcceptance.ready = true;
+    </script>
+  </body>
+</html>

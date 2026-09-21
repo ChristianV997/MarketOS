@@ -11,3 +11,8 @@ build/
 state/
 backend/state/
 data/*.db
+artifacts/
+artifacts/operator-browser-acceptance/
+frontend/playwright-report/
+frontend/test-results/
+**/marketos-operator-browser-acceptance/
