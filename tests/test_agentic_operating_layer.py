@@ -98,6 +98,15 @@ def test_pr_readiness_blocks_provider_mutation_terms():
     assert report["detections"]["provider_mutation_like_detected"] is True
 
 
+def test_pr_readiness_does_not_treat_refund_reserve_field_as_provider_mutation():
+    report = pr_readiness_report.report(
+        ["evaluation/companyos/service_market_research.py"],
+        'refund_revision_reserve = "bounded fixture evidence"',
+        branch="codex/test",
+    )
+    assert report["detections"]["provider_mutation_like_detected"] is False
+
+
 def test_pr_readiness_docs_only_is_ready_for_review():
     report = pr_readiness_report.report(["docs/ai/QUALITY_GATES.md"], "client.create_order() is forbidden", branch="codex/test")
     assert report["merge_readiness"] == "ready_for_review"

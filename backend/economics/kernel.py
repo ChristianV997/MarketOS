@@ -831,7 +831,7 @@ def orders_required_to_recover_fee(
 class ServiceEconomics:
     service_id: str
     service_fee: Money
-    incremental_contribution: Money
+    incremental_contribution: Money | None
     orders_required_to_recover_fee: Decimal | None
     delivery_hours: Decimal
     capacity_hours: Decimal | None
@@ -857,7 +857,7 @@ class ServiceEconomics:
         return {
             "service_id": self.service_id,
             "service_fee": self.service_fee.to_dict(),
-            "incremental_contribution": self.incremental_contribution.to_dict(),
+            "incremental_contribution": self.incremental_contribution.to_dict() if self.incremental_contribution else None,
             "orders_required_to_recover_fee": str(self.orders_required_to_recover_fee) if self.orders_required_to_recover_fee is not None else "unknown",
             "delivery_hours": str(self.delivery_hours),
             "capacity_hours": str(self.capacity_hours) if self.capacity_hours is not None else "unknown",
@@ -885,12 +885,12 @@ def calculate_service_economics(
     service_id: str,
     service_fee: Money,
     *,
-    ad_spend: Money,
-    contribution_margin: Decimal | int | str | float,
-    roas_before: Decimal | int | str | float,
-    roas_after: Decimal | int | str | float,
-    cac_before: Money,
-    cac_after: Money,
+    ad_spend: Money | None = None,
+    contribution_margin: Decimal | int | str | float | None = None,
+    roas_before: Decimal | int | str | float | None = None,
+    roas_after: Decimal | int | str | float | None = None,
+    cac_before: Money | None = None,
+    cac_after: Money | None = None,
     delivery_hours: Decimal | int | str | float,
     capacity_hours: Decimal | int | str | float | None = None,
     evidence_refs: tuple[EvidenceRef, ...] = (),
@@ -903,11 +903,18 @@ def calculate_service_economics(
     minimum_acceptable_value_multiple: Decimal | int | str | float = Decimal("1"),
 ) -> ServiceEconomics:
     _text(service_id, "service id")
-    if not all(isinstance(value, Money) for value in (service_fee, ad_spend, cac_before, cac_after)):
-        raise EconomicsError("service economics requires money")
-    for value in (ad_spend, cac_before, cac_after):
-        if value.currency != service_fee.currency:
-            raise CurrencyMismatchError()
+    if not isinstance(service_fee, Money):
+        raise EconomicsError("service economics requires a service fee")
+    performance_inputs = (ad_spend, contribution_margin, roas_before, roas_after, cac_before, cac_after)
+    performance_inputs_provided = tuple(value is not None for value in performance_inputs)
+    if any(performance_inputs_provided) and not all(performance_inputs_provided):
+        raise EconomicsError("service performance evidence must be complete")
+    if all(performance_inputs_provided):
+        if not all(isinstance(value, Money) for value in (ad_spend, cac_before, cac_after)):
+            raise EconomicsError("service performance economics requires money")
+        for value in (ad_spend, cac_before, cac_after):
+            if value.currency != service_fee.currency:
+                raise CurrencyMismatchError()
     for name, value in (("delivery cost", delivery_cost), ("tooling cost", tooling_cost), ("pass-through cost", pass_through_cost), ("refund revision reserve", refund_revision_reserve), ("target monthly contribution", target_monthly_contribution), ("client value", client_value_created)):
         if value is not None:
             if value.currency != service_fee.currency or value.amount < _ZERO:
@@ -919,9 +926,13 @@ def calculate_service_economics(
     if capacity is not None and capacity < _ZERO:
         raise EconomicsError("invalid capacity hours")
     utilization = delivery_hours_value / capacity if capacity and capacity > _ZERO else None
-    contribution = incremental_contribution(ad_spend, contribution_margin, roas_after, roas_before, service_fee)
-    orders = orders_required_to_recover_fee(service_fee, cac_before, cac_after)
-    roi = contribution.amount / service_fee.amount if service_fee.amount != _ZERO else None
+    performance_contribution = None
+    orders = None
+    roi = None
+    if all(performance_inputs_provided):
+        performance_contribution = incremental_contribution(ad_spend, contribution_margin, roas_after, roas_before, service_fee)
+        orders = orders_required_to_recover_fee(service_fee, cac_before, cac_after)
+        roi = performance_contribution.amount / service_fee.amount if service_fee.amount != _ZERO else None
     delivery_cost_value = delivery_cost or Money.zero(service_fee.currency, source="assumed_delivery_cost")
     tooling = tooling_cost or Money.zero(service_fee.currency, source="assumed_tooling_cost")
     pass_through = pass_through_cost or Money.zero(service_fee.currency, source="assumed_pass_through_cost")
@@ -936,7 +947,7 @@ def calculate_service_economics(
     if client_value_created is not None and service_fee.amount > _ZERO:
         client_multiple = client_value_created.amount / service_fee.amount
     return ServiceEconomics(
-        service_id, service_fee, contribution, orders, delivery_hours=delivery_hours_value, capacity_hours=capacity,
+        service_id, service_fee, performance_contribution, orders, delivery_hours=delivery_hours_value, capacity_hours=capacity,
         capacity_utilization=utilization, roi=roi, evidence_state=_evidence_state(evidence_refs), evidence_refs=evidence_refs,
         service_revenue=service_fee, delivery_cost=delivery_cost_value, tooling_cost=tooling, pass_through_cost=pass_through,
         refund_revision_reserve=reserve, contribution=contribution_amount, contribution_margin=contribution_margin_value,
