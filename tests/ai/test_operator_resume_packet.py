@@ -326,6 +326,39 @@ def test_filesystem_check_rejects_a_changed_file_that_is_itself_a_symlink_to_out
         validate_resume_packet(resume, expected_task_packet=task_packet, root=tmp_path)
 
 
+def test_filesystem_check_does_not_ignore_a_dangling_final_symlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Path.exists() is false for a dangling symlink. Treating that as an
+    ordinary deletion and walking up to the in-scope parent would miss the
+    symlink's out-of-root target, so the path entry itself must be resolved.
+    The monkeypatch models a dangling link portably, including on Windows
+    hosts where symlink creation is not permitted for the test process."""
+    root = tmp_path / "worktree"
+    scope = root / "scope"
+    scope.mkdir(parents=True)
+    link = scope / "dangling.py"
+    outside_target = tmp_path / "outside" / "future.py"
+    task_packet = _fs_task_packet(root)
+    resume = _fs_resume(task_packet, ["scope/dangling.py"])
+    original_exists = Path.exists
+    original_is_symlink = Path.is_symlink
+    original_resolve = Path.resolve
+
+    def simulated_exists(path: Path) -> bool:
+        return False if path == link else original_exists(path)
+
+    def simulated_is_symlink(path: Path) -> bool:
+        return True if path == link else original_is_symlink(path)
+
+    def simulated_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+        return outside_target if path == link else original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", simulated_exists)
+    monkeypatch.setattr(Path, "is_symlink", simulated_is_symlink)
+    monkeypatch.setattr(Path, "resolve", simulated_resolve)
+    with pytest.raises(ResumePacketError, match="escapes the worktree root"):
+        validate_resume_packet(resume, expected_task_packet=task_packet, root=root)
+
+
 def test_filesystem_check_rejects_an_ancestor_directory_symlinked_outside_the_root(tmp_path: Path):
     outside = tmp_path.parent / f"{tmp_path.name}-outside-dir"
     outside.mkdir()

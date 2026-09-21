@@ -186,10 +186,11 @@ def _assert_filesystem_contained(changed_files: list[str], *, allowed_scope: lis
     symlink (or has a symlinked ancestor directory) resolving somewhere
     else entirely.
 
-    For a deleted/nonexistent ``changed_files`` entry, the nearest
-    existing ancestor is resolved and checked instead -- a real file is
-    not required to exist for a legitimate deletion, but some real,
-    in-scope ancestor must, or the entry is rejected.
+    For a deleted/nonexistent ``changed_files`` entry, the walk-up stops
+    at the nearest existing path entry (including a dangling symlink) and
+    resolves it before checking the resulting path. A real file is not
+    required to exist for a legitimate deletion, but the resolved path
+    must remain inside both the worktree root and allowed scope.
 
     This reuses ``_in_scope`` for the scope comparison (the single
     canonical rule every consumer shares) and adds nothing beyond a
@@ -212,9 +213,9 @@ def _assert_filesystem_contained(changed_files: list[str], *, allowed_scope: lis
         # reject (or, worse on a backslash-tolerant filesystem, falsely
         # misresolve) an otherwise legitimate, already-validated path.
         probe = root / _normalize_path(item)
-        while not probe.exists() and probe != probe.parent:
+        while not probe.exists() and not probe.is_symlink() and probe != probe.parent:
             probe = probe.parent
-        if not probe.exists():
+        if not probe.exists() and not probe.is_symlink():
             raise ResumePacketError(f"changed_files entry has no existing path or ancestor inside the worktree root: {item}")
         resolved = probe.resolve()
         try:
