@@ -91,6 +91,9 @@ test("skip-to-main is first useful tab stop below the live-status header", () =>
 });
 
 test("narrow overlay leaves the live-status header above the scrim", () => {
+  assert.match(shellSrc, /<div className="relative flex-1 flex flex-col/);
+  assert.doesNotMatch(shellSrc, /<div className="relative z-50 flex-1 flex flex-col/);
+  assert.match(shellSrc, /<header className="relative z-50/);
   assert.match(shellSrc, /z-50/);
   assert.match(shellSrc, /NAV_SCRIM_ID/);
   assert.match(shellSrc, /top-12/);
