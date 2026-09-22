@@ -20,9 +20,10 @@ Validates the 14 key requirements:
 from __future__ import annotations
 
 import json
+import signal
 import subprocess
+import sys
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -497,9 +498,9 @@ def _fake_operator_stack_payload(**overrides: Any) -> dict[str, Any]:
 
 def test_operator_stack_evidence_reports_unavailable_when_the_runner_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     """The exact current-branch state: #290's runner is not merged here.
-    subprocess.run must never even be called in this case."""
+    subprocess.Popen must never even be called in this case."""
     called = []
-    monkeypatch.setattr(rehearsal_module.subprocess, "run", lambda *a, **k: called.append(1))
+    monkeypatch.setattr(rehearsal_module.subprocess, "Popen", lambda *a, **k: called.append(1))
     from backend.deployment.promotion_rehearsal import _operator_stack_evidence
 
     result = _operator_stack_evidence()
@@ -508,33 +509,86 @@ def test_operator_stack_evidence_reports_unavailable_when_the_runner_is_absent(m
     assert called == []
 
 
-def _with_fake_runner_present(monkeypatch: pytest.MonkeyPatch, fake_run) -> None:
+class _FakePopen:
+    """Stand-in for subprocess.Popen supporting the exact interface
+    _operator_stack_evidence and _terminate_operator_stack_process use:
+    communicate(timeout=), poll(), pid, returncode, kill(), send_signal().
+    ``communicate_results`` is a sequence consumed one per communicate()
+    call -- either an ``(stdout, stderr)`` tuple (the process has now
+    exited) or an ``Exception`` instance to raise (e.g. TimeoutExpired),
+    letting a test simulate "first call times out, second call (after a
+    signal) succeeds"."""
+
+    def __init__(self, communicate_results: list[Any], *, pid: int = 4242, returncode: int = 0) -> None:
+        self._results = list(communicate_results)
+        self.pid = pid
+        self.returncode = returncode
+        self._exited = False
+        self.signals_received: list[Any] = []
+
+    def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+        result = self._results.pop(0)
+        if isinstance(result, Exception):
+            if not isinstance(result, subprocess.TimeoutExpired):
+                # Real subprocess.Popen.communicate() only decodes after
+                # it has already collected all output and reaped the
+                # process -- a decode failure means the process is
+                # already gone, unlike TimeoutExpired (still running).
+                self._exited = True
+            raise result
+        self._exited = True
+        return result
+
+    def poll(self) -> int | None:
+        return self.returncode if self._exited else None
+
+    def kill(self) -> None:
+        self.signals_received.append("SIGKILL")
+        self._exited = True
+
+    def send_signal(self, sig: Any) -> None:
+        self.signals_received.append(sig)
+
+
+def _with_fake_runner_present(monkeypatch: pytest.MonkeyPatch, fake_popen_factory) -> None:
     """Simulate #290's runner file existing on this branch, without
     affecting any other Path.is_file() check this module or its callees
     make for an unrelated path (e.g. the Dockerfile check, phase1's own
-    file reads), and without intercepting any other subprocess.run call
-    the same pipeline makes for something else entirely (get_runtime_versions'
-    own node/docker --version calls, and -- confirmed by direct
-    reproduction -- CPython's platform.platform() itself shells out on
-    this interpreter/platform). fake_run is only invoked for argv that
-    actually names the operator-stack runner script; anything else goes
-    to the real subprocess.run unmodified."""
+    file reads), and without intercepting any other subprocess.Popen/.run
+    call the same pipeline makes for something else entirely
+    (get_runtime_versions' own node/docker --version calls, and --
+    confirmed by direct reproduction -- CPython's platform.platform()
+    itself shells out on this interpreter/platform). fake_popen_factory
+    is only invoked for argv that actually names the operator-stack
+    runner script; anything else goes to the real subprocess.Popen/.run
+    unmodified. Also patches os.killpg/os.getpgid to no-ops on POSIX
+    (there is no real process group to signal) while still recording
+    what _terminate_operator_stack_process attempted, via the fake
+    Popen's own send_signal/kill tracking for the POSIX branch's
+    process.kill() fallback and a module-level killpg spy."""
     runner_path = rehearsal_module.ROOT / "scripts" / "run_local_operator_stack.py"
     real_is_file = Path.is_file
-    real_run = rehearsal_module.subprocess.run
+    real_popen = rehearsal_module.subprocess.Popen
+    killpg_calls: list[Any] = []
 
     def fake_is_file(self: Path) -> bool:
         if self == runner_path:
             return True
         return real_is_file(self)
 
-    def scoped_run(argv, *args, **kwargs):
+    def scoped_popen(argv, *args, **kwargs):
         if isinstance(argv, (list, tuple)) and any(str(runner_path) in str(item) for item in argv):
-            return fake_run(argv, **kwargs)
-        return real_run(argv, *args, **kwargs)
+            return fake_popen_factory(argv, **kwargs)
+        return real_popen(argv, *args, **kwargs)
+
+    def fake_killpg(pgid: int, sig: Any) -> None:
+        killpg_calls.append((pgid, sig))
 
     monkeypatch.setattr(Path, "is_file", fake_is_file)
-    monkeypatch.setattr(rehearsal_module.subprocess, "run", scoped_run)
+    monkeypatch.setattr(rehearsal_module.subprocess, "Popen", scoped_popen)
+    monkeypatch.setattr(rehearsal_module.os, "getpgid", lambda pid: pid, raising=False)
+    monkeypatch.setattr(rehearsal_module.os, "killpg", fake_killpg, raising=False)
+    return killpg_calls
 
 
 def test_operator_stack_evidence_surfaces_a_real_passing_run_without_raw_logs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -546,14 +600,16 @@ def test_operator_stack_evidence_surfaces_a_real_passing_run_without_raw_logs(mo
     from backend.deployment.promotion_rehearsal import _operator_stack_evidence
 
     payload = _fake_operator_stack_payload()
+    seen_argv = []
 
-    def fake_run(argv, **kwargs):
-        assert "--dry-run" in argv
-        assert "--backend-only" in argv
-        return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+    def fake_popen_factory(argv, **kwargs):
+        seen_argv.append(list(argv))
+        return _FakePopen([(json.dumps(payload), "")])
 
-    _with_fake_runner_present(monkeypatch, fake_run)
+    _with_fake_runner_present(monkeypatch, fake_popen_factory)
     result = _operator_stack_evidence()
+    assert "--dry-run" in seen_argv[0]
+    assert "--backend-only" in seen_argv[0]
     assert result["status"] == "passed"
     assert result["runner_present"] is True
     assert result["surfaces"][0]["name"] == "health"
@@ -568,10 +624,10 @@ def test_operator_stack_evidence_surfaces_partial_without_erasing_it_to_passed(m
 
     payload = _fake_operator_stack_payload(classification="partial")
 
-    def fake_run(argv, **kwargs):
-        return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+    def fake_popen_factory(argv, **kwargs):
+        return _FakePopen([(json.dumps(payload), "")])
 
-    _with_fake_runner_present(monkeypatch, fake_run)
+    _with_fake_runner_present(monkeypatch, fake_popen_factory)
     result = _operator_stack_evidence()
     assert result["status"] == "partial"
 
@@ -583,28 +639,101 @@ def test_operator_stack_evidence_execute_flag_selects_the_runners_execute_mode(m
 
     seen_argv = []
 
-    def fake_run(argv, **kwargs):
+    def fake_popen_factory(argv, **kwargs):
         seen_argv.append(list(argv))
-        return SimpleNamespace(returncode=0, stdout=json.dumps(_fake_operator_stack_payload()), stderr="")
+        return _FakePopen([(json.dumps(_fake_operator_stack_payload()), "")])
 
-    _with_fake_runner_present(monkeypatch, fake_run)
+    _with_fake_runner_present(monkeypatch, fake_popen_factory)
     _operator_stack_evidence(execute=True)
     assert "--execute" in seen_argv[0]
     assert "--dry-run" not in seen_argv[0]
 
 
-def test_operator_stack_evidence_times_out_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A hung runner must fail closed to timed_out within the caller's
-    own bound, never hang the whole promotion rehearsal indefinitely."""
+def test_operator_stack_evidence_execute_flag_false_selects_frontend_probe_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """backend_only=False must omit --backend-only, so the runner also
+    probes the cockpit/workbench UI routes -- the flag genuinely changes
+    the invoked argv, not just documented as an option."""
     from backend.deployment.promotion_rehearsal import _operator_stack_evidence
 
-    def fake_run(argv, **kwargs):
-        raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs.get("timeout", 0))
+    seen_argv = []
 
-    _with_fake_runner_present(monkeypatch, fake_run)
+    def fake_popen_factory(argv, **kwargs):
+        seen_argv.append(list(argv))
+        return _FakePopen([(json.dumps(_fake_operator_stack_payload()), "")])
+
+    _with_fake_runner_present(monkeypatch, fake_popen_factory)
+    _operator_stack_evidence(backend_only=False)
+    assert "--backend-only" not in seen_argv[0]
+
+
+def test_operator_stack_evidence_times_out_bounded_and_attempts_graceful_interrupt_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hung runner must fail closed to timed_out within the caller's
+    own bound, never hang the whole promotion rehearsal indefinitely --
+    and the termination path must attempt a graceful interrupt (matching
+    how #290's own runner documents cleaning up "on interrupt") before
+    any hard kill, giving its own child-process cleanup a real chance to
+    run rather than being silently skipped."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    fake_process = _FakePopen(
+        [subprocess.TimeoutExpired(cmd=["fake"], timeout=5.0), ("", "")]  # 2nd communicate(): the graceful wait succeeds
+    )
+
+    def fake_popen_factory(argv, **kwargs):
+        return fake_process
+
+    killpg_calls = _with_fake_runner_present(monkeypatch, fake_popen_factory)
     result = _operator_stack_evidence(timeout_s=5.0)
     assert result["status"] == "timed_out"
     assert "5" in result["reason"]
+    if sys.platform != "win32":
+        # First signal sent must be the graceful one (SIGINT), not SIGKILL.
+        assert killpg_calls[0][1] == signal.SIGINT
+        # The process exited on the graceful attempt (2nd communicate()
+        # succeeded), so no SIGKILL escalation should have been needed.
+        assert all(sig != signal.SIGKILL for _pgid, sig in killpg_calls)
+
+
+def test_operator_stack_evidence_escalates_to_kill_when_graceful_interrupt_does_not_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the runner does not exit even after the graceful interrupt
+    (fully hung, not just slow), the caller must still escalate to a
+    hard kill rather than hanging forever waiting for it."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    fake_process = _FakePopen(
+        [
+            subprocess.TimeoutExpired(cmd=["fake"], timeout=5.0),  # initial wait
+            subprocess.TimeoutExpired(cmd=["fake"], timeout=10.0),  # graceful grace period also times out
+            ("", ""),  # final reap after the hard kill succeeds
+        ]
+    )
+
+    def fake_popen_factory(argv, **kwargs):
+        return fake_process
+
+    killpg_calls = _with_fake_runner_present(monkeypatch, fake_popen_factory)
+    result = _operator_stack_evidence(timeout_s=5.0)
+    assert result["status"] == "timed_out"
+    if sys.platform != "win32":
+        assert killpg_calls[0][1] == signal.SIGINT
+        assert killpg_calls[-1][1] == signal.SIGKILL
+
+
+def test_operator_stack_evidence_fails_closed_on_undecodable_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A child that writes bytes text=True cannot decode must fail closed
+    to malformed rather than let UnicodeDecodeError (a ValueError
+    subclass) propagate uncaught out of this function."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    fake_process = _FakePopen([UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")])
+
+    def fake_popen_factory(argv, **kwargs):
+        return fake_process
+
+    _with_fake_runner_present(monkeypatch, fake_popen_factory)
+    result = _operator_stack_evidence()
+    assert result["status"] == "malformed"
+    assert "undecodable" in result["reason"]
 
 
 def test_operator_stack_evidence_fails_closed_on_malformed_output(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -612,10 +741,10 @@ def test_operator_stack_evidence_fails_closed_on_malformed_output(monkeypatch: p
     closed to malformed, never be silently treated as any real status."""
     from backend.deployment.promotion_rehearsal import _operator_stack_evidence
 
-    def fake_run(argv, **kwargs):
-        return SimpleNamespace(returncode=1, stdout="not json at all", stderr="")
+    def fake_popen_factory(argv, **kwargs):
+        return _FakePopen([("not json at all", "")], returncode=1)
 
-    _with_fake_runner_present(monkeypatch, fake_run)
+    _with_fake_runner_present(monkeypatch, fake_popen_factory)
     result = _operator_stack_evidence()
     assert result["status"] == "malformed"
 
@@ -626,12 +755,45 @@ def test_operator_stack_evidence_fails_closed_on_wrong_schema(monkeypatch: pytes
     runner's real evidence."""
     from backend.deployment.promotion_rehearsal import _operator_stack_evidence
 
-    def fake_run(argv, **kwargs):
-        return SimpleNamespace(returncode=0, stdout=json.dumps({"schema": "SomeOther.Schema.v1", "classification": "passed"}), stderr="")
+    def fake_popen_factory(argv, **kwargs):
+        return _FakePopen([(json.dumps({"schema": "SomeOther.Schema.v1", "classification": "passed"}), "")])
 
-    _with_fake_runner_present(monkeypatch, fake_run)
+    _with_fake_runner_present(monkeypatch, fake_popen_factory)
     result = _operator_stack_evidence()
     assert result["status"] == "malformed"
+
+
+def test_operator_stack_evidence_fails_closed_on_empty_classification(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A schema-matching payload whose classification is empty/non-string
+    (a genuinely malformed but schema-valid runner report) must still
+    fail closed to malformed, not pass an empty string through as a
+    "status"."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    payload = _fake_operator_stack_payload(classification="")
+
+    def fake_popen_factory(argv, **kwargs):
+        return _FakePopen([(json.dumps(payload), "")])
+
+    _with_fake_runner_present(monkeypatch, fake_popen_factory)
+    result = _operator_stack_evidence()
+    assert result["status"] == "malformed"
+
+
+def test_operator_stack_evidence_ignores_non_mapping_surface_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A malformed surfaces list containing a non-dict entry must not
+    crash the summary -- the malformed entry is skipped, not trusted."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    payload = _fake_operator_stack_payload(surfaces=["not-a-dict", {"name": "health", "plane": "api", "classification": "passed", "http_status": 200, "reason": None}])
+
+    def fake_popen_factory(argv, **kwargs):
+        return _FakePopen([(json.dumps(payload), "")])
+
+    _with_fake_runner_present(monkeypatch, fake_popen_factory)
+    result = _operator_stack_evidence()
+    assert len(result["surfaces"]) == 1
+    assert result["surfaces"][0]["name"] == "health"
 
 
 def test_execute_promotion_rehearsal_operator_stack_wiring_and_no_raw_logs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -642,10 +804,10 @@ def test_execute_promotion_rehearsal_operator_stack_wiring_and_no_raw_logs_end_t
     raw-logs invariant to this new evidence source."""
     payload = _fake_operator_stack_payload(classification="failed", logs={"backend": "Traceback (most recent call last):\n  raise RuntimeError('boom')\n"})
 
-    def fake_run(argv, **kwargs):
-        return SimpleNamespace(returncode=1, stdout=json.dumps(payload), stderr="")
+    def fake_popen_factory(argv, **kwargs):
+        return _FakePopen([(json.dumps(payload), "")], returncode=1)
 
-    _with_fake_runner_present(monkeypatch, fake_run)
+    _with_fake_runner_present(monkeypatch, fake_popen_factory)
     bundle = execute_promotion_rehearsal(environment="local_dry_run", environ={}, execute_operator_stack=True)
     assert bundle.operator_stack["status"] == "failed"
     bundle_json = json.dumps(bundle.to_dict())

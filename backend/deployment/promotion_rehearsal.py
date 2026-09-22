@@ -25,6 +25,7 @@ import platform
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -573,19 +574,16 @@ def _operator_stack_evidence(
         argv.append("--backend-only")
     command_text = shlex.join(argv)
 
+    process_options: dict[str, Any] = {}
+    if sys.platform == "win32":
+        process_options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        process_options["start_new_session"] = True
+
     try:
-        completed = subprocess.run(
-            argv, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout_s, check=False
+        process = subprocess.Popen(
+            argv, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **process_options
         )
-    except subprocess.TimeoutExpired:
-        return {
-            "status": "timed_out",
-            "runner_present": True,
-            "command": command_text,
-            "reason": f"operator_stack_exceeded_{int(timeout_s)}s",
-            "network_calls": False,
-            "mutated": False,
-        }
     except OSError as exc:
         return {
             "status": "unavailable",
@@ -597,14 +595,45 @@ def _operator_stack_evidence(
         }
 
     try:
-        payload = json.loads(completed.stdout)
+        stdout, _stderr = process.communicate(timeout=timeout_s)
+        returncode = process.returncode
+    except subprocess.TimeoutExpired:
+        _terminate_operator_stack_process(process)
+        return {
+            "status": "timed_out",
+            "runner_present": True,
+            "command": command_text,
+            "reason": f"operator_stack_exceeded_{int(timeout_s)}s",
+            "network_calls": False,
+            "mutated": False,
+        }
+    except (UnicodeDecodeError, ValueError) as exc:
+        # text=True decodes with the locale default codec and strict
+        # errors; a child that writes undecodable bytes to stdout/stderr
+        # must fail closed to malformed, not raise past this function.
+        # communicate() only returns after the process has already exited
+        # (or raised TimeoutExpired first, handled above), so the process
+        # is not force-killed here -- only reaped, defensively bounded, in
+        # case that assumption is ever wrong for a given platform/codec.
+        _terminate_operator_stack_process(process)
+        return {
+            "status": "malformed",
+            "runner_present": True,
+            "command": command_text,
+            "reason": f"operator_stack_output_undecodable:{type(exc).__name__}",
+            "network_calls": False,
+            "mutated": False,
+        }
+
+    try:
+        payload = json.loads(stdout)
     except (json.JSONDecodeError, ValueError):
         return {
             "status": "malformed",
             "runner_present": True,
             "command": command_text,
             "reason": "operator_stack_output_not_json",
-            "exit_code": completed.returncode,
+            "exit_code": returncode,
             "network_calls": False,
             "mutated": False,
         }
@@ -614,7 +643,7 @@ def _operator_stack_evidence(
             "runner_present": True,
             "command": command_text,
             "reason": "operator_stack_output_unexpected_schema",
-            "exit_code": completed.returncode,
+            "exit_code": returncode,
             "network_calls": False,
             "mutated": False,
         }
@@ -630,6 +659,58 @@ def _operator_stack_evidence(
         "network_calls": bool(payload.get("external_network_calls", False)),
         "mutated": bool(payload.get("mutated", False)),
     }
+
+
+def _terminate_operator_stack_process(process: "subprocess.Popen[str]") -> None:
+    """Bound the runner subprocess's lifetime past our own timeout,
+    without relying solely on the runner's own documented cleanup (which
+    cannot run at all if we simply SIGKILL it -- SIGKILL cannot be caught,
+    so nothing downstream, including any grandchild the runner started in
+    its own separate process group/session, gets a chance to react).
+
+    Graceful first: on POSIX, deliver SIGINT to the runner's whole process
+    group (``start_new_session=True`` above makes it its own group
+    leader). CPython installs a default SIGINT handler that raises
+    KeyboardInterrupt in the *runner's* main thread -- exactly the signal
+    #290's own script documents itself as cleaning up on ("success,
+    failure, or interrupt"), so this gives its own try/finally-based
+    child cleanup (uvicorn, npm) a real chance to run, the same way a
+    developer's Ctrl-C would. Escalates to SIGKILL only if the runner
+    does not exit within a short grace period. On Windows, the closest
+    analogue (CTRL_BREAK_EVENT to the process group started via
+    CREATE_NEW_PROCESS_GROUP above) is used, matching the runner's own
+    internal Windows cleanup path -- unverified by execution on real
+    Windows in this sandbox, same disclosed limitation as this module's
+    other Windows-specific branches.
+    """
+    if process.poll() is not None:
+        return
+    try:
+        if sys.platform == "win32":
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            os.killpg(os.getpgid(process.pid), signal.SIGINT)
+    except (ProcessLookupError, PermissionError, OSError, AttributeError, ValueError):
+        pass
+    try:
+        process.communicate(timeout=10.0)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        if sys.platform == "win32":
+            process.kill()
+        else:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError, AttributeError, ValueError):
+        try:
+            process.kill()
+        except OSError:
+            pass
+    try:
+        process.communicate(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def _event_read_path_evidence(environ: Mapping[str, str]) -> dict[str, Any]:
