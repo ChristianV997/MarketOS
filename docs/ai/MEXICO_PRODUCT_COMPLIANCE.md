@@ -71,6 +71,10 @@ Unresolved for a human/lawyer/customs broker:
 7. Mexican **service-sector** licensing, health, and environmental requirements have no canonical evaluator in this repository yet. A declared `service` offering reports these as `not_assessed` (never silently cleared, never blocked by goods-only physical rules) -- a human must confirm no such requirement is missing from this system's model entirely before treating any real service offering's Mexico section as complete.
 8. `hybrid` offerings only get their goods component assessed by this evaluator; the service component is flagged `not_assessed` via warning, never evaluated.
 
+## Implementation note for the evaluator's owner (observed, not fixed here -- different lane)
+
+`evaluate_mexico_product_compliance()`'s `_from_evidence()` and the module-level `NON_SATISFYING_EVIDENCE` constant both treat `"manual"` as a non-satisfying evidence-class value, but `MexicoProductCompliancePacket.__post_init__` validates every `*_evidence_class` field against `EVIDENCE_CLASSES = ("official_db", "supplier_claim", "fixture", "unknown")`, which does not include `"manual"` -- so a caller can never actually construct a packet with `evidence_class="manual"` (it raises `ValueError` first), making that branch and `NON_SATISFYING_EVIDENCE` unreachable dead code. This is a code-quality observation confirmed by reading the evaluator directly (not by a failing test — no caller anywhere in this repository passes `"manual"` as an evidence class, so nothing currently depends on the broken path). It does not affect any status this document or the consumer projection reports today. Flagged here rather than fixed, since `evaluation/trustos/mexico_product_compliance.py` is owned by a separate lane and this document's own scope is the consumer projection, not the evaluator's internals.
+
 ## Safety
 
 No live ehomologados scrape, no supplier contact, no credentials, no legal/tax conclusion, no second gate.
