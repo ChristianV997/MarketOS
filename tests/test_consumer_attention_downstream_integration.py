@@ -50,6 +50,9 @@ def test_service_attention_reaches_existing_validation_and_draft_consumers_witho
     assert validation["executive_summary"]["consumer_attention_signals"]["status"] == "supplied"
     assert validation["overall_recommendation"] != "advance_to_launch_draft"
     assert validation["supplier_evidence"]["proof_present"] is False
+    assert validation["competition_evidence"]["pricing_coverage"] == 0
+    assert validation["competition_evidence"]["offers_observed"] == 0
+    assert validation["launch_readiness"]["status"] == "blocked"
 
     synthesis = build_product_opportunity_synthesis(None, None, attention).to_dict()
     assert synthesis["overall_recommendation"] != "advance_to_launch_draft"
@@ -61,6 +64,9 @@ def test_service_attention_reaches_existing_validation_and_draft_consumers_witho
     launch = build_launch_draft_pack(synthesis=synthesis, consumer_attention=attention).to_dict()
     assert launch["launch_draft_status"] == "draft_only_pending_human_approval"
     assert launch["approval_checklist"]["launch_authorized"] is False
+    assert launch["ads_launched"] is False
+    assert launch["orders_created"] is False
+    assert launch["payments_created"] is False
     assert all(launch[key]["status"] == "draft" for key in ("shopify_draft_payload", "medusa_draft_payload"))
 
     site = build_site_draft_pack(
@@ -70,6 +76,8 @@ def test_service_attention_reaches_existing_validation_and_draft_consumers_witho
         site_type="service_business_website",
     ).to_dict()
     assert site["approval_checklist"]["publishing_authorized"] is False
+    assert site["ads_launched"] is False
+    assert site["payments_created"] is False
     serialized = json.dumps({"attention": attention, "validation": validation, "synthesis": synthesis, "launch": launch, "site": site}, sort_keys=True)
     assert "api_key" not in serialized.lower()
     assert "live_observed" not in serialized
@@ -98,8 +106,13 @@ def test_blocked_attention_state_stays_blocked_through_downstream_boundaries():
     assert synthesis["unit_economics_summary"] == {}
     launch = build_launch_draft_pack(synthesis=synthesis, consumer_attention=attention).to_dict()
     assert launch["approval_checklist"]["launch_authorized"] is False
+    assert launch["ads_launched"] is False
+    assert launch["orders_created"] is False
+    assert launch["payments_created"] is False
     site = build_site_draft_pack(launch_draft_pack=launch, opportunity_synthesis=synthesis, consumer_attention=attention).to_dict()
     assert site["approval_checklist"]["publishing_authorized"] is False
+    assert site["ads_launched"] is False
+    assert site["payments_created"] is False
 
 
 def test_cli_service_fixture_is_deterministic_and_exposes_freshness_contract(tmp_path):
