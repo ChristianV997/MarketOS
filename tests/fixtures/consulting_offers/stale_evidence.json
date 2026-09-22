@@ -1,0 +1,20 @@
+{
+  "client_id": "fixture-client-alpha",
+  "workspace_id": "fixture-consulting-client",
+  "client_objective": "Review a stale evidence set without upgrading its claims.",
+  "geography": "Mexico",
+  "language": "es-MX",
+  "scope": "Evidence freshness review.",
+  "offering_kind": "product",
+  "selected_offer_ids": ["market-research-sprint"],
+  "pricing_currency": "USD",
+  "evidence": [
+    {"evidence_id": "stale-market-1", "evidence_class": "observed", "state": "stale", "source_ref": "manual://consulting-offers/stale", "summary": "Stale observation"}
+  ],
+  "assumptions": [],
+  "conflicts": [],
+  "missing_information": [],
+  "linked_component_report_ids": [],
+  "consulting_engagement_id": null,
+  "optional_upsell_offer_ids": []
+}

@@ -1,0 +1,18 @@
+{
+  "client_id": "fixture-client-alpha",
+  "workspace_id": "fixture-consulting-client",
+  "client_objective": "Classify an offering before selecting a consulting scope.",
+  "geography": "Mexico",
+  "language": "es-MX",
+  "scope": "Classification and discovery only.",
+  "offering_kind": "unknown",
+  "selected_offer_ids": ["full-commercial-assessment"],
+  "pricing_currency": "USD",
+  "evidence": [],
+  "assumptions": [],
+  "conflicts": [],
+  "missing_information": ["offering_kind_confirmation"],
+  "linked_component_report_ids": [],
+  "consulting_engagement_id": null,
+  "optional_upsell_offer_ids": []
+}
