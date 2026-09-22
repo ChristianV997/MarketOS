@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -483,7 +484,6 @@ def test_provider_mutation_without_approval_metadata_is_rejected() -> None:
         LIVE_ACTION_TYPES,
         simulate_action,
         transition_status,
-        make_request,
     )
 
     # 1. All live mutation actions in LIVE_ACTION_TYPES must require human approval
@@ -526,7 +526,6 @@ def test_event_spine_and_replay_identity_are_canonical_authorities() -> None:
 def test_governor_and_service_engagement_are_canonical_authorities() -> None:
     """Validate CompanyOS resource execution governor and service engagement projection."""
     from evaluation.companyos.resource_execution_governor import build_resource_execution_governor_report
-    from evaluation.companyos.service_engagement import build_service_engagement
 
     gov = build_resource_execution_governor_report()
     assert hasattr(gov, "report_version")
