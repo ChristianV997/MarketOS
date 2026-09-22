@@ -32,7 +32,7 @@ from evaluation.perf.integrated_replay import (
     sanitized_candidates,
 )
 
-THIS_CLI = ROOT / "scripts" / "run_commercial_replay_integration.py"
+THIS_CLI = ROOT / "scripts" / "run_integrated_replay_perf.py"
 THIS_MODULE = ROOT / "evaluation" / "perf" / "integrated_replay.py"
 PR279_CLI_REF = "origin/codex/marketos-commercial-replay-consolidation-v1:scripts/run_commercial_replay_integration.py"
 MIN_MODULE_BYTES = 16_000  # refuse truncated placeholders (prior Contents-API stubs)
