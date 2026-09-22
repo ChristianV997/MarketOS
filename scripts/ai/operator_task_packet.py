@@ -141,6 +141,15 @@ WINDOWS_DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:/")
 
 def assert_safe_path(path: str, field: str) -> str:
     value = _normalize_path(_text(path, field))
+    # A NUL byte is invalid in a POSIX or Windows path and is rejected
+    # explicitly rather than left to whatever a downstream filesystem call
+    # happens to do with it: os.open() raises ValueError on one, but
+    # Path.exists()/is_symlink() instead swallow the resulting OSError and
+    # return False, which would otherwise let a garbage entry slide into
+    # _assert_filesystem_contained's "deleted file" ancestor-walk fallback
+    # rather than being refused outright at the point of first validation.
+    if "\x00" in value:
+        raise TaskPacketError(f"{field} must not contain a NUL byte")
     candidate = Path(value)
     if candidate.is_absolute() or ".." in candidate.parts or WINDOWS_DRIVE_ABSOLUTE.match(value):
         raise TaskPacketError(f"{field} must stay relative without '..'")

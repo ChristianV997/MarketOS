@@ -455,6 +455,21 @@ def test_filesystem_check_windows_drive_letter_changed_file_still_rejected_pre_f
         validate_resume_packet(resume, expected_task_packet=task_packet, root=tmp_path)
 
 
+def test_filesystem_check_nul_byte_changed_file_still_rejected_pre_filesystem(tmp_path: Path):
+    """A NUL byte in a changed_files entry is rejected by assert_safe_path
+    inside _revalidate_resume_fields, before _assert_filesystem_contained
+    ever runs. Without this, Path.exists()/is_symlink() silently swallow
+    the OSError a NUL byte causes on a real syscall and return False,
+    which would otherwise route the entry into the "deleted file"
+    ancestor-walk fallback instead of being refused outright (found via
+    independent adversarial review of this exact function)."""
+    (tmp_path / "scope").mkdir()
+    task_packet = _fs_task_packet(tmp_path)
+    resume = dict(_fs_resume(task_packet, ["scope/a.py"]), changed_files=["scope/evil\x00.py"])
+    with pytest.raises(ResumePacketError, match="NUL byte"):
+        validate_resume_packet(resume, expected_task_packet=task_packet, root=tmp_path)
+
+
 def test_filesystem_check_normalizes_backslash_separators_like_every_other_scope_check(tmp_path: Path):
     """Regression: _assert_filesystem_contained must normalize backslashes
     exactly like _in_scope and assert_safe_path already do -- joining a
