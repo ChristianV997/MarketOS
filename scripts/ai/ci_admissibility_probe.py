@@ -757,7 +757,16 @@ def load_input(path: Path, *, root: Path = ROOT) -> Mapping[str, Any]:
 
 
 def _safe_markdown(value: Any) -> str:
-    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("`", "\\`").replace("<", "&lt;").replace(">", "&gt;")
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("`", "\\`")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 def render_markdown(report: Mapping[str, Any]) -> str:

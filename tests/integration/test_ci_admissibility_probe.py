@@ -546,6 +546,19 @@ def test_sanitized_step_objects_are_accepted():
     assert result["jobs"][0]["steps_executed"] == 1
 
 
+def test_markdown_escapes_untrusted_job_names():
+    data = payload()
+    unsafe_name = "[link](javascript:alert(1))|`code`"
+    data["required_jobs"] = [unsafe_name]
+    data["required_policy"]["jobs"] = [unsafe_name]
+    data["required_policy"]["fingerprint"] = policy_digest(data["required_policy"])
+    data["jobs"][0]["name"] = unsafe_name
+    markdown = render_markdown(report(data))
+    assert "\\[link\\]" in markdown
+    assert "[link](javascript:" not in markdown
+    assert "\\|" in markdown
+
+
 def test_input_size_and_path_safety_are_bounded(tmp_path: Path):
     oversized = tmp_path / "oversized.json"
     oversized.write_bytes(b"{" + (b"x" * MAX_INPUT_BYTES) + b"}")
