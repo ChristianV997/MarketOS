@@ -1,0 +1,52 @@
+{
+  "candidate_id": "cand-goods-observed",
+  "supplier_id": "supplier-alpha",
+  "offer_id": "offer-alpha-1",
+  "supplier_sku": "sku-alpha-1",
+  "offering_kind": "goods",
+  "captured_at": "2026-01-05T00:00:00Z",
+  "quoted_price": {"amount": "12.50", "currency": "USD"},
+  "price_evidence": {"quality": "observed", "human_confirmed": true, "evidence_state": "observed"},
+  "lane": {
+    "lane_id": "lane-cn-us",
+    "origin": "CN",
+    "ship_from": "CN",
+    "warehouse": "MX",
+    "destination_country": "US",
+    "currency": "USD",
+    "tax_rate": "0.07",
+    "duty_rate": "0.03"
+  },
+  "goods": {
+    "moq_availability": {
+      "minimum_order_quantity": 50,
+      "available_quantity": 5000,
+      "availability_status": "in_stock",
+      "evidence": {"quality": "observed", "human_confirmed": true, "evidence_state": "observed"}
+    },
+    "lead_time": {
+      "minimum_days": 10,
+      "maximum_days": 20,
+      "evidence": {"quality": "observed", "human_confirmed": true, "evidence_state": "observed"}
+    },
+    "fulfillment_mode": "wholesale_fba",
+    "customs": {
+      "duty_rate": "0.03",
+      "tax_rate": "0.07",
+      "hs_code": "8501.10",
+      "evidence": {"quality": "observed", "human_confirmed": true, "evidence_state": "observed"}
+    },
+    "returns_defects": {
+      "return_rate": "0.02",
+      "defect_rate": "0.01",
+      "evidence": {"quality": "observed", "human_confirmed": true, "evidence_state": "observed"}
+    },
+    "shipping": {
+      "supplier_shipping": {"amount": "1.20", "currency": "USD"},
+      "international_shipping": {"amount": "2.10", "currency": "USD"},
+      "evidence": {"quality": "observed", "human_confirmed": true, "evidence_state": "observed"}
+    },
+    "supplier_evidence": {"quality": "observed", "human_confirmed": true, "evidence_state": "observed"},
+    "logistics_evidence": {"quality": "observed", "human_confirmed": true, "evidence_state": "observed"}
+  }
+}
