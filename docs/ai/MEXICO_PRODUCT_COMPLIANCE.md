@@ -1,7 +1,8 @@
 # Mexico product-compliance policy overlay
 
 - lane: MEXICO-PRODUCT-COMPLIANCE-POLICY-V1
-- access date: 2026-09-19
+- legal-source access date: 2026-09-19 (unchanged since; no cited rule has been re-verified after this date)
+- consumer-architecture last updated: 2026-09-22 (offering_kind gating and the four report consumers documented below; no new legal source consulted for this update)
 - not legal advice
 - maps onto the canonical `promotion.compliance` gate
 - does **not** add a GATE_ID, registry, scorer, or live lookup
@@ -20,9 +21,24 @@
 | Dual-band / 4G | do **not** guess IFT-016 / IFT-017 / IFT-011; hold `compliance` |
 | Evidence classes | `official_db` may satisfy; `supplier_claim` / `fixture` / `unknown` never satisfy launch |
 | Already sold in MX | warning only; never auto-clears |
-| Consumer | do **not** edit `product_validation_report.py`; it remains a consumer of `promotion.compliance` |
+| Consumer | `evaluation.commerce.market_access_report` projects this evaluator's decision into every live recommendation surface (see "Consumer surfaces and offering_kind" below); it never recomputes law, never adds a second gate/registry, and never edits this evaluator's own files |
 
 Statuses preserved: `needs_evidence` | `not_assessed` | `not_applicable`. `satisfied` is internal and only when official, fresh, model-matched evidence exists.
+
+## Consumer surfaces and offering_kind (added, this document updated 2026-09-22)
+
+MarketOS recommends goods, services, and hybrids, but this evaluator only ever modeled goods (customs/telecom/NOM requirements). `evaluation.commerce.market_access_report` reads an additive `offering_kind` from the candidate dict (`"goods"` / `"service"` / `"hybrid"` / `"unknown"`, defaulting to `"goods"` so every pre-existing goods-only caller is unaffected) and gates which of this evaluator's requirements are even applicable **before** calling it — it never asks this evaluator to reason about services, and it never invents a second evaluator for them:
+
+| `offering_kind` | Customs / telecom / physical-NOM requirements (`mx_hs_classification`, `mx_pedimento`, `mx_immex`, `mx_telecom_homologation`, `mx_nom_208_radio`, `mx_nom_electrical_safety`, `mx_nom_labeling`) | Sector/consumer-labeling requirements this repo only models for goods today (`mx_lfpc_profeco`, `mx_infraestructura_calidad`, `mx_ley_general_salud`, `mx_cofepris_sector`, `mx_semarnat_sector`) | Fiscal duties (`mx_importer_rfc`, `mx_cfdi`, `mx_iva`) |
+| --- | --- | --- | --- |
+| `goods` (default) | evaluated normally by this evaluator | evaluated normally by this evaluator | evaluated normally |
+| `service` | `not_applicable` (no physical good exists to classify/label/homologate) | `not_assessed` (no service-sector evaluator exists here — never falsely cleared, never falsely blocked) | still evaluated (jurisdiction-wide sale duties, not goods-specific) |
+| `hybrid` | evaluated exactly as `goods` (nothing else to base it on) | evaluated exactly as `goods`, plus a warning that the service component is not covered | still evaluated |
+| `unknown` (declared or unrecognized) | `not_assessed` | `not_assessed` | `not_assessed` |
+
+A pure `service` offering can therefore never show `compliant` for Mexico — there is no canonical evaluator for Mexican service-sector licensing/health/environmental requirements yet, so those stay `not_assessed` rather than being silently cleared. This is a report-layer projection choice, not a change to this evaluator's own logic: `evaluate_mexico_product_compliance()` itself is never called with a "service" market or product family — it only ever sees `mexico`/`united_states`/`canada` and the existing `PRODUCT_FAMILIES` tuple, exactly as before.
+
+Consumer surfaces receiving the identical projection (proven by cross-consumer contract tests, `tests/test_market_access_cross_consumer_contract.py` and `tests/test_market_access_offering_kind_cross_consumer.py`): `evaluation.commerce.product_validation_report.ProductValidationReport`, `evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis`, `evaluation.commerce.launch_draft_pack.build_launch_draft_pack`, `evaluation.commerce.site_draft_builder.build_site_draft_pack`.
 
 ## Requirement families
 
@@ -52,6 +68,8 @@ Unresolved for a human/lawyer/customs broker:
 4. Graphic Sello IFT start date.
 5. Exact derechos / fees after CRT Pleno.
 6. HS code for any real SKU.
+7. Mexican **service-sector** licensing, health, and environmental requirements have no canonical evaluator in this repository yet. A declared `service` offering reports these as `not_assessed` (never silently cleared, never blocked by goods-only physical rules) -- a human must confirm no such requirement is missing from this system's model entirely before treating any real service offering's Mexico section as complete.
+8. `hybrid` offerings only get their goods component assessed by this evaluator; the service component is flagged `not_assessed` via warning, never evaluated.
 
 ## Safety
 
