@@ -37,7 +37,9 @@ test("operator journey harness encodes skip links, live region, evidence classes
   assert.doesNotMatch(html, /method:\s*["']POST["']/);
   assert.doesNotMatch(html, /<form/i);
   assert.doesNotMatch(html, /evidence class:\s*live_validated/i);
-  assert.match(html, /prefers-reduced-motion/);
+  assert.match(html, /apiMode === "empty"/);
+  assert.match(html, /apiMode === "stale"/);
+  assert.match(html, /apiMode === "loading"/);
   assert.match(html, /mobile-only/);
   assert.match(html, /desktop-only/);
 });
@@ -58,7 +60,10 @@ test("acceptance runner source stays loopback-only and fail-closed on mutations"
   assert.match(source, /not demo-success/);
   assert.match(source, /browser_proof/);
   assert.match(source, /orca/);
-  assert.match(source, /dump-dom|--dump-dom/);
+  assert.match(source, /operator_browser_cdp_probe/);
+  assert.match(source, /empty/);
+  assert.match(source, /stale/);
+  assert.match(source, /loading/);
   assert.doesNotMatch(source, /pip install|npm install|npx playwright install/i);
 });
 

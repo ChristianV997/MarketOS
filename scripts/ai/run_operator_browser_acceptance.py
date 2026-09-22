@@ -49,7 +49,7 @@ OPERATOR_ROUTES = (
     ("events", "/operator/events"),
 )
 
-API_MODES = ("ok-fixture", "down", "429", "500", "malformed")
+API_MODES = ("ok-fixture", "down", "429", "500", "malformed", "empty", "stale", "loading")
 VIEWPORTS = (
     ("mobile", 375, 812),
     ("tablet", 768, 1024),
@@ -465,6 +465,64 @@ def _assert_no_mutations(requests: list[dict[str, Any]]) -> list[str]:
     return failures
 
 
+def _run_chrome_cdp(config: AcceptanceConfig, base: str, artifact_dir: Path) -> dict[str, Any]:
+    chrome = _which_chrome()
+    node = shutil.which("node") or shutil.which("node.exe")
+    probe = REPOSITORY_ROOT / "scripts" / "ai" / "operator_browser_cdp_probe.mjs"
+    if not chrome or not node or not probe.is_file():
+        return {"ok": False, "reason": "cdp_unavailable", "results": []}
+    urls = []
+    for route_key, _route_path in OPERATOR_ROUTES:
+        for mode in API_MODES:
+            urls.append(
+                {
+                    "url": f"{base}/harness?route={route_key}&api={mode}",
+                    "label": f"{route_key}-{mode}-desktop",
+                    "width": 1440,
+                    "height": 900,
+                    "keyboard": mode == "ok-fixture" and route_key == "services",
+                    "screenshot": mode == "ok-fixture",
+                }
+            )
+        if config.include_viewports:
+            for name, width, height in VIEWPORTS:
+                urls.append(
+                    {
+                        "url": f"{base}/harness?route={route_key}&api=ok-fixture",
+                        "label": f"{route_key}-ok-fixture-{name}",
+                        "width": width,
+                        "height": height,
+                        "screenshot": False,
+                    }
+                )
+    plan_path = artifact_dir / "cdp-plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "chrome": chrome,
+                "artifactDir": str(artifact_dir),
+                "reducedMotion": True,
+                "urls": urls,
+            }
+        ),
+        encoding="utf-8",
+    )
+    completed = _run([node, str(probe), str(plan_path)], timeout=max(config.request_timeout_s * 12, 90.0))
+    text = completed.stdout or ""
+    start = text.find("{")
+    if start < 0:
+        return {"ok": False, "reason": "cdp_no_json", "stderr": (completed.stderr or "")[-400:], "results": []}
+    try:
+        payload = json.loads(text[start:])
+    except json.JSONDecodeError:
+        return {"ok": False, "reason": "cdp_bad_json", "results": []}
+    by_url: dict[str, Any] = {}
+    for item in payload.get("results") or []:
+        by_url.setdefault(item.get("url"), []).append(item)
+    payload["by_url"] = by_url
+    return payload
+
+
 def _extract_acceptance(dom_or_json: str) -> dict[str, Any]:
     match = re.search(r"data-surface=\"([^\"]+)\"", dom_or_json)
     surface = match.group(1) if match else None
@@ -496,6 +554,11 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
     base = f"http://{config.host}:{port}"
     browser_kind = resolve_browser(config.browser)
     driver = BrowserDriver(browser_kind, artifact_dir, config.request_timeout_s)
+    cdp_index: dict[str, Any] = {}
+    cdp_meta: dict[str, Any] = {"ok": False, "reason": "not_chrome"}
+    if browser_kind == "chrome":
+        cdp_meta = _run_chrome_cdp(config, base, artifact_dir)
+        cdp_index = cdp_meta.get("by_url") or {}
     report: dict[str, Any] = {
         "schema": "MarketOS.OperatorBrowserAcceptance.v1",
         "status": "passed",
@@ -512,6 +575,7 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
         "mutated": False,
         "network_providers": False,
         "live_ui": None,
+        "cdp": {"ok": False},
         "failures": [],
     }
 
@@ -590,50 +654,80 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
                         driver.keypress("Tab")
                         driver.keypress("Tab")
                 elif browser_kind == "chrome":
-                    width, height = VIEWPORTS[2][1], VIEWPORTS[2][2]
-                    dom = driver.dump_dom(url, width, height)
-                    if not dom:
-                        # Chrome dump-dom frequently hangs on Windows; fall back to
-                        # static HTML GET so the suite stays deterministic, and mark
-                        # that this case did not obtain Chrome DOM proof.
-                        code, body = _http_get(url, config.request_timeout_s)
-                        dom = body
-                        case["chrome_dump_dom"] = "timeout_or_empty"
-                        case["http_status"] = code
-                    extracted = _extract_acceptance(dom)
-                    case["dom_extract"] = extracted
-                    if mode in {"down", "429", "500", "malformed"}:
-                        # Without executed JS, static HTML cannot prove unavailable
-                        # surfaces; require either executed surface markers or the
-                        # harness still advertising fail-closed copy.
-                        case["passed"] = (
-                            extracted.get("surface") == "unavailable"
-                            or "not demo-success" in dom.lower()
-                            or "unavailable — not demo-success" in dom.lower()
-                            or (
-                                case.get("chrome_dump_dom") == "timeout_or_empty"
-                                and "not demo-success" in dom.lower()
-                                and extracted.get("mentions_skip")
-                            )
-                        )
+                    cdp_hits = cdp_index.get(url) or []
+                    snap = (cdp_hits[0] or {}).get("snap") if cdp_hits else None
+                    if snap:
+                        case["cdp"] = {
+                            "surface": snap.get("surface"),
+                            "viewport": snap.get("viewport"),
+                            "overflowX": snap.get("overflowX"),
+                            "hasSkip": snap.get("hasSkip"),
+                            "tabOrder": cdp_hits[0].get("tabOrder"),
+                            "evidence_label": "fixture_browser_tested",
+                        }
+                        requests_log = list(snap.get("requests") or [])
+                        surface = snap.get("surface")
+                        expected = {
+                            "down": "unavailable",
+                            "429": "unavailable",
+                            "500": "unavailable",
+                            "malformed": "unavailable",
+                            "loading": "loading",
+                            "empty": "empty",
+                            "stale": "stale",
+                        }.get(mode)
+                        if expected:
+                            case["passed"] = surface == expected and bool(snap.get("hasSkip")) and not snap.get("claimsLive")
+                        else:
+                            case["passed"] = surface in {"blocked", "partial"} and bool(snap.get("hasSkip")) and not snap.get("claimsLive")
+                        if cdp_hits[0].get("screenshot"):
+                            report["screenshots"].append(cdp_hits[0]["screenshot"])
+                        if config.include_viewports and mode == "ok-fixture":
+                            for hit in cdp_hits:
+                                label = str(hit.get("label") or "")
+                                case.setdefault("responsive", {})[label] = {
+                                    "width": (hit.get("snap") or {}).get("width"),
+                                    "overflowX": (hit.get("snap") or {}).get("overflowX"),
+                                }
                     else:
-                        case["passed"] = bool(
-                            extracted.get("mentions_skip")
-                            and extracted.get("mentions_fixture")
-                            and not extracted.get("claims_live_validated")
-                        )
-                    if "__mosRequests" in dom or "Network method log" in dom:
-                        case["instrumentation_present"] = True
-                    if mode == "ok-fixture" and config.include_viewports:
-                        for name, w, h in VIEWPORTS:
-                            shot = driver.screenshot(f"{route_key}-{mode}-{name}", w, h, url)
-                            if shot:
-                                report["screenshots"].append(shot)
-                            case.setdefault("responsive", {})[name] = {
-                                "width": w,
-                                "height": h,
-                                "css_classes_present": "mobile-only" in dom and "desktop-only" in dom,
-                            }
+                        width, height = VIEWPORTS[2][1], VIEWPORTS[2][2]
+                        dom = driver.dump_dom(url, width, height)
+                        if not dom:
+                            code, body = _http_get(url, config.request_timeout_s)
+                            dom = body
+                            case["chrome_dump_dom"] = "timeout_or_empty"
+                            case["http_status"] = code
+                        extracted = _extract_acceptance(dom)
+                        case["dom_extract"] = extracted
+                        if mode in {"down", "429", "500", "malformed"}:
+                            case["passed"] = (
+                                extracted.get("surface") == "unavailable"
+                                or "not demo-success" in dom.lower()
+                                or "unavailable — not demo-success" in dom.lower()
+                                or (
+                                    case.get("chrome_dump_dom") == "timeout_or_empty"
+                                    and "not demo-success" in dom.lower()
+                                    and extracted.get("mentions_skip")
+                                )
+                            )
+                        else:
+                            case["passed"] = bool(
+                                extracted.get("mentions_skip")
+                                and extracted.get("mentions_fixture")
+                                and not extracted.get("claims_live_validated")
+                            )
+                        if "__mosRequests" in dom or "Network method log" in dom:
+                            case["instrumentation_present"] = True
+                        if mode == "ok-fixture" and config.include_viewports:
+                            for name, w, h in VIEWPORTS:
+                                shot = driver.screenshot(f"{route_key}-{mode}-{name}", w, h, url)
+                                if shot:
+                                    report["screenshots"].append(shot)
+                                case.setdefault("responsive", {})[name] = {
+                                    "width": w,
+                                    "height": h,
+                                    "css_classes_present": "mobile-only" in dom and "desktop-only" in dom,
+                                }
                 else:
                     code, body = _http_get(url, config.request_timeout_s)
                     extracted = _extract_acceptance(body)
@@ -680,18 +774,11 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
         report["status"] = "passed_without_browser_proof" if not report["failures"] else "failed"
         report["browser_proof"] = False
     elif browser_kind == "chrome":
-        chrome_dom_hits = [
-            case
-            for case in report["cases"]
-            if case.get("api_mode") == "ok-fixture" and case.get("chrome_dump_dom") != "timeout_or_empty" and case.get("dom_extract")
-        ]
-        # Only claim Chrome browser proof when at least one dump-dom produced DOM.
-        executed = any(case.get("chrome_dump_dom") != "timeout_or_empty" and case.get("dom_extract", {}).get("surface") for case in report["cases"])
-        report["browser_proof"] = bool(executed)
+        report["cdp"] = {"ok": bool(cdp_meta.get("ok")), "reason": cdp_meta.get("reason"), "evidence_label": "fixture_browser_tested"}
+        report["browser_proof"] = bool(cdp_meta.get("ok"))
         if not report["failures"] and not report["browser_proof"]:
             report["status"] = "passed_without_browser_proof"
-            report["chrome_note"] = "dump-dom timed out or returned empty; static fixture contract still passed"
-        report["chrome_dom_hits"] = len(chrome_dom_hits)
+            report["chrome_note"] = "CDP unavailable and dump-dom did not execute; static fixture contract still passed"
     report_path = artifact_dir / "operator-browser-acceptance-report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     report["report_path"] = str(report_path)

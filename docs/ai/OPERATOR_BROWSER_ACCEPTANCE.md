@@ -24,7 +24,7 @@ No new browsers, MCP servers, or Playwright installs.
 | Backend | When used |
 |---|---|
 | **Orca embedded browser** (`orca tab` / `orca eval` / `orca screenshot` / `orca keypress`) | Preferred when `orca` is on PATH and runtime is reachable |
-| **Installed Google Chrome** headless (`--dump-dom`, `--screenshot`) | Fallback when Orca browser is unavailable |
+| **Installed Google Chrome** headless CDP (`scripts/ai/operator_browser_cdp_probe.mjs`) | Preferred fallback when Chrome and Node are installed. Dump-dom remains if CDP cannot start |
 | **`--browser none`** | Deterministic HTTP + fixture contract only; **does not claim browser proof** |
 
 Optional live UI: point at a loopback Vite server started by the `#290` local operator stack (or `npm run preview` after an existing lockfile install).
@@ -74,6 +74,10 @@ Python unit tests:
 - mobile: 375×812
 - tablet: 768×1024
 - desktop: 1440×900
+
+Evidence label for every Chrome CDP hit is `fixture_browser_tested`. It is not live commercial validation.
+
+Unavailable tools recorded by the runner: Orca (`orca` not on PATH), Playwright (not installed; this lane does not install it), axe (not installed). Chrome CDP is the executed browser backend when `google-chrome` and `node` exist.
 
 ## Artifacts
 

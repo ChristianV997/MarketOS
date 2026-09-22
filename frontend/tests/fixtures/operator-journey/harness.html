@@ -292,6 +292,19 @@
           setSurface("unavailable", "API down (connection refused simulation). Route remains unavailable — not demo-success.", "bad");
           return null;
         }
+        if (apiMode === "loading") {
+          setSurface("loading", "Loading fixture projection. Not live validated — not demo-success.", "warn");
+          return null;
+        }
+        if (apiMode === "empty") {
+          setSurface("empty", "Empty fixture board. Not live validated — not demo-success.", "warn");
+          return { engagements: [], candidates: [], events: [] };
+        }
+        if (apiMode === "stale") {
+          setSurface("stale", "Stale fixture snapshot. Not live validated — not demo-success.", "warn");
+          const base = fixtureRows[route] || [];
+          return { engagements: base, candidates: base, events: base, freshness: "stale" };
+        }
         const url = `/__mock_api/${route}?mode=${encodeURIComponent(apiMode)}`;
         try {
           const response = await fetch(url, { method: "GET" });
@@ -431,12 +444,18 @@
       }
 
       loadApi().then((payload) => {
-        if (apiMode === "down" || apiMode === "429" || apiMode === "500" || apiMode === "malformed") {
+        if (apiMode === "down" || apiMode === "429" || apiMode === "500" || apiMode === "malformed" || apiMode === "loading") {
           return;
         }
         if (route === "first-phase") renderFirstPhase(payload);
         else if (route === "events") renderEvents(payload);
         else renderServices(payload);
+        if (apiMode === "empty") {
+          setSurface("empty", "Empty fixture board. Not live validated — not demo-success.", "warn");
+        }
+        if (apiMode === "stale") {
+          setSurface("stale", "Stale fixture snapshot. Not live validated — not demo-success.", "warn");
+        }
       });
 
       window.__mosAcceptance.ready = true;
