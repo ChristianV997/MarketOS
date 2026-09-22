@@ -233,11 +233,11 @@ def test_service_delivery_projection_malformed_formats(artifacts_tmp: Path):
 
 
 def test_service_delivery_workbench_probe_offline():
-    """Probing workbench offline returns clean passed status on main (merged PR #271)."""
+    """Probing workbench offline returns clean unavailable status on main (unmerged PR #271)."""
     res = probe_service_delivery_workbench(base_url=None)
     assert res["mode"] == "in_process"
-    assert res["status"] == "passed"
-    assert res["reason"] == "in_process_router_verified"
+    assert res["status"] == "unavailable"
+    assert res["reason"] == "service_delivery_route_not_installed"
 
 
 def test_service_delivery_workbench_probe_http_unreachable():
