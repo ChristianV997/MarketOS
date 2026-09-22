@@ -15,6 +15,7 @@ from scripts.ai.operator_task_packet import (
     SCHEMA as TASK_SCHEMA,
     SECRET_SHAPED,
     TaskPacketError,
+    _in_scope,
     _normalize_path,
     _secret_like,
     validate_packet,
@@ -57,15 +58,6 @@ def _as_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return [str(value)]
-
-
-def _in_scope(path: str, allowed: list[str]) -> bool:
-    normalized = _normalize_path(path)
-    for prefix in allowed:
-        target = _normalize_path(prefix)
-        if normalized == target or normalized.startswith(target.rstrip("/") + "/") or target.startswith(normalized.rstrip("/") + "/"):
-            return True
-    return False
 
 
 def evaluate_report(
