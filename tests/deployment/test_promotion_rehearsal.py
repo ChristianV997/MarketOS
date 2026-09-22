@@ -20,7 +20,10 @@ Validates the 14 key requirements:
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -458,3 +461,193 @@ def test_execute_promotion_rehearsal_ci_admissibility_diagnostic_reflects_the_ci
     assert diagnostic["status"] == "detected"
     assert diagnostic["failure_details"]["steps_executed"] == 0
     assert diagnostic["failure_details"]["runner_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Operator-stack evidence: _operator_stack_evidence now actually invokes
+# #290's existing scripts/run_local_operator_stack.py (bounded, opt-in for
+# --execute) instead of only checking whether the file exists. subprocess.run
+# is mocked here because the runner script itself is #290's exclusive file
+# and is not present on this branch -- these tests prove this module's own
+# invocation/parsing/redaction logic is correct against the runner's real,
+# directly-observed JSON contract (schema MarketOS.LocalOperatorStack.v1),
+# captured by actually running that script with --execute --backend-only in
+# a separate inspection worktree of #290's branch before writing this code.
+# ---------------------------------------------------------------------------
+
+
+def _fake_operator_stack_payload(**overrides: Any) -> dict[str, Any]:
+    payload = {
+        "schema": "MarketOS.LocalOperatorStack.v1",
+        "classification": "passed",
+        "dry_run": False,
+        "mode": "fixture_only",
+        "external_network_calls": False,
+        "mutated": False,
+        "surfaces": [
+            {"name": "health", "plane": "api", "classification": "passed", "http_status": 200, "reason": None},
+            {"name": "ready", "plane": "api", "classification": "passed", "http_status": 200, "reason": None},
+            {"name": "workbench_api", "plane": "api", "classification": "surface_absent", "http_status": 404, "reason": None},
+        ],
+        "logs": {"backend": "INFO: Uvicorn running on http://127.0.0.1:3000\n"},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_operator_stack_evidence_reports_unavailable_when_the_runner_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The exact current-branch state: #290's runner is not merged here.
+    subprocess.run must never even be called in this case."""
+    called = []
+    monkeypatch.setattr(rehearsal_module.subprocess, "run", lambda *a, **k: called.append(1))
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    result = _operator_stack_evidence()
+    assert result["status"] == "unavailable"
+    assert result["runner_present"] is False
+    assert called == []
+
+
+def _with_fake_runner_present(monkeypatch: pytest.MonkeyPatch, fake_run) -> None:
+    """Simulate #290's runner file existing on this branch, without
+    affecting any other Path.is_file() check this module or its callees
+    make for an unrelated path (e.g. the Dockerfile check, phase1's own
+    file reads), and without intercepting any other subprocess.run call
+    the same pipeline makes for something else entirely (get_runtime_versions'
+    own node/docker --version calls, and -- confirmed by direct
+    reproduction -- CPython's platform.platform() itself shells out on
+    this interpreter/platform). fake_run is only invoked for argv that
+    actually names the operator-stack runner script; anything else goes
+    to the real subprocess.run unmodified."""
+    runner_path = rehearsal_module.ROOT / "scripts" / "run_local_operator_stack.py"
+    real_is_file = Path.is_file
+    real_run = rehearsal_module.subprocess.run
+
+    def fake_is_file(self: Path) -> bool:
+        if self == runner_path:
+            return True
+        return real_is_file(self)
+
+    def scoped_run(argv, *args, **kwargs):
+        if isinstance(argv, (list, tuple)) and any(str(runner_path) in str(item) for item in argv):
+            return fake_run(argv, **kwargs)
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", fake_is_file)
+    monkeypatch.setattr(rehearsal_module.subprocess, "run", scoped_run)
+
+
+def test_operator_stack_evidence_surfaces_a_real_passing_run_without_raw_logs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real, successful runner invocation must surface its classification
+    and a sanitized surfaces summary -- and must NEVER include the runner's
+    own raw `logs` field (a real captured stdout/stderr, up to and
+    including process tracebacks), matching this bundle's existing,
+    binding "no raw logs" invariant."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    payload = _fake_operator_stack_payload()
+
+    def fake_run(argv, **kwargs):
+        assert "--dry-run" in argv
+        assert "--backend-only" in argv
+        return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+
+    _with_fake_runner_present(monkeypatch, fake_run)
+    result = _operator_stack_evidence()
+    assert result["status"] == "passed"
+    assert result["runner_present"] is True
+    assert result["surfaces"][0]["name"] == "health"
+    assert "logs" not in result
+    assert "Uvicorn running" not in json.dumps(result)
+
+
+def test_operator_stack_evidence_surfaces_partial_without_erasing_it_to_passed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real run.py where health/ready pass but a route is surface_absent
+    reports "partial" -- must not be silently upgraded to "passed"."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    payload = _fake_operator_stack_payload(classification="partial")
+
+    def fake_run(argv, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+
+    _with_fake_runner_present(monkeypatch, fake_run)
+    result = _operator_stack_evidence()
+    assert result["status"] == "partial"
+
+
+def test_operator_stack_evidence_execute_flag_selects_the_runners_execute_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """execute=True must pass --execute, never --dry-run, to the runner --
+    proving the opt-in flag actually changes what gets invoked."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    seen_argv = []
+
+    def fake_run(argv, **kwargs):
+        seen_argv.append(list(argv))
+        return SimpleNamespace(returncode=0, stdout=json.dumps(_fake_operator_stack_payload()), stderr="")
+
+    _with_fake_runner_present(monkeypatch, fake_run)
+    _operator_stack_evidence(execute=True)
+    assert "--execute" in seen_argv[0]
+    assert "--dry-run" not in seen_argv[0]
+
+
+def test_operator_stack_evidence_times_out_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hung runner must fail closed to timed_out within the caller's
+    own bound, never hang the whole promotion rehearsal indefinitely."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    def fake_run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs.get("timeout", 0))
+
+    _with_fake_runner_present(monkeypatch, fake_run)
+    result = _operator_stack_evidence(timeout_s=5.0)
+    assert result["status"] == "timed_out"
+    assert "5" in result["reason"]
+
+
+def test_operator_stack_evidence_fails_closed_on_malformed_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-JSON stdout (a crashed runner, truncated output) must fail
+    closed to malformed, never be silently treated as any real status."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    def fake_run(argv, **kwargs):
+        return SimpleNamespace(returncode=1, stdout="not json at all", stderr="")
+
+    _with_fake_runner_present(monkeypatch, fake_run)
+    result = _operator_stack_evidence()
+    assert result["status"] == "malformed"
+
+
+def test_operator_stack_evidence_fails_closed_on_wrong_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Valid JSON but the wrong schema (a different tool's output landed
+    on stdout somehow) must fail closed, never be trusted as this
+    runner's real evidence."""
+    from backend.deployment.promotion_rehearsal import _operator_stack_evidence
+
+    def fake_run(argv, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"schema": "SomeOther.Schema.v1", "classification": "passed"}), stderr="")
+
+    _with_fake_runner_present(monkeypatch, fake_run)
+    result = _operator_stack_evidence()
+    assert result["status"] == "malformed"
+
+
+def test_execute_promotion_rehearsal_operator_stack_wiring_and_no_raw_logs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The production entrypoint, not just the helper in isolation: real
+    operator-stack evidence must reach the bundle's operator_stack field,
+    and the full bundle (every field, not only operator_stack) must still
+    never contain the runner's raw logs -- extending the pre-existing
+    raw-logs invariant to this new evidence source."""
+    payload = _fake_operator_stack_payload(classification="failed", logs={"backend": "Traceback (most recent call last):\n  raise RuntimeError('boom')\n"})
+
+    def fake_run(argv, **kwargs):
+        return SimpleNamespace(returncode=1, stdout=json.dumps(payload), stderr="")
+
+    _with_fake_runner_present(monkeypatch, fake_run)
+    bundle = execute_promotion_rehearsal(environment="local_dry_run", environ={}, execute_operator_stack=True)
+    assert bundle.operator_stack["status"] == "failed"
+    bundle_json = json.dumps(bundle.to_dict())
+    assert "Traceback" not in bundle_json
+    assert "boom" not in bundle_json

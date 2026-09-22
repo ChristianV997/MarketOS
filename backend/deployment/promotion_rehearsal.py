@@ -23,6 +23,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -502,17 +503,132 @@ def _phase1_summary(environ: Mapping[str, str]) -> dict[str, Any]:
     }
 
 
-def _operator_stack_evidence() -> dict[str, Any]:
-    """Report the existing operator-stack runner without importing or starting it."""
+_OPERATOR_STACK_SCHEMA = "MarketOS.LocalOperatorStack.v1"
+_OPERATOR_STACK_DEFAULT_TIMEOUT_S = 60.0
+
+
+def _operator_stack_surfaces_summary(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Extract only the sanitized per-endpoint classification from the
+    runner's real output -- name/classification/http_status/reason, never
+    raw response bytes, and never the runner's own ``logs`` field (a real
+    stdout/stderr capture, up to and including process tracebacks), which
+    this bundle never emits (see ``test_raw_logs_are_never_emitted_into_
+    promotion_bundles``, a pre-existing, still-binding invariant)."""
+    surfaces = payload.get("surfaces")
+    if not isinstance(surfaces, list):
+        return []
+    summary: list[dict[str, Any]] = []
+    for item in surfaces:
+        if not isinstance(item, Mapping):
+            continue
+        summary.append(
+            {
+                "name": item.get("name"),
+                "plane": item.get("plane"),
+                "classification": item.get("classification"),
+                "http_status": item.get("http_status"),
+                "reason": item.get("reason"),
+            }
+        )
+    return summary
+
+
+def _operator_stack_evidence(
+    *,
+    execute: bool = False,
+    backend_only: bool = True,
+    timeout_s: float = _OPERATOR_STACK_DEFAULT_TIMEOUT_S,
+) -> dict[str, Any]:
+    """Report the existing operator-stack runner's real, bounded evidence
+    when it is present on this branch -- never invented, never assumed.
+
+    ``execute=False`` (the default) invokes the runner in its own default
+    ``--dry-run`` mode: instant and safe, no process is ever started. This
+    still proves the runner's preflight plan is valid without the cost or
+    risk of a real subprocess. ``execute=True`` opts into the runner's
+    ``--execute`` mode, which starts real fixture-only, loopback-only
+    local processes and always cleans them up (that script's own
+    documented guarantee, not reimplemented here) -- a caller must ask
+    for that cost/risk explicitly; it is never the default for a function
+    other code composes into a bundle.
+
+    This never imports the runner as a module (it stays #290's exclusive
+    authority) -- only ``subprocess``-invokes its CLI and parses its own
+    sanitized JSON output, which is itself already the documented
+    contract between this composition and that runner.
+    """
     path = ROOT / "scripts" / "run_local_operator_stack.py"
-    present = path.is_file()
+    if not path.is_file():
+        return {
+            "status": "unavailable",
+            "runner_present": False,
+            "command": "python scripts/run_local_operator_stack.py --json",
+            "reason": "runner_not_on_current_main",
+            "network_calls": False,
+            "mutated": False,
+        }
+
+    argv = [sys.executable, str(path), "--json", "--execute" if execute else "--dry-run"]
+    if backend_only:
+        argv.append("--backend-only")
+    command_text = shlex.join(argv)
+
+    try:
+        completed = subprocess.run(
+            argv, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout_s, check=False
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "timed_out",
+            "runner_present": True,
+            "command": command_text,
+            "reason": f"operator_stack_exceeded_{int(timeout_s)}s",
+            "network_calls": False,
+            "mutated": False,
+        }
+    except OSError as exc:
+        return {
+            "status": "unavailable",
+            "runner_present": True,
+            "command": command_text,
+            "reason": f"operator_stack_invocation_failed:{type(exc).__name__}",
+            "network_calls": False,
+            "mutated": False,
+        }
+
+    try:
+        payload = json.loads(completed.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {
+            "status": "malformed",
+            "runner_present": True,
+            "command": command_text,
+            "reason": "operator_stack_output_not_json",
+            "exit_code": completed.returncode,
+            "network_calls": False,
+            "mutated": False,
+        }
+    if not isinstance(payload, Mapping) or payload.get("schema") != _OPERATOR_STACK_SCHEMA:
+        return {
+            "status": "malformed",
+            "runner_present": True,
+            "command": command_text,
+            "reason": "operator_stack_output_unexpected_schema",
+            "exit_code": completed.returncode,
+            "network_calls": False,
+            "mutated": False,
+        }
+
+    classification = payload.get("classification")
     return {
-        "status": "not_run" if present else "unavailable",
-        "runner_present": present,
-        "command": "python scripts/run_local_operator_stack.py --json",
-        "reason": "runner_present_but_not_invoked" if present else "runner_not_on_current_main",
-        "network_calls": False,
-        "mutated": False,
+        "status": classification if isinstance(classification, str) and classification else "malformed",
+        "runner_present": True,
+        "command": command_text,
+        "dry_run": bool(payload.get("dry_run", not execute)),
+        "mode": payload.get("mode"),
+        "surfaces": _operator_stack_surfaces_summary(payload),
+        "network_calls": bool(payload.get("external_network_calls", False)),
+        "mutated": bool(payload.get("mutated", False)),
     }
 
 
@@ -640,6 +756,9 @@ def execute_promotion_rehearsal(
     github_actions_job: Mapping[str, Any] | None = None,
     logs_available: bool = False,
     dockerfile_path: Path | None = None,
+    execute_operator_stack: bool = False,
+    operator_stack_backend_only: bool = True,
+    operator_stack_timeout_s: float = _OPERATOR_STACK_DEFAULT_TIMEOUT_S,
 ) -> PromotionRehearsalBundle:
     """Execute complete deployment promotion rehearsal across composed authorities.
 
@@ -650,6 +769,13 @@ def execute_promotion_rehearsal(
     it carries more specific, directly-observed evidence. ``logs_available``
     applies only to the ``github_actions_job`` path (``ci_override`` already
     carries its own ``logs_available`` key).
+
+    ``execute_operator_stack`` defaults to ``False``: the operator-stack
+    evidence below is gathered via the existing runner's safe ``--dry-run``
+    mode (instant, no process started). Passing ``True`` opts into that
+    runner's ``--execute`` mode, which starts real fixture-only local
+    processes -- an explicit, caller-requested cost/risk, never a default
+    for this composition.
     """
     if environment not in VALID_PROMOTION_ENVIRONMENTS:
         raise ValueError(f"Invalid environment '{environment}'. Must be one of {sorted(VALID_PROMOTION_ENVIRONMENTS)}")
@@ -774,7 +900,11 @@ def execute_promotion_rehearsal(
     # 12. Compose existing readiness authorities; these are evidence surfaces,
     # not a second gate or a substitute for the Phase 1 report.
     phase1 = _phase1_summary(env)
-    operator_stack = _operator_stack_evidence()
+    operator_stack = _operator_stack_evidence(
+        execute=execute_operator_stack,
+        backend_only=operator_stack_backend_only,
+        timeout_s=operator_stack_timeout_s,
+    )
     event_read_path = _event_read_path_evidence(env)
     rollback = _rollback_evidence(repo_info)
 
