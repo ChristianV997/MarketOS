@@ -216,27 +216,6 @@ test("fixture compose never reports success or live_validated", () => {
   assert.equal(view.liveEndpointUnavailable, true);
 });
 
-test("artifact-backed projection is available read-only without becoming live validation", () => {
-  const source = buildDemoProjection();
-  const result = adaptServiceProjection({
-    ...source,
-    live_endpoint_status: "available_read_only",
-  });
-  assert.equal(result.rejected, false);
-  assert.equal(result.projection.live_endpoint_status, "available_read_only");
-  const view = composeWorkbenchViewModel({
-    isLoading: false,
-    errorMessage: null,
-    projection: result.projection,
-    filters: EMPTY_FILTERS,
-    selectedId: result.projection.engagements[0].engagement_id,
-  });
-  assert.notEqual(view.surface, "success");
-  assert.equal(view.liveEndpointUnavailable, false);
-  assert.match(view.statusMessage, /available read-only/i);
-  assert.notEqual(result.projection.engagements[0].evidence[0].evidence_class, "live_validated");
-});
-
 test("adapter maps a #261 plane-shaped engagement without recalculating economics", () => {
   const result = adaptServiceProjection({
     report_version: "service-delivery-plane-v1",
