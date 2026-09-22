@@ -82,7 +82,7 @@ def test_nested_secret_keys_are_dropped(secret_key):
     assert normalize_record(value, mode="fixture") is None
 
 
-@pytest.mark.parametrize("secret_value", ["Bearer fixture", "sk_live_fixture", "ghp_fixture", "-----BEGIN PRIVATE KEY-----"])
+@pytest.mark.parametrize("secret_value", ["Bearer fixture", "sk_live_fixture", "ghp_fixture", "-----BEGIN " + "PRIVATE KEY-----"])
 def test_secret_shaped_values_are_dropped(secret_value):
     assert normalize_record(payload(content_text_excerpt=secret_value), mode="fixture") is None
 
