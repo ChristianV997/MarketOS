@@ -508,4 +508,3 @@ function toStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item)).filter(Boolean);
 }
-

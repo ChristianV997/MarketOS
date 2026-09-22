@@ -399,4 +399,3 @@ test("client-safe export rejects private notes, cross-client keys, and formula-s
   });
   assert.equal(formulaExport.accepted, false);
 });
-

@@ -58,4 +58,3 @@ process.stdout.write(`${JSON.stringify({
   diagnostics: adapted.projection.diagnostics,
   used_unserved_envelope: mode !== "live-get",
 })}\n`);
-

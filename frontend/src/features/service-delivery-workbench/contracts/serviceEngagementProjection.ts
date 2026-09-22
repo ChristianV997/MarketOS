@@ -187,7 +187,7 @@ export type ServiceEngagementProjection = {
   schema_version: typeof SERVICE_ENGAGEMENT_PROJECTION_VERSION;
   availability: "fixture" | "unavailable" | "partial" | "manual_import";
   live_endpoint: typeof FUTURE_WORKBENCH_PATH;
-  live_endpoint_status: "unavailable" | "available_read_only";
+  live_endpoint_status: "unavailable";
   read_only: true;
   generated_at: string;
   engagements: ServiceEngagement[];
