@@ -773,6 +773,44 @@ def test_document_digest_binding_rejects_path_traversal(tmp_path: Path) -> None:
         )
 
 
+def test_document_digest_binding_rejects_a_nul_byte_in_the_reference(tmp_path: Path) -> None:
+    """A NUL byte in document_evidence.reference must be rejected as a
+    clean ResearchToDecisionError, not surface an unhandled ValueError.
+    Path.resolve() raises ValueError("embedded null byte") deep inside
+    posixpath's realpath -- reproduced directly before this test existed.
+    Not a containment bypass (nothing is ever read), but an unhandled
+    exception breaks this module's fail-closed contract, which every
+    other rejection honors via ResearchToDecisionError."""
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    offer = _base_hydroponics_quote()
+    offer.update({"offer_id": "HYD-DOC-07", "supplier_sku": "HYD-DOC-07-SKU", "source_reference": "manual:evil\x00.pdf"})
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hyd-doc-7")
+    with pytest.raises(ResearchToDecisionError, match="safe reference"):
+        build_research_to_decision(
+            manifest,
+            base_dir=tmp_path,
+            supplier_evidence_root=evidence_root,
+            confirmed_supplier_document_evidence=[("HYD-DOC-07", "HYD-DOC-07-SKU", "manual:evil\x00.pdf", "0" * 64)],
+        )
+
+
+def test_supplier_input_path_rejects_a_nul_byte(tmp_path: Path) -> None:
+    """The same NUL-byte-crashes-Path.resolve() class of bug reproduced
+    via _resolve() directly (supplier_inputs.path), which shares _resolve
+    with document_evidence.reference and observation_inputs.path -- the
+    fix belongs in _resolve() itself, not only in the document-evidence
+    reference validator, since all three call sites share it."""
+    manifest = {
+        "captured_at": "2026-09-16T09:00:00-06:00",
+        "lane": dict(LANE),
+        "candidates": [{"candidate_id": "nul-byte-candidate"}],
+        "supplier_inputs": [{"path": "evil\x00.json"}],
+    }
+    with pytest.raises(ResearchToDecisionError, match="NUL byte"):
+        build_research_to_decision(manifest, base_dir=tmp_path)
+
+
 def _create_symlink_or_simulate(monkeypatch: pytest.MonkeyPatch, link: Path, target: Path) -> None:
     try:
         link.symlink_to(target)

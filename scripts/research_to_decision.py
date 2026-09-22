@@ -239,7 +239,15 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
         if "://" in reference or parsed.scheme not in {"fixture", "file", "manual"}:
             raise ResearchToDecisionError(f"{field} must be a safe reference")
     path = Path(parsed.path or reference)
-    if path.is_absolute() or ".." in path.parts or any(char in reference for char in "<>\r\n"):
+    if path.is_absolute() or ".." in path.parts or any(char in reference for char in "<>\r\n\x00"):
+        # \x00 specifically: Path.resolve() raises an unhandled ValueError
+        # ("embedded null byte") deep inside posixpath's realpath, not a
+        # ResearchToDecisionError -- reproduced via
+        # _supplier_document_evidence_bindings -> _resolve -> .resolve().
+        # Not a containment bypass (nothing is ever read), but an
+        # unhandled exception is not the fail-closed contract every other
+        # rejection in this module honors; reject it here instead, before
+        # any of this reference's later checks or filesystem calls run.
         raise ResearchToDecisionError(f"{field} must be a safe reference")
     return reference
 
@@ -680,6 +688,16 @@ def _text_list(value: Any, field: str, *, required: bool = False) -> list[str]:
 
 def _resolve(base_dir: Path, value: Any, *, label: str) -> Path:
     raw = _text(value, label, required=True)
+    if "\x00" in raw:
+        # Path.resolve() below raises an unhandled ValueError ("embedded
+        # null byte") deep inside posixpath's realpath rather than the
+        # ResearchToDecisionError every other rejection in this module
+        # produces -- reproduced via supplier_inputs.path,
+        # observation_inputs.path, and document_evidence.reference, all
+        # three of which share this function. Not a containment bypass
+        # (nothing is ever read before this point), but an unhandled
+        # exception is not this module's fail-closed contract.
+        raise ResearchToDecisionError(f"{label} must not contain a NUL byte")
     candidate = Path(raw)
     if candidate.is_absolute() or ".." in candidate.parts:
         raise ResearchToDecisionError(f"{label} must remain relative to the manifest")
