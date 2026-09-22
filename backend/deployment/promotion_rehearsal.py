@@ -58,9 +58,20 @@ VALID_READINESS_STATES = frozenset({
     "failed",
     "unavailable",
     "not_run",
+    "collection_failed",
     "blocked",
     "malformed",
     "timed_out",
+    "ci_unavailable",
+})
+
+EVIDENCE_CLASSES = frozenset({
+    "actual_executed",
+    "fixture",
+    "manual",
+    "derived",
+    "simulated_or_planned",
+    "unavailable",
     "ci_unavailable",
 })
 
@@ -237,15 +248,22 @@ def classify_ci_evidence(
     logs_available: bool = True,
 ) -> dict[str, Any]:
     """Classify CI evidence state fail-closed. Zero-step CI is never passed."""
-    if total_steps == 0 or runners_active == 0 or not logs_available:
+    if total_steps == 0 or runners_active == 0:
         state = "ci_unavailable"
-        reason = "CI runners are inactive, steps count is zero, or build logs are inaccessible."
+        reason = "CI runners are inactive or the job reported zero executed steps."
     elif ci_status == "passed":
-        state = "passed"
-        reason = "All pipeline steps verified with accessible audit logs."
+        if logs_available:
+            state = "passed"
+            reason = "All pipeline steps verified with accessible audit logs."
+        else:
+            state = "ci_unavailable"
+            reason = "CI steps executed but success cannot be verified because logs are inaccessible."
     elif ci_status == "failed":
         state = "failed"
-        reason = "One or more CI validation checks failed."
+        reason = "One or more executed CI validation checks failed; log availability does not erase the failure."
+    elif ci_status == "timed_out":
+        state = "timed_out"
+        reason = "An executed CI validation check timed out."
     else:
         state = "ci_unavailable"
         reason = f"CI status '{ci_status}' cannot be promoted without verified logs."
@@ -256,6 +274,185 @@ def classify_ci_evidence(
         "runners_active": runners_active,
         "logs_available": logs_available,
         "classification_reason": reason,
+    }
+
+
+def _harness_status(summary: Mapping[str, Any]) -> str:
+    """Reduce the existing harness counts without hiding an executed failure."""
+    for status in ("failed", "timed_out", "collection_failed", "malformed", "blocked", "unavailable", "not_run"):
+        if int(summary.get(status, 0) or 0) > 0:
+            return status
+    return "passed" if int(summary.get("total", 0) or 0) > 0 else "not_run"
+
+
+def _run_high_value_path_harness() -> dict[str, Any]:
+    """Execute the bounded offline harness; never synthesize a green result."""
+    try:
+        from scripts.run_high_value_path_harness import run_harness
+    except ModuleNotFoundError:
+        return {
+            "status": "unavailable",
+            "evidence_classification": "unavailable",
+            "reason": "high_value_path_harness_unavailable",
+            "paths_executed": 0,
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    try:
+        report = run_harness()
+    except Exception as exc:  # noqa: BLE001 - classify the executed harness failure
+        return {
+            "status": "failed",
+            "evidence_classification": "actual_executed",
+            "reason": f"high_value_path_harness_failed:{type(exc).__name__}",
+            "paths_executed": 0,
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    summary = report.get("summary") if isinstance(report, Mapping) else None
+    measurements = report.get("measurements") if isinstance(report, Mapping) else None
+    if not isinstance(summary, Mapping) or not isinstance(measurements, list):
+        return {
+            "status": "malformed",
+            "evidence_classification": "actual_executed",
+            "reason": "high_value_path_harness_report_malformed",
+            "paths_executed": 0,
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    status = _harness_status(summary)
+    replay_rows = [item for item in measurements if isinstance(item, Mapping) and item.get("replay_identity")]
+    return {
+        "schema": str(report.get("schema", "")),
+        "status": status,
+        "evidence_classification": "actual_executed",
+        "paths_executed": len(measurements),
+        "all_paths_passed": status == "passed",
+        "bit_identity_confirmed": bool(replay_rows) and all(item.get("repeated_match") is True for item in replay_rows),
+        "counts": {key: int(summary.get(key, 0) or 0) for key in ("passed", "failed", "unavailable", "not_run", "blocked", "malformed", "timed_out", "collection_failed", "total")},
+    }
+
+
+def _normalize_harness_results(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept only the small sanitized harness projection used by callers."""
+    status = value.get("status")
+    evidence_class = value.get("evidence_classification", "simulated_or_planned")
+    if status not in VALID_READINESS_STATES or evidence_class not in EVIDENCE_CLASSES:
+        return {
+            "status": "malformed",
+            "evidence_classification": "simulated_or_planned",
+            "reason": "high_value_path_summary_malformed",
+            "paths_executed": 0,
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    if value.get("stale") is True:
+        return {
+            "status": "unavailable",
+            "evidence_classification": evidence_class,
+            "reason": "high_value_path_evidence_stale",
+            "paths_executed": int(value.get("paths_executed", 0) or 0),
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    if value.get("partial") is True:
+        return {
+            "status": "unavailable",
+            "evidence_classification": evidence_class,
+            "reason": "high_value_path_evidence_incomplete",
+            "paths_executed": int(value.get("paths_executed", 0) or 0),
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    if status == "passed" and value.get("all_paths_passed") is not True:
+        status = "malformed"
+    return {
+        "status": status,
+        "evidence_classification": evidence_class,
+        "paths_executed": int(value.get("paths_executed", 0) or 0),
+        "all_paths_passed": status == "passed",
+        "bit_identity_confirmed": bool(value.get("bit_identity_confirmed")),
+    }
+
+
+def _phase1_summary(environ: Mapping[str, str]) -> dict[str, Any]:
+    """Embed the canonical Phase 1 report without making it a new authority."""
+    try:
+        from evaluation.commerce.readiness import build_phase1_readiness
+
+        value = build_phase1_readiness(environ=environ).to_dict()
+    except Exception as exc:  # noqa: BLE001 - readiness evidence must fail closed
+        return {"status": "unavailable", "reason": f"phase1_report_unavailable:{type(exc).__name__}"}
+    deployment = value.get("deployment_readiness", {})
+    events = value.get("event_readiness", {})
+    return {
+        "report_version": value.get("report_version"),
+        "status": value.get("overall_status", "unknown"),
+        "overall_score": value.get("overall_score"),
+        "blocking_gates": list(value.get("blocking_gates", [])),
+        "advisory_warnings": list(value.get("advisory_warnings", [])),
+        "deployment_status": deployment.get("status", "unknown"),
+        "event_status": events.get("status", "unknown"),
+        "read_only": bool(value.get("read_only")),
+        "mutated": bool(value.get("mutated")),
+        "network_calls": bool(value.get("network_calls")),
+    }
+
+
+def _operator_stack_evidence() -> dict[str, Any]:
+    """Report the existing operator-stack runner without importing or starting it."""
+    path = ROOT / "scripts" / "run_local_operator_stack.py"
+    present = path.is_file()
+    return {
+        "status": "not_run" if present else "unavailable",
+        "runner_present": present,
+        "command": "python scripts/run_local_operator_stack.py --json",
+        "reason": "runner_present_but_not_invoked" if present else "runner_not_on_current_main",
+        "network_calls": False,
+        "mutated": False,
+    }
+
+
+def _event_read_path_evidence(environ: Mapping[str, str]) -> dict[str, Any]:
+    """Validate only a bounded local JSONL read path; never emit event payloads."""
+    raw_path = str(environ.get("MARKETOS_EVENT_READ_JSONL_PATH", "")).strip()
+    if not raw_path:
+        return {"status": "unavailable", "reason": "event_read_path_not_configured", "event_count": 0}
+    try:
+        path = Path(raw_path).resolve()
+        artifacts = (ROOT / "artifacts").resolve()
+        if path != artifacts and artifacts not in path.parents:
+            return {"status": "blocked", "reason": "event_read_path_outside_artifacts", "event_count": 0}
+        if not path.is_file():
+            return {"status": "unavailable", "reason": "event_read_path_missing", "event_count": 0}
+        if path.stat().st_size > 1_048_576:
+            return {"status": "malformed", "reason": "event_read_path_too_large", "event_count": 0}
+        from backend.events.query_service import load_events_from_jsonl
+
+        events, warnings = load_events_from_jsonl(path)
+        if warnings:
+            return {"status": "malformed", "reason": "event_read_path_malformed", "event_count": len(events), "warning_count": len(warnings)}
+        return {"status": "passed" if events else "not_run", "reason": "canonical_events_available" if events else "event_read_path_empty", "event_count": len(events)}
+    except (OSError, ValueError):
+        return {"status": "malformed", "reason": "event_read_path_unreadable", "event_count": 0}
+
+
+def _rollback_evidence(repository: Mapping[str, Any]) -> dict[str, Any]:
+    """Identify a prior revision without changing the worktree."""
+    current = str(repository.get("commit_sha", ""))
+    previous = ""
+    try:
+        result = subprocess.run(["git", "rev-parse", "HEAD^"], cwd=repository.get("worktree_path"), capture_output=True, text=True, timeout=5, check=False)
+        if result.returncode == 0:
+            previous = result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return {
+        "status": "passed" if current and previous else "unavailable",
+        "current_revision": current,
+        "previous_revision": previous or None,
+        "mutation_performed": False,
+        "command": "git revert --no-commit <current_revision> (operator-reviewed only)",
     }
 
 
@@ -272,6 +469,10 @@ class PromotionRehearsalBundle:
     ci_evidence: dict[str, Any]
     coderos_status: dict[str, Any]
     high_value_path_summary: dict[str, Any]
+    phase1_readiness: dict[str, Any]
+    operator_stack: dict[str, Any]
+    event_read_path: dict[str, Any]
+    rollback_evidence: dict[str, Any]
     blockers: list[str] = field(default_factory=list)
     remediations: list[str] = field(default_factory=list)
     safe_next_action: str = ""
@@ -291,6 +492,10 @@ class PromotionRehearsalBundle:
             "ci_evidence": self.ci_evidence,
             "coderos_status": self.coderos_status,
             "high_value_path_summary": self.high_value_path_summary,
+            "phase1_readiness": self.phase1_readiness,
+            "operator_stack": self.operator_stack,
+            "event_read_path": self.event_read_path,
+            "rollback_evidence": self.rollback_evidence,
             "blockers": list(self.blockers),
             "remediations": list(self.remediations),
             "safe_next_action": self.safe_next_action,
@@ -310,6 +515,11 @@ class PromotionRehearsalBundle:
             "live_mutation_guard": self.live_mutation_guard,
             "ci_evidence_state": self.ci_evidence.get("state", ""),
             "coderos_status": self.coderos_status.get("status", ""),
+            "high_value_path_status": self.high_value_path_summary.get("status", ""),
+            "phase1_status": self.phase1_readiness.get("status", ""),
+            "operator_stack_status": self.operator_stack.get("status", ""),
+            "event_read_path_status": self.event_read_path.get("status", ""),
+            "rollback_status": self.rollback_evidence.get("status", ""),
             "blockers": sorted(self.blockers),
         }
         payload = json.dumps(deterministic_view, sort_keys=True, separators=(",", ":"))
@@ -412,13 +622,45 @@ def execute_promotion_rehearsal(
         # Default environment CI check: local worktrees have no active CI runners attached
         ci_eval = classify_ci_evidence(ci_status="ci_unavailable", total_steps=0, runners_active=0, logs_available=False)
 
-    # 11. High-value path summary
-    hvp_summary = harness_results or {
-        "status": "passed",
-        "all_paths_passed": True,
-        "paths_executed": 9,
-        "bit_identity_confirmed": True,
-    }
+    # 11. Execute the existing bounded harness when no sanitized result was supplied.
+    if harness_results is None:
+        hvp_summary = _run_high_value_path_harness()
+    elif not isinstance(harness_results, Mapping):
+        hvp_summary = {"status": "malformed", "evidence_classification": "simulated_or_planned", "reason": "high_value_path_summary_malformed", "paths_executed": 0, "all_paths_passed": False, "bit_identity_confirmed": False}
+    else:
+        hvp_summary = _normalize_harness_results(harness_results)
+
+    # 12. Compose existing readiness authorities; these are evidence surfaces,
+    # not a second gate or a substitute for the Phase 1 report.
+    phase1 = _phase1_summary(env)
+    operator_stack = _operator_stack_evidence()
+    event_read_path = _event_read_path_evidence(env)
+    rollback = _rollback_evidence(repo_info)
+
+    if phase1.get("status") == "blocked":
+        blockers.append("phase1_readiness_blocked")
+        remediations.append("Resolve the blocking gates in the canonical Phase 1 readiness report before release promotion.")
+    if operator_stack["status"] != "passed":
+        blockers.append(f"operator_stack_{operator_stack['status']}")
+        remediations.append("Run the existing bounded local operator-stack rehearsal; do not infer runtime readiness from static configuration.")
+    if event_read_path["status"] != "passed":
+        blockers.append(f"event_read_path_{event_read_path['status']}")
+        remediations.append("Configure a sanitized canonical event JSONL read path under artifacts/ and verify it through the existing read view.")
+    if rollback["status"] != "passed":
+        blockers.append("rollback_evidence_unavailable")
+        remediations.append("Identify a prior known-good revision before any deployment promotion.")
+
+    # Executed failures take precedence over unavailable evidence. Missing CI
+    # evidence remains ci_unavailable and cannot be hidden by local passes.
+    hvp_status = hvp_summary.get("status")
+    if hvp_status != "passed":
+        if hvp_status in VALID_READINESS_STATES:
+            blockers.append(f"high_value_path_{hvp_status}")
+        else:
+            blockers.append("high_value_path_malformed")
+    ci_state = ci_eval.get("state")
+    if ci_state != "passed":
+        blockers.append(f"ci_evidence_{ci_state}")
 
     # Final readiness state resolution
     if any("live_mutations_forbidden" in b for b in blockers):
@@ -431,8 +673,12 @@ def execute_promotion_rehearsal(
         readiness_state = "failed"
     elif any("missing_python_module" in b for b in blockers):
         readiness_state = "failed"
-    elif len(blockers) > 0:
-        readiness_state = "failed"
+    elif hvp_status in {"failed", "timed_out", "collection_failed", "malformed", "blocked", "unavailable", "not_run"}:
+        readiness_state = hvp_status
+    elif ci_state in {"failed", "timed_out", "unavailable", "ci_unavailable"}:
+        readiness_state = ci_state
+    elif phase1.get("status") == "blocked" or len(blockers) > 0:
+        readiness_state = "blocked"
     else:
         readiness_state = "passed"
 
@@ -454,6 +700,10 @@ def execute_promotion_rehearsal(
         ci_evidence=ci_eval,
         coderos_status=coderos,
         high_value_path_summary=hvp_summary,
+        phase1_readiness=phase1,
+        operator_stack=operator_stack,
+        event_read_path=event_read_path,
+        rollback_evidence=rollback,
         blockers=sorted(set(blockers)),
         remediations=sorted(set(remediations)),
         safe_next_action=safe_next_action,

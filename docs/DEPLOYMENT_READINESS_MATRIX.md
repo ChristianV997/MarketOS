@@ -17,7 +17,17 @@ Security: artifact-store traversal still described by #211. Mutation flags defau
 Persistence: JSONL under `artifacts/`. Compose Postgres/Redis are provisioned for staging persistence.
 Rollback: stop the process; delete fixture outputs only.
 Cost: $0.
-Readiness: `ready_local_dry_run`.
+The environment contract can report `ready_local_dry_run` because the offline
+process is safe to start without credentials. That is not release evidence.
+`python scripts/deployment_diagnostics.py --promotion-rehearsal --json` is the
+composed release rehearsal: it executes the bounded high-value-path harness,
+embeds the canonical Phase 1 report, checks the configured event read path and
+rollback revision, and reports missing operator-stack or CI evidence without
+turning local execution into a release pass. Zero-step or runnerless CI remains
+`ci_unavailable`; a local pass cannot replace it.
+Rollback: stop the process; delete fixture outputs only.
+Readiness: `ready_local_dry_run` for environment safety, but release promotion
+remains blocked until the composed evidence bundle is complete.
 
 ## 2. Isolated test worktree
 

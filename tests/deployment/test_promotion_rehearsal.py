@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 
 from backend.deployment.promotion_fixtures import (
     fixture_coderos_unavailable,
@@ -39,6 +40,7 @@ from backend.deployment.promotion_rehearsal import (
     execute_promotion_rehearsal,
     redact_secrets,
 )
+from backend.deployment import promotion_rehearsal as rehearsal_module
 
 
 def test_local_dry_run_requires_zero_credentials() -> None:
@@ -46,10 +48,69 @@ def test_local_dry_run_requires_zero_credentials() -> None:
         environment="local_dry_run",
         environ={},
     )
-    assert bundle.readiness_state == "passed"
-    assert len(bundle.blockers) == 0
+    assert bundle.readiness_state == "ci_unavailable"
+    assert "ci_evidence_ci_unavailable" in bundle.blockers
     assert bundle.credential_classification.get("no_credentials_required") is True
-    assert bundle.readiness_state == "passed"
+    assert bundle.high_value_path_summary["evidence_classification"] == "actual_executed"
+    assert bundle.high_value_path_summary["status"] == "passed"
+
+
+def test_local_execution_does_not_self_attest_release_readiness() -> None:
+    bundle = execute_promotion_rehearsal(
+        environment="local_dry_run",
+        environ={},
+        ci_override={"ci_status": "passed", "total_steps": 4, "runners_active": 1, "logs_available": True},
+        harness_results={
+            "status": "passed",
+            "all_paths_passed": True,
+            "paths_executed": 9,
+            "bit_identity_confirmed": True,
+            "evidence_classification": "actual_executed",
+        },
+    )
+    assert bundle.ci_evidence["state"] == "passed"
+    assert bundle.readiness_state != "passed"
+    assert bundle.phase1_readiness["status"] == "blocked"
+    assert bundle.operator_stack["status"] in {"unavailable", "not_run"}
+
+
+def test_rehearsal_surfaces_are_sanitized_and_deterministic() -> None:
+    first = execute_promotion_rehearsal(environment="local_dry_run", environ={})
+    second = execute_promotion_rehearsal(environment="local_dry_run", environ={})
+    assert first.deterministic_hash == second.deterministic_hash
+    assert first.event_read_path["status"] == "unavailable"
+    assert first.rollback_evidence["status"] == "passed"
+    assert first.to_dict()["phase1_readiness"]["network_calls"] is False
+    assert "CJ_API_KEY" not in json.dumps(first.to_dict())
+
+
+@pytest.mark.parametrize("marker", ["stale", "partial"])
+def test_stale_or_partial_local_evidence_cannot_pass(marker: str) -> None:
+    bundle = execute_promotion_rehearsal(
+        environment="local_dry_run",
+        environ={},
+        ci_override={"ci_status": "passed", "total_steps": 4, "runners_active": 1, "logs_available": True},
+        harness_results={
+            "status": "passed",
+            "all_paths_passed": True,
+            "paths_executed": 9,
+            "evidence_classification": "actual_executed",
+            marker: True,
+        },
+    )
+    assert bundle.high_value_path_summary["status"] == "unavailable"
+    assert bundle.readiness_state == "unavailable"
+
+
+def test_malformed_event_read_path_fails_closed(tmp_path, monkeypatch) -> None:
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    event_path = artifact_root / "events.jsonl"
+    event_path.write_text('{"not_an_event": true}\n', encoding="utf-8")
+    monkeypatch.setattr(rehearsal_module, "ROOT", tmp_path)
+    result = rehearsal_module._event_read_path_evidence({"MARKETOS_EVENT_READ_JSONL_PATH": str(event_path)})
+    assert result["status"] == "malformed"
+    assert result["event_count"] == 0
 
 
 def test_staging_rejects_weak_or_default_passwords() -> None:
@@ -114,6 +175,18 @@ def test_zero_step_ci_classification() -> None:
     bundle = fixture_zero_step_ci()
     assert bundle.ci_evidence["state"] in ("ci_unavailable", "unavailable")
     assert bundle.ci_evidence["state"] != "passed"
+
+
+def test_executed_failure_and_timeout_are_not_erased_by_missing_logs() -> None:
+    failed = classify_ci_evidence("failed", total_steps=3, runners_active=1, logs_available=False)
+    timed_out = classify_ci_evidence("timed_out", total_steps=3, runners_active=1, logs_available=False)
+    assert failed["state"] == "failed"
+    assert timed_out["state"] == "timed_out"
+
+
+def test_success_without_logs_remains_ci_unavailable() -> None:
+    result = classify_ci_evidence("passed", total_steps=3, runners_active=1, logs_available=False)
+    assert result["state"] == "ci_unavailable"
 
 
 def test_executed_failures_remain_failed(tmp_path: Path) -> None:
@@ -191,6 +264,6 @@ def test_promotion_rehearsal_does_not_replace_quality_gate() -> None:
         environment="local_dry_run",
         environ={},
     )
-    assert "promotion rehearsal" in bundle.safe_next_action.lower() or "staging" in bundle.safe_next_action.lower()
+    assert bundle.readiness_state != "passed"
     remediations_str = " ".join(bundle.remediations)
     assert "run_local_quality_gate.py" in remediations_str or "session_finish.py" in remediations_str or "uvicorn" in remediations_str

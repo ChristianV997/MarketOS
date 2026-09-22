@@ -4,6 +4,7 @@ def test_missing_credentials_blocks_without_values():
  r=build_readiness(environ={"MARKETOS_EVENT_READ_JSONL_PATH":"artifacts/events.jsonl"}).to_dict()
  assert r["overall_status"]=="blocked" and r["secret_presence_redacted"]["CJ_API_KEY"] is False
  assert "CJ_API_KEY" not in str(r["secret_presence_redacted"].values())
+ assert r["readiness_endpoint_status"] == "not_run"
 
 def test_readonly_cj_configuration_is_ready():
  env={"MARKETOS_SUPPLIER_PROVIDER":"cj","MARKETOS_SUPPLIER_AUTH_READONLY":"1","CJ_EMAIL":"operator@example.test","CJ_API_KEY":"secret","MARKETOS_EVENT_READ_JSONL_PATH":"artifacts/events.jsonl","MARKETOS_EVENT_WRITE_JSONL_PATH":"artifacts/events.jsonl"}
