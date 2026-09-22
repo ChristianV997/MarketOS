@@ -82,12 +82,21 @@ def test_client_safe_projection_excludes_internal_and_unsafe_fields() -> None:
     assert result.client_safe_projection["report_ids"] == ["report-safe-001"]
 
 
-def test_nested_non_string_facts_are_not_exported() -> None:
-    result = synthesize_portfolio(load_fixture("nested_secret_adversarial.json"))
-    serialized = json.dumps(result.to_dict(), sort_keys=True).lower()
+def test_nested_sensitive_facts_fail_closed() -> None:
+    with pytest.raises(PortfolioInputError, match="sensitive field"):
+        synthesize_portfolio(load_fixture("nested_secret_adversarial.json"))
 
-    assert "nested-secret-marker" not in serialized
+
+def test_nested_non_string_facts_are_ignored() -> None:
+    reports = load_fixture("complete_portfolio.json")
+    reports[0]["facts"]["market_research"].append({"summary": "not a persisted string fact"})
+
+    result = synthesize_portfolio(reports)
+
+    assert "not a persisted string fact" not in json.dumps(result.to_dict(), sort_keys=True)
     assert "api_key" not in json.dumps(result.client_safe_projection, sort_keys=True).lower()
+
+
 
 
 def test_duplicate_report_id_and_missing_fingerprint_fail_closed() -> None:

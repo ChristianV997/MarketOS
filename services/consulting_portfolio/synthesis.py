@@ -204,6 +204,7 @@ def _normalize_reports(reports: Sequence[Mapping[str, Any]]) -> list[dict[str, A
         if not isinstance(facts, Mapping):
             raise PortfolioInputError(f"facts must be a mapping for {report_id}")
         _reject_external_claims(report)
+        _reject_sensitive_content(facts)
         seen.add(report_id)
         normalized.append({
             "report_id": report_id,
@@ -229,6 +230,17 @@ def _reject_external_claims(value: Any) -> None:
     elif isinstance(value, (list, tuple)):
         for child in value:
             _reject_external_claims(child)
+
+
+def _reject_sensitive_content(value: Any) -> None:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if str(key).strip().lower() in _CLIENT_FORBIDDEN_KEYS:
+                raise PortfolioInputError(f"sensitive field rejected: {key}")
+            _reject_sensitive_content(child)
+    elif isinstance(value, (list, tuple, set)):
+        for child in value:
+            _reject_sensitive_content(child)
 
 
 def _client_projection(**data: Any) -> dict[str, Any]:
