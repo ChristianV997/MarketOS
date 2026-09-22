@@ -67,6 +67,7 @@ def test_each_priority_package_produces_a_valid_projection_row(package_id):
     assert projection["report_version"] == PROJECTION_REPORT_VERSION
     assert projection["engagements"][0]["service_id"] == pkg.package_id
     assert projection["engagements"][0]["package_id"] == pkg.package_id
+    assert projection["workspace_id"] == row["workspace_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -203,17 +204,31 @@ def test_replaying_the_same_row_twice_does_not_duplicate_engagements():
     assert projection["engagements"][0] == projection["engagements"][1]
 
 
+def test_projection_rejects_rows_from_multiple_workspaces():
+    _, _, _, _, row_a = _full_row("product-validation-sprint", client_id="client-a", registry_path="/tmp/never-written-service-delivery-projection-test-mixed-a.json")
+    _, _, _, _, row_b = _full_row("product-validation-sprint", client_id="client-b", registry_path="/tmp/never-written-service-delivery-projection-test-mixed-b.json")
+    row_b = {**row_b, "workspace_id": "workspace-other"}
+    with pytest.raises(ValueError, match="cannot combine workspaces"):
+        build_service_engagement_projection([row_a, row_b])
+
+
 # ---------------------------------------------------------------------------
 # Malformed input
 # ---------------------------------------------------------------------------
 
 def test_malformed_row_missing_engagement_id_still_produces_a_checkable_projection():
-    projection = build_service_engagement_projection([{"not_an_engagement": True}])
+    projection = build_service_engagement_projection([{"workspace_id": "workspace-malformed", "not_an_engagement": True}])
     # This producer does not validate row shape beyond the export boundary
     # (that is the API route's job per PR #271); it only guarantees the
     # envelope itself is well-formed and leakage-free.
-    assert projection["engagements"] == [{"not_an_engagement": True}]
+    assert projection["engagements"] == [{"workspace_id": "workspace-malformed", "not_an_engagement": True}]
+    assert projection["workspace_id"] == "workspace-malformed"
     assert projection["read_only"] is True
+
+
+def test_projection_rejects_rows_without_workspace_identity():
+    with pytest.raises(ValueError, match="require a workspace identity"):
+        build_service_engagement_projection([{"engagement_id": "eng-1"}])
 
 
 def test_empty_projection_is_still_a_valid_safe_envelope():

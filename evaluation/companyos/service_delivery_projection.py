@@ -278,13 +278,29 @@ def build_service_engagement_projection(
 
     Raises ``ValueError`` if the assembled envelope fails
     ``check_workspace_leakage`` -- this producer fails closed rather than
-    emitting a payload the API route would have to reject anyway.
+    emitting a payload the API route would have to reject anyway. Every
+    non-empty projection is scoped to exactly one workspace; the API route
+    binds that scope to its authenticated request principal.
     """
     from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
+
+    workspace_values: list[str] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise ValueError("service delivery projection rows require a workspace identity")
+        workspace_id = row.get("workspace_id")
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise ValueError("service delivery projection rows require a workspace identity")
+        workspace_values.append(workspace_id)
+    workspace_ids = set(workspace_values)
+    if len(workspace_ids) > 1:
+        raise ValueError("service delivery projection cannot combine workspaces")
+    workspace_id = next(iter(workspace_ids), None)
 
     payload: dict[str, Any] = {
         "report_version": PROJECTION_REPORT_VERSION,
         "schema_version": PROJECTION_REPORT_VERSION,
+        "workspace_id": workspace_id,
         "availability": availability,
         "generated_at": generated_at,
         "engagements": [dict(row) for row in rows],

@@ -24,6 +24,12 @@ function: given an engagement, package, economics result, data-quality
 assessment, and deliverable, it returns one `ServiceDeliveryArtifact` value.
 It stores nothing itself.
 
+`build_service_engagement_projection()` scopes every non-empty envelope to
+exactly one `workspace_id` and rejects rows from different workspaces or rows
+without a workspace identity. The read-only API route must bind that envelope
+identity to its authenticated request principal before serving it; a payload
+field alone is not authentication.
+
 ## Compatibility with PR #247
 
 As of this writing, PR #247's research-to-decision projection module does
