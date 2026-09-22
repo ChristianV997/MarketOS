@@ -78,6 +78,16 @@ def _git_value(*args: str) -> str:
         return "unavailable"
 
 
+def _is_mainline_identity(head_sha: str, origin_main_sha: str, merge_base: str) -> bool:
+    """Return true only when the report is executing on refreshed mainline."""
+    return (
+        head_sha != "unavailable"
+        and origin_main_sha != "unavailable"
+        and merge_base != "unavailable"
+        and head_sha == origin_main_sha == merge_base
+    )
+
+
 def _status_hash() -> str:
     try:
         result = subprocess.run(
@@ -575,6 +585,10 @@ def _service_delivery_authority_status() -> dict[str, Any]:
 
 
 def run_acceptance() -> dict[str, Any]:
+    head_sha = _git_value("rev-parse", "HEAD")
+    origin_main_sha = _git_value("rev-parse", "origin/main")
+    merge_base = _git_value("merge-base", "HEAD", "origin/main")
+    mainline_identity = _is_mainline_identity(head_sha, origin_main_sha, merge_base)
     before_status = _status_hash()
     replay = _run_replay()
     dogfood = _run_dogfood(replay)
@@ -591,14 +605,15 @@ def run_acceptance() -> dict[str, Any]:
         "safe_export": safe_export["status"] == PASS,
         "service_delivery_status_explicit": service_delivery["status"] in {PASS, UNAVAILABLE},
         "worktree_unchanged": before_status != "unavailable" and before_status == after_status,
+        "mainline_identity": mainline_identity,
     }
     return {
         "schema": SCHEMA,
         "status": PASS if all(checks.values()) else BLOCKED,
-        "status_semantics": "passed means the merged mainline scope passed; unavailable upstream authorities are never treated as passed",
-        "head_sha": _git_value("rev-parse", "HEAD"),
-        "origin_main_sha": _git_value("rev-parse", "origin/main"),
-        "merge_base": _git_value("merge-base", "HEAD", "origin/main"),
+        "status_semantics": "passed requires exact refreshed mainline identity; non-mainline worktrees are blocked and unavailable upstream authorities are never treated as passed",
+        "head_sha": head_sha,
+        "origin_main_sha": origin_main_sha,
+        "merge_base": merge_base,
         "merged_authorities": {
             "research_to_decision": "scripts/research_to_decision.py",
             "commercial_replay": "scripts/run_commercial_replay_integration.py",

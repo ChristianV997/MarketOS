@@ -35,6 +35,8 @@ EXPECTED_REPLAY_HASH_DIGESTS = {
 @pytest.fixture(scope="module")
 def report() -> dict:
     result = acceptance.run_acceptance()
+    if not result["checks"]["mainline_identity"]:
+        pytest.skip("mainline acceptance is not applicable outside exact refreshed origin/main")
     assert result["status"] == "passed", result
     return result
 
@@ -44,6 +46,27 @@ def _scenario_reports(report: dict) -> dict[str, dict]:
         item["summary"]["scenario"]: item
         for item in report["replay"]["scenarios"]
     }
+
+
+def test_non_mainline_execution_fails_closed(monkeypatch):
+    refs = {
+        ("rev-parse", "HEAD"): "head-sha",
+        ("rev-parse", "origin/main"): "main-sha",
+        ("merge-base", "HEAD", "origin/main"): "merge-base-sha",
+    }
+    monkeypatch.setattr(acceptance, "_git_value", lambda *args: refs[args])
+    monkeypatch.setattr(acceptance, "_status_hash", lambda: "stable-status")
+    monkeypatch.setattr(acceptance, "_run_replay", lambda: {"status": acceptance.PASS})
+    monkeypatch.setattr(acceptance, "_run_dogfood", lambda replay: {"status": acceptance.PASS})
+    monkeypatch.setattr(acceptance, "_run_direct_commerce_scope", lambda: {"status": acceptance.PASS})
+    monkeypatch.setattr(acceptance, "_run_cost_and_identity_probes", lambda: {"status": acceptance.PASS})
+    monkeypatch.setattr(acceptance, "_run_safe_export_probe", lambda: {"status": acceptance.PASS})
+    monkeypatch.setattr(acceptance, "_service_delivery_authority_status", lambda: {"status": acceptance.UNAVAILABLE})
+
+    result = acceptance.run_acceptance()
+
+    assert result["checks"]["mainline_identity"] is False
+    assert result["status"] == "blocked"
 
 
 def test_acceptance_report_is_mainline_only_and_versioned(report: dict):
