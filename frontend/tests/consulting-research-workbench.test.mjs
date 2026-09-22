@@ -26,9 +26,17 @@ test("fixture packet keeps section order and never becomes live proof", () => {
   assert.equal(exported.accepted, true);
   assert.equal(exported.payload.live_validated, false);
   assert.equal(exported.payload.launch_authorized, false);
-  const dump = JSON.stringify(exported.payload);
-  assert.doesNotMatch(dump, /internal_prompt|internal_formula|sk-live-/);
-  assert.ok(exported.payload.omitted.includes("credentials"));
+  const { omitted, ...body } = exported.payload;
+  assert.deepEqual(omitted, [
+    "internal_prompt",
+    "internal_formula",
+    "source_code",
+    "credentials",
+    "raw_provider_payload",
+    "hidden_heuristics",
+    "cross_client_data",
+  ]);
+  assert.doesNotMatch(JSON.stringify(body), /internal_prompt|internal_formula|sk-live-/);
 });
 
 test("live_validated claims normalize to unavailable and unknown confidence stays null", () => {
