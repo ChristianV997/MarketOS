@@ -108,6 +108,20 @@ existing operator outcomes `reject`, `hold_for_manual_review`,
 `needs_evidence`, `deferred`, `candidate_only`, and `launch_candidate` without
 granting merge, launch, spend, or provider authority.
 
+Supplier import fields `human_confirmed`/`human_reviewed` and `evidence_state`
+are untrusted source claims. The report preserves them as
+`supplier_claimed_human_confirmation` and `source_claimed_state`; the effective
+evidence state comes from the existing parser mode (JSON is `fixture`, CSV is
+`manual`). Imported rows cannot attest their own review. A local operator may
+separately pass the repeatable CLI option
+`--confirm-supplier-document OFFER_ID EXACT_SKU REFERENCE` after reviewing the
+referenced material. The tuple must match the normalized offer exactly, and
+only `manual` evidence can reach `supplier_documented`; fixture evidence stays
+at its fixture ceiling. This records a local assertion, not an authenticated
+identity, document-content verification, or supplier-authenticity finding.
+The report retains the reference only as a hashed evidence ID; it does not
+store or validate the referenced document itself.
+
 ## Evidence mode
 
 This path is offline and read-only. A generated packet is a reproducible
