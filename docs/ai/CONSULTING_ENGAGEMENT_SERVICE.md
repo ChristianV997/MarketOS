@@ -15,7 +15,7 @@ validation, launch authorization, or evidence of a commercial transaction.
 
 ## Public Contract
 
-Use `build_consulting_engagement(request, workspace=...)` with a
+Use `build_consulting_engagement(request, workspace=..., artifact_store=...)` with a
 `ConsultingEngagementRequest` or a mapping accepted by
 `ConsultingEngagementRequest.from_mapping`. The request contains:
 
@@ -48,7 +48,10 @@ request mapping
   -> TrustOS export_client_evidence allowlist
 ```
 
-The orchestrator never accepts a raw workspace ID as authority. The supplied
+The orchestrator never accepts a raw workspace ID as authority. The caller
+supplies the already workspace-bound `ArtifactStore`; the orchestrator checks
+that its bound workspace matches the registered identity before path
+validation. The supplied
 `ClientWorkspace` must be registered and must exactly match the request's
 workspace identity. Component reports from another workspace are rejected.
 TrustOS receives only its existing safe fields: workspace, status, blockers,
@@ -67,7 +70,8 @@ Evidence class and evidence state remain separate:
 - even that summary does not grant launch authorization or external-action
   authority;
 - `unknown` offering kind is supported as an input but fails closed until the
-  offering kind is confirmed.
+  offering kind is confirmed; explicit deliverables do not create an execution
+  plan while the offering kind is unknown.
 
 The service does not infer supplier proof, customer authorization, economics,
 compliance status, or legal clearance from attention, market, fixture, or

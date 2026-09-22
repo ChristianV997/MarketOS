@@ -152,7 +152,13 @@ class ConsultingEngagementOrchestrator:
             raise ConsultingEngagementError("workspace_identity_rejected")
         return registered
 
-    def build(self, request: ConsultingEngagementRequest | Mapping[str, Any], *, workspace: ClientWorkspace) -> ConsultingEngagementResult:
+    def build(
+        self,
+        request: ConsultingEngagementRequest | Mapping[str, Any],
+        *,
+        workspace: ClientWorkspace,
+        artifact_store: ArtifactStore,
+    ) -> ConsultingEngagementResult:
         try:
             request = request if isinstance(request, ConsultingEngagementRequest) else ConsultingEngagementRequest.from_mapping(request)
         except SchemaValidationError as exc:
@@ -167,10 +173,14 @@ class ConsultingEngagementOrchestrator:
             blockers = ["offering_kind_unknown"]
         else:
             blockers = []
-        plan = tuple(_plan_item(item, self.service_contract_registry) for item in selected if item != "client_safe_export")
+        plan = () if request.offering_kind == "unknown" else tuple(
+            _plan_item(item, self.service_contract_registry) for item in selected if item != "client_safe_export"
+        )
         blockers.extend(f"deliverable_{item.status}:{item.deliverable}" for item in plan if item.status in {"blocked", "unavailable"})
         if request.conflicts:
             blockers.append("evidence_conflict")
+        if any(item.state == "missing" for item in request.evidence):
+            blockers.append("evidence_missing")
         if any(item.state in {"stale", "conflicting", "blocked", "unavailable"} for item in request.evidence):
             blockers.append("evidence_not_current")
         blockers.extend(f"missing_information:{item}" for item in request.missing_information)
@@ -183,8 +193,10 @@ class ConsultingEngagementOrchestrator:
             if blockers else "Review the client-safe projection; no live action or launch authorization is granted."
         )
         engagement_id = _stable_id(request)
+        if not isinstance(artifact_store, ArtifactStore) or artifact_store.workspace.to_dict() != registered.to_dict():
+            raise ConsultingEngagementError("artifact_workspace_boundary_rejected") from None
         try:
-            ArtifactStore(registered, registry=self.workspace_registry).path_for(engagement_id, "engagement.json")
+            artifact_store.path_for(engagement_id, "engagement.json")
         except Exception:
             raise ConsultingEngagementError("artifact_workspace_boundary_rejected") from None
 
@@ -277,6 +289,7 @@ def build_consulting_engagement(
     request: ConsultingEngagementRequest | Mapping[str, Any],
     *,
     workspace: ClientWorkspace,
+    artifact_store: ArtifactStore,
     workspace_registry: WorkspaceRegistry | None = None,
     report_registry: ReportRegistry | None = None,
     service_contract_registry: ServiceContractRegistry | None = None,
@@ -285,7 +298,7 @@ def build_consulting_engagement(
         workspace_registry=workspace_registry,
         report_registry=report_registry,
         service_contract_registry=service_contract_registry,
-    ).build(request, workspace=workspace)
+    ).build(request, workspace=workspace, artifact_store=artifact_store)
 
 
 def render_consulting_engagement_markdown(result: ConsultingEngagementResult) -> str:

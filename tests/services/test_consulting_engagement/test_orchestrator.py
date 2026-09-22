@@ -8,6 +8,7 @@ import pytest
 from backend.organization.commercial_report import CommercialReport
 from backend.organization.report_registry import ReportRegistry
 from backend.organization.service_contract import ServiceContractRegistry
+from backend.workspaces.artifact_store import ArtifactStore
 from backend.workspaces.client_workspace import ClientWorkspace
 from backend.workspaces.registry import WorkspaceRegistry
 from services.consulting_engagement import (
@@ -53,11 +54,17 @@ def load_request(name: str) -> ConsultingEngagementRequest:
     return ConsultingEngagementRequest.from_mapping(json.loads((FIXTURE_DIR / name).read_text(encoding="utf-8")))
 
 
+def store_for(authorities):
+    workspace_registry, _, workspace = authorities
+    return ArtifactStore(workspace, workspace_registry)
+
+
 def build_fixture(name: str, authorities):
     workspace_registry, report_registry, workspace = authorities
     return build_consulting_engagement(
         load_request(name),
         workspace=workspace,
+        artifact_store=store_for(authorities),
         workspace_registry=workspace_registry,
         report_registry=report_registry,
     )
@@ -107,6 +114,35 @@ def test_unknown_offering_is_supported_but_fail_closed(authorities):
     assert result.client_safe_projection["offering_kind"] == "unknown"
 
 
+def test_missing_evidence_is_blocked_without_zero_filling(authorities):
+    result = build_fixture("missing_evidence.json", authorities)
+
+    assert result.status == "blocked"
+    assert result.blockers == ("evidence_missing",)
+    assert result.evidence_summary["state_counts"] == {"missing": 1}
+    assert result.evidence_summary["launch_authorized"] is False
+    assert "economics" not in json.dumps(result.to_dict(), sort_keys=True)
+
+
+def test_unknown_offering_never_plans_selected_deliverables(authorities):
+    workspace_registry, report_registry, workspace = authorities
+    request = load_request("unknown_offering.json")
+    request = ConsultingEngagementRequest.from_mapping(
+        {**request.to_dict(), "selected_deliverables": ("product_research", "client_safe_export")}
+    )
+
+    result = build_consulting_engagement(
+        request,
+        workspace=workspace,
+        artifact_store=store_for(authorities),
+        workspace_registry=workspace_registry,
+        report_registry=report_registry,
+    )
+
+    assert result.status == "blocked"
+    assert result.execution_plan == ()
+
+
 def test_stale_evidence_is_not_launch_authorization(authorities):
     result = build_fixture("stale_evidence.json", authorities)
 
@@ -135,6 +171,7 @@ def test_product_service_and_hybrid_module_selection_is_deterministic(authoritie
         result = build_consulting_engagement(
             request,
             workspace=workspace,
+            artifact_store=store_for(authorities),
             workspace_registry=workspace_registry,
             report_registry=report_registry,
         )
@@ -168,6 +205,29 @@ def test_workspace_identity_mismatch_is_rejected(authorities):
         build_consulting_engagement(
             request,
             workspace=forged,
+            artifact_store=store_for(authorities),
+            workspace_registry=workspace_registry,
+            report_registry=report_registry,
+        )
+
+
+def test_artifact_store_identity_mismatch_is_rejected(authorities):
+    workspace_registry, report_registry, workspace = authorities
+    other = workspace_registry.register(
+        ClientWorkspace(
+            workspace_id="fixture-other-artifact-client",
+            name="other artifact client",
+            workspace_type="client_service",
+            mode="client_service",
+        )
+    )
+    request = load_request("complete_product.json")
+
+    with pytest.raises(ConsultingEngagementError, match="artifact_workspace_boundary_rejected"):
+        build_consulting_engagement(
+            request,
+            workspace=workspace,
+            artifact_store=ArtifactStore(other, workspace_registry),
             workspace_registry=workspace_registry,
             report_registry=report_registry,
         )
@@ -188,6 +248,7 @@ def test_unregistered_workspace_is_rejected(authorities):
         build_consulting_engagement(
             request,
             workspace=unknown,
+            artifact_store=store_for(authorities),
             workspace_registry=workspace_registry,
             report_registry=report_registry,
         )
@@ -223,6 +284,7 @@ def test_cross_workspace_component_report_is_rejected(authorities):
         build_consulting_engagement(
             request,
             workspace=workspace,
+            artifact_store=store_for(authorities),
             workspace_registry=workspace_registry,
             report_registry=report_registry,
         )
@@ -237,6 +299,7 @@ def test_secret_shaped_request_is_rejected_before_orchestration(authorities):
                 "scope": "review bearer fixture-token",
             },
             workspace=workspace,
+            artifact_store=store_for(authorities),
             workspace_registry=workspace_registry,
             report_registry=report_registry,
         )
@@ -251,6 +314,7 @@ def test_optional_capability_degrades_without_raw_internals(authorities):
     result = build_consulting_engagement(
         request,
         workspace=workspace,
+        artifact_store=store_for(authorities),
         workspace_registry=workspace_registry,
         report_registry=report_registry,
         service_contract_registry=ServiceContractRegistry([]),
@@ -319,6 +383,7 @@ def test_evidence_classes_and_authority_are_preserved(authorities):
     result = build_consulting_engagement(
         request,
         workspace=workspace,
+        artifact_store=store_for(authorities),
         workspace_registry=workspace_registry,
         report_registry=report_registry,
     )
