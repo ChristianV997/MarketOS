@@ -277,6 +277,79 @@ def classify_ci_evidence(
     }
 
 
+_GITHUB_ACTIONS_CONCLUSION_TO_CI_STATUS = {
+    "success": "passed",
+    "failure": "failed",
+    "timed_out": "timed_out",
+}
+
+
+def classify_github_actions_job(job: Mapping[str, Any] | None, *, logs_available: bool = False) -> dict[str, Any]:
+    """Classify a real GitHub Actions job response (the exact shape the
+    Jobs API returns: ``runner_id`` and a ``steps`` list) fail-closed.
+
+    A pure adapter over ``classify_ci_evidence`` -- it derives that
+    function's abstract ``total_steps``/``runners_active``/``ci_status``
+    parameters from the job's real fields and delegates to it, rather than
+    creating a second CI-admissibility authority. ``runner_id == 0`` (the
+    value GitHub reports when a workflow never actually started, before a
+    runner was ever assigned) and an empty ``steps`` list are both treated
+    as no execution occurred, never as zero passing steps. ``job=None``
+    (the run/job could not be fetched at all -- API error, no permission,
+    or the run does not exist) and a non-mapping ``job`` both fail closed
+    to ``ci_unavailable`` rather than raising or being silently ignored.
+
+    ``logs_available`` defaults to ``False``: unless a caller explicitly
+    confirms it fetched the job's logs, this never assumes they exist --
+    matching ``classify_ci_evidence``'s existing rule that an executed
+    "success" conclusion without verified logs is not admissible evidence.
+    """
+    if job is None:
+        return {
+            "state": "ci_unavailable",
+            "total_steps": 0,
+            "runners_active": 0,
+            "logs_available": logs_available,
+            "runner_id": None,
+            "steps_executed": 0,
+            "runner_assigned": False,
+            "classification_reason": "job_unavailable: the GitHub Actions job could not be fetched (missing run, no access, or an API error).",
+        }
+    if not isinstance(job, Mapping):
+        return {
+            "state": "ci_unavailable",
+            "total_steps": 0,
+            "runners_active": 0,
+            "logs_available": logs_available,
+            "runner_id": None,
+            "steps_executed": 0,
+            "runner_assigned": False,
+            "classification_reason": f"job_malformed: expected a GitHub Actions job mapping, got {type(job).__name__}.",
+        }
+
+    steps = job.get("steps")
+    steps_list = steps if isinstance(steps, list) else []
+    steps_executed = len(steps_list)
+
+    runner_id_raw = job.get("runner_id", 0)
+    runner_id = int(runner_id_raw) if isinstance(runner_id_raw, (int, float)) and not isinstance(runner_id_raw, bool) else 0
+    runner_assigned = runner_id != 0
+
+    conclusion = job.get("conclusion")
+    ci_status = _GITHUB_ACTIONS_CONCLUSION_TO_CI_STATUS.get(str(conclusion), "ci_unavailable")
+
+    result = classify_ci_evidence(
+        ci_status=ci_status,
+        total_steps=steps_executed,
+        runners_active=1 if runner_assigned else 0,
+        logs_available=logs_available,
+    )
+    result["runner_id"] = runner_id
+    result["steps_executed"] = steps_executed
+    result["runner_assigned"] = runner_assigned
+    return result
+
+
 def _harness_status(summary: Mapping[str, Any]) -> str:
     """Reduce the existing harness counts without hiding an executed failure."""
     for status in ("failed", "timed_out", "collection_failed", "malformed", "blocked", "unavailable", "not_run"):
@@ -467,6 +540,7 @@ class PromotionRehearsalBundle:
     live_mutation_guard: dict[str, Any]
     diagnostics_summary: dict[str, Any]
     ci_evidence: dict[str, Any]
+    ci_admissibility_diagnostic: dict[str, Any]
     coderos_status: dict[str, Any]
     high_value_path_summary: dict[str, Any]
     phase1_readiness: dict[str, Any]
@@ -490,6 +564,7 @@ class PromotionRehearsalBundle:
             "live_mutation_guard": self.live_mutation_guard,
             "diagnostics_summary": self.diagnostics_summary,
             "ci_evidence": self.ci_evidence,
+            "ci_admissibility_diagnostic": self.ci_admissibility_diagnostic,
             "coderos_status": self.coderos_status,
             "high_value_path_summary": self.high_value_path_summary,
             "phase1_readiness": self.phase1_readiness,
@@ -514,6 +589,7 @@ class PromotionRehearsalBundle:
             "credential_classification": self.credential_classification,
             "live_mutation_guard": self.live_mutation_guard,
             "ci_evidence_state": self.ci_evidence.get("state", ""),
+            "ci_admissibility_diagnostic_status": self.ci_admissibility_diagnostic.get("status", ""),
             "coderos_status": self.coderos_status.get("status", ""),
             "high_value_path_status": self.high_value_path_summary.get("status", ""),
             "phase1_status": self.phase1_readiness.get("status", ""),
@@ -531,9 +607,20 @@ def execute_promotion_rehearsal(
     environ: Mapping[str, str] | None = None,
     harness_results: dict[str, Any] | None = None,
     ci_override: dict[str, Any] | None = None,
+    github_actions_job: Mapping[str, Any] | None = None,
+    logs_available: bool = False,
     dockerfile_path: Path | None = None,
 ) -> PromotionRehearsalBundle:
-    """Execute complete deployment promotion rehearsal across composed authorities."""
+    """Execute complete deployment promotion rehearsal across composed authorities.
+
+    ``github_actions_job``, when supplied, is a real GitHub Actions Jobs
+    API response (``{"runner_id": ..., "steps": [...], "conclusion": ...}``)
+    classified via ``classify_github_actions_job`` -- it takes precedence
+    over the abstract ``ci_override`` shape when both are supplied, since
+    it carries more specific, directly-observed evidence. ``logs_available``
+    applies only to the ``github_actions_job`` path (``ci_override`` already
+    carries its own ``logs_available`` key).
+    """
     if environment not in VALID_PROMOTION_ENVIRONMENTS:
         raise ValueError(f"Invalid environment '{environment}'. Must be one of {sorted(VALID_PROMOTION_ENVIRONMENTS)}")
 
@@ -574,7 +661,34 @@ def execute_promotion_rehearsal(
         blockers.append(f"live_mutations_forbidden in {environment}: Found active flags: {active_mutations}")
         remediations.append(f"Unset or disable live mutation flags: {active_mutations}")
 
-    # 6. Diagnostics
+    # 6. CI evidence classification. github_actions_job (real Jobs API
+    # evidence: runner_id, steps) takes precedence over the abstract
+    # ci_override shape when both are supplied, since it is the more
+    # specific, directly-observed input. Whichever path runs, its
+    # classified state/step-count feeds diagnose_zero_step_ci below
+    # (via ci_evidence_for_diagnostics) so the administrator-facing
+    # diagnostic always reflects what was actually observed rather than
+    # only doing so for the github_actions_job path specifically.
+    if github_actions_job is not None:
+        ci_eval = classify_github_actions_job(github_actions_job, logs_available=logs_available)
+        runner_id_for_diagnostics = ci_eval["runner_id"]
+    elif ci_override is not None:
+        ci_eval = classify_ci_evidence(**ci_override)
+        runner_id_for_diagnostics = None
+    else:
+        # Default environment CI check: local worktrees have no active CI runners attached
+        ci_eval = classify_ci_evidence(ci_status="ci_unavailable", total_steps=0, runners_active=0, logs_available=False)
+        runner_id_for_diagnostics = None
+    ci_evidence_for_diagnostics = {
+        "ci_status": ci_eval["state"],
+        "steps_executed": ci_eval["total_steps"],
+        "runner_id": runner_id_for_diagnostics,
+    }
+
+    # 7. Diagnostics. ci_evidence_for_diagnostics threads the real
+    # runner_id/steps evidence above into diagnose_zero_step_ci's
+    # administrator-facing message when it is available; omitted
+    # (None) reproduces the prior no-evidence behavior exactly.
     mode_mapping = {
         "local_dry_run": "local_dry_run",
         "isolated_worktree": "local_dry_run",
@@ -584,20 +698,24 @@ def execute_promotion_rehearsal(
         "live_provider_blocked": "staging",
     }
     diag_mode = mode_mapping[environment]
-    diag_report = run_all_diagnostics(environ=env, mode=diag_mode)
+    diag_report = run_all_diagnostics(environ=env, mode=diag_mode, ci_evidence=ci_evidence_for_diagnostics)
 
     diag_summary = {
         "status": diag_report["summary"]["status"],
         "detected_issues": diag_report["summary"]["detected_issues"],
         "total_checks": diag_report["summary"]["total_checks"],
     }
+    ci_admissibility_diagnostic = next(
+        (item for item in diag_report["diagnostics"] if item["code"] == "zero_step_ci"),
+        {"code": "zero_step_ci", "category": "continuous_integration", "status": "unavailable", "message": "", "remediation": "", "failure_details": {}},
+    )
     for item in diag_report["diagnostics"]:
         if item["status"] == "detected":
             remediations.append(f"[{item['code']}] {item['remediation']}")
             if item["category"] in {"environment_contract", "runtime_dependency"}:
                 blockers.append(f"diagnostic_{item['code']}: {item['message']}")
 
-    # 7. Environment contract check
+    # 8. Environment contract check
     env_report = validate_environment(environ=env, mode=diag_mode)
     if not env_report.ready:
         for b in env_report.blockers:
@@ -605,22 +723,15 @@ def execute_promotion_rehearsal(
         for w in env_report.warnings:
             remediations.append(f"Warning: {w}")
 
-    # 8. Password strength for private staging
+    # 9. Password strength for private staging
     if environment in {"private_staging", "authenticated_operator"}:
         pwd = str(env.get("POSTGRES_PASSWORD", "")).strip().lower()
         if pwd in INSECURE_PASSWORDS:
             blockers.append(f"insecure_database_password: The supplied database credential is an insecure default for {environment}")
             remediations.append("Generate and configure a high-entropy database password (>= 16 characters).")
 
-    # 9. CoderOS status
+    # 10. CoderOS status
     coderos = inspect_coderos_status(environ=env)
-
-    # 10. CI evidence classification
-    if ci_override is not None:
-        ci_eval = classify_ci_evidence(**ci_override)
-    else:
-        # Default environment CI check: local worktrees have no active CI runners attached
-        ci_eval = classify_ci_evidence(ci_status="ci_unavailable", total_steps=0, runners_active=0, logs_available=False)
 
     # 11. Execute the existing bounded harness when no sanitized result was supplied.
     if harness_results is None:
@@ -698,6 +809,7 @@ def execute_promotion_rehearsal(
         live_mutation_guard=live_guard,
         diagnostics_summary=diag_summary,
         ci_evidence=ci_eval,
+        ci_admissibility_diagnostic=ci_admissibility_diagnostic,
         coderos_status=coderos,
         high_value_path_summary=hvp_summary,
         phase1_readiness=phase1,

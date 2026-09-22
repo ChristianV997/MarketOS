@@ -267,3 +267,141 @@ def test_promotion_rehearsal_does_not_replace_quality_gate() -> None:
     assert bundle.readiness_state != "passed"
     remediations_str = " ".join(bundle.remediations)
     assert "run_local_quality_gate.py" in remediations_str or "session_finish.py" in remediations_str or "uvicorn" in remediations_str
+
+
+# ---------------------------------------------------------------------------
+# Real GitHub Actions job evidence (runner_id=0, empty steps, unavailable
+# logs) -- classify_github_actions_job is a pure adapter over the existing
+# classify_ci_evidence(), not a second CI authority.
+# ---------------------------------------------------------------------------
+
+
+def test_classify_github_actions_job_treats_runner_id_zero_as_ci_unavailable() -> None:
+    """A real GitHub Actions job response with runner_id=0 (never assigned
+    a runner) and an empty steps list is the exact shape GitHub reports
+    when a workflow never actually started -- this must classify as
+    ci_unavailable, never as a passed or failed execution."""
+    from backend.deployment.promotion_rehearsal import classify_github_actions_job
+
+    result = classify_github_actions_job({"runner_id": 0, "steps": [], "status": "completed", "conclusion": None})
+    assert result["state"] == "ci_unavailable"
+    assert result["runner_id"] == 0
+    assert result["steps_executed"] == 0
+    assert result["runner_assigned"] is False
+
+
+def test_classify_github_actions_job_treats_missing_job_as_unavailable() -> None:
+    """job=None (the run/job could not be fetched at all -- API 404, no
+    permissions, or the run doesn't exist) must fail closed to
+    ci_unavailable, never be silently treated as zero real steps executed
+    successfully."""
+    from backend.deployment.promotion_rehearsal import classify_github_actions_job
+
+    result = classify_github_actions_job(None)
+    assert result["state"] == "ci_unavailable"
+    assert result["runner_id"] is None
+    assert "job_unavailable" in result["classification_reason"]
+
+
+def test_classify_github_actions_job_preserves_an_executed_failure_with_a_real_runner() -> None:
+    """A genuinely assigned runner (nonzero runner_id) with executed steps
+    and a failure conclusion must remain 'failed' -- runner_id/steps
+    evidence must never launder an executed failure into ci_unavailable."""
+    from backend.deployment.promotion_rehearsal import classify_github_actions_job
+
+    job = {
+        "runner_id": 17,
+        "steps": [{"name": "checkout", "conclusion": "success"}, {"name": "pytest", "conclusion": "failure"}],
+        "status": "completed",
+        "conclusion": "failure",
+    }
+    result = classify_github_actions_job(job, logs_available=True)
+    assert result["state"] == "failed"
+    assert result["runner_id"] == 17
+    assert result["steps_executed"] == 2
+
+
+def test_classify_github_actions_job_reports_unavailable_logs_even_with_a_passed_conclusion() -> None:
+    """A run that executed and passed, but whose logs could not be fetched
+    (e.g. expired/retention-deleted), must remain ci_unavailable -- a
+    passed conclusion is not admissible evidence without logs to verify it."""
+    from backend.deployment.promotion_rehearsal import classify_github_actions_job
+
+    job = {"runner_id": 5, "steps": [{"name": "pytest", "conclusion": "success"}], "status": "completed", "conclusion": "success"}
+    result = classify_github_actions_job(job, logs_available=False)
+    assert result["state"] == "ci_unavailable"
+
+
+def test_classify_github_actions_job_fails_closed_on_a_malformed_job() -> None:
+    """A job value that is neither None nor a mapping (e.g. a raw string
+    or list from a broken API response) must fail closed, not crash and
+    not be silently treated as any particular CI state."""
+    from backend.deployment.promotion_rehearsal import classify_github_actions_job
+
+    result = classify_github_actions_job("not-a-job")
+    assert result["state"] == "ci_unavailable"
+    assert result["classification_reason"]
+
+
+def test_execute_promotion_rehearsal_wires_real_github_actions_job_evidence_end_to_end() -> None:
+    """The production entrypoint, not just the adapter in isolation: a
+    real runner_id=0/steps=[] job must (1) drive ci_evidence to
+    ci_unavailable, (2) appear in the resulting blockers, and (3) surface
+    a concrete, non-empty administrator-facing diagnostic identifying the
+    exact runner/log evidence gap -- not merely a generic 'blocked'
+    status with no explanation of what evidence was missing."""
+    bundle = execute_promotion_rehearsal(
+        environment="local_dry_run",
+        environ={},
+        github_actions_job={"runner_id": 0, "steps": [], "status": "completed", "conclusion": None},
+    )
+    assert bundle.ci_evidence["state"] == "ci_unavailable"
+    assert any("ci_evidence_ci_unavailable" in b for b in bundle.blockers)
+    diagnostic = bundle.ci_admissibility_diagnostic
+    assert diagnostic["failure_details"]["runner_id"] == 0
+    assert diagnostic["status"] == "detected"
+    assert diagnostic["message"]
+
+
+def test_execute_promotion_rehearsal_github_actions_job_takes_precedence_over_ci_override() -> None:
+    """Supplying both github_actions_job and ci_override is ambiguous --
+    github_actions_job (the more specific, real-evidence-shaped input)
+    must win deterministically, not silently pick whichever happens to be
+    evaluated last."""
+    bundle = execute_promotion_rehearsal(
+        environment="local_dry_run",
+        environ={},
+        ci_override={"ci_status": "passed", "total_steps": 4, "runners_active": 1, "logs_available": True},
+        github_actions_job={"runner_id": 0, "steps": [], "status": "completed", "conclusion": None},
+    )
+    assert bundle.ci_evidence["state"] == "ci_unavailable"
+
+
+def test_execute_promotion_rehearsal_assigned_runner_with_verified_logs_does_not_block_on_ci() -> None:
+    """The positive case: a real, assigned runner with executed passing
+    steps and available logs must not itself add a ci_evidence blocker --
+    proving the wiring is not a one-way always-block shortcut."""
+    bundle = execute_promotion_rehearsal(
+        environment="local_dry_run",
+        environ={},
+        github_actions_job={"runner_id": 9001, "steps": [{"name": "pytest", "conclusion": "success"}], "status": "completed", "conclusion": "success"},
+        logs_available=True,
+    )
+    assert bundle.ci_evidence["state"] == "passed"
+    assert not any(b.startswith("ci_evidence_") for b in bundle.blockers)
+
+
+def test_execute_promotion_rehearsal_ci_admissibility_diagnostic_reflects_the_ci_override_path_too() -> None:
+    """The wiring is not exclusive to github_actions_job -- the abstract
+    ci_override path (the pre-existing call shape) must also produce an
+    accurate ci_admissibility_diagnostic, not just the default all-defaults
+    diagnostic every other call shape used to fall back to."""
+    bundle = execute_promotion_rehearsal(
+        environment="local_dry_run",
+        environ={},
+        ci_override={"ci_status": "ci_unavailable", "total_steps": 0, "runners_active": 0, "logs_available": False},
+    )
+    diagnostic = bundle.ci_admissibility_diagnostic
+    assert diagnostic["status"] == "detected"
+    assert diagnostic["failure_details"]["steps_executed"] == 0
+    assert diagnostic["failure_details"]["runner_id"] is None
