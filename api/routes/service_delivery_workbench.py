@@ -79,6 +79,9 @@ def _validate_rows(rows: list[Any]) -> str | None:
     for row in rows:
         if not isinstance(row, Mapping):
             return "service_delivery_projection_row_must_be_object"
+        workspace_id = row.get("workspace_id")
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            return "service_delivery_projection_row_missing_workspace_id"
         engagement_id = row.get("engagement_id")
         if engagement_id is None or str(engagement_id).strip() == "":
             return "service_delivery_projection_row_missing_engagement_id"
@@ -92,7 +95,7 @@ def _validate_rows(rows: list[Any]) -> str | None:
     return None
 
 
-def _load_projection(path: Path | None) -> dict[str, Any]:
+def _load_projection(path: Path | None, *, authenticated_workspace_id: str | None) -> dict[str, Any]:
     if path is None:
         return _unavailable("service_delivery_projection_not_configured")
     try:
@@ -114,9 +117,16 @@ def _load_projection(path: Path | None) -> dict[str, Any]:
     rows = payload.get("engagements", payload.get("packages", []))
     if not isinstance(rows, list):
         return _unavailable("service_delivery_projection_rows_must_be_array")
+    declared_workspace_id = payload.get("workspace_id")
+    if not isinstance(declared_workspace_id, str) or not declared_workspace_id.strip():
+        return _unavailable("service_delivery_workspace_identity_missing")
+    if authenticated_workspace_id != declared_workspace_id:
+        return _unavailable("service_delivery_workspace_identity_mismatch")
     row_reason = _validate_rows(rows)
     if row_reason:
         return _unavailable(row_reason)
+    if any(row.get("workspace_id") != authenticated_workspace_id for row in rows):
+        return _unavailable("service_delivery_workspace_identity_mismatch")
     payload.update({
         "live_endpoint": ENDPOINT,
         "live_endpoint_status": "available_read_only",
@@ -129,13 +139,28 @@ def _load_projection(path: Path | None) -> dict[str, Any]:
     return payload
 
 
+def _authenticated_workspace_id(request: Request | None) -> str | None:
+    """Read the workspace principal bound by trusted auth middleware.
+
+    A client-controlled header or artifact field is not authentication. The
+    upstream authentication boundary must attach this value to
+    ``request.state`` before this read-only route can serve a projection.
+    """
+    state = getattr(request, "state", None)
+    value = getattr(state, "marketos_authenticated_workspace_id", None)
+    return value if isinstance(value, str) and value.strip() else None
+
+
 @router.get("/workbench")
 def workbench(request: Request = None):
+    workspace_id = _authenticated_workspace_id(request)
+    if workspace_id is None:
+        return _unavailable("service_delivery_workspace_identity_unavailable")
     key = getattr(getattr(request, "client", None), "host", None) or "direct"
     decision = check_rate_limit(event_read_policy(), key)
     if not decision.allowed:
         return JSONResponse({"status": "rate_limited", "read_only": True, "mutated": False}, status_code=429)
-    return _load_projection(_safe_projection_path())
+    return _load_projection(_safe_projection_path(), authenticated_workspace_id=workspace_id)
 
 
 __all__ = ["router", "workbench", "MAX_ENGAGEMENTS", "MAX_PROJECTION_BYTES"]

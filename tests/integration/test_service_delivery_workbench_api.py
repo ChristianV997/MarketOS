@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -35,10 +36,29 @@ def _adequate_intake() -> dict:
     return {name: {"available": True} for name in REQUIRED_CLIENT_DATA_FIELDS}
 
 
-def _make_row(package_id: str, target_state: str, client_id: str, *, currency: str = "USD", registry_path: str) -> dict:
+def _authenticated_request(workspace_id: str = "workspace-test"):
+    return SimpleNamespace(
+        client=SimpleNamespace(host="test-client"),
+        state=SimpleNamespace(marketos_authenticated_workspace_id=workspace_id),
+    )
+
+
+def _app_with_workspace(workspace_id: str = "workspace-test") -> FastAPI:
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def bind_workspace(request, call_next):
+        request.state.marketos_authenticated_workspace_id = workspace_id
+        return await call_next(request)
+
+    app.include_router(module.router)
+    return app
+
+
+def _make_row(package_id: str, target_state: str, client_id: str, *, currency: str = "USD", registry_path: str, workspace_name: str | None = None) -> dict:
     packages = {p.package_id: p for p in default_service_delivery_packages()}
     pkg = packages[package_id]
-    workspace = ClientWorkspace(name=client_id, workspace_type="client_service")
+    workspace = ClientWorkspace(name=workspace_name or client_id, workspace_type="client_service")
     engagement = create_engagement(client_id=client_id, workspace=workspace, package=pkg, scope=f"scope for {client_id}")
     refs = (EvidenceRef(f"ev-{client_id}", source_type="order_export", evidence_state="live_readonly", captured_at="2026-09-01"),)
     path_to_state = {
@@ -83,7 +103,7 @@ def _make_row(package_id: str, target_state: str, client_id: str, *, currency: s
 
 def test_workbench_is_safe_and_unavailable_without_projection(monkeypatch):
     monkeypatch.delenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", raising=False)
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert report["read_only"] is True
     assert report["network_calls"] is False
@@ -91,11 +111,25 @@ def test_workbench_is_safe_and_unavailable_without_projection(monkeypatch):
     assert report["engagements"] == []
 
 
+def test_workbench_requires_authenticated_workspace_identity(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    path = artifacts / "service_projection.json"
+    path.write_text(json.dumps(_safe_envelope([])), encoding="utf-8")
+    monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
+    monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
+
+    report = module.workbench()
+
+    assert report["live_endpoint_status"] == "unavailable"
+    assert report["diagnostics"] == ["service_delivery_workspace_identity_unavailable"]
+
+
 def test_workbench_rejects_projection_outside_artifacts(monkeypatch, tmp_path):
     path = tmp_path / "projection.json"
     path.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert report["diagnostics"] == ["service_delivery_projection_not_configured"]
 
@@ -104,10 +138,10 @@ def test_workbench_accepts_safe_read_only_projection(monkeypatch, tmp_path):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     path = artifacts / "service_projection.json"
-    path.write_text(json.dumps({"schema_version": "service-engagement-projection-v1", "availability": "manual_import", "generated_at": "deterministic", "read_only": True, "network_calls": False, "mutated": False, "engagements": []}), encoding="utf-8")
+    path.write_text(json.dumps({"schema_version": "service-engagement-projection-v1", "availability": "manual_import", "generated_at": "deterministic", "workspace_id": "workspace-test", "read_only": True, "network_calls": False, "mutated": False, "engagements": []}), encoding="utf-8")
     monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "available_read_only"
     assert report["live_endpoint"] == "/api/service-delivery/workbench"
     assert "read_only_artifact_projection" in report["diagnostics"]
@@ -117,10 +151,10 @@ def test_workbench_rejects_internal_fields(monkeypatch, tmp_path):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     path = artifacts / "unsafe.json"
-    path.write_text(json.dumps({"schema_version": "service-engagement-projection-v1", "read_only": True, "network_calls": False, "mutated": False, "engagements": [], "internal_prompt": "do not export"}), encoding="utf-8")
+    path.write_text(json.dumps({"schema_version": "service-engagement-projection-v1", "workspace_id": "workspace-test", "read_only": True, "network_calls": False, "mutated": False, "engagements": [], "internal_prompt": "do not export"}), encoding="utf-8")
     monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert "internal_prompt" not in str(report)
 
@@ -133,8 +167,7 @@ def test_workbench_route_is_registered(monkeypatch):
     text = api_source.read_text(encoding="utf-8")
     assert "api.routes.service_delivery_workbench" in text
     assert "include_router(_service_delivery_workbench_router)" in text
-    app = FastAPI()
-    app.include_router(module.router)
+    app = _app_with_workspace()
     client = TestClient(app)
     response = client.get("/api/service-delivery/workbench")
     assert response.status_code == 200
@@ -152,17 +185,17 @@ def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, t
     reg_path = str(tmp_path / "deliverables.json")
 
     rows = [
-        _make_row("product-validation-sprint", "draft_ready", "client-usd", currency="USD", registry_path=reg_path),
-        _make_row("unit-economics-cac-roas-diagnostic", "data_inadequate", "client-inadequate", currency="USD", registry_path=reg_path),
-        _make_row("launch-draft-pack", "draft_ready", "client-cad", currency="CAD", registry_path=reg_path),
-        _make_row("managed-acquisition-cro", "draft_ready", "client-mxn", currency="MXN", registry_path=reg_path),
-        _make_row("product-validation-sprint", "intake", "client-intake", currency="USD", registry_path=reg_path),
-        _make_row("launch-draft-pack", "cancelled", "client-cancelled", currency="USD", registry_path=reg_path),
-        _make_row("product-validation-sprint", "eligible", "client-eligible", currency="USD", registry_path=reg_path),
-        _make_row("launch-draft-pack", "client_review", "client-review", currency="CAD", registry_path=reg_path),
-        _make_row("managed-acquisition-cro", "approved", "client-approved", currency="MXN", registry_path=reg_path),
-        _make_row("unit-economics-cac-roas-diagnostic", "delivered", "client-delivered", currency="USD", registry_path=reg_path),
-        _make_row("product-validation-sprint", "rejected", "client-rejected", currency="USD", registry_path=reg_path),
+        _make_row("product-validation-sprint", "draft_ready", "client-usd", currency="USD", registry_path=reg_path, workspace_name="service-delivery-fixture"),
+        _make_row("unit-economics-cac-roas-diagnostic", "data_inadequate", "client-inadequate", currency="USD", registry_path=reg_path, workspace_name="service-delivery-fixture"),
+        _make_row("launch-draft-pack", "draft_ready", "client-cad", currency="CAD", registry_path=reg_path, workspace_name="service-delivery-fixture"),
+        _make_row("managed-acquisition-cro", "draft_ready", "client-mxn", currency="MXN", registry_path=reg_path, workspace_name="service-delivery-fixture"),
+        _make_row("product-validation-sprint", "intake", "client-intake", currency="USD", registry_path=reg_path, workspace_name="service-delivery-fixture"),
+        _make_row("launch-draft-pack", "cancelled", "client-cancelled", currency="USD", registry_path=reg_path, workspace_name="service-delivery-fixture"),
+        _make_row("product-validation-sprint", "eligible", "client-eligible", currency="USD", registry_path=reg_path, workspace_name="service-delivery-fixture"),
+        _make_row("launch-draft-pack", "client_review", "client-review", currency="CAD", registry_path=reg_path, workspace_name="service-delivery-fixture"),
+        _make_row("managed-acquisition-cro", "approved", "client-approved", currency="MXN", registry_path=reg_path, workspace_name="service-delivery-fixture"),
+        _make_row("unit-economics-cac-roas-diagnostic", "delivered", "client-delivered", currency="USD", registry_path=reg_path, workspace_name="service-delivery-fixture"),
+        _make_row("product-validation-sprint", "rejected", "client-rejected", currency="USD", registry_path=reg_path, workspace_name="service-delivery-fixture"),
     ]
     real_projection = build_service_engagement_projection(
         rows,
@@ -174,7 +207,7 @@ def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, t
     monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
 
-    direct_report = module.workbench()
+    direct_report = module.workbench(_authenticated_request("service-delivery-fixture"))
     assert direct_report["live_endpoint_status"] == "available_read_only"
     assert direct_report["read_only"] is True
     assert direct_report["network_calls"] is False
@@ -182,8 +215,7 @@ def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, t
     assert len(direct_report["engagements"]) == 11
 
     # Test via FastAPI TestClient
-    app = FastAPI()
-    app.include_router(module.router)
+    app = _app_with_workspace("service-delivery-fixture")
     client = TestClient(app)
     response = client.get("/api/service-delivery/workbench")
     assert response.status_code == 200
@@ -212,8 +244,7 @@ def test_workbench_enforces_rate_limiting_429(monkeypatch):
         allowed = False
 
     monkeypatch.setattr(module, "check_rate_limit", lambda policy, key: Denied())
-    app = FastAPI()
-    app.include_router(module.router)
+    app = _app_with_workspace()
     client = TestClient(app)
     response = client.get("/api/service-delivery/workbench")
     assert response.status_code == 429
@@ -234,7 +265,7 @@ def test_workbench_rejects_adversarial_traversal_paths(monkeypatch, tmp_path, tr
     target = (artifacts / traversal_path).resolve()
     monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(target))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert report["diagnostics"] == ["service_delivery_projection_not_configured"]
 
@@ -244,7 +275,7 @@ def test_workbench_rejects_directory_as_projection_path(monkeypatch, tmp_path):
     artifacts.mkdir()
     monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(artifacts))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert report["diagnostics"] == ["service_delivery_projection_not_configured"]
 
@@ -267,7 +298,7 @@ def test_workbench_handles_all_malformed_json_variants(monkeypatch, tmp_path, ba
     path.write_text(bad_content, encoding="utf-8")
     monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert expected_diagnostic in report["diagnostics"]
 
@@ -295,7 +326,7 @@ def test_workbench_rejects_deeply_nested_leakage_inside_engagements(monkeypatch,
     path.write_text(json.dumps(leaking_payload), encoding="utf-8")
     monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert "service_delivery_projection_failed_workspace_isolation" in report["diagnostics"]
     assert "sk-live" not in str(report)
@@ -346,11 +377,12 @@ def _handcrafted_row(
     contribution: bool = True,
     stale: bool = False,
     client_id: str = "client-a",
+    workspace_id: str = "workspace-test",
 ):
     return {
         "engagement_id": engagement_id,
         "client_id": client_id,
-        "workspace_id": f"ws-{client_id}",
+        "workspace_id": workspace_id,
         "service_id": "product-validation-sprint",
         "lifecycle_state": lifecycle,
         "economics": _display_economics(currency, contribution=contribution),
@@ -365,10 +397,11 @@ def _handcrafted_row(
     }
 
 
-def _safe_envelope(rows: list, *, availability: str = "manual_import", version: str = "service-delivery-plane-v1"):
+def _safe_envelope(rows: list, *, availability: str = "manual_import", version: str = "service-delivery-plane-v1", workspace_id: str = "workspace-test"):
     return {
         "schema_version": version,
         "report_version": version,
+        "workspace_id": workspace_id,
         "availability": availability,
         "generated_at": "deterministic",
         "read_only": True,
@@ -387,8 +420,7 @@ def test_workbench_serves_supported_lifecycle_states_without_recalculating(monke
     contribution = lifecycle not in {"intake", "data_inadequate", "cancelled", "rejected"}
     row = _handcrafted_row(f"eng-{lifecycle}", lifecycle, contribution=contribution, stale=(lifecycle == "intake"))
     _write_projection(monkeypatch, tmp_path, _safe_envelope([row], availability="partial" if lifecycle == "intake" else "manual_import"))
-    app = FastAPI()
-    app.include_router(module.router)
+    app = _app_with_workspace()
     payload = TestClient(app).get("/api/service-delivery/workbench").json()
     assert payload["live_endpoint_status"] == "available_read_only"
     served = payload["engagements"][0]
@@ -407,8 +439,7 @@ def test_workbench_serves_supported_lifecycle_states_without_recalculating(monke
 def test_workbench_preserves_currency_labels_without_conversion(monkeypatch, tmp_path, currency):
     row = _handcrafted_row(f"eng-{currency}", "draft_ready", currency=currency)
     _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
-    app = FastAPI()
-    app.include_router(module.router)
+    app = _app_with_workspace()
     served = TestClient(app).get("/api/service-delivery/workbench").json()["engagements"][0]
     assert served["economics"]["fee"]["currency"] == currency
     assert served["economics"]["contribution"]["currency"] == currency
@@ -417,8 +448,7 @@ def test_workbench_preserves_currency_labels_without_conversion(monkeypatch, tmp
 def test_workbench_keeps_missing_contribution_missing(monkeypatch, tmp_path):
     row = _handcrafted_row("eng-missing", "draft_ready", contribution=False)
     _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
-    app = FastAPI()
-    app.include_router(module.router)
+    app = _app_with_workspace()
     served = TestClient(app).get("/api/service-delivery/workbench").json()["engagements"][0]
     assert served["economics"]["fee"]["currency"] == "USD"
     assert served["economics"]["contribution"] is None
@@ -429,7 +459,7 @@ def test_workbench_rejects_currency_mismatch_in_display_economics(monkeypatch, t
     row = _handcrafted_row("eng-mix", "draft_ready", currency="USD")
     row["economics"]["contribution"]["currency"] = "CAD"
     _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert "service_delivery_projection_currency_mismatch" in report["diagnostics"]
     assert report["engagements"] == []
@@ -441,7 +471,7 @@ def test_workbench_rejects_duplicate_engagement_ids(monkeypatch, tmp_path):
         _handcrafted_row("eng-dup", "approved", client_id="client-b"),
     ]
     _write_projection(monkeypatch, tmp_path, _safe_envelope(rows))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert "service_delivery_projection_duplicate_engagement_id" in report["diagnostics"]
 
@@ -450,14 +480,14 @@ def test_workbench_rejects_missing_engagement_id(monkeypatch, tmp_path):
     row = _handcrafted_row("eng-ok", "eligible")
     row.pop("engagement_id")
     _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert "service_delivery_projection_row_missing_engagement_id" in report["diagnostics"]
 
 
 def test_workbench_rejects_non_object_row(monkeypatch, tmp_path):
     _write_projection(monkeypatch, tmp_path, _safe_envelope(["not-an-object"]))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert "service_delivery_projection_row_must_be_object" in report["diagnostics"]
 
@@ -469,7 +499,7 @@ def test_workbench_rejects_oversized_byte_payload(monkeypatch, tmp_path):
     path.write_bytes(b"{" + (b"a" * (module.MAX_PROJECTION_BYTES + 1)))
     monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert "service_delivery_projection_oversized" in report["diagnostics"]
 
@@ -480,7 +510,7 @@ def test_workbench_rejects_more_than_max_engagements(monkeypatch, tmp_path):
         for index in range(module.MAX_ENGAGEMENTS + 1)
     ]
     _write_projection(monkeypatch, tmp_path, _safe_envelope(rows))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert "service_delivery_projection_oversized" in report["diagnostics"]
 
@@ -489,10 +519,29 @@ def test_workbench_rejects_cross_client_marker_fields(monkeypatch, tmp_path):
     row = _handcrafted_row("eng-cross", "eligible")
     row["cross_client_reference"] = "other-client-id"
     _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
-    report = module.workbench()
+    report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert "service_delivery_projection_failed_workspace_isolation" in report["diagnostics"]
     assert "other-client-id" not in str(report)
+
+
+def test_workbench_rejects_authenticated_workspace_mismatch(monkeypatch, tmp_path):
+    _write_projection(monkeypatch, tmp_path, _safe_envelope([]))
+
+    report = module.workbench(_authenticated_request("workspace-other"))
+
+    assert report["live_endpoint_status"] == "unavailable"
+    assert report["diagnostics"] == ["service_delivery_workspace_identity_mismatch"]
+
+
+def test_workbench_rejects_row_workspace_mismatch(monkeypatch, tmp_path):
+    row = _handcrafted_row("eng-mismatch", "eligible", workspace_id="workspace-other")
+    _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
+
+    report = module.workbench(_authenticated_request())
+
+    assert report["live_endpoint_status"] == "unavailable"
+    assert report["diagnostics"] == ["service_delivery_workspace_identity_mismatch"]
 
 
 def test_workbench_source_order_is_preserved_across_clients(monkeypatch, tmp_path):
@@ -502,8 +551,7 @@ def test_workbench_source_order_is_preserved_across_clients(monkeypatch, tmp_pat
         _handcrafted_row("eng-m", "client_review", currency="MXN", client_id="client-m"),
     ]
     _write_projection(monkeypatch, tmp_path, _safe_envelope(rows))
-    app = FastAPI()
-    app.include_router(module.router)
+    app = _app_with_workspace()
     payload = TestClient(app).get("/api/service-delivery/workbench").json()
     assert [item["engagement_id"] for item in payload["engagements"]] == ["eng-z", "eng-a", "eng-m"]
     assert payload["engagements"][2]["economics"]["fee"]["currency"] == "MXN"
@@ -511,7 +559,7 @@ def test_workbench_source_order_is_preserved_across_clients(monkeypatch, tmp_pat
 
 def test_workbench_does_not_claim_live_validation(monkeypatch, tmp_path):
     _write_projection(monkeypatch, tmp_path, _safe_envelope([]))
-    payload = module.workbench()
+    payload = module.workbench(_authenticated_request())
     assert payload["live_endpoint_status"] == "available_read_only"
     assert payload["network_calls"] is False
     assert payload["mutated"] is False
