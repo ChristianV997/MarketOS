@@ -148,3 +148,4 @@ export function moveSelection(filtered: ServiceEngagement[], currentId: string |
   const next = Math.min(filtered.length - 1, Math.max(0, index + delta));
   return filtered[next]?.engagement_id ?? null;
 }
+

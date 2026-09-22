@@ -30,3 +30,4 @@ export function httpErrorUnavailableEnvelope(status: number, body: unknown) {
     ],
   } as const;
 }
+
