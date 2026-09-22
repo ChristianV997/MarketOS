@@ -75,7 +75,15 @@ Python unit tests:
 - tablet: 768×1024
 - desktop: 1440×900
 
-Evidence label for every Chrome CDP hit is `fixture_browser_tested`. It is not live commercial validation.
+Evidence label for every Chrome CDP hit is `fixture_browser_tested`. A loopback `--live-ui` run is `local_ui_tested`. This harness never emits `live_validated`.
+
+Windows:
+
+```powershell
+powershell -File scripts/operators/Start-OperatorBrowserAcceptance.ps1 -Browser none
+```
+
+Optional local stack (#290) is not started by this script. Pass `-LiveUi http://127.0.0.1:5173` only after that stack is already listening on loopback. Artifacts stay under `%TEMP%` and are redacted before write.
 
 Unavailable tools recorded by the runner: Orca (`orca` not on PATH), Playwright (not installed; this lane does not install it), axe (not installed). Chrome CDP is the executed browser backend when `google-chrome` and `node` exist.
 

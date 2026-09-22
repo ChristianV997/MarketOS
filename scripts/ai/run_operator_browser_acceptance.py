@@ -40,6 +40,18 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from scripts.ai.operator_browser_stack import (
+    EVIDENCE_FIXTURE,
+    EVIDENCE_LOCAL_UI,
+    artifact_dir_is_safe,
+    classify_evidence,
+    redact_report,
+    scenario_matrix,
+)
+
 FIXTURE_DIR = REPOSITORY_ROOT / "frontend" / "tests" / "fixtures" / "operator-journey"
 HARNESS_NAME = "harness.html"
 
@@ -794,7 +806,20 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
             report["status"] = "passed_without_browser_proof"
             report["chrome_note"] = "CDP unavailable and dump-dom did not execute; static fixture contract still passed"
     report_path = artifact_dir / "operator-browser-acceptance-report.json"
-    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    report["evidence_class"] = classify_evidence(
+        browser_executed=bool(report.get("browser_proof")),
+        live_ui=bool(report.get("live_ui")),
+    )
+    if report["evidence_class"] not in {EVIDENCE_FIXTURE, EVIDENCE_LOCAL_UI}:
+        report["failures"].append("evidence_class_rejected")
+        report["status"] = "failed"
+    report["scenario_rows"] = len(scenario_matrix())
+    report["live_validated"] = False
+    if not artifact_dir_is_safe(artifact_dir):
+        report["failures"].append("artifact_dir_unsafe")
+        report["status"] = "failed"
+    safe_report = redact_report(report)
+    report_path.write_text(json.dumps(safe_report, indent=2), encoding="utf-8")
     report["report_path"] = str(report_path)
     return report
 
