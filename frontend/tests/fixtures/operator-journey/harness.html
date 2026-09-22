@@ -90,7 +90,8 @@
         max-height: 10rem;
         overflow: auto;
       }
-      .hidden { display: none !important; }
+      .table-scroll { overflow: auto; max-width: 100%; }
+      .table-scroll table { min-width: 720px; }
       .export-preview {
         border: 1px dashed var(--line);
         border-radius: 0.5rem;
@@ -127,7 +128,7 @@
         </div>
         <div id="main-target-services"></div>
         <div class="mobile-only" id="service-pipeline-mobile" role="listbox" aria-label="Service pipeline mobile"></div>
-        <div class="desktop-only" id="service-pipeline">
+        <div class="desktop-only table-scroll" id="service-pipeline">
           <table role="grid" aria-label="Service pipeline">
             <caption>Server-ordered engagements. Selection is read-only.</caption>
             <thead>

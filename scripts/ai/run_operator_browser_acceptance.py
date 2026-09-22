@@ -480,8 +480,9 @@ def _run_chrome_cdp(config: AcceptanceConfig, base: str, artifact_dir: Path) -> 
                     "label": f"{route_key}-{mode}-desktop",
                     "width": 1440,
                     "height": 900,
-                    "keyboard": mode == "ok-fixture" and route_key == "services",
+    "keyboard": mode == "ok-fixture" and route_key == "services",
                     "screenshot": mode == "ok-fixture",
+                    "deep": mode == "ok-fixture" and route_key == "services",
                 }
             )
         if config.include_viewports:
@@ -682,6 +683,19 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
                             case["passed"] = surface in {"blocked", "partial"} and bool(snap.get("hasSkip")) and not snap.get("claimsLive")
                         if cdp_hits[0].get("screenshot"):
                             report["screenshots"].append(cdp_hits[0]["screenshot"])
+                        deep = cdp_hits[0].get("deep")
+                        if deep:
+                            case["deep"] = deep
+                            export_text = str(deep.get("exportText") or "")
+                            leaks = bool(re.search(r"(api[_-]?key\s*[:=]|sk_live|BEGIN [A-Z ]*PRIVATE)", export_text, re.I))
+                            export_ok = bool(deep.get("exportVisible")) and not leaks and (
+                                "Not a complete" in export_text or "client-safe" in export_text.lower()
+                            )
+                            motion_ok = str(deep.get("motion") or "") in {"0s", "0ms"}
+                            live_ok = "not live" in str(deep.get("liveText") or "").lower() or "fixture" in str(deep.get("liveText") or "").lower()
+                            focus_ok = deep.get("focusReturnedTo") == "svc-filter" and bool(deep.get("focusedRow"))
+                            case["passed"] = bool(case["passed"] and export_ok and motion_ok and live_ok and focus_ok)
+                            case["evidence_label"] = "fixture_browser_tested"
                         if config.include_viewports and mode == "ok-fixture":
                             for hit in cdp_hits:
                                 label = str(hit.get("label") or "")

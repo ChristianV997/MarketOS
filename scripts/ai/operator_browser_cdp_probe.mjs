@@ -77,6 +77,13 @@ const SNAP = `(() => ({
   overflowX: document.documentElement.scrollWidth - window.innerWidth,
   evidence: window.__mosAcceptance?.evidence || [],
   claimsLive: /evidence class:\\s*live_validated/i.test(document.body.innerText),
+  liveText: (document.querySelector('[aria-live="polite"]')?.textContent || "").trim().slice(0, 240),
+  motion: getComputedStyle(document.body).transitionDuration,
+  tableOverflow: (() => {
+    const scroller = document.querySelector(".table-scroll");
+    if (!scroller) return null;
+    return scroller.scrollWidth - scroller.clientWidth;
+  })(),
 }))()`;
 
 const results = [];
@@ -124,7 +131,33 @@ try {
       shot = `${plan.artifactDir}/${item.label}.png`;
       await writeFile(shot, Buffer.from(captured.data, "base64"));
     }
-    results.push({ url: item.url, label: item.label, snap, tabOrder, screenshot: shot });
+    let deep = null;
+    if (item.deep) {
+      await cdp.eval(`document.getElementById("svc-export")?.click()`);
+      await sleep(80);
+      deep = await cdp.eval(`(() => {
+        const preview = document.getElementById("svc-export-preview");
+        const text = (preview?.textContent || "").trim().slice(0, 240);
+        const row = document.querySelector("#svc-rows tr");
+        row?.focus();
+        const focusedRow = document.activeElement?.dataset?.id || null;
+        document.getElementById("svc-filter")?.focus();
+        return {
+          exportText: text,
+          exportVisible: preview ? !preview.classList.contains("hidden") : false,
+          focusedRow,
+          focusReturnedTo: document.activeElement?.id || null,
+          liveText: (document.getElementById("status-banner")?.textContent || "").trim().slice(0, 240),
+          motion: getComputedStyle(document.body).transitionDuration,
+          tableOverflow: (() => {
+            const scroller = document.querySelector(".table-scroll");
+            return scroller ? scroller.scrollWidth - scroller.clientWidth : null;
+          })(),
+          evidenceLabel: "fixture_browser_tested",
+        };
+      })()`);
+    }
+    results.push({ url: item.url, label: item.label, snap, tabOrder, screenshot: shot, deep });
   }
   ws.close();
   process.stdout.write(JSON.stringify({ ok: true, browser: "chrome-cdp", results }));
