@@ -25,6 +25,9 @@ embeds the canonical Phase 1 report, checks the configured event read path and
 rollback revision, and reports missing operator-stack or CI evidence without
 turning local execution into a release pass. Zero-step or runnerless CI remains
 `ci_unavailable`; a local pass cannot replace it.
+The read-only readiness CLI returns a nonzero exit when its report is
+`blocked`, and the deployment smoke CLI returns a nonzero exit when its report
+is `partial` or `failed`; JSON output remains available for diagnosis.
 Rollback: stop the process; delete fixture outputs only.
 Readiness: `ready_local_dry_run` for environment safety, but release promotion
 remains blocked until the composed evidence bundle is complete.

@@ -1,4 +1,7 @@
+import json
+
 from backend.deployment.readiness import build_readiness
+from scripts import check_readonly_deployment_readiness as readiness_cli
 
 def test_missing_credentials_blocks_without_values():
  r=build_readiness(environ={"MARKETOS_EVENT_READ_JSONL_PATH":"artifacts/events.jsonl"}).to_dict()
@@ -19,3 +22,9 @@ def test_mutation_flags_block_readiness():
 
 def test_platform_is_constrained():
  assert build_readiness(environ={},platform="unknown").platform=="local"
+
+def test_readiness_cli_fails_closed_when_report_is_blocked(monkeypatch, capsys):
+ monkeypatch.setattr(readiness_cli, "build_readiness", lambda **_: build_readiness(environ={}))
+ assert readiness_cli.main(["--json"]) == 1
+ report=json.loads(capsys.readouterr().out)
+ assert report["overall_status"] == "blocked"
