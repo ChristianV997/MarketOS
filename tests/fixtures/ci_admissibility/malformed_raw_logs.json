@@ -1,0 +1,10 @@
+{
+  "schema": "MarketOS.CIAdmissibilityEvidence.v1",
+  "repository": "ChristianV997/MarketOS",
+  "candidate_head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "workflow": null,
+  "required_jobs": ["test"],
+  "jobs": [],
+  "checks": [],
+  "raw_logs": "fixture placeholder is not admissible"
+}

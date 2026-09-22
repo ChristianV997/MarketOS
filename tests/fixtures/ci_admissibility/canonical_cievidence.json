@@ -1,0 +1,18 @@
+{
+  "schema": "MarketOS.CIEvidence.v1",
+  "run": {"status": "completed", "conclusion": "success"},
+  "required_jobs": ["test"],
+  "jobs": [
+    {
+      "name": "test",
+      "required": true,
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 101,
+      "runner_name": "ubuntu-latest",
+      "steps_executed": 4,
+      "logs_available": true,
+      "required_check_status": "success"
+    }
+  ]
+}
