@@ -1384,21 +1384,29 @@ def test_win32_open_same_handle_read_survives_a_path_level_file_replacement(
     """Deterministic (non-sleep) proof of the invariant the whole design
     relies on: once the handle/fd is obtained, replacing what the *path*
     points to must not change what the *already-open descriptor* reads.
-    The fake wires the sentinel Win32 handle to a real POSIX fd (the only
-    kind of descriptor this Linux sandbox can actually exercise), opened
-    before the path is overwritten; the read after replacement still
-    returns the original bytes, because a POSIX fd (like a Windows handle
-    on the same file) is bound to the underlying file object, not the
-    directory entry. This demonstrates the closure principle without
-    requiring real Win32 execution, but is not itself proof that
-    CreateFileW/GetFileInformationByHandle behave identically on real
-    Windows -- that remains unverified in this project (see module
-    docstring above)."""
+    The fake wires the sentinel Win32 handle to a real descriptor opened
+    before the path is overwritten. POSIX can exercise the same-path
+    replacement directly. Windows' ``os.open`` test double cannot emulate
+    the ``FILE_SHARE_DELETE`` flags used by the production ``CreateFileW``
+    call, so the Windows test double uses a descriptor-bound copy instead;
+    that still proves the reader consumes the already-open descriptor and
+    does not reopen the path. This demonstrates the Python-level closure
+    principle without claiming real Win32 execution, which remains
+    unverified in this project (see the module docstring above)."""
     doc = tmp_path / "doc.pdf"
     doc.write_bytes(b"original bytes bound to the handle")
 
     def fake_open_osfhandle(handle: int, _flags: int) -> int:
-        return os.open(doc, os.O_RDONLY)
+        descriptor_source = doc
+        if os.name == "nt":
+            # A Python ``os.open`` handle does not expose the share-delete
+            # flags that the production CreateFileW call supplies. Keep the
+            # fake descriptor stable without making os.replace fail on the
+            # Windows test runner; the real Win32 share mode is covered by
+            # the audited production call and remains execution-unverified.
+            descriptor_source = tmp_path / "descriptor-bound-copy.pdf"
+            descriptor_source.write_bytes(doc.read_bytes())
+        return os.open(descriptor_source, os.O_RDONLY)
 
     _install_fake_win32_kernel32(monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, attributes=0)
     _install_fake_msvcrt(monkeypatch, open_osfhandle=fake_open_osfhandle)
