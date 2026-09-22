@@ -1,0 +1,68 @@
+[
+  {
+    "candidate_id": "service-offer-alpha",
+    "query": "local service outcome",
+    "source": "operator-interview",
+    "source_type": "manual_csv_import",
+    "platform": "manual",
+    "offering_kind": "service",
+    "geography": "MX",
+    "language": "es-MX",
+    "observed_at": "2026-09-01T12:00:00Z",
+    "observation_key": "outcome_intent",
+    "observation_value": "high",
+    "hook": "Make the next step easier",
+    "pain_point": "manual coordination takes too long",
+    "desired_outcome": "clearer service delivery",
+    "source_confidence": 0.8,
+    "field_provenance": {
+      "outcome_intent": "manual:operator-interview"
+    },
+    "warnings": [
+      "manual_supplier_evidence_not_authenticated"
+    ]
+  },
+  {
+    "candidate_id": "service-offer-alpha",
+    "query": "local service outcome",
+    "source": "customer-review-snapshot",
+    "source_type": "manual_csv_import",
+    "platform": "manual",
+    "offering_kind": "service",
+    "geography": "MX",
+    "language": "es-MX",
+    "observed_at": "2026-09-04T12:00:00Z",
+    "observation_key": "outcome_intent",
+    "observation_value": "high",
+    "content_title": "Service feedback",
+    "hook": "Finish the task with less friction",
+    "pain_point": "unclear handoffs",
+    "desired_outcome": "predictable completion",
+    "review_count": 18,
+    "sentiment_label": "positive",
+    "source_confidence": 0.7,
+    "field_provenance": {
+      "outcome_intent": "manual:customer-review-snapshot"
+    }
+  },
+  {
+    "candidate_id": "service-offer-beta",
+    "query": "regional service outcome",
+    "source": "manual-demand-notes",
+    "source_type": "manual_csv_import",
+    "platform": "manual",
+    "offering_kind": "hybrid",
+    "geography": "US",
+    "language": "en-US",
+    "observed_at": "2026-09-03T12:00:00Z",
+    "observation_key": "outcome_intent",
+    "observation_value": "medium",
+    "hook": "A simpler path to completion",
+    "pain_point": "fragmented follow-up",
+    "desired_outcome": "consistent customer experience",
+    "source_confidence": 0.6,
+    "field_provenance": {
+      "outcome_intent": "manual:manual-demand-notes"
+    }
+  }
+]

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 PROVENANCE = frozenset({"observed", "derived", "assumed", "unavailable", "malformed", "blocked", "manual_import", "fixture"})
@@ -21,6 +22,10 @@ SOURCE_TYPES = frozenset(
     }
 )
 PLATFORMS = frozenset({"google_trends", "tiktok", "meta", "youtube", "reddit", "amazon", "mercadolibre", "ebay", "shopify", "minea", "dropshipio", "pipiads", "kalodata", "manual"})
+OFFERING_KINDS = frozenset({"goods", "service", "hybrid", "unknown"})
+FRESHNESS_STATES = frozenset({"fresh", "stale", "future_dated", "unavailable"})
+_LANGUAGE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def number(value: Any) -> float | None:
@@ -49,6 +54,75 @@ _bounded = bounded
 
 def text(value: Any, limit: int = 240) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+
+
+def normalize_observed_at(value: Any) -> str | None:
+    """Return a canonical UTC timestamp, or None when it was not supplied."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("observed_at must include a timezone")
+        return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    if not isinstance(value, str):
+        raise ValueError("observed_at must be an ISO-8601 string")
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        raise ValueError("observed_at must be an ISO-8601 timestamp") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("observed_at must include a timezone")
+    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _reference_time(value: Any) -> datetime | None:
+    normalized = normalize_observed_at(value)
+    if normalized is None:
+        return None
+    return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+
+
+def normalize_offering_kind(value: Any) -> str:
+    kind = str(value or "unknown").strip().lower()
+    if kind not in OFFERING_KINDS:
+        raise ValueError("offering_kind must be goods, service, hybrid, or unknown")
+    return kind
+
+
+def normalize_geography(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or _CONTROL.search(value):
+        raise ValueError("geography must be a safe text label")
+    value = text(value, 80)
+    return value or None
+
+
+def normalize_language(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or not _LANGUAGE.fullmatch(value.strip()):
+        raise ValueError("language must be a BCP-47-like label")
+    return value.strip()
+
+
+def freshness_state(observed_at: Any, *, as_of: Any = None, max_age_days: int = 90) -> str:
+    """Classify freshness without consulting the clock or inventing a timestamp."""
+    if max_age_days < 1:
+        raise ValueError("max_age_days must be positive")
+    observed = _reference_time(observed_at)
+    reference = _reference_time(as_of)
+    if observed is None or reference is None:
+        return "unavailable"
+    if observed > reference:
+        return "future_dated"
+    age_seconds = (reference - observed).total_seconds()
+    return "stale" if age_seconds > max_age_days * 86_400 else "fresh"
 
 
 def normalize_sentiment(value: Any) -> str:
@@ -180,16 +254,35 @@ class ConsumerAttentionEvidence:
     source_confidence: float = 0.0
     field_provenance: Mapping[str, str] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
-    observed_at: str = "deterministic"
+    observed_at: str | None = None
     read_only: bool = True
     network_calls: bool = False
     mutated: bool = False
+    offering_kind: str = "unknown"
+    geography: str | None = None
+    language: str | None = None
+    observation_key: str = ""
+    observation_value: str | None = None
 
     def __post_init__(self) -> None:
+        if not self.candidate_id or not self.query or not self.source:
+            raise ValueError("consumer attention identity fields are required")
+        if any(_CONTROL.search(value) for value in (self.candidate_id, self.query, self.source)):
+            raise ValueError("consumer attention identity fields must be safe text")
         if self.source_type not in SOURCE_TYPES:
             raise ValueError(f"unsupported source_type: {self.source_type}")
         if self.platform not in PLATFORMS:
             raise ValueError(f"unsupported platform: {self.platform}")
+        object.__setattr__(self, "observed_at", normalize_observed_at(self.observed_at))
+        object.__setattr__(self, "offering_kind", normalize_offering_kind(self.offering_kind))
+        object.__setattr__(self, "geography", normalize_geography(self.geography))
+        object.__setattr__(self, "language", normalize_language(self.language))
+        if not isinstance(self.observation_key, str) or _CONTROL.search(self.observation_key):
+            raise ValueError("observation_key must be safe text")
+        if self.observation_value is not None:
+            if _CONTROL.search(str(self.observation_value)):
+                raise ValueError("observation_value must be safe text")
+            object.__setattr__(self, "observation_value", text(self.observation_value, 120))
         if set(self.field_provenance.values()) - PROVENANCE:
             raise ValueError("invalid consumer-attention provenance")
         if not self.read_only or self.network_calls or self.mutated:
@@ -253,9 +346,27 @@ class ConsumerAttentionCandidateResult:
     evidence: tuple[ConsumerAttentionEvidence, ...]
     score: ConsumerAttentionScore
     warnings: tuple[str, ...] = ()
+    offering_kinds: tuple[str, ...] = ()
+    geographies: tuple[str, ...] = ()
+    languages: tuple[str, ...] = ()
+    freshness_statuses: tuple[str, ...] = ()
+    conflicting_observation_keys: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {"candidate_id": self.candidate_id, "query": self.query, "evidence": [item.to_dict() for item in self.evidence], "score": self.score.to_dict(), "platforms": sorted({item.platform for item in self.evidence}), "source_types": sorted({item.source_type for item in self.evidence}), "warnings": list(self.warnings)}
+        return {
+            "candidate_id": self.candidate_id,
+            "query": self.query,
+            "evidence": [item.to_dict() for item in self.evidence],
+            "score": self.score.to_dict(),
+            "platforms": sorted({item.platform for item in self.evidence}),
+            "source_types": sorted({item.source_type for item in self.evidence}),
+            "offering_kinds": list(self.offering_kinds),
+            "geographies": list(self.geographies),
+            "languages": list(self.languages),
+            "freshness_statuses": list(self.freshness_statuses),
+            "conflicting_observation_keys": list(self.conflicting_observation_keys),
+            "warnings": list(self.warnings),
+        }
 
 
 @dataclass(frozen=True)
@@ -272,9 +383,32 @@ class ConsumerAttentionReport:
     read_only: bool = True
     network_calls: bool = False
     mutated: bool = False
+    freshness_status: str = "unavailable"
+    offering_kinds: tuple[str, ...] = ()
+    geographies: tuple[str, ...] = ()
+    languages: tuple[str, ...] = ()
+    conflict_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
-        return {"report_version": self.report_version, "evidence_mode": self.evidence_mode, "candidate_count": self.candidate_count, "evidence_count": self.evidence_count, "platforms_observed": list(self.platforms_observed), "top_candidate_id": self.top_candidate_id, "next_best_action": self.next_best_action, "candidates": [item.to_dict() for item in self.candidates], "warnings": list(self.warnings), "read_only": self.read_only, "network_calls": self.network_calls, "mutated": self.mutated}
+        return {
+            "report_version": self.report_version,
+            "evidence_mode": self.evidence_mode,
+            "candidate_count": self.candidate_count,
+            "evidence_count": self.evidence_count,
+            "platforms_observed": list(self.platforms_observed),
+            "offering_kinds": list(self.offering_kinds),
+            "geographies": list(self.geographies),
+            "languages": list(self.languages),
+            "freshness_status": self.freshness_status,
+            "conflict_count": self.conflict_count,
+            "top_candidate_id": self.top_candidate_id,
+            "next_best_action": self.next_best_action,
+            "candidates": [item.to_dict() for item in self.candidates],
+            "warnings": list(self.warnings),
+            "read_only": self.read_only,
+            "network_calls": self.network_calls,
+            "mutated": self.mutated,
+        }
 
 
 ANGLE_RULES = (
@@ -323,12 +457,29 @@ def _voc(records: list[ConsumerAttentionEvidence]) -> VoiceOfCustomerEvidence:
     return VoiceOfCustomerEvidence(_phrases(records, "pain_point"), _phrases(records, "desired_outcome"), _phrases(records, "objection"), _phrases(records, "claim"), _phrases(records, "proof_signal"))
 
 
-def score_candidate(candidate_id: str, evidence: list[ConsumerAttentionEvidence], *, supplier_proof: bool = False) -> ConsumerAttentionScore:
+def _conflicting_observation_keys(records: Iterable[ConsumerAttentionEvidence]) -> tuple[str, ...]:
+    values: dict[str, set[str]] = {}
+    for record in records:
+        if record.observation_key and record.observation_value not in (None, ""):
+            values.setdefault(record.observation_key, set()).add(record.observation_value)
+    return tuple(sorted(key for key, observed_values in values.items() if len(observed_values) > 1))
+
+
+def _report_freshness(records: Iterable[ConsumerAttentionEvidence], *, as_of: Any, max_age_days: int) -> tuple[str, ...]:
+    return tuple(freshness_state(record.observed_at, as_of=as_of, max_age_days=max_age_days) for record in records)
+
+
+def score_candidate(
+    candidate_id: str,
+    evidence: list[ConsumerAttentionEvidence],
+    *,
+    supplier_proof: bool = False,
+    quality_blockers: Iterable[str] = (),
+) -> ConsumerAttentionScore:
     if not evidence:
         return ConsumerAttentionScore(candidate_id, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "reject_low_attention", {}, ("no_consumer_attention_evidence",), voice_of_customer=VoiceOfCustomerEvidence())
     growth = _average(bounded(item.search_growth_signal) for item in evidence if item.search_growth_signal is not None)
     search = _average([bounded(item.search_growth_signal) for item in evidence if item.keyword or item.search_growth_signal is not None])
-    views = [item.view_count for item in evidence if item.view_count]
     engagement = _average(min(1.0, ((item.engagement_count or (item.like_count or 0) + (item.comment_count or 0) + (item.share_count or 0)) / max(1, item.view_count or 10000)) * 10) for item in evidence)
     ad = _average(1.0 if item.ad_active_signal else 0.0 for item in evidence)
     reviews = _average(min(1.0, (item.review_count or 0) / 1000) for item in evidence if item.review_count is not None)
@@ -346,10 +497,16 @@ def score_candidate(candidate_id: str, evidence: list[ConsumerAttentionEvidence]
     overall = round(bounded(base * (1 - saturation * 0.35) * (0.65 + confidence * 0.35)), 4)
     creative = extract_creative_angles(evidence)
     voc_result = _voc(evidence)
-    reasons = ["consumer_attention_is_not_supplier_proof"]
+    quality_blockers = tuple(dict.fromkeys(str(item) for item in quality_blockers if item))
+    reasons = ["consumer_attention_is_not_supplier_proof", *quality_blockers]
     if not supplier_proof:
         reasons.append("supplier_proof_not_observed")
-    if objections >= 0.6:
+    if quality_blockers:
+        # Reuse the existing conservative rejection path so downstream
+        # synthesis cannot treat an attractive but contradictory signal as a
+        # promotion input. The reason identifies the actual blocker.
+        recommendation = "reject_low_attention"
+    elif objections >= 0.6:
         recommendation = "reject_high_objection_risk"
     elif overall < 0.25:
         recommendation = "reject_low_attention"
@@ -370,23 +527,113 @@ def score_candidate(candidate_id: str, evidence: list[ConsumerAttentionEvidence]
 
 
 def collapse_duplicates(records: Iterable[ConsumerAttentionEvidence]) -> list[ConsumerAttentionEvidence]:
-    selected: dict[tuple[str, str, str], ConsumerAttentionEvidence] = {}
+    selected: dict[tuple[str, str, str, str, str | None], ConsumerAttentionEvidence] = {}
     for record in records:
-        key = (record.candidate_id, record.source, record.content_title or record.hook)
+        # Keep contradictory observations separate so a stronger-looking
+        # duplicate cannot erase dissent before conflict analysis runs.
+        key = (record.candidate_id, record.source, record.content_title or record.hook, record.observation_key, record.observation_value)
         old = selected.get(key)
         if old is None or (record.source_confidence, record.engagement_count or 0, record.review_count or 0) > (old.source_confidence, old.engagement_count or 0, old.review_count or 0):
             selected[key] = record
     return sorted(selected.values(), key=lambda item: (item.candidate_id, item.platform, item.source, item.content_title))
 
 
-def build_report(records: list[ConsumerAttentionEvidence], *, evidence_mode: str = "fixture", supplier_proof_by_candidate: Mapping[str, bool] | None = None) -> ConsumerAttentionReport:
+def build_report(
+    records: list[ConsumerAttentionEvidence],
+    *,
+    evidence_mode: str = "fixture",
+    supplier_proof_by_candidate: Mapping[str, bool] | None = None,
+    as_of: str | datetime | None = None,
+    max_age_days: int = 90,
+) -> ConsumerAttentionReport:
+    if max_age_days < 1:
+        raise ValueError("max_age_days must be positive")
+    reference = _reference_time(as_of) if as_of is not None else None
     records = collapse_duplicates(records)
     grouped: dict[str, list[ConsumerAttentionEvidence]] = {}
     for record in records:
         if record.candidate_id:
             grouped.setdefault(record.candidate_id, []).append(record)
     proofs = supplier_proof_by_candidate or {}
-    results = tuple(ConsumerAttentionCandidateResult(candidate_id, rows[0].query, tuple(rows), score_candidate(candidate_id, rows, supplier_proof=proofs.get(candidate_id, False)), tuple(sorted({warning for row in rows for warning in row.warnings}))) for candidate_id, rows in sorted(grouped.items()))
+    candidate_results: list[ConsumerAttentionCandidateResult] = []
+    for candidate_id, rows in sorted(grouped.items()):
+        conflicts = _conflicting_observation_keys(rows)
+        freshness = _report_freshness(rows, as_of=reference, max_age_days=max_age_days)
+        freshness_blockers = ()
+        if as_of is not None:
+            freshness_blockers = tuple(
+                f"consumer_observation_{state}"
+                for state in sorted(set(freshness) - {"fresh"})
+            )
+        warnings = {warning for row in rows for warning in row.warnings}
+        if conflicts:
+            warnings.add("conflicting_consumer_observations")
+        if as_of is not None:
+            if any(state == "future_dated" for state in freshness):
+                warnings.add("future_dated_consumer_observation")
+            if any(state == "stale" for state in freshness):
+                warnings.add("stale_consumer_observation")
+            if any(state == "unavailable" for state in freshness):
+                warnings.add("consumer_observation_freshness_unavailable")
+        score = score_candidate(
+            candidate_id,
+            rows,
+            supplier_proof=proofs.get(candidate_id, False),
+            quality_blockers=("conflicting_consumer_observations",) * bool(conflicts) + freshness_blockers,
+        )
+        candidate_results.append(
+            ConsumerAttentionCandidateResult(
+                candidate_id,
+                rows[0].query,
+                tuple(rows),
+                score,
+                tuple(sorted(warnings)),
+                tuple(sorted({row.offering_kind for row in rows})),
+                tuple(sorted({row.geography for row in rows if row.geography})),
+                tuple(sorted({row.language for row in rows if row.language})),
+                tuple(sorted(set(freshness))),
+                conflicts,
+            )
+        )
+    results = tuple(candidate_results)
     results = tuple(sorted(results, key=lambda item: (-item.score.overall_consumer_attention, item.candidate_id)))
     top = results[0] if results else None
-    return ConsumerAttentionReport("consumer-attention-v1", evidence_mode, len(results), len(records), tuple(sorted({item.platform for item in records})), top.candidate_id if top else None, f"{top.score.recommendation}:{top.candidate_id}" if top else "expand_consumer_research", results, ("consumer_attention_is_not_supplier_proof",) if records else ("consumer_attention_not_supplied",))
+    states = {state for item in results for state in item.freshness_statuses}
+    if "future_dated" in states:
+        report_freshness = "future_dated"
+    elif "stale" in states:
+        report_freshness = "stale"
+    elif states == {"fresh"}:
+        report_freshness = "fresh"
+    else:
+        report_freshness = "unavailable"
+    warnings = ["consumer_attention_is_not_supplier_proof"] if records else ["consumer_attention_not_supplied"]
+    conflict_count = sum(len(item.conflicting_observation_keys) for item in results)
+    if conflict_count:
+        warnings.append("conflicting_consumer_observations")
+    if as_of is not None and report_freshness != "fresh":
+        warnings.append("consumer_attention_freshness_incomplete")
+    next_action = f"{top.score.recommendation}:{top.candidate_id}" if top else "expand_consumer_research"
+    if conflict_count:
+        next_action = "resolve_consumer_attention_conflicts"
+    elif as_of is not None and report_freshness != "fresh":
+        next_action = "refresh_consumer_attention_evidence"
+    return ConsumerAttentionReport(
+        "consumer-attention-v1",
+        evidence_mode,
+        len(results),
+        len(records),
+        tuple(sorted({item.platform for item in records})),
+        top.candidate_id if top else None,
+        next_action,
+        results,
+        tuple(dict.fromkeys(warnings)),
+        True,
+        False,
+        False,
+        report_freshness,
+        tuple(sorted({item.offering_kind for item in records})),
+        tuple(sorted({item.geography for item in records if item.geography})),
+        tuple(sorted({item.language for item in records if item.language})),
+        conflict_count,
+    )
