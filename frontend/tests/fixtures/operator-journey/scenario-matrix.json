@@ -16,6 +16,18 @@
     {
       "route": "/operator/services",
       "api_mode": "ok-fixture",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "ok-fixture",
       "width": 768,
       "height": 1024,
       "expected_surface": "blocked_or_partial",
@@ -52,6 +64,18 @@
     {
       "route": "/operator/services",
       "api_mode": "down",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "down",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -88,6 +112,18 @@
     {
       "route": "/operator/services",
       "api_mode": "429",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "429",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -124,6 +160,18 @@
     {
       "route": "/operator/services",
       "api_mode": "500",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "500",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -160,6 +208,18 @@
     {
       "route": "/operator/services",
       "api_mode": "malformed",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "malformed",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -196,6 +256,18 @@
     {
       "route": "/operator/services",
       "api_mode": "empty",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "empty",
       "width": 768,
       "height": 1024,
       "expected_surface": "empty",
@@ -222,6 +294,18 @@
       "api_mode": "stale",
       "width": 375,
       "height": 812,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "stale",
+      "width": 390,
+      "height": 844,
       "expected_surface": "stale",
       "allowed_methods": [
         "GET"
@@ -268,6 +352,18 @@
     {
       "route": "/operator/services",
       "api_mode": "loading",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "loading",
       "width": 768,
       "height": 1024,
       "expected_surface": "loading",
@@ -304,6 +400,18 @@
     {
       "route": "/operator/first-phase",
       "api_mode": "ok-fixture",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "ok-fixture",
       "width": 768,
       "height": 1024,
       "expected_surface": "blocked_or_partial",
@@ -340,6 +448,18 @@
     {
       "route": "/operator/first-phase",
       "api_mode": "down",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "down",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -376,6 +496,18 @@
     {
       "route": "/operator/first-phase",
       "api_mode": "429",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "429",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -412,6 +544,18 @@
     {
       "route": "/operator/first-phase",
       "api_mode": "500",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "500",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -448,6 +592,18 @@
     {
       "route": "/operator/first-phase",
       "api_mode": "malformed",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "malformed",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -484,6 +640,18 @@
     {
       "route": "/operator/first-phase",
       "api_mode": "empty",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "empty",
       "width": 768,
       "height": 1024,
       "expected_surface": "empty",
@@ -510,6 +678,18 @@
       "api_mode": "stale",
       "width": 375,
       "height": 812,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "stale",
+      "width": 390,
+      "height": 844,
       "expected_surface": "stale",
       "allowed_methods": [
         "GET"
@@ -556,6 +736,18 @@
     {
       "route": "/operator/first-phase",
       "api_mode": "loading",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "loading",
       "width": 768,
       "height": 1024,
       "expected_surface": "loading",
@@ -592,6 +784,18 @@
     {
       "route": "/operator/events",
       "api_mode": "ok-fixture",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "ok-fixture",
       "width": 768,
       "height": 1024,
       "expected_surface": "blocked_or_partial",
@@ -628,6 +832,18 @@
     {
       "route": "/operator/events",
       "api_mode": "down",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "down",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -664,6 +880,18 @@
     {
       "route": "/operator/events",
       "api_mode": "429",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "429",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -700,6 +928,18 @@
     {
       "route": "/operator/events",
       "api_mode": "500",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "500",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -736,6 +976,18 @@
     {
       "route": "/operator/events",
       "api_mode": "malformed",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "malformed",
       "width": 768,
       "height": 1024,
       "expected_surface": "unavailable",
@@ -772,6 +1024,18 @@
     {
       "route": "/operator/events",
       "api_mode": "empty",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "empty",
       "width": 768,
       "height": 1024,
       "expected_surface": "empty",
@@ -808,6 +1072,18 @@
     {
       "route": "/operator/events",
       "api_mode": "stale",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "stale",
       "width": 768,
       "height": 1024,
       "expected_surface": "stale",
@@ -834,6 +1110,18 @@
       "api_mode": "loading",
       "width": 375,
       "height": 812,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "loading",
+      "width": 390,
+      "height": 844,
       "expected_surface": "loading",
       "allowed_methods": [
         "GET"

@@ -71,7 +71,7 @@ Python unit tests:
 
 ## Viewport matrix
 
-- mobile: 375×812
+- mobile: 375×812 and 390×844
 - tablet: 768×1024
 - desktop: 1440×900
 

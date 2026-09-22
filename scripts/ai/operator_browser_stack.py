@@ -227,7 +227,7 @@ def scenario_matrix() -> list[dict[str, Any]]:
         "stale": "stale",
         "loading": "loading",
     }
-    viewports = ((375, 812), (768, 1024), (1440, 900))
+    viewports = ((375, 812), (390, 844), (768, 1024), (1440, 900))
     rows: list[dict[str, Any]] = []
     for route in routes:
         for mode, surface in modes.items():

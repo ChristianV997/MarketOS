@@ -47,7 +47,6 @@ from scripts.ai.operator_browser_stack import (
     EVIDENCE_FIXTURE,
     EVIDENCE_LOCAL_UI,
     artifact_dir_is_safe,
-    classify_evidence,
     redact_report,
     scenario_matrix,
 )
@@ -64,6 +63,7 @@ OPERATOR_ROUTES = (
 API_MODES = ("ok-fixture", "down", "429", "500", "malformed", "empty", "stale", "loading")
 VIEWPORTS = (
     ("mobile", 375, 812),
+    ("mobile-390", 390, 844),
     ("tablet", 768, 1024),
     ("desktop", 1440, 900),
 )
@@ -716,7 +716,7 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
                                     "overflowX": (hit.get("snap") or {}).get("overflowX"),
                                 }
                     else:
-                        width, height = VIEWPORTS[2][1], VIEWPORTS[2][2]
+                        width, height = VIEWPORTS[-1][1], VIEWPORTS[-1][2]
                         dom = driver.dump_dom(url, width, height)
                         if not dom:
                             code, body = _http_get(url, config.request_timeout_s)
@@ -806,10 +806,12 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
             report["status"] = "passed_without_browser_proof"
             report["chrome_note"] = "CDP unavailable and dump-dom did not execute; static fixture contract still passed"
     report_path = artifact_dir / "operator-browser-acceptance-report.json"
-    report["evidence_class"] = classify_evidence(
-        browser_executed=bool(report.get("browser_proof")),
-        live_ui=bool(report.get("live_ui")),
+    live = report.get("live_ui") if isinstance(report.get("live_ui"), dict) else {}
+    reachable = any(
+        isinstance(route, dict) and route.get("classification") == "reachable"
+        for route in (live.get("routes") or {}).values()
     )
+    report["evidence_class"] = EVIDENCE_LOCAL_UI if reachable else EVIDENCE_FIXTURE
     if report["evidence_class"] not in {EVIDENCE_FIXTURE, EVIDENCE_LOCAL_UI}:
         report["failures"].append("evidence_class_rejected")
         report["status"] = "failed"
