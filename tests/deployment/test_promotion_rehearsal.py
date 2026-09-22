@@ -343,6 +343,59 @@ def test_classify_github_actions_job_fails_closed_on_a_malformed_job() -> None:
     assert result["classification_reason"]
 
 
+@pytest.mark.parametrize("status", ["queued", "in_progress", "waiting"])
+def test_classify_github_actions_job_distinguishes_pending_from_permanently_unavailable(status: str) -> None:
+    """A workflow that has not finished yet (status != "completed") is a
+    distinct, deterministic state from a permanently missing/zero-step
+    run: it may still produce real evidence, so it must be flagged
+    pending=True rather than folded into the same ci_unavailable a truly
+    dead run produces. GitHub only ever sets `conclusion` once the job
+    reaches status="completed", so a `conclusion` value present alongside
+    a non-completed status must not be trusted as real evidence either."""
+    from backend.deployment.promotion_rehearsal import classify_github_actions_job
+
+    result = classify_github_actions_job({"status": status, "runner_id": 42, "steps": [], "conclusion": None})
+    assert result["state"] == "ci_unavailable"
+    assert result["pending"] is True
+    assert "job_pending" in result["classification_reason"]
+
+
+def test_classify_github_actions_job_completed_status_is_not_pending() -> None:
+    """The positive case for the pending guard: a genuinely completed job
+    must never be flagged pending, even though pending defaults to a
+    falsy-looking value elsewhere -- proving the guard is a real check,
+    not a tautology."""
+    from backend.deployment.promotion_rehearsal import classify_github_actions_job
+
+    result = classify_github_actions_job({"status": "completed", "runner_id": 7, "steps": [{"name": "pytest", "conclusion": "success"}], "conclusion": "success"}, logs_available=True)
+    assert result["pending"] is False
+    assert result["state"] == "passed"
+
+
+def test_classify_github_actions_job_treats_a_missing_steps_key_the_same_as_an_empty_list() -> None:
+    """The docstring claims a missing `steps` key is handled the same as
+    an empty list -- prove it with a job that omits the key entirely,
+    not one that sets it to []."""
+    from backend.deployment.promotion_rehearsal import classify_github_actions_job
+
+    job = {"status": "completed", "runner_id": 3, "conclusion": None}
+    assert "steps" not in job
+    result = classify_github_actions_job(job)
+    assert result["steps_executed"] == 0
+    assert result["state"] == "ci_unavailable"
+
+
+def test_classify_github_actions_job_rejects_an_implausible_negative_runner_id() -> None:
+    """GitHub never reports a negative runner_id for real evidence; a
+    negative value must not be trusted as proof a runner was assigned."""
+    from backend.deployment.promotion_rehearsal import classify_github_actions_job
+
+    result = classify_github_actions_job({"status": "completed", "runner_id": -1, "steps": [{"name": "pytest", "conclusion": "success"}], "conclusion": "success"})
+    assert result["runner_id"] == 0
+    assert result["runner_assigned"] is False
+    assert result["state"] == "ci_unavailable"
+
+
 def test_execute_promotion_rehearsal_wires_real_github_actions_job_evidence_end_to_end() -> None:
     """The production entrypoint, not just the adapter in isolation: a
     real runner_id=0/steps=[] job must (1) drive ci_evidence to

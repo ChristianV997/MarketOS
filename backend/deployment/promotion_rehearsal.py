@@ -283,21 +283,54 @@ _GITHUB_ACTIONS_CONCLUSION_TO_CI_STATUS = {
     "timed_out": "timed_out",
 }
 
+# GitHub only ever sets a job's conclusion once status == "completed"; any
+# other status (queued/in_progress/waiting) means the run has not finished
+# and any conclusion value present is not yet trustworthy evidence.
+_GITHUB_ACTIONS_INCOMPLETE_STATUSES = frozenset({"queued", "in_progress", "waiting", "requested", "pending"})
+
+
+def _github_actions_unavailable(reason: str, *, pending: bool = False) -> dict[str, Any]:
+    return {
+        "state": "ci_unavailable",
+        "total_steps": 0,
+        "runners_active": 0,
+        "logs_available": False,
+        "runner_id": None,
+        "steps_executed": 0,
+        "runner_assigned": False,
+        "pending": pending,
+        "classification_reason": reason,
+    }
+
 
 def classify_github_actions_job(job: Mapping[str, Any] | None, *, logs_available: bool = False) -> dict[str, Any]:
     """Classify a real GitHub Actions job response (the exact shape the
-    Jobs API returns: ``runner_id`` and a ``steps`` list) fail-closed.
+    Jobs API returns: ``status``, ``runner_id``, and a ``steps`` list)
+    fail-closed.
 
     A pure adapter over ``classify_ci_evidence`` -- it derives that
     function's abstract ``total_steps``/``runners_active``/``ci_status``
     parameters from the job's real fields and delegates to it, rather than
     creating a second CI-admissibility authority. ``runner_id == 0`` (the
     value GitHub reports when a workflow never actually started, before a
-    runner was ever assigned) and an empty ``steps`` list are both treated
-    as no execution occurred, never as zero passing steps. ``job=None``
-    (the run/job could not be fetched at all -- API error, no permission,
-    or the run does not exist) and a non-mapping ``job`` both fail closed
-    to ``ci_unavailable`` rather than raising or being silently ignored.
+    runner was ever assigned), a negative or otherwise implausible
+    ``runner_id``, and an empty/missing ``steps`` list are all treated as
+    no execution occurred, never as zero passing steps. ``job=None`` (the
+    run/job could not be fetched at all -- API error, no permission, or
+    the run does not exist) and a non-mapping ``job`` both fail closed to
+    ``ci_unavailable`` rather than raising or being silently ignored.
+
+    A job whose ``status`` is not yet ``"completed"`` (queued/in_progress)
+    is distinguished as *pending* (``result["pending"] is True``) rather
+    than folded into the same ``ci_unavailable`` a permanently-missing
+    runner produces: pending evidence may still arrive, so an
+    administrator reading this should re-check later, not treat it as a
+    dead end requiring intervention. The classification *state* still
+    stays within the existing closed vocabulary (``ci_unavailable`` --
+    conservative, since a pending run is not yet admissible evidence
+    either); ``pending`` is what makes the two cases distinguishable, per
+    the mission's explicit requirement to tell zero-step, executed
+    failure, timeout, unavailable logs, pending, and pass apart.
 
     ``logs_available`` defaults to ``False``: unless a caller explicitly
     confirms it fetched the job's logs, this never assumes they exist --
@@ -305,27 +338,18 @@ def classify_github_actions_job(job: Mapping[str, Any] | None, *, logs_available
     "success" conclusion without verified logs is not admissible evidence.
     """
     if job is None:
-        return {
-            "state": "ci_unavailable",
-            "total_steps": 0,
-            "runners_active": 0,
-            "logs_available": logs_available,
-            "runner_id": None,
-            "steps_executed": 0,
-            "runner_assigned": False,
-            "classification_reason": "job_unavailable: the GitHub Actions job could not be fetched (missing run, no access, or an API error).",
-        }
+        return _github_actions_unavailable(
+            "job_unavailable: the GitHub Actions job could not be fetched (missing run, no access, or an API error)."
+        )
     if not isinstance(job, Mapping):
-        return {
-            "state": "ci_unavailable",
-            "total_steps": 0,
-            "runners_active": 0,
-            "logs_available": logs_available,
-            "runner_id": None,
-            "steps_executed": 0,
-            "runner_assigned": False,
-            "classification_reason": f"job_malformed: expected a GitHub Actions job mapping, got {type(job).__name__}.",
-        }
+        return _github_actions_unavailable(f"job_malformed: expected a GitHub Actions job mapping, got {type(job).__name__}.")
+
+    status = str(job.get("status", "") or "").strip().lower()
+    if status in _GITHUB_ACTIONS_INCOMPLETE_STATUSES:
+        return _github_actions_unavailable(
+            f"job_pending: workflow status is '{status}' -- not yet completed, so any conclusion present is not admissible evidence.",
+            pending=True,
+        )
 
     steps = job.get("steps")
     steps_list = steps if isinstance(steps, list) else []
@@ -333,6 +357,11 @@ def classify_github_actions_job(job: Mapping[str, Any] | None, *, logs_available
 
     runner_id_raw = job.get("runner_id", 0)
     runner_id = int(runner_id_raw) if isinstance(runner_id_raw, (int, float)) and not isinstance(runner_id_raw, bool) else 0
+    if runner_id < 0:
+        # GitHub never reports a negative runner_id for real evidence;
+        # treat an implausible value the same as "never assigned" rather
+        # than trusting it as a real, active runner.
+        runner_id = 0
     runner_assigned = runner_id != 0
 
     conclusion = job.get("conclusion")
@@ -347,6 +376,7 @@ def classify_github_actions_job(job: Mapping[str, Any] | None, *, logs_available
     result["runner_id"] = runner_id
     result["steps_executed"] = steps_executed
     result["runner_assigned"] = runner_assigned
+    result["pending"] = False
     return result
 
 
