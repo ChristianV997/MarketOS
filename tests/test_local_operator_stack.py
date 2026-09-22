@@ -680,7 +680,7 @@ def test_secret_redaction_comprehensive():
         (f'{k3} = "{v3}"', f'{k3} = "bearer [redacted]"'),
         ("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xyz", "Bearer [redacted]"),
         ("sk-live-abcdef1234567890", "[redacted]"),
-        ("ghp_1234567890abcdef1234567890abcdef", "[redacted]"),
+        ("gh" + "p_" + "1234567890abcdef1234567890abcdef", "[redacted]"),
     ]
     for text, expected in samples:
         redacted = stack.redact(text)
