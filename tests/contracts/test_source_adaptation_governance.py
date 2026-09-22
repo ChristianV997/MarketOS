@@ -2,7 +2,7 @@
 for MarketOS source-adaptation registry and governance acceptance pipeline.
 
 Tests:
-1. Canonical schema parsing and record validation across all 29 registered sources.
+1. Canonical schema parsing and record validation across all 28 registered sources.
 2. Deterministic stable hash verification.
 3. Secret-shape detection and redaction.
 4. Fail-closed rejection:
@@ -107,8 +107,9 @@ def test_canonical_registry_loads_and_passes_validation():
     assert summary["total_sources"] == len(registry.records)
     assert "copy_pattern" in summary["modes"]
     assert "emulate" in summary["modes"]
-    assert "defer" in summary["modes"]
+    assert "integrate" in summary["modes"]
     assert "reject" in summary["modes"]
+    assert "defer" in summary["modes"]
     assert "reference_only" in summary["modes"]
 
 
@@ -122,7 +123,7 @@ def test_stable_hash_is_deterministic_and_bit_identical():
 
     assert len(hash1) == 64
     assert hash1 == hash2
-    assert hash1 == "882bb2ee9d604d6ee5af05cb2125ad68a2b1fea56a3f23630150869c56e2e727"
+    assert hash1 == "b8007cb92a7a552ae2a189e4205a738309773a638a71ab00c82a2b3a814b54d0"
 
 
 
@@ -336,6 +337,7 @@ def test_target_boundary_collision_detection():
     from evaluation.source_governance.registry import (
         SourceAdaptationRecord,
         generate_work_order_from_source_record,
+        AdaptationWorkOrder,
     )
     from evaluation.source_governance.validator import validate_target_boundary_collisions
 
