@@ -999,6 +999,12 @@ def evaluation_campaign(payload: dict[str, Any] = Body(...)):
 # ── WebSocket live event stream ────────────────────────────────────────────────
 
 try:
+    from api.routes.service_delivery_workbench import router as _service_delivery_workbench_router
+    app.include_router(_service_delivery_workbench_router)
+except ImportError:
+    pass
+
+try:
     from fastapi import WebSocket as _WebSocket
     from api.ws import event_stream as _ws_event_stream
 
