@@ -11,7 +11,7 @@ export function CandidateDetailPanel({
   if (!candidate) {
     return (
       <section
-        className="rounded-lg border border-dashed border-zinc-700 bg-zinc-900/20 p-4 text-sm text-zinc-500"
+        className="rounded-lg border border-dashed border-zinc-700 bg-zinc-900/20 p-4 text-sm text-zinc-400"
         aria-label="Candidate detail empty"
       >
         Select a candidate row to inspect pillar-level evidence, provenance, and next action. Detail view is read-only.
@@ -29,7 +29,7 @@ export function CandidateDetailPanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-zinc-100">{candidate.title}</h3>
-          <p className="mt-1 text-[11px] text-zinc-500">
+          <p className="mt-1 text-[11px] text-zinc-400">
             Rank {candidate.rankIndex + 1}
             {candidate.isTopCandidate ? " · top candidate" : ""} · {candidate.candidateId}
             {candidate.sku ? ` · SKU ${candidate.sku}` : " · SKU unavailable"}
@@ -46,11 +46,11 @@ export function CandidateDetailPanel({
 
       <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Exact SKU</dt>
+          <dt className="text-zinc-400">Exact SKU</dt>
           <dd className="mt-1 font-mono text-zinc-200">{candidate.sku ?? "unavailable from current endpoints"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Market lane</dt>
+          <dt className="text-zinc-400">Market lane</dt>
           <dd className="mt-1 text-zinc-200">
             {candidate.marketLane
               ? `${candidate.marketLane.origin ?? "—"} → ${candidate.marketLane.destination ?? "—"} (${candidate.marketLane.currency ?? "—"})`
@@ -58,52 +58,52 @@ export function CandidateDetailPanel({
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Supplier offer</dt>
+          <dt className="text-zinc-400">Supplier offer</dt>
           <dd className="mt-1 text-zinc-200">{candidate.supplierOffer ?? "unavailable from current endpoints"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Confidence</dt>
+          <dt className="text-zinc-400">Confidence</dt>
           <dd className="mt-1 text-zinc-200">
             {candidate.confidence !== null ? `${(candidate.confidence * 100).toFixed(0)}%` : "—"}
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Promotion state</dt>
+          <dt className="text-zinc-400">Promotion state</dt>
           <dd className="mt-1 text-zinc-200">{candidate.promotionState.replace(/_/g, " ")}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Commercial decision</dt>
+          <dt className="text-zinc-400">Commercial decision</dt>
           <dd className="mt-1 text-zinc-200">{candidate.commercialDecision?.replace(/_/g, " ") ?? "—"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Next best action</dt>
+          <dt className="text-zinc-400">Next best action</dt>
           <dd className="mt-1 text-zinc-200">{candidate.nextBestAction?.replace(/_/g, " ") ?? "—"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Evidence mode</dt>
+          <dt className="text-zinc-400">Evidence mode</dt>
           <dd className="mt-1 text-zinc-200">{candidate.evidenceMode.replace(/_/g, " ")}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Evidence class</dt>
+          <dt className="text-zinc-400">Evidence class</dt>
           <dd className="mt-1 text-zinc-200">{candidate.evidenceClass.replace(/_/g, " ")}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Source family</dt>
+          <dt className="text-zinc-400">Source family</dt>
           <dd className="mt-1 text-zinc-200">{candidate.sourceFamily?.replace(/_/g, " ") ?? "—"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Risk</dt>
+          <dt className="text-zinc-400">Risk</dt>
           <dd className="mt-1 text-zinc-200">{candidate.riskLevel ?? "—"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Validation priority</dt>
+          <dt className="text-zinc-400">Validation priority</dt>
           <dd className="mt-1 text-zinc-200">
             {(candidate.validationPriority ?? "—").replace(/_/g, " ")}
             {candidate.validationTarget ? ` → ${candidate.validationTarget}` : ""}
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Assumption ratio</dt>
+          <dt className="text-zinc-400">Assumption ratio</dt>
           <dd className="mt-1 text-zinc-200">
             {candidate.assumptionRatio !== null
               ? `${(candidate.assumptionRatio * 100).toFixed(0)}%`
@@ -111,7 +111,7 @@ export function CandidateDetailPanel({
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Evidence completeness</dt>
+          <dt className="text-zinc-400">Evidence completeness</dt>
           <dd className="mt-1 text-zinc-200">
             {candidate.evidenceCompleteness !== null
               ? `${(candidate.evidenceCompleteness * 100).toFixed(0)}%`
@@ -119,23 +119,23 @@ export function CandidateDetailPanel({
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Supplier evidence class</dt>
+          <dt className="text-zinc-400">Supplier evidence class</dt>
           <dd className="mt-1 text-zinc-200">{candidate.supplierEvidenceClass.replace(/_/g, " ")}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Consumer evidence class</dt>
+          <dt className="text-zinc-400">Consumer evidence class</dt>
           <dd className="mt-1 text-zinc-200">{candidate.consumerEvidenceClass.replace(/_/g, " ")}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Consumer attention</dt>
+          <dt className="text-zinc-400">Consumer attention</dt>
           <dd className="mt-1 text-zinc-200">{candidate.consumerAttentionSummary?.replace(/_/g, " ") ?? "unavailable"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Competition</dt>
+          <dt className="text-zinc-400">Competition</dt>
           <dd className="mt-1 text-zinc-200">{candidate.competitionSummary?.replace(/_/g, " ") ?? "unavailable"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Economics</dt>
+          <dt className="text-zinc-400">Economics</dt>
           <dd className="mt-1 text-zinc-200">
             {candidate.economicsUnavailable
               ? "unavailable"
@@ -143,43 +143,43 @@ export function CandidateDetailPanel({
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Replay identity</dt>
+          <dt className="text-zinc-400">Replay identity</dt>
           <dd className="mt-1 font-mono text-[11px] text-zinc-200">{candidate.replayIdentity ?? "unavailable"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Hard gates</dt>
+          <dt className="text-zinc-400">Hard gates</dt>
           <dd className="mt-1 text-zinc-200">
-            {candidate.hardGates.length ? candidate.hardGates.join(" · ") : "none listed"}
+            {candidate.hardGates.length ? candidate.hardGates.join(" · ") : "unavailable"}
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Evidence references</dt>
+          <dt className="text-zinc-400">Evidence references</dt>
           <dd className="mt-1 text-zinc-200">
             {candidate.evidenceReferences.length ? candidate.evidenceReferences.join(" · ") : "unavailable"}
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Freshness expiry</dt>
+          <dt className="text-zinc-400">Freshness expiry</dt>
           <dd className="mt-1 text-zinc-200">{candidate.freshnessExpiry ?? "unavailable"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Supplier confidence</dt>
+          <dt className="text-zinc-400">Supplier confidence</dt>
           <dd className="mt-1 text-zinc-200">
             {candidate.confidenceSupplier !== null ? `${(candidate.confidenceSupplier * 100).toFixed(0)}%` : "unavailable"}
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Marketplace confidence</dt>
+          <dt className="text-zinc-400">Marketplace confidence</dt>
           <dd className="mt-1 text-zinc-200">
             {candidate.confidenceMarketplace !== null ? `${(candidate.confidenceMarketplace * 100).toFixed(0)}%` : "unavailable"}
           </dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Launch authorized</dt>
+          <dt className="text-zinc-400">Launch authorized</dt>
           <dd className="mt-1 text-zinc-200">{candidate.launchAuthorizedFalse ? "false" : "unavailable"}</dd>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <dt className="text-zinc-500">Offer disposition</dt>
+          <dt className="text-zinc-400">Offer disposition</dt>
           <dd className="mt-1 text-zinc-200">{candidate.offerDisposition}</dd>
         </div>
       </dl>
@@ -190,19 +190,19 @@ export function CandidateDetailPanel({
 
       <div className="mt-4 grid gap-3 text-xs sm:grid-cols-3">
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <h4 className="text-zinc-500">Assumptions</h4>
+          <h4 className="text-zinc-400">Assumptions</h4>
           <p className="mt-1 text-zinc-300">
             {candidate.assumptions.length ? candidate.assumptions.join(" · ") : "none listed"}
           </p>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <h4 className="text-zinc-500">Missing evidence</h4>
+          <h4 className="text-zinc-400">Missing evidence</h4>
           <p className="mt-1 text-zinc-300">
-            {candidate.missingEvidence.length ? candidate.missingEvidence.join(" · ") : "none listed"}
+            {candidate.missingEvidence.length ? candidate.missingEvidence.join(" · ") : "unavailable"}
           </p>
         </div>
         <div className="rounded border border-zinc-800 bg-zinc-950/40 p-2">
-          <h4 className="text-zinc-500">Conflicts</h4>
+          <h4 className="text-zinc-400">Conflicts</h4>
           <p className="mt-1 text-zinc-300">
             {candidate.conflicts.length ? candidate.conflicts.join(" · ") : "none listed"}
           </p>
@@ -215,7 +215,17 @@ export function CandidateDetailPanel({
           <li key={cell.pillarId} className="rounded border border-zinc-800 bg-zinc-950/40 p-2 text-xs">
             <div className="flex items-center justify-between gap-2">
               <span className="text-zinc-200">{cell.label}</span>
-              <span className="text-[10px] text-zinc-500">{cell.status} · {cell.evidenceClass.replace(/_/g, " ")}</span>
+              <span className="text-[10px] text-zinc-400">
+                {cell.status === "available"
+                  ? "slot present (read-only)"
+                  : cell.status === "partial"
+                    ? "slot present"
+                    : cell.status === "blocked"
+                      ? "blocked"
+                      : "slot missing"}
+                {" · "}
+                {cell.evidenceClass.replace(/_/g, " ")}
+              </span>
             </div>
             <p className="mt-1 text-zinc-400">
               {cell.score !== null ? `${(cell.score * 100).toFixed(0)}%` : "—"}

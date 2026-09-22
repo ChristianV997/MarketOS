@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { CandidateFilterState, RankedCandidateRow } from "../contracts/firstPhaseEvidencePacket";
 import { STABLE_TOP_N } from "../contracts/firstPhaseEvidencePacket";
 import { uniqueDecisions } from "../lib/filterCandidates";
@@ -17,7 +18,7 @@ export function CockpitToolbar({
   onExport: () => void;
   exportDisabled: boolean;
 }) {
-  const decisions = uniqueDecisions(candidates);
+  const decisions = useMemo(() => uniqueDecisions(candidates), [candidates]);
 
   return (
     <section
@@ -33,7 +34,7 @@ export function CockpitToolbar({
               value={filter.query}
               onChange={(event) => onFilterChange({ ...filter, query: event.target.value })}
               placeholder="Title, decision, action…"
-              className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+              className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
               aria-controls="ranked-candidates-table"
             />
           </label>
@@ -99,7 +100,7 @@ export function CockpitToolbar({
           Export client-safe JSON
         </button>
       </div>
-      <p className="mt-3 text-[11px] text-zinc-500" aria-live="polite">
+      <p className="mt-3 text-[11px] text-zinc-400" aria-live="polite">
         Showing {filteredCount} of {candidates.length} candidates · server order preserved · filters never re-rank
       </p>
     </section>

@@ -12,6 +12,7 @@ import {
 } from "../contracts/serviceEngagementProjection.ts";
 import { HIGGSFIELD_DRAFT_SKILLS } from "../lib/creativeAssetContract.ts";
 
+/** Sanitized fixture classes only. Never emit live_validated from local builders. */
 const EVIDENCE_CYCLE: EvidenceClass[] = [
   "observed",
   "derived",
@@ -22,7 +23,6 @@ const EVIDENCE_CYCLE: EvidenceClass[] = [
   "manual_import",
   "simulated",
   "unavailable",
-  "live_validated",
 ];
 
 function creativeDraft(title: string): CreativeAssetRequest[] {
@@ -247,6 +247,9 @@ export function buildEngagement(options: {
     internal_formula: options.includeInternal ? "contribution = fee - labor - tooling" : null,
     updated_at: "2026-09-18T00:00:00Z",
     stale: Boolean(options.stale),
+    renewal_state: options.lifecycle === "renewal_candidate" ? "eligible" : options.lifecycle === "delivered" ? "pending_review" : "not_applicable",
+    approval_state: options.lifecycle === "approved" || options.lifecycle === "delivered" ? "approved" : "not_requested",
+    delivery_state: options.lifecycle === "delivered" ? "complete" : "not_started",
   };
 }
 

@@ -11,7 +11,7 @@ function renderStatusBanner(surface, message) {
 
 function renderPipeline(rows, selectedId) {
   const body = rows.map((row) => (
-    `<tr aria-selected="${row.engagement_id === selectedId}" tabindex="${row.engagement_id === selectedId ? 0 : -1}"><th scope="row">${row.intake.display_name}</th></tr>`
+    `<tr><th scope="row"><button type="button" aria-pressed="${row.engagement_id === selectedId}" tabindex="${row.engagement_id === selectedId ? 0 : -1}">${row.intake.display_name}</button></th></tr>`
   )).join("");
   return `<table><thead><tr><th scope="col">Client</th></tr></thead><tbody>${body}</tbody></table>`;
 }
@@ -31,7 +31,9 @@ test("react component contracts: live region, table semantics, data_inadequate c
   const exported = buildClientSafeServiceExport(engagement);
   assert.match(banner, /aria-live="polite"/);
   assert.match(pipeline, /<table/);
-  assert.match(pipeline, /aria-selected="true"/);
+  assert.match(pipeline, /aria-pressed="true"/);
+  assert.match(table, /type="button"/);
+  assert.doesNotMatch(table, /aria-selected/);
   assert.equal(exported.accepted, false);
   assert.match(workflow, /how_to_provide/);
 });

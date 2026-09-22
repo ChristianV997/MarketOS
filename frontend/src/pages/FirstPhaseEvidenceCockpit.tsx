@@ -55,7 +55,6 @@ export default function FirstPhaseEvidenceCockpitPage() {
 
   const selectedCandidate =
     filteredCandidates.find((candidate) => candidate.candidateId === selectedId)
-    ?? packet.rankedCandidates.find((candidate) => candidate.candidateId === selectedId)
     ?? null;
 
   function handleFilterChange(next: CandidateFilterState) {
@@ -84,11 +83,11 @@ export default function FirstPhaseEvidenceCockpitPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5 overflow-x-hidden p-4 sm:p-6">
+    <div className="mx-auto max-w-7xl space-y-5 overflow-x-auto p-4 sm:p-6">
       {/* Launch Draft Pack / Higgsfield creative assets: deferred. No frontend display adapter until a cockpit-owned read-only contract exists on this page. */}
       <a
         href="#ranked-candidates-table"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-100"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
       >
         Skip to ranked candidates
       </a>
@@ -96,7 +95,7 @@ export default function FirstPhaseEvidenceCockpitPage() {
       <header className="space-y-3">
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">First-phase evidence cockpit</h1>
-      <p className="mt-1 text-sm text-zinc-500">
+      <p className="mt-1 text-sm text-zinc-400">
             Decision-review surface over existing Phase 1 projections. Rankings and economics are not recalculated.
             GET /api/phase1/evidence-cockpit is not implemented; missing slots stay unavailable.
           </p>
@@ -145,6 +144,7 @@ export default function FirstPhaseEvidenceCockpitPage() {
           packet.state === "loading"
           || packet.rankedCandidates.length === 0
           || packet.state === "unavailable"
+          || packet.fingerprint.evidenceMode === "unknown"
         }
       />
 

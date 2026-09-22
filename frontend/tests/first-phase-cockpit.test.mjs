@@ -29,6 +29,7 @@ const FATAL_PROJECTION_WARNINGS = new Set([
   "launch_authorized_rejected",
   "replay_identity_invalid",
   "appendix_required",
+  "cross_workspace_rejected",
 ]);
 
 function deriveState(input, overlay) {
@@ -55,6 +56,10 @@ function deriveState(input, overlay) {
   const rankedCount =
     overlay?.rankedCount ?? (Array.isArray(input.benchmark?.candidates) ? input.benchmark.candidates.length : 0);
   if (rankedCount === 0) return "empty";
+  if (overlay?.evidenceMode === "unknown") return "partial";
+  if (overlay?.evidenceMode && ["fixture_only", "manual", "simulated", "unknown"].includes(overlay.evidenceMode)) {
+    return "partial";
+  }
   return "success";
 }
 
@@ -353,6 +358,26 @@ test("state transitions cover loading empty blocked unavailable stale partial su
     "success",
   );
   assert.equal(
+    deriveState(
+      {
+        isLoading: false,
+        phase1Readiness: { overall_status: "ready" },
+        benchmark: { candidates: [{}] },
+        publicMarket: null,
+        researchPortfolio: null,
+      },
+      {
+        supplied: false,
+        warning: null,
+        unmatchedServerIds: [],
+        unmatchedProjectionIds: [],
+        rankedCount: 1,
+        evidenceMode: "unknown",
+      },
+    ),
+    "partial",
+  );
+  assert.equal(
     deriveState({
       isLoading: false,
       phase1Readiness: { overall_status: "ready" },
@@ -625,21 +650,23 @@ test("accessibility and focus contracts are present", async () => {
   assert.match(page, /Skip to ranked candidates/);
   assert.match(page, /Not live validated/);
   assert.match(page, /No network mutations/);
-  assert.match(page, /overflow-x-hidden/);
+  assert.match(page, /overflow-x-auto/);
   assert.match(page, /Launch Draft Pack \/ Higgsfield/);
-  assert.match(table, /aria-selected/);
+  assert.match(page, /evidenceMode === "unknown"/);
   assert.match(table, /scope="col"/);
-  assert.match(table, /role="grid"/);
-  assert.match(table, /role="gridcell"/);
-  assert.match(table, /role="listbox"/);
-  assert.match(table, /aria-rowcount=\{candidates\.length \+ 1\}/);
+  assert.match(table, /aria-pressed=\{selected\}/);
+  assert.doesNotMatch(table, /role="grid"/);
+  assert.doesNotMatch(table, /role="listbox"/);
+  assert.doesNotMatch(table, /<tr[^>]*tabIndex=/);
   assert.match(table, /id="ranked-candidates-table"/);
+  assert.match(table, /tabIndex=\{-1\}/);
   assert.match(table, /tabIndex=\{tabIndex\}/);
   assert.match(table, /Home/);
   assert.match(table, /End/);
   assert.match(table, /md:hidden/);
   assert.match(table, /overflow-x-auto/);
-  assert.match(table, /focus-visible:ring-1/);
+  assert.match(table, /Scrollable ranked candidates table/);
+  assert.match(table, /focus-visible:outline/);
   assert.match(detail, /id="candidate-detail-panel"/);
   assert.match(detail, /Exact SKU/);
   assert.match(detail, /Market lane/);
@@ -651,6 +678,13 @@ test("accessibility and focus contracts are present", async () => {
   assert.match(banner, /aria-live="polite"/);
   assert.match(banner, /Fixture evidence is screening-only/);
   assert.match(banner, /not live validated/);
+  assert.doesNotMatch(page, /text-zinc-500/);
+  assert.doesNotMatch(table, /text-zinc-500/);
+  assert.doesNotMatch(detail, /text-zinc-500/);
+  assert.match(detail, /unavailable/);
+  assert.match(table, /Decision \{candidate.commercialDecision/);
+  assert.match(table, /commercialDecision\?\.replace\(\/_\/g, " "\) \?\? "unavailable"/);
+  assert.match(detail, /hardGates.length \? candidate.hardGates.join\(" · "\) : "unavailable"/);
 });
 
 test("demo fixture and control planes avoid secrets and document unavailable slots", async () => {
@@ -679,6 +713,7 @@ test("route wiring and api base authority remain unchanged", async () => {
   assert.match(mainSource, /\/operator\/first-phase/);
   assert.match(hookSource, /usePhase1Readiness/);
   assert.match(hookSource, /useResearchPortfolios/);
+  assert.match(hookSource, /useMemo/);
   assert.doesNotMatch(hookSource, /research_to_decision\.py|fetchResearchToDecision/);
   assert.match(apiBase, /VITE_API_BASE_URL/);
 });

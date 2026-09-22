@@ -1,7 +1,7 @@
-import { MAX_PROJECTION_CANDIDATES, type RankedCandidateRow } from "../contracts/firstPhaseEvidencePacket";
-import { containsSecretShapedValue } from "./exportClientSafeReport";
-import { derivePromotionState } from "./derivePromotionState";
-import { enrichDecisionReview } from "./mapDecisionReview";
+import { MAX_PROJECTION_CANDIDATES, type RankedCandidateRow } from "../contracts/firstPhaseEvidencePacket.ts";
+import { containsSecretShapedValue } from "./exportClientSafeReport.ts";
+import { derivePromotionState } from "./derivePromotionState.ts";
+import { enrichDecisionReview } from "./mapDecisionReview.ts";
 
 export const COMMERCE_CLIENT_PROJECTION_SCHEMA = "MarketOS.ClientCommerceProjection.v1";
 

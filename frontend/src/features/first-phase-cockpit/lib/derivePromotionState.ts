@@ -1,4 +1,4 @@
-import type { PromotionState } from "../contracts/firstPhaseEvidencePacket";
+import type { PromotionState } from "../contracts/firstPhaseEvidencePacket.ts";
 
 /** Map commercial_decision to a non-authoritative promotion label. Never "launched". */
 export function derivePromotionState(decision: string | null | undefined): PromotionState {

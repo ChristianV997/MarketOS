@@ -4,8 +4,9 @@ import { test } from "node:test";
 
 import { adaptServiceProjection, neverUpgradeEvidenceClass, normalizeEvidenceClass, normalizeLifecycle } from "../src/features/service-delivery-workbench/lib/adaptServiceProjection.ts";
 import { composeWorkbenchViewModel, moveSelection } from "../src/features/service-delivery-workbench/lib/composeWorkbenchViewModel.ts";
-import { buildClientSafeServiceExport, EXPORT_OMIT_KEYS } from "../src/features/service-delivery-workbench/lib/exportClientSafeEngagement.ts";
+import { buildClientSafeServiceExport, containsSecretShapedValue, EXPORT_OMIT_KEYS } from "../src/features/service-delivery-workbench/lib/exportClientSafeEngagement.ts";
 import { EMPTY_FILTERS, filterEngagements } from "../src/features/service-delivery-workbench/lib/filterEngagements.ts";
+import { httpErrorUnavailableEnvelope } from "../src/features/service-delivery-workbench/lib/unservedGetEnvelope.ts";
 import { HIGGSFIELD_CONTRACT_SOURCE, HIGGSFIELD_DRAFT_SKILLS } from "../src/features/service-delivery-workbench/lib/creativeAssetContract.ts";
 import { buildDemoProjection, buildOneClientProjection, buildScaleProjection, buildTenClientProjection } from "../src/features/service-delivery-workbench/fixtures/buildFixtures.ts";
 import { joinApiPath, resolveApiBaseUrl } from "../src/lib/apiBase.ts";
@@ -160,14 +161,35 @@ test("surface states include empty blocked unavailable loading stale partial suc
     isLoading: true, errorMessage: null, projection: null, filters: EMPTY_FILTERS, selectedId: null,
   });
   assert.equal(loading.surface, "loading");
+  assert.match(loading.pipelineEmptyCopy, /Loading the service-delivery workbench/);
   const empty = composeWorkbenchViewModel({
     isLoading: false, errorMessage: null, projection: null, filters: EMPTY_FILTERS, selectedId: null,
   });
   assert.equal(empty.surface, "empty");
+  assert.match(empty.pipelineEmptyCopy, /No sanitized service-engagement projection/);
   const unavailable = composeWorkbenchViewModel({
     isLoading: false, errorMessage: "boom", projection: null, filters: EMPTY_FILTERS, selectedId: null,
   });
   assert.equal(unavailable.surface, "unavailable");
+  assert.match(unavailable.pipelineEmptyCopy, /Demo fixtures are not substituted/);
+  assert.doesNotMatch(unavailable.pipelineEmptyCopy, /Clear filters/);
+});
+
+test("unserved GET envelope keeps the pipeline copy unavailable instead of filter-empty", () => {
+  const envelope = httpErrorUnavailableEnvelope(502, { error: "bad_gateway" });
+  const adapted = adaptServiceProjection(envelope);
+  assert.equal(adapted.rejected, false);
+  const view = composeWorkbenchViewModel({
+    isLoading: false,
+    errorMessage: null,
+    projection: adapted.projection,
+    filters: EMPTY_FILTERS,
+    selectedId: null,
+  });
+  assert.equal(view.surface, "unavailable");
+  assert.equal(view.filtered.length, 0);
+  assert.match(view.pipelineEmptyCopy, /Demo fixtures are not substituted/);
+  assert.doesNotMatch(view.pipelineEmptyCopy, /Clear filters/);
 });
 
 test("component sources expose required accessibility contracts", async () => {
@@ -214,6 +236,29 @@ test("fixture compose never reports success or live_validated", () => {
   });
   assert.notEqual(view.surface, "success");
   assert.equal(view.liveEndpointUnavailable, true);
+});
+
+test("artifact-backed projection is available read-only without becoming live validation", () => {
+  const source = buildDemoProjection();
+  const result = adaptServiceProjection({
+    ...source,
+    live_endpoint_status: "available_read_only",
+  });
+  assert.equal(result.rejected, false);
+  assert.equal(result.projection.live_endpoint_status, "available_read_only");
+  const view = composeWorkbenchViewModel({
+    isLoading: false,
+    errorMessage: null,
+    projection: result.projection,
+    filters: EMPTY_FILTERS,
+    selectedId: result.projection.engagements[0].engagement_id,
+  });
+  assert.notEqual(view.surface, "success");
+  assert.equal(view.liveEndpointUnavailable, false);
+  assert.match(view.statusMessage, /available_read_only/);
+  assert.match(view.statusMessage, /Envelope:/);
+  assert.notEqual(view.surface, "success");
+  assert.notEqual(result.projection.engagements[0].evidence[0].evidence_class, "live_validated");
 });
 
 test("adapter maps a #261 plane-shaped engagement without recalculating economics", () => {
@@ -303,4 +348,54 @@ test("adapter and filter sources never sort or recalculate contribution", async 
   assert.doesNotMatch(adapter, /\.sort\(/);
   assert.doesNotMatch(filter, /\.sort\(/);
   assert.match(adapter, /frontend_calculates: false/);
+});
+
+test("HTTP error JSON stays unavailable and is never fixture or empty success", () => {
+  const envelope = httpErrorUnavailableEnvelope(500, { detail: "Internal Server Error" });
+  const result = adaptServiceProjection(envelope, "live-get");
+  assert.equal(result.rejected, false);
+  assert.equal(result.projection.availability, "unavailable");
+  assert.equal(result.projection.live_endpoint_status, "unavailable");
+  assert.equal(result.projection.engagements.length, 0);
+  const view = composeWorkbenchViewModel({
+    isLoading: false,
+    errorMessage: "Canonical GET unavailable (500).",
+    projection: result.projection,
+    filters: EMPTY_FILTERS,
+    selectedId: null,
+  });
+  assert.equal(view.surface, "unavailable");
+  assert.notEqual(view.surface, "empty");
+  assert.notEqual(view.surface, "success");
+  assert.match(view.statusMessage, /unavailable/i);
+});
+
+test("missing producer currency is labeled unavailable instead of inventing USD", () => {
+  const demo = buildDemoProjection();
+  const first = demo.engagements[0];
+  const result = adaptServiceProjection({
+    ...demo,
+    engagements: [{
+      ...first,
+      economics: {
+        ...first.economics,
+        fee: { amount_label: "99.00" },
+      },
+    }],
+  });
+  assert.equal(result.projection.engagements[0].economics.fee.currency, "unavailable");
+  assert.notEqual(result.projection.engagements[0].economics.fee.currency, "USD");
+});
+
+test("client-safe export rejects private notes, cross-client keys, and formula-shaped summaries", () => {
+  assert.equal(containsSecretShapedValue({ private_note: "do not export" }), true);
+  assert.equal(containsSecretShapedValue({ private_notes: "do not export" }), true);
+  assert.equal(containsSecretShapedValue({ cross_client_data: "other-workspace" }), true);
+  const engagement = buildDemoProjection().engagements.find((row) => !row.eligibility.data_inadequate)
+    ?? buildDemoProjection().engagements[0];
+  const formulaExport = buildClientSafeServiceExport({
+    ...engagement,
+    evidence: [{ title: "econ", evidence_class: "fixture", summary: "contribution = fee - labor" }],
+  });
+  assert.equal(formulaExport.accepted, false);
 });

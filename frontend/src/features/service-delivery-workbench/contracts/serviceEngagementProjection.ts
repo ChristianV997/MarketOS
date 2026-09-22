@@ -177,13 +177,17 @@ export type ServiceEngagement = {
   internal_formula: string | null;
   updated_at: string;
   stale: boolean;
+  /** Copied #261/#275 labels. Display only; not a workflow engine. */
+  renewal_state: string | null;
+  approval_state: string | null;
+  delivery_state: string | null;
 };
 
 export type ServiceEngagementProjection = {
   schema_version: typeof SERVICE_ENGAGEMENT_PROJECTION_VERSION;
   availability: "fixture" | "unavailable" | "partial" | "manual_import";
   live_endpoint: typeof FUTURE_WORKBENCH_PATH;
-  live_endpoint_status: "unavailable";
+  live_endpoint_status: "unavailable" | "available_read_only";
   read_only: true;
   generated_at: string;
   engagements: ServiceEngagement[];
