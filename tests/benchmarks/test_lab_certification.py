@@ -121,11 +121,15 @@ def test_invalid_sample_shape_and_tail_guard():
     assert percentile_guard([1.0, 2.0, 3.0], 0.95) == 3.0
 
 
-def test_this_branch_cli_is_not_pr279_concat():
+def test_current_cli_scope_is_classified_without_lab_ownership():
     info = inspect_replay_cli_source(_CLI_PATH)
     assert info["status"] == "available"
-    assert info["is_pr279_concat"] is False
-    assert PR279_CONCAT_MARKER not in _CLI_PATH.read_text(encoding="utf-8")
+    # PR #279 is now part of refreshed mainline, so the dependency may be
+    # present. The laboratory observes that dependency; it does not duplicate
+    # the concat implementation in its own source.
+    assert info["is_pr279_concat"] is True
+    lab_source = _LAB_PATH.read_text(encoding="utf-8")
+    assert "events: tuple[Event, ...] = tuple((*commerce_events, *fulfillment_events))" not in lab_source
 
 
 def test_pr279_cli_blob_is_concat_when_present():
