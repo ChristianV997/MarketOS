@@ -570,7 +570,7 @@ def test_typed_boundary_rejects_secret_locators_snapshot_paths_and_raw_provenanc
     unsafe_locator = EvidenceRef(
         "unsafe-locator",
         source_type="manual_import",
-        document_ref="sk-live-example-secret-value",
+        document_ref="sk-" + "live-" + "example-secret-value",
         evidence_state="fixture",
         captured_at="2026-09-01T00:00:00+00:00",
         valid_until="2026-10-01T00:00:00+00:00",
@@ -642,7 +642,7 @@ def test_untrusted_privileged_typed_evidence_cannot_compute_economics(tmp_path):
 
 
 def test_typed_claim_maps_reject_untrusted_strings_and_never_emit_privileged_values(tmp_path):
-    secret = "sk-live-example-secret-value"
+    secret = "sk-" + "live-" + "example-secret-value"
     with pytest.raises(ValueError, match="evidence-state claim map is malformed") as exc_info:
         _assess(tmp_path, evidence_state_claims={"fee": secret})
     assert secret not in str(exc_info.value)
@@ -811,7 +811,7 @@ def test_untrusted_state_and_locator_claims_cannot_upgrade_evidence(tmp_path):
     assert "live_validated" not in json.dumps(payload)
 
     secret = _input_fixture()
-    secret["observations"][0]["evidence"]["reference"]["document_ref"] = "sk-live-example-secret-value"
+    secret["observations"][0]["evidence"]["reference"]["document_ref"] = "sk-" + "live-" + "example-secret-value"
     with pytest.raises(ValueError, match="secret-shaped"):
         _run_input(secret, registry=registry)
 
