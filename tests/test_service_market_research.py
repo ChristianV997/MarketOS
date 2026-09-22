@@ -140,6 +140,49 @@ def test_generic_service_candidate_uses_kernel_and_remains_review_only(tmp_path)
     assert client_export.payload["status"] == "needs_evidence"
 
 
+def test_service_market_projects_into_canonical_promotion_gate_without_authorizing_launch(tmp_path):
+    _, event, _ = _assess(tmp_path)
+
+    promotion = event.payload["promotion"]
+
+    assert promotion["requested_stage"] == "launch_draft"
+    assert promotion["promoted"] is False
+    assert promotion["achievable_stage"] == "candidate"
+    assert "exact_sku" in promotion["blockers"]
+    assert any(item.startswith("evidence_state_insufficient_for_stage:") for item in promotion["blockers"])
+
+
+def test_typed_assessment_rejects_forged_workspace_before_composition(tmp_path):
+    workspace, registry = _workspace_registry(tmp_path)
+    forged = ClientWorkspace(
+        workspace_id=workspace.workspace_id,
+        name="different workspace",
+        workspace_type=workspace.workspace_type,
+        created_at=workspace.created_at,
+        updated_at=workspace.updated_at,
+    )
+
+    with pytest.raises(ValueError, match="workspace identity rejected"):
+        _assess(tmp_path, workspace=forged, registry=registry)
+
+
+def test_typed_assessment_rejects_workspace_registered_with_different_identity(tmp_path):
+    workspace, registry = _workspace_registry(tmp_path)
+    mismatched_registry = WorkspaceRegistry(str(tmp_path / "mismatched-registry.json"))
+    mismatched_registry.register(
+        ClientWorkspace(
+            workspace_id=workspace.workspace_id,
+            name="different workspace",
+            workspace_type=workspace.workspace_type,
+            created_at=workspace.created_at,
+            updated_at=workspace.updated_at,
+        )
+    )
+
+    with pytest.raises(ValueError, match="workspace identity rejected"):
+        _assess(tmp_path, workspace=workspace, registry=mismatched_registry)
+
+
 def test_goods_remain_on_existing_product_synthesis_path(tmp_path):
     fixture_root = Path(__file__).parent / "fixtures" / "opportunity_synthesis"
     reports = [
@@ -377,6 +420,24 @@ def test_offering_types_are_explicit_without_product_name_rules(
     if offering_type == "goods":
         assert result["event"]["aggregate_type"] == "offering_market_candidate"
         assert result["event"]["payload"]["recommendation"] == "route_to_existing_goods_authority"
+
+
+@pytest.mark.parametrize("country", ("MX", "US", "CA"))
+def test_supported_jurisdictions_remain_unassessed_without_compliance_proof(tmp_path, country):
+    _, registry = _input_registry(tmp_path)
+    document = _input_fixture()
+    document["market_lane"]["destination_country"] = country
+
+    result = _run_input(document, registry=registry)
+    payload = result["event"]["payload"]
+    compliance_gate = next(
+        item for item in payload["promotion"]["gates"] if item["gate_id"] == "compliance"
+    )
+
+    assert payload["market_lane"]["destination_country"] == country
+    assert payload["market_access_assessment"] == "not_assessed"
+    assert compliance_gate["satisfied"] is False
+    assert result["trustos_export"]["payload"]["status"] == "needs_evidence"
 
 
 @pytest.mark.parametrize("offering_type", ("service", "goods", "hybrid", "unknown"))

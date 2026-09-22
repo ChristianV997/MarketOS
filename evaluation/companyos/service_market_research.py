@@ -33,8 +33,10 @@ from backend.events.replay_certification import replay_summary
 from backend.events.repository import InMemoryEventRepository
 from backend.workspaces.client_workspace import ClientWorkspace
 from backend.workspaces.registry import WorkspaceRegistry
+from evaluation.commerce.promotion import evaluate_promotion
 from evaluation.trustos.client_workspace_isolation import (
     ClientWorkspaceEvidenceExport,
+    ClientWorkspaceExportError,
     export_client_evidence,
 )
 
@@ -463,6 +465,92 @@ def _lane_summary(lane: MarketLane | None) -> dict[str, str] | None:
     }
 
 
+def _registered_workspace(
+    workspace: ClientWorkspace,
+    registry: WorkspaceRegistry,
+) -> ClientWorkspace:
+    """Return the exact registry record or fail before composing any output."""
+    if not isinstance(workspace, ClientWorkspace) or not isinstance(registry, WorkspaceRegistry):
+        raise ClientWorkspaceExportError("invalid_metadata")
+    try:
+        registered = registry.get(workspace.workspace_id)
+    except Exception:
+        raise ClientWorkspaceExportError("identity_rejected") from None
+    if registered is None or registered.to_dict() != workspace.to_dict():
+        raise ClientWorkspaceExportError("identity_rejected")
+    return registered
+
+
+def _promotion_summary(
+    *,
+    candidate_id: str,
+    economics: ServiceEconomics | None,
+    observations: tuple[ServiceMarketObservation, ...],
+    lane: MarketLane | None,
+    delivery_cost: Money | None,
+    delivery_evidence: EvidenceRef | None,
+    blockers: list[str],
+    evidence_source_mode: str,
+) -> dict[str, Any]:
+    """Project this adapter's evidence into the canonical promotion gate."""
+    blocker_set = set(blockers)
+    def evidence_usable(ref: EvidenceRef | None) -> bool:
+        if not isinstance(ref, EvidenceRef):
+            return False
+        if ref.evidence_state in _UNAVAILABLE_STATES or _evidence_class(ref, evidence_source_mode) == "unknown":
+            return False
+        evidence_id = ref.evidence_id
+        return not any(
+            f"{prefix}:{evidence_id}" in blocker_set
+            for prefix in (
+                "stale_evidence",
+                "future_dated_evidence",
+                "freshness_not_assessed",
+                "unknown_evidence_source",
+                "unverified_privileged_evidence_claim",
+                "malformed_evidence_state_mismatch",
+            )
+        )
+
+    lane_ready = (
+        lane is not None
+        and bool(lane.evidence_refs)
+        and all(evidence_usable(ref) for ref in lane.evidence_refs)
+        and "market_lane_not_assessed" not in blocker_set
+        and "missing_market_lane_evidence" not in blocker_set
+    )
+    shipping_ready = (
+        isinstance(delivery_cost, Money)
+        and evidence_usable(delivery_evidence)
+    )
+    competition_ready = any(
+        item.metric == "competitor_price"
+        and evidence_usable(item.evidence_ref)
+        for item in observations
+    ) and not any(item.startswith("conflicting_observation:") for item in blockers)
+    decision = evaluate_promotion(
+        candidate_id,
+        "launch_draft",
+        gate_satisfaction={
+            # The service contract has no exact SKU, ownership, return,
+            # warranty, support, compliance, or customer-promise proof.
+            "exact_sku": False,
+            "destination_lane": lane_ready,
+            "shipping": shipping_ready,
+            "return_route": False,
+            "warranty_route": False,
+            "support_owner": False,
+            "supplier_permission": False,
+            "compliance": False,
+            "economics": economics is not None,
+            "competition": competition_ready,
+            "customer_facing_promise": False,
+        },
+        evidence_state=economics.evidence_state if economics is not None else "unknown",
+    )
+    return decision.to_dict()
+
+
 def _record_assessment(
     *,
     payload: dict[str, Any],
@@ -475,6 +563,7 @@ def _record_assessment(
     event_type: str = "service_market_assessment_recorded",
     aggregate_type: str = "service_market_candidate",
 ) -> tuple[Event, ClientWorkspaceEvidenceExport, dict[str, Any]]:
+    workspace = _registered_workspace(workspace, registry)
     canonical_payload = canonical_json(payload)
     if len(canonical_payload.encode("utf-8")) > MAX_EVENT_PAYLOAD_BYTES:
         raise ValueError("service-market event payload exceeds size limit")
@@ -608,8 +697,7 @@ def assess_service_market_candidate(
         market_access_claim = _SAFE_PRIVILEGED_CLAIM
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("as_of must be timezone-aware")
-    if not isinstance(workspace, ClientWorkspace) or not isinstance(registry, WorkspaceRegistry):
-        raise ValueError("a registered client workspace is required")
+    workspace = _registered_workspace(workspace, registry)
     if not isinstance(observations, tuple) or len(observations) > MAX_MARKET_OBSERVATIONS:
         raise ValueError("service-market observation limit exceeded")
     if any(not isinstance(item, ServiceMarketObservation) for item in observations):
@@ -862,6 +950,16 @@ def assess_service_market_candidate(
             "client_impact_metrics": "not_assessed",
             "evidence_state": economics.evidence_state,
         }
+    promotion_summary = _promotion_summary(
+        candidate_id=candidate_id,
+        economics=economics,
+        observations=observations,
+        lane=lane,
+        delivery_cost=delivery_cost,
+        delivery_evidence=delivery_evidence,
+        blockers=blockers,
+        evidence_source_mode=evidence_source_mode,
+    )
     lane_data = _lane_summary(lane)
     payload = {
         "offering_type": "service",
@@ -877,6 +975,7 @@ def assess_service_market_candidate(
         "blockers": blockers,
         "missing_inputs": missing_inputs,
         "applicable_checks": ["service_market_evidence", "service_delivery_capacity", "service_contribution"],
+        "promotion": promotion_summary,
         "market_lane": lane_data,
         "observations": normalized_observations,
         "evidence_references": evidence_summaries,
