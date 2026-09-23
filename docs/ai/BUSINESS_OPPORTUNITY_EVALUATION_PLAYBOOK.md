@@ -149,6 +149,16 @@ fixture or simulation path.
 
 ## Evaluation Dimensions
 
+Eight evaluation lenses cover a review. Five are detailed below as
+dimensions: `reachable_buyer`, `recurring_pain`, `current_alternatives`,
+`supply_gap`, `evidence_quality`. The remaining three are covered
+elsewhere in this document: `unit_economics` (see "Economics Worksheet,
+Not an Engine"), `regulatory_risk` (see "Regulatory and Platform Risk"),
+and `geography` (the market/language context recorded on every
+Opportunity Record). `scripts/ai/validate_business_opportunity_playbook.py`
+enforces this closed set of eight lens keys against every fixture's
+`evidence[].dimension`.
+
 ### Reachable buyer
 
 Identify the buyer, geography, language, channel, access constraint, and
