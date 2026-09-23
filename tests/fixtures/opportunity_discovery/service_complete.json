@@ -1,0 +1,26 @@
+{
+  "run_id": "fixture-service-complete",
+  "candidates": [
+    {
+      "candidate_id": "ops-consulting",
+      "name": "Operations consulting",
+      "offering_kind": "service",
+      "category": "professional-services",
+      "geography": {"destination_country": "MX", "currency": "MXN"},
+      "evidence": [
+        {"evidence_id": "service-buyer", "area": "demand", "status": "observed_fact", "evidence_class": "manual", "source_type": "operator", "source_ref": "manual://buyer/ops", "freshness": "current"},
+        {"evidence_id": "service-capacity", "area": "capacity", "status": "assumption", "evidence_class": "manual", "source_type": "operator", "source_ref": "manual://capacity/ops", "freshness": "current"},
+        {"evidence_id": "service-economics", "area": "economics", "status": "assumption", "evidence_class": "derived", "source_type": "kernel", "source_ref": "derived://economics/ops", "freshness": "current"}
+      ],
+      "metadata": {"reachable_buyer": true},
+      "economics": {
+        "currency": "MXN",
+        "scenarios": {
+          "best": {"service_fee": {"amount": "30000", "currency": "MXN"}, "ad_spend": {"amount": "0", "currency": "MXN"}, "contribution_margin": "0.60", "roas_before": "1", "roas_after": "1", "cac_before": {"amount": "0", "currency": "MXN"}, "cac_after": {"amount": "0", "currency": "MXN"}, "delivery_hours": "20", "capacity_hours": "120", "delivery_cost": {"amount": "9000", "currency": "MXN"}, "tooling_cost": {"amount": "1000", "currency": "MXN"}, "pass_through_cost": {"amount": "0", "currency": "MXN"}, "revision_reserve": {"amount": "1000", "currency": "MXN"}},
+          "base": {"service_fee": {"amount": "24000", "currency": "MXN"}, "ad_spend": {"amount": "0", "currency": "MXN"}, "contribution_margin": "0.50", "roas_before": "1", "roas_after": "1", "cac_before": {"amount": "0", "currency": "MXN"}, "cac_after": {"amount": "0", "currency": "MXN"}, "delivery_hours": "24", "capacity_hours": "120", "delivery_cost": {"amount": "10000", "currency": "MXN"}, "tooling_cost": {"amount": "1200", "currency": "MXN"}, "pass_through_cost": {"amount": "0", "currency": "MXN"}, "revision_reserve": {"amount": "1200", "currency": "MXN"}},
+          "worst": {"service_fee": {"amount": "18000", "currency": "MXN"}, "ad_spend": {"amount": "0", "currency": "MXN"}, "contribution_margin": "0.40", "roas_before": "1", "roas_after": "1", "cac_before": {"amount": "0", "currency": "MXN"}, "cac_after": {"amount": "0", "currency": "MXN"}, "delivery_hours": "36", "capacity_hours": "120", "delivery_cost": {"amount": "13000", "currency": "MXN"}, "tooling_cost": {"amount": "1500", "currency": "MXN"}, "pass_through_cost": {"amount": "0", "currency": "MXN"}, "revision_reserve": {"amount": "2000", "currency": "MXN"}}
+        }
+      }
+    }
+  ]
+}
