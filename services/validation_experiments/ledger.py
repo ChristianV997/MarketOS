@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
 from backend.economics.kernel import EvidenceRef, Money, UnitEconomicsAssumptions, calculate_scenarios
+from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis
 from evaluation.companyos.approval_ledger import simulate_action
 from evaluation.companyos.resource_execution_governor import ExecutionDecisionRequest, evaluate_execution_request
 from evaluation.trustos.client_workspace_isolation import build_client_workspace_isolation_report
@@ -265,7 +266,8 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     economics = {"scenarios": {name: item.to_dict() for name, item in economics_results.items()}, "base_cost_state": "missing" if "product_cost" in missing_inputs else "explicit_zero" if product_cost.amount == 0 else "explicit", "missing_inputs": tuple(missing_inputs)}
     evidence = _evidence_summary(payload, as_of_dt)
     market, supplier, consumer = _pillar_reports(payload, evidence)
-    opportunity = {"top_candidate_id": candidate_id, "scoring_authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis", "report": {"candidate_id": candidate_id, "evidence_mode": evidence["mode"]}}
+    opportunity = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
+    opportunity["scoring_authority"] = "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis"
     result_rows = payload.get("result_statuses") or [((payload.get("result") or {}).get("status") or "simulated")]
     result_statuses = tuple(str(row) for row in result_rows if str(row) in _RESULT_STATUSES)
     if not result_statuses:
