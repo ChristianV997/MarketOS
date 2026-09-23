@@ -19,6 +19,15 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 const harnessUrl = new URL("./fixtures/operator-journey/harness.html", import.meta.url);
 const runnerPath = path.join(repoRoot, "scripts", "ai", "run_operator_browser_acceptance.py");
 
+function resolvePython() {
+  if (process.env.PYTHON) return process.env.PYTHON;
+  for (const candidate of ["python", "python3"]) {
+    const probe = spawnSync(candidate, ["-c", "import sys; raise SystemExit(0 if sys.version_info[0] >= 3 else 1)"]);
+    if (probe.status === 0) return candidate;
+  }
+  return "python";
+}
+
 test("operator journey harness encodes skip links, live region, evidence classes, and no mutation controls", async () => {
   const html = await readFile(harnessUrl, "utf8");
   assert.match(html, /Skip to service pipeline/);
@@ -69,9 +78,18 @@ test("acceptance runner source stays loopback-only and fail-closed on mutations"
   assert.doesNotMatch(source, /pip install|npm install|npx playwright install/i);
 });
 
+test("fixture runner uses python3 when the python command is absent", () => {
+  const named = spawnSync("python", ["-c", "print(1)"]);
+  if (named.error?.code !== "ENOENT") {
+    assert.equal(resolvePython(), process.env.PYTHON || "python");
+    return;
+  }
+  assert.equal(resolvePython(), "python3");
+});
+
 test("python fixture acceptance path runs without claiming browser proof when --browser none", () => {
   const completed = spawnSync(
-    process.env.PYTHON || "python",
+    resolvePython(),
     [runnerPath, "--browser", "none", "--skip-viewports", "--json"],
     {
       cwd: repoRoot,
