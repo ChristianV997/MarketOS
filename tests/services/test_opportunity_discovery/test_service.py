@@ -108,6 +108,72 @@ def test_stale_and_conflicting_evidence_are_preserved_as_blockers() -> None:
     assert "conflicting_competition_evidence" in decision.blockers
 
 
+def test_future_evidence_is_not_treated_as_current() -> None:
+    payload = product()
+    payload["candidates"][0]["evidence"][0]["freshness"] = "future"
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert "demand_evidence_future" in decision.evidence_gaps
+    assert "future_dated_evidence" in decision.blockers
+    assert decision.readiness == "not_ready"
+
+
+def test_synthesis_rejects_a_report_bound_to_another_candidate() -> None:
+    payload = product()
+    payload["candidates"][0]["reports"]["marketplace"]["candidates"][0]["candidate_id"] = "different-candidate"
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.recommendation == "blocked"
+    assert "report_candidate_identity_mismatch" in decision.fatal_gates
+    assert "malformed_synthesis_report" in decision.evidence_gaps
+
+
+def test_discover_ranks_multiple_candidates_by_canonical_synthesis_score() -> None:
+    first = product()["candidates"][0]
+    for key in ("affiliate_fee_rate", "brokerage_fee", "cac", "domestic_shipping", "international_shipping", "payment_fee_fixed", "platform_fee_fixed"):
+        first["economics"]["assumptions"][key] = {"amount": "0", "currency": "MXN"} if key in {"brokerage_fee", "cac", "domestic_shipping", "international_shipping", "payment_fee_fixed", "platform_fee_fixed"} else "0"
+    second = copy.deepcopy(first)
+    second["candidate_id"] = "higher-scoring-lamp"
+    second["name"] = "Higher scoring lamp"
+    for report in second["reports"].values():
+        for item in report["candidates"]:
+            item["candidate_id"] = "higher-scoring-lamp"
+    second["reports"]["marketplace"]["candidates"][0]["score"]["overall_marketplace_opportunity"] = 0.95
+    second["reports"]["supplier"]["candidates"][0]["score"]["overall_supplier_feasibility"] = 0.95
+    second["reports"]["consumer"]["candidates"][0]["score"]["overall_consumer_attention"] = 0.95
+
+    report = run_discovery("discover", {"candidates": [first, second]})
+
+    assert report.ranked_candidate_ids == ("higher-scoring-lamp", "desk-lamp")
+    assert report.decisions[0].metrics["synthesis_score"] != report.decisions[1].metrics["synthesis_score"]
+
+
+def test_service_missing_cost_is_unavailable_but_explicit_zero_is_preserved() -> None:
+    missing = fixture("service_complete.json")
+    missing["candidates"][0]["economics"]["scenarios"]["base"].pop("delivery_cost")
+    missing_decision = run_discovery("evaluate", missing).decisions[0]
+
+    assert missing_decision.scenarios["base"]["status"] == "unavailable"
+    assert "base.delivery_cost" in missing_decision.evidence_gaps
+
+    explicit_zero = fixture("service_complete.json")
+    explicit_zero["candidates"][0]["economics"]["scenarios"]["base"]["delivery_cost"]["amount"] = "0"
+    zero_decision = run_discovery("evaluate", explicit_zero).decisions[0]
+
+    assert zero_decision.scenarios["base"]["delivery_cost"]["amount"] == "0"
+    assert "base.delivery_cost" not in zero_decision.evidence_gaps
+
+
+def test_non_finite_numeric_input_is_rejected() -> None:
+    payload = product()
+    payload["candidates"][0]["economics"]["price"]["amount"] = float("nan")
+
+    with pytest.raises(OpportunityDiscoveryError, match="invalid_numeric_value"):
+        run_discovery("evaluate", payload)
+
+
 @pytest.mark.parametrize("offering_kind", ["product", "service", "hybrid", "unknown"])
 def test_offering_kinds_are_product_agnostic(offering_kind: str) -> None:
     if offering_kind == "service":

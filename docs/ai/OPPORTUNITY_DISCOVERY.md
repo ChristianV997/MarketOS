@@ -26,8 +26,11 @@ credentials, write a database, or authorize a commercial action.
   supplied under `evidence_candidates`). With no candidates, the result is
   `unavailable`; the engine never invents a market or product.
 - `evaluate`: assess exactly one candidate.
-- `compare`: assess two or more supplied candidates with stable candidate-ID
-  ordering. It does not create a competing composite ranking score.
+- `compare`: assess two or more supplied candidates. Product and hybrid
+  candidates are ordered by the existing canonical synthesis score, with the
+  candidate ID as the deterministic tie-breaker; service and unknown
+  candidates retain stable ID ordering. It does not create a competing
+  composite ranking score.
 - `validate`: produce the cheapest bounded, decision-changing evidence
   experiment for one candidate. The experiment is a read-only plan.
 - `review-results`: preserve supplied review results as operator input; local
@@ -67,9 +70,12 @@ separately as `actual_executed`; it never upgrades commercial evidence.
 
 Missing money is not converted to zero. Explicit zero is accepted as an input
 and remains serialized as zero. Missing price, product cost, required shipping,
-or service scenario inputs create unavailable evidence and do not produce a
-positive decision. Negative contribution is a fatal gate even when attention
-or product-synthesis scores are high.
+service delivery/tooling/pass-through costs, or other required scenario inputs
+create unavailable evidence and do not produce a positive decision. Future,
+stale, and conflicting evidence remains visibly non-current. Negative
+contribution is a fatal gate even when attention or product-synthesis scores
+are high. A report whose candidate IDs do not match the supplied candidate is
+malformed and is blocked rather than attributed to the wrong opportunity.
 
 ## Decision and Safety Semantics
 

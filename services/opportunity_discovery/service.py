@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -57,6 +58,7 @@ MAX_CANDIDATES = 50
 MAX_EVIDENCE = 250
 MAX_DEPTH = 12
 MAX_NODES = 2_000
+MAX_OUTPUT_BYTES = 128 * 1024
 
 _SECRET_KEY = re.compile(
     r"(?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|credential|cookie|password|private[_-]?key|secret|token)",
@@ -108,7 +110,15 @@ def _json_safe(value: Any, *, depth: int = 0, nodes: list[int] | None = None) ->
         if len(value.encode("utf-8")) > 4_096 or _FORBIDDEN_VALUE.search(value):
             raise OpportunityDiscoveryError("sensitive_value_rejected")
         return value
-    if value is None or isinstance(value, (bool, int, float, Decimal)):
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise OpportunityDiscoveryError("invalid_numeric_value")
+        return value
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise OpportunityDiscoveryError("invalid_numeric_value")
         return value
     raise OpportunityDiscoveryError("unsupported_input_value")
 
@@ -363,7 +373,7 @@ def _normalize_evidence(raw: Any, *, default_area: str) -> tuple[OpportunityEvid
             status = "hypothesis"
             notes.append("supplier_claim_is_not_independent_verification")
         freshness = item.get("freshness", "unknown")
-        if freshness not in {"current", "stale", "unknown"}:
+        if freshness not in {"current", "stale", "future", "unknown"}:
             freshness = "unknown"
             notes.append("freshness_unrecognized")
         result.append(OpportunityEvidence(evidence_id, area, status, evidence_class, source_type, _text(item.get("source_ref"), "source_ref"), freshness, bool(item.get("conflicting", False)), item.get("value"), tuple(notes)))
@@ -407,8 +417,10 @@ def _evidence_gaps(candidate: OpportunityCandidate) -> tuple[list[str], list[str
     classes: set[str] = set()
     for item in candidate.evidence:
         classes.add(item.evidence_class)
-        if item.status in {"unknown", "unavailable"} or item.freshness in {"stale", "unknown"}:
+        if item.status in {"unknown", "unavailable"} or item.freshness in {"stale", "future", "unknown"}:
             gaps.add(f"{item.area}_evidence_{item.status if item.status in {'unknown', 'unavailable'} else item.freshness}")
+        if item.freshness == "future":
+            blockers.add("future_dated_evidence")
         if item.conflicting:
             blockers.add(f"conflicting_{item.area}_evidence")
         if item.source_type == "supplier_claim":
@@ -530,7 +542,7 @@ def _service_scenarios(candidate: OpportunityCandidate) -> tuple[dict[str, Any],
             missing.append(f"{name}_scenario")
             outputs[name] = {"status": "unavailable", "missing_inputs": [f"{name}_scenario"]}
             continue
-        required = ("service_fee", "ad_spend", "contribution_margin", "roas_before", "roas_after", "cac_before", "cac_after", "delivery_hours", "revision_reserve")
+        required = ("service_fee", "ad_spend", "contribution_margin", "roas_before", "roas_after", "cac_before", "cac_after", "delivery_hours", "delivery_cost", "tooling_cost", "pass_through_cost", "revision_reserve")
         absent = [key for key in required if values.get(key) is None]
         if absent:
             missing.extend(f"{name}.{key}" for key in absent)
@@ -610,14 +622,49 @@ def _synthesis(candidate: OpportunityCandidate) -> dict[str, Any]:
     consumer = candidate.reports.get("consumer")
     if not any(isinstance(item, Mapping) for item in (market, supplier, consumer)):
         return {"status": "unavailable", "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis"}
+    for report in (market, supplier, consumer):
+        if not isinstance(report, Mapping) or not isinstance(report.get("candidates"), list):
+            continue
+        if not any(isinstance(item, Mapping) and item.get("candidate_id") == candidate.candidate_id for item in report["candidates"]):
+            return {
+                "status": "malformed",
+                "reason": "report_candidate_identity_mismatch",
+                "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+            }
     report = build_product_opportunity_synthesis(
         market if isinstance(market, Mapping) else None,
         supplier if isinstance(supplier, Mapping) else None,
         consumer if isinstance(consumer, Mapping) else None,
     ).to_dict()
+    candidate_report = next(
+        (item for item in report.get("candidates", []) if isinstance(item, Mapping) and item.get("candidate_id") == candidate.candidate_id),
+        None,
+    )
+    if candidate_report is None and any(isinstance(item, Mapping) and isinstance(item.get("candidates"), list) for item in (market, supplier, consumer)):
+        return {
+            "status": "malformed",
+            "reason": "report_candidate_identity_mismatch",
+            "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+        }
+    score = candidate_report.get("score", {}) if isinstance(candidate_report, Mapping) else {}
+    recommendation = score.get("recommendation", {}) if isinstance(score, Mapping) else {}
+    risk_profile = score.get("risk_profile", {}) if isinstance(score, Mapping) else {}
+    if candidate_report is not None:
+        return {
+            "status": "derived",
+            "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+            "candidate_id": candidate.candidate_id,
+            "combined_opportunity_score": score.get("combined_opportunity_score", candidate_report.get("combined_opportunity", 0)),
+            "supplier_feasibility": score.get("supplier_feasibility", candidate_report.get("supplier_feasibility", 0)),
+            "consumer_attention": score.get("consumer_attention", candidate_report.get("consumer_attention", 0)),
+            "marketplace_opportunity": score.get("marketplace_opportunity", candidate_report.get("marketplace_opportunity", 0)),
+            "recommendation": recommendation.get("code", candidate_report.get("combined_recommendation", "hold_for_manual_review")) if isinstance(recommendation, Mapping) else "hold_for_manual_review",
+            "risk_profile": risk_profile if isinstance(risk_profile, Mapping) else {},
+        }
     return {
         "status": "derived",
         "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+        "candidate_id": candidate.candidate_id,
         "combined_opportunity_score": report.get("combined_opportunity_score", 0),
         "supplier_feasibility": report.get("supplier_feasibility", 0),
         "consumer_attention": report.get("consumer_attention", 0),
@@ -688,6 +735,8 @@ def _decision(candidate: OpportunityCandidate, *, mode: str, workspace: Any, reg
         blockers.append("restricted_or_legal_category")
     if metadata.get("reachable_buyer") is False:
         blockers.append("no_reachable_buyer")
+    elif metadata.get("reachable_buyer") is not True:
+        gaps.append("reachable_buyer_evidence_unavailable")
     if metadata.get("operational_risk") in {"unacceptable", "blocked"} or metadata.get("compliance_status") in {"unacceptable", "blocked"}:
         blockers.append("unacceptable_compliance_or_operational_risk")
     supply_evidence = [item for item in candidate.evidence if item.area in {"supply", "supplier"}]
@@ -714,9 +763,12 @@ def _decision(candidate: OpportunityCandidate, *, mode: str, workspace: Any, reg
     synthesis = _synthesis(candidate)
     if synthesis.get("status") == "unavailable" and candidate.offering_kind in {"product", "hybrid"}:
         gaps.append("marketplace_supplier_consumer_reports_unavailable")
+    if synthesis.get("status") == "malformed":
+        blockers.append(str(synthesis.get("reason", "malformed_synthesis_report")))
+        gaps.append("malformed_synthesis_report")
     gaps = sorted(set(gaps))
     blockers = sorted(set(blockers))
-    fatal = tuple(item for item in blockers if item in {"restricted_or_legal_category", "no_reachable_buyer", "supply_unproven", "supplier_claim_not_verification", "structurally_negative_economics", "unacceptable_compliance_or_operational_risk", "economics_malformed"})
+    fatal = tuple(item for item in blockers if item in {"restricted_or_legal_category", "no_reachable_buyer", "supply_unproven", "supplier_claim_not_verification", "structurally_negative_economics", "unacceptable_compliance_or_operational_risk", "economics_malformed", "report_candidate_identity_mismatch"})
     if fatal:
         recommendation = "blocked"
         readiness = "blocked"
@@ -765,7 +817,14 @@ def run_discovery(mode: str, payload: Mapping[str, Any], *, workspace: Any = Non
         raise OpportunityDiscoveryError("compare_mode_requires_two_candidates")
     run_id = _ensure_id(safe.get("run_id", "opportunity-discovery-v1"), "run_id")
     decisions = tuple(_decision(item, mode=mode, workspace=workspace, registry=registry, run_id=run_id) for item in candidates)
-    ranked = tuple(item.candidate_id for item in decisions if item.readiness == "ready")
+    ready_decisions = [item for item in decisions if item.readiness == "ready"]
+    ranked = tuple(
+        item.candidate_id
+        for item in sorted(
+            ready_decisions,
+            key=lambda value: (-_decimal(value.metrics.get("synthesis_score"), "synthesis_score") if value.metrics.get("synthesis_score") is not None else Decimal("1"), value.candidate_id),
+        )
+    )
     blockers = sorted({blocker for item in decisions for blocker in item.blockers})
     if not candidates:
         status, next_action = "unavailable", "supply sanitized candidates or evidence-backed candidate generation inputs"
@@ -776,6 +835,8 @@ def run_discovery(mode: str, payload: Mapping[str, Any], *, workspace: Any = Non
     else:
         status, next_action = "ready_for_review", "review the deterministic evidence matrix; no external action is authorized"
     base = DiscoveryRun("opportunity-discovery-v1", mode, status, "actual_executed", candidates, decisions, ranked, tuple(blockers), next_action, {"read_only": True, "network_calls": False, "provider_calls": False, "credentials_present": False, "orders_created": False, "payments_created": False, "ads_launched": False, "publishing": False, "database_writes": False, "launch_authorized": False})
+    if len(_canonical(base.to_dict(include_fingerprint=False)).encode("utf-8")) > MAX_OUTPUT_BYTES:
+        raise OpportunityDiscoveryError("output_size_exceeded")
     return DiscoveryRun(base.run_version, base.mode, base.status, base.execution_classification, base.candidates, base.decisions, base.ranked_candidate_ids, base.blockers, base.next_best_action, base.safety, _fingerprint(base.to_dict(include_fingerprint=False)))
 
 
