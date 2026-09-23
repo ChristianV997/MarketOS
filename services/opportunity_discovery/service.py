@@ -15,6 +15,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, Sequence
 
 from backend.economics.kernel import (
+    CurrencyMismatchError,
     EVIDENCE_STATES,
     EvidenceRef,
     EconomicsError,
@@ -66,6 +67,7 @@ _SECRET_KEY = re.compile(
 )
 _FORBIDDEN_KEY = re.compile(r"(?:raw[_-]?payload|html|prompt|formula|source[_-]?code|stack[_-]?trace)", re.IGNORECASE)
 _FORBIDDEN_VALUE = re.compile(r"(?:BEGIN [A-Z ]+PRIVATE KEY|<\s*(?:script|html)|ignore (?:all|previous)|system prompt)", re.IGNORECASE)
+_NONFINITE_TEXT = re.compile(r"^[+-]?(?:nan|infinity|inf)$", re.IGNORECASE)
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$")
 
 
@@ -109,6 +111,8 @@ def _json_safe(value: Any, *, depth: int = 0, nodes: list[int] | None = None) ->
     if isinstance(value, str):
         if len(value.encode("utf-8")) > 4_096 or _FORBIDDEN_VALUE.search(value):
             raise OpportunityDiscoveryError("sensitive_value_rejected")
+        if _NONFINITE_TEXT.fullmatch(value.strip()):
+            raise OpportunityDiscoveryError("invalid_numeric_value")
         return value
     if value is None or isinstance(value, (bool, int)):
         return value
@@ -376,7 +380,10 @@ def _normalize_evidence(raw: Any, *, default_area: str) -> tuple[OpportunityEvid
         if freshness not in {"current", "stale", "future", "unknown"}:
             freshness = "unknown"
             notes.append("freshness_unrecognized")
-        result.append(OpportunityEvidence(evidence_id, area, status, evidence_class, source_type, _text(item.get("source_ref"), "source_ref"), freshness, bool(item.get("conflicting", False)), item.get("value"), tuple(notes)))
+        conflicting = item.get("conflicting", False)
+        if not isinstance(conflicting, bool):
+            raise OpportunityDiscoveryError("invalid_conflicting_flag")
+        result.append(OpportunityEvidence(evidence_id, area, status, evidence_class, source_type, _text(item.get("source_ref"), "source_ref"), freshness, conflicting, item.get("value"), tuple(notes)))
     return tuple(sorted(result, key=lambda item: item.evidence_id))
 
 
@@ -398,6 +405,9 @@ def _normalize_candidate(raw: Any, index: int) -> OpportunityCandidate:
     economics = raw.get("economics", {})
     if not isinstance(economics, Mapping):
         raise OpportunityDiscoveryError("invalid_economics")
+    metadata = raw.get("metadata", {})
+    if not isinstance(metadata, Mapping):
+        raise OpportunityDiscoveryError("invalid_metadata")
     return OpportunityCandidate(
         candidate_id,
         name,
@@ -407,7 +417,7 @@ def _normalize_candidate(raw: Any, index: int) -> OpportunityCandidate:
         _normalize_evidence(raw.get("evidence", ()), default_area="candidate"),
         dict(economics),
         dict(reports),
-        dict(raw.get("metadata", {})) if isinstance(raw.get("metadata", {}), Mapping) else {},
+        dict(metadata),
     )
 
 
@@ -506,19 +516,22 @@ def _unit_scenarios(candidate: OpportunityCandidate) -> tuple[dict[str, Any], di
     if missing:
         unavailable = {"status": "unavailable", "missing_inputs": sorted(set(missing))}
         return {"best": unavailable, "base": unavailable, "worst": unavailable}, unavailable, missing
-    lane = _lane(candidate, currency)
-    price = _money(price_value, currency=currency, candidate=candidate, area="demand", field_name="price")
-    product_cost = _money(cost_value, currency=currency, candidate=candidate, area="supply", field_name="product_cost")
-    assumption_values: dict[str, Any] = {}
-    money_fields = {"supplier_shipping", "domestic_shipping", "international_shipping", "brokerage_fee", "payment_fee_fixed", "platform_fee_fixed", "ad_spend", "cac"}
-    for key, value in assumptions_raw.items():
-        if key in money_fields:
-            assumption_values[key] = _money(value, currency=currency, candidate=candidate, area="economics", field_name=key)
-        elif key in UnitEconomicsAssumptions.__dataclass_fields__:
-            assumption_values[key] = _decimal(value, key)
-    assumptions = UnitEconomicsAssumptions(**assumption_values, evidence_refs=tuple(ref for ref in (_evidence_ref(candidate, "economics"),) if ref))
     try:
+        lane = _lane(candidate, currency)
+        price = _money(price_value, currency=currency, candidate=candidate, area="demand", field_name="price")
+        product_cost = _money(cost_value, currency=currency, candidate=candidate, area="supply", field_name="product_cost")
+        assumption_values: dict[str, Any] = {}
+        money_fields = {"supplier_shipping", "domestic_shipping", "international_shipping", "brokerage_fee", "payment_fee_fixed", "platform_fee_fixed", "ad_spend", "cac"}
+        for key, value in assumptions_raw.items():
+            if key in money_fields:
+                assumption_values[key] = _money(value, currency=currency, candidate=candidate, area="economics", field_name=key)
+            elif key in UnitEconomicsAssumptions.__dataclass_fields__:
+                assumption_values[key] = _decimal(value, key)
+        assumptions = UnitEconomicsAssumptions(**assumption_values, evidence_refs=tuple(ref for ref in (_evidence_ref(candidate, "economics"),) if ref))
         results = calculate_scenarios(price, product_cost, lane=lane, assumptions=assumptions, overrides=raw.get("scenario_overrides"))
+    except CurrencyMismatchError:
+        malformed = {"status": "malformed", "error": "currency_mismatch"}
+        return {"best": malformed, "base": malformed, "worst": malformed}, malformed, ["currency_mismatch"]
     except (EconomicsError, OpportunityDiscoveryError):
         malformed = {"status": "malformed", "error": "economics_contract_rejected"}
         return {"best": malformed, "base": malformed, "worst": malformed}, malformed, ["economics_contract_rejected"]
@@ -534,6 +547,22 @@ def _service_scenarios(candidate: OpportunityCandidate) -> tuple[dict[str, Any],
     scenario_inputs = raw.get("scenarios", {})
     if not isinstance(scenario_inputs, Mapping):
         raise OpportunityDiscoveryError("invalid_service_scenarios")
+    money_fields = {"service_fee", "ad_spend", "cac_before", "cac_after", "delivery_cost", "tooling_cost", "pass_through_cost", "revision_reserve", "target_monthly_contribution", "client_value_created"}
+    observed_currencies: list[str] = []
+    if raw.get("currency") is not None:
+        observed_currencies.append(str(raw["currency"]).upper())
+    for values in scenario_inputs.values():
+        if not isinstance(values, Mapping):
+            continue
+        if values.get("currency") is not None:
+            observed_currencies.append(str(values["currency"]).upper())
+        for field_name in money_fields:
+            value = values.get(field_name)
+            if isinstance(value, Mapping) and value.get("currency") is not None:
+                observed_currencies.append(str(value["currency"]).upper())
+    if observed_currencies and len(set(observed_currencies)) > 1:
+        malformed = {"status": "malformed", "error": "currency_mismatch"}
+        return {"best": malformed, "base": malformed, "worst": malformed}, malformed, ["currency_mismatch"]
     missing: list[str] = []
     outputs: dict[str, Any] = {}
     for name in ("best", "base", "worst"):
@@ -620,11 +649,18 @@ def _synthesis(candidate: OpportunityCandidate) -> dict[str, Any]:
     market = candidate.reports.get("marketplace")
     supplier = candidate.reports.get("supplier")
     consumer = candidate.reports.get("consumer")
-    if not any(isinstance(item, Mapping) for item in (market, supplier, consumer)):
+    provided_reports = (("marketplace", market), ("supplier", supplier), ("consumer", consumer))
+    if not any(report is not None for _, report in provided_reports):
         return {"status": "unavailable", "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis"}
-    for report in (market, supplier, consumer):
-        if not isinstance(report, Mapping) or not isinstance(report.get("candidates"), list):
+    for report_name, report in provided_reports:
+        if report is None:
             continue
+        if not isinstance(report, Mapping) or not isinstance(report.get("candidates"), list):
+            return {
+                "status": "malformed",
+                "reason": f"malformed_{report_name}_report",
+                "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+            }
         if not any(isinstance(item, Mapping) and item.get("candidate_id") == candidate.candidate_id for item in report["candidates"]):
             return {
                 "status": "malformed",
@@ -749,6 +785,8 @@ def _decision(candidate: OpportunityCandidate, *, mode: str, workspace: Any, reg
     gaps.extend(economics_missing)
     if base.get("status") in {"unavailable", "malformed"}:
         blockers.append("economics_unavailable")
+    if "currency_mismatch" in economics_missing:
+        blockers.append("currency_mismatch")
     contribution = base.get("contribution_after_cac") or base.get("contribution")
     if isinstance(contribution, Mapping):
         try:
@@ -768,7 +806,23 @@ def _decision(candidate: OpportunityCandidate, *, mode: str, workspace: Any, reg
         gaps.append("malformed_synthesis_report")
     gaps = sorted(set(gaps))
     blockers = sorted(set(blockers))
-    fatal = tuple(item for item in blockers if item in {"restricted_or_legal_category", "no_reachable_buyer", "supply_unproven", "supplier_claim_not_verification", "structurally_negative_economics", "unacceptable_compliance_or_operational_risk", "economics_malformed", "report_candidate_identity_mismatch"})
+    fatal = tuple(
+        item
+        for item in blockers
+        if item in {
+            "restricted_or_legal_category",
+            "no_reachable_buyer",
+            "supply_unproven",
+            "supplier_claim_not_verification",
+            "structurally_negative_economics",
+            "unacceptable_compliance_or_operational_risk",
+            "economics_malformed",
+            "currency_mismatch",
+            "report_candidate_identity_mismatch",
+        }
+        or item.startswith("conflicting_")
+        or item.startswith("malformed_")
+    )
     if fatal:
         recommendation = "blocked"
         readiness = "blocked"
@@ -803,6 +857,8 @@ def run_discovery(mode: str, payload: Mapping[str, Any], *, workspace: Any = Non
     if mode not in DISCOVERY_MODES:
         raise OpportunityDiscoveryError("invalid_mode")
     safe = _json_safe(payload)
+    if not isinstance(safe, Mapping):
+        raise OpportunityDiscoveryError("root_must_be_object")
     # Discovery may only derive candidates from an explicitly supplied seed;
     # it never invents a category, market, or business idea.
     candidates_raw = safe.get("candidates") or safe.get("evidence_candidates", [])
@@ -811,13 +867,19 @@ def run_discovery(mode: str, payload: Mapping[str, Any], *, workspace: Any = Non
     candidates = tuple(sorted((_normalize_candidate(item, index) for index, item in enumerate(candidates_raw)), key=lambda item: item.candidate_id))
     if len({item.candidate_id for item in candidates}) != len(candidates):
         raise OpportunityDiscoveryError("duplicate_candidate_id")
-    if mode in {"evaluate", "validate", "review-results"} and len(candidates) != 1:
+    if candidates and mode in {"evaluate", "validate", "review-results"} and len(candidates) != 1:
         raise OpportunityDiscoveryError("single_candidate_mode_requires_one_candidate")
-    if mode == "compare" and len(candidates) < 2:
+    if candidates and mode == "compare" and len(candidates) < 2:
         raise OpportunityDiscoveryError("compare_mode_requires_two_candidates")
     run_id = _ensure_id(safe.get("run_id", "opportunity-discovery-v1"), "run_id")
     decisions = tuple(_decision(item, mode=mode, workspace=workspace, registry=registry, run_id=run_id) for item in candidates)
-    ready_decisions = [item for item in decisions if item.readiness == "ready"]
+    ready_decisions = [
+        item
+        for item in decisions
+        if item.readiness == "ready"
+        and item.synthesis.get("status") == "derived"
+        and item.metrics.get("synthesis_score") is not None
+    ]
     ranked = tuple(
         item.candidate_id
         for item in sorted(
@@ -841,12 +903,17 @@ def run_discovery(mode: str, payload: Mapping[str, Any], *, workspace: Any = Non
 
 
 def render_markdown(report: DiscoveryRun | Mapping[str, Any]) -> str:
-    data = report.to_dict() if isinstance(report, DiscoveryRun) else dict(report)
+    data = report.to_dict() if isinstance(report, DiscoveryRun) else _json_safe(dict(report))
+    if not isinstance(data, Mapping):
+        raise OpportunityDiscoveryError("root_must_be_object")
     lines = ["# Opportunity Discovery", "", f"- Mode: **{data.get('mode', 'unknown')}**", f"- Status: **{data.get('status', 'unknown')}**", f"- Execution: **{data.get('execution_classification', 'unknown')}**", f"- Fingerprint: `{data.get('fingerprint', 'unavailable')}`", "", "## Decisions", "", "| Candidate | Recommendation | Readiness | Blockers |", "|---|---|---|---|"]
     for item in sorted(data.get("decisions", []), key=lambda value: str(value.get("candidate_id", ""))):
         lines.append(f"| {item.get('candidate_id', '')} | **{item.get('recommendation', '')}** | {item.get('readiness', '')} | {', '.join(item.get('blockers', [])) or 'none recorded'} |")
     lines.extend(["", "## Safety", "", "No ads, spend, publishing, outreach, orders, payments, inventory, provider activation, or launch authority is created by this report.", "", "## Next Action", "", str(data.get("next_best_action", "review evidence")), ""])
-    return "\n".join(lines)
+    rendered = "\n".join(lines)
+    if len(rendered.encode("utf-8")) > MAX_OUTPUT_BYTES:
+        raise OpportunityDiscoveryError("output_size_exceeded")
+    return rendered
 
 
 __all__ = [

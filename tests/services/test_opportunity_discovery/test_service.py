@@ -25,6 +25,14 @@ def product() -> dict:
     return fixture("product_complete.json")
 
 
+def ready_product() -> dict:
+    payload = product()
+    assumptions = payload["candidates"][0]["economics"]["assumptions"]
+    for key in ("affiliate_fee_rate", "brokerage_fee", "cac", "domestic_shipping", "international_shipping", "payment_fee_fixed", "platform_fee_fixed"):
+        assumptions[key] = {"amount": "0", "currency": "MXN"} if key in {"brokerage_fee", "cac", "domestic_shipping", "international_shipping", "payment_fee_fixed", "platform_fee_fixed"} else "0"
+    return payload
+
+
 def test_product_delegates_scoring_and_produces_stable_report() -> None:
     first = run_discovery("evaluate", product())
     second = run_discovery("evaluate", product())
@@ -131,9 +139,7 @@ def test_synthesis_rejects_a_report_bound_to_another_candidate() -> None:
 
 
 def test_discover_ranks_multiple_candidates_by_canonical_synthesis_score() -> None:
-    first = product()["candidates"][0]
-    for key in ("affiliate_fee_rate", "brokerage_fee", "cac", "domestic_shipping", "international_shipping", "payment_fee_fixed", "platform_fee_fixed"):
-        first["economics"]["assumptions"][key] = {"amount": "0", "currency": "MXN"} if key in {"brokerage_fee", "cac", "domestic_shipping", "international_shipping", "payment_fee_fixed", "platform_fee_fixed"} else "0"
+    first = ready_product()["candidates"][0]
     second = copy.deepcopy(first)
     second["candidate_id"] = "higher-scoring-lamp"
     second["name"] = "Higher scoring lamp"
@@ -210,6 +216,22 @@ def test_compare_validate_and_review_modes_have_explicit_contracts() -> None:
     assert review.decisions[0].review_results == {"result": "pending"}
 
 
+def test_non_product_candidates_are_not_ranked_without_canonical_synthesis() -> None:
+    report = run_discovery("discover", fixture("service_complete.json"))
+
+    assert report.decisions[0].synthesis["status"] == "not_applicable"
+    assert report.ranked_candidate_ids == ()
+
+
+@pytest.mark.parametrize("mode", ["discover", "evaluate", "compare", "validate", "review-results"])
+def test_no_candidates_degrades_to_unavailable_for_every_mode(mode: str) -> None:
+    report = run_discovery(mode, {"candidates": []})
+
+    assert report.status == "unavailable"
+    assert report.decisions == ()
+    assert report.ranked_candidate_ids == ()
+
+
 def test_discover_does_not_invent_candidates() -> None:
     report = run_discovery("discover", {"candidates": []})
 
@@ -230,6 +252,74 @@ def test_malformed_and_secret_shaped_input_fails_closed() -> None:
         run_discovery("discover", {"candidates": [], "api_key": "not allowed"})
     with pytest.raises(OpportunityDiscoveryError, match="duplicate_input_key"):
         load_payload('{"candidates": [], "candidates": []}')
+
+    with pytest.raises(OpportunityDiscoveryError, match="root_must_be_object"):
+        run_discovery("discover", [])
+
+
+def test_non_finite_numeric_text_in_nested_reports_is_rejected() -> None:
+    payload = product()
+    payload["candidates"][0]["reports"]["marketplace"]["candidates"][0]["score"]["overall_marketplace_opportunity"] = "NaN"
+
+    with pytest.raises(OpportunityDiscoveryError, match="invalid_numeric_value"):
+        run_discovery("evaluate", payload)
+
+
+def test_malformed_pillar_report_is_blocked_without_reflecting_adapter_errors() -> None:
+    payload = product()
+    payload["candidates"][0]["reports"]["marketplace"] = {"candidates": "not-a-list"}
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.recommendation == "blocked"
+    assert "malformed_marketplace_report" in decision.fatal_gates
+    assert "AttributeError" not in str(decision.to_dict())
+
+
+def test_current_conflicting_evidence_blocks_a_ready_product() -> None:
+    payload = ready_product()
+    payload["candidates"][0]["evidence"].append({
+        "evidence_id": "current-conflict",
+        "area": "competition",
+        "status": "observed_fact",
+        "evidence_class": "observed",
+        "source_type": "operator",
+        "source_ref": "manual://conflict",
+        "freshness": "current",
+        "conflicting": True,
+    })
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.recommendation == "blocked"
+    assert "conflicting_competition_evidence" in decision.fatal_gates
+
+
+def test_mixed_service_scenario_currency_is_blocked() -> None:
+    payload = fixture("service_complete.json")
+    payload["candidates"][0]["economics"]["scenarios"]["worst"]["currency"] = "USD"
+    payload["candidates"][0]["economics"]["scenarios"]["worst"]["service_fee"]["currency"] = "USD"
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.recommendation == "blocked"
+    assert "currency_mismatch" in decision.fatal_gates
+    assert all(item.get("status") == "malformed" for item in decision.scenarios.values())
+
+
+def test_product_currency_mismatch_is_a_bounded_blocked_result() -> None:
+    payload = product()
+    payload["candidates"][0]["economics"]["assumptions"]["supplier_shipping"]["currency"] = "USD"
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.scenarios["base"]["status"] == "malformed"
+    assert "economics_unavailable" in decision.blockers
+
+
+def test_markdown_rejects_unsafe_mapping_values() -> None:
+    with pytest.raises(OpportunityDiscoveryError, match="sensitive_value_rejected"):
+        render_markdown({"decisions": [{"candidate_id": "candidate-1", "blockers": ["system prompt"]}]})
 
 
 def test_live_claim_is_downgraded_and_does_not_upgrade_evidence() -> None:
@@ -276,4 +366,37 @@ def test_cli_smoke_is_json_and_does_not_claim_live_validation(tmp_path: Path) ->
     assert result.returncode == 0
     output = json.loads(result.stdout)
     assert output["execution_classification"] == "actual_executed"
+    assert output["safety"]["launch_authorized"] is False
+
+
+@pytest.mark.parametrize("mode", ["discover", "evaluate", "compare", "validate", "review-results"])
+def test_cli_executes_every_discovery_mode_with_deterministic_json(mode: str, tmp_path: Path) -> None:
+    payload = product()
+    if mode == "compare":
+        first = payload["candidates"][0]
+        second = copy.deepcopy(first)
+        second["candidate_id"] = "desk-lamp-alt"
+        second["name"] = "Desk lamp alternative"
+        for report in second["reports"].values():
+            for item in report["candidates"]:
+                item["candidate_id"] = "desk-lamp-alt"
+        payload["candidates"].append(second)
+    if mode == "review-results":
+        payload["candidates"][0]["metadata"] = {"review_results": {"result": "pending"}}
+    input_path = tmp_path / f"{mode}.json"
+    input_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, "scripts/run_opportunity_discovery.py", "--mode", mode, "--input", str(input_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert output["mode"] == mode
+    assert output["execution_classification"] == "actual_executed"
+    assert len(output["fingerprint"]) == 64
     assert output["safety"]["launch_authorized"] is False
