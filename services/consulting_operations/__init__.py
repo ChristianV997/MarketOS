@@ -16,12 +16,24 @@ from .readiness import (
     evaluate_consulting_readiness,
     generate_readiness_report,
 )
+from .packager import (
+    ConsultingDeliverable,
+    package_deliverable,
+)
+from .chain import (
+    ChainResult,
+    evaluate_consulting_chain,
+)
 
 __all__ = [
     "ConsultingEngagement",
     "ConsultingMilestone",
     "ConsultingReadinessReport",
     "ConsultingStatus",
+    "ConsultingDeliverable",
+    "ChainResult",
     "evaluate_consulting_readiness",
     "generate_readiness_report",
+    "package_deliverable",
+    "evaluate_consulting_chain",
 ]

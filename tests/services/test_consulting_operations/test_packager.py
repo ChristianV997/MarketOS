@@ -1,7 +1,6 @@
 """Tests for the consulting delivery packager."""
 from __future__ import annotations
 
-import json
 import pytest
 
 from services.consulting_operations.schemas import ConsultingEngagement

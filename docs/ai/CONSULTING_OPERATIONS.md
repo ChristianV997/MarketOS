@@ -15,3 +15,10 @@ This module (`services/consulting_operations`) evaluates whether a consulting pa
 
 ## Verification
 Tests are maintained in `tests/services/test_consulting_operations/` and enforce the exact state transitions and negative controls (unsafe client data rejection).
+
+## Chain Verification
+The `evaluate_consulting_chain` executes the full six-stage pipeline (offers -> engagement -> economics -> portfolio -> evidence register -> delivery), incorporating real constraints:
+- Pricing uses ranges instead of scalar commitments.
+- Missing, stale, or conflicting evidence is preserved safely.
+- Workspace boundary and leakage are strictly tested.
+- Output uses deterministic fingerprinting.
