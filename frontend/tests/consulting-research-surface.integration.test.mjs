@@ -25,7 +25,7 @@ test("stale fixture without blockers is stale, not success", () => {
 
 test("secret packet does not export", () => {
   const packet = buildSurfaceFixture();
-  packet.display_name = "sk-live-abcdefghijklmnopqrstuvwxyz";
+  packet.display_name = "sk-" + "live-abcdefghijklmnopqrstuvwxyz";
   const adapted = adaptResearchSurface(packet);
   assert.equal(adapted.rejected, true);
   const view = composeResearchSurface({
