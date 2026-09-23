@@ -11,7 +11,11 @@ The validation experiment ledger is an offline-first typed record for deciding w
 - price, product cost, and CAC values represented through the canonical Decimal economics kernel;
 - approval state, simulated result status, provenance, and workspace identity.
 - optional normalized candidate/evidence mappings from discovery and research,
-  with product/service/hybrid/unknown offering kind and geographic uncertainty.
+  with product/service/hybrid/unknown offering kind and geographic uncertainty;
+  the public `normalize_opportunity_inputs` adapter accepts sanitized
+  `normalized_candidate`/`candidate_report` and
+  `geographic_context`/`geographic_research` aliases without importing their
+  implementations.
 
 The result preserves:
 
@@ -54,6 +58,7 @@ or supply scores. Explicit zero money remains distinct from missing money.
 - Strong demand without `reachable_buyer`: `hold_unreachable_buyer`.
 - Negative base contribution after CAC: `kill_negative_unit_economics`.
 - Missing experiment budget: `blocked_missing_budget`.
+- Missing price, product cost, or CAC: `blocked_missing_economics`; missing is never treated as zero.
 - Invalid simulated result: `reject_invalid_result`.
 - Failed result: `kill_failed_result`.
 - Successful result: `advance_to_human_review`, never launch authorization.

@@ -6,8 +6,10 @@ from pathlib import Path
 import pytest
 
 from services.validation_experiments import (
+    NormalizedOpportunityInput,
     ValidationExperimentInputError,
     build_validation_experiment_ledger,
+    normalize_opportunity_inputs,
 )
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "validation_experiments"
@@ -160,3 +162,34 @@ def test_missing_opportunity_inputs_do_not_create_synthetic_demand():
     assert ledger.opportunity_summary["report"]["combined_opportunity_score"] == 0.0
     assert ledger.opportunity_summary["report"]["confidence_grade"] == "F_reject_or_missing"
     assert "opportunity_evidence" in ledger.evidence_gaps
+
+
+def test_normalized_adapter_accepts_candidate_and_geographic_research_aliases():
+    normalized = normalize_opportunity_inputs(
+        {
+            "offering_kind": "service",
+            "candidate_report": {"candidate_id": "ops-audit", "evidence": [{"provenance": "research://1"}]},
+            "geographic_research": {"geography_kind": "known", "trade_flow": {"state": "stale"}},
+        }
+    )
+    assert isinstance(normalized, NormalizedOpportunityInput)
+    assert normalized.candidate["candidate_id"] == "ops-audit"
+    assert normalized.candidate_evidence[0]["provenance"] == "research://1"
+    assert normalized.geographic_context["trade_flow"]["state"] == "stale"
+
+
+def test_missing_economics_cannot_advance_as_if_zero_cost():
+    payload = load("successful_result.json")
+    payload["product_cost"] = None
+    ledger = build_validation_experiment_ledger(payload)
+    assert ledger.economics["base_cost_state"] == "missing"
+    assert ledger.decision == "blocked_missing_economics"
+    assert ledger.approval_state == "blocked_by_policy"
+    assert ledger.validation_pipeline["next_action"] == "resolve_unit_economics"
+
+
+def test_unknown_result_status_is_rejected_instead_of_dropped():
+    payload = load("complete.json")
+    payload["result_statuses"] = ["successful", "not-a-result"]
+    with pytest.raises(ValidationExperimentInputError, match="result status"):
+        build_validation_experiment_ledger(payload)

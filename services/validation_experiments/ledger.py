@@ -91,6 +91,46 @@ def _clean(value: Any) -> Any:
     return value
 
 
+@dataclass(frozen=True)
+class NormalizedOpportunityInput:
+    """Typed boundary for sanitized discovery and geographic-research reports."""
+
+    offering_kind: str
+    candidate: dict[str, Any]
+    candidate_evidence: tuple[dict[str, Any], ...]
+    geographic_context: dict[str, Any]
+
+
+def normalize_opportunity_inputs(payload: Mapping[str, Any]) -> NormalizedOpportunityInput:
+    """Adapt normalized reports without importing their discovery implementations."""
+    kind = _text(payload.get("offering_kind") or "unknown", "offering_kind")
+    if kind not in _OFFERING_KINDS:
+        raise ValidationExperimentInputError("offering_kind must be product, service, hybrid, or unknown")
+    raw_candidate = payload.get("normalized_candidate", payload.get("candidate_report"))
+    if raw_candidate is None:
+        candidate: dict[str, Any] = {"candidate_id": payload.get("candidate_id"), "status": "unavailable"}
+    elif isinstance(raw_candidate, Mapping):
+        candidate = _clean(dict(raw_candidate))
+    else:
+        raise ValidationExperimentInputError("normalized_candidate must be an object")
+    raw_evidence = candidate.get("evidence", ())
+    if not isinstance(raw_evidence, (list, tuple)):
+        raise ValidationExperimentInputError("normalized candidate evidence must be a list")
+    evidence: list[dict[str, Any]] = []
+    for item in raw_evidence:
+        if not isinstance(item, Mapping):
+            raise ValidationExperimentInputError("normalized candidate evidence must be objects")
+        evidence.append(_clean(dict(item)))
+    raw_geography = payload.get("geographic_context", payload.get("geographic_research"))
+    if raw_geography is None:
+        geography: dict[str, Any] = {}
+    elif isinstance(raw_geography, Mapping):
+        geography = _clean(dict(raw_geography))
+    else:
+        raise ValidationExperimentInputError("geographic_context must be an object")
+    return NormalizedOpportunityInput(kind, candidate, tuple(evidence), geography)
+
+
 def _scan_unsafe(value: Any, path: str = "") -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
@@ -189,16 +229,10 @@ def _normalized_opportunity_pipeline(
     decision: str,
     gaps: tuple[str, ...],
 ) -> tuple[str, dict[str, Any]]:
-    kind = _text(payload.get("offering_kind") or "unknown", "offering_kind")
-    if kind not in _OFFERING_KINDS:
-        raise ValidationExperimentInputError("offering_kind must be product, service, hybrid, or unknown")
-
-    candidate = payload.get("normalized_candidate")
-    if candidate is not None and not isinstance(candidate, Mapping):
-        raise ValidationExperimentInputError("normalized_candidate must be an object")
-    candidate_evidence = candidate.get("evidence", ()) if isinstance(candidate, Mapping) else ()
-    if not isinstance(candidate_evidence, (list, tuple)):
-        raise ValidationExperimentInputError("normalized_candidate.evidence must be a list")
+    normalized = normalize_opportunity_inputs(payload)
+    kind = normalized.offering_kind
+    candidate = normalized.candidate
+    candidate_evidence = normalized.candidate_evidence
 
     provenance: list[str] = []
     freshness: list[str] = []
@@ -214,10 +248,7 @@ def _normalized_opportunity_pipeline(
         if bool(item.get("conflicting")) or state == "conflicting":
             conflicts.append(str(item.get("evidence_id") or "candidate_evidence"))
 
-    geography = payload.get("geographic_context")
-    if geography is not None and not isinstance(geography, Mapping):
-        raise ValidationExperimentInputError("geographic_context must be an object")
-    geography = geography or {}
+    geography = normalized.geographic_context
     geography_kind = _text(geography.get("geography_kind") or "unknown", "geography_kind")
     if geography_kind not in {"known", "unknown"}:
         raise ValidationExperimentInputError("geography_kind must be known or unknown")
@@ -257,6 +288,7 @@ def _normalized_opportunity_pipeline(
         "kill_negative_unit_economics": "resolve_unit_economics",
         "blocked_missing_budget": "define_experiment_budget",
         "hold_unreachable_buyer": "validate_reachable_buyer",
+        "blocked_missing_economics": "resolve_unit_economics",
         "reject_invalid_result": "repair_result_provenance",
         "kill_failed_result": "revise_hypothesis_or_stop",
         "advance_to_human_review": "review_simulated_result",
@@ -390,9 +422,12 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     opportunity = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
     opportunity["scoring_authority"] = "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis"
     result_rows = payload.get("result_statuses") or [((payload.get("result") or {}).get("status") or "simulated")]
-    result_statuses = tuple(str(row) for row in result_rows if str(row) in _RESULT_STATUSES)
-    if not result_statuses:
+    if not isinstance(result_rows, (list, tuple)):
+        raise ValidationExperimentInputError("result status must be a list")
+    result_statuses = tuple(str(row) for row in result_rows)
+    if not result_statuses or any(status not in _RESULT_STATUSES for status in result_statuses):
         raise ValidationExperimentInputError("result status is invalid")
+    economics_blocked = bool({"price", "product_cost", "cac"}.intersection(missing_inputs))
     blockers: list[str] = []
     gaps: list[str] = []
     if not payload.get("reachable_buyer", False):
@@ -405,6 +440,8 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
         blockers.append("experiment_budget")
     if missing_inputs:
         gaps.extend(missing_inputs)
+    if economics_blocked:
+        blockers.append("missing_economics")
     if any(item in evidence["states"] for item in ("stale", "future", "conflicting")):
         gaps.extend(item for item in ("stale_evidence", "future_evidence", "conflicting_evidence") if item in evidence["states"])
     if "fixture_evidence_not_live" in evidence["limitations"]:
@@ -418,10 +455,12 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     governor = evaluate_execution_request(request).to_dict()
     trustos = evaluate_action("launch_ad", generated_at="offline-deterministic").to_dict()
     workspace = build_client_workspace_isolation_report(workspace_type="client_growth_workspace", payload={"workspace_id": workspace_id, "status": "client_safe", "blockers": tuple(blockers), "evidence_required": tuple(gaps), "approvals_required": ("human_review",), "next_actions": ("review_simulated_result",)}).to_dict()
-    if base_after < 0:
-        decision = "kill_negative_unit_economics"
-    elif "experiment_budget" in blockers:
+    if "experiment_budget" in blockers:
         decision = "blocked_missing_budget"
+    elif economics_blocked:
+        decision = "blocked_missing_economics"
+    elif base_after < 0:
+        decision = "kill_negative_unit_economics"
     elif "reachable_buyer" in blockers:
         decision = "hold_unreachable_buyer"
     elif any(status == "invalid" for status in result_statuses):
