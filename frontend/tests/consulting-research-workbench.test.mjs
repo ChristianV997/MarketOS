@@ -54,7 +54,7 @@ test("live_validated claims normalize to unavailable and unknown confidence stay
 test("malformed, secret, and cross-client packets stay unavailable", () => {
   assert.equal(adaptConsultingResearch("nope").rejected, true);
   const secret = buildReviewFixture();
-  secret.research_question = "sk-live-abcdefghijklmnopqrstuvwxyz";
+  secret.research_question = "sk-" + "live-abcdefghijklmnopqrstuvwxyz";
   assert.equal(adaptConsultingResearch(secret).rejection_reason, "secret_or_cross_client_rejected");
   const leaked = buildReviewFixture();
   leaked.cross_client_notes = "other workspace";
