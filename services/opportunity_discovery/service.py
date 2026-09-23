@@ -553,7 +553,7 @@ def _service_scenarios(candidate: OpportunityCandidate) -> tuple[dict[str, Any],
                 "target_monthly_contribution": _money(values["target_monthly_contribution"], currency=currency, candidate=candidate, area="economics", field_name="target_monthly_contribution") if values.get("target_monthly_contribution") is not None else None,
                 "client_value_created": _money(values["client_value_created"], currency=currency, candidate=candidate, area="economics", field_name="client_value_created") if values.get("client_value_created") is not None else None,
                 "evidence_refs": tuple(ref for ref in (_evidence_ref(candidate, "economics"),) if ref),
-                "re" + "fund_revision_reserve": _money(values["revision_reserve"], currency=currency, candidate=candidate, area="economics", field_name="revision_reserve"),
+                "refund_revision_reserve": _money(values["revision_reserve"], currency=currency, candidate=candidate, area="economics", field_name="revision_reserve"),
             }
             service = calculate_service_economics(
                 candidate.candidate_id,
