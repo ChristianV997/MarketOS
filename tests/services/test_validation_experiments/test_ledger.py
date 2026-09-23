@@ -100,3 +100,63 @@ def test_threshold_result_decisions_are_deterministic():
     assert ledger.result_statuses == ("successful",)
     assert ledger.decision == "advance_to_human_review"
     assert ledger.approval_state == "pending_review"
+
+
+def test_normalized_opportunity_pipeline_preserves_kind_and_geography_uncertainty():
+    payload = load("complete.json")
+    payload.update(
+        {
+            "offering_kind": "hybrid",
+            "normalized_candidate": {
+                "candidate_id": "desk-clamp-lamp",
+                "name": "Desk clamp lamp",
+                "evidence": [{"evidence_id": "candidate-1", "state": "manual_import"}],
+            },
+            "geographic_context": {
+                "geography_kind": "known",
+                "origin": "US",
+                "destination": "MX",
+                "trade_flow": {"state": "fixture", "uncertainty": "quantity_missing"},
+                "freight_duty": {"state": "unknown"},
+            },
+        }
+    )
+    ledger = build_validation_experiment_ledger(payload)
+    pipeline = ledger.validation_pipeline
+    assert ledger.offering_kind == "hybrid"
+    assert pipeline["geography"]["uncertainty"] == ["freight_duty_unknown", "quantity_missing"]
+    assert pipeline["hypothesis"] == payload["hypothesis"]
+    assert pipeline["cheapest_falsification_test"]["method"] == "simulated_buyer_signal"
+    assert pipeline["next_action"] == "run_cheapest_falsification_test"
+    assert pipeline["client_safe"] is True
+
+
+def test_all_offering_kinds_are_supported_without_live_authority():
+    for kind in ("product", "service", "hybrid", "unknown"):
+        payload = load("successful_result.json")
+        payload["offering_kind"] = kind
+        ledger = build_validation_experiment_ledger(payload)
+        assert ledger.offering_kind == kind
+        assert ledger.validation_pipeline["economic_mode"] == kind
+        assert ledger.safety_summary["read_only"] is True
+
+
+def test_pipeline_json_and_markdown_are_deterministic_and_client_safe():
+    ledger = build_validation_experiment_ledger(load("complete.json"))
+    assert ledger.to_json() == ledger.to_json()
+    markdown = ledger.to_markdown()
+    assert markdown == ledger.to_markdown()
+    assert "api_key" not in markdown.lower()
+    assert "## Validation experiment" in markdown
+    assert "launch authorization" not in markdown.lower()
+
+
+def test_missing_opportunity_inputs_do_not_create_synthetic_demand():
+    payload = load("successful_result.json")
+    payload.pop("market_evidence", None)
+    payload.pop("supplier_evidence", None)
+    payload.pop("evidence_required", None)
+    ledger = build_validation_experiment_ledger(payload)
+    assert ledger.opportunity_summary["report"]["combined_opportunity_score"] == 0.0
+    assert ledger.opportunity_summary["report"]["confidence_grade"] == "F_reject_or_missing"
+    assert "opportunity_evidence" in ledger.evidence_gaps

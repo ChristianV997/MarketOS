@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
@@ -28,6 +28,7 @@ class ValidationExperimentInputError(ValueError):
 _ALLOWED_CHANNELS = frozenset({"manual_interview_simulation", "fixture_survey", "internal_replay", "offline_landing_draft"})
 _RESULT_STATUSES = frozenset({"successful", "failed", "inconclusive", "invalid", "simulated"})
 _EVIDENCE_STATES = frozenset({"unknown", "missing", "observed", "verified", "fixture", "manual_import", "simulated", "stale", "future", "conflicting", "rejected"})
+_OFFERING_KINDS = frozenset({"product", "service", "hybrid", "unknown"})
 _EXTERNAL_MARKERS = frozenset({"advertise", "advertising", "ad_launch", "launch_ad", "publish", "publishing", "outreach", "message", "messaging", "send", "order", "payment", "inventory", "provider_call", "customer_contact", "contact_customer"})
 _SECRET_MARKERS = frozenset({"api_key", "private_key", "password", "token", "access_token", "refresh_token", "authorization", "cookie", "credential", "raw_payload", "raw_html", "client_secret"})
 
@@ -174,10 +175,109 @@ def _pillar_reports(payload: Mapping[str, Any], evidence: Mapping[str, Any]) -> 
     supplied = payload.get("opportunity_reports")
     if isinstance(supplied, Mapping):
         return (supplied.get("marketplace") or {}, supplied.get("supplier") or {}, supplied.get("consumer") or {})
-    candidate_id = _text(payload.get("candidate_id"), "candidate_id", required=True)
-    mode = "fixture_demo" if evidence["mode"] == "fixture" else "manual_import" if evidence["mode"] == "manual" else "missing"
-    candidate = {"candidate_id": candidate_id, "title": candidate_id, "query": candidate_id, "evidence": [{"evidence_mode": mode, "source_family": "validation-experiment"}], "score": {"marketplace_opportunity": 0.8, "supplier_feasibility": 0.7, "consumer_attention": 0.8, "evidence_confidence": 0.5, "confidence_grade": "C_fixture_or_partial"}}
-    return ({"evidence_mode": mode, "candidates": [candidate]}, {"evidence_mode": mode, "candidates": [candidate]}, {"evidence_mode": mode, "candidates": [candidate]})
+    # Missing normalized opportunity inputs must stay missing.  In particular,
+    # candidate identity alone is not evidence of demand, supply, or attention.
+    return ({"evidence_mode": "missing", "candidates": []}, {"evidence_mode": "missing", "candidates": []}, {"evidence_mode": "missing", "candidates": []})
+
+
+def _normalized_opportunity_pipeline(
+    payload: Mapping[str, Any],
+    *,
+    evidence: Mapping[str, Any],
+    economics: Mapping[str, Any],
+    result_statuses: tuple[str, ...],
+    decision: str,
+    gaps: tuple[str, ...],
+) -> tuple[str, dict[str, Any]]:
+    kind = _text(payload.get("offering_kind") or "unknown", "offering_kind")
+    if kind not in _OFFERING_KINDS:
+        raise ValidationExperimentInputError("offering_kind must be product, service, hybrid, or unknown")
+
+    candidate = payload.get("normalized_candidate")
+    if candidate is not None and not isinstance(candidate, Mapping):
+        raise ValidationExperimentInputError("normalized_candidate must be an object")
+    candidate_evidence = candidate.get("evidence", ()) if isinstance(candidate, Mapping) else ()
+    if not isinstance(candidate_evidence, (list, tuple)):
+        raise ValidationExperimentInputError("normalized_candidate.evidence must be a list")
+
+    provenance: list[str] = []
+    freshness: list[str] = []
+    conflicts: list[str] = []
+    for item in candidate_evidence:
+        if not isinstance(item, Mapping):
+            raise ValidationExperimentInputError("normalized candidate evidence must be objects")
+        if item.get("provenance"):
+            provenance.append(str(item["provenance"]))
+        state = str(item.get("state") or item.get("evidence_state") or "unknown")
+        if state in {"stale", "future"}:
+            freshness.append(state)
+        if bool(item.get("conflicting")) or state == "conflicting":
+            conflicts.append(str(item.get("evidence_id") or "candidate_evidence"))
+
+    geography = payload.get("geographic_context")
+    if geography is not None and not isinstance(geography, Mapping):
+        raise ValidationExperimentInputError("geographic_context must be an object")
+    geography = geography or {}
+    geography_kind = _text(geography.get("geography_kind") or "unknown", "geography_kind")
+    if geography_kind not in {"known", "unknown"}:
+        raise ValidationExperimentInputError("geography_kind must be known or unknown")
+    uncertainty: set[str] = set()
+    if geography_kind == "unknown":
+        uncertainty.add("geography_unknown")
+    for field_name in ("trade_flow", "freight_duty", "returns_lead_time", "service_capacity", "regulatory"):
+        item = geography.get(field_name)
+        if item is None:
+            if geography_kind == "known" and field_name in {"trade_flow", "freight_duty"}:
+                uncertainty.add(f"{field_name}_unknown")
+            continue
+        if not isinstance(item, Mapping):
+            raise ValidationExperimentInputError(f"geographic_context.{field_name} must be an object")
+        state = str(item.get("state") or item.get("evidence_state") or "unknown")
+        if state in {"unknown", "missing", "stale", "future", "conflicting"}:
+            uncertainty.add(f"{field_name}_{state}")
+        if item.get("uncertainty"):
+            uncertainty.add(str(item["uncertainty"]))
+
+    cheapest_test = {
+        "method": _text(payload.get("test_method"), "test_method", required=True),
+        "channel": _text(payload.get("permitted_channel"), "permitted_channel", required=True),
+        "sample_target": int(payload["sample_target"]),
+        "budget": payload.get("assumed_budget") or {"state": "missing", "amount": "unknown"},
+        "falsifies": payload.get("kill_threshold"),
+        "read_only": True,
+    }
+    if "reachable_buyer" in gaps or "reachable_buyer" in payload and not payload.get("reachable_buyer"):
+        cheapest_test["rationale"] = "Test reachable-buyer access before interpreting demand strength."
+    elif "product_cost" in economics.get("missing_inputs", ()):
+        cheapest_test["rationale"] = "Resolve missing product cost before trusting unit economics."
+    else:
+        cheapest_test["rationale"] = "Use the smallest offline sample that can cross the stated threshold."
+
+    next_action = {
+        "kill_negative_unit_economics": "resolve_unit_economics",
+        "blocked_missing_budget": "define_experiment_budget",
+        "hold_unreachable_buyer": "validate_reachable_buyer",
+        "reject_invalid_result": "repair_result_provenance",
+        "kill_failed_result": "revise_hypothesis_or_stop",
+        "advance_to_human_review": "review_simulated_result",
+        "iterate_inconclusive_result": "run_cheapest_falsification_test",
+    }.get(decision, "human_review")
+    pipeline = {
+        "contract": "MarketOS.ValidationOpportunityPipeline.v1",
+        "economic_mode": kind,
+        "candidate": _clean(candidate) if isinstance(candidate, Mapping) else {"candidate_id": payload.get("candidate_id"), "status": "unavailable"},
+        "evidence": {"mode": evidence["mode"], "provenance": list(sorted(set(provenance))), "freshness": list(sorted(set(freshness))), "conflicts": list(sorted(set(conflicts)))},
+        "geography": {"kind": geography_kind, "origin": geography.get("origin", "unknown"), "destination": geography.get("destination", "unknown"), "uncertainty": list(sorted(uncertainty))},
+        "hypothesis": payload["hypothesis"],
+        "cheapest_falsification_test": cheapest_test,
+        "thresholds": {"success": payload["success_threshold"], "iterate": payload["iterate_threshold"], "kill": payload["kill_threshold"]},
+        "result_classification": tuple(sorted(result_statuses)),
+        "decision": decision,
+        "next_action": next_action,
+        "client_safe": True,
+        "read_only": True,
+    }
+    return kind, pipeline
 
 
 def _canonical_fingerprint(data: Mapping[str, Any]) -> str:
@@ -219,11 +319,32 @@ class ValidationExperimentLedger:
     safety_summary: dict[str, Any]
     generated_at: str = "offline-deterministic"
     fingerprint: str = ""
+    offering_kind: str = "unknown"
+    validation_pipeline: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = _clean({key: value for key, value in self.__dict__.items() if key != "fingerprint"})
         data["fingerprint"] = self.fingerprint or _canonical_fingerprint(data)
         return data
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+    def to_markdown(self) -> str:
+        pipeline = self.validation_pipeline
+        return "\n".join(
+            (
+                "## Validation experiment",
+                "",
+                f"- Candidate: {self.candidate_id}",
+                f"- Offering kind: {self.offering_kind}",
+                f"- Decision: {self.decision}",
+                f"- Next action: {pipeline.get('next_action', 'human_review')}",
+                f"- Cheapest falsification test: {pipeline.get('cheapest_falsification_test', {}).get('method', self.test_method)}",
+                "- Mode: offline, read-only, simulation-only",
+                "- External actions: blocked; this is planning output only.",
+            )
+        )
 
 
 def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_workspace_id: str | None = None, as_of: str = "2026-09-22T00:00:00Z") -> ValidationExperimentLedger:
@@ -288,6 +409,8 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
         gaps.extend(item for item in ("stale_evidence", "future_evidence", "conflicting_evidence") if item in evidence["states"])
     if "fixture_evidence_not_live" in evidence["limitations"]:
         gaps.append("fixture_evidence_not_live")
+    if not payload.get("opportunity_reports") and not payload.get("normalized_candidate") and not any(payload.get(key) for key in ("market_evidence", "supplier_evidence")):
+        gaps.append("opportunity_evidence")
     base_after = economics_results["base"].contribution_after_cac.amount
     budget_amount = float(budget_value.get("amount", 0)) if isinstance(budget_value, Mapping) else 0.0
     approval_sim = simulate_action("launch_ad", requested_budget=budget_amount, generated_at="offline-deterministic").to_dict()
@@ -312,5 +435,6 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     approval_state = "pending_review" if decision == "advance_to_human_review" else "blocked_by_policy" if blockers or base_after < 0 else "draft"
     limitations = tuple(sorted(set(evidence["limitations"] + (("external_execution_blocked",) if True else ()))))
     safety = {"read_only": True, "network_calls": False, "ads_launched": False, "spend_executed": False, "publishing_performed": False, "outreach_sent": False, "orders_created": False, "payments_created": False, "provider_calls": False, "customer_contact": False, "database_writes": False}
-    provisional = ValidationExperimentLedger(workspace_id, candidate_id, hypothesis, segment, channel, test_method, evidence_required, budget, sample_target, str(thresholds["success_threshold"]), str(thresholds["kill_threshold"]), str(thresholds["iterate_threshold"]), measurement, approval_state, result_statuses, decision, tuple(sorted(set(blockers))), tuple(sorted(set(gaps))), limitations, _text(payload.get("provenance"), "provenance", required=True), evidence, economics, {"candidate_id": opportunity.get("top_candidate_id"), "scoring_authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis", "report": opportunity}, approval_sim, governor, trustos, {"workspace_id": workspace_id, "client_safe": True, "safety_summary": workspace.get("safety_summary", {})}, safety)
+    offering_kind, validation_pipeline = _normalized_opportunity_pipeline(payload, evidence=evidence, economics=economics, result_statuses=result_statuses, decision=decision, gaps=tuple(gaps))
+    provisional = ValidationExperimentLedger(workspace_id, candidate_id, hypothesis, segment, channel, test_method, evidence_required, budget, sample_target, str(thresholds["success_threshold"]), str(thresholds["kill_threshold"]), str(thresholds["iterate_threshold"]), measurement, approval_state, result_statuses, decision, tuple(sorted(set(blockers))), tuple(sorted(set(gaps))), limitations, _text(payload.get("provenance"), "provenance", required=True), evidence, economics, {"candidate_id": opportunity.get("top_candidate_id"), "scoring_authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis", "report": opportunity}, approval_sim, governor, trustos, {"workspace_id": workspace_id, "client_safe": True, "safety_summary": workspace.get("safety_summary", {})}, safety, offering_kind=offering_kind, validation_pipeline=validation_pipeline)
     return ValidationExperimentLedger(**{**provisional.__dict__, "fingerprint": _canonical_fingerprint(provisional.to_dict())})
