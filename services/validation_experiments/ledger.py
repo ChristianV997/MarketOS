@@ -102,7 +102,10 @@ class NormalizedOpportunityInput:
 
 
 def normalize_opportunity_inputs(payload: Mapping[str, Any]) -> NormalizedOpportunityInput:
-    """Adapt normalized reports without importing their discovery implementations."""
+    """Adapt sanitized reports without importing discovery implementations."""
+    if not isinstance(payload, Mapping):
+        raise ValidationExperimentInputError("opportunity input must be an object")
+    _scan_unsafe(payload)
     kind = _text(payload.get("offering_kind") or "unknown", "offering_kind")
     if kind not in _OFFERING_KINDS:
         raise ValidationExperimentInputError("offering_kind must be product, service, hybrid, or unknown")

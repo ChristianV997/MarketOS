@@ -178,6 +178,11 @@ def test_normalized_adapter_accepts_candidate_and_geographic_research_aliases():
     assert normalized.geographic_context["trade_flow"]["state"] == "stale"
 
 
+def test_normalized_adapter_rejects_unsafe_nested_payload():
+    with pytest.raises(ValidationExperimentInputError, match="sensitive payload"):
+        normalize_opportunity_inputs({"candidate_report": {"api_key": "[REDACTED]"}})
+
+
 def test_missing_economics_cannot_advance_as_if_zero_cost():
     payload = load("successful_result.json")
     payload["product_cost"] = None
