@@ -39,6 +39,10 @@ test("shell registers one strategy route and no campaign mutation", async () => 
   assert.match(page, /stale evidence/);
   assert.match(page, /conflicting evidence/);
   assert.match(page, /draft only/);
+  assert.match(page, /draft_only=true/);
+  assert.match(page, /useSearchParams/);
+  assert.match(page, /Empty plan/);
+  assert.doesNotMatch(page, /fetch\(|method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/);
   const workbench = await readFile(new URL("../src/features/marketing-strategy-workbench/components/StrategyWorkbench.tsx", import.meta.url), "utf8");
   assert.match(workbench, /ArrowDown/);
   assert.match(workbench, /exportButtonRef\.current\?\.focus/);
