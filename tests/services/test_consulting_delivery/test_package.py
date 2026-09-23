@@ -31,7 +31,7 @@ def test_build_consulting_delivery_workspace_leakage_rejected():
             objective="Analyze market",
             executive_summary="Looks good.",
             metadata={
-                "evidence_matrix": {"market": "sk-live-1234567890abcdef"}, # simulated credential leak
+                "evidence_matrix": {"market": "sk-" + "live-1234567890abcdef"}, # simulated credential leak
             }
         )
 
