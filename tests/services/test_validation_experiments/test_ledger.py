@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from services.validation_experiments import (
+    ValidationExperimentInputError,
+    build_validation_experiment_ledger,
+)
+
+FIXTURES = Path(__file__).parents[2] / "fixtures" / "validation_experiments"
+
+
+def load(name: str) -> dict:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def test_strong_demand_without_reachable_buyer_holds():
+    ledger = build_validation_experiment_ledger(load("strong_demand_no_buyer.json"))
+    assert ledger.decision == "hold_unreachable_buyer"
+    assert "reachable_buyer" in ledger.blockers
+    assert ledger.opportunity_summary["scoring_authority"].endswith("build_product_opportunity_synthesis")
+
+
+def test_negative_unit_economics_kills_even_with_demand():
+    ledger = build_validation_experiment_ledger(load("negative_economics.json"))
+    assert ledger.decision == "kill_negative_unit_economics"
+    assert ledger.economics["scenarios"]["base"]["contribution_after_cac"]["amount"] == "-5.00"
+
+
+def test_missing_supplier_and_budget_fail_closed():
+    ledger = build_validation_experiment_ledger(load("missing_supplier_budget.json"))
+    assert ledger.decision == "blocked_missing_budget"
+    assert "supplier_evidence" in ledger.evidence_gaps
+    assert "experiment_budget" in ledger.blockers
+    assert ledger.approval_state == "blocked_by_policy"
+
+
+def test_fixture_evidence_is_not_live_evidence():
+    ledger = build_validation_experiment_ledger(load("fixture_evidence.json"))
+    assert ledger.evidence_summary["mode"] == "fixture"
+    assert ledger.evidence_summary["live_validated"] is False
+    assert "fixture_evidence_not_live" in ledger.limitations
+
+
+def test_explicit_zero_cost_is_distinct_from_missing_cost():
+    zero = build_validation_experiment_ledger(load("explicit_zero_cost.json"))
+    missing = build_validation_experiment_ledger(load("missing_cost.json"))
+    assert zero.economics["base_cost_state"] == "explicit_zero"
+    assert missing.economics["base_cost_state"] == "missing"
+    assert "product_cost" in missing.economics["missing_inputs"]
+
+
+@pytest.mark.parametrize(
+    ("fixture", "expected"),
+    [
+        ("stale_future_conflict.json", {"stale_evidence", "future_evidence", "conflicting_evidence"}),
+        ("simulated_results.json", {"successful", "failed", "inconclusive", "invalid", "simulated"}),
+    ],
+)
+def test_evidence_and_result_states_are_preserved(fixture: str, expected: set[str]):
+    ledger = build_validation_experiment_ledger(load(fixture))
+    observed = set(ledger.evidence_summary["states"]) | set(ledger.evidence_summary["limitations"]) | set(ledger.result_statuses)
+    assert expected <= observed
+
+
+def test_workspace_mismatch_and_unsafe_payload_fail_closed():
+    with pytest.raises(ValidationExperimentInputError, match="workspace"):
+        build_validation_experiment_ledger(load("workspace_mismatch.json"))
+    with pytest.raises(ValidationExperimentInputError, match="external action"):
+        build_validation_experiment_ledger(load("unsafe_payload.json"))
+
+
+def test_deterministic_fingerprint_and_safe_boundaries():
+    payload = load("complete.json")
+    first = build_validation_experiment_ledger(payload).to_dict()
+    second = build_validation_experiment_ledger(payload).to_dict()
+    assert first["fingerprint"] == second["fingerprint"]
+    assert first["generated_at"] == "offline-deterministic"
+    assert first["safety_summary"] == {
+        "read_only": True,
+        "network_calls": False,
+        "ads_launched": False,
+        "spend_executed": False,
+        "publishing_performed": False,
+        "outreach_sent": False,
+        "orders_created": False,
+        "payments_created": False,
+        "provider_calls": False,
+        "customer_contact": False,
+        "database_writes": False,
+    }
+    assert "api_key" not in json.dumps(first).lower()
+
+
+def test_threshold_result_decisions_are_deterministic():
+    ledger = build_validation_experiment_ledger(load("successful_result.json"))
+    assert ledger.result_statuses == ("successful",)
+    assert ledger.decision == "advance_to_human_review"
+    assert ledger.approval_state == "pending_review"
