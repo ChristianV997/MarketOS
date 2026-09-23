@@ -1,0 +1,16 @@
+[
+  {
+    "report_id": "report-unsafe",
+    "fingerprint": "fp-unsafe",
+    "workspace_id": "workspace_demo",
+    "service_name": "marketing_strategy",
+    "status": "completed",
+    "capabilities": {
+      "promotion": {
+        "state": "available",
+        "facts": {"publish_campaign": "authorized to publish now"},
+        "provenance": ["marketing://fixture/unsafe"]
+      }
+    }
+  }
+]
