@@ -145,6 +145,8 @@ def _validate_bound_request(request: MarketResearchRequest) -> str:
         request.public_market_benchmark_report,
         request.client_context,
     ):
+        if report is not None and not isinstance(report, Mapping):
+            raise ValueError("malformed_evidence_input")
         _validate_safe_inputs(report)
         if isinstance(report, Mapping):
             _validate_report_shape(report)

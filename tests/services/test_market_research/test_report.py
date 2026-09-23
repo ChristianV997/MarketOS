@@ -554,6 +554,11 @@ def test_unbound_candidate_identity_and_nested_nonfinite_input_fail_closed():
         build_market_research_report(_request(marketplace_report={"score": {"value": float("nan")}}))
 
 
+def test_non_mapping_pillar_is_rejected_before_canonical_synthesis():
+    with pytest.raises(ValueError, match="malformed_evidence_input"):
+        build_market_research_report(_request(marketplace_report="not-an-object"))
+
+
 def test_consumer_attention_cannot_satisfy_supplier_or_launch_gates():
     result = build_market_research_report(_bound_request(consumer_report=_CONSUMER))
     serialized = json.dumps(result.to_dict()).lower()
