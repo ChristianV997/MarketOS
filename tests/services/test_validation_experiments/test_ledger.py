@@ -45,6 +45,14 @@ def test_fixture_evidence_is_not_live_evidence():
     assert ledger.evidence_summary["mode"] == "fixture"
     assert ledger.evidence_summary["live_validated"] is False
     assert "fixture_evidence_not_live" in ledger.limitations
+    assert ledger.decision == "blocked_evidence_integrity"
+
+
+def test_stale_and_conflicting_evidence_blocks_decision():
+    ledger = build_validation_experiment_ledger(load("stale_future_conflict.json"))
+    assert ledger.decision == "blocked_evidence_integrity"
+    assert "evidence_integrity" in ledger.blockers
+    assert ledger.validation_pipeline["next_action"] == "repair_evidence_provenance"
 
 
 def test_explicit_zero_cost_is_distinct_from_missing_cost():

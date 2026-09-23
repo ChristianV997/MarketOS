@@ -292,6 +292,7 @@ def _normalized_opportunity_pipeline(
         "blocked_missing_budget": "define_experiment_budget",
         "hold_unreachable_buyer": "validate_reachable_buyer",
         "blocked_missing_economics": "resolve_unit_economics",
+        "blocked_evidence_integrity": "repair_evidence_provenance",
         "reject_invalid_result": "repair_result_provenance",
         "kill_failed_result": "revise_hypothesis_or_stop",
         "advance_to_human_review": "review_simulated_result",
@@ -447,6 +448,7 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
         blockers.append("missing_economics")
     if any(item in evidence["states"] for item in ("stale", "future", "conflicting")):
         gaps.extend(item for item in ("stale_evidence", "future_evidence", "conflicting_evidence") if item in evidence["states"])
+        blockers.append("evidence_integrity")
     if "fixture_evidence_not_live" in evidence["limitations"]:
         gaps.append("fixture_evidence_not_live")
     if not payload.get("opportunity_reports") and not payload.get("normalized_candidate") and not any(payload.get(key) for key in ("market_evidence", "supplier_evidence")):
@@ -457,6 +459,13 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     request = ExecutionDecisionRequest(request_id=f"validation-{candidate_id}", action_type="launch_ad_experiment", domain="ads_content", owner_department="validation", workspace_id=workspace_id, requested_amount=budget_amount, hypothesis=hypothesis, success_metric=measurement, kill_threshold=float(thresholds["kill_threshold"]), scale_threshold=float(thresholds["success_threshold"]), sample_size_target=sample_target, approval_state="approved" if payload.get("approval_state") == "approved" else "not_requested", trustos_decision="hard_block", workspace_decision="allow")
     governor = evaluate_execution_request(request).to_dict()
     trustos = evaluate_action("launch_ad", generated_at="offline-deterministic").to_dict()
+    if "stale_evidence" in gaps or "future_evidence" in gaps or "conflicting_evidence" in gaps:
+        blockers.append("evidence_integrity")
+    if "fixture_evidence_not_live" in gaps:
+        blockers.append("fixture_evidence_not_live")
+    if any(state in evidence["states"] for state in ("invalid", "rejected")):
+        blockers.append("rejected_evidence")
+    blockers = list(dict.fromkeys(blockers))
     workspace = build_client_workspace_isolation_report(workspace_type="client_growth_workspace", payload={"workspace_id": workspace_id, "status": "client_safe", "blockers": tuple(blockers), "evidence_required": tuple(gaps), "approvals_required": ("human_review",), "next_actions": ("review_simulated_result",)}).to_dict()
     if "experiment_budget" in blockers:
         decision = "blocked_missing_budget"
@@ -466,6 +475,8 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
         decision = "kill_negative_unit_economics"
     elif "reachable_buyer" in blockers:
         decision = "hold_unreachable_buyer"
+    elif "evidence_integrity" in blockers or "fixture_evidence_not_live" in blockers or "rejected_evidence" in blockers:
+        decision = "blocked_evidence_integrity"
     elif any(status == "invalid" for status in result_statuses):
         decision = "reject_invalid_result"
     elif any(status == "successful" for status in result_statuses):
