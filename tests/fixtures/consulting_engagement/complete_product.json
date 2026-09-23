@@ -15,5 +15,5 @@
   "conflicts": [],
   "missing_information": [],
   "linked_component_report_ids": ["report_fixture_product"],
-  "optional_upsell_recommendations": ["unit-economics"]
+  "optional_upsell_recommendations": ["unit-service-economics"]
 }

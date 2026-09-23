@@ -162,6 +162,47 @@ def _build_projection(data: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_component_report_envelope(
+    *,
+    report_id: str,
+    fingerprint: str,
+    service: str,
+    workspace_id: str,
+    status: str,
+    observed_at: str = "",
+    stale: bool = False,
+    conflicting: bool = False,
+    facts: Mapping[str, Any] | None = None,
+    capabilities: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """The one place a caller builds a persisted-component-report envelope
+    that both `services.consulting_portfolio.synthesize_portfolio` and
+    `build_evidence_register` accept, closing the envelope mismatch
+    between them: `synthesize_portfolio` reads a `service` key,
+    `build_evidence_register` reads `service_name` -- this emits both,
+    aliased to the same value, plus `workspace_id` and a `status` drawn
+    from `build_evidence_register`'s own fixed vocabulary (a strict
+    subset `synthesize_portfolio` accepts unconditionally, since it does
+    not restrict `status` to a fixed set). Neither consumer is modified;
+    this only removes the need for a caller to hand-build two slightly
+    different dicts for the same underlying report."""
+    if status not in _REPORT_STATUSES:
+        raise ConsultingEvidenceInputError(f"status must be one of {sorted(_REPORT_STATUSES)}")
+    return {
+        "report_id": report_id,
+        "fingerprint": fingerprint,
+        "service": service,
+        "service_name": service,
+        "workspace_id": workspace_id,
+        "status": status,
+        "observed_at": observed_at,
+        "stale": stale,
+        "conflicting": conflicting,
+        "facts": dict(facts or {}),
+        "capabilities": dict(capabilities or {}),
+    }
+
+
 def build_evidence_register(
     reports: Sequence[Mapping[str, Any]],
     *,

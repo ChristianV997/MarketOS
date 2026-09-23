@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from evaluation.commerce.kernel_integration import replay_fingerprint
+from services.consulting_offers import OFFER_IDS
 from services.reporting.render import render_markdown_report
 
 OFFERING_KINDS = frozenset({"product", "service", "hybrid", "unknown"})
@@ -185,7 +186,10 @@ class ConsultingEngagementRequest:
         object.__setattr__(self, "assumptions", _items(self.assumptions, "assumption"))
         object.__setattr__(self, "conflicts", _items(self.conflicts, "conflict"))
         object.__setattr__(self, "missing_information", _items(self.missing_information, "missing information"))
-        object.__setattr__(self, "optional_upsell_recommendations", _items(self.optional_upsell_recommendations, "upsell recommendation"))
+        upsells = _items(self.optional_upsell_recommendations, "upsell recommendation")
+        if any(item not in OFFER_IDS for item in upsells):
+            raise SchemaValidationError("optional_upsell_recommendations must reference the existing consulting_offers catalog")
+        object.__setattr__(self, "optional_upsell_recommendations", upsells)
         object.__setattr__(self, "linked_component_report_ids", tuple(_safe_id(item, "component report id") for item in self.linked_component_report_ids))
 
     @classmethod

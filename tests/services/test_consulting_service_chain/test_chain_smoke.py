@@ -25,7 +25,7 @@ from backend.workspaces.registry import WorkspaceRegistry
 from services.consulting_delivery import package_consulting_deliverable
 from services.consulting_economics import build_consulting_economics_report
 from services.consulting_engagement import ConsultingEngagementRequest, build_consulting_engagement
-from services.consulting_evidence_register import build_evidence_register
+from services.consulting_evidence_register import build_component_report_envelope, build_evidence_register
 from services.consulting_offers import ConsultingOfferRequest, build_consulting_offer_proposal
 from services.consulting_portfolio import synthesize_portfolio
 
@@ -124,43 +124,39 @@ def test_full_chain_composes_under_one_workspace_identity(local_authorities, glo
     # already-computed fingerprint/status into that shape, proving the
     # two "one register" / "one synthesis" authorities are reusable
     # across heterogeneous component services, not just one pillar.
-    # NOTE: synthesize_portfolio reads `service`; build_evidence_register
-    # reads `service_name` and additionally requires `workspace_id` on
-    # every envelope and a status drawn from its own fixed vocabulary
-    # (`completed|partial|unavailable|blocked|draft|empty`) rather than
-    # each component's own status enum. The two "generic component
-    # report" consumers do not share one envelope schema today; this
-    # smoke test supplies both key spellings rather than papering over
-    # the mismatch, and it is called out as a follow-up compatibility
-    # adapter in docs/ai/CONSULTING_SERVICE_CHAIN_INTEGRATION.md.
+    # synthesize_portfolio reads `service`; build_evidence_register reads
+    # `service_name` and additionally requires `workspace_id` on every
+    # envelope and a status drawn from its own fixed vocabulary. Rather
+    # than hand-building two slightly different dicts per report, both
+    # are built through the one shared
+    # consulting_evidence_register.build_component_report_envelope,
+    # which normalizes the mismatch in exactly one place (see
+    # test_component_report_envelope.py for the dedicated coverage).
     envelopes = [
-        {
-            "report_id": f"offer-{proposal.proposal_id}",
-            "fingerprint": proposal.fingerprint,
-            "service": "consulting_offers",
-            "service_name": "consulting_offers",
-            "workspace_id": WORKSPACE_ID,
-            "status": "completed",
-            "facts": {"offering_kind": proposal.offering_kind},
-        },
-        {
-            "report_id": f"engagement-{engagement.engagement_id}",
-            "fingerprint": engagement.fingerprint,
-            "service": "consulting_engagement",
-            "service_name": "consulting_engagement",
-            "workspace_id": WORKSPACE_ID,
-            "status": "completed",
-            "facts": {"offering_kind": engagement.offering_kind},
-        },
-        {
-            "report_id": f"economics-{economics.service_id}",
-            "fingerprint": economics.fingerprint,
-            "service": "consulting_economics",
-            "service_name": "consulting_economics",
-            "workspace_id": WORKSPACE_ID,
-            "status": "completed",
-            "facts": {"recommendation": economics.recommendation},
-        },
+        build_component_report_envelope(
+            report_id=f"offer-{proposal.proposal_id}",
+            fingerprint=proposal.fingerprint,
+            service="consulting_offers",
+            workspace_id=WORKSPACE_ID,
+            status="completed",
+            facts={"offering_kind": proposal.offering_kind},
+        ),
+        build_component_report_envelope(
+            report_id=f"engagement-{engagement.engagement_id}",
+            fingerprint=engagement.fingerprint,
+            service="consulting_engagement",
+            workspace_id=WORKSPACE_ID,
+            status="completed",
+            facts={"offering_kind": engagement.offering_kind},
+        ),
+        build_component_report_envelope(
+            report_id=f"economics-{economics.service_id}",
+            fingerprint=economics.fingerprint,
+            service="consulting_economics",
+            workspace_id=WORKSPACE_ID,
+            status="completed",
+            facts={"recommendation": economics.recommendation},
+        ),
     ]
     portfolio = synthesize_portfolio(envelopes)
     assert portfolio.report_ids == sorted(item["report_id"] for item in envelopes)

@@ -115,37 +115,58 @@ rejection test.
 | Planning prices remain assumptions | `consulting_offers.PlanningPriceRange` and `consulting_economics`'s evidence-state-tagged cost fields |
 | Missing != zero | `consulting_economics` preserves `evidence_state: "assumed"` vs `"observed"` per cost field; never coerces an absent figure to 0 |
 | Workspace mismatch / cross-client leakage fail closed | `consulting_delivery.build_consulting_delivery` raises on a metadata-claimed workspace mismatch; `package_consulting_deliverable` raises `cross_workspace_leakage` on a report registered under a different workspace — both verified by this branch's smoke test |
+| Artifact-store mismatch fail closed | `consulting_engagement.orchestrator` raises `artifact_workspace_boundary_rejected` when the supplied `ArtifactStore`'s bound workspace does not match the registered one — `test_artifact_store_identity_mismatch_is_rejected`, from #310's own kept suite |
+| Offer catalog consumed through a real dependency, not copied | `services/consulting_engagement/schemas.py` imports `OFFER_IDS` directly from `services.consulting_offers` (identity-checked in `test_engagement_schema_imports_the_same_offer_ids_object_not_a_copy`) and validates `optional_upsell_recommendations` against it — a real cross-package dependency, no redefinition |
+| One envelope schema for both "generic component report" consumers | `services.consulting_evidence_register.build_component_report_envelope` — see below |
+| Readiness states remain blocked/review-required when evidence is insufficient | `consulting_offers.PROPOSAL_STATUSES = {draft_ready, needs_evidence, blocked}`; `consulting_delivery.ConsultingDeliveryPackage.status` defaults to, and is forced back to, `"review_required"` for any unrecognized value (`test_review_required_is_explicit`, `test_status_remains_review_required`) |
 
-## A known, unresolved gap (documented, not papered over)
+## Two gaps closed in a later commit on this branch
 
-`consulting_portfolio.synthesize_portfolio` reads a component-report
+Both items below were originally documented here as open follow-up work.
+Both are now fixed, on this branch, with tests — not deferred further.
+
+**The `service`/`service_name` envelope mismatch is now normalized in one
+place.** `consulting_portfolio.synthesize_portfolio` reads a component-report
 envelope's `service` key; `consulting_evidence_register.build_evidence_register`
 reads `service_name` on the same conceptual envelope, and additionally
-*requires* `workspace_id` and a status from its own fixed vocabulary
-(`completed|partial|unavailable|blocked|draft|empty`). The two "generic
-persisted component report" consumers do not share one envelope schema
-today. This is not a duplicate-authority problem (each does a genuinely
-different aggregation), but it means a real caller currently has to build
-two slightly different envelope dicts for the same underlying report. The
-smoke test in this branch works around it explicitly rather than silently;
-a follow-up PR should either add a single shared `ComponentReportEnvelope`
-schema both packages accept, or a thin compatibility adapter between them.
+requires `workspace_id` and a status from its own fixed vocabulary
+(`completed|partial|unavailable|blocked|draft|empty`). Rather than
+patching either consumer (which would risk becoming "another" evidence
+register or portfolio synthesis authority), a single new function —
+`services.consulting_evidence_register.build_component_report_envelope`
+— builds one envelope dict carrying both `service` and `service_name`
+(aliased to the same value) plus `workspace_id` and a validated status,
+that both `synthesize_portfolio` and `build_evidence_register` accept
+unmodified. `tests/services/test_consulting_evidence_register/test_component_report_envelope.py`
+proves one envelope list satisfies both consumers at once, and
+`tests/services/test_consulting_service_chain/test_chain_smoke.py` was
+updated to build its envelopes through this function instead of two
+hand-written dicts per report.
 
 **Readiness** itself (the "readiness" stage named in the objective's chain)
-has no canonical authority on this branch: both #312's and #313's
-readiness modules were rejected for the reasons above. This is an honest
-gap, not a silent omission — see Next Action.
+still has no dedicated cross-stage authority on this branch — both #312's
+and #313's readiness modules were rejected for the reasons above, and
+building a new one is explicitly out of scope for this lane ("do not
+create another... consulting catalog, engagement model, economics
+service, portfolio service, evidence register, or delivery packager").
+What each stage already reports (`consulting_offers.PROPOSAL_STATUSES`,
+`consulting_delivery`'s forced `review_required` default) already
+satisfies "the chain never silently claims readiness it hasn't earned";
+a dedicated cross-stage readiness rollup remains a legitimate future PR,
+not a defect in this one.
 
 ## Validation run on this branch
 
-- `pytest tests/services/test_consulting_economics tests/services/test_consulting_engagement tests/services/test_consulting_portfolio tests/services/test_consulting_offers tests/services/test_consulting_evidence_register tests/services/test_consulting_delivery -q` → **87 passed**
-- `pytest tests/services/test_consulting_service_chain -q` → **2 passed** (real cross-package call chain + fail-closed cross-workspace rejection)
-- `pytest tests/contracts/test_architecture_boundaries.py tests/services/ -q` → **304 passed**
+- `pytest tests/services/test_consulting_economics tests/services/test_consulting_engagement tests/services/test_consulting_portfolio tests/services/test_consulting_offers tests/services/test_consulting_evidence_register tests/services/test_consulting_delivery tests/services/test_consulting_service_chain -q` → **98 passed** (87 prior + 9 new: 4 offer-catalog-dependency tests, 5 component-report-envelope tests)
+- `pytest tests/contracts/test_architecture_boundaries.py tests/services/ -q` → **313 passed**
 - `python -m compileall -q backend api evaluation services scripts tests` → clean
-- `ruff check` over every retained/added package and test directory → clean (one pre-existing unused-import issue in #312's `packager.py`/tests fixed during integration; one dynamic-`__all__.append` pattern in #312's `consulting_delivery/__init__.py` rewritten to a static `__all__` list)
+- `ruff check` over every retained/added package and test directory → clean
 - `git diff --check` → clean
-- `python scripts/ai/session_finish.py --dry-run` → passed
-- `python scripts/ai/pr_readiness_report.py` → `merge_readiness: "clear"`
+- `python scripts/ai/session_start.py --json` / `select_tests.py --from-git --json` → changed paths match exactly, `unknown_fallback` lane
+- `python scripts/ai/session_finish.py --dry-run` → 6 passed
+- `python scripts/ai/run_local_quality_gate.py --from-git --execute --phase preflight` → `status: "configuration_error"`, driven entirely by sandbox-wide conditions (`python_interpreter_mismatch`, `unpinned_requirements_present`, `git_state:dirty`) with no mention of any file this branch touches
+- `python scripts/ai/pr_readiness_report.py` → `merge_readiness: "clear"`, no blocking warnings
+- Security: manual pass on all changed files — no `eval`/`exec`/`os.system`/`pickle`/`yaml.load`/`subprocess` anywhere in the changed code
 
 ## Rollback
 
@@ -158,12 +179,13 @@ were modified by this integration.
 
 1. Land this branch's five full packages + partial #312 delivery packager
    as the consulting chain's first mergeable slice.
-2. Close or substantially rewrite #313 referencing this document (it
-   collides on-disk with #312 and duplicates #310's engagement schema).
-3. Rewrite #312's `consulting_operations` half (or a new PR) to build
-   readiness on top of #317's catalog and #310's `ConsultingEngagementResult`
-   instead of its own `KNOWN_PACKAGES` table — this is the still-missing
-   "readiness" stage of the chain.
-4. Add the shared component-report envelope schema (or adapter) described
-   above so `consulting_portfolio` and `consulting_evidence_register`
-   accept one canonical shape.
+2. Close or substantially rewrite #313 (and its successor #327, which
+   continues the same contaminated `consulting_operations` branch)
+   referencing this document — it collides on-disk with #312 and
+   duplicates #310's engagement schema. Neither #313 nor #327 was
+   consumed by, copied into, or otherwise touched by this branch.
+3. Build a dedicated readiness stage on top of #317's catalog and #310's
+   `ConsultingEngagementResult` instead of reviving either rejected
+   `KNOWN_PACKAGES` table or standalone `ConsultingEngagement` schema —
+   still the one missing stage of the chain, and out of scope for this
+   lane to build (see "do not create another... " constraint).
