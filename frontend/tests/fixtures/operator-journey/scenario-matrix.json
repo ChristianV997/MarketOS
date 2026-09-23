@@ -11,7 +11,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -23,7 +24,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -35,7 +37,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -47,7 +50,60 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "partial",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "partial",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "partial",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "partial",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -59,7 +115,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -71,7 +128,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -83,7 +141,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -95,7 +154,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -107,7 +167,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -119,7 +180,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -131,7 +193,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -143,7 +206,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -155,7 +219,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -167,7 +232,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -179,7 +245,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -191,7 +258,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -203,7 +271,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -215,7 +284,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -227,7 +297,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -239,7 +310,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -251,7 +323,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -263,7 +336,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -275,7 +349,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -287,7 +362,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -299,7 +375,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -311,7 +388,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -323,7 +401,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -335,7 +414,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -347,7 +427,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -359,7 +440,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -371,7 +453,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/services",
@@ -383,7 +466,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -395,7 +479,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -407,7 +492,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -419,7 +505,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -431,7 +518,60 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "partial",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "partial",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "partial",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "partial",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -443,7 +583,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -455,7 +596,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -467,7 +609,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -479,7 +622,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -491,7 +635,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -503,7 +648,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -515,7 +661,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -527,7 +674,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -539,7 +687,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -551,7 +700,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -563,7 +713,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -575,7 +726,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -587,7 +739,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -599,7 +752,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -611,7 +765,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -623,7 +778,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -635,7 +791,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -647,7 +804,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -659,7 +817,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -671,7 +830,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -683,7 +843,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -695,7 +856,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -707,7 +869,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -719,7 +882,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -731,7 +895,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -743,7 +908,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -755,7 +921,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/first-phase",
@@ -767,7 +934,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -779,7 +947,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -791,7 +960,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -803,7 +973,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -815,7 +986,60 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "partial",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "partial",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "partial",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "partial",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -827,7 +1051,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -839,7 +1064,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -851,7 +1077,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -863,7 +1090,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -875,7 +1103,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -887,7 +1116,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -899,7 +1129,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -911,7 +1142,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -923,7 +1155,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -935,7 +1168,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -947,7 +1181,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -959,7 +1194,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -971,7 +1207,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -983,7 +1220,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -995,7 +1233,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1007,7 +1246,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1019,7 +1259,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1031,7 +1272,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1043,7 +1285,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1055,7 +1298,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1067,7 +1311,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1079,7 +1324,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1091,7 +1337,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1103,7 +1350,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1115,7 +1363,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1127,7 +1376,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1139,7 +1389,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/events",
@@ -1151,7 +1402,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1163,7 +1415,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1175,7 +1428,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1187,7 +1441,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1199,7 +1454,60 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "partial",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "partial",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "partial",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "partial",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1211,7 +1519,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1223,7 +1532,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1235,7 +1545,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1247,7 +1558,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1259,7 +1571,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1271,7 +1584,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1283,7 +1597,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1295,7 +1610,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1307,7 +1623,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1319,7 +1636,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1331,7 +1649,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1343,7 +1662,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1355,7 +1675,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1367,7 +1688,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1379,7 +1701,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1391,7 +1714,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1403,7 +1727,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1415,7 +1740,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1427,7 +1753,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1439,7 +1766,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1451,7 +1779,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1463,7 +1792,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1475,7 +1805,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1487,7 +1818,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1499,7 +1831,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1511,7 +1844,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1523,7 +1857,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/consulting-research",
@@ -1535,7 +1870,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1547,7 +1883,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1559,7 +1896,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1571,7 +1909,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1583,7 +1922,60 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "partial",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "partial",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "partial",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "partial",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1595,7 +1987,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1607,7 +2000,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1619,7 +2013,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1631,7 +2026,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1643,7 +2039,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1655,7 +2052,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1667,7 +2065,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1679,7 +2078,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1691,7 +2091,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1703,7 +2104,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1715,7 +2117,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1727,7 +2130,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1739,7 +2143,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1751,7 +2156,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1763,7 +2169,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1775,7 +2182,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1787,7 +2195,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1799,7 +2208,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1811,7 +2221,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1823,7 +2234,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1835,7 +2247,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1847,7 +2260,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1859,7 +2273,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1871,7 +2286,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1883,7 +2299,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1895,7 +2312,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1907,7 +2325,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     },
     {
       "route": "/operator/marketing-strategy",
@@ -1919,7 +2338,8 @@
         "GET"
       ],
       "evidence_class": "fixture_browser_tested",
-      "live_validated": false
+      "live_validated": false,
+      "proves_react_production_screens": false
     }
   ]
 }

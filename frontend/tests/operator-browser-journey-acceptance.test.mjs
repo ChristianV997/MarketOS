@@ -40,6 +40,8 @@ test("operator journey harness encodes skip links, live region, evidence classes
   assert.match(html, /apiMode === "empty"/);
   assert.match(html, /apiMode === "stale"/);
   assert.match(html, /apiMode === "loading"/);
+  assert.match(html, /apiMode === "partial"/);
+  assert.match(html, /Not a React production screen/);
   assert.match(html, /mobile-only/);
   assert.match(html, /desktop-only/);
 });

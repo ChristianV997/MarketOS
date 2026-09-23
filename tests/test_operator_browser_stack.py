@@ -79,12 +79,14 @@ def test_probe_rejects_public_hosts():
 
 def test_scenario_matrix_is_get_only_and_not_live():
     rows = scenario_matrix()
-    assert len(rows) == 5 * 8 * 4
+    assert len(rows) == 5 * 9 * 4
     assert "/operator/consulting-research" in {row["route"] for row in rows}
     assert "/operator/marketing-strategy" in {row["route"] for row in rows}
     assert all(row["live_validated"] is False for row in rows)
     assert {row["evidence_class"] for row in rows} == {EVIDENCE_FIXTURE}
     assert all(row["allowed_methods"] == ["GET"] for row in rows)
+    assert all(row["proves_react_production_screens"] is False for row in rows)
+    assert any(row["api_mode"] == "partial" and row["expected_surface"] == "partial" for row in rows)
     assert all(row["live_validated"] is False for row in rows)
     assert any(row["api_mode"] == "malformed" and row["expected_surface"] == "unavailable" for row in rows)
 

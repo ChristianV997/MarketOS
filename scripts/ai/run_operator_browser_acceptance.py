@@ -62,7 +62,7 @@ OPERATOR_ROUTES = (
     ("marketing", "/operator/marketing-strategy"),
 )
 
-API_MODES = ("ok-fixture", "down", "429", "500", "malformed", "empty", "stale", "loading")
+API_MODES = ("ok-fixture", "partial", "down", "429", "500", "malformed", "empty", "stale", "loading")
 VIEWPORTS = (
     ("mobile", 375, 812),
     ("mobile-390", 390, 844),
@@ -654,6 +654,8 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
                     banner = str(parsed.get("banner") or "")
                     if mode in {"down", "429", "500", "malformed"}:
                         case["passed"] = surface == "unavailable" and "not demo-success" in banner.lower()
+                    elif mode == "partial":
+                        case["passed"] = surface == "partial" and bool(parsed.get("hasSkip"))
                     else:
                         case["passed"] = surface in {"blocked", "partial", "stale"} and surface != "success"
                         case["passed"] = bool(case["passed"] and parsed.get("hasSkip"))
@@ -693,6 +695,8 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
                         }.get(mode)
                         if expected:
                             case["passed"] = surface == expected and bool(snap.get("hasSkip")) and not snap.get("claimsLive")
+                        elif mode == "partial":
+                            case["passed"] = surface == "partial" and bool(snap.get("hasSkip")) and not snap.get("claimsLive")
                         else:
                             case["passed"] = surface in {"blocked", "partial"} and bool(snap.get("hasSkip")) and not snap.get("claimsLive")
                         if cdp_hits[0].get("screenshot"):
@@ -788,6 +792,9 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
             report["live_ui"] = live_report
             if live_report.get("failures"):
                 report["failures"].extend(live_report["failures"])
+            if browser_kind == "chrome":
+                report["mounted_routes"] = _probe_mounted_routes(live_base.rstrip("/"), artifact_dir, config)
+                report["failures"].extend(report["mounted_routes"].get("failures") or [])
 
         if config.hold_s > 0:
             time.sleep(config.hold_s)
@@ -813,12 +820,21 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
         isinstance(route, dict) and route.get("classification") == "reachable"
         for route in (live.get("routes") or {}).values()
     )
-    report["evidence_class"] = EVIDENCE_LOCAL_UI if reachable else EVIDENCE_FIXTURE
+    marketing_dom = bool((report.get("mounted_routes") or {}).get("marketing_strategy_dom_proof"))
+    consulting_mounted = bool((report.get("mounted_routes") or {}).get("consulting_research_mounted"))
+    report["fixture_browser_tested"] = browser_kind == "chrome" and bool(cdp_meta.get("ok")) and not report["failures"]
+    report["local_ui_tested"] = marketing_dom
+    report["consulting_research_mounted"] = consulting_mounted
+    report["marketing_strategy_dom_proof"] = marketing_dom
+    report["fixture_routes_prove_react_production_screens"] = False
+    report["evidence_class"] = EVIDENCE_LOCAL_UI if marketing_dom else EVIDENCE_FIXTURE
     if report["evidence_class"] not in {EVIDENCE_FIXTURE, EVIDENCE_LOCAL_UI}:
         report["failures"].append("evidence_class_rejected")
         report["status"] = "failed"
     report["scenario_rows"] = len(scenario_matrix())
     report["live_validated"] = False
+    if reachable and not marketing_dom:
+        report["http_200_is_not_react_proof"] = True
     if not artifact_dir_is_safe(artifact_dir):
         report["failures"].append("artifact_dir_unsafe")
         report["status"] = "failed"
@@ -826,6 +842,87 @@ def run_fixture_journey(config: AcceptanceConfig) -> dict[str, Any]:
     report_path.write_text(json.dumps(safe_report, indent=2), encoding="utf-8")
     report["report_path"] = str(report_path)
     return report
+
+
+def _probe_mounted_routes(base: str, artifact_dir: Path, config: AcceptanceConfig) -> dict[str, Any]:
+    """DOM-check loopback routes. HTTP 200 from a Vite SPA is not a mount."""
+    parsed = urlparse(base)
+    result: dict[str, Any] = {
+        "base": base,
+        "marketing_strategy_dom_proof": False,
+        "consulting_research_mounted": False,
+        "live_validated": False,
+        "proves_react_production_screens_from_fixtures": False,
+        "failures": [],
+    }
+    if parsed.hostname not in {"127.0.0.1", "localhost"}:
+        result["failures"].append("mounted_probe_not_loopback")
+        return result
+    chrome = _which_chrome()
+    node = shutil.which("node") or shutil.which("node.exe")
+    probe = REPOSITORY_ROOT / "scripts" / "ai" / "operator_browser_cdp_probe.mjs"
+    if not chrome or not node or not probe.is_file():
+        result["failures"].append("mounted_cdp_unavailable")
+        return result
+    urls = []
+    for label, path, width, height in (
+        ("marketing-desktop", "/operator/marketing-strategy", 1440, 900),
+        ("marketing-mobile", "/operator/marketing-strategy", 390, 844),
+        ("consulting-desktop", "/operator/consulting-research", 1440, 900),
+    ):
+        urls.append(
+            {
+                "url": f"{base}{path}",
+                "label": label,
+                "width": width,
+                "height": height,
+                "profile": "mounted-route",
+                "screenshot": False,
+            }
+        )
+    plan_path = artifact_dir / "mounted-cdp-plan.json"
+    plan_path.write_text(
+        json.dumps({"chrome": chrome, "artifactDir": str(artifact_dir), "reducedMotion": True, "urls": urls}),
+        encoding="utf-8",
+    )
+    completed = _run([node, str(probe), str(plan_path)], timeout=max(config.request_timeout_s * 8, 60.0))
+    text = completed.stdout or ""
+    start = text.find("{")
+    if start < 0:
+        result["failures"].append("mounted_cdp_no_json")
+        return result
+    try:
+        payload = json.loads(text[start:])
+    except json.JSONDecodeError:
+        result["failures"].append("mounted_cdp_bad_json")
+        return result
+    snaps = {item.get("label"): (item.get("snap") or {}) for item in payload.get("results") or []}
+    marketing = [snaps.get("marketing-desktop") or {}, snaps.get("marketing-mobile") or {}]
+    marketing_ok = all(
+        snap.get("showsLiveFalse")
+        and snap.get("showsLaunchFalse")
+        and snap.get("showsDraftOnly")
+        and not snap.get("claimsLiveTrue")
+        and not snap.get("claimsLaunchTrue")
+        and int(snap.get("overflowX") or 0) <= 8
+        for snap in marketing
+    )
+    consulting = snaps.get("consulting-desktop") or {}
+    consulting_mounted = bool(
+        consulting.get("consultingCopy")
+        and consulting.get("showsLiveFalse")
+        and consulting.get("showsLaunchFalse")
+        and not consulting.get("claimsLiveTrue")
+    )
+    result["marketing_strategy_dom_proof"] = marketing_ok
+    result["consulting_research_mounted"] = consulting_mounted
+    result["snaps"] = {
+        key: {k: snap.get(k) for k in ("showsLiveFalse", "showsLaunchFalse", "showsDraftOnly", "consultingCopy", "width", "overflowX", "motion", "claimsLiveTrue")}
+        for key, snap in snaps.items()
+    }
+    if not marketing_ok:
+        result["failures"].append("marketing_strategy_dom_unproven")
+    return result
 
 
 def _probe_live_ui(base: str, driver: BrowserDriver | None, config: AcceptanceConfig) -> dict[str, Any]:
@@ -852,7 +949,9 @@ def _probe_live_ui(base: str, driver: BrowserDriver | None, config: AcceptanceCo
             entry["classification"] = "unavailable"
             entry["passed"] = "demo-success" not in body.lower()
         elif 200 <= code < 400:
-            entry["classification"] = "reachable"
+            entry["classification"] = "http_ok_unproven"
+            entry["proves_react_production_screen"] = False
+            entry["note"] = "HTTP 200 is not DOM proof of a mounted React screen"
             # Read-only probe: install interceptor when orca is available.
             if driver and driver.kind == "orca":
                 if driver.page_id is None:
@@ -915,7 +1014,7 @@ def _probe_live_ui(base: str, driver: BrowserDriver | None, config: AcceptanceCo
                     result["failures"].extend(mutation_failures)
             else:
                 entry["passed"] = True
-                entry["note"] = "reachable_without_method_instrumentation"
+                entry["note"] = "http_ok_without_dom_proof"
         else:
             entry["classification"] = "unavailable"
             entry["passed"] = True

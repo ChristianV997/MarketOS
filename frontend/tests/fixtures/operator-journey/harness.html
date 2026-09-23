@@ -321,6 +321,11 @@
           setSurface("empty", "Empty fixture board. Not live validated — not demo-success.", "warn");
           return { engagements: [], candidates: [], events: [] };
         }
+        if (apiMode === "partial") {
+          setSurface("partial", "Partial fixture projection. live_validated=false. launch_authorized=false. Not a React production screen. Not demo-success.", "warn");
+          const base = fixtureRows[route] || [];
+          return { engagements: base.slice(0, 1), candidates: base.slice(0, 1), events: base.slice(0, 1), completeness: "partial" };
+        }
         if (apiMode === "stale") {
           setSurface("stale", "Stale fixture snapshot. Not live validated — not demo-success.", "warn");
           const base = fixtureRows[route] || [];
@@ -517,6 +522,9 @@
         }
         if (apiMode === "stale") {
           setSurface("stale", "Stale fixture snapshot. Not live validated — not demo-success.", "warn");
+        }
+        if (apiMode === "partial") {
+          setSurface("partial", "Partial fixture projection. live_validated=false. launch_authorized=false. Not a React production screen. Not demo-success.", "warn");
         }
       });
 

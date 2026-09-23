@@ -68,3 +68,8 @@ def test_run_fixture_journey_without_browser_is_honest(tmp_path: Path):
     assert all(case["http_status"] == 404 and case["passed"] for case in spa)
     saved = json.loads((tmp_path / "operator-browser-acceptance-report.json").read_text(encoding="utf-8"))
     assert saved["schema"] == report["schema"]
+    assert saved["live_validated"] is False
+    assert saved["evidence_class"] == "fixture_browser_tested"
+    assert saved["local_ui_tested"] is False
+    assert saved["fixture_routes_prove_react_production_screens"] is False
+    assert saved["consulting_research_mounted"] is False

@@ -225,6 +225,7 @@ def scenario_matrix() -> list[dict[str, Any]]:
     )
     modes = {
         "ok-fixture": "blocked_or_partial",
+        "partial": "partial",
         "down": "unavailable",
         "429": "unavailable",
         "500": "unavailable",
@@ -248,6 +249,7 @@ def scenario_matrix() -> list[dict[str, Any]]:
                         "allowed_methods": ["GET"],
                         "evidence_class": EVIDENCE_FIXTURE,
                         "live_validated": False,
+                        "proves_react_production_screens": False,
                     }
                 )
     return rows

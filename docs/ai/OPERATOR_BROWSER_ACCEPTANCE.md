@@ -75,7 +75,13 @@ Python unit tests:
 - tablet: 768×1024
 - desktop: 1440×900
 
-- `/operator/consulting-research` and `/operator/marketing-strategy` are fixture planning routes in this harness. They are not the #320/#321 React surfaces. `live_validated` and `launch_authorized` stay false.
+Evidence classes on every report:
+
+- `fixture_browser_tested`: Chrome CDP against this fixture harness, including loading, down, 429, 500, malformed, empty, stale, and partial. These rows set `proves_react_production_screens` to false.
+- `local_ui_tested`: only after a loopback DOM probe of the mounted `/operator/marketing-strategy` screen shows `live_validated=false`, `launch_authorized=false`, and `draft only` at mobile and desktop widths. An HTTP 200 from the Vite shell is not that proof.
+- `live_validated`: always false.
+
+`/operator/consulting-research` stays fixture-only unless that DOM probe finds a mounted consulting screen. On the #329 shell it is not mounted, so the report records `consulting_research_mounted=false`. Fixture planning copy is not the #320 or #321 React UI.
 
 Windows:
 

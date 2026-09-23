@@ -86,6 +86,22 @@ const SNAP = `(() => ({
   })(),
 }))()`;
 
+const MOUNTED = `(() => {
+  const text = (document.body && document.body.innerText) || "";
+  return {
+    showsLiveFalse: text.includes("live_validated=false"),
+    showsLaunchFalse: text.includes("launch_authorized=false"),
+    showsDraftOnly: text.includes("draft only"),
+    claimsLiveTrue: /live_validated\\s*[:=]\\s*true/i.test(text),
+    claimsLaunchTrue: /launch_authorized\\s*[:=]\\s*true/i.test(text),
+    consultingCopy: /consulting research/i.test(text),
+    width: window.innerWidth,
+    overflowX: document.documentElement.scrollWidth - window.innerWidth,
+    motion: getComputedStyle(document.body).transitionDuration,
+    provesReactProductionScreen: false,
+  };
+})()`;
+
 const results = [];
 try {
   await mkdir(plan.artifactDir, { recursive: true });
@@ -113,8 +129,8 @@ try {
       mobile: (item.width || 1440) < 768,
     });
     await cdp.send("Page.navigate", { url: item.url });
-    await sleep(700);
-    const snap = await cdp.eval(SNAP);
+    await sleep(item.profile === "mounted-route" ? 1200 : 700);
+    const snap = await cdp.eval(item.profile === "mounted-route" ? MOUNTED : SNAP);
     let tabOrder = null;
     if (item.keyboard) {
       tabOrder = [];
