@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import { composePublicityScenario } from "../src/features/marketing-publicity-surface/lib/composePublicityScenario.ts";
+import { buildClientSafeStrategyExport } from "../src/features/marketing-strategy-workbench/lib/exportClientSafeStrategy.ts";
 import { buildComplete, buildConflicting, buildPartial, buildStale } from "../src/features/marketing-strategy-workbench/fixtures/buildStrategyFixtures.ts";
 
 test("route page states stay draft-only and unlaunched", () => {
@@ -31,4 +32,27 @@ test("shell registers one strategy route and no campaign mutation", async () => 
   assert.doesNotMatch(page, /<PublicitySurface/);
   assert.doesNotMatch(page, /method:\s*["']POST["']|fetch\(/);
   assert.doesNotMatch(main, /method:\s*["']POST["']/);
+  assert.match(page, /Loading the draft strategy plan/);
+  assert.match(page, /empty plan/);
+  assert.match(page, /unavailable/);
+  assert.match(page, /partial evidence/);
+  assert.match(page, /stale evidence/);
+  assert.match(page, /conflicting evidence/);
+  assert.match(page, /draft only/);
+  const workbench = await readFile(new URL("../src/features/marketing-strategy-workbench/components/StrategyWorkbench.tsx", import.meta.url), "utf8");
+  assert.match(workbench, /ArrowDown/);
+  assert.match(workbench, /exportButtonRef\.current\?\.focus/);
+  assert.match(workbench, /motion-reduce:transition-none/);
+  assert.match(workbench, /overflow-x-auto/);
+  assert.match(workbench, /md:grid-cols-2/);
+  assert.doesNotMatch(workbench, /publish\(|adSpend|sendMessage|createCampaign/);
+  const packet = buildComplete("hybrid");
+  packet.positioning = "internal prompt hidden from clients";
+  const exported = buildClientSafeStrategyExport(packet);
+  assert.equal(exported.ok, false);
+  const safe = buildClientSafeStrategyExport(buildComplete("service"));
+  assert.equal(safe.ok, true);
+  assert.equal(safe.body.draft_only, true);
+  assert.equal(safe.body.executed_campaign, false);
+  assert.doesNotMatch(JSON.stringify(safe.body), /internal prompt/i);
 });

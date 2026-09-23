@@ -2,11 +2,11 @@ import { StrategyWorkbench } from "./components/StrategyWorkbench.tsx";
 import {
   buildComplete,
   buildConflicting,
-  buildNoEvidence,
   buildPartial,
   buildStale,
 } from "./fixtures/buildStrategyFixtures.ts";
 import type { MarketingStrategyPacket } from "./contracts/marketingStrategyPacket.ts";
+import { buildClientSafeStrategyExport } from "./lib/exportClientSafeStrategy.ts";
 import { composePublicityScenario } from "../marketing-publicity-surface/lib/composePublicityScenario.ts";
 
 export type StrategyRouteState = "loading" | "empty" | "unavailable" | "stale" | "conflict" | "partial" | "draft";
@@ -24,7 +24,12 @@ export function MarketingStrategyPage({ state = "draft" }: { state?: StrategyRou
   if (state === "loading") {
     return <p role="status" aria-live="polite">Loading the draft strategy plan.</p>;
   }
-  const scenario = composePublicityScenario(state === "empty" || state === "unavailable" ? null : packetFor(state), null);
+  const packet = state === "empty" || state === "unavailable" ? null : packetFor(state);
+  const scenario = composePublicityScenario(packet, null);
+  const exported = packet ? buildClientSafeStrategyExport(packet) : null;
+  const exportPreview = exported?.ok
+    ? JSON.stringify({ ...exported.body, live_validated: false, launch_authorized: false })
+    : "Export withheld. The draft was not published.";
   return (
     <div className="min-w-0">
       <p className="px-4 pt-4 text-sm text-zinc-300" role="status">
@@ -35,7 +40,7 @@ export function MarketingStrategyPage({ state = "draft" }: { state?: StrategyRou
         {scenario.surface === "stale" ? " · stale evidence" : ""}
         {scenario.surface === "conflicting" ? " · conflicting evidence" : ""}
       </p>
-      <StrategyWorkbench scenario={scenario} />
+      <StrategyWorkbench scenario={scenario} exportPreview={exportPreview} />
     </div>
   );
 }

@@ -1,8 +1,15 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { PublicityScenario } from "../../marketing-publicity-surface/lib/composePublicityScenario.ts";
 
-export function StrategyWorkbench({ scenario }: { scenario: PublicityScenario }) {
+export function StrategyWorkbench({
+  scenario,
+  exportPreview = null,
+}: {
+  scenario: PublicityScenario;
+  exportPreview?: string | null;
+}) {
   const [exportText, setExportText] = useState<string | null>(null);
+  const exportButtonRef = useRef<HTMLButtonElement>(null);
   return (
     <article className="mx-auto grid max-w-5xl gap-4 p-4 md:grid-cols-2 motion-reduce:transition-none" aria-labelledby="strategy-title">
       <a href="#strategy-claims" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4">
@@ -57,8 +64,18 @@ export function StrategyWorkbench({ scenario }: { scenario: PublicityScenario })
 
       <section id="strategy-claims" aria-labelledby="claims-heading" className="overflow-x-auto">
         <h2 id="claims-heading">Evidence-linked claims</h2>
-        <table>
-          <caption>Claims without evidence stay in needs rescenario.</caption>
+        <table
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
+            const rows = [...event.currentTarget.querySelectorAll<HTMLTableRowElement>("tbody tr")];
+            const index = rows.indexOf(document.activeElement as HTMLTableRowElement);
+            if (index < 0) return;
+            event.preventDefault();
+            const next = event.key === "Home" ? 0 : event.key === "End" ? rows.length - 1 : event.key === "ArrowDown" ? Math.min(rows.length - 1, index + 1) : Math.max(0, index - 1);
+            rows[next]?.focus();
+          }}
+        >
+          <caption>Claims without evidence stay in needs review.</caption>
           <thead>
             <tr>
               <th scope="col">Claim</th>
@@ -219,12 +236,13 @@ export function StrategyWorkbench({ scenario }: { scenario: PublicityScenario })
           ))}
         </ul>
         <button
+          ref={exportButtonRef}
           type="button"
-          onClick={() =>
-            setExportText(
-              "Client-safe preview stays in this page. It does not post, fund, or message anyone.",
-            )
-          }
+          className="motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400"
+          onClick={() => {
+            setExportText(exportPreview ?? "Export preview unavailable. Nothing was published or spent.");
+            exportButtonRef.current?.focus();
+          }}
         >
           Show bounded export preview
         </button>

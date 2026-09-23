@@ -62,7 +62,7 @@ test("component source has no mutation controls and keeps semantic review struct
   assert.match(source, /Draft only/);
   assert.match(source, /Skip to claims/);
   assert.match(source, /aria-live="polite"/);
-  assert.match(source, /<table>/);
+  assert.match(source, /<table/);
   assert.match(source, /overflow-x-auto/);
   assert.match(source, /motion-reduce:transition-none/);
   assert.match(source, /type="button"/);
