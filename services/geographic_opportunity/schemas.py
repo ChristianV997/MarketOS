@@ -541,10 +541,13 @@ class LandedCostScenario:
 class DestinationSourceComparison:
     """The destination/source comparison output. ``price_gap`` is a plain
     difference (destination minus origin), computed only when both sides
-    share one currency (an explicit FX-provenanced ``Money`` must be
-    supplied by the caller for a cross-currency comparison -- see
-    ``controls.require_fx_provenance``); this dataclass never converts a
-    currency itself."""
+    share one currency; this dataclass never converts a currency itself.
+    ``report._build_comparison`` enforces ``controls.require_fx_provenance``
+    on every Money passed into a comparison before this dataclass is
+    built, so a value that already carries a currency conversion
+    (``exchange_rate`` set) must name an acceptable, explicit rate
+    source -- never ``"assumed"`` or unknown -- or comparison-building
+    raises ``controls.FxProvenanceError`` before this object exists."""
 
     destination_price: Money | None
     origin_cost_basis: Money | None

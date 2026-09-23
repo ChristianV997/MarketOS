@@ -9,7 +9,14 @@ from decimal import Decimal
 
 import pytest
 
-from backend.economics.kernel import CurrencyMismatchError, Money
+from backend.economics.kernel import (
+    CurrencyMismatchError,
+    MarketLane,
+    Money,
+    UnitEconomicsAssumptions,
+    calculate_unit_economics,
+)
+from services.geographic_opportunity import controls
 from services.geographic_opportunity.report import build_geographic_opportunity_report
 from services.geographic_opportunity.schemas import (
     DestinationPriceObservation,
@@ -96,6 +103,73 @@ class TestMissingDuty:
         assert any("freight_duty" in b and "missing" in b for b in report.blockers)
 
 
+class TestKernelDutyRateFallbackIsNeverReportedAsMissing:
+    """Regression guard for the kernel behavior itself, distinct from
+    TestMissingDuty above (which proves this SERVICE's own blocker
+    workaround). This class calls
+    backend.economics.kernel.calculate_unit_economics directly, with no
+    services.geographic_opportunity code involved at all, to lock in the
+    exact kernel convention documented in
+    docs/ai/GEOGRAPHIC_OPPORTUNITY_ANALYSIS.md and report.py's own
+    _build_assumptions comment: once a lane is present,
+    UnitEconomicsResult.missing_inputs can never show "duty_rate" as
+    missing, even when the caller's own UnitEconomicsAssumptions.duty_rate
+    is None -- the kernel always falls back to lane.duty_rate, and
+    MarketLane.duty_rate always defaults to Decimal("0") when unset. If a
+    future kernel change altered this convention (e.g. to distinguish "the
+    lane never set duty_rate" from "the lane confirms 0%"), this test
+    would fail and needs to fail -- it exists specifically to catch that
+    kind of silent change, not to defend the current behavior as correct.
+    """
+
+    def test_duty_rate_falls_back_silently_to_a_lane_with_an_explicit_rate(self):
+        lane = MarketLane("lane-x", "CN", "CN", "MX", "MX", currency="USD", duty_rate=Decimal("0.05"), tax_rate=Decimal("0.16"))
+        price = Money(Decimal("120"), "USD")
+        cost = Money(Decimal("55"), "USD")
+        assumptions = UnitEconomicsAssumptions(duty_rate=None)  # caller never supplied this
+
+        result = calculate_unit_economics(price, cost, lane=lane, assumptions=assumptions, scenario="base")
+
+        assert "duty_rate" not in result.missing_inputs
+        # The kernel silently used the lane's own 5% duty_rate against the
+        # landed cost (product_cost, since no shipping legs were supplied
+        # here) -- proving the fallback actually fired, not just that
+        # "duty_rate" happens to be absent from missing_inputs for some
+        # other reason.
+        assert result.duty.amount == cost.amount * Decimal("0.05")
+
+    def test_duty_rate_falls_back_silently_to_a_lane_that_never_set_one(self):
+        # MarketLane.duty_rate defaults to Decimal("0") when a caller never
+        # set it explicitly -- so this lane's "0%" is indistinguishable,
+        # inside the kernel, from "nobody ever confirmed a duty rate for
+        # this lane". Both this test and the one above must pass with
+        # "duty_rate" absent from missing_inputs, since the kernel cannot
+        # tell the two cases apart.
+        lane = MarketLane("lane-y", "CN", "CN", "MX", "MX", currency="USD")
+        price = Money(Decimal("120"), "USD")
+        cost = Money(Decimal("55"), "USD")
+        assumptions = UnitEconomicsAssumptions(duty_rate=None)
+
+        result = calculate_unit_economics(price, cost, lane=lane, assumptions=assumptions, scenario="base")
+
+        assert "duty_rate" not in result.missing_inputs
+        assert result.duty.amount == Decimal("0")
+
+    def test_duty_rate_is_reported_missing_only_when_no_lane_is_supplied_at_all(self):
+        # Without a lane, the kernel has no fallback at all -- this is the
+        # one case where missing_inputs genuinely reflects a missing duty
+        # rate, confirming the fallback (not some other code path) is what
+        # suppresses "duty_rate" from missing_inputs in the two tests above.
+        price = Money(Decimal("120"), "USD")
+        cost = Money(Decimal("55"), "USD")
+        assumptions = UnitEconomicsAssumptions(duty_rate=None)
+
+        result = calculate_unit_economics(price, cost, lane=None, assumptions=assumptions, scenario="base")
+
+        assert "duty_rate" in result.missing_inputs
+        assert result.duty.amount == Decimal("0")
+
+
 class TestMissingSupplierCost:
     def test_missing_origin_supplier_cost_produces_no_scenarios_and_a_blocker(self):
         offer = replace(build_goods_offer(), origin_supplier_cost=None)
@@ -178,6 +252,84 @@ class TestUnitValueProxyIsNeverTreatedAsRetailPriceOrCost:
         base_a = next(s for s in report_a.landed_cost_scenarios if s.scenario_id == "base")
         base_b = next(s for s in report_b.landed_cost_scenarios if s.scenario_id == "base")
         assert base_a.result.net_sales.amount == base_b.result.net_sales.amount
+
+    def test_unit_value_and_supplier_cost_agreeing_within_threshold_is_not_flagged(self):
+        # unit_value=52 vs origin_supplier_cost=55 is a ~5.5% relative
+        # difference -- well under the 25% conflict threshold -- so this
+        # must NOT be flagged, proving the threshold isn't a hair-trigger
+        # that treats any nonzero difference as a conflict.
+        offer = build_goods_offer(unit_value=Money(Decimal("52"), "USD"))
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        assert report.comparison.unit_value_conflicts_with_supplier_cost is False
+
+    def test_unit_value_is_never_used_as_the_comparisons_origin_cost_basis(self):
+        # comparison.origin_cost_basis must come from origin_supplier_cost,
+        # never from trade_flow.unit_value -- the two are structurally
+        # separate fields on the offer, and this proves the comparison
+        # builder never conflates them.
+        offer = build_goods_offer(unit_value=Money(Decimal("9999"), "USD"))
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        assert report.comparison.origin_cost_basis.amount == offer.origin_supplier_cost.amount
+        assert report.comparison.origin_cost_basis.amount != Decimal("9999")
+
+    def test_missing_supplier_cost_does_not_fall_back_to_the_unit_value_proxy(self):
+        # With origin_supplier_cost=None, the comparison's origin_cost_basis
+        # must stay None -- it must never silently substitute the trade
+        # unit-value proxy as a stand-in cost basis.
+        offer = replace(build_goods_offer(), origin_supplier_cost=None)
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        assert report.comparison.origin_cost_basis is None
+        assert report.comparison.unit_value_proxy is not None
+
+
+class TestFxProvenanceIsEnforcedNotJustAvailable:
+    """controls.require_fx_provenance existed as an unused utility before
+    this finalization pass; report.py's _build_comparison and
+    _landed_cost_scenarios now call it on every Money that could reach a
+    comparison or landed-cost scenario, so a Money that already carries a
+    currency conversion (exchange_rate set) without an acceptable,
+    explicit rate source is rejected before a report is ever produced --
+    not just theoretically rejectable by a caller who remembers to call
+    the control themselves.
+    """
+
+    def test_a_destination_price_with_an_unacceptable_fx_source_is_rejected(self):
+        offer = build_goods_offer()
+        bad_price = Money(
+            Decimal("120"), "USD", source="explicit", exchange_rate=Decimal("1.1"), exchange_rate_timestamp="2026-01-01T00:00:00Z"
+        )
+        offer = replace(offer, destination_price=replace(offer.destination_price, observed_price=bad_price))
+        with pytest.raises(controls.FxProvenanceError):
+            build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+
+    def test_an_origin_cost_with_an_unacceptable_fx_source_is_rejected(self):
+        offer = build_goods_offer()
+        bad_cost = Money(
+            Decimal("55"), "USD", source="assumed", exchange_rate=Decimal("1.1"), exchange_rate_timestamp="2026-01-01T00:00:00Z"
+        )
+        offer = replace(offer, origin_supplier_cost=bad_cost)
+        with pytest.raises(controls.FxProvenanceError):
+            build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+
+    def test_a_money_with_no_exchange_rate_at_all_always_passes(self):
+        # The common case: an unconverted, same-currency observation never
+        # carries an exchange_rate, so this control is a no-op for it.
+        offer = build_goods_offer()
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        assert report.comparison is not None
+
+    def test_a_money_with_an_acceptable_fx_source_is_allowed(self):
+        offer = build_goods_offer()
+        good_price = Money(
+            Decimal("120"),
+            "USD",
+            source="central_bank_reference_rate",
+            exchange_rate=Decimal("1.1"),
+            exchange_rate_timestamp="2026-01-01T00:00:00Z",
+        )
+        offer = replace(offer, destination_price=replace(offer.destination_price, observed_price=good_price))
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        assert report.comparison is not None
 
 
 class TestListingPriceIsNeverTreatedAsRealizedSale:

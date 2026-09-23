@@ -20,6 +20,7 @@ from .controls import (
     require_present,
 )
 from .export import build_client_safe_export, collect_evidence_notes
+from .portfolio import GeographicOpportunityPortfolioEntry, build_geographic_opportunity_portfolio
 from .report import build_geographic_opportunity_report
 from .schemas import (
     SCHEMA,
@@ -52,6 +53,8 @@ __all__ = [
     "require_present",
     "build_client_safe_export",
     "collect_evidence_notes",
+    "GeographicOpportunityPortfolioEntry",
+    "build_geographic_opportunity_portfolio",
     "build_geographic_opportunity_report",
     "BilateralTradeFlowObservation",
     "CandidateBoundTradeIdentity",

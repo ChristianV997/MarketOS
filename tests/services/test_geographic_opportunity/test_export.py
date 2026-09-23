@@ -3,12 +3,17 @@ import json
 
 import pytest
 
+from dataclasses import replace
+from decimal import Decimal
+
+from backend.economics.kernel import Money
+
 from services.geographic_opportunity import controls
 from services.geographic_opportunity.export import build_client_safe_export, collect_evidence_notes
 from services.geographic_opportunity.report import build_geographic_opportunity_report
 from services.geographic_opportunity.schemas import FieldEvidence
 
-from .conftest import GENERATED_AT, build_goods_offer
+from .conftest import GENERATED_AT, build_goods_offer, build_unknown_offer
 
 
 class TestClientSafeExportShape:
@@ -33,6 +38,28 @@ class TestClientSafeExportShape:
         assert payload["read_only"] is True
         assert payload["network_calls"] is False
         assert payload["mutated"] is False
+
+    def test_export_omits_regulatory_status_when_no_observation_was_supplied(self):
+        offer = replace(build_goods_offer(), regulatory=None)
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        payload = build_client_safe_export(report)
+        assert "regulatory_status" not in payload
+
+    def test_export_never_leaks_the_raw_unit_value_proxy_as_a_price(self):
+        # comparison.unit_value_proxy is a customs-statistics proxy, never
+        # a retail price -- build_client_safe_export must never surface it
+        # under any key that could be mistaken for a client-facing price.
+        offer = build_goods_offer(unit_value=Money(Decimal("9999"), "USD"))
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        payload = build_client_safe_export(report)
+        assert "9999" not in json.dumps(payload)
+
+    def test_export_of_an_unknown_geography_report_carries_only_the_blocker(self):
+        report = build_geographic_opportunity_report(build_unknown_offer(), generated_at=GENERATED_AT)
+        payload = build_client_safe_export(report)
+        assert payload["comparison"] is None
+        assert payload["landed_cost_scenarios"] == []
+        assert any("geography_kind=unknown" in b for b in payload["blockers"])
 
 
 class TestNotesAreScreenedBeforeExport:

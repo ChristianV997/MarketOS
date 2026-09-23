@@ -128,6 +128,76 @@ treated as a retail price (`TestUnitValueProxyIsNeverTreatedAsRetailPriceOrCost`
 sale** (`TestListingPriceIsNeverTreatedAsRealizedSale` -- `is_realized_sale` defaults `False` and every landed-cost scenario's own
 `assumptions_note` discloses the `price_type` it was built on).
 
+## CLI entry point, offline serialization, and portfolio compatibility
+
+Three modules were added in a later finalization pass, strengthening
+the original build without altering its boundaries: no live Comtrade
+client, no credentials, no provider activation, and
+`backend.economics.kernel` remains untouched and the sole economics
+authority.
+
+- **`serialization.py`** -- deterministic, offline JSON-dict loaders
+  culminating in `offer_from_dict`, the sole entry point `cli.py` uses
+  to load an operator-authored offer file. `money_from_dict` and
+  `evidence_ref_from_dict` are thin pass-throughs to
+  `backend.economics.kernel.Money.from_dict` /
+  `EvidenceRef.from_dict` (which already existed in the kernel) --
+  this module never re-derives that logic. `lane_from_dict` is
+  deliberately a **bounded, practical subset** of `MarketLane`'s full
+  ~19-field shape (`lane_id`, `origin`, `ship_from`, `warehouse`,
+  `destination_country`, `destination_region`, `currency`, `tax_rate`,
+  `duty_rate`) -- the fields this domain's own fixtures actually vary
+  -- not a full `MarketLane` round-trip serializer. Every validation
+  (currency matching, offering/geography-kind gating,
+  missing-vs-explicit-zero, regulatory-status vocabulary, ...) still
+  happens inside each dataclass's own `__post_init__`; this module
+  performs none of its own.
+- **`cli.py`** -- a deterministic, offline operator entry point
+  (`python -m services.geographic_opportunity.cli OFFER.json
+  --generated-at ... [--format json|markdown]`). Reads one local offer
+  JSON file, builds a report via
+  `report.build_geographic_opportunity_report`, and prints JSON or
+  Markdown. `--generated-at` is required (never defaults to the system
+  clock), keeping a given invocation reproducible from its inputs
+  alone. Performs no network I/O and writes nothing but an
+  explicitly-requested `--output` file.
+- **`portfolio.py`** -- a duck-typed adapter onto the existing, merged
+  `backend.organization.portfolio_report.build_portfolio_report`
+  (which reads only `.report_id` / `.service_name` / `.status` /
+  `.recommendations` / `.next_actions` / `.risk_flags` off each entry
+  it is given -- confirmed by reading that module before writing this
+  one; it performs no `isinstance` check). This lets this service's
+  own reports be aggregated into a cross-service `PortfolioReport`
+  alongside reports from other services (e.g. an "opportunity
+  discovery" service) without either side importing the other's
+  dataclasses, and without this module importing any unmerged
+  "opportunity discovery" branch -- it depends only on this service's
+  own `GeographicOpportunityReport`.
+- **Explicit FX provenance is now enforced, not just available.**
+  `controls.require_fx_provenance` existed from the original build but
+  was not called anywhere; `report._build_comparison` and
+  `report._landed_cost_scenarios` now call it on every `Money` that
+  could reach a comparison or landed-cost scenario, so a `Money` that
+  already carries a currency conversion (`exchange_rate` set) without
+  an acceptable, explicit rate source is rejected
+  (`controls.FxProvenanceError`) before a report is ever produced. A
+  `Money` with no `exchange_rate` at all (the common, unconverted case)
+  always passes unchanged.
+- **Broader fixture-to-report integration.** Four full offer fixtures
+  (`tests/fixtures/geographic_opportunity/offers/{goods,service,hybrid,unknown}_offer.json`)
+  are loaded through `serialization.offer_from_dict` and driven all the
+  way through `build_geographic_opportunity_report` in
+  `tests/services/test_geographic_opportunity/test_serialization.py`,
+  alongside dedicated `cli.py` and `portfolio.py` test files.
+- **An explicit kernel-behavior regression test.**
+  `TestKernelDutyRateFallbackIsNeverReportedAsMissing` in
+  `test_report.py` calls
+  `backend.economics.kernel.calculate_unit_economics` directly (no
+  `services.geographic_opportunity` code involved) to lock in the
+  kernel's own duty-rate lane-fallback convention described below --
+  distinct from `TestMissingDuty`, which proves this service's own
+  blocker workaround.
+
 ## A documented kernel limitation: "missing duty" and the landed-cost math itself
 
 `backend.economics.kernel.calculate_unit_economics` itself falls back to
@@ -156,10 +226,20 @@ why in its own test docstring.
 
 ## Limitations and exact provenance
 
-- **Newly written in this change:** `schemas.py`, `controls.py`,
+- **Newly written in the original build:** `schemas.py`, `controls.py`,
   `report.py`, `export.py`, `__init__.py`,
   `backend/adapters/research/trade_flows.py`, all tests, all fixtures,
   this document.
+- **Newly written in this finalization pass:** `serialization.py`,
+  `cli.py`, `portfolio.py`, four full-offer fixtures under
+  `tests/fixtures/geographic_opportunity/offers/`,
+  `tests/services/test_geographic_opportunity/{test_serialization,test_cli,test_portfolio}.py`,
+  plus additional test classes in `test_report.py` (FX-provenance
+  enforcement, the kernel duty-rate regression guard, supplier-cost-
+  vs-unit-value separation) and `test_export.py` (client-safe export
+  coverage). `report.py` and `schemas.py` gained the FX-provenance
+  enforcement described above; `backend/economics/kernel.py` was not
+  modified.
 - **Composed, not duplicated:** `Money`/`EvidenceRef`/`MarketLane`/
   `UnitEconomicsAssumptions`/`UnitEconomicsResult`/
   `calculate_unit_economics` (kernel), `commercial_status`

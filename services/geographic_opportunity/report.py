@@ -118,6 +118,14 @@ def _landed_cost_scenarios(offer: TradeOpportunityOffer) -> tuple[LandedCostScen
     price = offer.destination_price.observed_price
     cost = offer.origin_supplier_cost
     controls.require_matching_currency(price, cost, field_name="destination price and origin supplier cost")
+    # A Money that already carries an exchange_rate (i.e. was converted by
+    # the caller before reaching this service) must name an acceptable,
+    # explicit rate source -- a landed-cost scenario must never be built
+    # on a currency conversion whose provenance is "assumed" or unknown.
+    # A Money with no exchange_rate at all (no conversion happened) always
+    # passes this check unchanged.
+    controls.require_fx_provenance(price, field_name="destination_price.observed_price")
+    controls.require_fx_provenance(cost, field_name="origin_supplier_cost")
     note = "based on a destination price observation of price_type={0!r}; not a confirmed realized-sale figure".format(
         offer.destination_price.price_type
     )
@@ -135,6 +143,19 @@ def _build_comparison(offer: TradeOpportunityOffer) -> DestinationSourceComparis
     destination_price = offer.destination_price.observed_price if offer.destination_price is not None else None
     origin_cost = offer.origin_supplier_cost
     unit_value = offer.trade_flow.unit_value if offer.trade_flow is not None else None
+
+    # Any Money reaching this comparison that already carries an
+    # exchange_rate (a conversion the caller performed before handing it
+    # to this service) must name an acceptable, explicit FX source -- see
+    # controls.require_fx_provenance. A Money with no exchange_rate at
+    # all always passes unchanged, so this is a no-op for the common
+    # case of same-currency, unconverted observations.
+    if destination_price is not None:
+        controls.require_fx_provenance(destination_price, field_name="comparison.destination_price")
+    if origin_cost is not None:
+        controls.require_fx_provenance(origin_cost, field_name="comparison.origin_cost_basis")
+    if unit_value is not None:
+        controls.require_fx_provenance(unit_value, field_name="comparison.unit_value_proxy")
 
     notes: list[str] = []
     price_gap: Money | None = None
