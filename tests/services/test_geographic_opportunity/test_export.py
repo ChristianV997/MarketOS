@@ -39,6 +39,12 @@ class TestClientSafeExportShape:
         assert payload["network_calls"] is False
         assert payload["mutated"] is False
 
+    def test_export_carries_the_report_fingerprint(self):
+        report = build_geographic_opportunity_report(build_goods_offer(), generated_at=GENERATED_AT)
+        payload = build_client_safe_export(report)
+        assert payload["fingerprint"] == report.fingerprint
+        assert len(payload["fingerprint"]) == 64
+
     def test_export_omits_regulatory_status_when_no_observation_was_supplied(self):
         offer = replace(build_goods_offer(), regulatory=None)
         report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)

@@ -43,6 +43,7 @@ mirroring this module's own ``offering_kind="unknown"`` gate.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -50,6 +51,9 @@ from typing import Any
 from backend.economics.kernel import CurrencyMismatchError, EconomicsError, EvidenceRef, MarketLane, Money
 
 SCHEMA = "MarketOS.GeographicOpportunity.v1"
+
+# A deterministic SHA-256 hex digest, or "" before report.py computes one.
+_FINGERPRINT_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 # Per-field evidence-quality vocabulary. Deliberately distinct from (not a
 # replacement for) backend.economics.kernel.EVIDENCE_STATES, which
@@ -624,6 +628,7 @@ class GeographicOpportunityReport:
     status: str
     generated_at: str
     schema: str = SCHEMA
+    fingerprint: str = ""
     read_only: bool = True
     network_calls: bool = False
     mutated: bool = False
@@ -655,6 +660,8 @@ class GeographicOpportunityReport:
             raise EconomicsError("invalid evidence quality summary")
         _text(self.status, "status", allow_empty=False)
         _text(self.generated_at, "generated_at", allow_empty=False)
+        if self.fingerprint != "" and _FINGERPRINT_PATTERN.fullmatch(self.fingerprint) is None:
+            raise EconomicsError("invalid fingerprint")
         if self.read_only is not True or self.network_calls is not False or self.mutated is not False:
             raise EconomicsError("this service is read-only and must never mutate or call a live network")
 
@@ -672,6 +679,7 @@ class GeographicOpportunityReport:
             "evidence_quality_summary": dict(self.evidence_quality_summary),
             "status": self.status,
             "generated_at": self.generated_at,
+            "fingerprint": self.fingerprint,
             "read_only": self.read_only,
             "network_calls": self.network_calls,
             "mutated": self.mutated,

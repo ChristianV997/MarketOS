@@ -356,3 +356,30 @@ class TestDeterminism:
         assert report.read_only is True
         assert report.network_calls is False
         assert report.mutated is False
+
+    def test_fingerprint_is_a_real_sha256_digest(self):
+        report = build_geographic_opportunity_report(build_goods_offer(), generated_at=GENERATED_AT)
+        assert len(report.fingerprint) == 64
+        int(report.fingerprint, 16)  # must be valid hex
+
+    def test_fingerprint_is_stable_for_identical_input(self):
+        offer = build_goods_offer()
+        first = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        second = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        assert first.fingerprint == second.fingerprint
+
+    def test_fingerprint_is_independent_of_generated_at(self):
+        offer = build_goods_offer()
+        first = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        second = build_geographic_opportunity_report(offer, generated_at="2030-01-01T00:00:00Z")
+        assert first.generated_at != second.generated_at
+        assert first.fingerprint == second.fingerprint
+
+    def test_fingerprint_changes_when_evidence_changes(self):
+        first = build_geographic_opportunity_report(build_goods_offer(), generated_at=GENERATED_AT)
+        second = build_geographic_opportunity_report(build_service_offer(), generated_at=GENERATED_AT)
+        assert first.fingerprint != second.fingerprint
+
+    def test_unknown_offer_still_gets_a_real_fingerprint(self):
+        report = build_geographic_opportunity_report(build_unknown_offer(), generated_at=GENERATED_AT)
+        assert len(report.fingerprint) == 64

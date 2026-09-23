@@ -11,7 +11,10 @@ is caller-supplied evidence already captured elsewhere.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter
+from dataclasses import replace
 from decimal import Decimal
 from typing import Sequence
 
@@ -283,6 +286,23 @@ def _evidence_quality_summary(risk_matrix: Sequence[OpportunityRiskEntry]) -> di
     return dict(counts)
 
 
+def _fingerprint(report: GeographicOpportunityReport) -> str:
+    """Deterministic SHA-256 over the report's own sorted-JSON payload,
+    excluding ``generated_at`` and ``fingerprint`` itself, matching the
+    fingerprinting convention already established by every other evidence
+    service in this repository (e.g. services.market_research,
+    services.market_research_evidence)."""
+    payload = report.to_dict()
+    payload.pop("generated_at", None)
+    payload.pop("fingerprint", None)
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _with_fingerprint(report: GeographicOpportunityReport) -> GeographicOpportunityReport:
+    return replace(report, fingerprint=_fingerprint(report))
+
+
 def build_geographic_opportunity_report(
     offer: TradeOpportunityOffer,
     *,
@@ -301,18 +321,20 @@ def build_geographic_opportunity_report(
         raise TypeError("offer must be a TradeOpportunityOffer")
 
     if offer.geography_kind == "unknown" or offer.offering_kind == "unknown":
-        return GeographicOpportunityReport(
-            candidate_id=offer.identity.candidate_id,
-            offer=offer,
-            landed_cost_scenarios=(),
-            comparison=None,
-            risk_matrix=(),
-            next_actions=(),
-            blockers=_blockers(offer, ()),
-            evidence_gaps=(),
-            evidence_quality_summary={quality: 0 for quality in EVIDENCE_QUALITY},
-            status=commercial_status(),
-            generated_at=generated_at,
+        return _with_fingerprint(
+            GeographicOpportunityReport(
+                candidate_id=offer.identity.candidate_id,
+                offer=offer,
+                landed_cost_scenarios=(),
+                comparison=None,
+                risk_matrix=(),
+                next_actions=(),
+                blockers=_blockers(offer, ()),
+                evidence_gaps=(),
+                evidence_quality_summary={quality: 0 for quality in EVIDENCE_QUALITY},
+                status=commercial_status(),
+                generated_at=generated_at,
+            )
         )
 
     landed_cost_scenarios = _landed_cost_scenarios(offer)
@@ -323,16 +345,18 @@ def build_geographic_opportunity_report(
     evidence_gaps = _evidence_gaps(offer, risk_matrix)
     evidence_quality_summary = _evidence_quality_summary(risk_matrix)
 
-    return GeographicOpportunityReport(
-        candidate_id=offer.identity.candidate_id,
-        offer=offer,
-        landed_cost_scenarios=landed_cost_scenarios,
-        comparison=comparison,
-        risk_matrix=risk_matrix,
-        next_actions=next_actions,
-        blockers=blockers,
-        evidence_gaps=evidence_gaps,
-        evidence_quality_summary=evidence_quality_summary,
-        status=commercial_status(),
-        generated_at=generated_at,
+    return _with_fingerprint(
+        GeographicOpportunityReport(
+            candidate_id=offer.identity.candidate_id,
+            offer=offer,
+            landed_cost_scenarios=landed_cost_scenarios,
+            comparison=comparison,
+            risk_matrix=risk_matrix,
+            next_actions=next_actions,
+            blockers=blockers,
+            evidence_gaps=evidence_gaps,
+            evidence_quality_summary=evidence_quality_summary,
+            status=commercial_status(),
+            generated_at=generated_at,
+        )
     )

@@ -76,6 +76,7 @@ class TestMarkdownOutput:
         assert "## Landed-cost scenarios" in text
         assert "## Destination/source comparison" in text
         assert "## Evidence quality summary" in text
+        assert "- fingerprint: " in text
 
     def test_unknown_geography_fixture_markdown_shows_no_scenarios(self, capsys):
         cli.main([str(FIXTURES_DIR / "unknown_offer.json"), "--generated-at", "2026-02-10T00:00:00Z", "--format", "markdown"])

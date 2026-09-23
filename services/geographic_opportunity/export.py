@@ -70,6 +70,7 @@ def build_client_safe_export(report: GeographicOpportunityReport, *, include_not
             else None
         ),
         "evidence_quality_summary": dict(report.evidence_quality_summary),
+        "fingerprint": report.fingerprint,
         "read_only": report.read_only,
         "network_calls": report.network_calls,
         "mutated": report.mutated,

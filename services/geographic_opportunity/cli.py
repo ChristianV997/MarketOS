@@ -63,6 +63,7 @@ def render_markdown(report: GeographicOpportunityReport) -> str:
         "",
         f"- schema: `{report.schema}`",
         f"- generated_at: {report.generated_at}",
+        f"- fingerprint: {report.fingerprint}",
         f"- status: {report.status}",
         f"- offering_kind: {offer.offering_kind}",
         f"- geography_kind: {offer.geography_kind}",
