@@ -98,7 +98,7 @@ def _validate_workspace_claims(value: Any, workspace_id: str) -> None:
             _validate_workspace_claims(child, workspace_id)
 
 
-def _bound_integrity(request: MarketResearchRequest) -> tuple[dict[str, Any] | None, str]:
+def _validate_bound_request(request: MarketResearchRequest) -> str:
     workspace_id = str(request.workspace_id or "")
     for report in (
         request.marketplace_report,
@@ -112,8 +112,18 @@ def _bound_integrity(request: MarketResearchRequest) -> tuple[dict[str, Any] | N
         if workspace_id:
             _validate_workspace_claims(report, workspace_id)
     if not workspace_id:
-        return None, ""
+        return ""
     validate_binding(request.candidate_id, workspace_id)
+    return workspace_id
+
+
+def _bound_integrity(
+    request: MarketResearchRequest,
+    workspace_id: str,
+    synthesis: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if not workspace_id:
+        return None
     integrity = build_evidence_integrity_report(
         candidate_id=request.candidate_id,
         workspace_id=workspace_id,
@@ -123,8 +133,9 @@ def _bound_integrity(request: MarketResearchRequest) -> tuple[dict[str, Any] | N
         consumer_report=request.consumer_report,
         public_market_benchmark_report=request.public_market_benchmark_report,
         product_validation_report=request.product_validation_report,
+        synthesis=synthesis,
     )
-    return integrity.to_dict(), workspace_id
+    return integrity.to_dict()
 
 
 def _evidence_class(integrity: Mapping[str, Any] | None) -> str:
@@ -331,7 +342,7 @@ def _fingerprint(payload: Mapping[str, Any]) -> str:
 
 def build_market_research_report(request: MarketResearchRequest) -> MarketResearchResult:
     offering_kind, offering_recognized = _recognized_offering_kind(request.offering_kind)
-    integrity, workspace_id = _bound_integrity(request)
+    workspace_id = _validate_bound_request(request)
 
     synthesis = build_product_opportunity_synthesis(
         request.marketplace_report,
@@ -340,6 +351,7 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         product_validation_report=request.product_validation_report,
         client_context=request.client_context,
     ).to_dict()
+    integrity = _bound_integrity(request, workspace_id, synthesis)
 
     candidate_id = request.candidate_id
     matched_marketplace = _matched_candidate(request.marketplace_report, candidate_id)

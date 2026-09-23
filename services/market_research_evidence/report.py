@@ -153,16 +153,21 @@ def build_evidence_integrity_report(
     consumer_report: Mapping[str, Any] | None = None,
     public_market_benchmark_report: Mapping[str, Any] | None = None,
     product_validation_report: Mapping[str, Any] | None = None,
+    synthesis: Mapping[str, Any] | None = None,
 ) -> EvidenceIntegrityResult:
     validate_binding(candidate_id, workspace_id)
 
-    synthesis = build_product_opportunity_synthesis(
-        marketplace_report,
-        supplier_report,
-        consumer_report,
-        product_validation_report=product_validation_report,
-    ).to_dict()
-    alias_collapse_notes = tuple(synthesis.get("alias_notes", ()))
+    synthesis_data = (
+        dict(synthesis)
+        if synthesis is not None
+        else build_product_opportunity_synthesis(
+            marketplace_report,
+            supplier_report,
+            consumer_report,
+            product_validation_report=product_validation_report,
+        ).to_dict()
+    )
+    alias_collapse_notes = tuple(synthesis_data.get("alias_notes", ()))
 
     missing_fields: list[str] = []
     unknown_freshness_fields: list[str] = []
