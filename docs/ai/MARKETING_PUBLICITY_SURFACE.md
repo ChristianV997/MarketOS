@@ -2,7 +2,7 @@
 
 Updated: 2026-09-22
 
-Client-safe planning view stacked on #306. It calls `composeStrategyView` and `buildClientSafeStrategyExport`. Research packets are checked against the same report and appendix versions as the cockpit contract. `launch_authorized: true` is rejected. Node cannot import `overlayResearchToDecision.ts` directly because that module's relative imports omit extensions; the surface still locks the production reason string `launch_authorized_rejected`.
+#306 and #315 are one planning surface. `StrategyWorkbench` renders the publicity scenario. `PublicitySurface` is that same component. There is no second campaign planner and no router mount.
 
 Budget rows, funnel steps, and kill/iterate/scale rules are assumptions. Evidence labels are not proof. Human approvals stay ungranted. A research packet with `launch_authorized: true` is rejected by the existing validator.
 

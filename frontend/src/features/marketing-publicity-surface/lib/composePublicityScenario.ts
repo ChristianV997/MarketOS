@@ -41,6 +41,10 @@ export interface PublicityScenario {
   legal_blockers: { blocker_id: string; domain: "legal" | "privacy"; reason: string }[];
   approvals: { approval_id: string; label: string; granted: false }[];
   research: { ok: false; reason: string } | { ok: true; launch_authorized: false };
+  offer_kind: StrategyView["offer_kind"];
+  surface: StrategyView["surface"];
+  offer_angles: StrategyView["offer_angles"];
+  rejected_reason: string | null;
   export_ok: boolean;
 }
 
@@ -71,6 +75,54 @@ export function composePublicityScenario(
   packet: MarketingStrategyPacket | null,
   researchRaw: unknown = null,
 ): PublicityScenario {
+  const extra = packet as (MarketingStrategyPacket & {
+    executed_campaign?: boolean;
+    launch_authorized?: boolean;
+    testimonials?: unknown;
+    roas?: unknown;
+  }) | null;
+  if (extra?.executed_campaign === true || extra?.launch_authorized === true || extra?.testimonials != null || extra?.roas != null) {
+    const reason = extra.executed_campaign
+      ? "executed_campaign_rejected"
+      : extra.launch_authorized
+        ? "launch_authorized_rejected"
+        : extra.testimonials != null
+          ? "fabricated_social_proof_rejected"
+          : "inferred_roas_rejected";
+    const view = composeStrategyView(null, true);
+    return {
+      strategy_id: view.strategy_id,
+      title: view.title,
+      offer_kind: view.offer_kind,
+      surface: "unavailable",
+      offer_angles: [],
+      draft_only: true,
+      executed_campaign: false,
+      proof: false,
+      rejected_reason: reason,
+      banner: `${reason}. Not an executed campaign.`,
+      audience: [],
+      positioning: "",
+      messages: [],
+      claims: [],
+      objections: [],
+      publicity: [],
+      pillars: [],
+      paid_tests: [],
+      ugc_briefs: [],
+      calendar: [],
+      channels: [],
+      funnel: [],
+      kpis: [],
+      budgets: [],
+      measurement: [],
+      decision_rules: [],
+      legal_blockers: [],
+      approvals: [],
+      research: { ok: false, reason },
+      export_ok: false,
+    };
+  }
   const view = composeStrategyView(packet);
   const research = readResearchGate(researchRaw);
   const exported = packet ? buildClientSafeStrategyExport(packet) : { ok: false };
@@ -82,9 +134,13 @@ export function composePublicityScenario(
   return {
     strategy_id: view.strategy_id,
     title: view.title,
+    offer_kind: view.offer_kind,
+    surface: view.surface,
+    offer_angles: view.offer_angles,
     draft_only: true,
     executed_campaign: false,
     proof: false,
+    rejected_reason: null,
     banner: `${view.banner} Fixture, manual, stale, and assumption labels are not proof.`,
     audience: view.audience,
     positioning: view.positioning,

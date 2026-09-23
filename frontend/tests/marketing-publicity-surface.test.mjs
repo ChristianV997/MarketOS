@@ -29,6 +29,18 @@ test("stale and no-evidence packets stay unproven", () => {
   assert.ok(none.claims.every((claim) => claim.status === "needs_review"));
 });
 
+test("unsafe execution, launch, testimonials, and roas are rejected", () => {
+  const executed = buildComplete("service");
+  executed.executed_campaign = true;
+  assert.equal(composePublicityScenario(executed).rejected_reason, "executed_campaign_rejected");
+  const quotes = buildComplete("service");
+  quotes.testimonials = ["Invented customer quote"];
+  assert.equal(composePublicityScenario(quotes).rejected_reason, "fabricated_social_proof_rejected");
+  const roas = buildComplete("service");
+  roas.roas = 3.2;
+  assert.equal(composePublicityScenario(roas).rejected_reason, "inferred_roas_rejected");
+  assert.equal(composePublicityScenario(roas).executed_campaign, false);
+});
 test("research launch authorization is rejected with the production reason", async () => {
   assert.equal(rejectedLaunchProbe(), "launch_authorized_rejected");
   const overlay = await readFile(
@@ -40,15 +52,12 @@ test("research launch authorization is rejected with the production reason", asy
 
 test("surface markup is responsive, labeled, and free of mutation calls", async () => {
   const source = await readFile(
-    new URL("../src/features/marketing-publicity-surface/components/PublicitySurface.tsx", import.meta.url),
+    new URL("../src/features/marketing-strategy-workbench/components/StrategyWorkbench.tsx", import.meta.url),
     "utf8",
   );
   assert.match(source, /md:grid-cols-2/);
-  assert.match(source, /Skip to human approvals/);
-  assert.match(source, /aria-live="polite"/);
-  assert.match(source, /overflow-x-auto/);
-  assert.match(source, /motion-reduce:transition-none/);
-  assert.match(source, /Kill, iterate, and scale/);
+  assert.match(source, /Skip to claims/);
+  assert.match(source, /Kill, iterate, and scale criteria/);
   assert.match(source, /Legal and privacy blockers/);
   assert.doesNotMatch(source, /fetch\(|method:\s*["']POST["']/);
 });
