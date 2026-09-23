@@ -58,6 +58,8 @@ OPERATOR_ROUTES = (
     ("services", "/operator/services"),
     ("first-phase", "/operator/first-phase"),
     ("events", "/operator/events"),
+    ("consulting", "/operator/consulting-research"),
+    ("marketing", "/operator/marketing-strategy"),
 )
 
 API_MODES = ("ok-fixture", "down", "429", "500", "malformed", "empty", "stale", "loading")

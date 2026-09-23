@@ -60,9 +60,11 @@ def test_run_fixture_journey_without_browser_is_honest(tmp_path: Path):
         "/operator/services",
         "/operator/first-phase",
         "/operator/events",
+        "/operator/consulting-research",
+        "/operator/marketing-strategy",
     ]
     spa = [case for case in report["cases"] if str(case["id"]).startswith("fixture-server-spa-")]
-    assert len(spa) == 3
+    assert len(spa) == 5
     assert all(case["http_status"] == 404 and case["passed"] for case in spa)
     saved = json.loads((tmp_path / "operator-browser-acceptance-report.json").read_text(encoding="utf-8"))
     assert saved["schema"] == report["schema"]

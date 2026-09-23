@@ -199,6 +199,25 @@
         <p class="muted">Public Commerce MVP POST control is intentionally omitted from this acceptance harness.</p>
       </section>
 
+      <section id="panel-planning" class="route-panel hidden" aria-label="Consulting and marketing fixture">
+        <a class="skip sr-only" href="#planning-table">Skip to planning claims</a>
+        <div class="toolbar">
+          <button type="button" id="fixture-drawer-toggle" aria-expanded="false" aria-controls="fixture-drawer">Open navigation</button>
+          <button type="button" id="planning-export">Safe export preview</button>
+        </div>
+        <nav id="fixture-drawer" hidden>
+          <a href="#planning-table">Claims</a>
+        </nav>
+        <div id="main-target-planning"></div>
+        <div class="table-scroll" id="planning-table">
+          <table>
+            <caption>Draft planning claims. live_validated is false. launch_authorized is false.</caption>
+            <tbody id="planning-rows"></tbody>
+          </table>
+        </div>
+        <div id="planning-export-preview" class="export-preview hidden" role="region" aria-label="Export preview"></div>
+      </section>
+
       <aside aria-label="Request method evidence">
         <h2 class="muted" style="font-size:0.95rem;margin:0 0 0.35rem">Network method log</h2>
         <div id="network-log" aria-live="polite">[]</div>
@@ -244,19 +263,20 @@
       const titles = {
         services: ["Service Delivery Workbench", "/operator/services fixture"],
         "first-phase": ["First-phase Evidence Cockpit", "/operator/first-phase fixture"],
-        events: ["Operator Event Dashboard", "/operator/events fixture"],
+        consulting: ["Consulting research", "/operator/consulting-research fixture"],
+        marketing: ["Marketing and publicity plan", "/operator/marketing-strategy fixture"],
       };
       const titlePair = titles[route] || titles.services;
       document.getElementById("route-title").textContent = titlePair[0];
       document.getElementById("route-subtitle").textContent = titlePair[1] + " · fixture/manual/simulated · not live proof";
       document.getElementById("skip-link").setAttribute(
         "href",
-        route === "services" ? "#service-pipeline" : route === "first-phase" ? "#ranked-candidates-table" : "#events-table",
+        route === "services" ? "#service-pipeline" : route === "first-phase" ? "#ranked-candidates-table" : route === "events" ? "#events-table" : "#planning-table",
       );
-      const panelId = route === "first-phase" ? "panel-first-phase" : route === "events" ? "panel-events" : "panel-services";
+      const panelId = route === "first-phase" ? "panel-first-phase" : route === "events" ? "panel-events" : route === "consulting" || route === "marketing" ? "panel-planning" : "panel-services";
       document.getElementById(panelId).classList.remove("hidden");
       const targetAlias =
-        route === "first-phase" ? "main-target-first-phase" : route === "events" ? "main-target-events" : "main-target-services";
+        route === "first-phase" ? "main-target-first-phase" : route === "events" ? "main-target-events" : route === "consulting" || route === "marketing" ? "main-target-planning" : "main-target-services";
       document.getElementById(targetAlias).id = "main-target";
 
       const banner = document.getElementById("status-banner");
@@ -444,12 +464,53 @@
         });
       }
 
+      function renderPlanning() {
+        setSurface("partial", "Fixture planning loaded. live_validated=false. launch_authorized=false. Not demo-success.", "warn");
+        const tbody = document.getElementById("planning-rows");
+        tbody.innerHTML = "";
+        const rows = apiMode === "empty" ? [] : [
+          ["Audience hypothesis", "assumption"],
+          ["Evidence-linked claim", apiMode === "stale" ? "stale" : "fixture"],
+          ["Partial slot", "unknown"],
+        ];
+        rows.forEach(([text, label]) => {
+          const tr = document.createElement("tr");
+          tr.tabIndex = 0;
+          tr.innerHTML = `<td>${text}</td><td>${label}</td>`;
+          tbody.appendChild(tr);
+        });
+        const toggle = document.getElementById("fixture-drawer-toggle");
+        const drawer = document.getElementById("fixture-drawer");
+        toggle.addEventListener("click", () => {
+          const open = drawer.hasAttribute("hidden");
+          if (open) drawer.removeAttribute("hidden");
+          else drawer.setAttribute("hidden", "");
+          toggle.setAttribute("aria-expanded", open ? "true" : "false");
+          toggle.textContent = open ? "Close navigation" : "Open navigation";
+          if (open) drawer.querySelector("a").focus();
+        });
+        window.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && !drawer.hasAttribute("hidden")) {
+            drawer.setAttribute("hidden", "");
+            toggle.setAttribute("aria-expanded", "false");
+            toggle.textContent = "Open navigation";
+            toggle.focus();
+          }
+        });
+        document.getElementById("planning-export").addEventListener("click", () => {
+          const preview = document.getElementById("planning-export-preview");
+          preview.classList.remove("hidden");
+          preview.textContent = "Client-safe preview. Secrets redacted. live_validated=false. launch_authorized=false.";
+        });
+      }
+
       loadApi().then((payload) => {
         if (apiMode === "down" || apiMode === "429" || apiMode === "500" || apiMode === "malformed" || apiMode === "loading") {
           return;
         }
         if (route === "first-phase") renderFirstPhase(payload);
         else if (route === "events") renderEvents(payload);
+        else if (route === "consulting" || route === "marketing") renderPlanning();
         else renderServices(payload);
         if (apiMode === "empty") {
           setSurface("empty", "Empty fixture board. Not live validated — not demo-success.", "warn");

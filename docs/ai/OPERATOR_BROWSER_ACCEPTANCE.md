@@ -75,7 +75,7 @@ Python unit tests:
 - tablet: 768×1024
 - desktop: 1440×900
 
-Evidence label for every Chrome CDP hit is `fixture_browser_tested`. A loopback `--live-ui` run is `local_ui_tested`. This harness never emits `live_validated`.
+- `/operator/consulting-research` and `/operator/marketing-strategy` are fixture planning routes in this harness. They are not the #320/#321 React surfaces. `live_validated` and `launch_authorized` stay false.
 
 Windows:
 

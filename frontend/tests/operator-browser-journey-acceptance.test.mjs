@@ -86,9 +86,15 @@ test("python fixture acceptance path runs without claiming browser proof when --
   assert.equal(report.browser_method, "none");
   assert.equal(report.browser_proof, false);
   assert.match(String(report.status), /^passed/);
-  assert.deepEqual(report.routes, ["/operator/services", "/operator/first-phase", "/operator/events"]);
+    assert.deepEqual(report.routes, [
+      "/operator/services",
+      "/operator/first-phase",
+      "/operator/events",
+      "/operator/consulting-research",
+      "/operator/marketing-strategy",
+    ]);
   const spa404 = report.cases.filter((item) => String(item.id).startsWith("fixture-server-spa-"));
-  assert.equal(spa404.length, 3);
+  assert.equal(spa404.length, 5);
   assert.ok(spa404.every((item) => item.passed && item.http_status === 404));
   const unavailable = report.cases.filter((item) => ["down", "429", "500", "malformed"].includes(item.api_mode));
   assert.ok(unavailable.length >= 3);

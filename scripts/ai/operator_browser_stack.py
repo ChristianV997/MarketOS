@@ -216,7 +216,13 @@ def artifact_dir_is_safe(path: Path) -> bool:
 
 
 def scenario_matrix() -> list[dict[str, Any]]:
-    routes = ("/operator/services", "/operator/first-phase", "/operator/events")
+    routes = (
+        "/operator/services",
+        "/operator/first-phase",
+        "/operator/events",
+        "/operator/consulting-research",
+        "/operator/marketing-strategy",
+    )
     modes = {
         "ok-fixture": "blocked_or_partial",
         "down": "unavailable",
