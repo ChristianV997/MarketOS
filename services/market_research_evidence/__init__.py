@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from .conflict import detect_field_conflicts
 from .freshness import classify_freshness
-from .identity import InvalidBindingError, build_observation_identity, build_source_identity, validate_binding
+from .identity import InvalidBindingError, build_observation_identity, build_source_identity, validate_binding, validate_candidate_id, validate_workspace_id
 from .report import REPORT_VERSION, TITLE, build_evidence_integrity_report, render_evidence_integrity_markdown
 from .schemas import (
     DEFAULT_FRESHNESS_DAYS,
@@ -37,6 +37,8 @@ __all__ = [
     "detect_field_conflicts",
     "classify_freshness",
     "validate_binding",
+    "validate_candidate_id",
+    "validate_workspace_id",
     "build_source_identity",
     "build_observation_identity",
     "InvalidBindingError",

@@ -51,6 +51,16 @@ _REPORT_FIELDS = (
     "public_market_benchmark_report",
     "product_validation_report",
 )
+MAX_MANIFEST_BYTES = 64 * 1024
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise MarketResearchOperatorError("duplicate manifest key")
+        result[key] = value
+    return result
 
 
 class MarketResearchOperatorError(ValueError):
@@ -62,8 +72,13 @@ def load_manifest(path: str) -> tuple[dict[str, Any], Path]:
     if not manifest_path.is_file():
         raise MarketResearchOperatorError(f"manifest not found: {path}")
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+        raw = manifest_path.read_bytes()
+        if len(raw) > MAX_MANIFEST_BYTES:
+            raise MarketResearchOperatorError("manifest exceeds bounded input size")
+        manifest = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except MarketResearchOperatorError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise MarketResearchOperatorError(f"manifest is not valid JSON: {exc}") from exc
     if not isinstance(manifest, dict):
         raise MarketResearchOperatorError("manifest must be a JSON object")
@@ -84,8 +99,13 @@ def _resolve_report(manifest: dict[str, Any], base_dir: Path, field: str) -> dic
         if not report_path.is_file():
             raise MarketResearchOperatorError(f"{path_key} not found: {manifest[path_key]}")
         try:
-            data = json.loads(report_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
+            raw = report_path.read_bytes()
+            if len(raw) > MAX_MANIFEST_BYTES:
+                raise MarketResearchOperatorError(f"{path_key} exceeds bounded input size")
+            data = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
+        except MarketResearchOperatorError:
+            raise
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise MarketResearchOperatorError(f"{path_key} is not valid JSON: {exc}") from exc
         if not isinstance(data, dict):
             raise MarketResearchOperatorError(f"{path_key} must contain a JSON object")

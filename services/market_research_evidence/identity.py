@@ -21,11 +21,19 @@ class InvalidBindingError(ValueError):
     injectable identity string."""
 
 
-def validate_binding(candidate_id: str, workspace_id: str) -> None:
+def validate_candidate_id(candidate_id: str) -> None:
     if not isinstance(candidate_id, str) or not _SAFE_ID.fullmatch(candidate_id):
         raise InvalidBindingError("invalid candidate_id")
+
+
+def validate_workspace_id(workspace_id: str) -> None:
     if not isinstance(workspace_id, str) or not _SAFE_ID.fullmatch(workspace_id):
         raise InvalidBindingError("invalid workspace_id")
+
+
+def validate_binding(candidate_id: str, workspace_id: str) -> None:
+    validate_candidate_id(candidate_id)
+    validate_workspace_id(workspace_id)
 
 
 def _fingerprint(*parts: str) -> str:
@@ -44,4 +52,4 @@ def build_observation_identity(candidate_id: str, workspace_id: str, field: str)
     return ObservationIdentity(candidate_id, workspace_id, field, _fingerprint("observation", candidate_id, workspace_id, field))
 
 
-__all__ = ["InvalidBindingError", "validate_binding", "build_source_identity", "build_observation_identity"]
+__all__ = ["InvalidBindingError", "validate_candidate_id", "validate_workspace_id", "validate_binding", "build_source_identity", "build_observation_identity"]

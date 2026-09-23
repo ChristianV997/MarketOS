@@ -490,6 +490,70 @@ def test_candidate_identity_does_not_follow_a_template_candidate():
     assert all(item["observation"]["candidate_id"] == "c1" for item in result.observation_source_identity)
 
 
+def test_candidate_identity_scopes_synthesis_summary_and_actions():
+    marketplace = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [
+            {"candidate_id": "template-candidate", "title": "Template", "score": {"overall_marketplace_opportunity": 0.99}},
+            {"candidate_id": "c1", "title": "Selected Candidate", "score": {"overall_marketplace_opportunity": 0.10}},
+        ],
+    }
+    result = build_market_research_report(_bound_request(marketplace_report=marketplace))
+
+    assert "template-candidate" not in result.executive_summary["headline"]
+    assert result.executive_summary["combined_opportunity_score"] == 0.055
+    assert result.next_action == "run_readonly_supplier_validation"
+
+
+def test_candidate_mismatch_is_missing_in_the_evidence_matrix():
+    marketplace = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{"candidate_id": "other", "score": {"overall_marketplace_opportunity": 0.99}}],
+    }
+    result = build_market_research_report(_bound_request(marketplace_report=marketplace))
+
+    row = next(item for item in result.evidence_matrix if item.pillar == "marketplace")
+    assert row.status == "missing"
+    assert "candidate_not_matched" in " ".join(row.notes)
+    assert "evidence_missing" in result.blockers
+    assert result.competitor_and_substitute_evidence["status"] == "candidate_not_matched"
+
+
+def test_public_market_candidate_results_preserve_identity_and_zero():
+    public_market = {
+        "evidence_mode": "sanitized_report",
+        "candidate_results": [{"candidate_id": "c1", "evidence": [{"price": 0, "shipping_cost": 0, "observed_at": "2026-09-20"}]}],
+    }
+    result = build_market_research_report(_bound_request(public_market_benchmark_report=public_market))
+
+    row = next(item for item in result.evidence_matrix if item.pillar == "public_market_benchmark")
+    assert row.status == "supplied"
+    assert result.marketplace_and_public_signals["status"] == "supplied"
+    assert any(item["observation"]["field"] == "price" for item in result.source_provenance)
+    assert any(item["observation"]["field"] == "shipping_cost" for item in result.source_provenance)
+
+
+def test_workspace_claim_requires_an_explicit_request_identity():
+    report = {**_MARKETPLACE, "workspace_id": "workspace-claimed"}
+
+    with pytest.raises(ValueError, match="workspace_identity_required"):
+        build_market_research_report(_request(marketplace_report=report))
+
+
+def test_unbound_candidate_identity_and_nested_nonfinite_input_fail_closed():
+    with pytest.raises(ValueError, match="invalid candidate_id"):
+        build_market_research_report(MarketResearchRequest(candidate_id="bad id", marketplace_report=_MARKETPLACE))
+
+    nested: dict = {"value": 1}
+    for _ in range(20):
+        nested = {"nested": nested}
+    with pytest.raises(ValueError, match="evidence_input_bounds_exceeded"):
+        build_market_research_report(_request(marketplace_report=nested))
+
+    with pytest.raises(ValueError, match="malformed_evidence_input"):
+        build_market_research_report(_request(marketplace_report={"score": {"value": float("nan")}}))
+
+
 def test_consumer_attention_cannot_satisfy_supplier_or_launch_gates():
     result = build_market_research_report(_bound_request(consumer_report=_CONSUMER))
     serialized = json.dumps(result.to_dict()).lower()

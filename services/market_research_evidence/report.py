@@ -54,8 +54,11 @@ _EXPECTED_FIELDS = {
 def _matched_candidate(report: Mapping[str, Any] | None, key: str, candidate_id: str) -> Mapping[str, Any] | None:
     if not report:
         return None
-    for item in report.get(key, []) or []:
-        if str(item.get("candidate_id")) == candidate_id:
+    values = report.get(key, []) or []
+    if not isinstance(values, list):
+        return None
+    for item in values:
+        if isinstance(item, Mapping) and str(item.get("candidate_id")) == candidate_id:
             return item
     return None
 
@@ -88,6 +91,8 @@ def _score_field_observations(pillar: str, report: Mapping[str, Any], candidate:
     source_ref = str(candidate.get("query") or candidate_id)
     for field_name in _SCORE_FIELDS.get(pillar, ()):
         score = candidate.get("score", {})
+        if not isinstance(score, Mapping):
+            score = {}
         value = score.get(field_name) if isinstance(score, Mapping) else None
         if value is None:
             missing_fields.append(f"{pillar}.{field_name}")
@@ -111,12 +116,13 @@ def _supplier_shipping_observations(report: Mapping[str, Any], candidate: Mappin
         return []
     observations = []
     for offer in priced:
-        source_ref = str(offer.get("supplier") or offer.get("source_type") or "supplier_offer")
+        source_ref = str(offer.get("source_ref") or offer.get("supplier") or offer.get("source_type") or "supplier_offer")
+        observed_at = _observed_at(offer) or _observed_at(candidate)
         observations.append(
             FieldObservation(
                 field="shipping_cost",
                 value=offer["shipping_cost"],
-                provenance=_provenance("supplier", "supplier", source_ref, candidate_id, workspace_id, "shipping_cost", evidence_mode, "", as_of),
+                provenance=_provenance("supplier", "supplier", source_ref, candidate_id, workspace_id, "shipping_cost", evidence_mode, observed_at, as_of),
             )
         )
     return observations
@@ -129,13 +135,14 @@ def _public_market_observations(report: Mapping[str, Any], candidate: Mapping[st
     priced_any = False
     shipped_any = False
     for item in evidence_items:
-        source_ref = str(item.get("source_domain") or item.get("competitor_url") or "public_market_evidence")
+        source_ref = str(item.get("source_ref") or item.get("source_domain") or item.get("competitor_url") or "public_market_evidence")
+        observed_at = _observed_at(item) or _observed_at(candidate)
         if item.get("price") is not None:
             priced_any = True
-            observations.append(FieldObservation("price", item["price"], _provenance("public_market_benchmark", "public_market_benchmark", source_ref, candidate_id, workspace_id, "price", evidence_mode, "", as_of)))
+            observations.append(FieldObservation("price", item["price"], _provenance("public_market_benchmark", "public_market_benchmark", source_ref, candidate_id, workspace_id, "price", evidence_mode, observed_at, as_of)))
         if item.get("shipping_cost") is not None:
             shipped_any = True
-            observations.append(FieldObservation("shipping_cost", item["shipping_cost"], _provenance("public_market_benchmark", "public_market_benchmark", source_ref, candidate_id, workspace_id, "shipping_cost", evidence_mode, "", as_of)))
+            observations.append(FieldObservation("shipping_cost", item["shipping_cost"], _provenance("public_market_benchmark", "public_market_benchmark", source_ref, candidate_id, workspace_id, "shipping_cost", evidence_mode, observed_at, as_of)))
     if not priced_any:
         missing_fields.append("public_market_benchmark.price")
     if not shipped_any:

@@ -34,6 +34,9 @@ Source reports may carry an optional workspace claim, but a mismatched claim
 is rejected before either canonical authority runs. A request without a
 workspace remains available only as a legacy composition result and is marked
 `blocked_identity_unavailable` for client-safe export.
+Source reports that claim a workspace while the request is unbound are
+rejected rather than silently binding the result to unverified input. Candidate
+identifiers are validated even for unbound requests.
 
 ## Offering kinds
 
@@ -84,6 +87,15 @@ never silently treated as equivalent to a `LIVE_EVIDENCE_MODES` observation.
   `ready_for_trustos_review` only when workspace identity is bound and no
   leakage finding is present; it is not authentication, authorization, or
   launch approval.
+- Report input is bounded by node count, nesting depth, string size, and total
+  serialized output size. Non-finite numeric values, unsafe provider/raw
+  payload markers, non-string mapping keys, and duplicate JSON manifest keys
+  fail closed before canonical synthesis or evidence reporting.
+- Candidate-scoped synthesis is performed after the requested candidate is
+  selected. A template or another candidate cannot supply the requested
+  candidate's headline, score, plan, price, or action. A supplied pillar that
+  does not contain the requested candidate is reported as `missing` with a
+  candidate-mismatch limitation.
 
 These four "never treat X as Y" invariants and the never-zero invariant are
 each covered by a dedicated test in
@@ -125,13 +137,13 @@ it would escape that directory). It performs no I/O beyond reading the
 manifest and any referenced report files, and writes output only when
 `--output` is given. `tests/services/test_market_research/test_operator_entrypoint.py`
 exercises it end to end, including a real subprocess invocation compared
-against the in-process call.
+against the in-process call. The loader rejects oversized manifests, duplicate
+keys, path escapes, and malformed report shapes.
 
 ## Status
 
-Implemented and unit-tested (51 tests across
-`tests/services/test_market_research/test_report.py` and
-`test_operator_entrypoint.py`) against synthetic fixtures, including
+Implemented and unit-tested (98 focused tests across the market-research and
+market-research-evidence suites) against synthetic fixtures, including
 dedicated conflict (`tests/fixtures/market_research/conflict.json`) and
 stale/future (`tests/fixtures/market_research/stale_and_future.json`)
 fixtures, plus a TrustOS-boundary test proving `check_workspace_leakage`

@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+from decimal import Decimal
 from typing import Any, Mapping
 
 from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis
@@ -26,7 +28,7 @@ from evaluation.trustos.client_workspace_isolation import check_workspace_leakag
 from services.reporting.render import json_safe, render_markdown_report
 from services.market_research_evidence import build_evidence_integrity_report
 from services.market_research_evidence.freshness import classify_freshness
-from services.market_research_evidence.identity import validate_binding
+from services.market_research_evidence.identity import validate_binding, validate_candidate_id
 
 from .schemas import (
     FIXTURE_LIKE_EVIDENCE_MODES,
@@ -44,6 +46,10 @@ TITLE = "MarketOS Market Research Report"
 # existing 180-day convention for other evidence-freshness checks
 # (evaluation.trustos.mexico_product_compliance's citation_freshness_days).
 DEFAULT_FRESHNESS_DAYS = 180
+MAX_INPUT_NODES = 5_000
+MAX_INPUT_DEPTH = 12
+MAX_INPUT_STRING_BYTES = 8_192
+MAX_REPORT_BYTES = 128 * 1024
 
 _PILLAR_REPORT_FIELDS = (
     ("marketplace", "marketplace_report"),
@@ -56,49 +62,81 @@ _PILLAR_REPORT_FIELDS = (
 _UNSAFE_KEYS = frozenset({
     "api_key", "apikey", "access_token", "authorization", "cookie", "credential",
     "client_secret", "password", "private_key", "secret", "token", "raw_html",
-    "raw_payload", "provider_payload", "internal_prompt", "formula", "source_code",
+    "raw_payload", "provider_payload", "provider_response", "raw_response", "internal_prompt", "formula", "source_code",
     "filesystem_path",
 })
 _UNSAFE_VALUE_MARKERS = (
     "<html", "<script", "-----begin", "sk-", "ghp_", "github_pat_", "bearer ",
     "api_key", "access_token", "raw_payload", "provider_payload", "internal_prompt",
-    "source_code", ".env",
+    "provider_response", "raw_response", "source_code", ".env",
 )
 _ABSOLUTE_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|/(?:etc|home|tmp|Users)/)")
 
 
-def _validate_safe_inputs(value: Any) -> None:
+def _validate_safe_inputs(value: Any, *, depth: int = 0, nodes: list[int] | None = None) -> None:
     """Reject unsafe evidence before either authority sees the payload."""
+    nodes = nodes if nodes is not None else [0]
+    nodes[0] += 1
+    if nodes[0] > MAX_INPUT_NODES or depth > MAX_INPUT_DEPTH:
+        raise ValueError("evidence_input_bounds_exceeded")
     if isinstance(value, Mapping):
         for key, child in value.items():
+            if not isinstance(key, str):
+                raise ValueError("malformed_evidence_input")
             key_text = str(key).casefold().replace("-", "_").replace(" ", "_")
             if key_text in _UNSAFE_KEYS or any(marker in key_text for marker in ("raw_payload", "provider_payload")):
                 raise ValueError("unsafe_evidence_input")
-            _validate_safe_inputs(child)
+            _validate_safe_inputs(child, depth=depth + 1, nodes=nodes)
         return
     if isinstance(value, (list, tuple)):
         for child in value:
-            _validate_safe_inputs(child)
+            _validate_safe_inputs(child, depth=depth + 1, nodes=nodes)
         return
     if isinstance(value, str):
+        if len(value.encode("utf-8")) > MAX_INPUT_STRING_BYTES:
+            raise ValueError("evidence_input_bounds_exceeded")
         lowered = value.casefold()
         if any(marker in lowered for marker in _UNSAFE_VALUE_MARKERS) or _ABSOLUTE_PATH.match(value):
             raise ValueError("unsafe_evidence_input")
+        return
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("malformed_evidence_input")
+    if isinstance(value, Decimal) and not value.is_finite():
+        raise ValueError("malformed_evidence_input")
 
 
 def _validate_workspace_claims(value: Any, workspace_id: str) -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
-            if str(key).casefold() == "workspace_id" and child not in (None, "", workspace_id):
-                raise ValueError("workspace_mismatch")
+            if str(key).casefold() == "workspace_id" and child not in (None, ""):
+                if not workspace_id:
+                    raise ValueError("workspace_identity_required")
+                if child != workspace_id:
+                    raise ValueError("workspace_mismatch")
             _validate_workspace_claims(child, workspace_id)
     elif isinstance(value, (list, tuple)):
         for child in value:
             _validate_workspace_claims(child, workspace_id)
 
 
+def _validate_report_shape(report: Mapping[str, Any] | None) -> None:
+    if not report:
+        return
+    for key in ("candidates", "candidate_results"):
+        if key not in report:
+            continue
+        values = report[key]
+        if not isinstance(values, list) or any(not isinstance(item, Mapping) for item in values):
+            raise ValueError("malformed_evidence_input")
+
+
 def _validate_bound_request(request: MarketResearchRequest) -> str:
-    workspace_id = str(request.workspace_id or "")
+    if not isinstance(request.candidate_id, str):
+        raise ValueError("invalid candidate_id")
+    validate_candidate_id(request.candidate_id)
+    if request.workspace_id not in (None, "") and not isinstance(request.workspace_id, str):
+        raise ValueError("invalid workspace_id")
+    workspace_id = request.workspace_id or ""
     for report in (
         request.marketplace_report,
         request.supplier_report,
@@ -108,8 +146,9 @@ def _validate_bound_request(request: MarketResearchRequest) -> str:
         request.client_context,
     ):
         _validate_safe_inputs(report)
-        if workspace_id:
-            _validate_workspace_claims(report, workspace_id)
+        if isinstance(report, Mapping):
+            _validate_report_shape(report)
+        _validate_workspace_claims(report, workspace_id)
     if not workspace_id:
         return ""
     validate_binding(request.candidate_id, workspace_id)
@@ -196,10 +235,27 @@ def _recognized_offering_kind(raw: Any) -> tuple[str, bool]:
 def _matched_candidate(report: Mapping[str, Any] | None, candidate_id: str) -> Mapping[str, Any] | None:
     if not report:
         return None
-    for item in report.get("candidates", []) or []:
-        if str(item.get("candidate_id")) == candidate_id:
-            return item
+    for key in ("candidates", "candidate_results"):
+        values = report.get(key, [])
+        if values is None:
+            continue
+        if not isinstance(values, list):
+            raise ValueError("malformed_evidence_input")
+        for item in values:
+            if isinstance(item, Mapping) and str(item.get("candidate_id")) == candidate_id:
+                return item
     return None
+
+
+def _candidate_scoped_report(report: Mapping[str, Any] | None, candidate_id: str) -> Mapping[str, Any] | None:
+    """Keep the canonical synthesis authority scoped to the requested ID."""
+    if not report:
+        return report
+    scoped = dict(report)
+    for key in ("candidates", "candidate_results"):
+        if key in report and isinstance(report[key], list):
+            scoped[key] = [item for item in report[key] if isinstance(item, Mapping) and str(item.get("candidate_id")) == candidate_id]
+    return scoped
 
 
 def _candidate_observed_at(matched: Mapping[str, Any] | None) -> str | None:
@@ -209,6 +265,8 @@ def _candidate_observed_at(matched: Mapping[str, Any] | None) -> str | None:
         if matched.get(key):
             return str(matched[key])
     score = matched.get("score") or {}
+    if not isinstance(score, Mapping):
+        score = {}
     for key in ("observed_at", "as_of"):
         if score.get(key):
             return str(score[key])
@@ -224,8 +282,9 @@ def _pillar_row(name: str, report: Mapping[str, Any] | None, *, candidate_id: st
     if evidence_mode in FIXTURE_LIKE_EVIDENCE_MODES:
         notes.append(f"{name}_evidence_mode_is_{evidence_mode}_not_live_proof")
     matched = _matched_candidate(report, candidate_id)
-    if report.get("candidates") is not None and matched is None:
-        notes.append(f"{name}_supplied_but_no_candidate_matches_{candidate_id}")
+    if matched is None:
+        notes.append(f"{name}_candidate_not_matched:{candidate_id}")
+        return EvidenceMatrixRow(name, "missing", evidence_mode, None, tuple(notes))
     observed_at = _candidate_observed_at(matched)
     status = "supplied"
     # Delegates to the one canonical freshness classifier
@@ -258,6 +317,8 @@ def _observed_list(report: Mapping[str, Any] | None, *field_names: str) -> list[
 def _demand_and_customer_evidence(consumer_report: Mapping[str, Any] | None, matched: Mapping[str, Any] | None) -> dict[str, Any]:
     if not consumer_report:
         return {"status": "consumer_attention_not_supplied"}
+    if matched is None:
+        return {"status": "candidate_not_matched", "warning": "consumer_attention_for_another_candidate_is_not_evidence_for_this_candidate"}
     score = (matched or {}).get("score", {})
     return {
         "status": "supplied",
@@ -272,6 +333,8 @@ def _demand_and_customer_evidence(consumer_report: Mapping[str, Any] | None, mat
 def _competitor_and_substitute_evidence(marketplace_report: Mapping[str, Any] | None, matched: Mapping[str, Any] | None) -> dict[str, Any]:
     if not marketplace_report:
         return {"status": "marketplace_trends_not_supplied"}
+    if matched is None:
+        return {"status": "candidate_not_matched", "warning": "marketplace_evidence_for_another_candidate_is_not_evidence_for_this_candidate"}
     score = (matched or {}).get("score", {})
     return {
         "status": "supplied",
@@ -282,9 +345,11 @@ def _competitor_and_substitute_evidence(marketplace_report: Mapping[str, Any] | 
     }
 
 
-def _marketplace_and_public_signals(public_market_report: Mapping[str, Any] | None) -> dict[str, Any]:
+def _marketplace_and_public_signals(public_market_report: Mapping[str, Any] | None, matched: Mapping[str, Any] | None) -> dict[str, Any]:
     if not public_market_report:
         return {"status": "public_market_benchmark_not_supplied"}
+    if matched is None:
+        return {"status": "candidate_not_matched", "warning": "public_market_evidence_for_another_candidate_is_not_evidence_for_this_candidate"}
     return {
         "status": "supplied",
         "pricing_coverage": public_market_report.get("pricing_coverage"),
@@ -296,7 +361,11 @@ def _marketplace_and_public_signals(public_market_report: Mapping[str, Any] | No
 def _supplier_feasibility_section(supplier_report: Mapping[str, Any] | None, matched: Mapping[str, Any] | None) -> dict[str, Any]:
     if not supplier_report:
         return {"status": "supplier_feasibility_not_relevant_or_not_supplied"}
+    if matched is None:
+        return {"status": "candidate_not_matched", "warning": "supplier_evidence_for_another_candidate_is_not_evidence_for_this_candidate"}
     score = (matched or {}).get("score", {})
+    if not isinstance(score, Mapping):
+        score = {}
     return {
         "status": "supplied",
         "overall_supplier_feasibility": score.get("overall_supplier_feasibility"),
@@ -307,10 +376,15 @@ def _supplier_feasibility_section(supplier_report: Mapping[str, Any] | None, mat
     }
 
 
-def _delivery_and_logistics_feasibility(matched: Mapping[str, Any] | None) -> dict[str, Any]:
-    if matched is None:
+def _delivery_and_logistics_feasibility(supplier_report: Mapping[str, Any] | None, matched: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not supplier_report:
         return {"status": "supplier_feasibility_not_relevant_or_not_supplied"}
-    economics = (matched.get("score") or {}).get("economics", {}) or {}
+    if matched is None:
+        return {"status": "candidate_not_matched"}
+    score = matched.get("score") or {}
+    economics = score.get("economics", {}) if isinstance(score, Mapping) else {}
+    if not isinstance(economics, Mapping):
+        economics = {}
     shipping_cost = economics.get("shipping_cost")
     result: dict[str, Any] = {"status": "supplied"}
     result["shipping_cost"] = shipping_cost if shipping_cost is not None else "missing"
@@ -323,6 +397,8 @@ def _delivery_and_logistics_feasibility(matched: Mapping[str, Any] | None) -> di
 
 def _pricing_and_willingness_to_pay(synthesis_dict: Mapping[str, Any]) -> dict[str, Any]:
     band = synthesis_dict.get("recommended_price_band") or {}
+    if not isinstance(band, Mapping):
+        band = {}
     return {
         "recommended_price_band": band,
         "status": band.get("status", "unavailable"),
@@ -339,19 +415,27 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
     offering_kind, offering_recognized = _recognized_offering_kind(request.offering_kind)
     workspace_id = _validate_bound_request(request)
 
-    synthesis = build_product_opportunity_synthesis(
+    full_synthesis = build_product_opportunity_synthesis(
         request.marketplace_report,
         request.supplier_report,
         request.consumer_report,
         product_validation_report=request.product_validation_report,
         client_context=request.client_context,
     ).to_dict()
-    integrity = _bound_integrity(request, workspace_id, synthesis)
+    synthesis = build_product_opportunity_synthesis(
+        _candidate_scoped_report(request.marketplace_report, request.candidate_id),
+        _candidate_scoped_report(request.supplier_report, request.candidate_id),
+        _candidate_scoped_report(request.consumer_report, request.candidate_id),
+        product_validation_report=request.product_validation_report,
+        client_context=request.client_context,
+    ).to_dict()
+    integrity = _bound_integrity(request, workspace_id, full_synthesis)
 
     candidate_id = request.candidate_id
     matched_marketplace = _matched_candidate(request.marketplace_report, candidate_id)
     matched_supplier = _matched_candidate(request.supplier_report, candidate_id)
     matched_consumer = _matched_candidate(request.consumer_report, candidate_id)
+    matched_public_market = _matched_candidate(request.public_market_benchmark_report, candidate_id)
 
     evidence_matrix = tuple(
         _pillar_row(name, getattr(request, field_name), candidate_id=candidate_id, as_of=request.as_of)
@@ -365,7 +449,10 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         assumptions.extend(str(item) for item in request.product_validation_report.get("open_questions", []) or [])
         observed_facts.extend(str(item) for item in request.product_validation_report.get("risk_flags", []) or [])
     if matched_supplier:
-        assumptions.extend(str(item) for item in (matched_supplier.get("assumptions") or matched_supplier.get("score", {}).get("assumptions", [])))
+        supplier_score = matched_supplier.get("score") or {}
+        if not isinstance(supplier_score, Mapping):
+            supplier_score = {}
+        assumptions.extend(str(item) for item in (matched_supplier.get("assumptions") or supplier_score.get("assumptions", [])))
     if matched_marketplace:
         observed_facts.extend(_observed_list(request.marketplace_report, "marketplaces_observed"))
     if matched_consumer:
@@ -374,6 +461,8 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
     observed_facts = sorted(dict.fromkeys(observed_facts))
 
     risk_profile = synthesis.get("risk_profile") or {}
+    if not isinstance(risk_profile, Mapping):
+        risk_profile = {}
     blockers = tuple(dict.fromkeys(risk_profile.get("blockers", [])))
     risks = tuple(dict.fromkeys(
         list(risk_profile.get("supplier_risks", []))
@@ -382,7 +471,7 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
     ))
     integrity_conflicts = tuple(integrity.get("deterministic_conflicts", ())) if integrity else ()
     source_conflicts = tuple(dict.fromkeys(
-        list(synthesis.get("alias_notes", []))
+        list(full_synthesis.get("alias_notes", []))
         + [str(item.get("note", "unresolved_evidence_conflict")) for item in integrity_conflicts]
     ))
 
@@ -410,6 +499,12 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         (list(integrity.get("missing_fields", ())) if integrity else []) + list(evidence_matrix_missing)
     ))
     freshness = _freshness_rows(integrity)
+    if not integrity:
+        freshness = tuple(
+            {"field": row.pillar, "pillar": row.pillar, "status": row.status, "observed_at": row.observed_at, "source_ref": ""}
+            for row in evidence_matrix
+            if row.status in {"stale", "future", "unknown"}
+        )
     observation_source_identity = tuple(
         {
             "observation": item.get("observation", {}),
@@ -428,6 +523,10 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
             blockers = tuple(dict.fromkeys(list(blockers) + ["evidence_freshness_unresolved"]))
     else:
         blockers = tuple(dict.fromkeys(list(blockers) + ["workspace_identity_unavailable"]))
+    if any(row.status == "missing" for row in evidence_matrix):
+        blockers = tuple(dict.fromkeys(list(blockers) + ["evidence_missing"]))
+    if any(row.status in {"stale", "future", "unknown"} for row in evidence_matrix):
+        blockers = tuple(dict.fromkeys(list(blockers) + ["evidence_freshness_unresolved"]))
 
     conflict_findings = tuple(integrity_conflicts)
     next_research_actions = _next_research_actions(
@@ -496,13 +595,12 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         limitations.append("offering_kind_unknown_no_applicability_determination_made")
 
     candidate_title = None
-    if str(synthesis.get("top_candidate_id")) == candidate_id:
+    for matched in (matched_marketplace, matched_supplier, matched_consumer, matched_public_market):
+        if matched and matched.get("title"):
+            candidate_title = matched["title"]
+            break
+    if candidate_title is None and str(synthesis.get("top_candidate_id")) == candidate_id:
         candidate_title = synthesis.get("top_candidate_title")
-    if candidate_title is None:
-        for matched in (matched_marketplace, matched_supplier, matched_consumer):
-            if matched and matched.get("title"):
-                candidate_title = matched["title"]
-                break
     candidate_title = candidate_title or candidate_id
 
     fingerprint_payload = {
@@ -528,7 +626,7 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         "evidence_integrity_fingerprint": integrity.get("fingerprint", "") if integrity else "",
     }
 
-    return MarketResearchResult(
+    result = MarketResearchResult(
         report_version=REPORT_VERSION,
         candidate_id=candidate_id,
         workspace_id=workspace_id,
@@ -541,9 +639,9 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         evidence_matrix=evidence_matrix,
         demand_and_customer_evidence=_demand_and_customer_evidence(request.consumer_report, matched_consumer),
         competitor_and_substitute_evidence=_competitor_and_substitute_evidence(request.marketplace_report, matched_marketplace),
-        marketplace_and_public_signals=_marketplace_and_public_signals(request.public_market_benchmark_report),
+        marketplace_and_public_signals=_marketplace_and_public_signals(request.public_market_benchmark_report, matched_public_market),
         supplier_feasibility=_supplier_feasibility_section(request.supplier_report, matched_supplier),
-        delivery_and_logistics_feasibility=_delivery_and_logistics_feasibility(matched_supplier),
+        delivery_and_logistics_feasibility=_delivery_and_logistics_feasibility(request.supplier_report, matched_supplier),
         pricing_and_willingness_to_pay=_pricing_and_willingness_to_pay(synthesis),
         assumptions=tuple(assumptions),
         observed_facts=tuple(observed_facts),
@@ -568,6 +666,13 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         next_research_actions=next_research_actions,
         evidence_integrity_fingerprint=integrity.get("fingerprint", "") if integrity else "",
     )
+    try:
+        encoded = json.dumps(json_safe(result.to_dict()), sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("malformed_market_research_output") from exc
+    if len(encoded) > MAX_REPORT_BYTES:
+        raise ValueError("market_research_output_bounds_exceeded")
+    return result
 
 
 def render_market_research_markdown(result: MarketResearchResult) -> str:

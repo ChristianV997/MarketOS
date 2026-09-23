@@ -34,6 +34,14 @@ def test_load_manifest_rejects_invalid_json(tmp_path):
         load_manifest(str(bad))
 
 
+def test_load_manifest_rejects_duplicate_keys(tmp_path):
+    duplicate = tmp_path / "duplicate.json"
+    duplicate.write_text('{"candidate_id": "c1", "candidate_id": "c2"}', encoding="utf-8")
+
+    with pytest.raises(MarketResearchOperatorError, match="duplicate manifest key"):
+        load_manifest(str(duplicate))
+
+
 def test_main_emits_json_report_with_conflict_findings_and_provenance(capsys):
     exit_code = main(["--manifest", str(FIXTURES / "manifest_inline.json")])
     assert exit_code == 0

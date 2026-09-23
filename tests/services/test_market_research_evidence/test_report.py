@@ -170,6 +170,30 @@ def test_unknown_freshness_flagged_via_fixture():
     assert result.unknown_freshness_fields
 
 
+def test_offer_and_public_observation_dates_reach_provenance():
+    supplier = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{
+            "candidate_id": "cand-1",
+            "offers": [{"supplier": "supplier-a", "shipping_cost": 4.5, "observed_at": "2024-01-01"}],
+            "score": {"overall_supplier_feasibility": 0.6},
+        }],
+    }
+    public_market = {
+        "evidence_mode": "sanitized_report",
+        "candidate_results": [{
+            "candidate_id": "cand-1",
+            "evidence": [{"source_domain": "example.com", "price": 10, "observed_at": "2024-01-01"}],
+        }],
+    }
+
+    result = _build(supplier_report=supplier, public_market_benchmark_report=public_market)
+
+    observed = {(item.field, item.provenance.observed_at, item.provenance.freshness_status) for item in result.field_observations}
+    assert ("shipping_cost", "2024-01-01", "stale") in observed
+    assert ("price", "2024-01-01", "stale") in observed
+
+
 # --- deterministic conflict detection -------------------------------------
 
 
