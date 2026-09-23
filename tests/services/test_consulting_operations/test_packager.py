@@ -99,3 +99,21 @@ def test_package_deliverable_size_limit():
     }
     with pytest.raises(ValueError, match="exceeds max"):
         package_deliverable(engagement, reports)
+
+def test_package_deliverable_markdown_rendering():
+    engagement = ConsultingEngagement(
+        engagement_id="eng-1",
+        package_id="pkg-1",
+        workspace_id="ws-1",
+        owner="owner-1",
+    )
+    reports = {
+        "commercial": {"summary": "test", "value": 42},
+    }
+    deliverable = package_deliverable(engagement, reports)
+    md = deliverable.to_markdown()
+    assert "# Consulting Deliverable: pkg-1" in md
+    assert "**Engagement ID:** eng-1" in md
+    assert "### Commercial" in md
+    assert "test" in md
+    assert "42" in md

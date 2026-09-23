@@ -30,6 +30,24 @@ class ConsultingDeliverable:
             "payload": self.payload,
         }, indent=2)
 
+    def to_markdown(self) -> str:
+        """Render the deliverable as safe Markdown."""
+        lines = [
+            f"# Consulting Deliverable: {self.package_id}",
+            f"**Engagement ID:** {self.engagement_id}",
+            f"**Workspace ID:** {self.workspace_id}",
+            "",
+            "## Payload Contents",
+            ""
+        ]
+
+        for key, value in self.payload.items():
+            lines.append(f"### {key.title()}")
+            lines.append(f"```json\n{json.dumps(value, indent=2)}\n```")
+            lines.append("")
+
+        return "\n".join(lines)
+
 def _check_payload_size(payload: dict[str, Any]) -> None:
     size = len(json.dumps(payload).encode("utf-8"))
     if size > MAX_DELIVERABLE_BYTES:
