@@ -56,6 +56,7 @@ class MarketResearchRequest:
     product_validation_report: Mapping[str, Any] | None = None
     public_market_benchmark_report: Mapping[str, Any] | None = None
     client_context: Mapping[str, Any] | None = None
+    workspace_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class ValidationStep:
 class MarketResearchResult:
     report_version: str
     candidate_id: str
+    workspace_id: str
     candidate_title: str
     offering_kind: str
     offering_kind_recognized: bool
@@ -115,6 +117,16 @@ class MarketResearchResult:
     follow_up_modules: tuple[str, ...]
     fingerprint: str
     source_reports: dict[str, str]
+    observation_source_identity: tuple[dict[str, Any], ...]
+    freshness: tuple[dict[str, Any], ...]
+    conflict_findings: tuple[dict[str, Any], ...]
+    evidence_class: str
+    source_provenance: tuple[dict[str, Any], ...]
+    missing_data: tuple[str, ...]
+    client_safe_export_status: str
+    client_safe_projection: dict[str, Any]
+    next_research_actions: tuple[str, ...]
+    evidence_integrity_fingerprint: str
     dry_run: bool = True
     read_only: bool = True
     network_calls: bool = False
@@ -131,6 +143,7 @@ class MarketResearchResult:
         return {
             "report_version": self.report_version,
             "candidate_id": self.candidate_id,
+            "workspace_id": self.workspace_id,
             "candidate_title": self.candidate_title,
             "offering_kind": self.offering_kind,
             "offering_kind_recognized": self.offering_kind_recognized,
@@ -156,6 +169,16 @@ class MarketResearchResult:
             "follow_up_modules": list(self.follow_up_modules),
             "fingerprint": self.fingerprint,
             "source_reports": dict(self.source_reports),
+            "observation_source_identity": [dict(item) for item in self.observation_source_identity],
+            "freshness": [dict(item) for item in self.freshness],
+            "conflict_findings": [dict(item) for item in self.conflict_findings],
+            "evidence_class": self.evidence_class,
+            "source_provenance": [dict(item) for item in self.source_provenance],
+            "missing_data": list(self.missing_data),
+            "client_safe_export_status": self.client_safe_export_status,
+            "client_safe_projection": dict(self.client_safe_projection),
+            "next_research_actions": list(self.next_research_actions),
+            "evidence_integrity_fingerprint": self.evidence_integrity_fingerprint,
             "dry_run": self.dry_run,
             "read_only": self.read_only,
             "network_calls": self.network_calls,

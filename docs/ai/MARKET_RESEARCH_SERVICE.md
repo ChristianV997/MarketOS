@@ -11,10 +11,15 @@ read straight from `evaluation.commerce.opportunity_synthesis`.
 
 ```
 services.market_research.report.build_market_research_report
+  -> services.market_research_evidence.report.build_evidence_integrity_report
+       (candidate/workspace identity, source provenance, freshness, missing
+        fields, and deterministic cross-pillar conflicts; no ranking)
   -> evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis
        (sole fusion/ranking authority: marketplace + supplier + consumer
         pillars, alias-collision detection via alias_notes, recommendation
         and decision code)
+  -> evaluation.trustos.client_workspace_isolation.check_workspace_leakage
+       (client-safe projection check; no raw report export)
   -> services.reporting.render.render_markdown_report / json_safe
        (shared markdown renderer and float-safety helper, reused verbatim)
 ```
@@ -23,6 +28,12 @@ No file under `evaluation/companyos/`, `backend/economics/kernel.py`, or any
 unmerged consumer-attention / supplier-feasibility authority extension is
 imported. Those live only in open, unmerged pull requests as of this work
 (#295, #302) and are treated as unavailable rather than fabricated.
+
+The integrated contract requires `workspace_id` for an identity-bound report.
+Source reports may carry an optional workspace claim, but a mismatched claim
+is rejected before either canonical authority runs. A request without a
+workspace remains available only as a legacy composition result and is marked
+`blocked_identity_unavailable` for client-safe export.
 
 ## Offering kinds
 
@@ -46,10 +57,10 @@ Each of the five input pillars (`marketplace`, `supplier`, `consumer_attention`,
   `DEFAULT_FRESHNESS_DAYS` (180 days, the same window convention used by
   `evaluation.trustos.mexico_product_compliance`'s citation-freshness check).
 - `future` — `observed_at` is after `as_of`.
-- `conflict` — surfaced separately via `source_conflicts`, which is a direct
-  pass-through of `opportunity_synthesis`'s existing `alias_notes` (the
-  `_candidate_map` / `_identity_key` alias-collision detector); this service
-  never recomputes conflict detection.
+- `conflict` — surfaced separately via `source_conflicts`; the existing
+  `opportunity_synthesis.alias_notes` remain pass-through, while the joined
+  evidence authority adds field-level `conflict_findings` across pillars.
+  Findings are reported, never averaged or resolved.
 
 Pillars whose `evidence_mode` is in `FIXTURE_LIKE_EVIDENCE_MODES` (`fixture`,
 `fixture_demo`, `manual_import`, `manual`) are flagged in the row's notes —
@@ -66,6 +77,13 @@ never silently treated as equivalent to a `LIVE_EVIDENCE_MODES` observation.
   `supplier_feasibility.py`'s `shipping_cost_missing` flag).
 - No second promotion gate or ranking engine is introduced; recommendation
   and decision code come from `opportunity_synthesis` only.
+- The integrated result exposes `observation_source_identity`, `freshness`,
+  `source_provenance`, `missing_data`, `evidence_class`, and deterministic
+  `next_research_actions` without copying raw provider payloads.
+- TrustOS checks a bounded `client_safe_projection`. Its status is
+  `ready_for_trustos_review` only when workspace identity is bound and no
+  leakage finding is present; it is not authentication, authorization, or
+  launch approval.
 
 These four "never treat X as Y" invariants and the never-zero invariant are
 each covered by a dedicated test in
@@ -84,6 +102,13 @@ non-empty bounded `validation_plan`, `follow_up_modules` naming only the
 pillars that are actually missing, and a deterministic SHA-256 `fingerprint`
 computed over the sorted-JSON payload with `generated_at` excluded (so
 identical evidence always yields the same fingerprint).
+The integrated fields are part of the same public result rather than a second
+report type: `workspace_id`, observation/source identities, freshness rows,
+field-level conflict findings, evidence class, source provenance, missing
+data, client-safe export status/projection, evidence-integrity fingerprint,
+and next research actions. Missing values remain explicit; an explicit
+numeric zero remains a supplied observation.
+
 `render_market_research_markdown` renders the same data through the shared
 `services.reporting.render.render_markdown_report` helper. The result carries
 `dry_run=True`, `read_only=True`, `network_calls=False`, `mutated=False` —
@@ -91,7 +116,7 @@ this service performs no I/O beyond composing already-supplied report dicts.
 
 ## Status
 
-Implemented and unit-tested (33 tests,
+Implemented and unit-tested (41 tests,
 `tests/services/test_market_research/test_report.py`) against synthetic
 fixtures, including dedicated conflict (`tests/fixtures/market_research/conflict.json`)
 and stale/future (`tests/fixtures/market_research/stale_and_future.json`)

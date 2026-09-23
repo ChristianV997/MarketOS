@@ -23,9 +23,9 @@ class InvalidBindingError(ValueError):
 
 def validate_binding(candidate_id: str, workspace_id: str) -> None:
     if not isinstance(candidate_id, str) or not _SAFE_ID.fullmatch(candidate_id):
-        raise InvalidBindingError(f"invalid candidate_id: {candidate_id!r}")
+        raise InvalidBindingError("invalid candidate_id")
     if not isinstance(workspace_id, str) or not _SAFE_ID.fullmatch(workspace_id):
-        raise InvalidBindingError(f"invalid workspace_id: {workspace_id!r}")
+        raise InvalidBindingError("invalid workspace_id")
 
 
 def _fingerprint(*parts: str) -> str:

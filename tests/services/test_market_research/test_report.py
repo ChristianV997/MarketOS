@@ -315,3 +315,175 @@ def test_report_is_read_only_and_never_claims_network_calls():
     assert result.network_calls is False
     assert result.mutated is False
     assert result.dry_run is True
+
+
+# ---------------------------------------------------------------------------
+# integrated evidence-authority contract
+# ---------------------------------------------------------------------------
+
+
+def _bound_request(**overrides) -> MarketResearchRequest:
+    base = dict(
+        candidate_id="c1",
+        workspace_id="workspace-1",
+        offering_kind="goods",
+        geography="MX",
+        language="es",
+        as_of="2026-09-22",
+    )
+    base.update(overrides)
+    return MarketResearchRequest(**base)
+
+
+def test_integrated_report_exposes_one_bound_evidence_contract():
+    result = build_market_research_report(_bound_request(
+        marketplace_report=_MARKETPLACE,
+        supplier_report=_SUPPLIER_WITH_SHIPPING,
+        consumer_report=_CONSUMER,
+    ))
+
+    payload = result.to_dict()
+    assert payload["candidate_id"] == "c1"
+    assert payload["workspace_id"] == "workspace-1"
+    assert payload["observation_source_identity"]
+    assert payload["source_provenance"]
+    assert payload["freshness"]
+    assert payload["evidence_class"] == "sanitized_report"
+    assert payload["client_safe_export_status"] == "ready_for_trustos_review"
+    assert payload["client_safe_projection"]["live_proof"] is False
+    assert payload["client_safe_projection"]["external_actions_authorized"] is False
+
+
+def test_integrated_report_does_not_turn_absent_score_into_zero():
+    result = build_market_research_report(_bound_request())
+
+    assert result.executive_summary["combined_opportunity_score"] == "missing"
+    assert result.evidence_class == "missing"
+    assert result.missing_data
+
+
+def test_cross_pillar_conflict_is_distinct_from_alias_notes():
+    supplier = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{
+            "candidate_id": "c1",
+            "offers": [{"supplier": "supplier-a", "shipping_cost": 4.5}],
+            "score": {"overall_supplier_feasibility": 0.6},
+        }],
+    }
+    public_market = {
+        "evidence_mode": "sanitized_report",
+        "candidate_results": [{
+            "candidate_id": "c1",
+            "evidence": [{"source_domain": "example.com", "shipping_cost": 6.0}],
+        }],
+    }
+    result = build_market_research_report(_bound_request(
+        supplier_report=supplier,
+        public_market_benchmark_report=public_market,
+    ))
+
+    assert result.conflict_findings
+    assert any(item["field"] == "shipping_cost" for item in result.conflict_findings)
+    assert result.blockers.count("evidence_conflict") == 1
+    assert result.client_safe_export_status == "ready_for_trustos_review"
+
+
+def test_missing_and_explicit_zero_shipping_remain_distinct():
+    missing = build_market_research_report(_bound_request(supplier_report=_SUPPLIER))
+    explicit_zero = {
+        **_SUPPLIER_WITH_SHIPPING,
+        "candidates": [{
+            **_SUPPLIER_WITH_SHIPPING["candidates"][0],
+            "offers": [{"supplier": "supplier-a", "shipping_cost": 0}],
+            "score": {
+                **_SUPPLIER_WITH_SHIPPING["candidates"][0]["score"],
+                "economics": {"shipping_cost": 0},
+            },
+        }],
+    }
+    supplied_zero = build_market_research_report(_bound_request(supplier_report=explicit_zero))
+
+    assert "supplier.shipping_cost" in missing.missing_data
+    assert missing.delivery_and_logistics_feasibility["shipping_cost"] == "missing"
+    assert supplied_zero.delivery_and_logistics_feasibility["shipping_cost"] == 0
+    assert "supplier.shipping_cost" not in supplied_zero.missing_data
+
+
+def test_stale_and_future_evidence_block_integrated_report():
+    stale = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{"candidate_id": "c1", "observed_at": "2024-01-01", "score": {"overall_marketplace_opportunity": 0.7}}],
+    }
+    future = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{"candidate_id": "c1", "observed_at": "2027-01-01", "score": {"overall_marketplace_opportunity": 0.7}}],
+    }
+
+    for report in (stale, future):
+        result = build_market_research_report(_bound_request(marketplace_report=report))
+        assert result.client_safe_export_status == "ready_for_trustos_review"
+        assert "evidence_freshness_unresolved" in result.blockers
+        assert any(row["status"] in {"stale", "future"} for row in result.freshness)
+        assert "refresh_or_reject_temporally_invalid_evidence" in result.next_research_actions
+
+
+def test_workspace_mismatch_and_unsafe_payloads_fail_closed_without_reflection():
+    mismatched = {**_MARKETPLACE, "workspace_id": "workspace-other"}
+    with pytest.raises(ValueError, match="workspace_mismatch"):
+        build_market_research_report(_bound_request(marketplace_report=mismatched))
+
+    for unsafe in (
+        {"api_key": "not-a-real-secret"},
+        {"provider_payload": {"value": "fixture"}},
+        {"notes": "<html><script>internal</script>"},
+    ):
+        with pytest.raises(ValueError, match="unsafe_evidence_input"):
+            build_market_research_report(_bound_request(marketplace_report=unsafe))
+
+    with pytest.raises(ValueError, match="invalid workspace_id") as error:
+        build_market_research_report(_bound_request(workspace_id="workspace;secret"))
+    assert "secret" not in str(error.value)
+
+
+def test_candidate_identity_does_not_follow_a_template_candidate():
+    marketplace = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [
+            {"candidate_id": "template-candidate", "title": "Template", "score": {"overall_marketplace_opportunity": 0.99}},
+            {"candidate_id": "c1", "title": "Selected Candidate", "score": {"overall_marketplace_opportunity": 0.6}},
+        ],
+    }
+    result = build_market_research_report(_bound_request(
+        marketplace_report=marketplace,
+        client_context={"template_candidate_id": "template-candidate"},
+    ))
+
+    assert result.candidate_id == "c1"
+    assert result.candidate_title == "Selected Candidate"
+    assert result.workspace_id == "workspace-1"
+    assert all(item["observation"]["candidate_id"] == "c1" for item in result.observation_source_identity)
+
+
+def test_consumer_attention_cannot_satisfy_supplier_or_launch_gates():
+    result = build_market_research_report(_bound_request(consumer_report=_CONSUMER))
+    serialized = json.dumps(result.to_dict()).lower()
+
+    assert "supplier_feasibility" in result.next_research_actions
+    assert "evidence_missing" in result.blockers
+    assert "attention_is_not_supplier_proof" in serialized
+    assert result.client_safe_projection["live_proof"] is False
+    assert result.client_safe_projection["external_actions_authorized"] is False
+
+
+def test_integrated_serialization_and_markdown_are_deterministic():
+    request = _bound_request(
+        marketplace_report=_MARKETPLACE,
+        supplier_report=_SUPPLIER_WITH_SHIPPING,
+        consumer_report=_CONSUMER,
+    )
+    first = build_market_research_report(request)
+    second = build_market_research_report(request)
+
+    assert json.dumps(first.to_dict(), sort_keys=True) == json.dumps(second.to_dict(), sort_keys=True)
+    assert render_market_research_markdown(first) == render_market_research_markdown(second)

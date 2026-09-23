@@ -18,11 +18,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import time
 from datetime import date, timedelta
 from typing import Any, Mapping
 
 from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis
+from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
 from services.reporting.render import json_safe, render_markdown_report
+from services.market_research_evidence import build_evidence_integrity_report
+from services.market_research_evidence.identity import validate_binding
 
 from .schemas import (
     FIXTURE_LIKE_EVIDENCE_MODES,
@@ -48,6 +53,125 @@ _PILLAR_REPORT_FIELDS = (
     ("public_market_benchmark", "public_market_benchmark_report"),
     ("product_validation", "product_validation_report"),
 )
+
+_UNSAFE_KEYS = frozenset({
+    "api_key", "apikey", "access_token", "authorization", "cookie", "credential",
+    "client_secret", "password", "private_key", "secret", "token", "raw_html",
+    "raw_payload", "provider_payload", "internal_prompt", "formula", "source_code",
+    "filesystem_path",
+})
+_UNSAFE_VALUE_MARKERS = (
+    "<html", "<script", "-----begin", "sk-", "ghp_", "github_pat_", "bearer ",
+    "api_key", "access_token", "raw_payload", "provider_payload", "internal_prompt",
+    "source_code", ".env",
+)
+_ABSOLUTE_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|/(?:etc|home|tmp|Users)/)")
+
+
+def _validate_safe_inputs(value: Any) -> None:
+    """Reject unsafe evidence before either authority sees the payload."""
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            key_text = str(key).casefold().replace("-", "_").replace(" ", "_")
+            if key_text in _UNSAFE_KEYS or any(marker in key_text for marker in ("raw_payload", "provider_payload")):
+                raise ValueError("unsafe_evidence_input")
+            _validate_safe_inputs(child)
+        return
+    if isinstance(value, (list, tuple)):
+        for child in value:
+            _validate_safe_inputs(child)
+        return
+    if isinstance(value, str):
+        lowered = value.casefold()
+        if any(marker in lowered for marker in _UNSAFE_VALUE_MARKERS) or _ABSOLUTE_PATH.match(value):
+            raise ValueError("unsafe_evidence_input")
+
+
+def _validate_workspace_claims(value: Any, workspace_id: str) -> None:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if str(key).casefold() == "workspace_id" and child not in (None, "", workspace_id):
+                raise ValueError("workspace_mismatch")
+            _validate_workspace_claims(child, workspace_id)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            _validate_workspace_claims(child, workspace_id)
+
+
+def _bound_integrity(request: MarketResearchRequest) -> tuple[dict[str, Any] | None, str]:
+    workspace_id = str(request.workspace_id or "")
+    for report in (
+        request.marketplace_report,
+        request.supplier_report,
+        request.consumer_report,
+        request.product_validation_report,
+        request.public_market_benchmark_report,
+        request.client_context,
+    ):
+        _validate_safe_inputs(report)
+        if workspace_id:
+            _validate_workspace_claims(report, workspace_id)
+    if not workspace_id:
+        return None, ""
+    validate_binding(request.candidate_id, workspace_id)
+    integrity = build_evidence_integrity_report(
+        candidate_id=request.candidate_id,
+        workspace_id=workspace_id,
+        as_of=request.as_of,
+        marketplace_report=request.marketplace_report,
+        supplier_report=request.supplier_report,
+        consumer_report=request.consumer_report,
+        public_market_benchmark_report=request.public_market_benchmark_report,
+        product_validation_report=request.product_validation_report,
+    )
+    return integrity.to_dict(), workspace_id
+
+
+def _evidence_class(integrity: Mapping[str, Any] | None) -> str:
+    if not integrity:
+        return "unbound"
+    modes = sorted({str(item.get("evidence_mode")) for item in integrity.get("provenance_records", ())})
+    if not modes or modes == ["missing"]:
+        return "missing"
+    if len(modes) == 1:
+        return modes[0]
+    return "mixed"
+
+
+def _freshness_rows(integrity: Mapping[str, Any] | None) -> tuple[dict[str, Any], ...]:
+    if not integrity:
+        return ()
+    rows = []
+    for item in integrity.get("provenance_records", ()):
+        observation = item.get("observation", {})
+        source = item.get("source", {})
+        rows.append({
+            "field": observation.get("field", ""),
+            "pillar": item.get("pillar", ""),
+            "status": item.get("freshness_status", "missing"),
+            "observed_at": item.get("observed_at", "missing"),
+            "source_ref": source.get("source_ref", ""),
+        })
+    return tuple(sorted(rows, key=lambda row: (row["field"], row["pillar"], row["source_ref"])))
+
+
+def _next_research_actions(
+    *,
+    follow_up_modules: list[str],
+    missing_data: tuple[str, ...],
+    freshness: tuple[dict[str, Any], ...],
+    conflicts: tuple[dict[str, Any], ...],
+) -> tuple[str, ...]:
+    actions = list(follow_up_modules)
+    actions.extend(f"obtain_evidence:{item}" for item in missing_data)
+    actions.extend(
+        f"reconcile_conflict:{item['field']}"
+        for item in conflicts
+        if item.get("field")
+    )
+    if any(item.get("status") in {"stale", "future", "unknown"} for item in freshness):
+        actions.append("refresh_or_reject_temporally_invalid_evidence")
+    return tuple(dict.fromkeys(sorted(actions)))
 
 
 def _parse_day(value: Any) -> date | None:
@@ -207,6 +331,7 @@ def _fingerprint(payload: Mapping[str, Any]) -> str:
 
 def build_market_research_report(request: MarketResearchRequest) -> MarketResearchResult:
     offering_kind, offering_recognized = _recognized_offering_kind(request.offering_kind)
+    integrity, workspace_id = _bound_integrity(request)
 
     synthesis = build_product_opportunity_synthesis(
         request.marketplace_report,
@@ -248,7 +373,11 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         + list(risk_profile.get("marketplace_risks", []))
         + list(risk_profile.get("consumer_risks", []))
     ))
-    source_conflicts = tuple(synthesis.get("alias_notes", []))
+    integrity_conflicts = tuple(integrity.get("deterministic_conflicts", ())) if integrity else ()
+    source_conflicts = tuple(dict.fromkeys(
+        list(synthesis.get("alias_notes", []))
+        + [str(item.get("note", "unresolved_evidence_conflict")) for item in integrity_conflicts]
+    ))
 
     validation_plan = tuple(
         ValidationStep(str(item.get("window", "")), str(item.get("task", "")))
@@ -267,11 +396,83 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
     if offering_kind in {"service", "hybrid"}:
         follow_up_modules.append("service_delivery_feasibility_when_a_canonical_evaluator_exists")
 
+    evidence_matrix_missing = tuple(
+        f"{row.pillar}.report" for row in evidence_matrix if row.status == "missing"
+    )
+    missing_data = tuple(dict.fromkeys(
+        (list(integrity.get("missing_fields", ())) if integrity else []) + list(evidence_matrix_missing)
+    ))
+    freshness = _freshness_rows(integrity)
+    observation_source_identity = tuple(
+        {
+            "observation": item.get("observation", {}),
+            "source": item.get("source", {}),
+        }
+        for item in (integrity.get("provenance_records", ()) if integrity else ())
+    )
+    source_provenance = tuple(integrity.get("provenance_records", ())) if integrity else ()
+    evidence_class = _evidence_class(integrity)
+    if integrity:
+        if integrity.get("deterministic_conflict_detected"):
+            blockers = tuple(dict.fromkeys(list(blockers) + ["evidence_conflict"]))
+        if integrity.get("missing_fields"):
+            blockers = tuple(dict.fromkeys(list(blockers) + ["evidence_missing"]))
+        if any(item.get("freshness_status") in {"stale", "future", "unknown"} for item in source_provenance):
+            blockers = tuple(dict.fromkeys(list(blockers) + ["evidence_freshness_unresolved"]))
+    else:
+        blockers = tuple(dict.fromkeys(list(blockers) + ["workspace_identity_unavailable"]))
+
+    conflict_findings = tuple(integrity_conflicts)
+    next_research_actions = _next_research_actions(
+        follow_up_modules=follow_up_modules,
+        missing_data=missing_data,
+        freshness=freshness,
+        conflicts=conflict_findings,
+    )
+
+    client_safe_projection = {
+        "candidate_id": request.candidate_id,
+        "workspace_id": workspace_id,
+        "offering_kind": offering_kind,
+        "geography": request.geography,
+        "language": request.language,
+        "evidence_class": evidence_class,
+        "freshness": list(freshness),
+        "conflict_findings": [
+            {"field": item.get("field", ""), "delta": item.get("delta", 0), "note": item.get("note", "")}
+            for item in conflict_findings
+        ],
+        "missing_data": list(missing_data),
+        "blockers": list(blockers),
+        "next_research_actions": list(next_research_actions),
+        "live_proof": False,
+        "external_actions_authorized": False,
+    }
+    leakage_findings = check_workspace_leakage(client_safe_projection, client_safe=True)
+    client_safe_export_status = (
+        "blocked_identity_unavailable" if not workspace_id
+        else "blocked_leakage" if leakage_findings
+        else "ready_for_trustos_review"
+    )
+    if client_safe_export_status != "ready_for_trustos_review":
+        blockers = tuple(dict.fromkeys(list(blockers) + ["client_safe_export_blocked"]))
+        client_safe_projection["blockers"] = list(blockers)
+    next_research_actions = _next_research_actions(
+        follow_up_modules=follow_up_modules,
+        missing_data=missing_data,
+        freshness=freshness,
+        conflicts=conflict_findings,
+    )
+
+    supplied_pillars = any(getattr(request, field_name) for _, field_name in _PILLAR_REPORT_FIELDS)
+    combined_opportunity_score = synthesis.get("combined_opportunity_score")
+    if not supplied_pillars:
+        combined_opportunity_score = "missing"
     executive_summary = {
         "headline": synthesis.get("client_summary", ""),
         "operator_summary": synthesis.get("operator_summary", ""),
         "overall_recommendation": synthesis.get("overall_recommendation", "hold_for_manual_review"),
-        "combined_opportunity_score": synthesis.get("combined_opportunity_score", 0.0),
+        "combined_opportunity_score": combined_opportunity_score if combined_opportunity_score is not None else "missing",
         "confidence_grade": synthesis.get("confidence_grade", "F_reject_or_missing"),
     }
 
@@ -300,6 +501,7 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
     fingerprint_payload = {
         "report_version": REPORT_VERSION,
         "candidate_id": candidate_id,
+        "workspace_id": workspace_id,
         "offering_kind": offering_kind,
         "geography": request.geography,
         "language": request.language,
@@ -307,11 +509,22 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         "executive_summary": executive_summary,
         "blockers": list(blockers),
         "risks": list(risks),
+        "observation_source_identity": list(observation_source_identity),
+        "freshness": list(freshness),
+        "conflict_findings": list(conflict_findings),
+        "evidence_class": evidence_class,
+        "source_provenance": list(source_provenance),
+        "missing_data": list(missing_data),
+        "client_safe_export_status": client_safe_export_status,
+        "client_safe_projection": client_safe_projection,
+        "next_research_actions": list(next_research_actions),
+        "evidence_integrity_fingerprint": integrity.get("fingerprint", "") if integrity else "",
     }
 
     return MarketResearchResult(
         report_version=REPORT_VERSION,
         candidate_id=candidate_id,
+        workspace_id=workspace_id,
         candidate_title=str(candidate_title),
         offering_kind=offering_kind,
         offering_kind_recognized=offering_recognized,
@@ -337,14 +550,28 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         follow_up_modules=tuple(dict.fromkeys(follow_up_modules)),
         fingerprint=_fingerprint(fingerprint_payload),
         source_reports=source_reports,
+        observation_source_identity=observation_source_identity,
+        freshness=freshness,
+        conflict_findings=conflict_findings,
+        evidence_class=evidence_class,
+        source_provenance=source_provenance,
+        missing_data=missing_data,
+        client_safe_export_status=client_safe_export_status,
+        client_safe_projection=client_safe_projection,
+        next_research_actions=next_research_actions,
+        evidence_integrity_fingerprint=integrity.get("fingerprint", "") if integrity else "",
+        generated_at=0.0 if workspace_id else time.time(),
     )
 
 
 def render_market_research_markdown(result: MarketResearchResult) -> str:
     data = result.to_dict()
     sections = [
+        {"heading": "Candidate & Workspace Identity", "body": {"candidate_id": data["candidate_id"], "workspace_id": data["workspace_id"], "offering_kind": data["offering_kind"]}},
         {"heading": "Executive Decision Summary", "body": data["executive_summary"]},
         {"heading": "Evidence Matrix", "body": data["evidence_matrix"]},
+        {"heading": "Observation & Source Provenance", "body": data["observation_source_identity"] or ["none recorded"]},
+        {"heading": "Freshness", "body": data["freshness"] or ["none recorded"]},
         {"heading": "Demand & Customer Evidence", "body": data["demand_and_customer_evidence"]},
         {"heading": "Competitor & Substitute Evidence", "body": data["competitor_and_substitute_evidence"]},
         {"heading": "Marketplace & Public-Market Signals", "body": data["marketplace_and_public_signals"]},
@@ -354,10 +581,14 @@ def render_market_research_markdown(result: MarketResearchResult) -> str:
         {"heading": "Assumptions (not yet observed)", "body": data["assumptions"] or ["none recorded"]},
         {"heading": "Observed Facts", "body": data["observed_facts"] or ["none recorded"]},
         {"heading": "Source Conflicts", "body": data["source_conflicts"] or ["none detected"]},
+        {"heading": "Deterministic Conflict Findings", "body": data["conflict_findings"] or ["none detected"]},
+        {"heading": "Missing Data", "body": data["missing_data"] or ["none recorded"]},
         {"heading": "Confidence & Limitations", "body": {"confidence_grade": data["confidence_grade"], "limitations": data["limitations"]}},
         {"heading": "Blockers", "body": list(data["blockers"]) or ["none recorded"]},
         {"heading": "Risks", "body": list(data["risks"]) or ["none recorded"]},
         {"heading": "Prioritized Next Action", "body": data["next_action"]},
+        {"heading": "Next Research Actions", "body": data["next_research_actions"] or ["none recorded"]},
+        {"heading": "Client-Safe Export Status", "body": data["client_safe_export_status"]},
         {"heading": "Bounded Validation Plan", "body": data["validation_plan"]},
         {"heading": "Optional Follow-Up Modules", "body": list(data["follow_up_modules"]) or ["none recommended"]},
         {"heading": "Report Fingerprint", "body": data["fingerprint"]},
