@@ -1,6 +1,4 @@
 import pytest
-import tempfile
-import json
 from services.consulting_delivery.packager import package_consulting_deliverable
 from backend.organization.report_registry import get_report_registry
 from backend.organization.commercial_report import CommercialReport

@@ -1,5 +1,5 @@
 import pytest
-from services.consulting_delivery.package import build_consulting_delivery, ConsultingDeliveryPackage
+from services.consulting_delivery.package import build_consulting_delivery
 from backend.deliverables.package import DeliverableSection
 
 def test_build_consulting_delivery_safe_fields():
