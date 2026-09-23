@@ -87,3 +87,40 @@ class TestClientSafeRecord:
         safe = trade_flows.client_safe_record(record)
         assert "api_key" not in safe
         assert safe["reporter_country"] == "MEX"
+
+
+class TestOversizedInputRejected:
+    def test_rejects_a_file_larger_than_the_bulk_size_cap(self, tmp_path):
+        big = tmp_path / "too_big.json"
+        padding = "x" * (trade_flows.MAX_BULK_FILE_BYTES + 1)
+        big.write_text('[{"reporterISO": "MEX", "partnerISO": "CHN", "note": "' + padding + '"}]')
+        assert big.stat().st_size > trade_flows.MAX_BULK_FILE_BYTES
+        with pytest.raises(trade_flows.TradeFlowImportError, match="exceeds"):
+            trade_flows.import_un_comtrade_bulk_file(big)
+
+    def test_a_file_under_the_cap_is_accepted(self, tmp_path):
+        small = tmp_path / "small.json"
+        small.write_text('[{"reporterISO": "MEX", "partnerISO": "CHN"}]')
+        assert small.stat().st_size < trade_flows.MAX_BULK_FILE_BYTES
+        records = trade_flows.import_un_comtrade_bulk_file(small)
+        assert len(records) == 1
+
+
+class TestMalformedTopLevelStructure:
+    def test_a_json_scalar_instead_of_a_list_or_object_yields_no_records(self, tmp_path):
+        bad = tmp_path / "scalar.json"
+        bad.write_text('"not a list or object"')
+        assert trade_flows.import_un_comtrade_bulk_file(bad) == []
+
+    def test_a_row_that_is_not_an_object_is_skipped_not_crashed(self, tmp_path):
+        bad = tmp_path / "mixed_rows.json"
+        bad.write_text('[{"reporterISO": "MEX", "partnerISO": "CHN"}, "a bare string row", 42, null]')
+        records = trade_flows.import_un_comtrade_bulk_file(bad)
+        assert len(records) == 1
+        assert records[0]["reporter_country"] == "MEX"
+
+    def test_invalid_json_is_rejected_not_silently_empty(self, tmp_path):
+        bad = tmp_path / "invalid.json"
+        bad.write_text("{not valid json")
+        with pytest.raises(Exception):
+            trade_flows.import_un_comtrade_bulk_file(bad)

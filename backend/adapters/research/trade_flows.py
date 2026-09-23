@@ -38,6 +38,13 @@ from typing import Any, Mapping
 
 PINNED_SOURCE = "un_comtrade_bulk_download_v1"
 
+# A local UN Comtrade bulk-download extract is legitimately larger than a
+# single manual candidate file (thousands of rows), so this is looser
+# than scripts/research_to_decision.py's 256 KiB single-document cap --
+# but it is still a bound, not an unbounded read of an arbitrary local
+# file, matching this repository's general "bounded local file" pattern.
+MAX_BULK_FILE_BYTES = 5 * 1024 * 1024
+
 # Copied verbatim from backend.adapters.research.supplier_feasibility.
 SECRET_KEY = re.compile(r"(token|secret|password|api[_-]?key|authorization|cookie|private[_-]?key)", re.I)
 SECRET_VALUE = re.compile(r"(bearer\s+|sk_live_|sk_test_|ghp_|xox[baprs]-|-----BEGIN)", re.I)
@@ -72,6 +79,8 @@ def validate_input_path(path: str | Path) -> Path:
         raise TradeFlowImportError("only sanitized JSON and CSV inputs are supported")
     if not candidate.is_file():
         raise TradeFlowImportError("trade-flow import file does not exist")
+    if candidate.stat().st_size > MAX_BULK_FILE_BYTES:
+        raise TradeFlowImportError(f"trade-flow import file exceeds {MAX_BULK_FILE_BYTES} bytes")
     return candidate
 
 
