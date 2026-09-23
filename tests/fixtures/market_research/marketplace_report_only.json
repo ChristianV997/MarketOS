@@ -1,0 +1,8 @@
+{
+  "evidence_mode": "sanitized_report",
+  "marketplaces_observed": ["ebay"],
+  "candidates": [
+    {"candidate_id": "cand-1", "query": "portable blender", "observed_at": "2026-08-01",
+     "score": {"overall_marketplace_opportunity": 0.7, "saturation_score": 0.4}}
+  ]
+}

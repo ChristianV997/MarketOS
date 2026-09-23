@@ -19,14 +19,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import time
-from datetime import date, timedelta
 from typing import Any, Mapping
 
 from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis
 from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
 from services.reporting.render import json_safe, render_markdown_report
 from services.market_research_evidence import build_evidence_integrity_report
+from services.market_research_evidence.freshness import classify_freshness
 from services.market_research_evidence.identity import validate_binding
 
 from .schemas import (
@@ -185,13 +184,6 @@ def _next_research_actions(
     return tuple(dict.fromkeys(sorted(actions)))
 
 
-def _parse_day(value: Any) -> date | None:
-    try:
-        return date.fromisoformat(str(value).strip()[:10])
-    except (TypeError, ValueError):
-        return None
-
-
 def _recognized_offering_kind(raw: Any) -> tuple[str, bool]:
     if raw in (None, ""):
         return "unknown", True
@@ -236,16 +228,19 @@ def _pillar_row(name: str, report: Mapping[str, Any] | None, *, candidate_id: st
         notes.append(f"{name}_supplied_but_no_candidate_matches_{candidate_id}")
     observed_at = _candidate_observed_at(matched)
     status = "supplied"
-    as_of_day = _parse_day(as_of) if as_of else None
-    observed_day = _parse_day(observed_at) if observed_at else None
-    if as_of_day and observed_day:
-        if observed_day > as_of_day:
-            status = "future"
-            notes.append(f"{name}_observed_at_is_after_as_of")
-        elif (as_of_day - observed_day) > timedelta(days=DEFAULT_FRESHNESS_DAYS):
-            status = "stale"
-            notes.append(f"{name}_observed_at_exceeds_{DEFAULT_FRESHNESS_DAYS}_day_freshness_window")
-    elif observed_at and observed_day is None:
+    # Delegates to the one canonical freshness classifier
+    # (services.market_research_evidence.freshness.classify_freshness)
+    # instead of re-deriving the same day-diff/threshold logic here, so
+    # the unbound evidence-matrix view and the bound evidence-integrity
+    # view can never silently diverge on what counts as stale/future.
+    freshness_status = classify_freshness(observed_at, as_of, freshness_days=DEFAULT_FRESHNESS_DAYS)
+    if freshness_status == "future":
+        status = "future"
+        notes.append(f"{name}_observed_at_is_after_as_of")
+    elif freshness_status == "stale":
+        status = "stale"
+        notes.append(f"{name}_observed_at_exceeds_{DEFAULT_FRESHNESS_DAYS}_day_freshness_window")
+    elif freshness_status == "unknown":
         notes.append(f"{name}_observed_at_is_not_a_real_timestamp:{observed_at}")
     return EvidenceMatrixRow(name, status, evidence_mode, observed_at, tuple(notes))
 
@@ -572,7 +567,6 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         client_safe_projection=client_safe_projection,
         next_research_actions=next_research_actions,
         evidence_integrity_fingerprint=integrity.get("fingerprint", "") if integrity else "",
-        generated_at=0.0 if workspace_id else time.time(),
     )
 
 

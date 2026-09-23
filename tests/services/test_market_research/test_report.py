@@ -274,8 +274,11 @@ def test_fingerprint_changes_when_evidence_changes():
 
 def test_fingerprint_is_independent_of_generated_at():
     r1 = build_market_research_report(_request(marketplace_report=_MARKETPLACE))
+    import time
+
+    time.sleep(0.01)
     r2 = build_market_research_report(_request(marketplace_report=_MARKETPLACE))
-    assert r1.generated_at != r2.generated_at or True  # generated_at may coincide; fingerprint must match regardless
+    assert r1.generated_at != r2.generated_at
     assert r1.fingerprint == r2.fingerprint
 
 
@@ -446,6 +449,28 @@ def test_workspace_mismatch_and_unsafe_payloads_fail_closed_without_reflection()
     assert "secret" not in str(error.value)
 
 
+def test_trustos_boundary_blocks_leakage_this_module_own_input_filter_misses():
+    """Genuine defense-in-depth, not duplicate checking: this module's own
+    _validate_safe_inputs marker list does not cover words like "pricing"
+    or "formula" in a free-text query field, so this input passes it. The
+    TrustOS check_workspace_leakage boundary at the client-safe-projection
+    stage does cover them and must still catch this before export."""
+    marketplace = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [
+            {
+                "candidate_id": "c1",
+                "query": "our internal pricing formula for a competitor",
+                "observed_at": "2026-08-01",
+                "score": {"overall_marketplace_opportunity": 0.7, "saturation_score": 0.4},
+            }
+        ],
+    }
+    result = build_market_research_report(_bound_request(marketplace_report=marketplace))
+    assert result.client_safe_export_status == "blocked_leakage"
+    assert "client_safe_export_blocked" in result.blockers
+
+
 def test_candidate_identity_does_not_follow_a_template_candidate():
     marketplace = {
         "evidence_mode": "sanitized_report",
@@ -477,6 +502,12 @@ def test_consumer_attention_cannot_satisfy_supplier_or_launch_gates():
 
 
 def test_integrated_serialization_and_markdown_are_deterministic():
+    """generated_at is real wall-clock time (see
+    test_fingerprint_is_independent_of_generated_at) and legitimately
+    differs between any two calls, so it is excluded here rather than
+    special-cased to a fixed sentinel in production code just to make two
+    calls compare byte-for-byte equal. Every other field must still match
+    exactly."""
     request = _bound_request(
         marketplace_report=_MARKETPLACE,
         supplier_report=_SUPPLIER_WITH_SHIPPING,
@@ -485,5 +516,12 @@ def test_integrated_serialization_and_markdown_are_deterministic():
     first = build_market_research_report(request)
     second = build_market_research_report(request)
 
-    assert json.dumps(first.to_dict(), sort_keys=True) == json.dumps(second.to_dict(), sort_keys=True)
-    assert render_market_research_markdown(first) == render_market_research_markdown(second)
+    first_dict = first.to_dict()
+    second_dict = second.to_dict()
+    first_dict.pop("generated_at")
+    second_dict.pop("generated_at")
+    assert json.dumps(first_dict, sort_keys=True) == json.dumps(second_dict, sort_keys=True)
+
+    first_markdown = render_market_research_markdown(first).split("_Generated at", 1)[-1]
+    second_markdown = render_market_research_markdown(second).split("_Generated at", 1)[-1]
+    assert first_markdown.split("_\n", 1)[-1] == second_markdown.split("_\n", 1)[-1]

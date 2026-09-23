@@ -114,12 +114,28 @@ numeric zero remains a supplied observation.
 `dry_run=True`, `read_only=True`, `network_calls=False`, `mutated=False` —
 this service performs no I/O beyond composing already-supplied report dicts.
 
+## Operator entry point
+
+`scripts/market_research_report.py --manifest <manifest.json> [--markdown] [--output PATH]`
+is the documented, offline CLI entry point for this service, following the
+same manifest-driven convention as `scripts/research_to_decision.py`. The
+manifest supplies `candidate_id` plus each pillar report either inline or
+as a `*_report_path` relative to the manifest's own directory (rejected if
+it would escape that directory). It performs no I/O beyond reading the
+manifest and any referenced report files, and writes output only when
+`--output` is given. `tests/services/test_market_research/test_operator_entrypoint.py`
+exercises it end to end, including a real subprocess invocation compared
+against the in-process call.
+
 ## Status
 
-Implemented and unit-tested (41 tests,
-`tests/services/test_market_research/test_report.py`) against synthetic
-fixtures, including dedicated conflict (`tests/fixtures/market_research/conflict.json`)
-and stale/future (`tests/fixtures/market_research/stale_and_future.json`)
-fixtures. Not integration-tested against any live marketplace, supplier, or
-consumer-attention provider, and not live-validated — all evidence in this
-service's test suite is fixture-supplied.
+Implemented and unit-tested (51 tests across
+`tests/services/test_market_research/test_report.py` and
+`test_operator_entrypoint.py`) against synthetic fixtures, including
+dedicated conflict (`tests/fixtures/market_research/conflict.json`) and
+stale/future (`tests/fixtures/market_research/stale_and_future.json`)
+fixtures, plus a TrustOS-boundary test proving `check_workspace_leakage`
+catches free-text values (e.g. "pricing formula") this service's own input
+filter does not. Not integration-tested against any live marketplace,
+supplier, or consumer-attention provider, and not live-validated — all
+evidence in this service's test suite is fixture-supplied.
