@@ -388,10 +388,17 @@ def _delivery_and_logistics_feasibility(supplier_report: Mapping[str, Any] | Non
     if not isinstance(economics, Mapping):
         economics = {}
     shipping_cost = economics.get("shipping_cost")
+    shipping_speed_score = economics.get("shipping_speed_score")
+    moq = economics.get("moq")
     result: dict[str, Any] = {"status": "supplied"}
+    # An absent key and an explicit `null` both mean "we don't know" here --
+    # neither is ever a real 0/false value for these fields, so both are
+    # normalized to the same "missing" sentinel rather than letting an
+    # explicit null slip through as JSON `null` while an absent key becomes
+    # the string "missing".
     result["shipping_cost"] = shipping_cost if shipping_cost is not None else "missing"
-    result["shipping_speed_score"] = economics.get("shipping_speed_score", "missing")
-    result["moq"] = economics.get("moq", "missing")
+    result["shipping_speed_score"] = shipping_speed_score if shipping_speed_score is not None else "missing"
+    result["moq"] = moq if moq is not None else "missing"
     if shipping_cost is None:
         result["note"] = "shipping_cost_missing_is_not_the_same_as_zero_cost"
     return result

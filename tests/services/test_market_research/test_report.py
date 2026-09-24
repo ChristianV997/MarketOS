@@ -117,6 +117,26 @@ def test_supplied_shipping_cost_is_reported_as_the_real_number():
     assert result.delivery_and_logistics_feasibility["shipping_cost"] == 4.5
 
 
+def test_explicit_null_moq_and_shipping_speed_are_reported_as_missing_not_none():
+    """An explicit `null` in the input economics dict must render the same
+    'missing' sentinel as an absent key -- not a raw None/JSON null, which
+    would be a different, inconsistent 'missing' representation."""
+    supplier = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{
+            "candidate_id": "c1", "query": "q",
+            "offers": [{"supplier": "s", "shipping_cost": 4.5}],
+            "score": {
+                "overall_supplier_feasibility": 0.6,
+                "economics": {"shipping_cost": 4.5, "moq": None, "shipping_speed_score": None},
+            },
+        }],
+    }
+    result = build_market_research_report(_request(supplier_report=supplier))
+    assert result.delivery_and_logistics_feasibility["moq"] == "missing"
+    assert result.delivery_and_logistics_feasibility["shipping_speed_score"] == "missing"
+
+
 # ---------------------------------------------------------------------------
 # never treat attention as supplier proof, trends as launch authorization,
 # supplier claims as validation, or fixture/manual evidence as live proof
