@@ -63,7 +63,7 @@ Older reported SHAs `5545579` and `84aa84b` are ancestors, not the live head.
 7. Adversarial tests: altered intermediate hash, wrong counts 16/18/20/37, truncated module (real file), field-hash ≠ `Event.replay_hash`, empty-record vacuous pass closed.
 8. Report narrative is generated from measured structs, not a hardcoded 13× PASS table.
 
-`backend/events/replay_certification.py` three-line advisory-only `json.dumps` patch is left in place (semantically equivalent; `Event.replay_hash` unchanged). No further production optimization.
+`backend/events/replay_certification.py` is an existing canonical authority and was not changed by the laboratory finalization commit. No production optimization is claimed here; `Event.replay_hash` remains untouched.
 
 ## Measured replay evidence (current head)
 
@@ -78,7 +78,7 @@ Environment: Python 3.13.15, Windows x86_64, benchmark warm-up=1 discarded, n=3 
 
 17-event commerce rows: 5 scenarios; every row emitted 17 events, equal ordered `Event.replay_hash` sequences, equal aggregate hashes between dual runs, and zero sequence/live-authority violations. The measured aggregate hashes are emitted in the JSON artifact; this report does not copy a stale hash table.
 
-37-event canonical rows: 5 scenarios; every row emitted 37 events, `replay_equal=true`, launch authorization false, live actions false, and all 13 invariant checks true. The canonical authority is `scripts.run_commercial_replay_integration`, not a laboratory duplicate.
+37-event canonical rows: 5 scenarios; every row emitted 37 events, `replay_equal=true`, launch authorization false, live actions false, and all 13 invariant checks true. The canonical authority is `scripts.run_commercial_replay_integration`; the laboratory invokes and observes it rather than duplicating it.
 
 Benchmark timing: total timed runs 15; mean cycle 20.46 ms; p50 19.92 ms; p95/p99 22.71 ms. Because n=3 is below the tail threshold, p95 and p99 are sample maxima under `sample_maximum_small_n_guard`, not population tail estimates. Evidence is deterministic local dry-run/replay evidence, not commercial validation.
 

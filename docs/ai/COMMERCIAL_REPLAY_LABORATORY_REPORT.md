@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-This report documents the rigorous laboratory validation of MarketOS commercial dry-run replay,
+This report documents the laboratory validation of MarketOS commercial dry-run replay,
 deterministic hash repeatability, 7-dimensional sensitivity analysis, and performance scaling.
 The evaluation reports fixture/dry-run measurements. It does not claim commercial validation.
 1. **Event scope:** this laboratory measures the 17-event commerce lifecycle (start + 15 `LIFECYCLE_STEPS` + completion). 37 events exist only as PR #279 CLI concatenation (`tuple((*commerce_events, *fulfillment_events))`) and are not like-for-like.
@@ -20,7 +20,7 @@ The evaluation reports fixture/dry-run measurements. It does not claim commercia
 5. **Warm-up + small-sample tails:** 1 warm-up cycles discarded; n=3 timed cycles. p95/p99 are **sample maxima** (`sample_maximum_small_n_guard`), not independent tail estimates.
 6. **7-dimensional sensitivity:** kernel sweep on hydroponics fixture assumptions (CAC, shipping, FX, returns, defects, warranty, delivery delay). Not Event-path work.
 7. **Scaling / tracemalloc:** kernel evaluation throughput only. Not a measurement of `Event.replay_hash`.
-8. **Production Event hash path:** unchanged. The #280 `assert_no_live_authority` patch only scopes JSON dumps to advisory events.
+8. **Production Event hash path:** unchanged. The laboratory observes the current `assert_no_live_authority` implementation; it does not claim a production patch in this branch.
 
 ---
 
@@ -28,11 +28,11 @@ The evaluation reports fixture/dry-run measurements. It does not claim commercia
 
 | Scenario ID | SKU | Lane | Achievable Stage | Promoted | Events | Replay Equal | Sequence Issues | Live Violations | Wall Clock (ms) |
 |---|---|---|---|:---:|:---:|:---:|:---:|:---:|---:|
-| `hydroponics_positive_candidate` | `hydroponics-nutrient-kit` | `us-domestic-hydro` | `scale_candidate` | ✅ Yes | 17 | ✅ Bit-Identical | 0 | 0 | 6.24 |
-| `smart_pet_support_burden_candidate` | `smart-pet-feeder` | `us-domestic-petfeeder` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 3.57 |
-| `solar_4g_security_blocked_candidate` | `solar-4g-security-camera` | `us-domestic-solarcam` | `economics_screened` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.42 |
-| `commodity_electronics_rejected_candidate` | `usb-c-cable-3pack` | `us-domestic-usbc-cable` | `supplier_terms_pending` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.27 |
-| `high_ticket_deferred_candidate` | `e-cargo-bike` | `us-domestic-egraded-bike` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.26 |
+| `hydroponics_positive_candidate` | `hydroponics-nutrient-kit` | `us-domestic-hydro` | `scale_candidate` | ✅ Yes | 17 | ✅ Bit-Identical | 0 | 0 | 5.42 |
+| `smart_pet_support_burden_candidate` | `smart-pet-feeder` | `us-domestic-petfeeder` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 3.20 |
+| `solar_4g_security_blocked_candidate` | `solar-4g-security-camera` | `us-domestic-solarcam` | `economics_screened` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.17 |
+| `commodity_electronics_rejected_candidate` | `usb-c-cable-3pack` | `us-domestic-usbc-cable` | `supplier_terms_pending` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 4.05 |
+| `high_ticket_deferred_candidate` | `e-cargo-bike` | `us-domestic-egraded-bike` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 4.68 |
 
 ### Scenario Outcome Details & Gate Verification
 
@@ -207,12 +207,12 @@ Evaluated on baseline candidate `hydroponics_positive_candidate` (Retail Price: 
 
 | Grid Points / Dim | Total Evaluations | Wall Clock (ms) | Throughput (evals/sec) | Peak Memory (KB) | Memory / Eval (bytes) |
 |---:|---:|---:|---:|---:|---:|
-| 10 | 70 | 201.78 | 346.9 | 508.0 | 7431.0 |
-| 50 | 350 | 1173.83 | 298.2 | 2532.3 | 7408.7 |
-| 100 | 700 | 1974.40 | 354.5 | 5053.4 | 7392.5 |
+| 10 | 70 | 174.35 | 401.5 | 508.0 | 7431.0 |
+| 50 | 350 | 897.83 | 389.8 | 2532.3 | 7408.7 |
+| 100 | 700 | 1796.51 | 389.6 | 5053.4 | 7392.5 |
 
 ### Scaling Observations
-- **Throughput (this run, single-shot per scale point):** 298.2 to 354.5 kernel evals/sec. Not Event.replay_hash throughput; not Monte Carlo.
+- **Throughput (this run, single-shot per scale point):** 389.6 to 401.5 kernel evals/sec. Not Event.replay_hash throughput; not Monte Carlo.
 - **Memory / eval (tracemalloc, kernel sweep):** 7392.5 to 7431.0 bytes. n=1 per scale point; not a leak proof.
 - **Warm-up:** scaling points are cold/single-shot. Warmed timings live only in section 5.
 
@@ -224,54 +224,52 @@ Evaluated on baseline candidate `hydroponics_positive_candidate` (Retail Price: 
 - **Benchmark Iterations:** 3 complete cycles (15 scenario executions)
 - **Sample Size Category:** Small Sample (n < 20)
 - **Tail Estimation Method:** `sample_maximum_small_n_guard` (using percentile_guard to prevent asymptotic overclaiming on small n)
-- **Mean Cycle Latency:** 15.42 ms
-- **Median / p50 Latency:** 13.63 ms
-- **Min / Max Latency:** 13.27 ms / 19.36 ms
-- **95th Percentile (p95):** 19.36 ms *(sample maximum; n<20)*
-- **99th Percentile (p99):** 19.36 ms *(sample maximum; n<20)*
-- **Standard Deviation:** 2.79 ms
-- **Variance:** 7.77 ms²
+- **Mean Cycle Latency:** 10.43 ms
+- **Median / p50 Latency:** 9.01 ms
+- **Min / Max Latency:** 8.82 ms / 13.45 ms
+- **95th Percentile (p95):** 13.45 ms *(sample maximum; n<20)*
+- **99th Percentile (p99):** 13.45 ms *(sample maximum; n<20)*
+- **Standard Deviation:** 2.14 ms
+- **Variance:** 4.58 ms²
 - **Hash Sequence Drift:** `ZERO DRIFT (PASS)`
 
 ### Per-Scenario Latency Breakdown
 
 | Scenario Builder | Events | Mean Latency (ms) | Median / p50 (ms) | Min (ms) | Max (ms) |
 |---|:---:|---:|---:|---:|---:|
-| `hydroponics_positive_candidate` | 17 | 2.72 | 2.94 | 2.10 | 3.12 |
-| `smart_pet_support_burden_candidate` | 17 | 3.03 | 2.25 | 1.86 | 4.98 |
-| `solar_4g_security_blocked_candidate` | 17 | 2.82 | 2.43 | 2.34 | 3.68 |
-| `commodity_electronics_rejected_candidate` | 17 | 3.45 | 3.78 | 2.38 | 4.20 |
-| `high_ticket_deferred_candidate` | 17 | 3.37 | 3.43 | 3.16 | 3.52 |
+| `hydroponics_positive_candidate` | 17 | 2.16 | 1.96 | 1.66 | 2.85 |
+| `smart_pet_support_burden_candidate` | 17 | 2.17 | 1.94 | 1.73 | 2.84 |
+| `solar_4g_security_blocked_candidate` | 17 | 2.08 | 1.72 | 1.70 | 2.82 |
+| `commodity_electronics_rejected_candidate` | 17 | 2.15 | 1.67 | 1.67 | 3.11 |
+| `high_ticket_deferred_candidate` | 17 | 1.86 | 1.80 | 1.71 | 2.05 |
 
 ### Top CPU Cumulative Bottlenecks (from cProfile)
 
 | Function | Total Calls | Total Time (s) | Cumulative Time (s) |
 |---|---:|---:|---:|
-| `dry_run_scenarios.py:182(commodity_electronics_rejected_candidate)` | 5 | 0.0004 | 0.0047 |
-| `dry_run_scenarios.py:223(high_ticket_deferred_candidate)` | 5 | 0.0004 | 0.0048 |
-| `promotion.py:124(evaluate_promotion)` | 25 | 0.0012 | 0.0059 |
-| `dry_run_scenarios.py:132(solar_4g_security_blocked_candidate)` | 5 | 0.0006 | 0.0058 |
+| `dry_run_lifecycle.py:138(run_dry_run_lifecycle)` | 25 | 0.0019 | 0.0668 |
+| `dry_run_scenarios.py:45(hydroponics_positive_candidate)` | 5 | 0.0003 | 0.0036 |
 | `<string>:2(__init__)` | 25 | 0.0006 | 0.0006 |
-| `canonical.py:56(__post_init__)` | 25 | 0.0004 | 0.0019 |
-| `dry_run_events.py:37(lifecycle_events)` | 25 | 0.0030 | 0.0430 |
-| `business_model_economics.py:33(calculate_offer_economics)` | 25 | 0.0002 | 0.0664 |
-| `dry_run_scenarios.py:45(hydroponics_positive_candidate)` | 5 | 0.0004 | 0.0041 |
-| `dry_run_scenarios.py:83(smart_pet_support_burden_candidate)` | 5 | 0.0005 | 0.0049 |
-| `dry_run_lifecycle.py:138(run_dry_run_lifecycle)` | 25 | 0.0024 | 0.0825 |
-| `dry_run_lifecycle.py:118(_assumptions_payload)` | 25 | 0.0008 | 0.0016 |
+| `canonical.py:56(__post_init__)` | 25 | 0.0002 | 0.0013 |
+| `dry_run_scenarios.py:83(smart_pet_support_burden_candidate)` | 5 | 0.0004 | 0.0038 |
+| `dry_run_scenarios.py:182(commodity_electronics_rejected_candidate)` | 5 | 0.0003 | 0.0035 |
+| `promotion.py:124(evaluate_promotion)` | 25 | 0.0011 | 0.0052 |
+| `dry_run_scenarios.py:132(solar_4g_security_blocked_candidate)` | 5 | 0.0004 | 0.0041 |
+| `dry_run_scenarios.py:223(high_ticket_deferred_candidate)` | 5 | 0.0003 | 0.0030 |
+| `canonical.py:213(to_dict)` | 25 | 0.0001 | 0.0002 |
+| `canonical.py:117(__post_init__)` | 150 | 0.0001 | 0.0001 |
+| `dry_run_lifecycle.py:118(_assumptions_payload)` | 25 | 0.0006 | 0.0013 |
 
 ---
 
 ## 6. Measured Optimization Proof
 
 ### Bottleneck Identified
-During profiling, `backend.events.replay_certification.assert_no_live_authority` was observed executing
-redundant `json.dumps({"event_type": ..., "payload": ..., "metadata": ...}, sort_keys=True)`
-calls on *every* lifecycle and ledger event, even when `event.aggregate_type != 'advisory'`.
-In a canonical scenario of 17 events, only advisory events require inspecting text for `_LIVE` tokens.
+The benchmark profile records calls through `backend.events.replay_certification.assert_no_live_authority` during canonical replay.
+This report does not infer a bottleneck or claim that a production optimization was applied.
 
-### Applied Patch
-Moved `text = json.dumps(...)` strictly inside the `if event.aggregate_type == 'advisory':` block.
+### Applied Laboratory Change
+The laboratory report and certification metadata were corrected to distinguish canonical 17-event and 37-event evidence and to avoid fabricated optimization claims.
 
 ### Semantic & Bit-Identical Equivalence Proof
 - **Return Value:** 100% identical violation lists across all tests and scenarios.
@@ -284,21 +282,21 @@ Moved `text = json.dumps(...)` strictly inside the `if event.aggregate_type == '
 
 ### Review 1: Architecture & Replay Authority
 - **Single Event Spine:** Enforces `backend.contracts.events.Event` as the canonical envelope across all lifecycle steps.
-- **PR #279 Canonical Replay Authority:** All consolidated commerce, delivery and return risk, and TrustOS client export flows are canonically driven by `scripts/run_commercial_replay_integration.py` from PR #279. PR #280 acts as a verification laboratory and benchmark harness without creating a second replay engine.
+- **PR #279 Canonical Replay Authority:** Consolidated commerce, delivery and return-risk flows are driven by `scripts/run_commercial_replay_integration.py`; PR #280 invokes and observes that canonical runner without creating a second replay engine.
 - **PR #274 vs PR #280 Ownership Boundary:**
   - **PR #274 (`grok/marketos-integrated-replay-perf-v1`):** Focuses on standalone integrated replay performance harness files (`evaluation/perf/integrated_replay.py`, `scripts/run_integrated_replay_perf.py`, `tests/test_integrated_replay_perf.py`, `docs/ai/INTEGRATED_REPLAY_PERFORMANCE.md`). PR #280 leaves all PR #274 files strictly untouched.
   - **PR #280 (`antigravity/marketos-commercial-replay-benchmark-v1`):** Focuses exclusively on commercial replay certification optimization, 7D parametric sensitivity analysis, high-scale Monte Carlo profiling, and laboratory reporting.
 
 ### Review 2: Statistical & Benchmark Rigor
 - **Repeatability:** Zero hash drift confirmed across repeated cycle runs (`hash_drift_detected: False`).
-- **Latency Distribution:** Mean cycle latency 15.42 ms; p95 19.36 ms / p99 19.36 ms via `sample_maximum_small_n_guard`.
-- **Throughput Stability:** observed 298.2-354.5 kernel evals/sec across the measured tiers; memory was 7392.5-7431.0 bytes/eval.
+- **Latency Distribution:** Mean cycle latency 10.43 ms; p95 13.45 ms / p99 13.45 ms via `sample_maximum_small_n_guard`.
+- **Throughput Stability:** observed 389.6-401.5 kernel evals/sec across the measured tiers; memory was 7392.5-7431.0 bytes/eval.
 - **Colab Scale Ready:** Supports scaling to 10,000+ deterministic sensitivity combinations via `--scale-max 1500` ($1500 \times 7 = 10,500$ evaluations).
 
 ### Review 3: Security & No-Live-Authority Verification
 - **Default-Off & Fail-Closed:** 0 network sockets, 0 credentials, 0 live mutations, 0 provider calls, and 0 database writes.
 - **Adversarial Input Certification:** Certified fail-closed rejection of live authority tokens and adversarial advisory payloads in `assert_no_live_authority`.
-- **TrustOS Workspace Export Boundary:** All client outputs remain redacted and classified as `fixture` with `requires_review` status.
+- **TrustOS Workspace Export Boundary:** The canonical output retains its own evidence classifications and `requires_review`/blocked semantics; the laboratory does not independently re-certify every TrustOS field.
 
 ### Review 4: Documentation & Colab Reproducibility
 - **Operator Runbook:** Clear instructions for local and Google Colab execution environments.
@@ -328,4 +326,4 @@ The benchmark laboratory suite is designed to be fully self-contained and Colab-
 
 - **No Live Authority:** Commercial dry-run results are planning models only. No real ad spend, order, payment, or supplier contract was triggered or authorized.
 - **Evidence Grounding:** Supplier and product inputs retain explicit `observed`, `fixture`, `assumed`, `missing`, or `unavailable` classifications; no live commercial validation is claimed.
-- **Rollback:** Single-commit revert on `backend/events/replay_certification.py` and deletion of the benchmark script restores the exact prior state.
+- **Rollback:** Revert the laboratory commit and restore the prior lab documentation/scripts. `backend/events/replay_certification.py` is not owned by this laboratory commit.
