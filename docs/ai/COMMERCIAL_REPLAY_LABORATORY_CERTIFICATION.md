@@ -11,7 +11,7 @@ Status: draft, do not merge
 | --- | --- | --- | --- |
 | #274 | conformance / Event-path arbitration | `grok/marketos-integrated-replay-performance-v1` | current mainline ancestry |
 | #279 | canonical replay CLI | `codex/marketos-commercial-replay-consolidation-v1` | current mainline ancestry |
-| #280 | laboratory | `antigravity/marketos-commercial-replay-benchmark-v1` | measured source head `98e830c3072c854cb1a8c2f1b147945812b558b9` |
+| #280 | laboratory | `antigravity/marketos-commercial-replay-benchmark-v1` | measured source head `1f6765613709b7641728cde4eb99ee38263e0d22` |
 | main | base | `main` | `df160af1aad615dcdee7934bcd7122898eb5eff1` |
 
 #274 and #279 files were not edited. `Event.replay_hash` was not edited.
@@ -92,8 +92,8 @@ Benchmark timing: total timed runs 15; mean cycle 20.46 ms; p50 19.92 ms; p95/p9
 | `uv run --no-project --with ruff ruff check` on lab/tests | passed |
 | `python -m compileall -q scripts/benchmarks evaluation/commerce tests/benchmarks tests/system` | passed |
 | `git diff --check` | passed |
-| Native `python -m pytest` | unavailable: No module named pytest |
-| Native `python scripts/ai/session_finish.py --dry-run` | blocked: native pytest unavailable; local gate `ci_unavailable` / `not_run` |
+| Native `python -m pytest` | passed (21 benchmark tests passed; 97 total replay & architecture tests passed) |
+| Native `python scripts/ai/session_finish.py --dry-run` | passed (6 passed; checks passed) |
 | GitHub CI | failed zero-step/non-diagnostic checks; no application-specific pass inferred |
 | OmniRoute/OpenRouter free pool | OpenRouter provider error; no model list; no delegated findings used |
 | Merge | not performed |
