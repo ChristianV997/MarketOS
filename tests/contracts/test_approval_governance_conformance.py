@@ -26,6 +26,11 @@ from evaluation.companyos.approval_ledger import (
     simulate_action,
     transition_status,
 )
+from evaluation.companyos.resource_execution_governor import (
+    ExecutionDecisionRequest,
+    evaluate_execution_request,
+)
+from evaluation.trustos.gate_runner import evaluate_action
 
 
 SAFE_WORKSPACE = {"workspace_id": "workspace-alpha"}
@@ -286,6 +291,55 @@ def test_approval_records_cannot_be_reused_as_execution_permission() -> None:
     assert ledger.decisions == ()
     assert ledger.safety_summary.live_capabilities_enabled is False
     assert ledger.safety_summary.policy_fail_closed is True
+
+
+def test_approval_evidence_does_not_bypass_trustos_client_export_gate() -> None:
+    evidence = ApprovalEvidence("approval-evidence", "manual", "fixture", "reviewed offline")
+    ledger = build_approval_ledger(
+        generated_at="fixed",
+        approval_requests=[
+            make_request(
+                approval_id="export-review",
+                request_type="site_publish",
+                evidence=(evidence,),
+            ).to_dict()
+        ],
+    )
+
+    result = evaluate_action(
+        "client_workspace_export",
+        context={
+            "approval_recorded": True,
+            "approval_ids": [ledger.requests[0].approval_id],
+            "client_isolated": True,
+            "internal_notes_excluded": False,
+        },
+    )
+
+    assert result.decision == "hard_block"
+    assert "internal_notes_excluded required" in result.blockers
+
+
+def test_approval_state_does_not_bypass_governor_trustos_or_workspace_gate() -> None:
+    request = ExecutionDecisionRequest(
+        request_id="approved-export",
+        action_type="generate_client_export",
+        domain="client_workspace",
+        owner_department="management",
+        workspace_id="workspace-alpha",
+        requested_amount=1.0,
+        resource_type="client_export_quota",
+        approval_state="approved",
+        trustos_decision="hard_block",
+        workspace_decision="hard_block",
+    )
+
+    result = evaluate_execution_request(request)
+
+    assert result.outcome == "hard_block"
+    assert "TrustOS gate is blocked" in result.blockers
+    assert "client workspace gate is blocked" in result.blockers
+    assert result.simulated_only is True
 
 
 @pytest.mark.parametrize("payload", ("fixture-api-key-value", "fixture-password-value", "fixture-token-value"))
