@@ -281,6 +281,17 @@ def test_malformed_pillar_score_is_blocked_instead_of_clamped_to_zero(report_nam
     assert decision.synthesis["status"] == "malformed"
 
 
+def test_overflowing_report_number_is_not_clamped_to_one() -> None:
+    payload = ready_product()
+    payload["candidates"][0]["reports"]["marketplace"]["candidates"][0]["score"]["overall_marketplace_opportunity"] = "1e999999"
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.recommendation == "blocked"
+    assert "malformed_marketplace_report" in decision.fatal_gates
+    assert decision.synthesis["status"] == "malformed"
+
+
 def test_malformed_pillar_report_is_blocked_without_reflecting_adapter_errors() -> None:
     payload = product()
     payload["candidates"][0]["reports"]["marketplace"] = {"candidates": "not-a-list"}

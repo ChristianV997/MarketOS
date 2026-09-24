@@ -114,6 +114,17 @@ def _decimal(value: Any, field_name: str) -> Decimal:
     return result
 
 
+def _finite_report_number(value: Any, field_name: str) -> Decimal:
+    result = _decimal(value, field_name)
+    try:
+        runtime_value = float(result)
+    except (OverflowError, ValueError):
+        raise OpportunityDiscoveryError("invalid_numeric_value") from None
+    if not math.isfinite(runtime_value):
+        raise OpportunityDiscoveryError("invalid_numeric_value")
+    return result
+
+
 def _json_safe(value: Any, *, depth: int = 0, nodes: list[int] | None = None) -> Any:
     """Copy a bounded JSON-like value while rejecting secret-shaped content."""
     nodes = nodes if nodes is not None else [0]
@@ -710,7 +721,7 @@ def _synthesis(candidate: OpportunityCandidate) -> dict[str, Any]:
             for field_name in _REPORT_SCORE_NUMERIC_FIELDS:
                 if field_name in score:
                     try:
-                        _decimal(score[field_name], f"{report_name}_{field_name}")
+                        _finite_report_number(score[field_name], f"{report_name}_{field_name}")
                     except OpportunityDiscoveryError:
                         return {
                             "status": "malformed",
@@ -728,7 +739,7 @@ def _synthesis(candidate: OpportunityCandidate) -> dict[str, Any]:
                 for field_name in _REPORT_SCORE_NUMERIC_FIELDS:
                     if field_name in economics:
                         try:
-                            _decimal(economics[field_name], f"{report_name}_{field_name}")
+                            _finite_report_number(economics[field_name], f"{report_name}_{field_name}")
                         except OpportunityDiscoveryError:
                             return {
                                 "status": "malformed",
