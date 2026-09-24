@@ -66,9 +66,32 @@ _SECRET_KEY = re.compile(
     re.IGNORECASE,
 )
 _FORBIDDEN_KEY = re.compile(r"(?:raw[_-]?payload|html|prompt|formula|source[_-]?code|stack[_-]?trace)", re.IGNORECASE)
-_FORBIDDEN_VALUE = re.compile(r"(?:BEGIN [A-Z ]+PRIVATE KEY|<\s*(?:script|html)|ignore (?:all|previous)|system prompt)", re.IGNORECASE)
+_PATH_KEY = re.compile(r"(?:^|[_-])(?:path|filename|file[_-]?name)$", re.IGNORECASE)
+_FORBIDDEN_VALUE = re.compile(
+    r"(?:BEGIN [A-Z ]+PRIVATE KEY|</?[A-Z][^>]*>|ignore (?:all|previous)|system prompt|"
+    r"(?:authorization|api[_-]?key|access[_-]?token|client[_-]?secret|password|private[_-]?key)\s*[:=]\s*\S+|"
+    r"\b(?:bearer|basic)\s+[A-Z0-9._~+/=-]{8,})",
+    re.IGNORECASE,
+)
+_PATH_ESCAPE = re.compile(r"(?:^|[\\/])\.\.(?:[\\/]|$)|^(?:[\\/]|[A-Za-z]:)")
 _NONFINITE_TEXT = re.compile(r"^[+-]?(?:nan|infinity|inf)$", re.IGNORECASE)
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$")
+_REPORT_SCORE_NUMERIC_FIELDS = frozenset(
+    {
+        "overall_marketplace_opportunity",
+        "overall_supplier_feasibility",
+        "overall_consumer_attention",
+        "saturation_score",
+        "objection_density",
+        "attention_saturation_risk",
+        "gross_margin_percent",
+        "profit_per_order_before_ad_spend",
+        "break_even_cpa",
+        "break_even_roas",
+        "target_sell_price",
+        "estimated_landed_cost",
+    }
+)
 
 
 class OpportunityDiscoveryError(ValueError):
@@ -104,6 +127,8 @@ def _json_safe(value: Any, *, depth: int = 0, nodes: list[int] | None = None) ->
                 raise OpportunityDiscoveryError("invalid_field_name")
             if _SECRET_KEY.search(raw_key) or _FORBIDDEN_KEY.search(raw_key):
                 raise OpportunityDiscoveryError("sensitive_field_rejected")
+            if _PATH_KEY.search(raw_key):
+                raise OpportunityDiscoveryError("unsafe_path_field")
             result[raw_key] = _json_safe(child, depth=depth + 1, nodes=nodes)
         return result
     if isinstance(value, (list, tuple)):
@@ -153,6 +178,13 @@ def _text(value: Any, field_name: str, *, default: str = "") -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > 256:
         raise OpportunityDiscoveryError(f"invalid_{field_name}")
     return value.strip()
+
+
+def _source_ref(value: Any) -> str:
+    reference = _text(value, "source_ref")
+    if _PATH_ESCAPE.search(reference):
+        raise OpportunityDiscoveryError("unsafe_source_ref")
+    return reference
 
 
 def _source_class(value: Any) -> str:
@@ -383,7 +415,7 @@ def _normalize_evidence(raw: Any, *, default_area: str) -> tuple[OpportunityEvid
         conflicting = item.get("conflicting", False)
         if not isinstance(conflicting, bool):
             raise OpportunityDiscoveryError("invalid_conflicting_flag")
-        result.append(OpportunityEvidence(evidence_id, area, status, evidence_class, source_type, _text(item.get("source_ref"), "source_ref"), freshness, conflicting, item.get("value"), tuple(notes)))
+        result.append(OpportunityEvidence(evidence_id, area, status, evidence_class, source_type, _source_ref(item.get("source_ref")), freshness, conflicting, item.get("value"), tuple(notes)))
     return tuple(sorted(result, key=lambda item: item.evidence_id))
 
 
@@ -661,17 +693,66 @@ def _synthesis(candidate: OpportunityCandidate) -> dict[str, Any]:
                 "reason": f"malformed_{report_name}_report",
                 "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
             }
-        if not any(isinstance(item, Mapping) and item.get("candidate_id") == candidate.candidate_id for item in report["candidates"]):
+        for item in report["candidates"]:
+            if not isinstance(item, Mapping) or not isinstance(item.get("candidate_id"), str) or not _ID.fullmatch(item["candidate_id"]):
+                return {
+                    "status": "malformed",
+                    "reason": f"malformed_{report_name}_report",
+                    "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+                }
+            score = item.get("score")
+            if not isinstance(score, Mapping) or not score:
+                return {
+                    "status": "malformed",
+                    "reason": f"malformed_{report_name}_report",
+                    "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+                }
+            for field_name in _REPORT_SCORE_NUMERIC_FIELDS:
+                if field_name in score:
+                    try:
+                        _decimal(score[field_name], f"{report_name}_{field_name}")
+                    except OpportunityDiscoveryError:
+                        return {
+                            "status": "malformed",
+                            "reason": f"malformed_{report_name}_report",
+                            "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+                        }
+            economics = score.get("economics")
+            if economics is not None and not isinstance(economics, Mapping):
+                return {
+                    "status": "malformed",
+                    "reason": f"malformed_{report_name}_report",
+                    "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+                }
+            if isinstance(economics, Mapping):
+                for field_name in _REPORT_SCORE_NUMERIC_FIELDS:
+                    if field_name in economics:
+                        try:
+                            _decimal(economics[field_name], f"{report_name}_{field_name}")
+                        except OpportunityDiscoveryError:
+                            return {
+                                "status": "malformed",
+                                "reason": f"malformed_{report_name}_report",
+                                "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+                            }
+        if not any(item.get("candidate_id") == candidate.candidate_id for item in report["candidates"]):
             return {
                 "status": "malformed",
                 "reason": "report_candidate_identity_mismatch",
                 "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
             }
-    report = build_product_opportunity_synthesis(
-        market if isinstance(market, Mapping) else None,
-        supplier if isinstance(supplier, Mapping) else None,
-        consumer if isinstance(consumer, Mapping) else None,
-    ).to_dict()
+    try:
+        report = build_product_opportunity_synthesis(
+            market if isinstance(market, Mapping) else None,
+            supplier if isinstance(supplier, Mapping) else None,
+            consumer if isinstance(consumer, Mapping) else None,
+        ).to_dict()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return {
+            "status": "malformed",
+            "reason": "malformed_synthesis_report",
+            "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+        }
     candidate_report = next(
         (item for item in report.get("candidates", []) if isinstance(item, Mapping) and item.get("candidate_id") == candidate.candidate_id),
         None,
@@ -906,8 +987,20 @@ def render_markdown(report: DiscoveryRun | Mapping[str, Any]) -> str:
     data = report.to_dict() if isinstance(report, DiscoveryRun) else _json_safe(dict(report))
     if not isinstance(data, Mapping):
         raise OpportunityDiscoveryError("root_must_be_object")
+    decisions = data.get("decisions", [])
+    if not isinstance(decisions, list):
+        raise OpportunityDiscoveryError("invalid_markdown_decisions")
+    for item in decisions:
+        if not isinstance(item, Mapping):
+            raise OpportunityDiscoveryError("invalid_markdown_decision")
+        candidate_id = item.get("candidate_id", "")
+        if not isinstance(candidate_id, str) or (candidate_id and not _ID.fullmatch(candidate_id)):
+            raise OpportunityDiscoveryError("invalid_markdown_candidate_id")
+        blockers = item.get("blockers", [])
+        if not isinstance(blockers, list) or any(not isinstance(blocker, str) for blocker in blockers):
+            raise OpportunityDiscoveryError("invalid_markdown_blockers")
     lines = ["# Opportunity Discovery", "", f"- Mode: **{data.get('mode', 'unknown')}**", f"- Status: **{data.get('status', 'unknown')}**", f"- Execution: **{data.get('execution_classification', 'unknown')}**", f"- Fingerprint: `{data.get('fingerprint', 'unavailable')}`", "", "## Decisions", "", "| Candidate | Recommendation | Readiness | Blockers |", "|---|---|---|---|"]
-    for item in sorted(data.get("decisions", []), key=lambda value: str(value.get("candidate_id", ""))):
+    for item in sorted(decisions, key=lambda value: str(value.get("candidate_id", ""))):
         lines.append(f"| {item.get('candidate_id', '')} | **{item.get('recommendation', '')}** | {item.get('readiness', '')} | {', '.join(item.get('blockers', [])) or 'none recorded'} |")
     lines.extend(["", "## Safety", "", "No ads, spend, publishing, outreach, orders, payments, inventory, provider activation, or launch authority is created by this report.", "", "## Next Action", "", str(data.get("next_best_action", "review evidence")), ""])
     rendered = "\n".join(lines)

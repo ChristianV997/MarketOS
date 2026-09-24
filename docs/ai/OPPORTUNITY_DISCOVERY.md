@@ -16,9 +16,13 @@ python scripts/run_opportunity_discovery.py --mode compare --input .\candidates.
 ```
 
 The input is capped at 64 KiB, rejects duplicate JSON keys, rejects secret or
-raw-payload-shaped fields, and bounds nested values and candidate count. The
-command is read-only and does not register a workspace, call a provider, read
-credentials, write a database, or authorize a commercial action.
+raw-payload-shaped fields, filesystem path fields, traversal-like provenance
+references, HTML, and credential-shaped values, and bounds nested values and
+candidate count. Pillar reports must contain structurally valid candidate IDs
+and numeric score fields; malformed numbers are blocked before canonical
+synthesis can coerce them to zero. The command is read-only and does not
+register a workspace, call a provider, read credentials, write a database, or
+authorize a commercial action.
 
 ## Modes
 

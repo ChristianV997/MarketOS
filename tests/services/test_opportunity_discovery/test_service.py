@@ -265,6 +265,22 @@ def test_non_finite_numeric_text_in_nested_reports_is_rejected() -> None:
         run_discovery("evaluate", payload)
 
 
+@pytest.mark.parametrize("report_name, field_name", [
+    ("marketplace", "overall_marketplace_opportunity"),
+    ("supplier", "overall_supplier_feasibility"),
+    ("consumer", "overall_consumer_attention"),
+])
+def test_malformed_pillar_score_is_blocked_instead_of_clamped_to_zero(report_name: str, field_name: str) -> None:
+    payload = ready_product()
+    payload["candidates"][0]["reports"][report_name]["candidates"][0]["score"][field_name] = "not-a-number"
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.recommendation == "blocked"
+    assert f"malformed_{report_name}_report" in decision.fatal_gates
+    assert decision.synthesis["status"] == "malformed"
+
+
 def test_malformed_pillar_report_is_blocked_without_reflecting_adapter_errors() -> None:
     payload = product()
     payload["candidates"][0]["reports"]["marketplace"] = {"candidates": "not-a-list"}
@@ -320,6 +336,36 @@ def test_product_currency_mismatch_is_a_bounded_blocked_result() -> None:
 def test_markdown_rejects_unsafe_mapping_values() -> None:
     with pytest.raises(OpportunityDiscoveryError, match="sensitive_value_rejected"):
         render_markdown({"decisions": [{"candidate_id": "candidate-1", "blockers": ["system prompt"]}]})
+
+
+@pytest.mark.parametrize("payload, error", [
+    ({"candidates": [], "note": "<div>unsafe</div>"}, "sensitive_value_rejected"),
+    ({"candidates": [], "note": "Authorization: Bearer synthetic-token"}, "sensitive_value_rejected"),
+    ({"candidates": [], "source_path": "..\\private"}, "unsafe_path_field"),
+])
+def test_unsafe_html_secret_and_path_inputs_fail_closed(payload: dict, error: str) -> None:
+    with pytest.raises(OpportunityDiscoveryError, match=error):
+        run_discovery("discover", payload)
+
+
+@pytest.mark.parametrize("source_ref", ["manual://../../private", "/private/artifact", "C:\\private\\artifact", "C:..\\private"])
+def test_path_escape_source_reference_is_rejected(source_ref: str) -> None:
+    payload = product()
+    payload["candidates"][0]["evidence"][0]["source_ref"] = source_ref
+
+    with pytest.raises(OpportunityDiscoveryError, match="unsafe_source_ref"):
+        run_discovery("evaluate", payload)
+
+
+@pytest.mark.parametrize("report", [
+    {"decisions": "not-a-list"},
+    {"decisions": ["not-a-decision"]},
+    {"decisions": [{"candidate_id": "../escape", "blockers": []}]},
+    {"decisions": [{"candidate_id": "candidate-1", "blockers": [{"unsafe": True}]}]},
+])
+def test_markdown_rejects_malformed_decision_shape(report: dict) -> None:
+    with pytest.raises(OpportunityDiscoveryError):
+        render_markdown(report)
 
 
 def test_live_claim_is_downgraded_and_does_not_upgrade_evidence() -> None:
