@@ -91,9 +91,10 @@ The richer adapter contract is:
 
 Only sanitized metadata is accepted. Raw logs, stdout/stderr, credentials,
 environment values, arbitrary payloads, comments, and private notes are
-rejected. Inputs are capped at 64 KiB, 100 jobs, 100 checks, 200 step names
-per job, and 64 nested JSON containers. Input files must be regular files
-inside the selected worktree.
+rejected. Duplicate JSON keys and invalid timezone-aware timestamps are also
+rejected rather than normalized ambiguously. Inputs are capped at 64 KiB, 100
+jobs, 100 checks, 200 step names per job, and 64 nested JSON containers. Input
+files must be regular files inside the selected worktree.
 
 `log_status` is metadata, not a log payload:
 

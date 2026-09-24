@@ -491,6 +491,22 @@ def test_direct_payload_size_and_nesting_are_bounded():
     assert nested_result["error"] == "input_nesting_exceeds_limit"
 
 
+def test_duplicate_json_keys_and_invalid_timestamps_fail_closed(tmp_path: Path):
+    duplicate = tmp_path / "duplicate.json"
+    duplicate.write_text(
+        '{"schema":"MarketOS.CIAdmissibilityEvidence.v1","schema":"MarketOS.CIAdmissibilityEvidence.v1"}',
+        encoding="utf-8",
+    )
+    with pytest.raises(EvidenceInputError, match="duplicate_json_key"):
+        load_input(duplicate, root=tmp_path)
+
+    invalid = payload()
+    invalid["workflow"]["created_at"] = "2026-99-99T99:99:99+00:00"
+    result = report(invalid)
+    assert result["classification"] == "malformed"
+    assert result["error"] == "invalid_workflow_created_at"
+
+
 def test_fingerprint_and_serialization_are_deterministic():
     first = report()
     second = report(copy.deepcopy(payload()))

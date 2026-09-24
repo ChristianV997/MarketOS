@@ -8,6 +8,7 @@ non-CI distinctions without becoming another merge or deployment authority.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import re
@@ -58,6 +59,15 @@ class EvidenceInputError(ValueError):
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise EvidenceInputError("duplicate_json_key")
+        result[key] = value
+    return result
 
 
 def _canonical(value: Any) -> str:
@@ -145,6 +155,10 @@ def _timestamp(value: Any, *, field: str, required: bool = False) -> str | None:
     text = _text(value, field=field, limit=80)
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T[^\s]+(?:Z|[+-]\d{2}:\d{2})", text):
         raise EvidenceInputError(f"invalid_{field}")
+    try:
+        datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise EvidenceInputError(f"invalid_{field}") from exc
     return text
 
 
@@ -746,7 +760,7 @@ def load_input(path: Path, *, root: Path = ROOT) -> Mapping[str, Any]:
     if len(raw) > MAX_INPUT_BYTES:
         raise EvidenceInputError("input_exceeds_size_cap")
     try:
-        value = json.loads(raw.decode("utf-8"))
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise EvidenceInputError("input_not_json") from exc
     except RecursionError as exc:
