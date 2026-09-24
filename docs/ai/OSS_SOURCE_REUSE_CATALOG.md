@@ -1,0 +1,127 @@
+# OSS source reuse catalog
+
+Updated: 2026-09-24
+
+## Status
+
+`data/oss_source_intake.json` is an advisory intake catalog. It is not a source authority and it is not a fourth catalog beside the three records below. `catalog_status` is `advisory_intake_only` and `authority` is `none`.
+
+A verdict in this file does not add a dependency, copy code, call a provider, or change runtime behavior. `copy_pattern` means a later, separate handoff could study a permissive pattern. It does not perform that copy.
+
+## Relation to the PR #272 registry
+
+The canonical source list remains `data/source_adaptation_registry.json`, owned by the PR #272 lane, with `data/source_adaptation_work_orders.json` and `data/external_capability_catalog.json`. This intake does not edit those files.
+
+Rows leave this intake only by an explicit handoff from the owner of PR #272. That handoff is the only promotion path into the source adaptation registry. Matching `registry_ref` values (`src-scrapy`, `src-duckdb`, `src-polars`) point at existing rows so those repositories are not registered again.
+
+`scripts/ai/validate_oss_source_catalog.py` is offline. It hard-fails intake violations and only reports existing defects in the canonical registry and the capability catalog. It does not rewrite them.
+
+## Candidate table
+
+Pins were resolved on 2026-09-24 with `git ls-remote` and the primary `LICENSE` file at that commit. Observation detail is on each row.
+
+| source_id | work order | verdict | registry_ref | revision | tag | license |
+|---|---|---|---|---|---|---|
+| `oss-crawlee-python` | WO-C4-01 | copy_pattern | — | `ac6ebad10bedfb9111c4d95cda8a8831d28a31c5` | v1.9.3 | Apache-2.0 |
+| `oss-trafilatura` | WO-C4-01 | copy_pattern | — | `c1bc9531a2a978326112ca9987e1382745116136` | v2.2.0 | Apache-2.0 |
+| `oss-scrapy` | WO-C4-01 | copy_pattern | src-scrapy | `b1f9e56693cd2000ddcea922306f726f3e9339af` | 2.12.0 | BSD-3-Clause |
+| `oss-duckdb` | WO-C4-02 | copy_pattern | src-duckdb | `19864453f7d0ed095256d848b46e7b8630989bac` | v1.1.3 | MIT |
+| `oss-polars` | WO-C4-02 | copy_pattern | src-polars | `87feed72585eff5acf3defb7f81029123d5cba68` | py-1.17.1 | MIT |
+| `oss-networkx` | WO-C4-02 | copy_pattern | — | `49ca2290b80c1389eb4d8d8e49dcba73f8fec016` | networkx-3.7 | BSD-3-Clause |
+| `oss-ortools` | WO-C4-03 | reference_only | — | `551ad10d94835c99e5e1e684500d3db398c0e345` | v9.15 | Apache-2.0 |
+| `oss-ortools-dependency-weight` | WO-C4-03 | defer | — | `551ad10d94835c99e5e1e684500d3db398c0e345` | v9.15 | Apache-2.0 |
+| `oss-simpy` | WO-C4-03 | copy_pattern | — | `f43816490c6f76f336ad6e457d3cab9f386894af` | 4.1.2 | MIT |
+| `oss-un-comtrade-api-client` | WO-C4-04 | defer | — | `0848a3f1cf63234a93fb5635b9b19b2265afab71` | — | MIT |
+| `oss-amazon-sp-api-models` | WO-C4-05 | defer | — | `3659f96867bfc669aca7a524c2f95744ff0e4478` | v2026.08 | Apache-2.0 |
+| `oss-tiktok-business-api-sdk` | WO-C4-05 | sidecar | — | `f809c396520df2d7b201a9ccc5378d822b728ed3` | — | MIT |
+| `oss-google-ads-python` | WO-C4-05 | defer | — | `48845cfdb8c9d7ea96930a13d9a14c19286c35e8` | 33.0.0 | Apache-2.0 |
+| `oss-meta-ad-library-scripts` | WO-C4-REF | reference_only | — | `7c90db6f9a2f8342fba8e2e908b57220354b8d09` | — | LicenseRef-Facebook-API-connection |
+| `oss-product-opportunity` | WO-C4-REF | reference_only | — | `1cc0da6246bb925b59ad006f7c56765e5066784d` | — | MIT |
+| `oss-gapscope` | WO-C4-REF | reject | — | `97db6018a2974342b5007ab133c5e48aa2e20165` | — | MIT |
+| `oss-speculora` | WO-C4-REF | reference_only | — | `c429c24f1edac27f19ef2bb070936aa4be59e7d3` | — | CC-BY-4.0 |
+
+Primary LICENSE URLs, each at the pinned commit:
+
+- `oss-crawlee-python`: https://github.com/apify/crawlee-python/blob/ac6ebad10bedfb9111c4d95cda8a8831d28a31c5/LICENSE
+- `oss-trafilatura`: https://github.com/adbar/trafilatura/blob/c1bc9531a2a978326112ca9987e1382745116136/LICENSE
+- `oss-scrapy`: https://github.com/scrapy/scrapy/blob/b1f9e56693cd2000ddcea922306f726f3e9339af/LICENSE
+- `oss-duckdb`: https://github.com/duckdb/duckdb/blob/19864453f7d0ed095256d848b46e7b8630989bac/LICENSE
+- `oss-polars`: https://github.com/pola-rs/polars/blob/87feed72585eff5acf3defb7f81029123d5cba68/LICENSE
+- `oss-networkx`: https://github.com/networkx/networkx/blob/49ca2290b80c1389eb4d8d8e49dcba73f8fec016/LICENSE.txt
+- `oss-ortools`: https://github.com/google/or-tools/blob/551ad10d94835c99e5e1e684500d3db398c0e345/LICENSE
+- `oss-ortools-dependency-weight`: https://github.com/google/or-tools/blob/551ad10d94835c99e5e1e684500d3db398c0e345/LICENSE
+- `oss-simpy`: https://gitlab.com/team-simpy/simpy/-/blob/f43816490c6f76f336ad6e457d3cab9f386894af/LICENSE.rst
+- `oss-un-comtrade-api-client`: https://github.com/uncomtrade/comtradeapicall/blob/0848a3f1cf63234a93fb5635b9b19b2265afab71/LICENSE
+- `oss-amazon-sp-api-models`: https://github.com/amzn/selling-partner-api-models/blob/3659f96867bfc669aca7a524c2f95744ff0e4478/LICENSE
+- `oss-tiktok-business-api-sdk`: https://github.com/tiktok/tiktok-business-api-sdk/blob/f809c396520df2d7b201a9ccc5378d822b728ed3/LICENSE.md
+- `oss-google-ads-python`: https://github.com/googleads/google-ads-python/blob/48845cfdb8c9d7ea96930a13d9a14c19286c35e8/LICENSE
+- `oss-meta-ad-library-scripts`: https://github.com/facebookresearch/Ad-Library-API-Script-Repository/blob/7c90db6f9a2f8342fba8e2e908b57220354b8d09/LICENSE
+- `oss-product-opportunity`: https://github.com/sprensis/product-opportunity/blob/1cc0da6246bb925b59ad006f7c56765e5066784d/LICENSE
+- `oss-gapscope`: https://github.com/sarthak070707/gapscope-market-intelligence/blob/97db6018a2974342b5007ab133c5e48aa2e20165/LICENSE
+- `oss-speculora`: https://github.com/speculora/speculora/blob/c429c24f1edac27f19ef2bb070936aa4be59e7d3/LICENSE
+
+### Registry pointers
+
+| intake id | registry_ref | repository |
+|---|---|---|
+| `oss-scrapy` | `src-scrapy` | https://github.com/scrapy/scrapy |
+| `oss-duckdb` | `src-duckdb` | https://github.com/duckdb/duckdb |
+| `oss-polars` | `src-polars` | https://github.com/pola-rs/polars |
+
+Scrapy's registry `revision` is annotated tag object `8c85937adef8279f12e35e0ee9a20c52ff6d1648`. `git ls-remote` on 2026-09-24 showed that tag peels to commit `b1f9e56693cd2000ddcea922306f726f3e9339af`, which is the intake pin. The registry was not changed.
+
+DuckDB `v1.1.3` and Polars `py-1.17.1` matched the registry commits directly. Newer tags were listed and were not used.
+
+### Notes that are not promotions
+
+- Crawlee `copy_pattern` excludes `fingerprint_suite`, `proxy_configuration.py`, session pools, curl impersonation, and browser automation observed at the pin.
+- Trafilatura `copy_pattern` is allowed only because the LICENSE file at `v2.2.0` is Apache-2.0. Tag `v1.6.0` (`0bce2189288f4211e561c46083d7952fa65a7b72`) still had a GPL-3.0 LICENSE file when read the same day.
+- OR-Tools dependency weight is `oss-ortools-dependency-weight` with verdict `defer`. The modeling row stays `reference_only`. GitHub reported repository size `1309998` on 2026-09-24. That number is not an approval to depend on the package.
+- SimPy's canonical repository is GitLab `https://gitlab.com/team-simpy/simpy`, which is the Source code URL PyPI published for 4.1.2. `https://github.com/simpy/simpy` was not found.
+- UN Comtrade is `defer` only. The README at the pin takes a `subscription_key`. No key is stored and no call is made. The LICENSE copyright line names the Python Packaging Authority, not the UN.
+- Platform SDKs are `sidecar` or `defer` only: Amazon SP-API models `defer`, TikTok Business SDK `sidecar`, Google Ads Python `defer`.
+
+## Rejects and non-canonical names
+
+- GapScope: no canonical repository was identified. A GitHub name search on 2026-09-24 returned several unrelated repositories. The intake pins `sarthak070707/gapscope-market-intelligence` only so the row has a real commit and LICENSE file, and the verdict is `reject`.
+- product-opportunity: `sprensis/product-opportunity` was the closest name match whose primary LICENSE file was read. That file is MIT at `1cc0da6246bb925b59ad006f7c56765e5066784d`, so the row is not rejected for a missing license. Verdict remains `reference_only` so it cannot become a scoring authority next to MarketOS product opportunity synthesis. Confidence is low that this namesake is a canonical upstream.
+- Meta Ad Library scripts: `facebookresearch/Ad-Library-API-Script-Repository` is reference_only. Its LICENSE file is a Facebook API-connection grant, not a general OSI license. Unofficial scrapers were not pinned.
+- Speculora: `speculora/speculora` is reference_only methodology. The LICENSE file is CC BY 4.0 for documentation and excludes the name and logo.
+
+## Reported defects, not fixed
+
+The validator reports these and still exits 0 when the intake itself is valid:
+
+- Patterned placeholder SHAs on `src-coderos`, `src-gstack`, and `src-hermes-ecc` in `data/source_adaptation_registry.json` (both `revision` and `commit_sha`).
+- All-zero `commit_sha` rows in `data/external_capability_catalog.json`, including `meta_ad_library` and `tiktok_creative_center` (15 rows on this base commit).
+
+## Safety limits
+
+- Offline validator and offline tests. No network calls at runtime.
+- No scraper, proxy rotation, browser evasion, credential handling, or live provider call.
+- No raw provider payload store and no external mutation.
+- No new provider adapter and no edit to the three existing catalogs.
+- Crawlee anti-blocking, fingerprint, and proxy surfaces are prohibited.
+- GPL or AGPL, unknown, or missing licenses cannot be `integrate` or `copy_pattern`.
+- Platform SDKs and the UN Comtrade client cannot be anything except `sidecar` or `defer`.
+- At most five candidates per work order.
+
+## Validator
+
+```bash
+python scripts/ai/validate_oss_source_catalog.py --json
+python scripts/ai/validate_oss_source_catalog.py --markdown
+```
+
+Exit `0` when the intake is valid. Reported registry and capability defects do not change that code. Exit `1` when the intake fails. Exit `2` when the intake file is missing.
+
+## Rollback
+
+Revert the single intake commit, or delete these four files:
+
+- `data/oss_source_intake.json`
+- `scripts/ai/validate_oss_source_catalog.py`
+- `tests/contracts/test_oss_source_catalog.py`
+- `docs/ai/OSS_SOURCE_REUSE_CATALOG.md`
+
+Nothing else in the tree depends on them. The canonical registry, work orders, and capability catalog stay as they were.
