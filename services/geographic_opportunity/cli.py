@@ -38,12 +38,31 @@ from .serialization import offer_from_dict
 _FORMATS = ("json", "markdown")
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """``json.loads``'s default object hook silently keeps only the last
+    value for a duplicate key at any nesting level (confirmed:
+    ``json.loads('{"a": 1, "a": 2}')`` returns ``{"a": 2}`` with no
+    warning) -- a caller-supplied offer file with a duplicate
+    ``destination_price``, ``lane``, or any other key would silently have
+    one observation overwritten by another with no rejection or
+    disclosure. This hook is applied to every JSON object encountered,
+    at every nesting level, since ``json.loads`` calls ``object_pairs_hook``
+    once per object regardless of depth."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate offer key: {key!r}")
+        result[key] = value
+    return result
+
+
 def load_offer_file(path: Path) -> dict[str, Any]:
     """Reads and JSON-parses one local offer file. Performs no network
     access and no normalization beyond UTF-8 decoding; any parse error
-    propagates to the caller unchanged."""
+    propagates to the caller unchanged. Rejects a duplicate key at any
+    nesting level rather than silently keeping only the last value."""
     text = path.read_text(encoding="utf-8")
-    return json.loads(text)
+    return json.loads(text, object_pairs_hook=_reject_duplicate_keys)
 
 
 def _fmt_money(money: Money | None) -> str:

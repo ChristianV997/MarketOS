@@ -96,3 +96,29 @@ class TestUnsupportedFormatRejected:
         report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
         with pytest.raises(ValueError):
             cli.render(report, "yaml")
+
+
+class TestDuplicateOfferKeysRejected:
+    """json.loads's default behavior silently keeps only the last value
+    for a duplicate key at any nesting level -- confirmed directly:
+    json.loads('{"a": 1, "a": 2}') returns {"a": 2} with no warning. A
+    caller-supplied offer file with a duplicate top-level or nested key
+    (e.g. two "destination_price" blocks) must be rejected, not silently
+    resolved to whichever one happened to parse last."""
+
+    def test_duplicate_top_level_key_is_rejected(self, tmp_path):
+        bad = tmp_path / "dup_top_level.json"
+        bad.write_text('{"candidate_id": "c1", "candidate_id": "c2"}')
+        with pytest.raises(ValueError, match="duplicate offer key"):
+            cli.load_offer_file(bad)
+
+    def test_duplicate_nested_key_is_rejected(self, tmp_path):
+        bad = tmp_path / "dup_nested.json"
+        bad.write_text('{"identity": {"candidate_id": "c1", "candidate_id": "c2"}}')
+        with pytest.raises(ValueError, match="duplicate offer key"):
+            cli.load_offer_file(bad)
+
+    def test_a_file_without_duplicate_keys_still_loads_normally(self):
+        data = cli.load_offer_file(FIXTURES_DIR / "goods_offer.json")
+        assert isinstance(data, dict)
+        assert "identity" in data
