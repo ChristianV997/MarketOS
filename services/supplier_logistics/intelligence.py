@@ -52,7 +52,9 @@ def evaluate_supplier_logistics(
 
     try:
         # Normalize evidence input
-        if isinstance(supplier_evidence, dict):
+        if supplier_evidence is None:
+            evidence_data = {}
+        elif isinstance(supplier_evidence, dict):
             # Parse dict back into expected format or treat as raw
             evidence_data = supplier_evidence
         elif hasattr(supplier_evidence, "to_dict"):
@@ -61,8 +63,8 @@ def evaluate_supplier_logistics(
             return SupplierLogisticsResult("blocked", ("invalid_supplier_evidence_format",), {}, _generate_fingerprint({}))
 
         # We must support explicit missing vs unprovided states
-        evidence_mode = evidence_data.get("evidence_mode", "unknown")
-        if evidence_mode not in {"fixture", "simulated", "stale", "missing", "conflicting"}:
+        evidence_mode = evidence_data.get("evidence_mode", "unknown") if evidence_data else "missing"
+        if evidence_mode not in {"fixture", "simulated", "stale", "missing", "conflicting", "manual"}:
             # Normalize live claims to unavailable per architecture rules unless admissible
             evidence_mode = "unavailable"
 
@@ -92,6 +94,11 @@ def evaluate_supplier_logistics(
                 raise SupplierLogisticsError("missing_shipping_cost")
             processed_offer["shipping_cost"] = offer["shipping_cost"]
 
+            # Handle additional logistics fields if present
+            for extra in ("customs_cost", "handling_cost", "delivery_days", "capacity"):
+                if extra in offer:
+                    processed_offer[extra] = offer[extra]
+
             # Check for currency mismatch if currencies are provided
             curr1 = offer.get("currency")
             curr2 = evidence_data.get("currency")
@@ -113,7 +120,7 @@ def evaluate_supplier_logistics(
             if leakage:
                 raise ValueError(f"Workspace isolation violation: {leakage}")
         except Exception as e:
-            raise SupplierLogisticsError(f"workspace_isolation_failed")
+            raise SupplierLogisticsError("workspace_isolation_failed")
 
         return SupplierLogisticsResult(
             status="ready",

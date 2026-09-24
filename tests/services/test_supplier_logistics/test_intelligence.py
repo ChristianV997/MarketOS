@@ -87,3 +87,23 @@ def test_supplier_logistics_workspace_leakage_fails():
     result = evaluate_supplier_logistics(offers, evidence)
     assert result.status == "failed"
     assert "workspace_isolation_failed" in result.reasons
+
+def test_supplier_logistics_none_evidence_mode_missing():
+    offers = [
+        {"candidate_id": "cand-1", "type": "goods", "unit_cost": 10.0, "shipping_cost": 2.0}
+    ]
+
+    result = evaluate_supplier_logistics(offers, None)
+    assert result.status == "ready"
+    assert result.payload["evidence_mode"] == "missing"
+
+def test_supplier_logistics_handles_freight_and_customs():
+    offers = [
+        {"candidate_id": "cand-1", "type": "goods", "unit_cost": 10.0, "shipping_cost": 2.0, "customs_cost": 1.5, "delivery_days": 10}
+    ]
+    evidence = {"evidence_mode": "fixture"}
+
+    result = evaluate_supplier_logistics(offers, evidence)
+    assert result.status == "ready"
+    assert result.payload["offers"][0]["customs_cost"] == 1.5
+    assert result.payload["offers"][0]["delivery_days"] == 10
