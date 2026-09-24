@@ -138,6 +138,17 @@ def test_synthesis_rejects_a_report_bound_to_another_candidate() -> None:
     assert "malformed_synthesis_report" in decision.evidence_gaps
 
 
+def test_duplicate_synthesis_rows_fail_closed_before_canonical_fusion() -> None:
+    payload = product()
+    row = copy.deepcopy(payload["candidates"][0]["reports"]["marketplace"]["candidates"][0])
+    payload["candidates"][0]["reports"]["marketplace"]["candidates"].append(row)
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.recommendation == "blocked"
+    assert "duplicate_report_candidate_id" in decision.fatal_gates
+
+
 def test_discover_ranks_multiple_candidates_by_canonical_synthesis_score() -> None:
     first = ready_product()["candidates"][0]
     second = copy.deepcopy(first)
@@ -170,6 +181,48 @@ def test_service_missing_cost_is_unavailable_but_explicit_zero_is_preserved() ->
 
     assert zero_decision.scenarios["base"]["delivery_cost"]["amount"] == "0"
     assert "base.delivery_cost" not in zero_decision.evidence_gaps
+
+
+def test_null_product_cost_is_unavailable_not_malformed() -> None:
+    payload = product()
+    payload["candidates"][0]["economics"]["product_cost"]["amount"] = None
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.scenarios["base"]["status"] == "unavailable"
+    assert "product_cost" in decision.evidence_gaps
+    assert "economics_malformed" not in decision.fatal_gates
+
+
+def test_null_shipping_is_unavailable_not_malformed() -> None:
+    payload = product()
+    payload["candidates"][0]["economics"]["assumptions"]["supplier_shipping"]["amount"] = None
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.scenarios["base"]["status"] == "unavailable"
+    assert "shipping" in decision.evidence_gaps
+
+
+def test_service_capacity_is_required_for_economics_readiness() -> None:
+    payload = fixture("service_complete.json")
+    for scenario in payload["candidates"][0]["economics"]["scenarios"].values():
+        scenario.pop("capacity_hours")
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.scenarios["base"]["status"] == "unavailable"
+    assert "base.capacity_hours" in decision.evidence_gaps
+
+
+def test_negative_service_delivery_cost_is_a_fatal_economics_failure() -> None:
+    payload = fixture("service_complete.json")
+    payload["candidates"][0]["economics"]["scenarios"]["base"]["delivery_cost"]["amount"] = "-1"
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.recommendation == "blocked"
+    assert "economics_malformed" in decision.fatal_gates
 
 
 def test_non_finite_numeric_input_is_rejected() -> None:
@@ -341,7 +394,9 @@ def test_product_currency_mismatch_is_a_bounded_blocked_result() -> None:
     decision = run_discovery("evaluate", payload).decisions[0]
 
     assert decision.scenarios["base"]["status"] == "malformed"
-    assert "economics_unavailable" in decision.blockers
+    assert "economics_malformed" in decision.blockers
+    assert decision.recommendation == "blocked"
+    assert "currency_mismatch" in decision.fatal_gates
 
 
 def test_markdown_rejects_unsafe_mapping_values() -> None:

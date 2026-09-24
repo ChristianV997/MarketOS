@@ -492,6 +492,11 @@ def _evidence_ref(candidate: OpportunityCandidate, area: str) -> EvidenceRef | N
     return EvidenceRef(item.evidence_id, item.source_type, document_ref=item.source_ref, extraction_method="offline_input", evidence_state=state)
 
 
+def _money_is_missing(value: Any) -> bool:
+    """Treat absent and explicit-null money as unavailable, not malformed."""
+    return value is None or (isinstance(value, Mapping) and value.get("amount") is None)
+
+
 def _money(value: Any, *, currency: str, candidate: OpportunityCandidate, area: str, field_name: str) -> Money:
     if isinstance(value, Mapping):
         amount = value.get("amount")
@@ -544,9 +549,9 @@ def _unit_scenarios(candidate: OpportunityCandidate) -> tuple[dict[str, Any], di
     missing: list[str] = []
     price_value = raw.get("price")
     cost_value = raw.get("product_cost")
-    if price_value is None:
+    if _money_is_missing(price_value):
         missing.append("price")
-    if cost_value is None:
+    if _money_is_missing(cost_value):
         missing.append("product_cost")
     required = raw.get("required_inputs", ("shipping",))
     if not isinstance(required, (list, tuple)):
@@ -554,7 +559,10 @@ def _unit_scenarios(candidate: OpportunityCandidate) -> tuple[dict[str, Any], di
     assumptions_raw = raw.get("assumptions", {})
     if not isinstance(assumptions_raw, Mapping):
         raise OpportunityDiscoveryError("invalid_economics_assumptions")
-    if "shipping" in required and not any(key in assumptions_raw for key in ("supplier_shipping", "domestic_shipping", "international_shipping")):
+    if "shipping" in required and not any(
+        key in assumptions_raw and not _money_is_missing(assumptions_raw[key])
+        for key in ("supplier_shipping", "domestic_shipping", "international_shipping")
+    ):
         missing.append("shipping")
     if missing:
         unavailable = {"status": "unavailable", "missing_inputs": sorted(set(missing))}
@@ -566,7 +574,7 @@ def _unit_scenarios(candidate: OpportunityCandidate) -> tuple[dict[str, Any], di
         assumption_values: dict[str, Any] = {}
         money_fields = {"supplier_shipping", "domestic_shipping", "international_shipping", "brokerage_fee", "payment_fee_fixed", "platform_fee_fixed", "ad_spend", "cac"}
         for key, value in assumptions_raw.items():
-            if key in money_fields:
+            if key in money_fields and not _money_is_missing(value):
                 assumption_values[key] = _money(value, currency=currency, candidate=candidate, area="economics", field_name=key)
             elif key in UnitEconomicsAssumptions.__dataclass_fields__:
                 assumption_values[key] = _decimal(value, key)
@@ -614,8 +622,14 @@ def _service_scenarios(candidate: OpportunityCandidate) -> tuple[dict[str, Any],
             missing.append(f"{name}_scenario")
             outputs[name] = {"status": "unavailable", "missing_inputs": [f"{name}_scenario"]}
             continue
-        required = ("service_fee", "ad_spend", "contribution_margin", "roas_before", "roas_after", "cac_before", "cac_after", "delivery_hours", "delivery_cost", "tooling_cost", "pass_through_cost", "revision_reserve")
-        absent = [key for key in required if values.get(key) is None]
+        required = ("service_fee", "ad_spend", "contribution_margin", "roas_before", "roas_after", "cac_before", "cac_after", "delivery_hours", "capacity_hours", "delivery_cost", "tooling_cost", "pass_through_cost", "revision_reserve")
+        required_money = {"service_fee", "ad_spend", "cac_before", "cac_after", "delivery_cost", "tooling_cost", "pass_through_cost", "revision_reserve"}
+        absent = [
+            key
+            for key in required
+            if (key in required_money and _money_is_missing(values.get(key)))
+            or (key not in required_money and values.get(key) is None)
+        ]
         if absent:
             missing.extend(f"{name}.{key}" for key in absent)
             outputs[name] = {"status": "unavailable", "missing_inputs": absent}
@@ -631,11 +645,11 @@ def _service_scenarios(candidate: OpportunityCandidate) -> tuple[dict[str, Any],
                 "cac_after": _money(values["cac_after"], currency=currency, candidate=candidate, area="economics", field_name="cac_after"),
                 "delivery_hours": _decimal(values["delivery_hours"], "delivery_hours"),
                 "capacity_hours": _decimal(values["capacity_hours"], "capacity_hours") if values.get("capacity_hours") is not None else None,
-                "delivery_cost": _money(values["delivery_cost"], currency=currency, candidate=candidate, area="economics", field_name="delivery_cost") if values.get("delivery_cost") is not None else None,
-                "tooling_cost": _money(values["tooling_cost"], currency=currency, candidate=candidate, area="economics", field_name="tooling_cost") if values.get("tooling_cost") is not None else None,
-                "pass_through_cost": _money(values["pass_through_cost"], currency=currency, candidate=candidate, area="economics", field_name="pass_through_cost") if values.get("pass_through_cost") is not None else None,
-                "target_monthly_contribution": _money(values["target_monthly_contribution"], currency=currency, candidate=candidate, area="economics", field_name="target_monthly_contribution") if values.get("target_monthly_contribution") is not None else None,
-                "client_value_created": _money(values["client_value_created"], currency=currency, candidate=candidate, area="economics", field_name="client_value_created") if values.get("client_value_created") is not None else None,
+                "delivery_cost": _money(values["delivery_cost"], currency=currency, candidate=candidate, area="economics", field_name="delivery_cost"),
+                "tooling_cost": _money(values["tooling_cost"], currency=currency, candidate=candidate, area="economics", field_name="tooling_cost"),
+                "pass_through_cost": _money(values["pass_through_cost"], currency=currency, candidate=candidate, area="economics", field_name="pass_through_cost"),
+                "target_monthly_contribution": None if _money_is_missing(values.get("target_monthly_contribution")) else _money(values["target_monthly_contribution"], currency=currency, candidate=candidate, area="economics", field_name="target_monthly_contribution"),
+                "client_value_created": None if _money_is_missing(values.get("client_value_created")) else _money(values["client_value_created"], currency=currency, candidate=candidate, area="economics", field_name="client_value_created"),
                 "evidence_refs": tuple(ref for ref in (_evidence_ref(candidate, "economics"),) if ref),
                 "refund_revision_reserve": _money(values["revision_reserve"], currency=currency, candidate=candidate, area="economics", field_name="revision_reserve"),
             }
@@ -704,6 +718,7 @@ def _synthesis(candidate: OpportunityCandidate) -> dict[str, Any]:
                 "reason": f"malformed_{report_name}_report",
                 "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
             }
+        seen_candidate_ids: set[str] = set()
         for item in report["candidates"]:
             if not isinstance(item, Mapping) or not isinstance(item.get("candidate_id"), str) or not _ID.fullmatch(item["candidate_id"]):
                 return {
@@ -718,6 +733,13 @@ def _synthesis(candidate: OpportunityCandidate) -> dict[str, Any]:
                     "reason": f"malformed_{report_name}_report",
                     "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
                 }
+            if item["candidate_id"] in seen_candidate_ids:
+                return {
+                    "status": "malformed",
+                    "reason": "duplicate_report_candidate_id",
+                    "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
+                }
+            seen_candidate_ids.add(item["candidate_id"])
             for field_name in _REPORT_SCORE_NUMERIC_FIELDS:
                 if field_name in score:
                     try:
@@ -875,8 +897,10 @@ def _decision(candidate: OpportunityCandidate, *, mode: str, workspace: Any, reg
         blockers.append("supplier_claim_not_verification")
     scenarios, base, economics_missing = _economics(candidate)
     gaps.extend(economics_missing)
-    if base.get("status") in {"unavailable", "malformed"}:
+    if base.get("status") == "unavailable":
         blockers.append("economics_unavailable")
+    elif base.get("status") == "malformed":
+        blockers.append("economics_malformed")
     if "currency_mismatch" in economics_missing:
         blockers.append("currency_mismatch")
     contribution = base.get("contribution_after_cac") or base.get("contribution")
@@ -913,7 +937,7 @@ def _decision(candidate: OpportunityCandidate, *, mode: str, workspace: Any, reg
             "report_candidate_identity_mismatch",
         }
         or item.startswith("conflicting_")
-        or item.startswith("malformed_")
+        or item.startswith(("malformed_", "duplicate_"))
     )
     if fatal:
         recommendation = "blocked"
