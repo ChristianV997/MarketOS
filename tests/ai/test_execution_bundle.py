@@ -432,6 +432,25 @@ def test_resume_rejects_missing_root(tmp_path: Path):
         bundle.resume(tmp_path / "does-not-exist", resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
 
 
+def test_resume_rejects_a_str_root_instead_of_path(tmp_path: Path):
+    """The PR description for this lane claims a str-instead-of-Path root
+    is one of the adversarial cases reproduced against this entrypoint,
+    but no test exercised it until now -- only root=None and a
+    nonexistent-but-genuine Path were covered. resume()'s own
+    isinstance(root, Path) check (never packet-supplied or unvalidated)
+    must reject a bare string before it ever reaches
+    validate_resume_packet/_assert_filesystem_contained, both of which
+    call .resolve() and would instead raise a raw, unhelpful AttributeError
+    on a str (no .resolve() method) rather than this module's own
+    ExecutionBundleError."""
+    (tmp_path / "scope").mkdir()
+    (tmp_path / "scope" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    task_packet = _resume_task_packet(tmp_path)
+    resume_packet = _resume_packet(task_packet, ["scope/a.py"])
+    with pytest.raises(bundle.ExecutionBundleError, match="Path root"):
+        bundle.resume(str(tmp_path), resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+
 def test_resume_rejects_path_traversal_in_changed_files(tmp_path: Path):
     """A genuine resume packet cannot be *built* with a traversal entry
     (build_resume_packet already rejects it) -- the threat this tests is a
