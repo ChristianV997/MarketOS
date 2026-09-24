@@ -218,6 +218,67 @@ def test_full_chain_composes_under_one_workspace_identity(local_authorities, glo
     assert len(delivery.sections) == 2
 
 
+def _build_offer_and_engagement_fingerprints(tmp_path_factory):
+    """Runs the offer + engagement + economics stages from scratch against
+    a brand-new, independent set of registries and returns their
+    fingerprints. Used to prove the chain's output is deterministic across
+    two fully independent runs, not just within one shared fixture."""
+    tmp_path = tmp_path_factory.mktemp("chain-determinism")
+    import backend.core.persistence as persistence_module
+
+    persistence_module.STATE_DIR = str(tmp_path / "state")
+    workspace_registry = WorkspaceRegistry(str(tmp_path / "workspaces.json"))
+    workspace = workspace_registry.register(
+        ClientWorkspace(
+            workspace_id=WORKSPACE_ID, name="fixture consulting client",
+            workspace_type="client_service", mode="client_service", dry_run_default=True,
+        )
+    )
+    report_registry = ReportRegistry(str(tmp_path / "reports.json"))
+    report_registry.register(
+        CommercialReport(
+            report_id="report_fixture_product", workspace_id=workspace.workspace_id,
+            proposal_id="proposal-fixture", experiment_id="experiment-fixture",
+            service_name="product_research", title="Fixture product report",
+            summary="A bounded fixture report.", status="completed",
+        )
+    )
+    artifact_store = ArtifactStore(workspace, workspace_registry)
+
+    offer_request = ConsultingOfferRequest.from_mapping(
+        json.loads((OFFERS_FIXTURES / "complete_product.json").read_text(encoding="utf-8"))
+    )
+    proposal = build_consulting_offer_proposal(
+        offer_request, workspace=workspace, artifact_store=artifact_store,
+        workspace_registry=workspace_registry, report_registry=report_registry,
+    )
+    engagement_request = ConsultingEngagementRequest.from_mapping(
+        json.loads((ENGAGEMENT_FIXTURES / "complete_product.json").read_text(encoding="utf-8"))
+    )
+    engagement = build_consulting_engagement(
+        engagement_request, workspace=workspace, artifact_store=artifact_store,
+        workspace_registry=workspace_registry, report_registry=report_registry,
+    )
+    economics = build_consulting_economics_report(
+        json.loads((ECONOMICS_FIXTURES / "project_complete.json").read_text(encoding="utf-8"))
+    )
+    return proposal.fingerprint, engagement.fingerprint, economics.fingerprint
+
+
+def test_the_chain_is_deterministic_across_two_fully_independent_runs(tmp_path_factory):
+    """Not a duplicate of each package's own single-build determinism
+    test: this rebuilds offers -> engagement -> economics twice from
+    scratch, each against its own brand-new workspace/report registries
+    (different tmp_path, different ArtifactStore paths), and asserts the
+    three fingerprints match byte-for-byte -- proving determinism holds
+    across independent runs of the whole composed sequence, not just
+    within one shared set of registries."""
+    first = _build_offer_and_engagement_fingerprints(tmp_path_factory)
+    second = _build_offer_and_engagement_fingerprints(tmp_path_factory)
+    assert first == second
+    assert all(len(fp) == 64 for fp in first)
+
+
 def test_cross_workspace_report_is_rejected_by_the_delivery_boundary(global_report_registry):
     """Fail-closed: a report registered under a different workspace_id must
     never be packaged into another workspace's client deliverable."""
