@@ -32,7 +32,7 @@ test("shell registers one strategy route and no campaign mutation", async () => 
   assert.doesNotMatch(page, /<PublicitySurface/);
   assert.doesNotMatch(page, /method:\s*["']POST["']|fetch\(/);
   assert.doesNotMatch(main, /method:\s*["']POST["']/);
-  assert.match(page, /Loading the draft strategy plan/);
+  assert.match(page, /Loading the draft strategy plan\. draft_only=true · live_validated=false · launch_authorized=false/);
   assert.match(page, /empty plan/);
   assert.match(page, /unavailable/);
   assert.match(page, /partial evidence/);

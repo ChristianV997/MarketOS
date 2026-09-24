@@ -33,7 +33,11 @@ export function MarketingStrategyPage({ state = "draft" }: { state?: StrategyRou
   const [params] = useSearchParams();
   state = fixtureStateFromSearch(params, state);
   if (state === "loading") {
-    return <p role="status" aria-live="polite">Loading the draft strategy plan.</p>;
+    return (
+      <p role="status" aria-live="polite">
+        Loading the draft strategy plan. draft_only=true · live_validated=false · launch_authorized=false
+      </p>
+    );
   }
   const packet = state === "empty" || state === "unavailable" ? null : packetFor(state);
   const composed = composePublicityScenario(packet, null);
