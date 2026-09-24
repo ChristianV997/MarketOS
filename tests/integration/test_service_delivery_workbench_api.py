@@ -290,6 +290,9 @@ def test_workbench_rejects_directory_as_projection_path(monkeypatch, tmp_path):
     (json.dumps({"schema_version": "service-delivery-plane-v1", "read_only": True, "network_calls": True, "engagements": []}), "unsafe_service_delivery_projection"),
     (json.dumps({"schema_version": "service-delivery-plane-v1", "read_only": True, "mutated": True, "engagements": []}), "unsafe_service_delivery_projection"),
     (json.dumps({"schema_version": "service-delivery-plane-v1", "read_only": True, "engagements": "not-a-list"}), "service_delivery_projection_rows_must_be_array"),
+    # Small on disk but deep enough to blow json.loads's recursion limit; must
+    # still fail closed rather than propagate an uncaught RecursionError.
+    ("[" * 200_000 + "]" * 200_000, "service_delivery_projection_unavailable"),
 ])
 def test_workbench_handles_all_malformed_json_variants(monkeypatch, tmp_path, bad_content, expected_diagnostic):
     artifacts = tmp_path / "artifacts"

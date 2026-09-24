@@ -102,7 +102,7 @@ def _load_projection(path: Path | None, *, authenticated_workspace_id: str | Non
         if path.stat().st_size > MAX_PROJECTION_BYTES:
             return _unavailable("service_delivery_projection_oversized")
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return _unavailable("service_delivery_projection_unavailable")
     if not isinstance(value, Mapping):
         return _unavailable("service_delivery_projection_root_must_be_object")
