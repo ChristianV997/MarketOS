@@ -428,6 +428,17 @@ class TradeOpportunityOffer:
     ``freight_duty``/``returns_lead_time``; service/hybrid offerings
     require ``service_capacity``; a pure "service" offering forbids the
     physical-goods profiles and vice versa.
+
+    When ``geography_kind="known"``, ``lane.origin``/
+    ``lane.destination_country`` must equal ``identity.origin_country``/
+    ``identity.destination_country``. ``lane`` is what actually drives
+    every duty/tax/currency figure ``report.py`` hands to
+    ``calculate_unit_economics``, while ``identity`` is what a report's
+    own JSON/Markdown rendering displays as this candidate's origin and
+    destination -- without this check, a caller could bind a candidate to
+    one country pair while silently pricing it with another country's
+    lane assumptions, contaminating the report with a geography it never
+    displays.
     """
 
     identity: CandidateBoundTradeIdentity
@@ -474,6 +485,10 @@ class TradeOpportunityOffer:
                 raise EconomicsError("geography_kind='known' requires a lane")
             if not isinstance(self.lane, MarketLane):
                 raise EconomicsError("invalid lane")
+            if self.lane.origin != self.identity.origin_country:
+                raise EconomicsError("lane.origin must match identity.origin_country; a candidate's bound country identity must not be contaminated by a lane assumption for a different country")
+            if self.lane.destination_country != self.identity.destination_country:
+                raise EconomicsError("lane.destination_country must match identity.destination_country; a candidate's bound country identity must not be contaminated by a lane assumption for a different country")
             for optional_profile, expected_type in (
                 (self.trade_flow, BilateralTradeFlowObservation),
                 (self.destination_price, DestinationPriceObservation),

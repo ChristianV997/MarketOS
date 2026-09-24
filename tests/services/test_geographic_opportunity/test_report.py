@@ -343,6 +343,64 @@ class TestListingPriceIsNeverTreatedAsRealizedSale:
             assert "marketplace_listing" in scenario.assumptions_note
             assert "not a confirmed realized-sale figure" in scenario.assumptions_note
 
+    def test_a_confirmed_realized_sale_is_not_mislabeled_as_unconfirmed(self):
+        """A caller who explicitly confirms is_realized_sale=True must not
+        have that confirmation contradicted by the scenario's own note --
+        the note is the one place this report states, in plain text,
+        whether its destination price is realized-sale evidence."""
+        offer = build_goods_offer()
+        realized = replace(
+            offer,
+            destination_price=replace(offer.destination_price, price_type="retail_shelf", is_realized_sale=True),
+        )
+        report = build_geographic_opportunity_report(realized, generated_at=GENERATED_AT)
+        assert report.landed_cost_scenarios
+        for scenario in report.landed_cost_scenarios:
+            assert "caller has confirmed this is a realized-sale figure" in scenario.assumptions_note
+            assert "not a confirmed realized-sale figure" not in scenario.assumptions_note
+
+
+class TestUnverifiedObservedEvidenceIsNotTreatedAsVerified:
+    """quality="observed" alone is a self-reported label, not a
+    verification -- controls.is_verified is the single gate for whether an
+    "observed" claim actually carries a human-confirmed EvidenceRef in a
+    verified-like evidence_state. A supplier's own unconfirmed claim
+    dressed up as quality="observed" (no evidence_ref at all, or one that
+    is not human_confirmed, or whose evidence_state is not verified-like)
+    must not be scored -- or surfaced -- identically to genuinely verified
+    evidence."""
+
+    def test_an_observed_claim_with_no_evidence_ref_is_not_low_severity(self):
+        offer = build_goods_offer(origin_cost_evidence=FieldEvidence(quality="observed"))
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        entry = next(e for e in report.risk_matrix if e.category == "origin_supplier_cost")
+        assert controls.is_verified(entry.evidence) is False
+        assert entry.severity != "low"
+
+    def test_an_observed_claim_with_no_evidence_ref_appears_in_evidence_gaps(self):
+        offer = build_goods_offer(origin_cost_evidence=FieldEvidence(quality="observed"))
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        assert any("origin_supplier_cost" in gap and "not verified" in gap for gap in report.evidence_gaps)
+
+    def test_an_observed_claim_with_an_unconfirmed_evidence_ref_is_not_low_severity(self):
+        from backend.economics.kernel import EvidenceRef
+
+        unconfirmed_ref = EvidenceRef(evidence_id="ev-unconfirmed", source_type="manual_import", evidence_state="observed", human_confirmed=False)
+        offer = build_goods_offer(origin_cost_evidence=FieldEvidence(quality="observed", evidence_ref=unconfirmed_ref))
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        entry = next(e for e in report.risk_matrix if e.category == "origin_supplier_cost")
+        assert entry.severity != "low"
+
+    def test_a_genuinely_verified_observed_claim_still_gets_low_severity(self):
+        """Regression guard: the fix must not over-correct and downgrade
+        real, verified evidence."""
+        offer = build_goods_offer()  # conftest's observed_evidence() is human_confirmed=True, evidence_state="observed"
+        report = build_geographic_opportunity_report(offer, generated_at=GENERATED_AT)
+        entry = next(e for e in report.risk_matrix if e.category == "origin_supplier_cost")
+        assert controls.is_verified(entry.evidence) is True
+        assert entry.severity == "low"
+        assert not any("origin_supplier_cost" in gap and "not verified" in gap for gap in report.evidence_gaps)
+
 
 class TestDeterminism:
     def test_identical_input_produces_identical_output(self):

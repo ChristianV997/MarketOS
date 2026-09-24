@@ -129,9 +129,22 @@ def _landed_cost_scenarios(offer: TradeOpportunityOffer) -> tuple[LandedCostScen
     # passes this check unchanged.
     controls.require_fx_provenance(price, field_name="destination_price.observed_price")
     controls.require_fx_provenance(cost, field_name="origin_supplier_cost")
-    note = "based on a destination price observation of price_type={0!r}; not a confirmed realized-sale figure".format(
-        offer.destination_price.price_type
-    )
+    # is_realized_sale must be reflected accurately here: this note is the
+    # one place a landed-cost scenario states, in plain text, whether its
+    # own destination price is confirmed realized-sale evidence or only a
+    # listing/quote. Stating "not a confirmed realized-sale figure"
+    # unconditionally -- regardless of what the caller actually confirmed
+    # -- would misrepresent genuine realized-sale evidence as unconfirmed,
+    # exactly the listing-price-vs-realized-sale confusion this service
+    # must not produce.
+    if offer.destination_price.is_realized_sale:
+        note = "based on a destination price observation of price_type={0!r}; caller has confirmed this is a realized-sale figure".format(
+            offer.destination_price.price_type
+        )
+    else:
+        note = "based on a destination price observation of price_type={0!r}; not a confirmed realized-sale figure".format(
+            offer.destination_price.price_type
+        )
     scenarios = []
     for scenario_id in _SCENARIO_IDS:
         assumptions = _build_assumptions(offer, scenario_id)
@@ -197,7 +210,17 @@ def _build_comparison(offer: TradeOpportunityOffer) -> DestinationSourceComparis
 
 
 def _risk_entry(category: str, evidence: FieldEvidence, description: str) -> OpportunityRiskEntry:
-    return OpportunityRiskEntry(category=category, severity=_QUALITY_SEVERITY[evidence.quality], description=description, evidence=evidence)
+    severity = _QUALITY_SEVERITY[evidence.quality]
+    # quality="observed" alone is not a verification: it is a self-reported
+    # label a caller can attach to any claim, including a supplier's own
+    # unconfirmed quote. controls.is_verified is the single gate for
+    # whether an "observed" claim was actually backed by a human-confirmed
+    # EvidenceRef in a verified-like evidence_state; an "observed" claim
+    # that fails that gate is exactly as uncertain as a "manual" one and
+    # must not be scored as low risk alongside genuinely verified evidence.
+    if evidence.quality == "observed" and not controls.is_verified(evidence):
+        severity = _QUALITY_SEVERITY["manual"]
+    return OpportunityRiskEntry(category=category, severity=severity, description=description, evidence=evidence)
 
 
 def _risk_matrix(offer: TradeOpportunityOffer) -> tuple[OpportunityRiskEntry, ...]:
@@ -272,6 +295,11 @@ def _blockers(offer: TradeOpportunityOffer, risk_matrix: Sequence[OpportunityRis
 
 def _evidence_gaps(offer: TradeOpportunityOffer, risk_matrix: Sequence[OpportunityRiskEntry]) -> tuple[str, ...]:
     gaps = [f"{entry.category}: evidence quality is {entry.evidence.quality}" for entry in risk_matrix if entry.evidence.quality in {"missing", "stale", "conflicting"}]
+    gaps.extend(
+        f"{entry.category}: evidence is labeled observed but is not verified (no human-confirmed evidence reference in a verified evidence state)"
+        for entry in risk_matrix
+        if entry.evidence.quality == "observed" and not controls.is_verified(entry.evidence)
+    )
     if offer.service_capacity is not None and offer.service_capacity.capacity_available is None:
         gaps.append("service_capacity: availability has not been explicitly confirmed either way")
     if offer.regulatory is None and offer.geography_kind == "known":

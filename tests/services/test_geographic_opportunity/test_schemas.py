@@ -30,6 +30,33 @@ class TestUnknownGeographyStaysUnassessed:
         assert offer.lane is None and offer.trade_flow is None
 
 
+class TestKnownGeographyRequiresLaneIdentityToMatch:
+    """lane.origin/lane.destination_country is what actually drives every
+    duty/tax/currency figure calculate_unit_economics computes, while
+    identity.origin_country/identity.destination_country is what a
+    report's own rendering displays as this candidate's country pair.
+    Without this check a caller could bind a candidate to one country pair
+    while silently pricing it with a different country's lane
+    assumptions -- a geographic identity mismatch."""
+
+    def test_lane_origin_must_match_identity_origin_country(self):
+        identity = CandidateBoundTradeIdentity("cand-mismatch", "CN", "MX")
+        wrong_origin_lane = build_lane(origin="VN", destination="MX")
+        with pytest.raises(EconomicsError, match="lane.origin must match identity.origin_country"):
+            TradeOpportunityOffer(identity=identity, offering_kind="unknown", geography_kind="known", lane=wrong_origin_lane)
+
+    def test_lane_destination_must_match_identity_destination_country(self):
+        identity = CandidateBoundTradeIdentity("cand-mismatch", "CN", "MX")
+        wrong_destination_lane = build_lane(origin="CN", destination="FR")
+        with pytest.raises(EconomicsError, match="lane.destination_country must match identity.destination_country"):
+            TradeOpportunityOffer(identity=identity, offering_kind="unknown", geography_kind="known", lane=wrong_destination_lane)
+
+    def test_matching_lane_and_identity_is_accepted(self):
+        offer = build_goods_offer()
+        assert offer.lane.origin == offer.identity.origin_country
+        assert offer.lane.destination_country == offer.identity.destination_country
+
+
 class TestUnknownOfferingStaysUnassessed:
     def test_unknown_offering_rejects_a_trade_flow(self):
         identity = CandidateBoundTradeIdentity("cand-y", "CN", "MX")
