@@ -56,7 +56,7 @@ def detect_field_conflicts(
         if len(numeric_items) < 2:
             continue
         values = [value for _, value in numeric_items]
-        delta = round(max(values) - min(values), 6)
+        delta = max(values) - min(values)
         if delta <= tolerance:
             continue
         rendered = tuple(

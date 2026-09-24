@@ -89,6 +89,28 @@ def test_main_rejects_manifest_missing_candidate_id(tmp_path, capsys):
     assert payload["status"] == "rejected"
 
 
+def test_main_rejects_null_workspace_id(tmp_path, capsys):
+    manifest = tmp_path / "null_workspace.json"
+    manifest.write_text(json.dumps({"candidate_id": "c1", "workspace_id": None}), encoding="utf-8")
+
+    exit_code = main(["--manifest", str(manifest)])
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "rejected"
+    assert payload["error"] == "workspace_id must be a string when supplied"
+
+
+def test_main_reports_output_io_errors_as_structured_rejection(tmp_path, capsys):
+    missing_parent = tmp_path / "missing" / "report.json"
+
+    exit_code = main(["--manifest", str(FIXTURES / "manifest_inline.json"), "--output", str(missing_parent)])
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "rejected"
+
+
 def test_main_rejects_a_report_path_that_escapes_the_manifest_directory(tmp_path, capsys):
     manifest = tmp_path / "escape.json"
     manifest.write_text(json.dumps({"candidate_id": "c1", "marketplace_report_path": "../../etc/passwd"}), encoding="utf-8")

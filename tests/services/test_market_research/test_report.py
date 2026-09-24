@@ -469,6 +469,25 @@ def test_workspace_mismatch_and_unsafe_payloads_fail_closed_without_reflection()
     assert "secret" not in str(error.value)
 
 
+@pytest.mark.parametrize("unsafe_query", [
+    "<img src=x onerror=alert(1)>",
+    "sk_live_51N0REALSECRETEXAMPLE",
+    "eyJhbGciOiJIUzI1NiJ9.payload.signature",
+])
+def test_html_and_secret_shaped_values_are_rejected_before_synthesis(unsafe_query):
+    marketplace = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{
+            "candidate_id": "c1",
+            "query": unsafe_query,
+            "score": {"overall_marketplace_opportunity": 0.7},
+        }],
+    }
+
+    with pytest.raises(ValueError, match="unsafe_evidence_input"):
+        build_market_research_report(_request(marketplace_report=marketplace))
+
+
 def test_trustos_boundary_blocks_leakage_this_module_own_input_filter_misses():
     """Genuine defense-in-depth, not duplicate checking: this module's own
     _validate_safe_inputs marker list does not cover words like "pricing"
@@ -486,9 +505,8 @@ def test_trustos_boundary_blocks_leakage_this_module_own_input_filter_misses():
             }
         ],
     }
-    result = build_market_research_report(_bound_request(marketplace_report=marketplace))
-    assert result.client_safe_export_status == "blocked_leakage"
-    assert "client_safe_export_blocked" in result.blockers
+    with pytest.raises(ValueError, match="unsafe_evidence_input"):
+        build_market_research_report(_bound_request(marketplace_report=marketplace))
 
 
 def test_candidate_identity_does_not_follow_a_template_candidate():
@@ -523,6 +541,64 @@ def test_candidate_identity_scopes_synthesis_summary_and_actions():
     assert "template-candidate" not in result.executive_summary["headline"]
     assert result.executive_summary["combined_opportunity_score"] == 0.055
     assert result.next_action == "run_readonly_supplier_validation"
+
+
+def test_duplicate_candidate_rows_fail_closed_before_synthesis():
+    marketplace = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [
+            {"candidate_id": "c1", "title": "First", "score": {"overall_marketplace_opportunity": 0.10}},
+            {"candidate_id": "c1", "title": "Second", "score": {"overall_marketplace_opportunity": 0.90}},
+        ],
+    }
+
+    with pytest.raises(ValueError, match="ambiguous_candidate_identity"):
+        build_market_research_report(_bound_request(marketplace_report=marketplace))
+
+
+@pytest.mark.parametrize("candidate_id", ["../other", "bad/id", "candidate with spaces"])
+def test_decoy_candidate_rows_require_safe_identity(candidate_id):
+    marketplace = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{"candidate_id": candidate_id, "score": {"overall_marketplace_opportunity": 0.99}}],
+    }
+
+    with pytest.raises(ValueError, match="invalid candidate_id"):
+        build_market_research_report(_bound_request(marketplace_report=marketplace))
+
+
+def test_aggregate_product_validation_is_not_candidate_evidence():
+    validation = {
+        "evidence_mode": "sanitized_report",
+        "top_candidates": [{"candidate": {"candidate_id": "decoy", "title": "Decoy"}}],
+        "risk_flags": ["decoy_risk"],
+        "open_questions": ["decoy_question"],
+    }
+
+    result = build_market_research_report(_bound_request(product_validation_report=validation))
+
+    row = next(item for item in result.evidence_matrix if item.pillar == "product_validation")
+    assert row.status == "missing"
+    assert "product_validation_candidate_binding_unavailable" in result.blockers
+    assert "decoy_risk" not in result.observed_facts
+    assert "decoy_question" not in result.assumptions
+
+
+def test_candidate_bound_product_validation_is_preserved():
+    validation = {
+        "evidence_mode": "sanitized_report",
+        "top_candidates": [{"candidate": {"candidate_id": "c1", "title": "Selected"}}],
+        "risk_flags": ["selected_risk"],
+        "open_questions": ["selected_question"],
+    }
+
+    result = build_market_research_report(_bound_request(product_validation_report=validation))
+
+    row = next(item for item in result.evidence_matrix if item.pillar == "product_validation")
+    assert row.status == "supplied"
+    assert "product_validation_candidate_binding_unavailable" not in result.blockers
+    assert "selected_risk" in result.observed_facts
+    assert "selected_question" in result.assumptions
 
 
 def test_candidate_mismatch_is_missing_in_the_evidence_matrix():

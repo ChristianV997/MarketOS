@@ -90,8 +90,10 @@ competitor's observed shipping cost for the same candidate can be compared
 directly, which is exactly the scenario `alias_notes` cannot see. Pillar-
 specific score fields (e.g. `marketplace.overall_marketplace_opportunity`)
 are prefixed by pillar, since they are not comparable units across
-pillars. The function never averages, weights, or resolves a conflict —
-it only reports it, with every contributing observation and its source.
+pillars. The function applies its tolerance to the unrounded numeric delta;
+presentation rounding cannot erase a real disagreement. It never averages,
+weights, or resolves a conflict — it only reports it, with every contributing
+observation and its source.
 
 ## Missing-vs-zero and explicit unknown states
 

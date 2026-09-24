@@ -216,6 +216,18 @@ def test_detect_field_conflicts_flags_disagreement():
     assert findings[0].delta == 15.0
 
 
+def test_conflict_detector_respects_tolerance_without_rounding():
+    obs = (
+        FieldObservation("price", 1.0, _fake_provenance("public_market_benchmark", "a")),
+        FieldObservation("price", 1.0000004, _fake_provenance("public_market_benchmark", "b")),
+    )
+
+    findings = detect_field_conflicts("cand-1", obs)
+
+    assert len(findings) == 1
+    assert findings[0].delta == pytest.approx(0.0000004)
+
+
 def test_detect_field_conflicts_ignores_missing_and_unknown_sentinels():
     obs = (
         FieldObservation("price", MISSING, _fake_provenance("public_market_benchmark", "a")),

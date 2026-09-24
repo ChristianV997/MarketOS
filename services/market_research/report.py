@@ -68,9 +68,17 @@ _UNSAFE_KEYS = frozenset({
 _UNSAFE_VALUE_MARKERS = (
     "<html", "<script", "-----begin", "sk-", "ghp_", "github_pat_", "bearer ",
     "api_key", "access_token", "raw_payload", "provider_payload", "internal_prompt",
-    "provider_response", "raw_response", "source_code", ".env",
+    "provider_response", "raw_response", "source_code", "pricing formula", "internal pricing",
+    "formula", "heuristic", "strategy", "other_client", "cross_client", ".env",
 )
 _ABSOLUTE_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|/(?:etc|home|tmp|Users)/)")
+_UNSAFE_HTML_TAG = re.compile(r"</?[A-Za-z][^>]{0,256}>")
+_UNSAFE_SECRET_PATTERNS = (
+    re.compile(r"(?i)\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{8,}\b"),
+    re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b"),
+)
 
 
 def _validate_safe_inputs(value: Any, *, depth: int = 0, nodes: list[int] | None = None) -> None:
@@ -96,7 +104,12 @@ def _validate_safe_inputs(value: Any, *, depth: int = 0, nodes: list[int] | None
         if len(value.encode("utf-8")) > MAX_INPUT_STRING_BYTES:
             raise ValueError("evidence_input_bounds_exceeded")
         lowered = value.casefold()
-        if any(marker in lowered for marker in _UNSAFE_VALUE_MARKERS) or _ABSOLUTE_PATH.match(value):
+        if (
+            any(marker in lowered for marker in _UNSAFE_VALUE_MARKERS)
+            or _UNSAFE_HTML_TAG.search(value)
+            or any(pattern.search(value) for pattern in _UNSAFE_SECRET_PATTERNS)
+            or _ABSOLUTE_PATH.match(value)
+        ):
             raise ValueError("unsafe_evidence_input")
         return
     if isinstance(value, float) and not math.isfinite(value):
@@ -122,12 +135,21 @@ def _validate_workspace_claims(value: Any, workspace_id: str) -> None:
 def _validate_report_shape(report: Mapping[str, Any] | None) -> None:
     if not report:
         return
+    seen_candidate_ids: set[str] = set()
     for key in ("candidates", "candidate_results"):
         if key not in report:
             continue
         values = report[key]
         if not isinstance(values, list) or any(not isinstance(item, Mapping) for item in values):
             raise ValueError("malformed_evidence_input")
+        for item in values:
+            candidate_id = item.get("candidate_id")
+            if not isinstance(candidate_id, str) or not candidate_id.strip():
+                raise ValueError("malformed_evidence_input")
+            validate_candidate_id(candidate_id)
+            if candidate_id in seen_candidate_ids:
+                raise ValueError("ambiguous_candidate_identity")
+            seen_candidate_ids.add(candidate_id)
 
 
 def _validate_bound_request(request: MarketResearchRequest) -> str:
@@ -275,6 +297,31 @@ def _candidate_observed_at(matched: Mapping[str, Any] | None) -> str | None:
     return None
 
 
+def _product_validation_candidate(report: Mapping[str, Any], candidate_id: str) -> Mapping[str, Any] | None:
+    """Return a ProductValidation row only when it carries candidate identity.
+
+    ProductValidationReport is normally an aggregate presentation report. Its
+    top-candidate title, risks, and open questions must not become evidence for
+    a different candidate merely because the report was supplied alongside it.
+    """
+    report_candidate_id = report.get("candidate_id")
+    if report_candidate_id == candidate_id:
+        return report
+    for key in ("top_candidates", "candidate_rankings"):
+        rows = report.get(key)
+        if rows is None:
+            continue
+        if not isinstance(rows, list) or any(not isinstance(item, Mapping) for item in rows):
+            raise ValueError("malformed_evidence_input")
+        for row in rows:
+            nested = row.get("candidate")
+            if isinstance(nested, Mapping) and nested.get("candidate_id") == candidate_id:
+                return row
+            if row.get("candidate_id") == candidate_id:
+                return row
+    return None
+
+
 def _pillar_row(name: str, report: Mapping[str, Any] | None, *, candidate_id: str, as_of: str) -> EvidenceMatrixRow:
     if not report:
         return EvidenceMatrixRow(name, "missing", None, None, (f"{name}_not_supplied",))
@@ -283,9 +330,14 @@ def _pillar_row(name: str, report: Mapping[str, Any] | None, *, candidate_id: st
     notes: list[str] = []
     if evidence_mode in FIXTURE_LIKE_EVIDENCE_MODES:
         notes.append(f"{name}_evidence_mode_is_{evidence_mode}_not_live_proof")
-    matched = _matched_candidate(report, candidate_id)
+    matched = (
+        _product_validation_candidate(report, candidate_id)
+        if name == "product_validation"
+        else _matched_candidate(report, candidate_id)
+    )
     if matched is None:
-        notes.append(f"{name}_candidate_not_matched:{candidate_id}")
+        note = "candidate_not_bound" if name == "product_validation" else "candidate_not_matched"
+        notes.append(f"{name}_{note}:{candidate_id}")
         return EvidenceMatrixRow(name, "missing", evidence_mode, None, tuple(notes))
     observed_at = _candidate_observed_at(matched)
     status = "supplied"
@@ -424,13 +476,6 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
     offering_kind, offering_recognized = _recognized_offering_kind(request.offering_kind)
     workspace_id = _validate_bound_request(request)
 
-    full_synthesis = build_product_opportunity_synthesis(
-        request.marketplace_report,
-        request.supplier_report,
-        request.consumer_report,
-        product_validation_report=request.product_validation_report,
-        client_context=request.client_context,
-    ).to_dict()
     synthesis = build_product_opportunity_synthesis(
         _candidate_scoped_report(request.marketplace_report, request.candidate_id),
         _candidate_scoped_report(request.supplier_report, request.candidate_id),
@@ -438,7 +483,16 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         product_validation_report=request.product_validation_report,
         client_context=request.client_context,
     ).to_dict()
-    integrity = _bound_integrity(request, workspace_id, full_synthesis)
+    alias_notes = tuple(
+        build_product_opportunity_synthesis(
+            request.marketplace_report,
+            request.supplier_report,
+            request.consumer_report,
+            product_validation_report=request.product_validation_report,
+            client_context=request.client_context,
+        ).to_dict().get("alias_notes", ())
+    )
+    integrity = _bound_integrity(request, workspace_id, synthesis)
 
     candidate_id = request.candidate_id
     matched_marketplace = _matched_candidate(request.marketplace_report, candidate_id)
@@ -454,7 +508,12 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
 
     assumptions: list[str] = []
     observed_facts: list[str] = []
-    if request.product_validation_report:
+    product_validation_candidate = (
+        _product_validation_candidate(request.product_validation_report, request.candidate_id)
+        if request.product_validation_report
+        else None
+    )
+    if product_validation_candidate:
         assumptions.extend(str(item) for item in request.product_validation_report.get("open_questions", []) or [])
         observed_facts.extend(str(item) for item in request.product_validation_report.get("risk_flags", []) or [])
     if matched_supplier:
@@ -480,7 +539,7 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
     ))
     integrity_conflicts = tuple(integrity.get("deterministic_conflicts", ())) if integrity else ()
     source_conflicts = tuple(dict.fromkeys(
-        list(full_synthesis.get("alias_notes", []))
+        list(alias_notes)
         + [str(item.get("note", "unresolved_evidence_conflict")) for item in integrity_conflicts]
     ))
 
@@ -536,6 +595,8 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         blockers = tuple(dict.fromkeys(list(blockers) + ["evidence_missing"]))
     if any(row.status in {"stale", "future", "unknown"} for row in evidence_matrix):
         blockers = tuple(dict.fromkeys(list(blockers) + ["evidence_freshness_unresolved"]))
+    if request.product_validation_report and product_validation_candidate is None:
+        blockers = tuple(dict.fromkeys(list(blockers) + ["product_validation_candidate_binding_unavailable"]))
 
     conflict_findings = tuple(integrity_conflicts)
     next_research_actions = _next_research_actions(

@@ -61,7 +61,8 @@ Each of the five input pillars (`marketplace`, `supplier`, `consumer_attention`,
   `evaluation.trustos.mexico_product_compliance`'s citation-freshness check).
 - `future` — `observed_at` is after `as_of`.
 - `conflict` — surfaced separately via `source_conflicts`; the existing
-  `opportunity_synthesis.alias_notes` remain pass-through, while the joined
+  `opportunity_synthesis.alias_notes` remain pass-through for source-collision
+  context, while the joined
   evidence authority adds field-level `conflict_findings` across pillars.
   Findings are reported, never averaged or resolved.
 
@@ -91,6 +92,11 @@ never silently treated as equivalent to a `LIVE_EVIDENCE_MODES` observation.
   serialized output size. Non-finite numeric values, unsafe provider/raw
   payload markers, non-string mapping keys, and duplicate JSON manifest keys
   fail closed before canonical synthesis or evidence reporting.
+- Every candidate row carries a safe, bounded candidate ID and duplicate IDs
+  fail closed before synthesis. Aggregate Product Validation reports are not
+  candidate evidence unless their report or a nested ranking row explicitly
+  binds to the requested candidate; unbound risks and open questions are not
+  copied into that candidate's facts or assumptions.
 - Candidate-scoped synthesis is performed after the requested candidate is
   selected. A template or another candidate cannot supply the requested
   candidate's headline, score, plan, price, or action. A supplied pillar that
@@ -138,11 +144,13 @@ manifest and any referenced report files, and writes output only when
 `--output` is given. `tests/services/test_market_research/test_operator_entrypoint.py`
 exercises it end to end, including a real subprocess invocation compared
 against the in-process call. The loader rejects oversized manifests, duplicate
-keys, path escapes, and malformed report shapes.
+keys, path escapes, null workspace identities, malformed report shapes, and
+output-file I/O failures as bounded structured rejections rather than
+tracebacks.
 
 ## Status
 
-Implemented and unit-tested (98 focused tests across the market-research and
+Implemented and unit-tested (112 focused tests across the market-research and
 market-research-evidence suites) against synthetic fixtures, including
 dedicated conflict (`tests/fixtures/market_research/conflict.json`) and
 stale/future (`tests/fixtures/market_research/stale_and_future.json`)

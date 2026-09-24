@@ -117,6 +117,9 @@ def build_request_from_manifest(manifest: dict[str, Any], base_dir: Path) -> Mar
     candidate_id = manifest.get("candidate_id")
     if not isinstance(candidate_id, str) or not candidate_id.strip():
         raise MarketResearchOperatorError("manifest requires a non-empty candidate_id")
+    workspace_id = manifest.get("workspace_id", "")
+    if workspace_id is None or not isinstance(workspace_id, str):
+        raise MarketResearchOperatorError("workspace_id must be a string when supplied")
     client_context = manifest.get("client_context")
     if client_context is not None and not isinstance(client_context, dict):
         raise MarketResearchOperatorError("client_context must be a JSON object")
@@ -126,7 +129,7 @@ def build_request_from_manifest(manifest: dict[str, Any], base_dir: Path) -> Mar
         "geography": str(manifest.get("geography", "")),
         "language": str(manifest.get("language", "")),
         "as_of": str(manifest.get("as_of", "")),
-        "workspace_id": str(manifest.get("workspace_id", "")),
+        "workspace_id": workspace_id,
         "client_context": client_context,
     }
     for field in _REPORT_FIELDS:
@@ -149,11 +152,15 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"status": "rejected", "error": str(exc)}, sort_keys=True))
         return 2
 
-    payload = render_market_research_markdown(result) if args.markdown else json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n"
-    if args.output:
-        Path(args.output).write_text(payload, encoding="utf-8")
-    else:
-        sys.stdout.write(payload)
+    try:
+        payload = render_market_research_markdown(result) if args.markdown else json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n"
+        if args.output:
+            Path(args.output).write_text(payload, encoding="utf-8")
+        else:
+            sys.stdout.write(payload)
+    except (OSError, TypeError, ValueError) as exc:
+        print(json.dumps({"status": "rejected", "error": str(exc)}, sort_keys=True))
+        return 2
     return 0
 
 
