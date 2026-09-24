@@ -41,6 +41,7 @@ test("operator journey harness encodes skip links, live region, evidence classes
   assert.match(html, /simulated/);
   assert.match(html, /unknown/);
   assert.match(html, /Safe export preview/);
+  assert.match(html, /document\.getElementById\("planning-export"\)\.focus\(\)/);
   assert.match(html, /Not live validated|not live proof|not live validated/i);
   assert.match(html, /POST control is intentionally omitted/);
   assert.doesNotMatch(html, /method:\s*["']POST["']/);

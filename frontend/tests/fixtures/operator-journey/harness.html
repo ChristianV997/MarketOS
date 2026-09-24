@@ -506,6 +506,7 @@
           const preview = document.getElementById("planning-export-preview");
           preview.classList.remove("hidden");
           preview.textContent = "Client-safe preview. Secrets redacted. live_validated=false. launch_authorized=false.";
+          document.getElementById("planning-export").focus();
         });
       }
 
