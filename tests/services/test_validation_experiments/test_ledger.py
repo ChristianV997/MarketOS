@@ -137,7 +137,7 @@ def test_normalized_opportunity_pipeline_preserves_kind_and_geography_uncertaint
     assert pipeline["geography"]["uncertainty"] == ["freight_duty_unknown", "quantity_missing"]
     assert pipeline["hypothesis"] == payload["hypothesis"]
     assert pipeline["cheapest_falsification_test"]["method"] == "simulated_buyer_signal"
-    assert pipeline["next_action"] == "run_cheapest_falsification_test"
+    assert pipeline["next_action"] == "repair_evidence_provenance"
     assert pipeline["client_safe"] is True
 
 
@@ -191,6 +191,16 @@ def test_normalized_adapter_rejects_unsafe_nested_payload():
         normalize_opportunity_inputs({"candidate_report": {"api_key": "[REDACTED]"}})
 
 
+def test_missing_supplier_evidence_is_a_blocker():
+    payload = load("successful_result.json")
+    payload["evidence_required"] = ["supplier_evidence"]
+    payload.pop("supplier_evidence", None)
+    ledger = build_validation_experiment_ledger(payload)
+    assert ledger.decision == "blocked_supplier_evidence"
+    assert "supplier_evidence" in ledger.blockers
+    assert ledger.validation_pipeline["next_action"] == "resolve_supplier_evidence"
+
+
 def test_missing_economics_cannot_advance_as_if_zero_cost():
     payload = load("successful_result.json")
     payload["product_cost"] = None
@@ -199,6 +209,38 @@ def test_missing_economics_cannot_advance_as_if_zero_cost():
     assert ledger.decision == "blocked_missing_economics"
     assert ledger.approval_state == "blocked_by_policy"
     assert ledger.validation_pipeline["next_action"] == "resolve_unit_economics"
+
+
+def test_manual_and_unavailable_results_remain_distinct():
+    payload = load("complete.json")
+    payload["result_statuses"] = ["manual", "unavailable"]
+    ledger = build_validation_experiment_ledger(payload)
+    assert ledger.result_statuses == ("manual", "unavailable")
+    assert set(ledger.validation_pipeline["result_classification"]) == {"manual", "unavailable"}
+
+
+def test_adapter_evidence_provenance_and_geography_state_are_preserved():
+    payload = load("complete.json")
+    payload.update(
+        {
+            "normalized_candidate": {
+                "candidate_id": "candidate-1",
+                "evidence": [{"evidence_id": "candidate-e1", "provenance": "research://candidate-1", "state": "stale"}],
+            },
+            "geographic_research": {
+                "geography_kind": "known",
+                "origin": "US",
+                "destination": "MX",
+                "trade_flow": {"state": "conflicting", "provenance": "research://trade-1"},
+            },
+        }
+    )
+    ledger = build_validation_experiment_ledger(payload)
+    assert {"conflicting", "stale"} <= set(ledger.evidence_summary["states"])
+    pipeline = ledger.validation_pipeline
+    assert pipeline["evidence"]["provenance"] == ["research://candidate-1"]
+    assert pipeline["geography"]["provenance"] == ["research://trade-1"]
+    assert "conflicting" in pipeline["geography"]["states"]
 
 
 def test_unknown_result_status_is_rejected_instead_of_dropped():

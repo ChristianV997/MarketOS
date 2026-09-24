@@ -59,8 +59,10 @@ or supply scores. Explicit zero money remains distinct from missing money.
 - Negative base contribution after CAC: `kill_negative_unit_economics`.
 - Missing experiment budget: `blocked_missing_budget`.
 - Missing price, product cost, or CAC: `blocked_missing_economics`; missing is never treated as zero.
-- Invalid simulated result: `reject_invalid_result`.
-- Failed result: `kill_failed_result`.
+- Missing required supplier evidence: `blocked_supplier_evidence`; supplier identity or availability is never inferred.
+- Manual or unavailable result: retained as distinct classifications and never promoted as successful evidence.
+- Invalid simulated result: `reject_invalid_result`;
+- Failed result: `kill_failed_result`;
 - Successful result: `advance_to_human_review`, never launch authorization.
 - Inconclusive or simulated result: `iterate_inconclusive_result`.
 

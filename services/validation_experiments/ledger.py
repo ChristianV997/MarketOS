@@ -26,7 +26,7 @@ class ValidationExperimentInputError(ValueError):
 
 
 _ALLOWED_CHANNELS = frozenset({"manual_interview_simulation", "fixture_survey", "internal_replay", "offline_landing_draft"})
-_RESULT_STATUSES = frozenset({"successful", "failed", "inconclusive", "invalid", "simulated"})
+_RESULT_STATUSES = frozenset({"successful", "failed", "inconclusive", "invalid", "simulated", "manual", "unavailable"})
 _EVIDENCE_STATES = frozenset({"unknown", "missing", "observed", "verified", "fixture", "manual_import", "simulated", "stale", "future", "conflicting", "rejected"})
 _OFFERING_KINDS = frozenset({"product", "service", "hybrid", "unknown"})
 _EXTERNAL_MARKERS = frozenset({"advertise", "advertising", "ad_launch", "launch_ad", "publish", "publishing", "outreach", "message", "messaging", "send", "order", "payment", "inventory", "provider_call", "customer_contact", "contact_customer"})
@@ -183,6 +183,16 @@ def _evidence_summary(payload: Mapping[str, Any], as_of: datetime) -> dict[str, 
     for value in payload.get("evidence_items", ()):
         if isinstance(value, Mapping):
             items.append(value)
+    candidate_report = payload.get("normalized_candidate", payload.get("candidate_report"))
+    if isinstance(candidate_report, Mapping):
+        for value in candidate_report.get("evidence", ()):
+            if isinstance(value, Mapping):
+                items.append(value)
+    geographic_report = payload.get("geographic_context", payload.get("geographic_research"))
+    if isinstance(geographic_report, Mapping):
+        for value in geographic_report.values():
+            if isinstance(value, Mapping) and (value.get("evidence_state") or value.get("state")):
+                items.append(value)
     states: set[str] = set()
     modes: set[str] = set()
     for item in items:
@@ -252,6 +262,15 @@ def _normalized_opportunity_pipeline(
             conflicts.append(str(item.get("evidence_id") or "candidate_evidence"))
 
     geography = normalized.geographic_context
+    geography_provenance: list[str] = []
+    geography_states: set[str] = set()
+    for item in geography.values():
+        if isinstance(item, Mapping):
+            if item.get("provenance"):
+                geography_provenance.append(str(item["provenance"]))
+            state = item.get("state") or item.get("evidence_state")
+            if state:
+                geography_states.add(str(state))
     geography_kind = _text(geography.get("geography_kind") or "unknown", "geography_kind")
     if geography_kind not in {"known", "unknown"}:
         raise ValidationExperimentInputError("geography_kind must be known or unknown")
@@ -292,6 +311,7 @@ def _normalized_opportunity_pipeline(
         "blocked_missing_budget": "define_experiment_budget",
         "hold_unreachable_buyer": "validate_reachable_buyer",
         "blocked_missing_economics": "resolve_unit_economics",
+        "blocked_supplier_evidence": "resolve_supplier_evidence",
         "blocked_evidence_integrity": "repair_evidence_provenance",
         "reject_invalid_result": "repair_result_provenance",
         "kill_failed_result": "revise_hypothesis_or_stop",
@@ -303,7 +323,7 @@ def _normalized_opportunity_pipeline(
         "economic_mode": kind,
         "candidate": _clean(candidate) if isinstance(candidate, Mapping) else {"candidate_id": payload.get("candidate_id"), "status": "unavailable"},
         "evidence": {"mode": evidence["mode"], "provenance": list(sorted(set(provenance))), "freshness": list(sorted(set(freshness))), "conflicts": list(sorted(set(conflicts)))},
-        "geography": {"kind": geography_kind, "origin": geography.get("origin", "unknown"), "destination": geography.get("destination", "unknown"), "uncertainty": list(sorted(uncertainty))},
+        "geography": {"kind": geography_kind, "origin": geography.get("origin", "unknown"), "destination": geography.get("destination", "unknown"), "uncertainty": list(sorted(uncertainty)), "provenance": list(sorted(set(geography_provenance))), "states": list(sorted(geography_states))},
         "hypothesis": payload["hypothesis"],
         "cheapest_falsification_test": cheapest_test,
         "thresholds": {"success": payload["success_threshold"], "iterate": payload["iterate_threshold"], "kill": payload["kill_threshold"]},
@@ -434,10 +454,13 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     economics_blocked = bool({"price", "product_cost", "cac"}.intersection(missing_inputs))
     blockers: list[str] = []
     gaps: list[str] = []
+    if "manual" in result_statuses or "unavailable" in result_statuses:
+        gaps.append("manual_or_unavailable_result")
     if not payload.get("reachable_buyer", False):
         blockers.append("reachable_buyer")
     if "supplier_evidence" in evidence_required and not isinstance(payload.get("supplier_evidence"), Mapping):
         gaps.append("supplier_evidence")
+        blockers.append("supplier_evidence")
     if "experiment_budget" in evidence_required and budget_value is None:
         blockers.append("experiment_budget")
     if budget_value is None:
@@ -466,11 +489,12 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     if any(state in evidence["states"] for state in ("invalid", "rejected")):
         blockers.append("rejected_evidence")
     blockers = list(dict.fromkeys(blockers))
-    workspace = build_client_workspace_isolation_report(workspace_type="client_growth_workspace", payload={"workspace_id": workspace_id, "status": "client_safe", "blockers": tuple(blockers), "evidence_required": tuple(gaps), "approvals_required": ("human_review",), "next_actions": ("review_simulated_result",)}).to_dict()
     if "experiment_budget" in blockers:
         decision = "blocked_missing_budget"
     elif economics_blocked:
         decision = "blocked_missing_economics"
+    elif "supplier_evidence" in blockers:
+        decision = "blocked_supplier_evidence"
     elif base_after < 0:
         decision = "kill_negative_unit_economics"
     elif "reachable_buyer" in blockers:
@@ -479,12 +503,13 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
         decision = "blocked_evidence_integrity"
     elif any(status == "invalid" for status in result_statuses):
         decision = "reject_invalid_result"
-    elif any(status == "successful" for status in result_statuses):
+    elif any(status == "successful" for status in result_statuses) and not {"manual", "unavailable"}.intersection(result_statuses):
         decision = "advance_to_human_review"
     elif any(status == "failed" for status in result_statuses):
         decision = "kill_failed_result"
     else:
         decision = "iterate_inconclusive_result"
+    workspace = build_client_workspace_isolation_report(workspace_type="client_growth_workspace", payload={"workspace_id": workspace_id, "status": "client_safe", "blockers": tuple(blockers), "evidence_required": tuple(gaps), "approvals_required": ("human_review",), "next_actions": (decision,)}).to_dict()
     approval_state = "pending_review" if decision == "advance_to_human_review" else "blocked_by_policy" if blockers or base_after < 0 else "draft"
     limitations = tuple(sorted(set(evidence["limitations"] + (("external_execution_blocked",) if True else ()))))
     safety = {"read_only": True, "network_calls": False, "ads_launched": False, "spend_executed": False, "publishing_performed": False, "outreach_sent": False, "orders_created": False, "payments_created": False, "provider_calls": False, "customer_contact": False, "database_writes": False}
