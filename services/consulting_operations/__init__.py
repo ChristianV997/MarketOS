@@ -7,3 +7,5 @@ __all__ = [
     "validate_consulting_intake",
     "ConsultingIntake"
 ]
+from .chain import run_consulting_chain, ConsultingChainReport
+__all__.extend(["run_consulting_chain", "ConsultingChainReport"])
