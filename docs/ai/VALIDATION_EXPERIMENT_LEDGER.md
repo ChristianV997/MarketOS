@@ -19,6 +19,13 @@ The validation experiment ledger is an offline-first typed record for deciding w
 
 The result preserves:
 
+- the experiment hypothesis, target offering, candidate identity, expected decision,
+  and explicit success/failure/iterate criteria;
+- a typed evidence register with source, source class, evidence mode/state, and
+  candidate identity for the market, demand, supplier, logistics, and marketing
+  pillars; economics coverage is reported from the canonical money inputs;
+- separate pillar coverage: demand or attention evidence never becomes supplier
+  proof, and supplier proof must be explicitly marked on supplier evidence;
 - deterministic evidence mode and state, including fixture/manual/unknown, stale, future, conflicting, and missing evidence;
 - explicit zero costs separately from missing costs;
 - base, downside, and upside economics from `backend.economics.kernel.calculate_scenarios`;
@@ -45,8 +52,10 @@ The result preserves:
 7. call `evaluate_execution_request` for resource/budget/runaway governance;
 8. record a TrustOS hard block for ad execution;
 9. create a client-safe workspace summary;
-10. classify simulated results and choose a deterministic offline decision;
-11. fingerprint canonical output.
+10. project target offering, decision criteria, six-pillar evidence coverage, and
+    mandatory human-review metadata;
+11. classify simulated results and choose a deterministic offline decision;
+12. fingerprint canonical output.
 
 The pipeline emits deterministic JSON through `to_json()` and a bounded
 client-safe Markdown summary through `to_markdown()`. Missing opportunity
@@ -65,12 +74,21 @@ or supply scores. Explicit zero money remains distinct from missing money.
 - Failed result: `kill_failed_result`;
 - Successful result: `advance_to_human_review`, never launch authorization.
 - Inconclusive or simulated result: `iterate_inconclusive_result`.
+- Empty result lists and external-action labels fail closed; a missing result is
+  represented as the default `simulated` classification only when no result list
+  was supplied.
 
 These are planning classifications, not permissions to spend, publish, advertise, contact customers, order inventory, pay suppliers, call providers, or write databases.
 
 ## Safety boundaries
 
 The ledger is deterministic, fixture/manual-input only, read-only, and network-free. It never sends messages, calls providers, launches ads, publishes, places orders, makes payments, reserves inventory, contacts customers, or writes a database. Approval state is recorded as draft, pending review, or blocked-by-policy; it cannot grant external authority. Workspace identity must match and unsafe/sensitive keys fail closed.
+
+`target_offering`, `expected_decision`, `decision_criteria`, `evidence_register`,
+`pillar_evidence`, and `human_review` are projections for review and planning.
+They do not add a ranker, economics kernel, TrustOS boundary, readiness gate, or
+provider client. The deterministic fingerprint covers these projections and the
+existing canonical-authority outputs.
 
 ## Tests and fixtures
 

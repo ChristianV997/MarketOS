@@ -29,8 +29,9 @@ _ALLOWED_CHANNELS = frozenset({"manual_interview_simulation", "fixture_survey", 
 _RESULT_STATUSES = frozenset({"successful", "failed", "inconclusive", "invalid", "simulated", "manual", "unavailable"})
 _EVIDENCE_STATES = frozenset({"unknown", "missing", "observed", "verified", "fixture", "manual_import", "simulated", "stale", "future", "conflicting", "rejected"})
 _OFFERING_KINDS = frozenset({"product", "service", "hybrid", "unknown"})
-_EXTERNAL_MARKERS = frozenset({"advertise", "advertising", "ad_launch", "launch_ad", "publish", "publishing", "outreach", "message", "messaging", "send", "order", "payment", "inventory", "provider_call", "customer_contact", "contact_customer"})
+_EXTERNAL_MARKERS = frozenset({"advertise", "advertising", "ad_launch", "launch_ad", "publish", "publishing", "outreach", "message", "messaging", "send", "order", "payment", "inventory", "provider_call", "customer_contact", "contact_customer", "ads_launched", "spend_executed", "publishing_performed", "outreach_sent", "orders_created", "payments_created", "provider_calls", "database_writes", "launch_authorized", "launch_authorization"})
 _SECRET_MARKERS = frozenset({"api_key", "private_key", "password", "token", "access_token", "refresh_token", "authorization", "cookie", "credential", "raw_payload", "raw_html", "client_secret"})
+_PILLARS = ("market", "demand", "supplier", "logistics", "economics", "marketing")
 
 
 def _text(value: Any, name: str, *, required: bool = False) -> str:
@@ -86,8 +87,10 @@ def _clean(value: Any) -> Any:
         return str(value.quantize(Decimal("0.01")))
     if isinstance(value, Mapping):
         return {str(key): _clean(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}
-    if isinstance(value, (tuple, list, set)):
+    if isinstance(value, (tuple, list)):
         return [_clean(item) for item in value]
+    if isinstance(value, set):
+        return [_clean(item) for item in sorted(value, key=lambda item: str(item))]
     return value
 
 
@@ -222,6 +225,111 @@ def _evidence_summary(payload: Mapping[str, Any], as_of: datetime) -> dict[str, 
     if "conflicting" in states:
         limitations.append("conflicting_evidence")
     return {"mode": mode, "states": tuple(sorted(states)), "live_validated": mode == "live" and not states.intersection({"stale", "future", "conflicting", "missing"}), "limitations": tuple(sorted(set(limitations)))}
+
+
+def _evidence_register(payload: Mapping[str, Any], as_of: datetime) -> tuple[dict[str, Any], ...]:
+    """Return a typed, non-authoritative evidence register for every pillar."""
+    sources = (
+        ("market", "market_evidence", "market_research"),
+        ("demand", "demand_evidence", "consumer_evidence"),
+        ("supplier", "supplier_evidence", "supplier_research"),
+        ("logistics", "logistics_evidence", "logistics_research"),
+        ("marketing", "marketing_evidence", "marketing_research"),
+    )
+    rows: list[dict[str, Any]] = []
+
+    def add(value: Any, pillar: str, default_class: str) -> None:
+        if value is None and pillar == "demand":
+            value = payload.get("consumer_evidence")
+        if isinstance(value, Mapping):
+            values = (value,)
+        elif isinstance(value, (list, tuple)):
+            values = tuple(item for item in value if isinstance(item, Mapping))
+        else:
+            values = ()
+        for item in values:
+            captured = _iso(item.get("captured_at"), "captured_at")
+            valid_until = _iso(item.get("valid_until"), "valid_until")
+            state = _state(item)
+            if captured and captured > as_of:
+                state = "future"
+            elif valid_until and valid_until < as_of:
+                state = "stale"
+            rows.append(
+                {
+                    "pillar": pillar,
+                    "evidence_id": str(item.get("evidence_id") or f"{pillar}-unidentified"),
+                    "source": str(item.get("source") or item.get("evidence_source") or item.get("provenance") or "unspecified"),
+                    "source_class": str(item.get("source_class") or item.get("evidence_class") or item.get("class") or default_class),
+                    "evidence_mode": str(item.get("evidence_mode") or "unknown"),
+                    "evidence_state": state,
+                    "candidate_id": str(item.get("candidate_id") or payload.get("candidate_id") or "unidentified"),
+                    "supplier_proof": bool(item.get("supplier_proof", False)) if pillar == "supplier" else False,
+                }
+            )
+
+    for pillar, key, default_class in sources:
+        add(payload.get(key), pillar, default_class)
+    for item in payload.get("evidence_items", ()):
+        if isinstance(item, Mapping):
+            add(item, str(item.get("pillar") or "market"), "evidence_item")
+    candidate_report = payload.get("normalized_candidate", payload.get("candidate_report"))
+    if isinstance(candidate_report, Mapping):
+        for item in candidate_report.get("evidence", ()):
+            if isinstance(item, Mapping):
+                add(item, str(item.get("pillar") or "market"), "candidate_report")
+    geographic_report = payload.get("geographic_context", payload.get("geographic_research"))
+    if isinstance(geographic_report, Mapping):
+        for item in geographic_report.values():
+            if isinstance(item, Mapping) and (item.get("evidence_state") or item.get("state") or item.get("evidence_id")):
+                add(item, "logistics", "geographic_research")
+    return tuple(sorted(rows, key=lambda row: tuple(str(row[key]) for key in ("pillar", "evidence_id", "source"))))
+
+
+def _pillar_evidence(register: tuple[dict[str, Any], ...], economics: Mapping[str, Any]) -> dict[str, Any]:
+    """Summarize coverage without turning attention or demand into proof."""
+    result: dict[str, Any] = {}
+    for pillar in _PILLARS:
+        rows = [row for row in register if row["pillar"] == pillar]
+        result[pillar] = {
+            "status": "supplied" if rows else "missing",
+            "evidence_ids": [row["evidence_id"] for row in rows],
+            "source_classes": sorted({row["source_class"] for row in rows}),
+            "states": sorted({row["evidence_state"] for row in rows}),
+            "supplier_proof": bool(pillar == "supplier" and any(row["supplier_proof"] for row in rows)),
+        }
+    economics_state = "missing" if economics.get("missing_inputs") else "assumed_or_explicit"
+    result["economics"] = {**result["economics"], "status": economics_state, "missing_inputs": list(economics.get("missing_inputs", ())), "source_classes": ["unit_economics_inputs"]}
+    return result
+
+
+def _target_offering(payload: Mapping[str, Any], candidate_id: str, offering_kind: str, candidate: Mapping[str, Any]) -> dict[str, Any]:
+    supplied = payload.get("target_offering")
+    if supplied is not None and not isinstance(supplied, Mapping):
+        raise ValidationExperimentInputError("target_offering must be an object")
+    offering = dict(supplied or {})
+    offering.setdefault("candidate_id", candidate_id)
+    offering.setdefault("kind", offering_kind)
+    offering.setdefault("name", candidate.get("name") or candidate.get("title") or candidate_id)
+    offering.setdefault("target_segment", payload.get("target_segment", ""))
+    return _clean(offering)
+
+
+def _decision_criteria(payload: Mapping[str, Any], thresholds: Mapping[str, Decimal]) -> dict[str, Any]:
+    supplied = payload.get("decision_criteria")
+    if supplied is not None and not isinstance(supplied, Mapping):
+        raise ValidationExperimentInputError("decision_criteria must be an object")
+    criteria = dict(supplied or {})
+    criteria.setdefault("success", payload.get("success_criteria") or f"metric >= {thresholds['success_threshold']}")
+    criteria.setdefault("failure", payload.get("failure_criteria") or f"metric <= {thresholds['kill_threshold']}")
+    criteria.setdefault("iterate", payload.get("iterate_criteria") or f"metric between {thresholds['kill_threshold']} and {thresholds['success_threshold']}")
+    return _clean(criteria)
+
+
+def _assert_offline_label(value: str, name: str) -> None:
+    lower = value.lower()
+    if any(marker in lower for marker in _EXTERNAL_MARKERS):
+        raise ValidationExperimentInputError(f"{name} cannot authorize external action")
 
 
 def _pillar_reports(payload: Mapping[str, Any], evidence: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]]:
@@ -377,6 +485,12 @@ class ValidationExperimentLedger:
     fingerprint: str = ""
     offering_kind: str = "unknown"
     validation_pipeline: dict[str, Any] = field(default_factory=dict)
+    target_offering: dict[str, Any] = field(default_factory=dict)
+    expected_decision: str = "human_review"
+    decision_criteria: dict[str, Any] = field(default_factory=dict)
+    evidence_register: tuple[dict[str, Any], ...] = ()
+    pillar_evidence: dict[str, Any] = field(default_factory=dict)
+    human_review: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = _clean({key: value for key, value in self.__dict__.items() if key != "fingerprint"})
@@ -393,7 +507,9 @@ class ValidationExperimentLedger:
                 "## Validation experiment",
                 "",
                 f"- Candidate: {self.candidate_id}",
+                f"- Target offering: {self.target_offering.get('name', self.candidate_id)} ({self.offering_kind})",
                 f"- Offering kind: {self.offering_kind}",
+                f"- Expected decision: {self.expected_decision}",
                 f"- Decision: {self.decision}",
                 f"- Next action: {pipeline.get('next_action', 'human_review')}",
                 f"- Cheapest falsification test: {pipeline.get('cheapest_falsification_test', {}).get('method', self.test_method)}",
@@ -419,6 +535,7 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     hypothesis = _text(payload.get("hypothesis"), "hypothesis", required=True)
     segment = _text(payload.get("target_segment"), "target_segment", required=True)
     test_method = _text(payload.get("test_method"), "test_method", required=True)
+    _assert_offline_label(test_method, "test_method")
     measurement = _text(payload.get("measurement_method"), "measurement_method", required=True)
     evidence_required = tuple(sorted(str(item) for item in payload.get("evidence_required", ()) if str(item)))
     sample_target = _positive_int(payload.get("sample_target"), "sample_target")
@@ -445,8 +562,10 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     market, supplier, consumer = _pillar_reports(payload, evidence)
     opportunity = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
     opportunity["scoring_authority"] = "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis"
-    result_rows = payload.get("result_statuses") or [((payload.get("result") or {}).get("status") or "simulated")]
-    if not isinstance(result_rows, (list, tuple)):
+    result_rows = payload.get("result_statuses")
+    if result_rows is None:
+        result_rows = [((payload.get("result") or {}).get("status") or "simulated")]
+    if not isinstance(result_rows, (list, tuple)) or not result_rows:
         raise ValidationExperimentInputError("result status must be a list")
     result_statuses = tuple(str(row) for row in result_rows)
     if not result_statuses or any(status not in _RESULT_STATUSES for status in result_statuses):
@@ -514,5 +633,24 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     limitations = tuple(sorted(set(evidence["limitations"] + (("external_execution_blocked",) if True else ()))))
     safety = {"read_only": True, "network_calls": False, "ads_launched": False, "spend_executed": False, "publishing_performed": False, "outreach_sent": False, "orders_created": False, "payments_created": False, "provider_calls": False, "customer_contact": False, "database_writes": False}
     offering_kind, validation_pipeline = _normalized_opportunity_pipeline(payload, evidence=evidence, economics=economics, result_statuses=result_statuses, decision=decision, gaps=tuple(gaps))
-    provisional = ValidationExperimentLedger(workspace_id, candidate_id, hypothesis, segment, channel, test_method, evidence_required, budget, sample_target, str(thresholds["success_threshold"]), str(thresholds["kill_threshold"]), str(thresholds["iterate_threshold"]), measurement, approval_state, result_statuses, decision, tuple(sorted(set(blockers))), tuple(sorted(set(gaps))), limitations, _text(payload.get("provenance"), "provenance", required=True), evidence, economics, {"candidate_id": opportunity.get("top_candidate_id"), "scoring_authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis", "report": opportunity}, approval_sim, governor, trustos, {"workspace_id": workspace_id, "client_safe": True, "safety_summary": workspace.get("safety_summary", {})}, safety, offering_kind=offering_kind, validation_pipeline=validation_pipeline)
+    candidate = validation_pipeline.get("candidate", {}) if isinstance(validation_pipeline.get("candidate"), Mapping) else {}
+    target_offering = _target_offering(payload, candidate_id, offering_kind, candidate)
+    expected_decision = _text(payload.get("expected_decision") or "human_review", "expected_decision", required=True)
+    _assert_offline_label(expected_decision, "expected_decision")
+    decision_criteria = _decision_criteria(payload, thresholds)
+    evidence_register = _evidence_register(payload, as_of_dt)
+    pillar_evidence = _pillar_evidence(evidence_register, economics)
+    human_review = {
+        "required": True,
+        "status": "pending" if decision == "advance_to_human_review" else "blocked_or_not_ready",
+        "approval_state": approval_state,
+        "reviewer": _text(payload.get("reviewer"), "reviewer"),
+        "launch_authority": False,
+    }
+    validation_pipeline["target_offering"] = target_offering
+    validation_pipeline["expected_decision"] = expected_decision
+    validation_pipeline["decision_criteria"] = decision_criteria
+    validation_pipeline["pillars"] = pillar_evidence
+    validation_pipeline["human_review"] = human_review
+    provisional = ValidationExperimentLedger(workspace_id, candidate_id, hypothesis, segment, channel, test_method, evidence_required, budget, sample_target, str(thresholds["success_threshold"]), str(thresholds["kill_threshold"]), str(thresholds["iterate_threshold"]), measurement, approval_state, result_statuses, decision, tuple(sorted(set(blockers))), tuple(sorted(set(gaps))), limitations, _text(payload.get("provenance"), "provenance", required=True), evidence, economics, {"candidate_id": opportunity.get("top_candidate_id"), "scoring_authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis", "report": opportunity}, approval_sim, governor, trustos, {"workspace_id": workspace_id, "client_safe": True, "safety_summary": workspace.get("safety_summary", {})}, safety, offering_kind=offering_kind, validation_pipeline=validation_pipeline, target_offering=target_offering, expected_decision=expected_decision, decision_criteria=decision_criteria, evidence_register=evidence_register, pillar_evidence=pillar_evidence, human_review=human_review)
     return ValidationExperimentLedger(**{**provisional.__dict__, "fingerprint": _canonical_fingerprint(provisional.to_dict())})

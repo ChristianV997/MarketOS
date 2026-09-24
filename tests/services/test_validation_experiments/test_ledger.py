@@ -248,3 +248,46 @@ def test_unknown_result_status_is_rejected_instead_of_dropped():
     payload["result_statuses"] = ["successful", "not-a-result"]
     with pytest.raises(ValidationExperimentInputError, match="result status"):
         build_validation_experiment_ledger(payload)
+
+
+def test_ledger_exposes_offering_decision_criteria_and_all_service_pillars():
+    payload = load("complete.json")
+    payload.update(
+        {
+            "target_offering": {"name": "Eye-comfort desk light", "kind": "product"},
+            "expected_decision": "human_review",
+            "decision_criteria": {"success": "qualified_interest_rate >= 0.25"},
+            "demand_evidence": {"evidence_id": "demand-1", "source": "research://demand", "source_class": "interview", "evidence_state": "observed"},
+            "logistics_evidence": {"evidence_id": "logistics-1", "source": "research://freight", "source_class": "freight_quote", "evidence_state": "fixture"},
+            "marketing_evidence": {"evidence_id": "marketing-1", "source": "research://creative", "source_class": "creative_review", "evidence_state": "observed"},
+        }
+    )
+    ledger = build_validation_experiment_ledger(payload)
+    assert ledger.target_offering["candidate_id"] == "desk-clamp-lamp"
+    assert ledger.expected_decision == "human_review"
+    assert ledger.decision_criteria["success"] == "qualified_interest_rate >= 0.25"
+    assert set(ledger.pillar_evidence) == {"market", "demand", "supplier", "logistics", "economics", "marketing"}
+    assert ledger.pillar_evidence["supplier"]["supplier_proof"] is False
+    assert ledger.pillar_evidence["demand"]["source_classes"] == ["interview"]
+    assert ledger.pillar_evidence["logistics"]["source_classes"] == ["freight_quote"]
+
+
+def test_attention_or_demand_cannot_be_marked_as_supplier_proof():
+    payload = load("complete.json")
+    payload.pop("supplier_evidence", None)
+    payload["demand_evidence"] = {"evidence_id": "demand-1", "supplier_proof": True, "evidence_state": "verified"}
+    ledger = build_validation_experiment_ledger(payload)
+    assert ledger.pillar_evidence["supplier"]["status"] == "missing"
+    assert ledger.pillar_evidence["supplier"]["supplier_proof"] is False
+    assert ledger.pillar_evidence["demand"]["supplier_proof"] is False
+
+
+def test_empty_result_statuses_and_external_decisions_fail_closed():
+    payload = load("complete.json")
+    payload["result_statuses"] = []
+    with pytest.raises(ValidationExperimentInputError, match="result status"):
+        build_validation_experiment_ledger(payload)
+    payload = load("complete.json")
+    payload["expected_decision"] = "launch advertising"
+    with pytest.raises(ValidationExperimentInputError, match="external action"):
+        build_validation_experiment_ledger(payload)
