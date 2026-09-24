@@ -37,7 +37,7 @@ Pins were resolved on 2026-09-24 with `git ls-remote` and the primary `LICENSE` 
 | `oss-google-ads-python` | WO-C4-05 | defer | — | `48845cfdb8c9d7ea96930a13d9a14c19286c35e8` | 33.0.0 | Apache-2.0 |
 | `oss-meta-ad-library-scripts` | WO-C4-REF | reference_only | — | `7c90db6f9a2f8342fba8e2e908b57220354b8d09` | — | LicenseRef-Facebook-API-connection |
 | `oss-product-opportunity` | WO-C4-REF | reference_only | — | `1cc0da6246bb925b59ad006f7c56765e5066784d` | — | MIT |
-| `oss-gapscope` | WO-C4-REF | reject | — | `97db6018a2974342b5007ab133c5e48aa2e20165` | — | MIT |
+| `oss-gapscope` | WO-C4-REF | reference_only | — | identity_unresolved, no URL | — | none_verified |
 | `oss-speculora` | WO-C4-REF | reference_only | — | `c429c24f1edac27f19ef2bb070936aa4be59e7d3` | — | CC-BY-4.0 |
 
 Primary LICENSE URLs, each at the pinned commit:
@@ -57,7 +57,7 @@ Primary LICENSE URLs, each at the pinned commit:
 - `oss-google-ads-python`: https://github.com/googleads/google-ads-python/blob/48845cfdb8c9d7ea96930a13d9a14c19286c35e8/LICENSE
 - `oss-meta-ad-library-scripts`: https://github.com/facebookresearch/Ad-Library-API-Script-Repository/blob/7c90db6f9a2f8342fba8e2e908b57220354b8d09/LICENSE
 - `oss-product-opportunity`: https://github.com/sprensis/product-opportunity/blob/1cc0da6246bb925b59ad006f7c56765e5066784d/LICENSE
-- `oss-gapscope`: https://github.com/sarthak070707/gapscope-market-intelligence/blob/97db6018a2974342b5007ab133c5e48aa2e20165/LICENSE
+- `oss-gapscope`: no repository URL and no LICENSE file. The name is shared by unrelated public repositories, so none was pinned.
 - `oss-speculora`: https://github.com/speculora/speculora/blob/c429c24f1edac27f19ef2bb070936aa4be59e7d3/LICENSE
 
 ### Registry pointers
@@ -77,16 +77,17 @@ DuckDB `v1.1.3` and Polars `py-1.17.1` matched the registry commits directly. Ne
 - Crawlee `copy_pattern` excludes `fingerprint_suite`, `proxy_configuration.py`, session pools, curl impersonation, and browser automation observed at the pin.
 - Trafilatura `copy_pattern` is allowed only because the LICENSE file at `v2.2.0` is Apache-2.0. Tag `v1.6.0` (`0bce2189288f4211e561c46083d7952fa65a7b72`) still had a GPL-3.0 LICENSE file when read the same day.
 - OR-Tools dependency weight is `oss-ortools-dependency-weight` with verdict `defer`. The modeling row stays `reference_only`. GitHub reported repository size `1309998` on 2026-09-24. That number is not an approval to depend on the package.
-- SimPy's canonical repository is GitLab `https://gitlab.com/team-simpy/simpy`, which is the Source code URL PyPI published for 4.1.2. `https://github.com/simpy/simpy` was not found.
+- Crawlee is pinned at `apify/crawlee-python`, the Python repository. A re-read of the LICENSE blob at `ac6ebad10bedfb9111c4d95cda8a8831d28a31c5` is Apache-2.0, so the verdict stays `copy_pattern`. The JavaScript crawlee repository is not the pin.
+- SimPy's canonical repository is GitLab `https://gitlab.com/team-simpy/simpy`. PyPI 4.1.2 names that Source code URL. `https://github.com/simpy/simpy` returned HTTP 404. Tag `4.1.2` peels to `f43816490c6f76f336ad6e457d3cab9f386894af`, and `LICENSE.rst` there is MIT. The exact-URL rule accepts any `https://host/owner/name` forge URL, including GitLab.
 - UN Comtrade is `defer` only. The README at the pin takes a `subscription_key`. No key is stored and no call is made. The LICENSE copyright line names the Python Packaging Authority, not the UN.
 - Platform SDKs are `sidecar` or `defer` only: Amazon SP-API models `defer`, TikTok Business SDK `sidecar`, Google Ads Python `defer`.
 
 ## Rejects and non-canonical names
 
-- GapScope: no canonical repository was identified. A GitHub name search on 2026-09-24 returned several unrelated repositories. The intake pins `sarthak070707/gapscope-market-intelligence` only so the row has a real commit and LICENSE file, and the verdict is `reject`.
+- GapScope: `reference_only` with `identity_unresolved: true` and a null repository URL. A GitHub name search on 2026-09-24 returned several unrelated repositories. None was selected, and no LICENSE file was read. The license field is `none_verified`.
 - product-opportunity: `sprensis/product-opportunity` was the closest name match whose primary LICENSE file was read. That file is MIT at `1cc0da6246bb925b59ad006f7c56765e5066784d`, so the row is not rejected for a missing license. Verdict remains `reference_only` so it cannot become a scoring authority next to MarketOS product opportunity synthesis. Confidence is low that this namesake is a canonical upstream.
 - Meta Ad Library scripts: `facebookresearch/Ad-Library-API-Script-Repository` is reference_only. Its LICENSE file is a Facebook API-connection grant, not a general OSI license. Unofficial scrapers were not pinned.
-- Speculora: `speculora/speculora` is reference_only methodology. The LICENSE file is CC BY 4.0 for documentation and excludes the name and logo.
+- Speculora: `speculora/speculora` is reference_only methodology. The LICENSE file at `c429c24f1edac27f19ef2bb070936aa4be59e7d3` was read and is CC BY 4.0 for documentation. `none_verified` does not apply. The name and logo are excluded.
 
 ## Reported defects, not fixed
 
@@ -105,6 +106,7 @@ The validator reports these and still exits 0 when the intake itself is valid:
 - GPL or AGPL, unknown, or missing licenses cannot be `integrate` or `copy_pattern`.
 - Platform SDKs and the UN Comtrade client cannot be anything except `sidecar` or `defer`.
 - At most five candidates per work order.
+- A null repository URL is allowed only on `reference_only` or `reject` rows with `identity_unresolved: true`. `integrate`, `copy_pattern`, and `sidecar` cannot use a null URL.
 
 ## Validator
 

@@ -72,7 +72,9 @@ REQUIRED_TEXT = (
 MAX_CANDIDATES_PER_WORK_ORDER = 5
 MAX_ERRORS = 100
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
-REPO_URL = re.compile(r"^https://(?:github\.com|gitlab\.com)/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+# Exact repository URL on any https forge: https://host/owner/name
+# with no .git suffix, trailing slash, query, fragment, or extra path.
+REPO_URL = re.compile(r"^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?/[A-Za-z0-9_.~-]+/[A-Za-z0-9_.~-]+$")
 SOURCE_ID = re.compile(r"^oss-[a-z0-9]+(?:-[a-z0-9]+)*$")
 REGISTRY_REF = re.compile(r"^src-[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -131,11 +133,11 @@ def is_exact_repository_url(value: Any) -> bool:
 
 
 def license_blocks_copy(license_name: Any) -> bool:
-    """GPL, AGPL, unknown, and missing classifications block copy or integrate."""
+    """GPL, AGPL, unknown, missing, and unverified classifications block copy or integrate."""
     if not isinstance(license_name, str):
         return True
     text = license_name.strip().lower()
-    if text in {"", "unknown", "missing", "n/a", "none", "unlicensed"}:
+    if text in {"", "unknown", "missing", "n/a", "none", "none_verified", "unlicensed"}:
         return True
     if "unknown" in text or "missing" in text:
         return True
@@ -227,7 +229,11 @@ def _license_is_absent(license_name: Any) -> bool:
     if not isinstance(license_name, str):
         return True
     text = license_name.strip().lower()
-    return text in {"", "unknown", "missing", "n/a", "none", "unlicensed"} or "unknown" in text or "missing" in text
+    return (
+        text in {"", "unknown", "missing", "n/a", "none", "none_verified", "unlicensed"}
+        or "unknown" in text
+        or "missing" in text
+    )
 
 
 def _license_url_error(url: Any, revision: str) -> str | None:
@@ -266,12 +272,25 @@ def _validate_candidate(
     else:
         seen_ids.add(source_id)
 
-    if not is_exact_repository_url(row.get("repository_url")):
+    url = row.get("repository_url")
+    identity_unresolved = row.get("identity_unresolved") is True
+    if "identity_unresolved" in row and not isinstance(row.get("identity_unresolved"), bool):
+        errors.append(f"{label}: identity_unresolved must be boolean")
+    verdict = row.get("verdict")
+    unresolved_without_repo = url is None and identity_unresolved and verdict in {"reference_only", "reject"}
+    if url is None:
+        if not unresolved_without_repo:
+            errors.append(
+                f"{label}: null repository URL requires identity_unresolved and verdict reference_only or reject"
+            )
+    elif not is_exact_repository_url(url):
         errors.append(f"{label}: repository URL is not exact")
 
     revision = row.get("revision")
     revision_text = revision.strip() if isinstance(revision, str) else ""
-    if not isinstance(revision, str) or revision_text == "":
+    if unresolved_without_repo and (revision is None or revision_text == ""):
+        pass
+    elif not isinstance(revision, str) or revision_text == "":
         errors.append(f"{label}: revision is empty")
     elif revision_text.lower() in FLOATING_REVISIONS or revision_text.lower().startswith("refs/"):
         errors.append(f"{label}: revision is floating")
@@ -295,6 +314,8 @@ def _validate_candidate(
     license_name = row.get("license")
     if verdict in COPY_VERDICTS and license_blocks_copy(license_name):
         errors.append(f"{label}: license blocks integrate/copy_pattern ({license_name!r})")
+    if unresolved_without_repo and not _license_is_absent(license_name):
+        errors.append(f"{label}: identity_unresolved row has no primary LICENSE file")
 
     pinned_sha = isinstance(revision, str) and bool(SHA40.fullmatch(revision_text)) and revision_text == revision_text.lower()
     if pinned_sha:

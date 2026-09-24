@@ -23,6 +23,7 @@ from scripts.ai.validate_oss_source_catalog import (  # noqa: E402
     collect_capability_defects,
     collect_registry_defects,
     is_all_zero_sha,
+    is_exact_repository_url,
     is_patterned_placeholder_sha,
     render_markdown,
     validate_paths,
@@ -121,9 +122,17 @@ def test_real_intake_file_validates() -> None:
     assert by_id["oss-scrapy"]["registry_ref"] == "src-scrapy"
     assert by_id["oss-duckdb"]["registry_ref"] == "src-duckdb"
     assert by_id["oss-polars"]["registry_ref"] == "src-polars"
+    assert by_id["oss-crawlee-python"]["repository_url"] == "https://github.com/apify/crawlee-python"
+    assert by_id["oss-crawlee-python"]["license"] == "Apache-2.0"
+    assert by_id["oss-crawlee-python"]["verdict"] == "copy_pattern"
     assert by_id["oss-trafilatura"]["license"] == "Apache-2.0"
     assert by_id["oss-trafilatura"]["verdict"] == "copy_pattern"
     assert by_id["oss-trafilatura"]["revision"] == "c1bc9531a2a978326112ca9987e1382745116136"
+    assert by_id["oss-simpy"]["repository_url"] == "https://gitlab.com/team-simpy/simpy"
+    assert by_id["oss-simpy"]["license"] == "MIT"
+    assert by_id["oss-simpy"]["verdict"] == "copy_pattern"
+    assert by_id["oss-un-comtrade-api-client"]["repository_url"] == "https://github.com/uncomtrade/comtradeapicall"
+    assert by_id["oss-un-comtrade-api-client"]["license"] == "MIT"
     assert by_id["oss-un-comtrade-api-client"]["verdict"] == "defer"
     assert by_id["oss-un-comtrade-api-client"]["candidate_class"] == "external_api_client"
     assert by_id["oss-amazon-sp-api-models"]["verdict"] == "defer"
@@ -134,13 +143,24 @@ def test_real_intake_file_validates() -> None:
     assert by_id["oss-meta-ad-library-scripts"]["verdict"] == "reference_only"
     assert by_id["oss-product-opportunity"]["verdict"] == "reference_only"
     assert by_id["oss-product-opportunity"]["license"] == "MIT"
-    assert by_id["oss-gapscope"]["verdict"] == "reject"
+    assert by_id["oss-gapscope"]["verdict"] == "reference_only"
+    assert by_id["oss-gapscope"]["repository_url"] is None
+    assert by_id["oss-gapscope"]["revision"] is None
+    assert by_id["oss-gapscope"]["identity_unresolved"] is True
+    assert by_id["oss-gapscope"]["license"] == "none_verified"
     assert by_id["oss-speculora"]["verdict"] == "reference_only"
+    assert by_id["oss-speculora"]["license"] == "CC-BY-4.0"
+    assert by_id["oss-speculora"]["repository_url"] == "https://github.com/speculora/speculora"
     assert by_id["oss-ortools-dependency-weight"]["verdict"] == "defer"
     assert by_id["oss-ortools"]["verdict"] == "reference_only"
     counts: dict[str, int] = {}
     for row in document["candidates"]:
-        assert row["revision"] in row["license_evidence_url"]
+        if row.get("identity_unresolved") is True and row.get("repository_url") is None:
+            assert row["verdict"] in {"reference_only", "reject"}
+            assert row.get("revision") in (None, "")
+        else:
+            assert row["revision"] in row["license_evidence_url"]
+            assert is_exact_repository_url(row["repository_url"])
         assert row["prohibited_behavior"].strip()
         assert row["attribution_requirement"].strip()
         counts[row["work_order_id"]] = counts.get(row["work_order_id"], 0) + 1
@@ -219,6 +239,84 @@ def test_each_violation_fails(overrides: dict, fragment: str) -> None:
     errors = _errors([_row(**overrides)])
     assert errors
     assert any(fragment in error for error in errors)
+
+
+def test_exact_repository_url_accepts_gitlab_and_other_https_forges() -> None:
+    assert is_exact_repository_url("https://gitlab.com/team-simpy/simpy")
+    assert is_exact_repository_url("https://codeberg.org/example/library")
+    assert is_exact_repository_url("https://bitbucket.org/example/library")
+    assert not is_exact_repository_url("https://gitlab.com/team-simpy/simpy.git")
+    assert not is_exact_repository_url("https://gitlab.com/team-simpy/simpy/")
+    assert not is_exact_repository_url("http://gitlab.com/team-simpy/simpy")
+    report = _report([_row(repository_url="https://codeberg.org/example/library")])
+    assert report["valid"] is True
+
+
+def _unresolved_row(**overrides: object) -> dict:
+    row = _row(
+        source_id="oss-unresolved-fixture",
+        repository_url=None,
+        revision=None,
+        version_tag=None,
+        license_evidence_url=None,
+        license="none_verified",
+        verdict="reference_only",
+        identity_unresolved=True,
+        candidate_class="unidentified_namesake",
+        relevant_module="none",
+        marketos_target_capability="none",
+    )
+    row.update(overrides)
+    return row
+
+
+def test_null_repository_url_only_for_unresolved_reference_or_reject() -> None:
+    assert _report([_unresolved_row()])["valid"] is True
+    assert _report([_unresolved_row(verdict="reject")])["valid"] is True
+    for verdict in ("integrate", "copy_pattern", "sidecar"):
+        errors = _errors([_unresolved_row(verdict=verdict, license="Apache-2.0")])
+        assert any("null repository URL" in error for error in errors)
+    omitted = _row(repository_url=None, verdict="reference_only", license="none_verified", license_evidence_url=None, revision=None)
+    assert any("null repository URL" in error for error in _errors([omitted]))
+
+
+def test_acceptance_negative_fixtures() -> None:
+    """Each deliberately bad fixture must fail on its own."""
+    registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    cases = {
+        "zero SHA": (_report([_row(revision=ZERO_SHA)]), "revision is all-zero"),
+        "patterned SHA": (_report([_row(revision=PLACEHOLDER_SHAS["src-coderos"])]), "revision is a patterned placeholder"),
+        "main": (_report([_row(revision="main")]), "revision is floating"),
+        "duplicate source_id": (
+            _report([
+                _row(source_id="oss-example"),
+                _row(source_id="oss-example", repository_url="https://github.com/example/other"),
+            ]),
+            "duplicate source_id",
+        ),
+        "registry URL without registry_ref": (
+            _report(
+                [_row(repository_url="https://github.com/scrapy/scrapy", source_id="oss-scrapy-bare")],
+                registry=registry,
+            ),
+            "repository URL is already in the source adaptation registry",
+        ),
+        "GPL integrate": (_report([_row(license="GPL-3.0-only", verdict="integrate")]), "license blocks integrate/copy_pattern"),
+        "platform SDK integrate": (
+            _report([_row(candidate_class="platform_sdk", verdict="integrate")]),
+            "platform_sdk verdict must be sidecar or defer",
+        ),
+        "six candidates": (
+            _report([
+                _row(source_id=f"oss-extra-{index}", repository_url=f"https://github.com/example/lib{index}")
+                for index in range(6)
+            ]),
+            "has more than 5 candidates (6)",
+        ),
+    }
+    for name, (report, fragment) in cases.items():
+        assert report["valid"] is False, name
+        assert any(fragment in error for error in report["errors"]), name
 
 
 def test_duplicate_source_id_fails() -> None:

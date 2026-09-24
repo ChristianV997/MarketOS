@@ -13,7 +13,7 @@
       "version_tag": "v1.9.3",
       "license_evidence_url": "https://github.com/apify/crawlee-python/blob/ac6ebad10bedfb9111c4d95cda8a8831d28a31c5/LICENSE",
       "license": "Apache-2.0",
-      "maintenance_evidence": "Observed 2026-09-24 with git ls-remote: tag v1.9.3 is commit ac6ebad10bedfb9111c4d95cda8a8831d28a31c5 (no peeled tag object). GitHub commit committer date 2026-08-24T05:56:19Z, subject 'chore(release): Update changelog and package version [skip ci]'. Default branch master HEAD the same day was 45bb0e25df8fdad3caf0e756e32c2063717da4ce. No other maintenance claim.",
+      "maintenance_evidence": "Observed 2026-09-24 with git ls-remote: tag v1.9.3 is commit ac6ebad10bedfb9111c4d95cda8a8831d28a31c5 (no peeled tag object). GitHub commit committer date 2026-08-24T05:56:19Z, subject 'chore(release): Update changelog and package version [skip ci]'. Default branch master HEAD the same day was 45bb0e25df8fdad3caf0e756e32c2063717da4ce. No other maintenance claim. Re-read 2026-09-24 on the cloud VM: the LICENSE blob at this SHA returned HTTP 200 and begins with Apache License Version 2.0. The repository is apify/crawlee-python, the Python package, not the JavaScript crawlee repository.",
       "relevant_module": "src/crawlee/http_clients/_httpx.py",
       "work_order_id": "WO-C4-01",
       "marketos_target_capability": "offline page extraction patterns for stored HTML fixtures",
@@ -24,7 +24,7 @@
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. This intake row is advisory and does not create a crawler authority. src-crawl4ai remains the registry's separate web-extraction row.",
       "registry_ref": null,
       "confidence": "medium",
-      "unknowns": "Whether a future handoff would copy only the plain HTTP client, or decline the package because the prohibited surfaces are part of the same distribution, is undecided here.",
+      "unknowns": "The Apache-2.0 LICENSE at this pin was re-read. Whether a future handoff would copy only the plain HTTP client, or decline the package because the prohibited surfaces are part of the same distribution, is undecided here.",
       "candidate_class": "oss_library"
     },
     {
@@ -34,7 +34,7 @@
       "version_tag": "v2.2.0",
       "license_evidence_url": "https://github.com/adbar/trafilatura/blob/c1bc9531a2a978326112ca9987e1382745116136/LICENSE",
       "license": "Apache-2.0",
-      "maintenance_evidence": "Observed 2026-09-24 with git ls-remote: tag v2.2.0 is commit c1bc9531a2a978326112ca9987e1382745116136. GitHub commit committer date 2026-07-31T16:06:56Z, subject 'maintenance: prepare v2.2.0 (#895)'. The LICENSE file at that commit begins with Apache License Version 2.0. The same day, tag v1.6.0 (commit 0bce2189288f4211e561c46083d7952fa65a7b72, committer date 2023-05-11T10:54:29Z) had a GNU GPL Version 3 LICENSE file, and tag v2.0.0 (commit c6e834030779f0fb59aa3888c2f3222101bbdd0f, committer date 2024-12-03T15:23:03Z) had an Apache License 2.0 file. Default branch master HEAD was c852cae9708a59f04521b19395d8ed49771a5c78. No other maintenance claim.",
+      "maintenance_evidence": "Observed 2026-09-24 with git ls-remote: tag v2.2.0 is commit c1bc9531a2a978326112ca9987e1382745116136. GitHub commit committer date 2026-07-31T16:06:56Z, subject 'maintenance: prepare v2.2.0 (#895)'. The LICENSE file at that commit begins with Apache License Version 2.0. The same day, tag v1.6.0 (commit 0bce2189288f4211e561c46083d7952fa65a7b72, committer date 2023-05-11T10:54:29Z) had a GNU GPL Version 3 LICENSE file, and tag v2.0.0 (commit c6e834030779f0fb59aa3888c2f3222101bbdd0f, committer date 2024-12-03T15:23:03Z) had an Apache License 2.0 file. Default branch master HEAD was c852cae9708a59f04521b19395d8ed49771a5c78. No other maintenance claim. Re-read 2026-09-24 on the cloud VM: the v2.2.0 LICENSE blob is Apache License Version 2.0 (HTTP 200). The v1.6.0 LICENSE blob at 0bce2189288f4211e561c46083d7952fa65a7b72 is GNU GPL Version 3 (HTTP 200). The pin stays on the Apache-2.0 commit.",
       "relevant_module": "trafilatura/core.py",
       "work_order_id": "WO-C4-01",
       "marketos_target_capability": "offline main-text extraction from stored HTML fixtures",
@@ -192,7 +192,7 @@
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. Advisory simulation pattern only. It does not authorize logistics execution.",
       "registry_ref": null,
       "confidence": "medium",
-      "unknowns": "git ls-remote of https://github.com/simpy/simpy.git on 2026-09-24 returned repository not found. The GitLab URL is the one PyPI named. GitHub forks were not license-read.",
+      "unknowns": "Confirmed 2026-09-24 on the cloud VM: https://github.com/simpy/simpy returned HTTP 404 and git ls-remote reported repository not found. PyPI simpy 4.1.2 project_urls Source code is https://gitlab.com/team-simpy/simpy/. git ls-remote of that GitLab repository shows tag 4.1.2 object 1a30d42fe3690846d0be5803e67ab6299cd97955 peeling to f43816490c6f76f336ad6e457d3cab9f386894af, which is also master HEAD. LICENSE.rst at that commit begins 'The MIT License (MIT)'. Identity is resolved to that GitLab repository, so this row is not identity_unresolved.",
       "candidate_class": "oss_library"
     },
     {
@@ -202,7 +202,7 @@
       "version_tag": null,
       "license_evidence_url": "https://github.com/uncomtrade/comtradeapicall/blob/0848a3f1cf63234a93fb5635b9b19b2265afab71/LICENSE",
       "license": "MIT",
-      "maintenance_evidence": "Observed 2026-09-24 with git ls-remote: no tags were listed. main HEAD was commit 0848a3f1cf63234a93fb5635b9b19b2265afab71. GitHub commit committer date 2026-06-11T18:28:37Z, subject 'update readmin'. README.md at that commit says the package calls UN Comtrade APIs and that getFinalData takes a subscription_key. No other maintenance claim.",
+      "maintenance_evidence": "Observed 2026-09-24 with git ls-remote: no tags were listed. main HEAD was commit 0848a3f1cf63234a93fb5635b9b19b2265afab71. GitHub commit committer date 2026-06-11T18:28:37Z, subject 'update readmin'. README.md at that commit says the package calls UN Comtrade APIs and that getFinalData takes a subscription_key. No other maintenance claim. Re-read 2026-09-24 on the cloud VM: the LICENSE blob at this SHA is the MIT permission text (HTTP 200). The copyright line is still 'Copyright (c) 2018 The Python Packaging Authority'.",
       "relevant_module": "src/comtradeapicall/PreviewGet.py",
       "work_order_id": "WO-C4-04",
       "marketos_target_capability": "trade and geographic asymmetry evidence, deferred",
@@ -323,24 +323,25 @@
     },
     {
       "source_id": "oss-gapscope",
-      "repository_url": "https://github.com/sarthak070707/gapscope-market-intelligence",
-      "revision": "97db6018a2974342b5007ab133c5e48aa2e20165",
+      "repository_url": null,
+      "revision": null,
       "version_tag": null,
-      "license_evidence_url": "https://github.com/sarthak070707/gapscope-market-intelligence/blob/97db6018a2974342b5007ab133c5e48aa2e20165/LICENSE",
-      "license": "MIT",
-      "maintenance_evidence": "Observed 2026-09-24: GitHub repository name search for gapscope returned multiple unrelated repositories. The only namesake whose LICENSE file was read is sarthak070707/gapscope-market-intelligence at main HEAD 97db6018a2974342b5007ab133c5e48aa2e20165, committer date 2026-06-25T10:23:19Z, subject 'Update dashboard and scanner screenshots with new theme'. The LICENSE file is MIT, copyright 2026 Sarthak Arya. No other maintenance claim.",
-      "relevant_module": "README.md",
+      "license_evidence_url": null,
+      "license": "none_verified",
+      "maintenance_evidence": "Observed 2026-09-24 on the cloud VM: GitHub repository name search for gapscope returned multiple unrelated public repositories. No one of them was selected. No commit and no LICENSE file were read for GapScope, because choosing a namesake would invent an identity.",
+      "relevant_module": "none",
       "work_order_id": "WO-C4-REF",
       "marketos_target_capability": "none",
-      "verdict": "reject",
-      "prohibited_behavior": "Rejected. Do not copy this namesake, do not run its server, scanner, or agent code, and do not treat any GapScope repository found on 2026-09-24 as a MarketOS source.",
-      "security_tos_risks": "No canonical project was identified. Pinning one namesake does not create a license to operate its app or to collect market data with it.",
-      "attribution_requirement": "Not applicable for reuse. Do not add third-party notices from this rejected namesake.",
-      "duplicate_authority_decision": "No canonical GapScope repository was identified. This URL is an inspected namesake so the row has a real commit and LICENSE file. Verdict reject means it is not a methodology source and not an authority.",
+      "verdict": "reference_only",
+      "prohibited_behavior": "Reference only. Do not copy any GapScope namesake, do not run its server, scanner, or agent code, and do not treat any repository that shares the name as a MarketOS source.",
+      "security_tos_risks": "No canonical project was identified. A null repository URL means this row authorizes no checkout, no license grant, and no data collection.",
+      "attribution_requirement": "Not applicable. Do not add third-party notices for GapScope, because no repository was selected and no LICENSE file was read.",
+      "duplicate_authority_decision": "identity_unresolved. Multiple public repositories share the name. This row records reference_only with a null repository URL and does not pick one.",
       "registry_ref": null,
       "confidence": "low",
-      "unknowns": "Name-search hits observed on 2026-09-24 and not license-read: khemmanat/gapscope, joey564-wq/GapScope, nightswimmer/GapScope, ARIJIT00171/GapScope, Sonbrightside/gapscope, milanvarghese/GapScope-Engineering-Knowledge-Gap-Analyzer. None of those was established as canonical.",
-      "candidate_class": "unidentified_namesake"
+      "unknowns": "Name-search hits observed on 2026-09-24 and deliberately not pinned: khemmanat/gapscope, joey564-wq/GapScope, nightswimmer/GapScope, ARIJIT00171/GapScope, Sonbrightside/gapscope, sarthak070707/gapscope-market-intelligence, milanvarghese/GapScope-Engineering-Knowledge-Gap-Analyzer. None was established as canonical.",
+      "candidate_class": "unidentified_namesake",
+      "identity_unresolved": true
     },
     {
       "source_id": "oss-speculora",
@@ -360,7 +361,7 @@
       "duplicate_authority_decision": "Reference only. MarketOS product opportunity synthesis remains the scoring authority. This repository is not promoted into the source adaptation registry.",
       "registry_ref": null,
       "confidence": "medium",
-      "unknowns": "GitHub SPDX metadata was NOASSERTION. The LICENSE file itself names CC BY 4.0 and limits that grant to documentation, text, and diagrams. No release tag was resolved.",
+      "unknowns": "Re-read 2026-09-24 on the cloud VM: the LICENSE file at c429c24f1edac27f19ef2bb070936aa4be59e7d3 returned HTTP 200 and begins 'Creative Commons Attribution 4.0 International (CC BY 4.0)'. The classification is CC-BY-4.0 because that file was read. none_verified does not apply. The grant is limited to documentation, text, and diagrams and excludes the Speculora name and logo. No release tag was resolved.",
       "candidate_class": "methodology_reference"
     }
   ]
