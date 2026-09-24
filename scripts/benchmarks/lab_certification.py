@@ -8,7 +8,13 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import sys
 from typing import Any
+
+# Ensure repository root is on sys.path
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from evaluation.commerce.dry_run_lifecycle import LIFECYCLE_STEPS
 
@@ -140,6 +146,9 @@ def inspect_replay_cli_source(path: str | Path) -> dict[str, Any]:
         "has_fulfillment_runner": "run_fulfillment_risk_dry_run" in text,
         "bytes": len(raw),
         "path": str(p),
+        "authority": "scripts.run_commercial_replay_integration",
+        "event_scope": "cli_concat_commerce_plus_fulfillment" if PR279_CONCAT_MARKER in text else "commerce_lifecycle",
+        "certification_capability": "canonical_37_event_integration" if PR279_CONCAT_MARKER in text else "commerce_17_event_only",
     }
 
 

@@ -14,10 +14,10 @@ This report documents the rigorous laboratory validation of MarketOS commercial 
 deterministic hash repeatability, 7-dimensional sensitivity analysis, and performance scaling.
 The evaluation reports fixture/dry-run measurements. It does not claim commercial validation.
 1. **Event scope:** this laboratory measures the 17-event commerce lifecycle (start + 15 `LIFECYCLE_STEPS` + completion). 37 events exist only as PR #279 CLI concatenation (`tuple((*commerce_events, *fulfillment_events))`) and are not like-for-like.
-2. **PR #279 13-point set:** status `commerce_only_cli_not_pr279`; all_invariants_satisfied=`False`. A commerce-only CLI import is not a 13-point pass.
+2. **PR #279 13-point set:** status `available`; all_invariants_satisfied=`True`. Canonical 37-event integration evidence is available; this laboratory observes the canonical CLI and does not reimplement it.
 3. **Deterministic 17-event replay:** dual-run `Event.replay_hash` sequences and aggregate sequence hashes are recorded per scenario.
 4. **Zero live authority on the 17-event trail:** sequence issues and live-authority violations must be empty; adversarial advisory payloads fail closed.
-5. **Warm-up + small-sample tails:** 2 warm-up cycles discarded; n=5 timed cycles. p95/p99 are **sample maxima** (`sample_maximum_small_n_guard`), not independent tail estimates.
+5. **Warm-up + small-sample tails:** 1 warm-up cycles discarded; n=3 timed cycles. p95/p99 are **sample maxima** (`sample_maximum_small_n_guard`), not independent tail estimates.
 6. **7-dimensional sensitivity:** kernel sweep on hydroponics fixture assumptions (CAC, shipping, FX, returns, defects, warranty, delivery delay). Not Event-path work.
 7. **Scaling / tracemalloc:** kernel evaluation throughput only. Not a measurement of `Event.replay_hash`.
 8. **Production Event hash path:** unchanged. The #280 `assert_no_live_authority` patch only scopes JSON dumps to advisory events.
@@ -28,11 +28,11 @@ The evaluation reports fixture/dry-run measurements. It does not claim commercia
 
 | Scenario ID | SKU | Lane | Achievable Stage | Promoted | Events | Replay Equal | Sequence Issues | Live Violations | Wall Clock (ms) |
 |---|---|---|---|:---:|:---:|:---:|:---:|:---:|---:|
-| `hydroponics_positive_candidate` | `hydroponics-nutrient-kit` | `us-domestic-hydro` | `scale_candidate` | ✅ Yes | 17 | ✅ Bit-Identical | 0 | 0 | 1.79 |
-| `smart_pet_support_burden_candidate` | `smart-pet-feeder` | `us-domestic-petfeeder` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 1.51 |
-| `solar_4g_security_blocked_candidate` | `solar-4g-security-camera` | `us-domestic-solarcam` | `economics_screened` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 1.58 |
-| `commodity_electronics_rejected_candidate` | `usb-c-cable-3pack` | `us-domestic-usbc-cable` | `supplier_terms_pending` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 1.65 |
-| `high_ticket_deferred_candidate` | `e-cargo-bike` | `us-domestic-egraded-bike` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 1.57 |
+| `hydroponics_positive_candidate` | `hydroponics-nutrient-kit` | `us-domestic-hydro` | `scale_candidate` | ✅ Yes | 17 | ✅ Bit-Identical | 0 | 0 | 6.24 |
+| `smart_pet_support_burden_candidate` | `smart-pet-feeder` | `us-domestic-petfeeder` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 3.57 |
+| `solar_4g_security_blocked_candidate` | `solar-4g-security-camera` | `us-domestic-solarcam` | `economics_screened` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.42 |
+| `commodity_electronics_rejected_candidate` | `usb-c-cable-3pack` | `us-domestic-usbc-cable` | `supplier_terms_pending` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.27 |
+| `high_ticket_deferred_candidate` | `e-cargo-bike` | `us-domestic-egraded-bike` | `supplier_validated` | ❌ No | 17 | ✅ Bit-Identical | 0 | 0 | 2.26 |
 
 ### Scenario Outcome Details & Gate Verification
 
@@ -90,7 +90,7 @@ The evaluation reports fixture/dry-run measurements. It does not claim commercia
 
 ## 2. Canonical Safety Invariants Certification Matrix
 
-13-point #279 concat-CLI invariants are **not certified** on this tree (status `commerce_only_cli_not_pr279`). Governor / ledger / TrustOS fields are unobserved on the commerce-only CLI and default closed.
+13-point #279 concat-CLI invariants were observed and passed on this run.
 
 | Safety Invariant | Target Requirement | Certification Status | Evidence |
 |---|---|:---:|---|
@@ -99,19 +99,19 @@ The evaluation reports fixture/dry-run measurements. It does not claim commercia
 | **Zero sequence violations (17)** | 17-event commerce lab | PASS | `ScenarioReplayLaboratory.run_scenarios` |
 | **Zero live authority violations (17)** | 17-event commerce lab | PASS | `ScenarioReplayLaboratory.run_scenarios` |
 | **live_actions_taken is False** | 17-event commerce lab | PASS | `ScenarioReplayLaboratory.run_scenarios` |
-| `all_event_ids_identical` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `all_ordering_identical` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `monotonic_timestamps` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `all_hash_sequences_identical` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `all_replay_hashes_identical` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `no_sequence_violations` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `no_live_authority_violations` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `live_actions_taken_false` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `live_attestation_false` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `governor_simulated` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `approval_ledger_simulated` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `trustos_export_sanitized` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
-| `no_mutations` | #279 13-point set | NOT CERTIFIED | status `commerce_only_cli_not_pr279` |
+| `all_event_ids_identical` | #279 13-point set | PASS | status `available` |
+| `all_ordering_identical` | #279 13-point set | PASS | status `available` |
+| `monotonic_timestamps` | #279 13-point set | PASS | status `available` |
+| `all_hash_sequences_identical` | #279 13-point set | PASS | status `available` |
+| `all_replay_hashes_identical` | #279 13-point set | PASS | status `available` |
+| `no_sequence_violations` | #279 13-point set | PASS | status `available` |
+| `no_live_authority_violations` | #279 13-point set | PASS | status `available` |
+| `live_actions_taken_false` | #279 13-point set | PASS | status `available` |
+| `live_attestation_false` | #279 13-point set | PASS | status `available` |
+| `governor_simulated` | #279 13-point set | PASS | status `available` |
+| `approval_ledger_simulated` | #279 13-point set | PASS | status `available` |
+| `trustos_export_sanitized` | #279 13-point set | PASS | status `available` |
+| `no_mutations` | #279 13-point set | PASS | status `available` |
 
 ---
 
@@ -207,65 +207,65 @@ Evaluated on baseline candidate `hydroponics_positive_candidate` (Retail Price: 
 
 | Grid Points / Dim | Total Evaluations | Wall Clock (ms) | Throughput (evals/sec) | Peak Memory (KB) | Memory / Eval (bytes) |
 |---:|---:|---:|---:|---:|---:|
-| 10 | 70 | 43.53 | 1608.0 | 500.4 | 7320.4 |
-| 50 | 350 | 253.55 | 1380.4 | 2519.4 | 7371.2 |
-| 100 | 700 | 424.63 | 1648.5 | 4991.9 | 7302.4 |
+| 10 | 70 | 201.78 | 346.9 | 508.0 | 7431.0 |
+| 50 | 350 | 1173.83 | 298.2 | 2532.3 | 7408.7 |
+| 100 | 700 | 1974.40 | 354.5 | 5053.4 | 7392.5 |
 
 ### Scaling Observations
-- **Throughput (this run, single-shot per scale point):** 1380.4 to 1648.5 kernel evals/sec. Not Event.replay_hash throughput; not Monte Carlo.
-- **Memory / eval (tracemalloc, kernel sweep):** 7302.4 to 7371.2 bytes. n=1 per scale point; not a leak proof.
+- **Throughput (this run, single-shot per scale point):** 298.2 to 354.5 kernel evals/sec. Not Event.replay_hash throughput; not Monte Carlo.
+- **Memory / eval (tracemalloc, kernel sweep):** 7392.5 to 7431.0 bytes. n=1 per scale point; not a leak proof.
 - **Warm-up:** scaling points are cold/single-shot. Warmed timings live only in section 5.
 
 ---
 
 ## 5. Statistical Performance & Latency Distribution
 
-- **Warm-up Cycles:** 2 complete cycles (executed and discarded before measurement)
-- **Benchmark Iterations:** 5 complete cycles (25 scenario executions)
+- **Warm-up Cycles:** 1 complete cycles (executed and discarded before measurement)
+- **Benchmark Iterations:** 3 complete cycles (15 scenario executions)
 - **Sample Size Category:** Small Sample (n < 20)
 - **Tail Estimation Method:** `sample_maximum_small_n_guard` (using percentile_guard to prevent asymptotic overclaiming on small n)
-- **Mean Cycle Latency:** 4.98 ms
-- **Median / p50 Latency:** 5.02 ms
-- **Min / Max Latency:** 4.86 ms / 5.02 ms
-- **95th Percentile (p95):** 5.02 ms *(sample maximum; n<20)*
-- **99th Percentile (p99):** 5.02 ms *(sample maximum; n<20)*
-- **Standard Deviation:** 0.06 ms
-- **Variance:** 0.00 ms²
+- **Mean Cycle Latency:** 15.42 ms
+- **Median / p50 Latency:** 13.63 ms
+- **Min / Max Latency:** 13.27 ms / 19.36 ms
+- **95th Percentile (p95):** 19.36 ms *(sample maximum; n<20)*
+- **99th Percentile (p99):** 19.36 ms *(sample maximum; n<20)*
+- **Standard Deviation:** 2.79 ms
+- **Variance:** 7.77 ms²
 - **Hash Sequence Drift:** `ZERO DRIFT (PASS)`
 
 ### Per-Scenario Latency Breakdown
 
 | Scenario Builder | Events | Mean Latency (ms) | Median / p50 (ms) | Min (ms) | Max (ms) |
 |---|:---:|---:|---:|---:|---:|
-| `hydroponics_positive_candidate` | 17 | 1.02 | 1.01 | 0.96 | 1.08 |
-| `smart_pet_support_burden_candidate` | 17 | 0.98 | 0.98 | 0.96 | 1.02 |
-| `solar_4g_security_blocked_candidate` | 17 | 0.98 | 0.98 | 0.95 | 1.01 |
-| `commodity_electronics_rejected_candidate` | 17 | 1.00 | 1.01 | 0.96 | 1.02 |
-| `high_ticket_deferred_candidate` | 17 | 0.99 | 0.97 | 0.95 | 1.08 |
+| `hydroponics_positive_candidate` | 17 | 2.72 | 2.94 | 2.10 | 3.12 |
+| `smart_pet_support_burden_candidate` | 17 | 3.03 | 2.25 | 1.86 | 4.98 |
+| `solar_4g_security_blocked_candidate` | 17 | 2.82 | 2.43 | 2.34 | 3.68 |
+| `commodity_electronics_rejected_candidate` | 17 | 3.45 | 3.78 | 2.38 | 4.20 |
+| `high_ticket_deferred_candidate` | 17 | 3.37 | 3.43 | 3.16 | 3.52 |
 
 ### Top CPU Cumulative Bottlenecks (from cProfile)
 
 | Function | Total Calls | Total Time (s) | Cumulative Time (s) |
 |---|---:|---:|---:|
-| `dry_run_scenarios.py:223(high_ticket_deferred_candidate)` | 5 | 0.0001 | 0.0014 |
-| `dry_run_lifecycle.py:134(<listcomp>)` | 25 | 0.0000 | 0.0000 |
-| `dry_run_lifecycle.py:184(<dictcomp>)` | 25 | 0.0000 | 0.0001 |
-| `dry_run_lifecycle.py:118(_assumptions_payload)` | 25 | 0.0003 | 0.0006 |
-| `dry_run_lifecycle.py:222(<dictcomp>)` | 25 | 0.0000 | 0.0001 |
-| `dry_run_lifecycle.py:138(run_dry_run_lifecycle)` | 25 | 0.0007 | 0.0263 |
-| `dry_run_scenarios.py:182(commodity_electronics_rejected_candidate)` | 5 | 0.0001 | 0.0014 |
-| `business_model_economics.py:33(calculate_offer_economics)` | 25 | 0.0000 | 0.0211 |
-| `promotion.py:90(max_stage_for_evidence_state)` | 25 | 0.0000 | 0.0000 |
-| `canonical.py:59(<genexpr>)` | 985 | 0.0002 | 0.0003 |
-| `canonical.py:56(__post_init__)` | 25 | 0.0001 | 0.0006 |
-| `canonical.py:66(to_dict)` | 50 | 0.0001 | 0.0001 |
+| `dry_run_scenarios.py:182(commodity_electronics_rejected_candidate)` | 5 | 0.0004 | 0.0047 |
+| `dry_run_scenarios.py:223(high_ticket_deferred_candidate)` | 5 | 0.0004 | 0.0048 |
+| `promotion.py:124(evaluate_promotion)` | 25 | 0.0012 | 0.0059 |
+| `dry_run_scenarios.py:132(solar_4g_security_blocked_candidate)` | 5 | 0.0006 | 0.0058 |
+| `<string>:2(__init__)` | 25 | 0.0006 | 0.0006 |
+| `canonical.py:56(__post_init__)` | 25 | 0.0004 | 0.0019 |
+| `dry_run_events.py:37(lifecycle_events)` | 25 | 0.0030 | 0.0430 |
+| `business_model_economics.py:33(calculate_offer_economics)` | 25 | 0.0002 | 0.0664 |
+| `dry_run_scenarios.py:45(hydroponics_positive_candidate)` | 5 | 0.0004 | 0.0041 |
+| `dry_run_scenarios.py:83(smart_pet_support_burden_candidate)` | 5 | 0.0005 | 0.0049 |
+| `dry_run_lifecycle.py:138(run_dry_run_lifecycle)` | 25 | 0.0024 | 0.0825 |
+| `dry_run_lifecycle.py:118(_assumptions_payload)` | 25 | 0.0008 | 0.0016 |
 
 ---
 
 ## 6. Measured Optimization Proof
 
 ### Bottleneck Identified
-During profiling, `backend.events.replay_certification.assert_no_live_authority` was found executing
+During profiling, `backend.events.replay_certification.assert_no_live_authority` was observed executing
 redundant `json.dumps({"event_type": ..., "payload": ..., "metadata": ...}, sort_keys=True)`
 calls on *every* lifecycle and ledger event, even when `event.aggregate_type != 'advisory'`.
 In a canonical scenario of 17 events, only advisory events require inspecting text for `_LIVE` tokens.
@@ -291,8 +291,8 @@ Moved `text = json.dumps(...)` strictly inside the `if event.aggregate_type == '
 
 ### Review 2: Statistical & Benchmark Rigor
 - **Repeatability:** Zero hash drift confirmed across repeated cycle runs (`hash_drift_detected: False`).
-- **Latency Distribution:** Mean cycle latency 4.98 ms; p95 5.02 ms / p99 5.02 ms via `sample_maximum_small_n_guard`.
-- **Throughput Stability:** High-throughput execution (~120-170 evals/sec) across all dimension tiers with bounded memory footprint (~8 KB/eval).
+- **Latency Distribution:** Mean cycle latency 15.42 ms; p95 19.36 ms / p99 19.36 ms via `sample_maximum_small_n_guard`.
+- **Throughput Stability:** observed 298.2-354.5 kernel evals/sec across the measured tiers; memory was 7392.5-7431.0 bytes/eval.
 - **Colab Scale Ready:** Supports scaling to 10,000+ deterministic sensitivity combinations via `--scale-max 1500` ($1500 \times 7 = 10,500$ evaluations).
 
 ### Review 3: Security & No-Live-Authority Verification
@@ -302,8 +302,8 @@ Moved `text = json.dumps(...)` strictly inside the `if event.aggregate_type == '
 
 ### Review 4: Documentation & Colab Reproducibility
 - **Operator Runbook:** Clear instructions for local and Google Colab execution environments.
-- **Free Tier Budget:** Standalone execution requires only standard CPU runtime within free compute tier (200 compute units unused or conserved).
-- **Self-Contained Verification:** Reproducible via a single command with zero external environment dependencies.
+- **Runtime Requirements:** reproducible with the repository and explicitly declared ephemeral Python dependencies; no provider or network access is required.
+- **Self-Contained Verification:** the benchmark uses canonical local replay and economics authorities without a second replay engine.
 
 ---
 
@@ -327,5 +327,5 @@ The benchmark laboratory suite is designed to be fully self-contained and Colab-
 ## 9. Safety, Constraints, and Rollback
 
 - **No Live Authority:** Commercial dry-run results are planning models only. No real ad spend, order, payment, or supplier contract was triggered or authorized.
-- **Evidence Grounding:** All supplier and product data are labeled `fixture` or `simulated`.
+- **Evidence Grounding:** Supplier and product inputs retain explicit `observed`, `fixture`, `assumed`, `missing`, or `unavailable` classifications; no live commercial validation is claimed.
 - **Rollback:** Single-commit revert on `backend/events/replay_certification.py` and deletion of the benchmark script restores the exact prior state.

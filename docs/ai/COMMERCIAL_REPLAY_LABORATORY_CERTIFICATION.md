@@ -9,18 +9,18 @@ Status: draft, do not merge
 
 | PR | Role | Branch | HEAD |
 | --- | --- | --- | --- |
-| #274 | conformance / Event-path arbitration | `grok/marketos-integrated-replay-performance-v1` | `f51b746fad033a68d9c332c19784e9b2f045c9ce` |
-| #279 | canonical replay CLI | `codex/marketos-commercial-replay-consolidation-v1` | `0dd413969b5c822f0bcbfa1764ea9fb9eecc9a57` |
-| #280 | laboratory | `antigravity/marketos-commercial-replay-benchmark-v1` | this commit |
-| main | base | `main` | `e6a2e88e03ed07e4da8f6351aa114f5d5a8007c6` |
+| #274 | conformance / Event-path arbitration | `grok/marketos-integrated-replay-performance-v1` | current mainline ancestry |
+| #279 | canonical replay CLI | `codex/marketos-commercial-replay-consolidation-v1` | current mainline ancestry |
+| #280 | laboratory | `antigravity/marketos-commercial-replay-benchmark-v1` | measured source head `98e830c3072c854cb1a8c2f1b147945812b558b9` |
+| main | base | `main` | `df160af1aad615dcdee7934bcd7122898eb5eff1` |
 
 #274 and #279 files were not edited. `Event.replay_hash` was not edited.
 
 ## Execution class
 
-Exclusive worktree `/tmp/marketos-pr280` with materialized blobs. Sparse GitHub Contents API copies are not evidence.
+Exclusive Windows worktree `C:\Users\HP\Documents\MarketOS.worktrees\marketos-commercial-replay-benchmark-v1` with materialized blobs. Sparse GitHub Contents API copies are not evidence.
 
-- `grok` CLI, Hermes, ECC skills, gstack, CoderOS: **unavailable** (not fabricated).
+- `grok` CLI, Hermes, ECC skills, and gstack: **unavailable** (not fabricated). CoderOS runtime checks were available but its OpenRouter free provider was unavailable.
 - GitHub Actions: **`ci_unavailable`** (do not treat zero-step checks as executed tests).
 
 ## 17 versus 37 (from executable source)
@@ -41,7 +41,9 @@ commerce: builder() -> run_dry_run_lifecycle -> lifecycle_events
 
 This lab **refuses** a non-17 commerce trail. Comparing 17-event walls or hashes to 37-event rows is invalid.
 
-On this #280 tree, `scripts/run_commercial_replay_integration.py` is the **commerce-only** CLI (7442 bytes, no concat marker). Importing it is not a 13-point #279 pass. `run_canonical_replay_integration()` returns `status=commerce_only_cli_not_pr279`, `all_invariants_satisfied=False`.
+On the current #280 tree, `scripts/run_commercial_replay_integration.py` is the canonical #279 concat CLI. The laboratory observes it without reimplementing its event construction. `run_canonical_replay_integration()` reports five 37-event rows and evaluates the 13-point safety invariants against the returned canonical fields.
+
+Evidence class: the 17-event rows are deterministic dry-run/fixture evidence (`observed` or `fixture` as emitted by the builders); the 37-event rows are canonical replay integration evidence from the local CLI. Neither class is commercial validation.
 
 ## Tracked lab bytes (this tree, before this certifier commit they were already complete)
 
@@ -63,42 +65,37 @@ Older reported SHAs `5545579` and `84aa84b` are ancestors, not the live head.
 
 `backend/events/replay_certification.py` three-line advisory-only `json.dumps` patch is left in place (semantically equivalent; `Event.replay_hash` unchanged). No further production optimization.
 
-## Measured 17-event aggregate `Event.replay_hash` (this run)
+## Measured replay evidence (current head)
 
-Command:
+Commands:
 
 ```
-python3 scripts/benchmarks/benchmark_commercial_replay_lab.py --warmup 2 --runs 5 --scale-max 50 --json
+uv run --no-project --with scipy --with requests python scripts/benchmarks/benchmark_commercial_replay_lab.py --warmup 1 --runs 3 --scale-max 10 --json
+uv run --no-project --with scipy --with requests python scripts/run_commercial_replay_integration.py --json
 ```
 
-Environment: Python 3.10.21, Linux x86_64, warmup=2 discarded, n=5 timed cycles, small-sample tails.
+Environment: Python 3.13.15, Windows x86_64, benchmark warm-up=1 discarded, n=3 timed cycles, small-sample tails.
 
-| Scenario | Evidence | Events | Aggregate `Event.replay_hash` | Dual-run equal |
-| --- | --- | ---: | --- | --- |
-| hydroponics_positive_candidate | observed | 17 | `6fb5335152136dd144dce4f9409c9556b73586e2000909d341642b322e448043` | True |
-| smart_pet_support_burden_candidate | observed | 17 | `454324ce4704c1e2c962c966e72a93f3bdc21179cd55db2f8d65441b772095ac` | True |
-| solar_4g_security_blocked_candidate | fixture | 17 | `44ea844bac5e4822416ca71cb9ebf59af8b3c46b4a1ceb01a56a86cae538f3e9` | True |
-| commodity_electronics_rejected_candidate | observed | 17 | `b19c522f0ecc954a268a7369634f1013f49f2b9f2387250fc396805416131aa4` | True |
-| high_ticket_deferred_candidate | observed | 17 | `f9d709c9366b35985f15cbf0018e741a530f5250567a335a7407d471d37c13fe` | True |
+17-event commerce rows: 5 scenarios; every row emitted 17 events, equal ordered `Event.replay_hash` sequences, equal aggregate hashes between dual runs, and zero sequence/live-authority violations. The measured aggregate hashes are emitted in the JSON artifact; this report does not copy a stale hash table.
 
-These match the #274 published 17-event aggregates. Hash drift across 5 warmed cycles: **none**.
+37-event canonical rows: 5 scenarios; every row emitted 37 events, `replay_equal=true`, launch authorization false, live actions false, and all 13 invariant checks true. The canonical authority is `scripts.run_commercial_replay_integration`, not a laboratory duplicate.
 
-Statistical (n=5, sample maxima): mean 4.87 ms, p50 4.86 ms, p95=p99=max 4.91 ms. Fixture/dry-run walls, not commercial validation.
+Benchmark timing: total timed runs 15; mean cycle 20.46 ms; p50 19.92 ms; p95/p99 22.71 ms. Because n=3 is below the tail threshold, p95 and p99 are sample maxima under `sample_maximum_small_n_guard`, not population tail estimates. Evidence is deterministic local dry-run/replay evidence, not commercial validation.
 
 ## Checks
 
 | Check | Result |
 | --- | --- |
 | Exclusive #280 worktree | done (`antigravity/marketos-commercial-replay-benchmark-v1`) |
-| `python -m pytest tests/benchmarks/test_lab_certification.py tests/benchmarks/test_commercial_replay_lab.py` | 21 passed |
-| `python -m pytest tests/system/test_commercial_dry_run_replay_integration.py tests/system/test_public_signal_replay_certification.py` (#280 / main 17-path) | 33 passed |
-| `python -m pytest tests/system/test_commercial_dry_run_replay_integration.py` in #279-ro @ `0dd4139` | 61 passed |
-| `python -m pytest tests/contracts/test_architecture_boundaries.py` | 9 passed |
-| `python -m compileall` + `ruff check` on lab/tests | ok |
-| `git diff --check` | clean |
-| `python scripts/ai/session_finish.py --dry-run` | ok |
-| GitHub CI | `ci_unavailable` |
-| grok / Hermes / ECC / gstack / CoderOS | unavailable |
+| `uv run --no-project --with pytest --with scipy --with requests pytest -q tests/benchmarks/test_lab_certification.py tests/benchmarks/test_commercial_replay_lab.py tests/system/test_commercial_dry_run_replay_integration.py` | 82 passed |
+| `uv run --no-project --with pytest --with scipy --with requests pytest -q tests/system/test_commercial_dry_run_replay_integration.py tests/system/test_commercial_replay_evidence_truth_gaps.py` | 66 passed |
+| `uv run --no-project --with ruff ruff check` on lab/tests | passed |
+| `python -m compileall -q scripts/benchmarks evaluation/commerce tests/benchmarks tests/system` | passed |
+| `git diff --check` | passed |
+| Native `python -m pytest` | unavailable: No module named pytest |
+| Native `python scripts/ai/session_finish.py --dry-run` | blocked: native pytest unavailable; local gate `ci_unavailable` / `not_run` |
+| GitHub CI | failed zero-step/non-diagnostic checks; no application-specific pass inferred |
+| OmniRoute/OpenRouter free pool | OpenRouter provider error; no model list; no delegated findings used |
 | Merge | not performed |
 
 ## Safety
@@ -107,8 +104,8 @@ No providers, credentials, customer data, orders, payments, refunds, ads, messag
 
 ## Rollback
 
-Revert this certifier commit on `antigravity/marketos-commercial-replay-benchmark-v1` or close draft #280. Base remains `e6a2e88e`.
+Revert the laboratory-only commit on `antigravity/marketos-commercial-replay-benchmark-v1`, or close draft #280. The base remains `df160af1aad615dcdee7934bcd7122898eb5eff1`.
 
 ## Operator next action
 
-Keep #280 draft. After #279 merges, re-run `run_canonical_replay_integration()` on the concat CLI and only then consider the 13-point set. Do not merge.
+Keep #280 draft. Re-run the two measured commands above after any mainline or canonical replay change, then attach fresh JSON output to the PR before considering promotion. Do not merge.

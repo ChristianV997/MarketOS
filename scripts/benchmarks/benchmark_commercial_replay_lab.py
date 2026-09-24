@@ -772,7 +772,7 @@ def generate_laboratory_report(
     md.append("")
     md.append("## Executive Summary")
     md.append("")
-    md.append("This report documents the rigorous laboratory validation of MarketOS commercial dry-run replay,")
+    md.append("This report documents the laboratory validation of MarketOS commercial dry-run replay,")
     md.append("deterministic hash repeatability, 7-dimensional sensitivity analysis, and performance scaling.")
     md.append("The evaluation reports fixture/dry-run measurements. It does not claim commercial validation.")
     md.append("1. **Event scope:** this laboratory measures the 17-event commerce lifecycle (start + 15 `LIFECYCLE_STEPS` + completion). 37 events exist only as PR #279 CLI concatenation (`tuple((*commerce_events, *fulfillment_events))`) and are not like-for-like.")
@@ -781,7 +781,11 @@ def generate_laboratory_report(
     md.append(
         f"2. **PR #279 13-point set:** status `{integration_status}`; "
         f"all_invariants_satisfied=`{integration_certified}`. "
-        "A commerce-only CLI import is not a 13-point pass."
+        + (
+            "Canonical 37-event integration evidence is available; this laboratory observes the canonical CLI and does not reimplement it."
+            if integration_certified
+            else "A commerce-only CLI import is not a 13-point pass."
+        )
     )
     md.append("3. **Deterministic 17-event replay:** dual-run `Event.replay_hash` sequences and aggregate sequence hashes are recorded per scenario.")
     md.append("4. **Zero live authority on the 17-event trail:** sequence issues and live-authority violations must be empty; adversarial advisory payloads fail closed.")
@@ -943,7 +947,7 @@ def generate_laboratory_report(
     md.append("## 6. Measured Optimization Proof")
     md.append("")
     md.append("### Bottleneck Identified")
-    md.append("During profiling, `backend.events.replay_certification.assert_no_live_authority` was found executing")
+    md.append("During profiling, `backend.events.replay_certification.assert_no_live_authority` was observed executing")
     md.append("redundant `json.dumps({\"event_type\": ..., \"payload\": ..., \"metadata\": ...}, sort_keys=True)`")
     md.append("calls on *every* lifecycle and ledger event, even when `event.aggregate_type != 'advisory'`.")
     md.append("In a canonical scenario of 17 events, only advisory events require inspecting text for `_LIVE` tokens.")
@@ -972,7 +976,15 @@ def generate_laboratory_report(
     md.append(f"- **Latency Distribution:** Mean cycle latency {stats_summary.mean_cycle_ms:.2f} ms; "
               f"p95 {stats_summary.p95_cycle_ms:.2f} ms / p99 {stats_summary.p99_cycle_ms:.2f} ms "
               f"via `{stats_summary.tail_estimation_method}`.")
-    md.append("- **Throughput Stability:** High-throughput execution (~120-170 evals/sec) across all dimension tiers with bounded memory footprint (~8 KB/eval).")
+    if scaling_records:
+        throughputs = [sc.evals_per_sec for sc in scaling_records]
+        memories = [sc.bytes_per_eval for sc in scaling_records]
+        md.append(
+            f"- **Throughput Stability:** observed {min(throughputs):.1f}-{max(throughputs):.1f} "
+            f"kernel evals/sec across the measured tiers; memory was {min(memories):.1f}-{max(memories):.1f} bytes/eval."
+        )
+    else:
+        md.append("- **Throughput Stability:** no scaling points were measured.")
     md.append("- **Colab Scale Ready:** Supports scaling to 10,000+ deterministic sensitivity combinations via `--scale-max 1500` ($1500 \\times 7 = 10,500$ evaluations).")
     md.append("")
     md.append("### Review 3: Security & No-Live-Authority Verification")
@@ -982,8 +994,8 @@ def generate_laboratory_report(
     md.append("")
     md.append("### Review 4: Documentation & Colab Reproducibility")
     md.append("- **Operator Runbook:** Clear instructions for local and Google Colab execution environments.")
-    md.append("- **Free Tier Budget:** Standalone execution requires only standard CPU runtime within free compute tier (200 compute units unused or conserved).")
-    md.append("- **Self-Contained Verification:** Reproducible via a single command with zero external environment dependencies.")
+    md.append("- **Runtime Requirements:** reproducible with the repository and explicitly declared ephemeral Python dependencies; no provider or network access is required.")
+    md.append("- **Self-Contained Verification:** the benchmark uses canonical local replay and economics authorities without a second replay engine.")
     md.append("")
     md.append("---")
     md.append("")
@@ -1007,7 +1019,7 @@ def generate_laboratory_report(
     md.append("## 9. Safety, Constraints, and Rollback")
     md.append("")
     md.append("- **No Live Authority:** Commercial dry-run results are planning models only. No real ad spend, order, payment, or supplier contract was triggered or authorized.")
-    md.append("- **Evidence Grounding:** All supplier and product data are labeled `fixture` or `simulated`.")
+    md.append("- **Evidence Grounding:** Supplier and product inputs retain explicit `observed`, `fixture`, `assumed`, `missing`, or `unavailable` classifications; no live commercial validation is claimed.")
     md.append("- **Rollback:** Single-commit revert on `backend/events/replay_certification.py` and deletion of the benchmark script restores the exact prior state.")
 
     content = "\n".join(md)
@@ -1068,7 +1080,11 @@ def main() -> int:
         "evidence_classification": "per_scenario",
         "live_authority": "blocked",
         "event_scope": "commerce_lifecycle_17",
-        "cli_concat_37_owner": "PR #279 only",
+        "cli_concat_37_owner": "canonical scripts.run_commercial_replay_integration only",
+        "canonical_event_scopes": {
+            "commerce": COMMERCE_LIFECYCLE_EVENT_COUNT,
+            "commerce_plus_fulfillment": CLI_CONCAT_EVENT_COUNT,
+        },
         "environment": {
             "git_head": _git_head(),
             "python": sys.version.split()[0],
