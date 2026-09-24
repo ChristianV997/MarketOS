@@ -8,6 +8,7 @@ the action represented by a request.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+import re
 from typing import Any, Iterable, Mapping, Sequence
 
 REQUEST_TYPES = (
@@ -30,6 +31,7 @@ LIVE_ACTION_TYPES = frozenset({
     "invoice_creation", "payment_creation", "supplier_order", "ad_launch", "site_publish",
     "domain_change", "hosting_change", "customer_message",
 })
+_SENSITIVE_TEXT = re.compile(r"(?:api[_-]?key|password|secret|token|bearer|private[_-]?key)", re.IGNORECASE)
 
 
 def _tuple(value: Any) -> tuple[str, ...]:
@@ -105,6 +107,11 @@ class ApprovalEvidence:
     source: str
     summary: str
     sanitized: bool = True
+
+    def __post_init__(self) -> None:
+        values = (self.ref_id, self.evidence_type, self.source, self.summary)
+        if not self.sanitized or any(_SENSITIVE_TEXT.search(str(value)) for value in values):
+            raise ValueError("approval evidence must be sanitized and secret-free")
 
 
 @dataclass(frozen=True)
