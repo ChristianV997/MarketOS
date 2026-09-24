@@ -866,6 +866,44 @@ def test_document_digest_binding_rejects_symlink_within_the_root(tmp_path: Path,
         )
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only; os.mkfifo does not exist on this platform")
+def test_document_digest_binding_rejects_a_named_pipe_without_hanging(tmp_path: Path) -> None:
+    """The FIFO-DoS closure has direct helper-level coverage
+    (``test_secure_open_rejects_a_named_pipe_without_hanging``), but that
+    alone does not prove the real caller ever reaches it, and the PR
+    description's claim of a live production-entrypoint FIFO reproduction
+    was previously untested at this level -- this closes that gap.
+
+    A FIFO placed statically at the reference path (as opposed to one
+    swapped in mid-race) is actually rejected one layer earlier than
+    ``_open_verified_evidence_file``'s O_NONBLOCK guard: ``_resolve()``
+    (called first, at line ~612) uses ``Path.is_file()``, a non-blocking
+    ``stat()``-based check that already reports False for a FIFO, so the
+    binding never reaches the open call at all for this static placement.
+    That earlier check is itself non-blocking (stat never blocks on a
+    FIFO; only an actual open()/read() against one with no writer does),
+    so the no-hang guarantee holds end to end -- just via a different,
+    earlier check than the FIFO-specific one. The O_NONBLOCK guard in
+    ``_open_verified_evidence_file`` remains real, load-bearing
+    defense-in-depth for the disclosed TOCTOU case: a file swapped for a
+    FIFO in the race window between ``_resolve()``'s check and the actual
+    open, which a static placement like this one cannot exercise."""
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    fifo = evidence_root / "hyd-quote.pdf"
+    os.mkfifo(fifo)
+    offer = _base_hydroponics_quote()
+    offer.update({"offer_id": "HYD-DOC-FIFO", "supplier_sku": "HYD-DOC-FIFO-SKU", "source_reference": "manual:hyd-quote.pdf"})
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hyd-doc-fifo")
+    with pytest.raises(ResearchToDecisionError, match="does not exist"):
+        build_research_to_decision(
+            manifest,
+            base_dir=tmp_path,
+            supplier_evidence_root=evidence_root,
+            confirmed_supplier_document_evidence=[("HYD-DOC-FIFO", "HYD-DOC-FIFO-SKU", "hyd-quote.pdf", "0" * 64)],
+        )
+
+
 def test_document_digest_binding_rejects_oversized_file(tmp_path: Path) -> None:
     from scripts.research_to_decision import MAX_EVIDENCE_DOCUMENT_BYTES
 
