@@ -1,11 +1,13 @@
 """Tests for services.supplier_logistics_research.report.build_supplier_logistics_report."""
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
 
-from backend.economics.kernel import CurrencyMismatchError, Money, UnitEconomicsResult
+from backend.economics.kernel import CurrencyMismatchError, EvidenceRef, Money, UnitEconomicsResult
+from services.supplier_logistics_research import controls
 from services.supplier_logistics_research.report import build_supplier_logistics_report
-from services.supplier_logistics_research.schemas import LandedCostScenario
+from services.supplier_logistics_research.schemas import FieldEvidence, LandedCostScenario
 
 GENERATED_AT = "2026-01-06T00:00:00Z"
 
@@ -100,6 +102,43 @@ class TestUnknownOfferingStaysUnassessed:
         assert report.landed_cost_scenarios == ()
         assert report.risk_matrix == ()
         assert report.next_actions == ()
+
+
+class TestUnverifiedObservedEvidenceIsNotTreatedAsVerified:
+    """quality="observed" alone is a self-reported label, not a
+    verification -- controls.is_verified is the single gate for whether an
+    "observed" claim actually carries a human-confirmed EvidenceRef in a
+    verified-like evidence_state. A supplier's own unconfirmed claim
+    dressed up as quality="observed" (no evidence_ref at all, or one that
+    is not human_confirmed, or whose evidence_state is not verified-like)
+    must never be scored identically to genuinely verified evidence."""
+
+    def test_an_observed_claim_with_no_evidence_ref_is_not_low_severity(self, offer_factory):
+        offer = offer_factory("goods_offer_observed.json")
+        offer = replace(offer, price_evidence=FieldEvidence(quality="observed"))
+        report = build_supplier_logistics_report(offer, generated_at=GENERATED_AT)
+        entry = next(e for e in report.risk_matrix if e.category == "quoted_cost")
+        assert controls.is_verified(entry.evidence) is False
+        assert entry.severity != "low"
+
+    def test_an_observed_claim_with_an_unconfirmed_evidence_ref_is_not_low_severity(self, offer_factory):
+        offer = offer_factory("goods_offer_observed.json")
+        unconfirmed_ref = EvidenceRef(evidence_id="ev-unconfirmed", source_type="manual_import", evidence_state="observed", human_confirmed=False)
+        offer = replace(offer, price_evidence=FieldEvidence(quality="observed", evidence_ref=unconfirmed_ref))
+        report = build_supplier_logistics_report(offer, generated_at=GENERATED_AT)
+        entry = next(e for e in report.risk_matrix if e.category == "quoted_cost")
+        assert entry.severity != "low"
+
+    def test_a_genuinely_verified_observed_claim_still_gets_low_severity(self, offer_factory):
+        """Regression guard: the fix must not over-correct and downgrade
+        real, verified evidence -- the fully-observed fixture's every
+        FieldEvidence is human_confirmed=True in a verified evidence_state."""
+        offer = offer_factory("goods_offer_observed.json")
+        report = build_supplier_logistics_report(offer, generated_at=GENERATED_AT)
+        entry = next(e for e in report.risk_matrix if e.category == "quoted_cost")
+        assert controls.is_verified(entry.evidence) is True
+        assert entry.severity == "low"
+        assert report.blockers == ()
 
 
 class TestDeterminism:

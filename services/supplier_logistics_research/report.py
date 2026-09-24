@@ -111,7 +111,19 @@ def _landed_cost_scenarios(offer: SupplierLogisticsOffer, target_price: Money | 
 
 
 def _risk_entry(category: str, evidence: FieldEvidence, description: str) -> RiskMatrixEntry:
-    return RiskMatrixEntry(category=category, severity=_QUALITY_SEVERITY[evidence.quality], description=description, evidence=evidence)
+    severity = _QUALITY_SEVERITY[evidence.quality]
+    # quality="observed" alone is not a verification: it is a self-reported
+    # label a caller can attach to any claim, including a supplier's own
+    # unconfirmed quote. controls.is_verified is the single gate for
+    # whether an "observed" claim was actually backed by a human-confirmed
+    # EvidenceRef in a verified-like evidence_state; an "observed" claim
+    # that fails that gate is exactly as uncertain as a "manual" one and
+    # must not be scored as low risk alongside genuinely verified evidence
+    # -- a supplier self-claim must never become verified supplier proof
+    # just by being labeled "observed".
+    if evidence.quality == "observed" and not controls.is_verified(evidence):
+        severity = _QUALITY_SEVERITY["manual"]
+    return RiskMatrixEntry(category=category, severity=severity, description=description, evidence=evidence)
 
 
 def _goods_risk_entries(goods: GoodsLogisticsProfile) -> tuple[RiskMatrixEntry, ...]:
