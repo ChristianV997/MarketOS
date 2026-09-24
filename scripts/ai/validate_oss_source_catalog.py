@@ -173,11 +173,20 @@ def _registry_index(document: Any) -> tuple[dict[str, dict[str, Any]], dict[str,
     return by_id, by_url
 
 
-def _sha_defect(value: Any) -> str | None:
+# src-scrapy stores the annotated tag object for 2.12.0 in commit fields.
+# That object peels to commit b1f9e56693cd2000ddcea922306f726f3e9339af.
+# Reported as a #272 defect. It is not a version conflict, and it is not fixed here.
+ANNOTATED_TAG_OBJECT_SHA = "8c85937adef8279f12e35e0ee9a20c52ff6d1648"
+ANNOTATED_TAG_OBJECT_SOURCE = "src-scrapy"
+
+
+def _sha_defect(value: Any, *, source_id: str = "") -> str | None:
     if is_all_zero_sha(value):
         return "all_zero_sha"
     if is_patterned_placeholder_sha(value):
         return "patterned_placeholder_sha"
+    if source_id == ANNOTATED_TAG_OBJECT_SOURCE and value == ANNOTATED_TAG_OBJECT_SHA:
+        return "annotated_tag_object_sha"
     return None
 
 
@@ -189,7 +198,7 @@ def collect_registry_defects(document: Any) -> list[dict[str, Any]]:
             continue
         source_id = str(row.get("source_id") or "")
         for field in ("revision", "commit_sha"):
-            defect = _sha_defect(row.get(field))
+            defect = _sha_defect(row.get(field), source_id=source_id)
             if defect is None:
                 continue
             defects.append(
@@ -308,7 +317,11 @@ def _validate_candidate(
         errors.append(f"{label}: version_tag is floating")
 
     verdict = row.get("verdict")
-    if verdict not in VERDICTS:
+    registry_ref_present = row.get("registry_ref") is not None
+    if registry_ref_present:
+        if verdict is not None:
+            errors.append(f"{label}: registry_ref row must have a null verdict")
+    elif verdict not in VERDICTS:
         errors.append(f"{label}: verdict is not an intake verdict")
 
     license_name = row.get("license")
@@ -329,9 +342,9 @@ def _validate_candidate(
     candidate_class = row.get("candidate_class")
     if candidate_class not in CANDIDATE_CLASSES:
         errors.append(f"{label}: candidate_class is not an intake class")
-    if candidate_class == "platform_sdk" and verdict not in SIDECAR_OR_DEFER:
+    if verdict is not None and candidate_class == "platform_sdk" and verdict not in SIDECAR_OR_DEFER:
         errors.append(f"{label}: platform_sdk verdict must be sidecar or defer")
-    if candidate_class == "external_api_client" and verdict not in SIDECAR_OR_DEFER:
+    if verdict is not None and candidate_class == "external_api_client" and verdict not in SIDECAR_OR_DEFER:
         errors.append(f"{label}: external_api_client verdict must be sidecar or defer")
 
     for field in ("prohibited_behavior", "attribution_requirement"):

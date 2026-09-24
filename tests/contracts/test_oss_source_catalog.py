@@ -122,9 +122,12 @@ def test_real_intake_file_validates() -> None:
     assert by_id["oss-scrapy"]["registry_ref"] == "src-scrapy"
     assert by_id["oss-duckdb"]["registry_ref"] == "src-duckdb"
     assert by_id["oss-polars"]["registry_ref"] == "src-polars"
+    for source_id in ("oss-scrapy", "oss-duckdb", "oss-polars"):
+        assert by_id[source_id]["verdict"] is None
     assert by_id["oss-crawlee-python"]["repository_url"] == "https://github.com/apify/crawlee-python"
     assert by_id["oss-crawlee-python"]["license"] == "Apache-2.0"
     assert by_id["oss-crawlee-python"]["verdict"] == "copy_pattern"
+    assert by_id["oss-crawlee-python"]["relevant_module"] == "src/crawlee/crawlers/_beautifulsoup/_beautifulsoup_parser.py"
     assert by_id["oss-trafilatura"]["license"] == "Apache-2.0"
     assert by_id["oss-trafilatura"]["verdict"] == "copy_pattern"
     assert by_id["oss-trafilatura"]["revision"] == "c1bc9531a2a978326112ca9987e1382745116136"
@@ -142,7 +145,12 @@ def test_real_intake_file_validates() -> None:
         assert by_id[source_id]["candidate_class"] == "platform_sdk"
     assert by_id["oss-meta-ad-library-scripts"]["verdict"] == "reference_only"
     assert by_id["oss-product-opportunity"]["verdict"] == "reference_only"
-    assert by_id["oss-product-opportunity"]["license"] == "MIT"
+    assert by_id["oss-product-opportunity"]["license"] == "none_verified"
+    assert by_id["oss-product-opportunity"]["repository_url"] is None
+    assert by_id["oss-product-opportunity"]["revision"] is None
+    assert by_id["oss-product-opportunity"]["license_evidence_url"] is None
+    assert by_id["oss-product-opportunity"]["identity_unresolved"] is True
+    assert by_id["oss-product-opportunity"]["candidate_class"] == "unidentified_namesake"
     assert by_id["oss-gapscope"]["verdict"] == "reference_only"
     assert by_id["oss-gapscope"]["repository_url"] is None
     assert by_id["oss-gapscope"]["revision"] is None
@@ -189,6 +197,11 @@ def test_registry_and_capability_defects_are_reported_without_failing() -> None:
     assert "meta_ad_library" in reported_ids
     assert "tiktok_creative_center" in reported_ids
     assert len(reported_ids) == 15
+    scrapy_defects = [item for item in report["registry_defects"] if item["record_id"] == "src-scrapy"]
+    assert {(item["field"], item["defect"], item["value"]) for item in scrapy_defects} == {
+        ("revision", "annotated_tag_object_sha", "8c85937adef8279f12e35e0ee9a20c52ff6d1648"),
+        ("commit_sha", "annotated_tag_object_sha", "8c85937adef8279f12e35e0ee9a20c52ff6d1648"),
+    }
 
 
 def test_report_is_deterministic() -> None:
@@ -313,6 +326,25 @@ def test_acceptance_negative_fixtures() -> None:
             ]),
             "has more than 5 candidates (6)",
         ),
+        "registry_ref with copy_pattern": (
+            _report(
+                [
+                    _row(
+                        repository_url="https://github.com/scrapy/scrapy",
+                        source_id="oss-scrapy-verdict",
+                        registry_ref="src-scrapy",
+                        revision="b1f9e56693cd2000ddcea922306f726f3e9339af",
+                        verdict="copy_pattern",
+                    )
+                ],
+                registry=registry,
+            ),
+            "registry_ref row must have a null verdict",
+        ),
+        "null verdict without registry_ref": (
+            _report([_row(registry_ref=None, verdict=None)]),
+            "verdict is not an intake verdict",
+        ),
     }
     for name, (report, fragment) in cases.items():
         assert report["valid"] is False, name
@@ -382,6 +414,7 @@ def test_registry_url_requires_matching_registry_ref() -> None:
                 source_id="oss-scrapy-pointer",
                 registry_ref="src-scrapy",
                 revision="b1f9e56693cd2000ddcea922306f726f3e9339af",
+                verdict=None,
             )
         ],
         registry=registry,
