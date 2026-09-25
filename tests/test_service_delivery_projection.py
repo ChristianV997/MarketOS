@@ -281,6 +281,29 @@ def test_row_rejects_malformed_artifact_identity_or_export_status():
         build_service_engagement_row(engagement, pkg, dq, economics, replace(artifact, safe_export_status="unsafe"))
 
 
+def test_row_rejects_a_self_consistently_forged_package_version():
+    # verify_artifact_id only proves artifact_id was derived from whatever
+    # package_version the artifact itself claims -- it cannot by itself
+    # catch an artifact whose package_version was swapped and its
+    # artifact_id recomputed to match, since that recomputed id is
+    # genuinely self-consistent. The row builder must separately bind the
+    # artifact's claimed package_version to the package actually supplied,
+    # the same way it already binds package_id.
+    from evaluation.companyos.service_delivery_artifact import _artifact_id
+
+    engagement, pkg, dq, economics, _ = _full_row("product-validation-sprint", registry_path="/tmp/never-written-service-delivery-projection-test-forged-version.json")
+    refs = engagement.evidence_set
+    registry = DeliverableRegistry(path="/tmp/never-written-service-delivery-projection-test-forged-version-registry.json")
+    deliverable = build_client_service_deliverable(engagement, pkg, economics, dq, recommendation="ok", registry=registry)
+    artifact = build_service_delivery_artifact(engagement, pkg, economics, dq, deliverable, evidence_refs=refs)
+
+    forged_version = f"{pkg.package_version}-forged"
+    forged_id = _artifact_id(artifact.engagement_id, artifact.package_id, forged_version)
+    forged = replace(artifact, package_version=forged_version, artifact_id=forged_id)
+    with pytest.raises(ValueError, match="artifact and package identity"):
+        build_service_engagement_row(engagement, pkg, dq, economics, forged)
+
+
 def test_empty_projection_is_still_a_valid_safe_envelope():
     projection = build_service_engagement_projection([], availability="unavailable", diagnostics=("no_engagements_available",))
     assert projection["engagements"] == []

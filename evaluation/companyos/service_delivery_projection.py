@@ -190,7 +190,7 @@ def build_service_engagement_row(
     if artifact is not None:
         if artifact.workspace_id != engagement.workspace_id or artifact.engagement_id != engagement.engagement_id:
             raise ValueError("service delivery artifact and engagement identity mismatch")
-        if artifact.package_id != package.package_id:
+        if artifact.package_id != package.package_id or artifact.package_version != package.package_version:
             raise ValueError("service delivery artifact and package identity mismatch")
         if artifact.schema != ARTIFACT_SCHEMA_VERSION or not verify_artifact_id(
             artifact.engagement_id,
