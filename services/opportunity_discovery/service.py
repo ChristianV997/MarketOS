@@ -60,6 +60,8 @@ MAX_EVIDENCE = 250
 MAX_DEPTH = 12
 MAX_NODES = 2_000
 MAX_OUTPUT_BYTES = 128 * 1024
+MAX_DECIMAL_DIGITS = 64
+MAX_DECIMAL_ADJUSTED = 100
 
 _SECRET_KEY = re.compile(
     r"(?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|credential|cookie|password|private[_-]?key|secret|token)",
@@ -110,6 +112,10 @@ def _decimal(value: Any, field_name: str) -> Decimal:
     except (InvalidOperation, TypeError, ValueError):
         raise OpportunityDiscoveryError(f"invalid_{field_name}") from None
     if not result.is_finite():
+        raise OpportunityDiscoveryError(f"invalid_{field_name}")
+    if len(result.as_tuple().digits) > MAX_DECIMAL_DIGITS or (
+        result and abs(result.adjusted()) > MAX_DECIMAL_ADJUSTED
+    ):
         raise OpportunityDiscoveryError(f"invalid_{field_name}")
     return result
 
@@ -401,10 +407,14 @@ def _normalize_evidence(raw: Any, *, default_area: str) -> tuple[OpportunityEvid
     if not isinstance(raw, list) or len(raw) > MAX_EVIDENCE:
         raise OpportunityDiscoveryError("invalid_evidence_collection")
     result: list[OpportunityEvidence] = []
+    seen_evidence_ids: set[str] = set()
     for item in raw:
         if not isinstance(item, Mapping):
             raise OpportunityDiscoveryError("invalid_evidence_item")
         evidence_id = _ensure_id(item.get("evidence_id", f"evidence-{len(result) + 1}"), "evidence_id")
+        if evidence_id in seen_evidence_ids:
+            raise OpportunityDiscoveryError("duplicate_evidence_id")
+        seen_evidence_ids.add(evidence_id)
         area = _text(item.get("area"), "evidence_area", default=default_area)
         source_type = _text(item.get("source_type"), "source_type", default="unknown")
         requested_class = _source_class(item.get("evidence_class", item.get("source", "unknown")))
@@ -433,7 +443,7 @@ def _normalize_evidence(raw: Any, *, default_area: str) -> tuple[OpportunityEvid
 def _normalize_candidate(raw: Any, index: int) -> OpportunityCandidate:
     if not isinstance(raw, Mapping):
         raise OpportunityDiscoveryError("invalid_candidate")
-    candidate_id = _ensure_id(raw.get("candidate_id", f"candidate-{index + 1}"), "candidate_id")
+    candidate_id = _ensure_id(raw.get("candidate_id"), "candidate_id")
     name = _text(raw.get("name", raw.get("title")), "candidate_name")
     offering_kind = raw.get("offering_kind", "unknown")
     if offering_kind not in OFFERING_KINDS:
@@ -506,6 +516,9 @@ def _money(value: Any, *, currency: str, candidate: OpportunityCandidate, area: 
         evidence_state = value.get("evidence_state", _kernel_state("unknown", "unknown"))
         tax_inclusion_state = value.get("tax_inclusion_state", "unknown")
         if evidence_state not in EVIDENCE_STATES:
+            evidence_state = "unknown"
+        elif evidence_state in {"live_readonly", "verified"}:
+            # Imported payloads cannot attest to live verification or operator review.
             evidence_state = "unknown"
     else:
         amount = value
@@ -768,7 +781,7 @@ def _synthesis(candidate: OpportunityCandidate) -> dict[str, Any]:
                                 "reason": f"malformed_{report_name}_report",
                                 "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
                             }
-        if not any(item.get("candidate_id") == candidate.candidate_id for item in report["candidates"]):
+        if len(seen_candidate_ids) != 1 or candidate.candidate_id not in seen_candidate_ids:
             return {
                 "status": "malformed",
                 "reason": "report_candidate_identity_mismatch",

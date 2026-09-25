@@ -66,6 +66,22 @@ def test_missing_supplier_evidence_is_not_invented() -> None:
     assert "supplier_evidence_unavailable" in report.decisions[0].evidence_gaps
 
 
+def test_candidate_identity_is_required_and_cannot_be_inferred_from_position() -> None:
+    payload = product()
+    payload["candidates"][0].pop("candidate_id")
+
+    with pytest.raises(OpportunityDiscoveryError, match="invalid_candidate_id"):
+        run_discovery("evaluate", payload)
+
+
+def test_duplicate_evidence_ids_fail_closed() -> None:
+    payload = product()
+    payload["candidates"][0]["evidence"].append(copy.deepcopy(payload["candidates"][0]["evidence"][0]))
+
+    with pytest.raises(OpportunityDiscoveryError, match="duplicate_evidence_id"):
+        run_discovery("evaluate", payload)
+
+
 def test_unavailable_freight_is_a_gap_not_zero_cost() -> None:
     payload = product()
     payload["candidates"][0]["economics"]["assumptions"].pop("supplier_shipping")
@@ -147,6 +163,18 @@ def test_duplicate_synthesis_rows_fail_closed_before_canonical_fusion() -> None:
 
     assert decision.recommendation == "blocked"
     assert "duplicate_report_candidate_id" in decision.fatal_gates
+
+
+def test_synthesis_rejects_extra_decoy_rows_for_a_candidate() -> None:
+    payload = product()
+    decoy = copy.deepcopy(payload["candidates"][0]["reports"]["marketplace"]["candidates"][0])
+    decoy["candidate_id"] = "decoy-lamp"
+    payload["candidates"][0]["reports"]["marketplace"]["candidates"].append(decoy)
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.recommendation == "blocked"
+    assert "report_candidate_identity_mismatch" in decision.fatal_gates
 
 
 def test_discover_ranks_multiple_candidates_by_canonical_synthesis_score() -> None:
@@ -343,6 +371,26 @@ def test_overflowing_report_number_is_not_clamped_to_one() -> None:
     assert decision.recommendation == "blocked"
     assert "malformed_marketplace_report" in decision.fatal_gates
     assert decision.synthesis["status"] == "malformed"
+
+
+def test_oversized_economic_amount_is_rejected_before_kernel_calculation() -> None:
+    payload = product()
+    payload["candidates"][0]["economics"]["product_cost"]["amount"] = "1" + ("0" * 1000)
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.recommendation == "blocked"
+    assert "economics_malformed" in decision.fatal_gates
+
+
+def test_imported_verified_money_state_is_downgraded() -> None:
+    payload = product()
+    payload["candidates"][0]["economics"]["product_cost"]["evidence_state"] = "verified"
+
+    decision = run_discovery("evaluate", payload).decisions[0]
+
+    assert decision.scenarios["base"]["product_cost"]["evidence_state"] == "unknown"
+    assert "verified" not in str(decision.to_dict())
 
 
 def test_malformed_pillar_report_is_blocked_without_reflecting_adapter_errors() -> None:
