@@ -418,6 +418,13 @@ def test_report_is_read_only_and_never_claims_network_calls():
     assert result.mutated is False
 
 
+def test_malformed_candidate_rows_fail_structurally_not_with_attribute_error():
+    with pytest.raises(ValueError, match="malformed_evidence_input"):
+        _build(marketplace_report={"candidates": "not-a-list"})
+    with pytest.raises(ValueError, match="malformed_evidence_input"):
+        _build(public_market_benchmark_report={"candidate_results": ["not-an-object"]})
+
+
 def _fake_provenance(pillar: str, source_ref: str) -> EvidenceProvenance:
     return EvidenceProvenance(
         pillar=pillar,

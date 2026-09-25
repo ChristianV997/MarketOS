@@ -93,15 +93,25 @@ never silently treated as equivalent to a `LIVE_EVIDENCE_MODES` observation.
   payload markers, non-string mapping keys, and duplicate JSON manifest keys
   fail closed before canonical synthesis or evidence reporting.
 - Every candidate row carries a safe, bounded candidate ID and duplicate IDs
-  fail closed before synthesis. Aggregate Product Validation reports are not
-  candidate evidence unless their report or a nested ranking row explicitly
-  binds to the requested candidate; unbound risks and open questions are not
-  copied into that candidate's facts or assumptions.
+  fail closed before synthesis. A product-validation matrix row is supplied
+  only when the report or a nested ranking row binds the requested candidate.
+  Aggregate open questions and risk flags are copied only when that report
+  binds exactly the requested candidate, so a multi-candidate aggregate
+  cannot cross.
 - Candidate-scoped synthesis is performed after the requested candidate is
   selected. A template or another candidate cannot supply the requested
-  candidate's headline, score, plan, price, or action. A supplied pillar that
-  does not contain the requested candidate is reported as `missing` with a
-  candidate-mismatch limitation.
+  candidate's headline, score, plan, price, or action. Alias notes are kept
+  only when they name the requested candidate; notes about other rows do not
+  enter that candidate's source conflicts. When the synthesis authority has
+  no row for the requested candidate, its empty-input fallback score of `0.0`
+  is reported as `"missing"`, which stays distinct from an explicit zero on
+  a matched candidate. A supplied pillar that does not contain the requested
+  candidate is reported as `missing` with a candidate-mismatch limitation.
+- Aggregate product-validation open questions and risk flags are copied only
+  when every bound identity on that report is exactly the requested
+  candidate. A multi-candidate aggregate cannot cross onto the requested
+  candidate. An explicit numeric zero, including `pages_observed: 0`, is
+  preserved and is not replaced by a fallback field.
 
 These four "never treat X as Y" invariants and the never-zero invariant are
 each covered by a dedicated test in
@@ -150,12 +160,14 @@ tracebacks.
 
 ## Status
 
-Implemented and unit-tested (112 focused tests across the market-research and
+Implemented and unit-tested (119 focused tests across the market-research and
 market-research-evidence suites) against synthetic fixtures, including
 dedicated conflict (`tests/fixtures/market_research/conflict.json`) and
 stale/future (`tests/fixtures/market_research/stale_and_future.json`)
 fixtures, plus a TrustOS-boundary test proving `check_workspace_leakage`
-catches free-text values (e.g. "pricing formula") this service's own input
-filter does not. Not integration-tested against any live marketplace,
+blocks client-safe export when free text the local input filter allows
+(for example a query containing "prompt") still reaches the projection.
+Formula-shaped, HTML, credential, and provider-payload values are rejected
+before synthesis. Not integration-tested against any live marketplace,
 supplier, or consumer-attention provider, and not live-validated — all
 evidence in this service's test suite is fixture-supplied.

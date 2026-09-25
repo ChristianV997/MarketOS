@@ -142,7 +142,7 @@ the leakage check's own (deterministic, but separately verifiable) output.
 
 ## Status
 
-Implemented and unit-tested (39 tests,
+Implemented and unit-tested (40 tests,
 `tests/services/test_market_research_evidence/test_report.py`) against
 synthetic fixtures, including a dedicated cross-source logistics-conflict
 fixture (`tests/fixtures/market_research_evidence/logistics_conflict.json`)

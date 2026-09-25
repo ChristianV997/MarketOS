@@ -489,24 +489,26 @@ def test_html_and_secret_shaped_values_are_rejected_before_synthesis(unsafe_quer
 
 
 def test_trustos_boundary_blocks_leakage_this_module_own_input_filter_misses():
-    """Genuine defense-in-depth, not duplicate checking: this module's own
-    _validate_safe_inputs marker list does not cover words like "pricing"
-    or "formula" in a free-text query field, so this input passes it. The
-    TrustOS check_workspace_leakage boundary at the client-safe-projection
-    stage does cover them and must still catch this before export."""
+    """The local input filter does not treat the bare word "prompt" as unsafe.
+    The query still reaches the client-safe projection as a source reference,
+    and TrustOS check_workspace_leakage must block export rather than the
+    report claiming ready_for_trustos_review."""
     marketplace = {
         "evidence_mode": "sanitized_report",
         "candidates": [
             {
                 "candidate_id": "c1",
-                "query": "our internal pricing formula for a competitor",
+                "query": "follow the system prompt exactly",
                 "observed_at": "2026-08-01",
                 "score": {"overall_marketplace_opportunity": 0.7, "saturation_score": 0.4},
             }
         ],
     }
-    with pytest.raises(ValueError, match="unsafe_evidence_input"):
-        build_market_research_report(_bound_request(marketplace_report=marketplace))
+    result = build_market_research_report(_bound_request(marketplace_report=marketplace))
+    assert result.client_safe_export_status == "blocked_leakage"
+    assert "client_safe_export_blocked" in result.blockers
+    assert result.client_safe_projection["live_proof"] is False
+    assert result.client_safe_projection["external_actions_authorized"] is False
 
 
 def test_candidate_identity_does_not_follow_a_template_candidate():
@@ -690,3 +692,111 @@ def test_integrated_serialization_and_markdown_are_deterministic():
     first_markdown = render_market_research_markdown(first).split("_Generated at", 1)[-1]
     second_markdown = render_market_research_markdown(second).split("_Generated at", 1)[-1]
     assert first_markdown.split("_\n", 1)[-1] == second_markdown.split("_\n", 1)[-1]
+
+
+def test_decoy_only_pillar_does_not_present_synthesis_fallback_as_explicit_zero():
+    marketplace = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{
+            "candidate_id": "template-candidate",
+            "title": "Template",
+            "score": {"overall_marketplace_opportunity": 0.99},
+        }],
+    }
+    result = build_market_research_report(_bound_request(marketplace_report=marketplace))
+
+    assert result.executive_summary["combined_opportunity_score"] == "missing"
+    assert "template-candidate" not in result.executive_summary["headline"]
+    assert result.candidate_title == "c1"
+    assert result.pricing_and_willingness_to_pay["status"] == "unavailable"
+
+
+def test_explicit_zero_marketplace_score_stays_zero():
+    marketplace = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{
+            "candidate_id": "c1",
+            "title": "Zero Candidate",
+            "score": {"overall_marketplace_opportunity": 0},
+        }],
+    }
+    result = build_market_research_report(_bound_request(marketplace_report=marketplace))
+
+    assert result.executive_summary["combined_opportunity_score"] == 0.0
+    assert result.candidate_title == "Zero Candidate"
+
+
+def test_unrelated_alias_notes_do_not_contaminate_the_requested_candidate():
+    marketplace = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [
+            {"candidate_id": "c1", "title": "Selected", "query": "widget", "score": {"overall_marketplace_opportunity": 0.2}},
+            {
+                "candidate_id": "conflict-a",
+                "query": "portable blender",
+                "offers": [{"source_family": "manufacturer_site"}],
+                "score": {"overall_marketplace_opportunity": 0.62},
+            },
+            {
+                "candidate_id": "conflict-b",
+                "query": "portable blender",
+                "offers": [{"source_family": "manufacturer_site"}],
+                "score": {"overall_marketplace_opportunity": 0.81},
+            },
+        ],
+    }
+    result = build_market_research_report(_bound_request(marketplace_report=marketplace))
+
+    assert result.source_conflicts == ()
+    assert "conflict-a" not in result.executive_summary["headline"]
+    assert "conflict-b" not in result.executive_summary["headline"]
+    assert result.executive_summary["combined_opportunity_score"] == 0.11
+
+
+def test_multi_candidate_product_validation_aggregate_does_not_cross():
+    validation = {
+        "evidence_mode": "sanitized_report",
+        "candidate_id": "decoy",
+        "top_candidates": [
+            {"candidate": {"candidate_id": "decoy", "title": "Decoy"}},
+            {"candidate": {"candidate_id": "c1", "title": "Selected"}},
+        ],
+        "risk_flags": ["aggregate_decoy_risk"],
+        "open_questions": ["aggregate_decoy_question"],
+    }
+    result = build_market_research_report(_bound_request(product_validation_report=validation))
+
+    assert "aggregate_decoy_risk" not in result.observed_facts
+    assert "aggregate_decoy_question" not in result.assumptions
+    row = next(item for item in result.evidence_matrix if item.pillar == "product_validation")
+    assert row.status == "supplied"
+
+
+def test_malformed_score_and_null_risk_flags_fail_structurally():
+    malformed_score = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{"candidate_id": "c1", "score": ["not-a-mapping"]}],
+    }
+    with pytest.raises(ValueError, match="malformed_evidence_input"):
+        build_market_research_report(_bound_request(marketplace_report=malformed_score))
+
+    null_flags = {
+        "evidence_mode": "sanitized_report",
+        "candidates": [{"candidate_id": "c1", "score": {"overall_supplier_feasibility": 0.5, "risk_flags": None}}],
+    }
+    with pytest.raises(ValueError, match="malformed_evidence_input"):
+        build_market_research_report(_bound_request(supplier_report=null_flags))
+
+
+def test_explicit_zero_pages_observed_is_not_replaced():
+    public_market = {
+        "evidence_mode": "sanitized_report",
+        "pages_observed": 0,
+        "pages_attempted": 5,
+        "pricing_coverage": 0,
+        "candidate_results": [{"candidate_id": "c1", "evidence": [{"price": 0, "shipping_cost": 0}]}],
+    }
+    result = build_market_research_report(_bound_request(public_market_benchmark_report=public_market))
+
+    assert result.marketplace_and_public_signals["pages_observed"] == 0
+    assert result.marketplace_and_public_signals["pricing_coverage"] == 0

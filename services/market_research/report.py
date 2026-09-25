@@ -150,6 +150,29 @@ def _validate_report_shape(report: Mapping[str, Any] | None) -> None:
             if candidate_id in seen_candidate_ids:
                 raise ValueError("ambiguous_candidate_identity")
             seen_candidate_ids.add(candidate_id)
+            _validate_candidate_payload(item)
+
+
+def _validate_candidate_payload(item: Mapping[str, Any]) -> None:
+    """Reject shapes that would raise AttributeError or TypeError inside synthesis."""
+    for key in ("offers", "evidence", "assumptions"):
+        if key in item and item[key] is not None and (
+            isinstance(item[key], str) or not isinstance(item[key], (list, tuple))
+        ):
+            raise ValueError("malformed_evidence_input")
+    if "score" not in item or item.get("score") is None:
+        return
+    score = item.get("score")
+    if not isinstance(score, Mapping):
+        raise ValueError("malformed_evidence_input")
+    for key in ("risk_flags", "assumptions", "creative_hooks", "recommended_ad_angles"):
+        if key not in score:
+            continue
+        value = score[key]
+        if value is None or isinstance(value, str) or not isinstance(value, (list, tuple)):
+            raise ValueError("malformed_evidence_input")
+    if "economics" in score and score["economics"] is not None and not isinstance(score["economics"], Mapping):
+        raise ValueError("malformed_evidence_input")
 
 
 def _validate_bound_request(request: MarketResearchRequest) -> str:
@@ -247,6 +270,69 @@ def _next_research_actions(
     return tuple(dict.fromkeys(sorted(actions)))
 
 
+def _score_mapping(matched: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """A present score must be an object. A list or scalar is malformed, not a miss."""
+    if not matched:
+        return {}
+    score = matched.get("score", {})
+    if score is None:
+        return {}
+    if not isinstance(score, Mapping):
+        raise ValueError("malformed_evidence_input")
+    return score
+
+
+def _economics_mapping(score: Mapping[str, Any]) -> Mapping[str, Any]:
+    economics = score.get("economics", {})
+    if economics is None:
+        return {}
+    if not isinstance(economics, Mapping):
+        raise ValueError("malformed_evidence_input")
+    return economics
+
+
+def _string_items(value: Any) -> list[str]:
+    """A missing key should be passed as []. An explicit null or scalar is malformed."""
+    if value is None or isinstance(value, str) or not isinstance(value, (list, tuple)):
+        raise ValueError("malformed_evidence_input")
+    return [str(item) for item in value]
+
+
+def _alias_notes_for_candidate(notes: Any, candidate_id: str) -> tuple[str, ...]:
+    """Keep alias notes that name this candidate. Notes about other rows do not cross over."""
+    if notes is None:
+        return ()
+    if isinstance(notes, str) or not isinstance(notes, (list, tuple)):
+        raise ValueError("malformed_evidence_input")
+    token = f"'{candidate_id}'"
+    return tuple(str(note) for note in notes if token in str(note))
+
+
+def _product_validation_ids(report: Mapping[str, Any]) -> set[str]:
+    ids: set[str] = set()
+    report_candidate_id = report.get("candidate_id")
+    if isinstance(report_candidate_id, str) and report_candidate_id.strip():
+        ids.add(report_candidate_id)
+    for key in ("top_candidates", "candidate_rankings"):
+        rows = report.get(key)
+        if rows is None:
+            continue
+        if not isinstance(rows, list) or any(not isinstance(item, Mapping) for item in rows):
+            raise ValueError("malformed_evidence_input")
+        for row in rows:
+            nested = row.get("candidate")
+            if nested is not None and not isinstance(nested, Mapping):
+                raise ValueError("malformed_evidence_input")
+            if isinstance(nested, Mapping):
+                nested_id = nested.get("candidate_id")
+                if isinstance(nested_id, str) and nested_id.strip():
+                    ids.add(nested_id)
+            row_id = row.get("candidate_id")
+            if isinstance(row_id, str) and row_id.strip():
+                ids.add(row_id)
+    return ids
+
+
 def _recognized_offering_kind(raw: Any) -> tuple[str, bool]:
     if raw in (None, ""):
         return "unknown", True
@@ -288,9 +374,7 @@ def _candidate_observed_at(matched: Mapping[str, Any] | None) -> str | None:
     for key in ("observed_at", "as_of"):
         if matched.get(key):
             return str(matched[key])
-    score = matched.get("score") or {}
-    if not isinstance(score, Mapping):
-        score = {}
+    score = _score_mapping(matched)
     for key in ("observed_at", "as_of"):
         if score.get(key):
             return str(score[key])
@@ -373,7 +457,7 @@ def _demand_and_customer_evidence(consumer_report: Mapping[str, Any] | None, mat
         return {"status": "consumer_attention_not_supplied"}
     if matched is None:
         return {"status": "candidate_not_matched", "warning": "consumer_attention_for_another_candidate_is_not_evidence_for_this_candidate"}
-    score = (matched or {}).get("score", {})
+    score = _score_mapping(matched)
     return {
         "status": "supplied",
         "platforms_observed": _observed_list(consumer_report, "platforms_observed"),
@@ -389,7 +473,7 @@ def _competitor_and_substitute_evidence(marketplace_report: Mapping[str, Any] | 
         return {"status": "marketplace_trends_not_supplied"}
     if matched is None:
         return {"status": "candidate_not_matched", "warning": "marketplace_evidence_for_another_candidate_is_not_evidence_for_this_candidate"}
-    score = (matched or {}).get("score", {})
+    score = _score_mapping(matched)
     return {
         "status": "supplied",
         "marketplaces_observed": _observed_list(marketplace_report, "marketplaces_observed", "platforms_observed"),
@@ -407,7 +491,11 @@ def _marketplace_and_public_signals(public_market_report: Mapping[str, Any] | No
     return {
         "status": "supplied",
         "pricing_coverage": public_market_report.get("pricing_coverage"),
-        "pages_observed": public_market_report.get("pages_observed") or public_market_report.get("pages_attempted"),
+        "pages_observed": (
+            public_market_report.get("pages_observed")
+            if public_market_report.get("pages_observed") is not None
+            else public_market_report.get("pages_attempted")
+        ),
         "candidate_count": public_market_report.get("candidate_count"),
     }
 
@@ -417,15 +505,13 @@ def _supplier_feasibility_section(supplier_report: Mapping[str, Any] | None, mat
         return {"status": "supplier_feasibility_not_relevant_or_not_supplied"}
     if matched is None:
         return {"status": "candidate_not_matched", "warning": "supplier_evidence_for_another_candidate_is_not_evidence_for_this_candidate"}
-    score = (matched or {}).get("score", {})
-    if not isinstance(score, Mapping):
-        score = {}
+    score = _score_mapping(matched)
     return {
         "status": "supplied",
         "overall_supplier_feasibility": score.get("overall_supplier_feasibility"),
         "recommendation": score.get("recommendation"),
-        "risk_flags": list(score.get("risk_flags", [])),
-        "economics": score.get("economics", {}),
+        "risk_flags": _string_items(score.get("risk_flags", [])),
+        "economics": _economics_mapping(score),
         "warning": "a_supplier_claim_is_not_validation_until_observed_or_verified",
     }
 
@@ -435,10 +521,8 @@ def _delivery_and_logistics_feasibility(supplier_report: Mapping[str, Any] | Non
         return {"status": "supplier_feasibility_not_relevant_or_not_supplied"}
     if matched is None:
         return {"status": "candidate_not_matched"}
-    score = matched.get("score") or {}
-    economics = score.get("economics", {}) if isinstance(score, Mapping) else {}
-    if not isinstance(economics, Mapping):
-        economics = {}
+    score = _score_mapping(matched)
+    economics = _economics_mapping(score)
     shipping_cost = economics.get("shipping_cost")
     shipping_speed_score = economics.get("shipping_speed_score")
     moq = economics.get("moq")
@@ -483,14 +567,15 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         product_validation_report=request.product_validation_report,
         client_context=request.client_context,
     ).to_dict()
-    alias_notes = tuple(
+    alias_notes = _alias_notes_for_candidate(
         build_product_opportunity_synthesis(
             request.marketplace_report,
             request.supplier_report,
             request.consumer_report,
             product_validation_report=request.product_validation_report,
             client_context=request.client_context,
-        ).to_dict().get("alias_notes", ())
+        ).to_dict().get("alias_notes", ()),
+        request.candidate_id,
     )
     integrity = _bound_integrity(request, workspace_id, synthesis)
 
@@ -513,14 +598,19 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
         if request.product_validation_report
         else None
     )
-    if product_validation_candidate:
-        assumptions.extend(str(item) for item in request.product_validation_report.get("open_questions", []) or [])
-        observed_facts.extend(str(item) for item in request.product_validation_report.get("risk_flags", []) or [])
+    if (
+        product_validation_candidate
+        and request.product_validation_report is not None
+        and _product_validation_ids(request.product_validation_report) == {request.candidate_id}
+    ):
+        assumptions.extend(_string_items(request.product_validation_report.get("open_questions", [])))
+        observed_facts.extend(_string_items(request.product_validation_report.get("risk_flags", [])))
     if matched_supplier:
-        supplier_score = matched_supplier.get("score") or {}
-        if not isinstance(supplier_score, Mapping):
-            supplier_score = {}
-        assumptions.extend(str(item) for item in (matched_supplier.get("assumptions") or supplier_score.get("assumptions", [])))
+        supplier_score = _score_mapping(matched_supplier)
+        raw_assumptions = matched_supplier.get("assumptions")
+        if not raw_assumptions:
+            raw_assumptions = supplier_score.get("assumptions", [])
+        assumptions.extend(_string_items(raw_assumptions))
     if matched_marketplace:
         observed_facts.extend(_observed_list(request.marketplace_report, "marketplaces_observed"))
     if matched_consumer:
@@ -642,7 +732,9 @@ def build_market_research_report(request: MarketResearchRequest) -> MarketResear
 
     supplied_pillars = any(getattr(request, field_name) for _, field_name in _PILLAR_REPORT_FIELDS)
     combined_opportunity_score = synthesis.get("combined_opportunity_score")
-    if not supplied_pillars:
+    # The synthesis authority returns 0.0 when it has no candidate row. That
+    # fallback is not an explicit zero for the requested candidate.
+    if not supplied_pillars or str(synthesis.get("top_candidate_id") or "") != candidate_id:
         combined_opportunity_score = "missing"
     executive_summary = {
         "headline": synthesis.get("client_summary", ""),

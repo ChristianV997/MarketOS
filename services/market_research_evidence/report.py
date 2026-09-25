@@ -51,6 +51,29 @@ _EXPECTED_FIELDS = {
 }
 
 
+def _require_candidate_rows(report: Mapping[str, Any] | None, key: str) -> None:
+    """A present candidate collection must be a list of objects, never a scalar that would AttributeError later."""
+    if not report or key not in report:
+        return
+    values = report.get(key)
+    if values is None:
+        return
+    if not isinstance(values, list) or any(not isinstance(item, Mapping) for item in values):
+        raise ValueError("malformed_evidence_input")
+    for item in values:
+        score = item.get("score", {})
+        if score is None:
+            continue
+        if not isinstance(score, Mapping):
+            raise ValueError("malformed_evidence_input")
+        if "risk_flags" in score and (
+            score["risk_flags"] is None
+            or isinstance(score["risk_flags"], str)
+            or not isinstance(score["risk_flags"], (list, tuple))
+        ):
+            raise ValueError("malformed_evidence_input")
+
+
 def _matched_candidate(report: Mapping[str, Any] | None, key: str, candidate_id: str) -> Mapping[str, Any] | None:
     if not report:
         return None
@@ -163,6 +186,13 @@ def build_evidence_integrity_report(
     synthesis: Mapping[str, Any] | None = None,
 ) -> EvidenceIntegrityResult:
     validate_binding(candidate_id, workspace_id)
+    for report, key in (
+        (marketplace_report, "candidates"),
+        (supplier_report, "candidates"),
+        (consumer_report, "candidates"),
+        (public_market_benchmark_report, "candidate_results"),
+    ):
+        _require_candidate_rows(report, key)
 
     synthesis_data = (
         dict(synthesis)
