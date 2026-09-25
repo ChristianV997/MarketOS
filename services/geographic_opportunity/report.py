@@ -174,6 +174,26 @@ def _build_comparison(offer: TradeOpportunityOffer) -> DestinationSourceComparis
         controls.require_fx_provenance(unit_value, field_name="comparison.unit_value_proxy")
 
     notes: list[str] = []
+    # A price_gap here is only ever as trustworthy as destination_price
+    # itself. Unlike _landed_cost_scenarios (which already discloses this
+    # in each scenario's own assumptions_note), this comparison -- and its
+    # client-safe export in export.py -- previously surfaced price_gap
+    # with no indication that destination_price could be an unconfirmed
+    # marketplace listing rather than a realized sale. Disclosing it here
+    # too closes that gap for this separate code path.
+    if destination_price is not None:
+        if offer.destination_price.is_realized_sale:
+            notes.append(
+                "destination_price is based on a destination price observation of price_type={0!r}; caller has confirmed this is a realized-sale figure".format(
+                    offer.destination_price.price_type
+                )
+            )
+        else:
+            notes.append(
+                "destination_price is based on a destination price observation of price_type={0!r}; not a confirmed realized-sale figure".format(
+                    offer.destination_price.price_type
+                )
+            )
     price_gap: Money | None = None
     if destination_price is not None and origin_cost is not None:
         if destination_price.currency == origin_cost.currency:

@@ -359,6 +359,28 @@ class TestListingPriceIsNeverTreatedAsRealizedSale:
             assert "caller has confirmed this is a realized-sale figure" in scenario.assumptions_note
             assert "not a confirmed realized-sale figure" not in scenario.assumptions_note
 
+    def test_comparison_price_gap_also_discloses_the_price_type_basis(self):
+        # _build_comparison is a separate code path from
+        # _landed_cost_scenarios: comparison.price_gap could previously be
+        # derived from an unconfirmed marketplace listing with nothing in
+        # comparison.notes (or its client-safe export) disclosing that --
+        # only the landed-cost scenario's own note carried the disclosure.
+        report = build_geographic_opportunity_report(build_goods_offer(), generated_at=GENERATED_AT)
+        assert report.comparison is not None
+        assert report.comparison.price_gap is not None
+        assert any("marketplace_listing" in note and "not a confirmed realized-sale figure" in note for note in report.comparison.notes)
+
+    def test_comparison_reflects_a_confirmed_realized_sale_too(self):
+        offer = build_goods_offer()
+        realized = replace(
+            offer,
+            destination_price=replace(offer.destination_price, price_type="retail_shelf", is_realized_sale=True),
+        )
+        report = build_geographic_opportunity_report(realized, generated_at=GENERATED_AT)
+        assert report.comparison is not None
+        assert any("caller has confirmed this is a realized-sale figure" in note for note in report.comparison.notes)
+        assert not any("not a confirmed realized-sale figure" in note for note in report.comparison.notes)
+
 
 class TestUnverifiedObservedEvidenceIsNotTreatedAsVerified:
     """quality="observed" alone is a self-reported label, not a
