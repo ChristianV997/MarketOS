@@ -19,6 +19,13 @@
       "marketos_target_capability": "offline page extraction patterns for stored HTML fixtures",
       "verdict": "copy_pattern",
       "prohibited_behavior": "Do not import or copy anti-blocking, fingerprint, proxy, session-pool, or browser-evasion code. At this pin those surfaces include src/crawlee/fingerprint_suite/, src/crawlee/proxy_configuration.py, src/crawlee/sessions/_session_pool.py, src/crawlee/http_clients/_curl_impersonate.py, and src/crawlee/browsers/. Do not rotate proxies, impersonate clients, or run a live crawl.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "The package is a crawler. Using its fingerprint, proxy, or browser surfaces would evade site controls and expand network access. This intake allows none of that.",
       "attribution_requirement": "Retain the Apache License 2.0 text and any NOTICE at this revision, and keep copyright notices on any copied portions.",
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. This intake row is advisory and does not create a crawler authority. src-crawl4ai remains the registry's separate web-extraction row.",
@@ -40,6 +47,13 @@
       "marketos_target_capability": "offline main-text extraction from stored HTML fixtures",
       "verdict": "copy_pattern",
       "prohibited_behavior": "Do not copy a revision whose LICENSE file is GPL. Do not add live downloading or crawling. At this pin, trafilatura/downloads.py, trafilatura/spider.py, trafilatura/sitemaps.py, and trafilatura/feeds.py are out of scope.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "Downloader and spider modules can fetch remote pages. This row does not authorize network fetches or bypassing site access controls.",
       "attribution_requirement": "Retain the Apache License 2.0 text from the LICENSE file at this commit, and keep copyright notices on any copied portions.",
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. Advisory intake only. It does not replace src-crawl4ai or src-scrapy.",
@@ -61,6 +75,13 @@
       "marketos_target_capability": "backend.scouting.item_pipeline",
       "verdict": null,
       "prohibited_behavior": "Do not adopt the Twisted downloader, scheduler, or HTTP client. Do not scrape live sites, rotate proxies, or evade robots or access controls. This row does not authorize a crawler runtime.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "Scrapy is a network crawler. Live crawling, credentialed spiders, and access-control evasion are out of scope. The registry already records the item pipeline as offline.",
       "attribution_requirement": "Include the Scrapy copyright notice, the three BSD conditions, and the disclaimer from the LICENSE file at this commit. Do not use the Scrapy name to endorse MarketOS.",
       "duplicate_authority_decision": "repository_url matches src-scrapy. This row does not create a second source authority. Verdict is null because the registry is the verdict authority. The registry stores annotated tag object 8c85937adef8279f12e35e0ee9a20c52ff6d1648 in revision and commit_sha. That is a reported #272 defect (a tag-object SHA stored in a commit field), not a version conflict. This intake pins the peeled commit b1f9e56693cd2000ddcea922306f726f3e9339af and does not edit the registry.",
@@ -82,6 +103,13 @@
       "marketos_target_capability": "backend.analytics.embedded_query_engine",
       "verdict": null,
       "prohibited_behavior": "Do not enable httpfs, remote attaches, or other outbound queries. Do not treat this intake as permission to add a second analytics authority beside src-duckdb. No credentials.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "DuckDB can be built with remote filesystem extensions. This row is local analytical SQL only.",
       "attribution_requirement": "Include the Stichting DuckDB Foundation copyright line and the MIT permission notice from the LICENSE file at this commit.",
       "duplicate_authority_decision": "repository_url matches src-duckdb. Verdict is null because the registry is the verdict authority. This intake row points at that registry row and does not create a second pin authority.",
@@ -103,6 +131,13 @@
       "marketos_target_capability": "backend.analytics.dataframe_engine",
       "verdict": null,
       "prohibited_behavior": "Do not enable cloud or remote scans. Do not treat this intake as permission to add a second dataframe authority beside src-polars. No credentials and no outbound IO.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "Polars can scan remote paths when those features are used. This row is local tabular expressions only.",
       "attribution_requirement": "Include the copyright lines and MIT permission notice from the LICENSE file at this commit, including the NVIDIA portions notice.",
       "duplicate_authority_decision": "repository_url matches src-polars. Verdict is null because the registry is the verdict authority. This intake row points at that registry row and does not create a second pin authority.",
@@ -124,6 +159,13 @@
       "marketos_target_capability": "local graph summaries over offline evidence tables",
       "verdict": "copy_pattern",
       "prohibited_behavior": "Local graph algorithms only. Do not fetch remote graphs, call external APIs, or use this row as a sourcing or ranking authority.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "No network, credential, or terms-of-service surface was observed in the LICENSE file. Remote graph loading is still prohibited by this row.",
       "attribution_requirement": "Include the NetworkX Developers copyright notice, the three BSD conditions, and the disclaimer from LICENSE.txt at this commit. Do not use the NetworkX name to endorse MarketOS.",
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. Advisory pattern intake beside src-duckdb and src-polars, not a new analytics authority.",
@@ -145,6 +187,13 @@
       "marketos_target_capability": "logistics and operations simulation study",
       "verdict": "reference_only",
       "prohibited_behavior": "Do not vendor solver binaries, third_party_solvers, or the ortools package from this row. Dependency weight is the separate row oss-ortools-dependency-weight. Do not call remote solvers.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "OR-Tools can link optional commercial solvers such as Gurobi. No solver license key, remote solve, or live operations control is authorized.",
       "attribution_requirement": "If any Apache-2.0 portion is later copied under a separate handoff, retain the Apache License 2.0 text and NOTICE from this revision. This reference_only row does not copy code.",
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. Reference only. The dependency-weight decision is a different intake row for the same repository and is not an integration approval.",
@@ -166,6 +215,13 @@
       "marketos_target_capability": "dependency-weight decision for OR-Tools, separate from the modeling reference",
       "verdict": "defer",
       "prohibited_behavior": "Do not add the google/or-tools distribution, native solver libraries, or third_party_solvers to MarketOS dependencies, images, or lockfiles on the strength of this intake.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "A native solver dependency increases build and supply-chain surface, including optional commercial solver hooks. No package install is authorized.",
       "attribution_requirement": "No third-party notice is added by this deferred decision. Any later dependency would still have to retain the Apache License 2.0 text and NOTICE from the pinned revision.",
       "duplicate_authority_decision": "Separate decision from oss-ortools. Same repository URL, same commit, no registry row. Defer means the weight is recorded and not approved.",
@@ -187,6 +243,13 @@
       "marketos_target_capability": "offline discrete-event logistics simulation study",
       "verdict": "copy_pattern",
       "prohibited_behavior": "Offline discrete-event simulation only. Do not connect a simulation to live orders, inventory, carriers, payments, or customer messages. Do not treat a simulation result as operational authority.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "No network or credential surface was observed in LICENSE.rst. Connecting the simulation to live operations would create one and is prohibited here.",
       "attribution_requirement": "Include the copyright line and MIT permission notice from LICENSE.rst at this commit.",
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. Advisory simulation pattern only. It does not authorize logistics execution.",
@@ -208,6 +271,13 @@
       "marketos_target_capability": "trade and geographic asymmetry evidence, deferred",
       "verdict": "defer",
       "prohibited_behavior": "Do not call the UN Comtrade API, embed or store a subscription key, download bulk trade files, or send live requests. No credential handling and no provider client.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "README describes free and premium UN Comtrade APIs and a subscription key. Terms were not accepted. An API client is not a local dataset.",
       "attribution_requirement": "Do not add a third-party notice from this deferred row. The LICENSE file's own attribution line was not adopted because the copyright holder text does not name the UN.",
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. Sidecar or defer only; this row is defer. It is not a trade-data authority and does not activate a provider.",
@@ -229,6 +299,13 @@
       "marketos_target_capability": "Amazon Selling Partner schema reference, deferred",
       "verdict": "defer",
       "prohibited_behavior": "Do not call Selling Partner APIs, generate or store Login with Amazon credentials, or submit feeds, orders, inventory, or other mutations. Do not vendor the models into a live client.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "Selling Partner use is governed by Amazon developer terms and credentials. This row stores neither and makes no calls.",
       "attribution_requirement": "If a later handoff copies schema text, retain the Apache License 2.0 text and NOTICE from this commit. This defer row does not copy them into MarketOS.",
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. Platform SDK class, verdict defer. It does not become a commerce or catalog authority.",
@@ -250,6 +327,13 @@
       "marketos_target_capability": "TikTok Business API schema reference, sidecar only",
       "verdict": "sidecar",
       "prohibited_behavior": "Do not call TikTok Business APIs, store access tokens, or publish ads or creatives. Do not import the SDK into MarketOS runtime or grant it spend, posting, or messaging authority.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "A business API SDK implies developer credentials and TikTok platform terms. Neither was accepted. The capability catalog row tiktok_creative_center is a separate record and is not activated here.",
       "attribution_requirement": "If the SDK is ever kept beside the repository as a sidecar checkout, keep the MIT copyright and permission notice from LICENSE.md at this commit inside that checkout. Do not add it to MarketOS as an embedded dependency from this row.",
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. Platform SDK class, verdict sidecar: outside MarketOS source authority. It does not replace tiktok_creative_center.",
@@ -271,6 +355,13 @@
       "marketos_target_capability": "Google Ads schema reference, deferred",
       "verdict": "defer",
       "prohibited_behavior": "Do not call Google Ads APIs, store OAuth or developer tokens, or mutate campaigns, budgets, bids, or ads. Do not add the google-ads package as a MarketOS dependency from this row.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "The client is a credentialed advertising API. OAuth, developer tokens, and Google Ads terms were not accepted. No spend or campaign mutation is authorized.",
       "attribution_requirement": "If a later handoff copies any portion, retain the Apache License 2.0 text from this commit. This defer row does not copy it into MarketOS.",
       "duplicate_authority_decision": "Not in source_adaptation_registry.json. Platform SDK class, verdict defer. It is not an ads authority.",
@@ -292,6 +383,13 @@
       "marketos_target_capability": "none",
       "verdict": "reference_only",
       "prohibited_behavior": "Do not run the scripts, send access tokens, call the Ad Library API, scrape the library, or store ad payloads. Do not use the scripts as an ingestion authority. Unofficial Ad Library scrapers found in search were not pinned.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "The LICENSE file limits use to Facebook web services and APIs and names the Facebook Platform Policy. Tokens, live calls, and stored ad payloads are prohibited. meta_ad_library in the capability catalog is a separate record and is not activated.",
       "attribution_requirement": "Do not redistribute the scripts from this intake. A written reference cites the repository URL, this commit, and the LICENSE copyright notice for Facebook, Inc. and its affiliates.",
       "duplicate_authority_decision": "Reference only, and not a fourth source authority. The capability catalog already has meta_ad_library. This row does not promote or replace it.",
@@ -313,6 +411,13 @@
       "marketos_target_capability": "none",
       "verdict": "reference_only",
       "prohibited_behavior": "Reference only. Do not copy any product-opportunity namesake, do not run its skill or scripts, and do not treat any repository that shares the name as a MarketOS scoring source.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "No canonical project was identified. A null repository URL means this row authorizes no checkout, no license grant, and no data collection.",
       "attribution_requirement": "Not applicable. Do not add third-party notices for product-opportunity, because no repository was selected and no LICENSE file was read.",
       "duplicate_authority_decision": "identity_unresolved. A namesake was seen and was not verified as the intended project. This row records reference_only with a null repository URL and does not pick one.",
@@ -335,6 +440,13 @@
       "marketos_target_capability": "none",
       "verdict": "reference_only",
       "prohibited_behavior": "Reference only. Do not copy any GapScope namesake, do not run its server, scanner, or agent code, and do not treat any repository that shares the name as a MarketOS source.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "No canonical project was identified. A null repository URL means this row authorizes no checkout, no license grant, and no data collection.",
       "attribution_requirement": "Not applicable. Do not add third-party notices for GapScope, because no repository was selected and no LICENSE file was read.",
       "duplicate_authority_decision": "identity_unresolved. Multiple public repositories share the name. This row records reference_only with a null repository URL and does not pick one.",
@@ -357,6 +469,13 @@
       "marketos_target_capability": "methodology notes only",
       "verdict": "reference_only",
       "prohibited_behavior": "Methodology reference only. Do not copy the docs into a scoring formula, do not use the Speculora name or logo, and do not turn the opportunity-score writeup into MarketOS ranking, pricing, or launch authority.",
+      "prohibited_behavior_flags": [
+        "no_live_scraping",
+        "no_proxy_rotation",
+        "no_credentials",
+        "no_raw_payloads",
+        "no_provider_activation"
+      ],
       "security_tos_risks": "The LICENSE file covers documentation, text, and diagrams, and excludes the Speculora name, logo, and trade dress. No product data was fetched.",
       "attribution_requirement": "If documentation is quoted, attribute Speculora, link to https://creativecommons.org/licenses/by/4.0/, and indicate changes. The LICENSE file says attribution does not grant trademark use. The file also says a link to https://speculora.com satisfies attribution.",
       "duplicate_authority_decision": "Reference only. MarketOS product opportunity synthesis remains the scoring authority. This repository is not promoted into the source adaptation registry.",

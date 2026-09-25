@@ -26,6 +26,7 @@ from scripts.ai.validate_oss_source_catalog import (  # noqa: E402
     is_exact_repository_url,
     is_patterned_placeholder_sha,
     render_markdown,
+    REQUIRED_PROHIBITED_FLAGS,
     validate_paths,
 )
 
@@ -68,6 +69,7 @@ def _row(**overrides: object) -> dict:
         "marketos_target_capability": "offline fixture extraction",
         "verdict": "copy_pattern",
         "prohibited_behavior": "No live crawling, proxies, fingerprints, or credentials.",
+        "prohibited_behavior_flags": list(REQUIRED_PROHIBITED_FLAGS),
         "security_tos_risks": "Fixture only. No network and no terms acceptance.",
         "attribution_requirement": "Retain the Apache-2.0 notice.",
         "duplicate_authority_decision": "Intake fixture, not a source authority.",
@@ -170,6 +172,7 @@ def test_real_intake_file_validates() -> None:
             assert row["revision"] in row["license_evidence_url"]
             assert is_exact_repository_url(row["repository_url"])
         assert row["prohibited_behavior"].strip()
+        assert row["prohibited_behavior_flags"] == list(REQUIRED_PROHIBITED_FLAGS)
         assert row["attribution_requirement"].strip()
         counts[row["work_order_id"]] = counts.get(row["work_order_id"], 0) + 1
     assert counts == report["work_order_counts"]
@@ -346,9 +349,33 @@ def test_acceptance_negative_fixtures() -> None:
             "verdict is not an intake verdict",
         ),
     }
+    for flag in REQUIRED_PROHIBITED_FLAGS:
+        cases[f"missing {flag}"] = (
+            _report([_row(prohibited_behavior_flags=[item for item in REQUIRED_PROHIBITED_FLAGS if item != flag])]),
+            f"prohibited_behavior_flags missing {flag}",
+        )
+    cases["unknown prohibited flag"] = (
+        _report([_row(prohibited_behavior_flags=[*REQUIRED_PROHIBITED_FLAGS, "live_scraping"])]),
+        "prohibited_behavior_flags has unknown flag 'live_scraping'",
+    )
     for name, (report, fragment) in cases.items():
         assert report["valid"] is False, name
         assert any(fragment in error for error in report["errors"]), name
+
+
+@pytest.mark.parametrize("missing", REQUIRED_PROHIBITED_FLAGS)
+def test_each_missing_prohibited_flag_fails_on_its_own(missing: str) -> None:
+    flags = [flag for flag in REQUIRED_PROHIBITED_FLAGS if flag != missing]
+    errors = _errors([_row(prohibited_behavior_flags=flags)])
+    assert errors
+    assert any(f"prohibited_behavior_flags missing {missing}" in error for error in errors)
+    assert not any("unknown flag" in error for error in errors)
+
+
+def test_unknown_prohibited_flag_fails() -> None:
+    errors = _errors([_row(prohibited_behavior_flags=[*REQUIRED_PROHIBITED_FLAGS, "live_scraping"])])
+    assert any("prohibited_behavior_flags has unknown flag 'live_scraping'" in error for error in errors)
+    assert not any("prohibited_behavior_flags missing" in error for error in errors)
 
 
 def test_duplicate_source_id_fails() -> None:

@@ -109,6 +109,7 @@ The validator reports these and still exits 0 when the intake itself is valid:
 - At most five candidates per work order.
 - A null repository URL is allowed only on `reference_only` or `reject` rows with `identity_unresolved: true`. `integrate`, `copy_pattern`, and `sidecar` cannot use a null URL.
 - A non-null `registry_ref` requires `verdict: null`. A null `registry_ref` still requires an intake verdict. `inherited` is not a verdict.
+- Every candidate sets `prohibited_behavior_flags` to a list containing all five flags: `no_live_scraping`, `no_proxy_rotation`, `no_credentials`, `no_raw_payloads`, and `no_provider_activation`. Missing any one of those flags fails validation. A flag outside that enum fails as unknown. The free-text `prohibited_behavior` field is still required.
 
 ## Validator
 

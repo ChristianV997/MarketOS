@@ -23,6 +23,14 @@ DEFAULT_CAPABILITIES = REPO_ROOT / "data" / "external_capability_catalog.json"
 VERDICTS = {"integrate", "copy_pattern", "reference_only", "sidecar", "defer", "reject"}
 COPY_VERDICTS = {"integrate", "copy_pattern"}
 SIDECAR_OR_DEFER = {"sidecar", "defer"}
+REQUIRED_PROHIBITED_FLAGS = (
+    "no_live_scraping",
+    "no_proxy_rotation",
+    "no_credentials",
+    "no_raw_payloads",
+    "no_provider_activation",
+)
+PROHIBITED_FLAG_ENUM = frozenset(REQUIRED_PROHIBITED_FLAGS)
 CONFIDENCE = {"low", "medium", "high"}
 FLOATING_REVISIONS = {"main", "master", "latest", "head", "origin/main", "origin/master"}
 PLACEHOLDER_PREFIXES = ("e5f6a7b8c9", "1a8b9c0d2e", "3c4d5e6f7a")
@@ -351,6 +359,19 @@ def _validate_candidate(
         value = row.get(field)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{label}: {field} is empty")
+    flags = row.get("prohibited_behavior_flags")
+    if not isinstance(flags, list):
+        errors.append(f"{label}: prohibited_behavior_flags must be a list")
+    else:
+        present: set[str] = set()
+        for flag in flags:
+            if not isinstance(flag, str) or flag not in PROHIBITED_FLAG_ENUM:
+                errors.append(f"{label}: prohibited_behavior_flags has unknown flag {flag!r}")
+            else:
+                present.add(flag)
+        for flag in REQUIRED_PROHIBITED_FLAGS:
+            if flag not in present:
+                errors.append(f"{label}: prohibited_behavior_flags missing {flag}")
     for field in REQUIRED_TEXT:
         value = row.get(field)
         if not isinstance(value, str) or not value.strip():
