@@ -644,8 +644,6 @@ def _overall_projection(data: Mapping[str, Any]) -> dict[str, Any]:
         states.append(context)
     required = [item for item in projections if item.get("required")]
     required_states = [item["classification"] for item in required]
-    if not states and required:
-        states.append("pass")
     executed_steps = sum(int(item.get("steps_executed", 0) or 0) for item in required)
     workflow_failure = workflow.get("conclusion") in {"failure", "cancelled", "startup_failure"} and executed_steps > 0
     workflow_timeout = workflow.get("conclusion") == "timed_out" and executed_steps > 0
@@ -663,6 +661,10 @@ def _overall_projection(data: Mapping[str, Any]) -> dict[str, Any]:
         classification, status, reason = "pass", "passed", "all_required_ci_jobs_executed"
     else:
         classification, status, reason = "ci_unavailable", "unavailable", "required_ci_evidence_incomplete"
+        if not states:
+            states.append("workflow_conclusion_incomplete")
+    if classification == "pass" and not states:
+        states.append("pass")
     return {
         "status": status,
         "classification": classification,

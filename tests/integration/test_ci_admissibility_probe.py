@@ -194,6 +194,26 @@ def test_pending_job_is_not_passed():
     assert result["jobs"][0]["classification"] == "pending"
 
 
+def test_diagnostic_state_never_reports_pass_when_classification_is_not_pass():
+    # Every required job can individually classify as "pass" (nothing gets
+    # added to the internal per-job `states` list) while the workflow's own
+    # conclusion never reached "success" -- e.g. "neutral". The overall
+    # classification correctly falls back to ci_unavailable, but a stale
+    # unconditional "if not states: states.append('pass')" fallback used to
+    # report diagnostic_state: "pass" anyway, even though admissible_evidence
+    # and classification were both correctly False/ci_unavailable. A
+    # consumer reading only diagnostic_state (not classification) could be
+    # misled into treating this as clean evidence.
+    data = payload()
+    data["workflow"]["conclusion"] = "neutral"
+    result = report(data)
+    assert result["classification"] == "ci_unavailable"
+    assert result["status"] == "unavailable"
+    assert result["admissible_evidence"] is False
+    assert result["diagnostic_state"] != "pass"
+    assert "pass" not in result["diagnostic_states"]
+
+
 def test_deploy_preview_failure_is_not_ci_failure():
     data = payload()
     data["checks"] = [
