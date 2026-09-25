@@ -95,7 +95,14 @@ def test_raw_provider_payloads_are_dropped(raw_field):
 
 
 def test_raw_html_excerpt_is_not_retained():
-    assert normalize_record(payload(content_text_excerpt="<script>alert('fixture')</script>"), mode="fixture") is None
+    assert normalize_record(payload(content_text_excerpt="<div>provider payload</div>"), mode="fixture") is None
+
+
+def test_numeric_text_is_parsed_without_silent_character_stripping():
+    item = normalize_record(payload(search_growth_signal="1e2"), mode="fixture")
+
+    assert item is not None
+    assert item.search_growth_signal == 100
 
 
 def test_field_provenance_is_not_a_live_authority():
@@ -127,6 +134,36 @@ def test_explicit_supplier_proof_is_not_inferred_from_attention_rows():
     score = report["candidates"][0]["score"]
     assert "supplier_proof_not_observed" in score["reasons"]
     assert "advance_to_launch_draft" not in score["recommendation"]
+
+
+def test_attention_never_authorizes_launch_even_when_supplier_proof_is_supplied():
+    common = {
+        "engagement_count": 100000,
+        "view_count": 100000,
+        "like_count": 100000,
+        "comment_count": 1000,
+        "share_count": 1000,
+        "review_count": 1000,
+        "search_growth_signal": 1,
+        "ad_active_signal": True,
+        "ad_platform": "meta",
+        "ugc_scriptability": 1,
+        "visual_demo_score": 1,
+        "intent": "transactional",
+        "source_confidence": 0.95,
+    }
+    items = [
+        record(platform="youtube", hook="Solve the problem", **common),
+        record(platform="tiktok", hook="Show the transformation", **common),
+        record(platform="meta", hook="Make the outcome giftable", **common),
+        record(platform="amazon", hook="Explain the messy handoff", **common),
+    ]
+
+    score = score_candidate("candidate-neutral", items, supplier_proof=True)
+
+    assert score.overall_consumer_attention >= 0.7
+    assert score.recommendation == "manual_review_required"
+    assert "advance_to_launch_draft" not in score.recommendation
 
 
 def test_quality_blocker_overrides_attractive_attention_score():

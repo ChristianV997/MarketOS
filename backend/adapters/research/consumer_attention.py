@@ -27,8 +27,9 @@ from evaluation.commerce.consumer_attention import (
 SECRET_KEY = re.compile(r"(token|secret|password|api[_-]?key|authorization|cookie|private[_-]?key)", re.I)
 SECRET_VALUE = re.compile(r"(bearer\s+|sk_live_|sk_test_|ghp_|xox[baprs]-|-----BEGIN)", re.I)
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
-RAW_HTML = re.compile(r"<(?:!doctype\s+html|html|body|script)\b", re.I)
+RAW_HTML = re.compile(r"(?:<!doctype\s+html|</?[a-z][^>]*>)", re.I)
 RAW_PAYLOAD_KEY = re.compile(r"^(?:raw[_-]?(?:html|payload)|provider[_-]?payload)$", re.I)
+MAX_IMPORT_BYTES = 64 * 1024
 
 
 class ConsumerAttentionImportError(ValueError):
@@ -43,6 +44,8 @@ def validate_input_path(path: str | Path) -> Path:
         raise ConsumerAttentionImportError("only sanitized JSON and CSV inputs are supported")
     if not candidate.is_file():
         raise ConsumerAttentionImportError("consumer attention import file does not exist")
+    if candidate.stat().st_size > MAX_IMPORT_BYTES:
+        raise ConsumerAttentionImportError("consumer attention import exceeds size limit")
     return candidate
 
 
@@ -78,6 +81,11 @@ def _value(row: Mapping[str, Any], *names: str) -> Any:
     return None
 
 
+def _optional_int(value: Any) -> int | None:
+    parsed = number(value)
+    return None if parsed is None else int(parsed)
+
+
 SOURCE_DEFAULTS = {
     "google_trends": "google_trends_fixture", "tiktok": "tiktok_creative_center_snapshot", "meta": "meta_ad_library_snapshot", "youtube": "youtube_search_snapshot", "reddit": "reddit_threads_manual_import", "amazon": "amazon_reviews_snapshot", "mercadolibre": "mercadolibre_reviews_snapshot", "ebay": "ebay_reviews_snapshot", "shopify": "shopify_reviews_snapshot", "minea": "minea_manual_import", "dropshipio": "dropshipio_manual_import", "pipiads": "pipiads_manual_import", "kalodata": "kalodata_manual_import", "manual": "manual_csv_import",
 }
@@ -95,9 +103,10 @@ def normalize_record(row: Mapping[str, Any], *, default_platform: str = "manual"
     source_type = str(_value(merged, "source_type") or default_source_type)
     if source_type not in SOURCE_TYPES:
         source_type = SOURCE_DEFAULTS.get(platform, "fixture_demo")
-    candidate_id = str(_value(merged, "candidate_id", "product_id") or "").strip()
-    if not candidate_id:
+    raw_candidate_id = _value(merged, "candidate_id", "product_id")
+    if not isinstance(raw_candidate_id, str) or not raw_candidate_id.strip():
         return None
+    candidate_id = raw_candidate_id.strip()
     identifier_values = (
         candidate_id,
         _value(merged, "observation_key", "signal_id", "metric"),
@@ -136,12 +145,12 @@ def normalize_record(row: Mapping[str, Any], *, default_platform: str = "manual"
             proof_signal=text(_value(merged, "proof_signal", "proof") or "", 160),
             format=text(_value(merged, "format", "content_format") or "", 80),
             engagement_count=int(engagement) if engagement is not None else None,
-            view_count=int(number(_value(merged, "view_count", "views")) or 0) or None,
-            like_count=int(number(_value(merged, "like_count", "likes")) or 0) or None,
-            comment_count=int(number(_value(merged, "comment_count", "comments")) or 0) or None,
-            share_count=int(number(_value(merged, "share_count", "shares")) or 0) or None,
-            save_count=int(number(_value(merged, "save_count", "saves")) or 0) or None,
-            review_count=int(number(_value(merged, "review_count", "reviews")) or 0) or None,
+            view_count=_optional_int(_value(merged, "view_count", "views")),
+            like_count=_optional_int(_value(merged, "like_count", "likes")),
+            comment_count=_optional_int(_value(merged, "comment_count", "comments")),
+            share_count=_optional_int(_value(merged, "share_count", "shares")),
+            save_count=_optional_int(_value(merged, "save_count", "saves")),
+            review_count=_optional_int(_value(merged, "review_count", "reviews")),
             rating=number(_value(merged, "rating", "stars")),
             sentiment_label=normalize_sentiment(_value(merged, "sentiment_label", "sentiment")),
             intent_label=normalize_intent(_value(merged, "intent_label", "intent", "keyword_intent")),
@@ -172,7 +181,15 @@ def normalize_record(row: Mapping[str, Any], *, default_platform: str = "manual"
 
 
 def _json_rows(path: str | Path) -> list[Mapping[str, Any]]:
-    raw = json.loads(validate_input_path(path).read_text(encoding="utf8"))
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ConsumerAttentionImportError("duplicate JSON object key")
+            result[key] = value
+        return result
+
+    raw = json.loads(validate_input_path(path).read_text(encoding="utf8"), object_pairs_hook=reject_duplicate_keys)
     if isinstance(raw, list):
         return [row for row in raw if isinstance(row, Mapping)]
     if isinstance(raw, Mapping):

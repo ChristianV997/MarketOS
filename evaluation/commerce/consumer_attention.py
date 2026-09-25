@@ -6,12 +6,15 @@ turns attention into supplier proof or launch authorization.
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 PROVENANCE = frozenset({"observed", "derived", "assumed", "unavailable", "malformed", "blocked", "manual_import", "fixture"})
+EVIDENCE_MODES = PROVENANCE | frozenset({"fixture_demo", "manual_csv_import"})
+UNTRUSTED_LIVE_MODES = frozenset({"live", "live_validated", "live_observed", "production", "verified"})
 SOURCE_TYPES = frozenset(
     {
         "google_trends_manual_import", "google_trends_fixture", "tiktok_creative_center_snapshot", "tiktok_ad_snapshot",
@@ -26,21 +29,28 @@ OFFERING_KINDS = frozenset({"goods", "service", "hybrid", "unknown"})
 FRESHNESS_STATES = frozenset({"fresh", "stale", "future_dated", "unavailable"})
 _LANGUAGE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_NUMBER = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$", re.I)
 
 
 def number(value: Any) -> float | None:
     if value in (None, ""):
         return None
+    if isinstance(value, bool):
+        return None
     if isinstance(value, (int, float)):
-        return float(value)
+        result = float(value)
+        return result if math.isfinite(result) else None
     text = str(value).strip().lower().replace(",", "")
+    text = re.sub(r"^[\$€£]\s*", "", text)
     multiplier = 1000000 if text.endswith("m") else 1000 if text.endswith("k") else 1
     text = text.rstrip("km")
-    text = re.sub(r"[^0-9.\-]", "", text)
+    if not _NUMBER.fullmatch(text):
+        return None
     try:
-        return float(text) * multiplier
+        result = float(text) * multiplier
     except (TypeError, ValueError):
         return None
+    return result if math.isfinite(result) else None
 
 
 def bounded(value: Any) -> float:
@@ -78,6 +88,13 @@ def normalize_observed_at(value: Any) -> str | None:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("observed_at must include a timezone")
     return parsed.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def normalize_evidence_mode(value: Any) -> str:
+    mode = str(value or "unavailable").strip().lower()
+    if mode in UNTRUSTED_LIVE_MODES or mode not in EVIDENCE_MODES:
+        return "unavailable"
+    return mode
 
 
 def _reference_time(value: Any) -> datetime | None:
@@ -273,6 +290,7 @@ class ConsumerAttentionEvidence:
             raise ValueError(f"unsupported source_type: {self.source_type}")
         if self.platform not in PLATFORMS:
             raise ValueError(f"unsupported platform: {self.platform}")
+        object.__setattr__(self, "evidence_mode", normalize_evidence_mode(self.evidence_mode))
         object.__setattr__(self, "observed_at", normalize_observed_at(self.observed_at))
         object.__setattr__(self, "offering_kind", normalize_offering_kind(self.offering_kind))
         object.__setattr__(self, "geography", normalize_geography(self.geography))
@@ -513,7 +531,8 @@ def score_candidate(
     elif not supplier_proof and overall >= 0.45:
         recommendation = "validate_supplier_first"
     elif overall >= 0.7:
-        recommendation = "advance_to_launch_draft"
+        # Attention is an input to downstream decisions, never launch authority.
+        recommendation = "manual_review_required"
     elif hooks >= 0.5:
         recommendation = "generate_creative_tests"
     else:
@@ -620,7 +639,7 @@ def build_report(
         next_action = "refresh_consumer_attention_evidence"
     return ConsumerAttentionReport(
         "consumer-attention-v1",
-        evidence_mode,
+        normalize_evidence_mode(evidence_mode),
         len(results),
         len(records),
         tuple(sorted({item.platform for item in records})),

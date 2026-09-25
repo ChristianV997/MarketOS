@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.adapters.research.consumer_attention import import_json, normalize_record
+from backend.adapters.research.consumer_attention import ConsumerAttentionImportError, import_json, normalize_record
 from evaluation.commerce.consumer_attention import (
     ConsumerAttentionEvidence,
     build_report,
@@ -80,6 +80,44 @@ def test_identity_metadata_survives_normalization_and_serialization(field):
     report_key = {"offering_kind": "offering_kinds", "geography": "geographies", "language": "languages"}[field]
     assert report[report_key] == [getattr(record, field)]
     assert report["candidates"][0][report_key] == [getattr(record, field)]
+
+
+def test_explicit_zero_counts_are_distinct_from_missing_counts():
+    zero = row(view_count=0, review_count=0)
+    missing = row()
+
+    assert zero.view_count == 0
+    assert zero.review_count == 0
+    assert missing.view_count is None
+    assert missing.review_count is None
+
+
+def test_candidate_identity_must_be_text_not_a_coerced_number():
+    payload = row().to_dict()
+
+    assert normalize_record({**payload, "candidate_id": 42}, mode="fixture") is None
+
+
+def test_live_evidence_mode_is_downgraded_to_unavailable():
+    record = normalize_record(row().to_dict(), mode="live_validated")
+    assert record is not None
+
+    report = build_report([record], evidence_mode="live_validated").to_dict()
+
+    assert record.evidence_mode == "unavailable"
+    assert report["evidence_mode"] == "unavailable"
+
+
+def test_json_duplicate_keys_and_oversized_inputs_fail_closed(tmp_path):
+    duplicate = tmp_path / "duplicate.json"
+    duplicate.write_text('{"candidate_id":"first","candidate_id":"second"}', encoding="utf-8")
+    with pytest.raises(ConsumerAttentionImportError, match="duplicate JSON object key"):
+        import_json(duplicate)
+
+    oversized = tmp_path / "oversized.json"
+    oversized.write_text("x" * (64 * 1024 + 1), encoding="utf-8")
+    with pytest.raises(ConsumerAttentionImportError, match="exceeds size limit"):
+        import_json(oversized)
 
 
 def test_conflicting_observations_are_visible_and_block_attention_recommendation():
