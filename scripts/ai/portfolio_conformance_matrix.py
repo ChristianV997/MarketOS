@@ -38,6 +38,7 @@ SECRET_RE = re.compile(
 SENSITIVE_KEY_RE = re.compile(r"(?i)(password|secret|token|api[_-]?key|private[_-]?key|authorization|credential)")
 UNSAFE_TEXT_RE = re.compile(r"[\x00-\x1f\x7f\u200b\u200c\u200d\u202a-\u202e\u2060\u2066-\u2069\ufeff]")
 SECRET_ASSIGNMENT_RE = re.compile(r"(?i)(password|secret|token|api[_-]?key|private[_-]?key|authorization|credential)\s*[:=]\s*\S+")
+NON_CI_MARKERS = ("netlify", "deploy-preview", "deploy_preview", "preview-deploy")
 
 CI_STATUSES = frozenset({"completed", "queued", "in_progress", "pending", "waiting", "cancelled"})
 CI_CONCLUSIONS = frozenset({"success", "passed", "failure", "failed", "timed_out", "cancelled", "skipped", "neutral"})
@@ -168,8 +169,32 @@ def _normalize_steps(value: Any) -> int:
 def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise MatrixInputError("invalid_ci_job")
-    _check_keys(value, {"name", "status", "conclusion", "required", "head_sha", "runner_id", "steps", "steps_executed", "logs_available"})
+    _check_keys(
+        value,
+        {
+            "name",
+            "workflow_name",
+            "kind",
+            "status",
+            "conclusion",
+            "required",
+            "head_sha",
+            "runner_id",
+            "steps",
+            "steps_executed",
+            "logs_available",
+        },
+    )
     name = _text(value.get("name"), field="ci_job_name", limit=160)
+    workflow_name = _optional_text(value.get("workflow_name"), field="ci_workflow_name", limit=180)
+    normalized_name = name.casefold().replace("_", "-")
+    kind = _text(value.get("kind", "ci"), field="ci_job_kind", limit=40).lower()
+    if kind == "ci" and any(marker in normalized_name for marker in NON_CI_MARKERS):
+        kind = "deploy_preview"
+    if kind not in {"ci", "deploy_preview", "non_ci"}:
+        raise MatrixInputError("invalid_ci_job_kind")
+    if kind != "ci" and value.get("required") is True:
+        raise MatrixInputError("non_ci_job_cannot_be_required")
     status = _text(value.get("status"), field="ci_job_status", limit=40).lower()
     if status not in CI_STATUSES:
         raise MatrixInputError("invalid_ci_job_status")
@@ -178,10 +203,10 @@ def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: s
         conclusion = _text(conclusion, field="ci_job_conclusion", limit=40).lower()
         if conclusion not in CI_CONCLUSIONS:
             raise MatrixInputError("invalid_ci_job_conclusion")
-    required = value.get("required", name in required_names)
+    required = value.get("required", name in required_names and kind == "ci")
     if not isinstance(required, bool):
         raise MatrixInputError("invalid_ci_required_flag")
-    if required != (name in required_names):
+    if required != (name in required_names and kind == "ci"):
         raise MatrixInputError("ci_required_flag_mismatch")
     head_sha = _sha(value.get("head_sha"), field="ci_head_sha")
     if head_sha != expected_head_sha:
@@ -208,7 +233,7 @@ def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: s
         if conclusion is not None or step_count != 0 or runner_id not in {None, 0} or logs_available is True:
             raise MatrixInputError("contradictory_pending_ci_metadata")
     elif status == "in_progress":
-        if conclusion is not None or runner_id in {None, 0}:
+        if conclusion is not None or runner_id in {None, 0} or logs_available is True:
             raise MatrixInputError("contradictory_in_progress_ci_metadata")
     elif status == "completed":
         if conclusion is None:
@@ -218,6 +243,8 @@ def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: s
             raise MatrixInputError("contradictory_cancelled_ci_metadata")
     return {
         "name": name,
+        "workflow_name": workflow_name,
+        "kind": kind,
         "status": status,
         "conclusion": conclusion,
         "required": required,
@@ -226,6 +253,7 @@ def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: s
         "steps_executed": step_count,
         "logs_available": logs_available,
     }
+
 
 
 def _normalize_local_evidence(value: Any) -> dict[str, Any]:
@@ -242,6 +270,32 @@ def _normalize_local_evidence(value: Any) -> dict[str, Any]:
     if fingerprint is not None:
         fingerprint = _sha(fingerprint, field="local_evidence_fingerprint")
     return {"classification": classification, "status": status, "fingerprint": fingerprint}
+
+
+def _normalize_economics(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise MatrixInputError("invalid_economics")
+    _check_keys(value, {"gross_margin", "estimated_revenue", "estimated_cost", "currency", "evidence_state"})
+    currency = _optional_text(value.get("currency"), field="economics_currency", limit=10)
+    evidence_state = _text(value.get("evidence_state", "unknown"), field="economics_evidence_state", limit=30)
+    margin = value.get("gross_margin")
+    if margin is not None and (not isinstance(margin, (int, float, str)) or isinstance(margin, bool)):
+        raise MatrixInputError("invalid_economics_margin")
+    is_explicit_zero = False
+    if margin is not None:
+        try:
+            is_explicit_zero = float(margin) == 0.0
+        except ValueError:
+            raise MatrixInputError("invalid_economics_margin") from None
+    classification = "explicit_zero" if is_explicit_zero else ("provided" if margin is not None else "missing")
+    return {
+        "currency": currency,
+        "gross_margin": str(margin) if margin is not None else None,
+        "evidence_state": evidence_state,
+        "classification": classification,
+    }
 
 
 def _normalize_pr(value: Any) -> dict[str, Any]:
@@ -264,6 +318,10 @@ def _normalize_pr(value: Any) -> dict[str, Any]:
         "ci_jobs",
         "local_evidence",
         "authority_claims",
+        "workspace_id",
+        "candidate_id",
+        "client_id",
+        "economics",
     }
     _check_keys(value, allowed)
     number = value.get("number")
@@ -275,6 +333,10 @@ def _normalize_pr(value: Any) -> dict[str, Any]:
     required_checks = _string_list(value.get("required_checks", []), field="required_checks", limit=MAX_JOBS_PER_PR, item_limit=160)
     if not required_checks:
         raise MatrixInputError("empty_required_checks")
+    for item in required_checks:
+        normalized = item.casefold().replace("_", "-")
+        if any(marker in normalized for marker in NON_CI_MARKERS):
+            raise MatrixInputError("non_ci_check_in_required_checks")
     required_checks_source = _text(value.get("required_checks_source"), field="required_checks_source", limit=60)
     if required_checks_source != "branch_protection_adapter":
         raise MatrixInputError("untrusted_required_checks_source")
@@ -300,6 +362,10 @@ def _normalize_pr(value: Any) -> dict[str, Any]:
     changed_files = value.get("changed_files", [])
     if not isinstance(changed_files, list) or len(changed_files) > MAX_FILES_PER_PR:
         raise MatrixInputError("invalid_changed_files")
+    workspace_id = _optional_text(value.get("workspace_id"), field="workspace_id", limit=100)
+    candidate_id = _optional_text(value.get("candidate_id"), field="candidate_id", limit=100)
+    client_id = _optional_text(value.get("client_id"), field="client_id", limit=100)
+    economics = _normalize_economics(value.get("economics")) if "economics" in value else None
     return {
         "number": number,
         "title": _text(value.get("title", f"PR #{number}"), field="pull_request_title"),
@@ -310,6 +376,10 @@ def _normalize_pr(value: Any) -> dict[str, Any]:
         "head_ref": _text(value.get("head_ref"), field="head_ref", limit=200),
         "head_sha": head_sha,
         "merge_base_sha": _sha(value.get("merge_base_sha"), field="merge_base_sha", required=False),
+        "workspace_id": workspace_id,
+        "candidate_id": candidate_id,
+        "client_id": client_id,
+        "economics": economics,
         "changed_files": sorted({_path(item) for item in changed_files}),
         "depends_on": dependencies,
         "required_checks": required_checks,
@@ -324,11 +394,13 @@ def normalize_input(value: Any) -> dict[str, Any]:
     """Validate and normalize a sanitized adapter payload."""
     if not isinstance(value, Mapping):
         raise MatrixInputError("input_root_not_object")
-    _check_keys(value, {"schema", "repository", "origin_main", "pull_requests"})
+    _check_keys(value, {"schema", "repository", "origin_main", "pull_requests", "workspace_id", "client_id"})
     if value.get("schema") != INPUT_SCHEMA:
         raise MatrixInputError("unsupported_input_schema")
     repository = _text(value.get("repository"), field="repository", limit=200)
     origin_main = _sha(value.get("origin_main"), field="origin_main")
+    root_workspace = _optional_text(value.get("workspace_id"), field="workspace_id", limit=100)
+    root_client = _optional_text(value.get("client_id"), field="client_id", limit=100)
     raw_prs = value.get("pull_requests")
     if not isinstance(raw_prs, list) or len(raw_prs) > MAX_PRS:
         raise MatrixInputError("invalid_pull_requests")
@@ -336,7 +408,31 @@ def normalize_input(value: Any) -> dict[str, Any]:
     numbers = [item["number"] for item in prs]
     if len(set(numbers)) != len(numbers):
         raise MatrixInputError("duplicate_pull_request_number")
-    return {"schema": INPUT_SCHEMA, "repository": repository, "origin_main": origin_main, "pull_requests": sorted(prs, key=lambda item: item["number"])}
+
+    workspaces = {pr["workspace_id"] for pr in prs if pr.get("workspace_id")}
+    if root_workspace:
+        workspaces.add(root_workspace)
+    if len(workspaces) > 1:
+        raise MatrixInputError("cross_workspace_portfolio_rows")
+
+    clients = {pr["client_id"] for pr in prs if pr.get("client_id")}
+    if root_client:
+        clients.add(root_client)
+    if len(clients) > 1:
+        raise MatrixInputError("cross_client_portfolio_rows")
+
+    result = {
+        "schema": INPUT_SCHEMA,
+        "repository": repository,
+        "origin_main": origin_main,
+        "pull_requests": sorted(prs, key=lambda item: item["number"]),
+    }
+    if root_workspace:
+        result["workspace_id"] = root_workspace
+    if root_client:
+        result["client_id"] = root_client
+    return result
+
 
 
 def _run_git(root: Path, *args: str) -> tuple[str | None, str]:
@@ -469,6 +565,8 @@ def _ci_projection(pr: Mapping[str, Any]) -> dict[str, Any]:
         jobs.append(
             {
                 "name": job["name"],
+                "workflow_name": job.get("workflow_name"),
+                "kind": job.get("kind", "ci"),
                 "required": job["required"],
                 "status": job["status"],
                 "conclusion": job["conclusion"],
@@ -479,9 +577,11 @@ def _ci_projection(pr: Mapping[str, Any]) -> dict[str, Any]:
                 "logs_available": job["logs_available"],
             }
         )
-    names = {job["name"] for job in pr["ci_jobs"]}
+    ci_jobs_only = [job for job in jobs if job.get("kind") == "ci"]
+    non_ci_checks = [job for job in jobs if job.get("kind") in {"deploy_preview", "non_ci"}]
+    names = {job["name"] for job in ci_jobs_only}
     missing = sorted(set(pr["required_checks"]) - names)
-    required = [job for job in jobs if job["required"]]
+    required = [job for job in ci_jobs_only if job["required"]]
     required_classes = [job["classification"] for job in required]
     if any(item == "malformed" for item in required_classes):
         classification = "malformed"
@@ -503,6 +603,7 @@ def _ci_projection(pr: Mapping[str, Any]) -> dict[str, Any]:
         "required_checks_source": pr["required_checks_source"],
         "missing_required": missing,
         "jobs": jobs,
+        "non_ci_checks": non_ci_checks,
     }
 
 
@@ -589,6 +690,10 @@ def build_matrix(payload: Mapping[str, Any] | None, *, repository_state: Mapping
     base["repository"] = data["repository"]
     base["input_origin_main"] = data["origin_main"]
     base["origin_main"] = repo.get("origin_main") or data["origin_main"]
+    if data.get("workspace_id"):
+        base["workspace_id"] = data["workspace_id"]
+    if data.get("client_id"):
+        base["client_id"] = data["client_id"]
     base["input"] = {"classification": "actual", "schema": data["schema"]}
     if repo.get("remote_repository") and data["repository"] != repo["remote_repository"]:
         base["blockers"].append("repository_mismatch")
@@ -628,6 +733,10 @@ def build_matrix(payload: Mapping[str, Any] | None, *, repository_state: Mapping
                 "head_ref": pr["head_ref"],
                 "head_sha": pr["head_sha"],
                 "merge_base_sha": pr["merge_base_sha"],
+                "workspace_id": pr.get("workspace_id"),
+                "candidate_id": pr.get("candidate_id"),
+                "client_id": pr.get("client_id"),
+                "economics": pr.get("economics"),
                 "changed_files": pr["changed_files"],
                 "ancestry": ancestry,
                 "stacking": dependency,

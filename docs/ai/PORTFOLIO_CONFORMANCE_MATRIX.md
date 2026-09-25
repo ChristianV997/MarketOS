@@ -65,6 +65,8 @@ The adapter root is:
   "schema": "MarketOS.PortfolioConformanceInput.v1",
   "repository": "ChristianV997/MarketOS",
   "origin_main": "<40 hexadecimal characters>",
+  "workspace_id": "optional-canonical-workspace",
+  "client_id": "optional-canonical-client",
   "pull_requests": []
 }
 ```
@@ -82,6 +84,14 @@ Each pull request may contain only:
   "head_ref": "codex/example",
   "head_sha": "<sha>",
   "merge_base_sha": "<sha>",
+  "workspace_id": "optional-canonical-workspace",
+  "candidate_id": "optional-candidate-id",
+  "client_id": "optional-canonical-client",
+  "economics": {
+    "gross_margin": 0.0,
+    "currency": "USD",
+    "evidence_state": "simulated"
+  },
   "changed_files": ["scripts/example.py"],
   "depends_on": [
     {"number": 290, "head_sha": "<sha>", "available": true}
@@ -91,6 +101,8 @@ Each pull request may contain only:
   "ci_jobs": [
     {
       "name": "test",
+      "workflow_name": "Agentic Quality Gate",
+      "kind": "ci",
       "status": "completed",
       "conclusion": "success",
       "required": true,
@@ -113,6 +125,18 @@ Each pull request may contain only:
 provenance contract for the sanitized adapter and is not a merge authorization
 or a substitute for reviewing the source adapter. Every CI job must carry the
 exact PR `head_sha`, so evidence cannot be reused across heads.
+
+Deploy preview markers (`netlify`, `deploy-preview`, `deploy_preview`,
+`preview-deploy`) are strictly forbidden in `required_checks` and fail closed.
+Jobs carrying these markers or declaring `kind: "deploy_preview"` cannot be
+marked required, are segregated into `non_ci_checks`, and never satisfy CI
+requirements or promote CI status to `pass`. In-progress jobs cannot claim
+final logs are available.
+
+Portfolio rows must belong to a single workspace and client; conflicting
+`workspace_id` or `client_id` values fail closed. When provided, `economics`
+explicit-zero values (`gross_margin: 0.0`) are preserved as `explicit_zero`
+distinct from absent/omitted economics (`missing`).
 
 The adapter must not include PR bodies, comments, private notes, raw logs,
 provider payloads, credentials, tokens, output dumps, or arbitrary fields. The
@@ -145,7 +169,8 @@ An executed failure has priority over incomplete evidence when both are present;
 the report retains both per-job classifications. A zero-step job with a
 failure conclusion is still `zero_step_runnerless`, never `executed_failure`.
 No run-level success, Netlify status, local fixture, or empty job list can
-substitute for executed required CI evidence.
+substitute for executed required CI evidence. Deploy preview and Netlify entries
+are segregated to `non_ci_checks` and do not contribute to CI admissibility.
 
 ## Ancestry, Stacking, and Dependencies
 

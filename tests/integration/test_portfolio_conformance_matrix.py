@@ -364,3 +364,107 @@ def test_no_input_is_useful_but_not_a_green_portfolio():
     assert report["portfolio_status"] == "blocked"
     assert report["blockers"] == ["portfolio_input_not_supplied"]
     assert report["merge_authorized"] is False
+
+
+def test_non_ci_marker_in_required_checks_fails_closed():
+    payload = fixture("mixed_portfolio.json")
+    payload["pull_requests"][0]["required_checks"] = ["netlify/deploy-preview"]
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    assert report["portfolio_status"] == "malformed"
+    assert report["input"]["error"] == "non_ci_check_in_required_checks"
+
+
+def test_deploy_preview_job_separated_from_ci_and_cannot_satisfy_ci_pass():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["required_checks"] = ["test"]
+    # Netlify job declared with required=True must fail closed
+    target["ci_jobs"].append(
+        {
+            "name": "netlify/marketos/deploy-preview",
+            "status": "completed",
+            "conclusion": "success",
+            "required": True,
+            "head_sha": target["head_sha"],
+            "runner_id": 199,
+            "steps_executed": 2,
+            "logs_available": True,
+        }
+    )
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    assert report["portfolio_status"] == "malformed"
+    assert report["input"]["error"] == "non_ci_job_cannot_be_required"
+
+    # When not required, it must be segregated to non_ci_checks and not satisfy CI
+    target["ci_jobs"][-1]["required"] = False
+    report_valid = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report_valid, 271)
+    assert pr["ci"]["classification"] == "pass"
+    assert len(pr["ci"]["non_ci_checks"]) == 1
+    assert pr["ci"]["non_ci_checks"][0]["kind"] == "deploy_preview"
+    assert pr["ci"]["non_ci_checks"][0]["name"] == "netlify/marketos/deploy-preview"
+
+
+def test_explicit_workflow_name_and_job_identity_preserved():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_jobs"][0]["workflow_name"] = "Agentic Quality Gate"
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["jobs"][0]["workflow_name"] == "Agentic Quality Gate"
+
+
+def test_contradictory_in_progress_with_logs_available_fails_closed():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_jobs"][0].update({"status": "in_progress", "conclusion": None, "logs_available": True, "runner_id": 101})
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    assert report["portfolio_status"] == "malformed"
+    assert report["input"]["error"] == "contradictory_in_progress_ci_metadata"
+
+
+def test_cross_client_and_cross_workspace_portfolio_rows_fail_closed():
+    payload = fixture("mixed_portfolio.json")
+    payload["pull_requests"][0]["client_id"] = "client-alpha"
+    payload["pull_requests"][1]["client_id"] = "client-beta"
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    assert report["portfolio_status"] == "malformed"
+    assert report["input"]["error"] == "cross_client_portfolio_rows"
+
+    # Mismatched workspaces also fail closed
+    payload2 = fixture("mixed_portfolio.json")
+    payload2["pull_requests"][0]["workspace_id"] = "ws-one"
+    payload2["pull_requests"][1]["workspace_id"] = "ws-two"
+    report2 = build_matrix(payload2, repository_state=REPO_STATE)
+    assert report2["portfolio_status"] == "malformed"
+    assert report2["input"]["error"] == "cross_workspace_portfolio_rows"
+
+    # Consistent workspace and candidate identities are retained
+    payload3 = fixture("mixed_portfolio.json")
+    payload3["workspace_id"] = "ws-canonical"
+    payload3["client_id"] = "client-canonical"
+    for item in payload3["pull_requests"]:
+        item["workspace_id"] = "ws-canonical"
+        item["client_id"] = "client-canonical"
+        item["candidate_id"] = f"candidate-{item['number']}"
+    report3 = build_matrix(payload3, repository_state=REPO_STATE)
+    assert report3["workspace_id"] == "ws-canonical"
+    assert report3["client_id"] == "client-canonical"
+    pr3 = by_number(report3, 271)
+    assert pr3["workspace_id"] == "ws-canonical"
+    assert pr3["client_id"] == "client-canonical"
+    assert pr3["candidate_id"] == "candidate-271"
+
+
+def test_missing_versus_explicit_zero_economics():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["economics"] = {"gross_margin": 0.0, "currency": "USD", "evidence_state": "simulated"}
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["economics"]["classification"] == "explicit_zero"
+    assert pr["economics"]["gross_margin"] == "0.0"
+
+    # PR without economics remains None/missing, not laundered into 0.0
+    pr_no_econ = by_number(report, 275)
+    assert pr_no_econ["economics"] is None
