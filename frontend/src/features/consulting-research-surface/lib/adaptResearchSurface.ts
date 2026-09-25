@@ -11,7 +11,7 @@ import {
 
 const CLASS_SET = new Set<string>(EVIDENCE_CLASSES);
 const SECTION_SET = new Set<string>(SECTION_IDS);
-const LEAK = /(cross_client|cross_workspace|internal_prompt|internal_formula|raw_payload|api_key|heuristic_weight)/i;
+const LEAK = /(cross[ _-]?client|cross[ _-]?workspace|another[ _-]?client|other[ _-]?client|different[ _-]?client|competing[ _-]?client|internal[ _-]?prompt|internal[ _-]?formula|raw[ _-]?payload|api[ _-]?key|heuristic[ _-]?weight)/i;
 const SECRET = /sk-live-|sk-test-|ghp_|github_pat_|AKIA[0-9A-Z]{16}|bearer\s+[a-z0-9._-]{10,}/i;
 
 export interface AdaptResult {
@@ -26,7 +26,7 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 function leaky(value: unknown): boolean {
-  if (typeof value === "string") return SECRET.test(value);
+  if (typeof value === "string") return SECRET.test(value) || LEAK.test(value);
   if (Array.isArray(value)) return value.some(leaky);
   if (!value || typeof value !== "object") return false;
   return Object.entries(value as Record<string, unknown>).some(([key, item]) => LEAK.test(key) || leaky(item));

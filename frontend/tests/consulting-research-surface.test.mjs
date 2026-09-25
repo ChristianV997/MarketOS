@@ -67,6 +67,36 @@ test("live claims, empty packets, loading, and errors stay honest", () => {
   assert.equal(adaptResearchSurface({ version: "nope" }).reason, "unsupported_version");
 });
 
+test("export gate also rejects free-text prohibited content as defense in depth", () => {
+  const packet = buildSurfaceFixture();
+  const adapted = adaptResearchSurface(packet);
+  adapted.model.sections[0].rows[0].summary = "Leaked after adaptation: internal prompt details for this engagement.";
+  const exported = buildClientSafeSurfaceExport(adapted.model);
+  assert.equal(exported.accepted, false);
+  assert.equal(exported.reason, "prohibited_value");
+});
+
+test("free-text mentions of prohibited topics are rejected at ingestion, not just key names", () => {
+  const packet = buildSurfaceFixture();
+  packet.sections[0].rows[0].summary = "Our internal formula is cost * 1.4, and this is shared with another_client too.";
+  const adapted = adaptResearchSurface(packet);
+  assert.equal(adapted.rejected, true);
+  assert.equal(adapted.reason, "prohibited_field");
+  assert.equal(adapted.model.availability, "unavailable");
+
+  const crossWorkspace = buildSurfaceFixture();
+  crossWorkspace.sections[1].rows[0].summary = "Copied from a different client's workspace for comparison.";
+  assert.equal(adaptResearchSurface(crossWorkspace).rejected, true);
+});
+
+test("benign summaries mentioning 'client' without a cross-tenant qualifier are not rejected", () => {
+  const packet = buildSurfaceFixture();
+  packet.sections[0].rows[0].summary = "Client demand held steady quarter over quarter.";
+  const adapted = adaptResearchSurface(packet);
+  assert.equal(adapted.rejected, false);
+  assert.equal(adapted.model.sections[0].rows[0].summary, "Client demand held steady quarter over quarter.");
+});
+
 test("keyboard stays in source order and source has no mutation client", async () => {
   const order = ["demand", "customer", "supplier"];
   assert.equal(moveSelection(order, "demand", "ArrowDown"), "customer");
