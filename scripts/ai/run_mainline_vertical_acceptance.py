@@ -32,6 +32,7 @@ FIXTURE_DIR = ROOT / "tests" / "fixtures" / "research_to_decision"
 SCHEMA = "MarketOS.MainlineVerticalAcceptance.v1"
 PASS = "passed"
 UNAVAILABLE = "unavailable"
+NOT_RUN = "not_run"
 BLOCKED = "blocked"
 MALFORMED = "malformed"
 TIMED_OUT = "timed_out"
@@ -584,11 +585,80 @@ def _service_delivery_authority_status() -> dict[str, Any]:
     return {"status": PASS, "reason": None, "missing_paths": [], "source_prs": []}
 
 
+def _not_run_mainline_report(
+    *,
+    head_sha: str,
+    origin_main_sha: str,
+    merge_base: str,
+) -> dict[str, Any]:
+    """Return a bounded report without executing non-mainline authorities."""
+    reason = "exact_ref_identity_required"
+    not_run = {"status": NOT_RUN, "reason": reason}
+    return {
+        "schema": SCHEMA,
+        "status": BLOCKED,
+        "status_semantics": "passed requires exact refreshed mainline identity; non-mainline worktrees are blocked before upstream authorities run",
+        "head_sha": head_sha,
+        "origin_main_sha": origin_main_sha,
+        "merge_base": merge_base,
+        "merged_authorities": {
+            "research_to_decision": "scripts/research_to_decision.py",
+            "commercial_replay": "scripts/run_commercial_replay_integration.py",
+            "operator_dogfood": "scripts/run_operator_dogfood_vertical.py and scripts/run_operator_dogfood_workflow.py",
+            "economics": "backend/economics/kernel.py",
+            "events": "backend/contracts/events.py and backend/events/replay_certification.py",
+            "fulfillment": "evaluation/commerce/fulfillment_risk_lifecycle.py",
+            "trustos_export": "evaluation/trustos/client_workspace_isolation.py",
+        },
+        "checks": {
+            "replay": False,
+            "dogfood": False,
+            "direct_commerce_scope": False,
+            "cost_identity_probes": False,
+            "safe_export": False,
+            "service_delivery_status_explicit": False,
+            "worktree_unchanged": True,
+            "mainline_identity": False,
+        },
+        "replay": not_run,
+        "dogfood": not_run,
+        "direct_commerce_scope": not_run,
+        "negative_and_identity_probes": not_run,
+        "trustos_export": not_run,
+        "service_delivery_upstream": {
+            "status": NOT_RUN,
+            "reason": reason,
+            "source_prs": [271, 275],
+        },
+        "safety": {
+            "network_calls": False,
+            "provider_calls": False,
+            "credentials_used": False,
+            "payments": False,
+            "orders": False,
+            "ads": False,
+            "publishing": False,
+            "database_writes": False,
+            "messages": False,
+            "external_mutations": False,
+            "evidence_mode": "not_run_non_mainline",
+            "ci": "ci_unavailable",
+        },
+        "rollback": "Delete this acceptance harness files; merged replay, event, economics, and TrustOS authorities are untouched.",
+    }
+
+
 def run_acceptance() -> dict[str, Any]:
     head_sha = _git_value("rev-parse", "HEAD")
     origin_main_sha = _git_value("rev-parse", "origin/main")
     merge_base = _git_value("merge-base", "HEAD", "origin/main")
     mainline_identity = _is_mainline_identity(head_sha, origin_main_sha, merge_base)
+    if not mainline_identity:
+        return _not_run_mainline_report(
+            head_sha=head_sha,
+            origin_main_sha=origin_main_sha,
+            merge_base=merge_base,
+        )
     before_status = _status_hash()
     replay = _run_replay()
     dogfood = _run_dogfood(replay)

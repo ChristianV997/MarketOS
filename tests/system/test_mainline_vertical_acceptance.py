@@ -34,9 +34,14 @@ EXPECTED_REPLAY_HASH_DIGESTS = {
 
 @pytest.fixture(scope="module")
 def report() -> dict:
-    result = acceptance.run_acceptance()
-    if not result["checks"]["mainline_identity"]:
+    refs = (
+        acceptance._git_value("rev-parse", "HEAD"),
+        acceptance._git_value("rev-parse", "origin/main"),
+        acceptance._git_value("merge-base", "HEAD", "origin/main"),
+    )
+    if not acceptance._is_mainline_identity(*refs):
         pytest.skip("mainline acceptance is not applicable outside exact refreshed origin/main")
+    result = acceptance.run_acceptance()
     assert result["status"] == "passed", result
     return result
 
@@ -56,17 +61,29 @@ def test_non_mainline_execution_fails_closed(monkeypatch):
     }
     monkeypatch.setattr(acceptance, "_git_value", lambda *args: refs[args])
     monkeypatch.setattr(acceptance, "_status_hash", lambda: "stable-status")
-    monkeypatch.setattr(acceptance, "_run_replay", lambda: {"status": acceptance.PASS})
-    monkeypatch.setattr(acceptance, "_run_dogfood", lambda replay: {"status": acceptance.PASS})
-    monkeypatch.setattr(acceptance, "_run_direct_commerce_scope", lambda: {"status": acceptance.PASS})
-    monkeypatch.setattr(acceptance, "_run_cost_and_identity_probes", lambda: {"status": acceptance.PASS})
-    monkeypatch.setattr(acceptance, "_run_safe_export_probe", lambda: {"status": acceptance.PASS})
-    monkeypatch.setattr(acceptance, "_service_delivery_authority_status", lambda: {"status": acceptance.UNAVAILABLE})
+    def unexpected_call(*args, **kwargs):
+        raise AssertionError("non-mainline acceptance must not execute upstream authorities")
+
+    monkeypatch.setattr(acceptance, "_run_replay", unexpected_call)
+    monkeypatch.setattr(acceptance, "_run_dogfood", unexpected_call)
+    monkeypatch.setattr(acceptance, "_run_direct_commerce_scope", unexpected_call)
+    monkeypatch.setattr(acceptance, "_run_cost_and_identity_probes", unexpected_call)
+    monkeypatch.setattr(acceptance, "_run_safe_export_probe", unexpected_call)
+    monkeypatch.setattr(acceptance, "_service_delivery_authority_status", unexpected_call)
 
     result = acceptance.run_acceptance()
 
     assert result["checks"]["mainline_identity"] is False
     assert result["status"] == "blocked"
+    assert result["replay"] == {"status": "not_run", "reason": "exact_ref_identity_required"}
+    for key in (
+        "dogfood",
+        "direct_commerce_scope",
+        "negative_and_identity_probes",
+        "trustos_export",
+        "service_delivery_upstream",
+    ):
+        assert result[key]["status"] == "not_run"
 
 
 def test_acceptance_report_is_mainline_only_and_versioned(report: dict):
