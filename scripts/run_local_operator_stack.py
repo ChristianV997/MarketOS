@@ -110,8 +110,10 @@ SECRET_ENV_KEYS = (
 _SECRET_PATTERNS = (
     # Key-value assignments like key: value or key=value
     re.compile(
-        r'(?i)\b((?:api[_-]?key|access[_-]?token|authorization|password|secret)\s*[:=]\s*)(["\']?)([^"\'\s,;&]+)\2'
+        r'(?i)\b((?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|access[_-]?token|authorization|password|token|secret|private[_-]?key|credentials?|database[_-]?url|service[_-]?role[_-]?key)(?:[_-][a-z0-9]+)*\s*[:=]\s*)(["\']?)([^"\'\s,;&]+)\2'
     ),
+    # URL userinfo passwords
+    re.compile(r'(?i)([a-z][a-z0-9+.-]*://[^/\s:@]+:)([^@\s/]+)(@)'),
     # Bearer tokens
     re.compile(r'(?i)\b(bearer\s+)([A-Za-z0-9_\-\.+=/]+)'),
     # Standalone sk-... and ghp_...
@@ -209,8 +211,9 @@ def redact(text: str) -> str:
     if not text:
         return ""
     result = _SECRET_PATTERNS[0].sub(r'\1\2[redacted]\2', text)
-    result = _SECRET_PATTERNS[1].sub(r'\1[redacted]', result)
-    result = _SECRET_PATTERNS[2].sub(r'[redacted]', result)
+    result = _SECRET_PATTERNS[1].sub(r'\1[redacted]\3', result)
+    result = _SECRET_PATTERNS[2].sub(r'\1[redacted]', result)
+    result = _SECRET_PATTERNS[3].sub(r'[redacted]', result)
     return result
 
 
@@ -649,6 +652,8 @@ def _overall(rows: list[dict[str, Any]], *, backend_started: bool, frontend_star
         workbench = next((row for row in rows if row["name"] == "workbench_api"), None)
         if any(row["classification"] == "timeout" for row in rows if row["plane"] == "api"):
             return "timeout"
+        if any(row["classification"] == "failed" for row in rows if row["plane"] == "api"):
+            return "failed"
         if frontend_started:
             frontend_passed = any(row["classification"] == "passed" for row in rows if row["plane"] == "frontend")
             frontend_failed = any(row["classification"] == "failed" for row in rows if row["plane"] == "frontend")
