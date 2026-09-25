@@ -1,5 +1,5 @@
 import pytest
-from services.consulting_delivery.package import build_consulting_delivery
+from services.consulting_delivery.package import ConsultingDeliveryPackage, build_consulting_delivery
 from backend.deliverables.package import DeliverableSection
 
 def test_build_consulting_delivery_safe_fields():
@@ -161,3 +161,17 @@ def test_status_remains_review_required():
         metadata={"status": "draft"} # Should be forced to review_required
     )
     assert pkg.status == "review_required"
+
+
+def test_direct_package_construction_cannot_claim_approval_or_delivery():
+    for status in ("approved", "delivered"):
+        pkg = ConsultingDeliveryPackage(
+            package_id="pkg_unsafe-status",
+            workspace_id="ws_123",
+            title="Review Test",
+            objective="Must be reviewed",
+            executive_summary="",
+            status=status,
+        )
+        assert pkg.status == "review_required"
+        assert pkg.metadata["review_required"] is True

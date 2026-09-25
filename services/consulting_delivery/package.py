@@ -51,8 +51,10 @@ class ConsultingDeliveryPackage:
     created_at: float = field(default_factory=time.time)
 
     def __post_init__(self):
-        # Enforce explicitly review-required
-        if self.status not in {"review_required", "approved", "delivered"}:
+        # Every package remains review-required until a separate human-controlled
+        # process handles approval or delivery; this layer must not expose those
+        # states as if it had authority to grant them.
+        if self.status != "review_required":
             self.status = "review_required"
 
         # Scrub metadata to only allow safe keys
