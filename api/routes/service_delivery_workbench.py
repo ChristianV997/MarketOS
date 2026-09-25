@@ -23,6 +23,11 @@ MAX_PROJECTION_BYTES = 1_048_576
 MAX_ENGAGEMENTS = 500
 
 
+def _reject_non_finite_json(value: str) -> None:
+    """Keep projection payloads compatible with strict JSON serializers."""
+    raise ValueError(f"unsupported JSON constant: {value}")
+
+
 def _unavailable(reason: str) -> dict[str, Any]:
     return {
         "schema_version": "service-engagement-projection-v1",
@@ -43,7 +48,10 @@ def _safe_projection_path() -> Path | None:
     value = os.getenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", "")
     if not value:
         return None
-    path = Path(value).resolve()
+    try:
+        path = Path(value).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
     return path if ARTIFACTS in path.parents and path.is_file() else None
 
 
@@ -101,7 +109,10 @@ def _load_projection(path: Path | None, *, authenticated_workspace_id: str | Non
     try:
         if path.stat().st_size > MAX_PROJECTION_BYTES:
             return _unavailable("service_delivery_projection_oversized")
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=_reject_non_finite_json,
+        )
     except (OSError, ValueError, RecursionError):
         return _unavailable("service_delivery_projection_unavailable")
     if not isinstance(value, Mapping):

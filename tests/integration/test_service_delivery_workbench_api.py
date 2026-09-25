@@ -293,6 +293,17 @@ def test_workbench_rejects_directory_as_projection_path(monkeypatch, tmp_path):
     # Small on disk but deep enough to blow json.loads's recursion limit; must
     # still fail closed rather than propagate an uncaught RecursionError.
     ("[" * 200_000 + "]" * 200_000, "service_delivery_projection_unavailable"),
+], ids=[
+    "invalid-json",
+    "empty",
+    "root-array",
+    "root-string",
+    "unsupported-version",
+    "read-only-false",
+    "network-enabled",
+    "mutation-enabled",
+    "rows-not-array",
+    "deep-nesting",
 ])
 def test_workbench_handles_all_malformed_json_variants(monkeypatch, tmp_path, bad_content, expected_diagnostic):
     artifacts = tmp_path / "artifacts"
@@ -304,6 +315,43 @@ def test_workbench_handles_all_malformed_json_variants(monkeypatch, tmp_path, ba
     report = module.workbench(_authenticated_request())
     assert report["live_endpoint_status"] == "unavailable"
     assert expected_diagnostic in report["diagnostics"]
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_workbench_rejects_non_finite_json_constants(monkeypatch, tmp_path, constant):
+    content = (
+        '{"schema_version":"service-delivery-plane-v1",'
+        '"workspace_id":"workspace-test","read_only":true,'
+        '"network_calls":false,"mutated":false,"engagements":[],'
+        f'"unsafe_value":{constant}}}'
+    )
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    path = artifacts / "non_finite.json"
+    path.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
+    monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
+
+    report = module.workbench(_authenticated_request())
+
+    assert report["live_endpoint_status"] == "unavailable"
+    assert report["diagnostics"] == ["service_delivery_projection_unavailable"]
+
+
+def test_workbench_rejects_projection_path_resolution_errors(monkeypatch):
+    class RaisingPath:
+        def __init__(self, _: str):
+            pass
+
+        def resolve(self):
+            raise RuntimeError("synthetic symlink loop")
+
+    monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", "synthetic")
+    monkeypatch.setattr(module, "Path", RaisingPath)
+
+    assert module.workbench(_authenticated_request())["diagnostics"] == [
+        "service_delivery_projection_not_configured"
+    ]
 
 
 def test_workbench_rejects_deeply_nested_leakage_inside_engagements(monkeypatch, tmp_path):
