@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -19,6 +20,7 @@ from evaluation.companyos.service_delivery import (
 )
 from evaluation.companyos.service_delivery_artifact import build_service_delivery_artifact
 from evaluation.companyos.service_delivery_projection import (
+    MAX_PROJECTION_BYTES,
     PROJECTION_REPORT_VERSION,
     build_service_engagement_projection,
     build_service_engagement_row,
@@ -193,15 +195,8 @@ def test_projection_is_byte_identical_across_independent_builds():
 
 def test_replaying_the_same_row_twice_does_not_duplicate_engagements():
     _, _, _, _, row = _full_row("product-validation-sprint", registry_path="/tmp/never-written-service-delivery-projection-test-12.json")
-    projection = build_service_engagement_projection([row, row])
-    ids = [item["engagement_id"] for item in projection["engagements"]]
-    # The projection builder itself does not deduplicate (that is the
-    # frontend adapter's job, which already rejects duplicate_engagement_id)
-    # -- this proves the *row* stays byte-identical across repeated
-    # inclusion, which is what makes that downstream duplicate detection
-    # possible in the first place.
-    assert ids[0] == ids[1]
-    assert projection["engagements"][0] == projection["engagements"][1]
+    with pytest.raises(ValueError, match="duplicate engagement"):
+        build_service_engagement_projection([row, row])
 
 
 def test_projection_rejects_rows_from_multiple_workspaces():
@@ -216,19 +211,74 @@ def test_projection_rejects_rows_from_multiple_workspaces():
 # Malformed input
 # ---------------------------------------------------------------------------
 
-def test_malformed_row_missing_engagement_id_still_produces_a_checkable_projection():
-    projection = build_service_engagement_projection([{"workspace_id": "workspace-malformed", "not_an_engagement": True}])
-    # This producer does not validate row shape beyond the export boundary
-    # (that is the API route's job per PR #271); it only guarantees the
-    # envelope itself is well-formed and leakage-free.
-    assert projection["engagements"] == [{"workspace_id": "workspace-malformed", "not_an_engagement": True}]
-    assert projection["workspace_id"] == "workspace-malformed"
-    assert projection["read_only"] is True
+def test_malformed_row_missing_engagement_id_is_rejected_at_the_producer_boundary():
+    with pytest.raises(ValueError, match="complete identity"):
+        build_service_engagement_projection([{"workspace_id": "workspace-malformed", "not_an_engagement": True}])
 
 
 def test_projection_rejects_rows_without_workspace_identity():
     with pytest.raises(ValueError, match="require a workspace identity"):
         build_service_engagement_projection([{"engagement_id": "eng-1"}])
+
+
+def test_projection_rejects_oversized_serialized_output():
+    row = {
+        "workspace_id": "workspace-large",
+        "engagement_id": "eng-large",
+        "client_id": "client-large",
+        "package_id": "product-validation-sprint",
+        "read_only": True,
+        "network_calls": False,
+        "mutated": False,
+        "scope": "x" * MAX_PROJECTION_BYTES,
+    }
+    with pytest.raises(ValueError, match="serialized size"):
+        build_service_engagement_projection([row])
+
+
+def test_projection_rejects_nested_identity_mismatch():
+    _, _, _, _, row = _full_row("product-validation-sprint", registry_path="/tmp/never-written-service-delivery-projection-test-identity.json")
+    mismatched = {**row, "intake": {**row["intake"], "workspace_id": "workspace-other"}}
+    with pytest.raises(ValueError, match="mismatched nested identity"):
+        build_service_engagement_projection([mismatched])
+
+
+def test_projection_rejects_unsafe_row_flags():
+    _, _, _, _, row = _full_row("product-validation-sprint", registry_path="/tmp/never-written-service-delivery-projection-test-safety.json")
+    with pytest.raises(ValueError, match="read-only safety"):
+        build_service_engagement_projection([{**row, "network_calls": True}])
+
+
+def test_projection_rejects_mixed_display_economics_currencies():
+    _, _, _, _, row = _full_row("product-validation-sprint", registry_path="/tmp/never-written-service-delivery-projection-test-currency.json")
+    economics = {**row["economics"], "contribution": {**row["economics"]["contribution"], "currency": "CAD"}}
+    with pytest.raises(ValueError, match="currency mismatch"):
+        build_service_engagement_projection([{**row, "economics": economics}])
+
+
+def test_row_rejects_mismatched_artifact_identity():
+    engagement, pkg, dq, economics, row = _full_row("product-validation-sprint", registry_path="/tmp/never-written-service-delivery-projection-test-artifact-identity.json")
+    del row
+    refs = engagement.evidence_set
+    registry = DeliverableRegistry(path="/tmp/never-written-service-delivery-projection-test-artifact-identity-registry.json")
+    deliverable = build_client_service_deliverable(engagement, pkg, economics, dq, recommendation="ok", registry=registry)
+    artifact = build_service_delivery_artifact(engagement, pkg, economics, dq, deliverable, evidence_refs=refs)
+    forged = replace(artifact, workspace_id="workspace-other")
+    with pytest.raises(ValueError, match="artifact and engagement identity"):
+        build_service_engagement_row(engagement, pkg, dq, economics, forged)
+
+
+def test_row_rejects_malformed_artifact_identity_or_export_status():
+    engagement, pkg, dq, economics, _ = _full_row("product-validation-sprint", registry_path="/tmp/never-written-service-delivery-projection-test-malformed-artifact.json")
+    refs = engagement.evidence_set
+    registry = DeliverableRegistry(path="/tmp/never-written-service-delivery-projection-test-malformed-artifact-registry.json")
+    deliverable = build_client_service_deliverable(engagement, pkg, economics, dq, recommendation="ok", registry=registry)
+    artifact = build_service_delivery_artifact(engagement, pkg, economics, dq, deliverable, evidence_refs=refs)
+
+    with pytest.raises(ValueError, match="artifact identity"):
+        build_service_engagement_row(engagement, pkg, dq, economics, replace(artifact, artifact_id="artifact-forged"))
+    with pytest.raises(ValueError, match="safe for export"):
+        build_service_engagement_row(engagement, pkg, dq, economics, replace(artifact, safe_export_status="unsafe"))
 
 
 def test_empty_projection_is_still_a_valid_safe_envelope():

@@ -116,6 +116,37 @@ only supplies keys the adapter already reads (`evidence_set[].evidence_class`,
 anything it omits (e.g. `deliverables`, which the adapter derives from the
 existing `deliverable_ids` list when a richer object isn't supplied).
 
+### Producer-side fail-closed invariants
+
+The producer validates the projection before any consumer receives it; it
+does not rely on a future route or frontend to repair malformed input:
+
+- Each row must contain non-empty `workspace_id`, `engagement_id`, `client_id`,
+  and `package_id` values. Nested intake identity, when present, must match
+  the row identity, and every row must belong to the same workspace.
+- Engagement IDs must be unique within one envelope. The engagement identity
+  is verified against the canonical `ClientEngagement` identity builder, and
+  an optional `ServiceDeliveryArtifact` must match the engagement and package
+  identities, use the canonical schema, pass `verify_artifact_id()`, and carry
+  a `client_safe` or `redacted` export status.
+- Projection and row safety flags are exact: `read_only: true`,
+  `network_calls: false`, and `mutated: false`. These flags describe an
+  offline planning projection and do not grant execution authority.
+- Display-only fee and contribution values may contain at most one currency;
+  mixed currencies are rejected rather than converted or silently compared.
+  Missing economics remain unavailable, while an explicitly supplied zero is
+  preserved as a numeric zero by the canonical economics authority.
+- Envelopes are bounded at `MAX_ENGAGEMENTS = 500` rows and
+  `MAX_PROJECTION_BYTES = 1 MiB` after deterministic JSON serialization with
+  `allow_nan=False`. Non-finite or non-serializable values fail closed.
+- TrustOS workspace-leakage checks remain the export boundary. Leakage errors
+  are deliberately non-reflective and do not expose field paths or raw input.
+
+The CLI writer applies a second canonical path-jail check: its resolved output
+must remain below the repository `artifacts/` directory. It writes only a
+deterministic, read-only JSON projection and performs no provider, network,
+payment, order, messaging, publishing, or database mutation.
+
 Two things this producer gets right that are easy to get wrong:
 
 - **Fee display uses `ServiceEconomics.service_fee`, not `ClientEngagement.fee`.**

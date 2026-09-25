@@ -36,6 +36,7 @@ provider, and never mutates a client, payment, or lifecycle record.
 from __future__ import annotations
 
 from decimal import Decimal
+import json
 from typing import Any, Mapping
 
 from backend.economics import Money, ServiceEconomics
@@ -44,10 +45,11 @@ from .service_delivery import (
     ClientDataQualityAssessment,
     ClientEngagement,
     ClientFacingServicePackage,
+    verify_engagement_id,
 )
 from backend.economics import EvidenceRef
 
-from .service_delivery_artifact import ServiceDeliveryArtifact, classify_evidence_ref
+from .service_delivery_artifact import ARTIFACT_SCHEMA_VERSION, ServiceDeliveryArtifact, classify_evidence_ref, verify_artifact_id
 
 
 def _frontend_evidence_class_for_kernel_state(evidence_state: str) -> str:
@@ -60,6 +62,8 @@ def _frontend_evidence_class_for_kernel_state(evidence_state: str) -> str:
     return _frontend_evidence_class(classify_evidence_ref(EvidenceRef("economics", evidence_state=evidence_state)))
 
 PROJECTION_REPORT_VERSION = "service-delivery-plane-v1"
+MAX_PROJECTION_BYTES = 1_048_576
+MAX_ENGAGEMENTS = 500
 
 # Mirrors frontend/src/features/service-delivery-workbench/contracts/serviceEngagementProjection.ts
 # EVIDENCE_CLASSES -- the frontend's own vocabulary, not this backend's
@@ -177,6 +181,29 @@ def build_service_engagement_row(
     row = engagement.to_dict()
     evidence_titles = evidence_titles or {}
 
+    if not verify_engagement_id(engagement):
+        raise ValueError("service delivery engagement identity failed verification")
+    if engagement.package_id != package.package_id:
+        raise ValueError("service delivery engagement and package identity mismatch")
+    if engagement.read_only is not True or engagement.network_calls is not False or engagement.mutated is not False:
+        raise ValueError("service delivery engagement violates read-only safety invariants")
+    if artifact is not None:
+        if artifact.workspace_id != engagement.workspace_id or artifact.engagement_id != engagement.engagement_id:
+            raise ValueError("service delivery artifact and engagement identity mismatch")
+        if artifact.package_id != package.package_id:
+            raise ValueError("service delivery artifact and package identity mismatch")
+        if artifact.schema != ARTIFACT_SCHEMA_VERSION or not verify_artifact_id(
+            artifact.engagement_id,
+            artifact.package_id,
+            artifact.package_version,
+            artifact.artifact_id,
+        ):
+            raise ValueError("service delivery artifact identity failed verification")
+        if artifact.safe_export_status not in {"client_safe", "redacted"}:
+            raise ValueError("service delivery artifact is not safe for export")
+        if artifact.read_only is not True or artifact.network_calls is not False or artifact.mutated is not False:
+            raise ValueError("service delivery artifact violates read-only safety invariants")
+
     row["service_id"] = package.package_id
     # engagement.data_quality_state only updates when a caller threads it
     # through transition_engagement(..., data_quality_state=...); a caller
@@ -266,6 +293,52 @@ def build_service_engagement_row(
     return row
 
 
+def _validate_projection_rows(rows: list[Mapping[str, Any]]) -> None:
+    if len(rows) > MAX_ENGAGEMENTS:
+        raise ValueError("service delivery projection exceeds the engagement limit")
+
+    workspace_ids: set[str] = set()
+    seen_engagement_ids: set[str] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise ValueError("service delivery projection rows must be objects")
+
+        workspace_id = row.get("workspace_id")
+        engagement_id = row.get("engagement_id")
+        client_id = row.get("client_id")
+        package_id = row.get("package_id")
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise ValueError("service delivery projection rows require a workspace identity")
+        workspace_ids.add(workspace_id)
+        if len(workspace_ids) > 1:
+            raise ValueError("service delivery projection cannot combine workspaces")
+        if not all(isinstance(value, str) and value.strip() for value in (engagement_id, client_id, package_id)):
+            raise ValueError("service delivery projection row requires a complete identity")
+
+        engagement_key = engagement_id.strip()
+        if engagement_key in seen_engagement_ids:
+            raise ValueError("service delivery projection contains duplicate engagement identities")
+        seen_engagement_ids.add(engagement_key)
+
+        intake = row.get("intake")
+        if isinstance(intake, Mapping):
+            if intake.get("workspace_id") not in (None, workspace_id) or intake.get("client_id") not in (None, client_id):
+                raise ValueError("service delivery projection contains mismatched nested identity")
+
+        if row.get("read_only") is not True or row.get("network_calls") is not False or row.get("mutated") is not False:
+            raise ValueError("service delivery projection row violates read-only safety invariants")
+
+        economics = row.get("economics")
+        if isinstance(economics, Mapping):
+            currencies = {
+                value.get("currency")
+                for value in (economics.get("fee"), economics.get("contribution"))
+                if isinstance(value, Mapping) and value.get("currency")
+            }
+            if len(currencies) > 1:
+                raise ValueError("service delivery projection contains a currency mismatch")
+
+
 def build_service_engagement_projection(
     rows: list[Mapping[str, Any]],
     *,
@@ -284,10 +357,11 @@ def build_service_engagement_projection(
     """
     from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
 
+    rows = list(rows)
+    _validate_projection_rows(rows)
+
     workspace_values: list[str] = []
     for row in rows:
-        if not isinstance(row, Mapping):
-            raise ValueError("service delivery projection rows require a workspace identity")
         workspace_id = row.get("workspace_id")
         if not isinstance(workspace_id, str) or not workspace_id.strip():
             raise ValueError("service delivery projection rows require a workspace identity")
@@ -311,12 +385,20 @@ def build_service_engagement_projection(
     }
     leakage_findings = check_workspace_leakage(payload, client_safe=True)
     if leakage_findings:
-        raise ValueError(f"projection failed workspace isolation: {[item.field_path for item in leakage_findings]}")
+        raise ValueError("projection failed workspace isolation")
+    try:
+        serialized = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("service delivery projection must be finite JSON") from exc
+    if len(serialized.encode("utf-8")) > MAX_PROJECTION_BYTES:
+        raise ValueError("service delivery projection exceeds the serialized size limit")
     return payload
 
 
 __all__ = [
     "PROJECTION_REPORT_VERSION",
+    "MAX_PROJECTION_BYTES",
+    "MAX_ENGAGEMENTS",
     "build_service_engagement_row",
     "build_service_engagement_projection",
 ]
