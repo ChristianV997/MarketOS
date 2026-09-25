@@ -96,6 +96,14 @@ rejected rather than normalized ambiguously. Inputs are capped at 64 KiB, 100
 jobs, 100 checks, 200 step names per job, and 64 nested JSON containers. Input
 files must be regular files inside the selected worktree.
 
+Rich-schema job records must carry the workflow binding needed to admit
+execution: a positive `run_id`, `workflow_name`, candidate `head_sha`, runner
+metadata, and step evidence. The compatibility `MarketOS.CIEvidence.v1`
+adapter remains intentionally incomplete and is never upgraded by omission.
+Contradictory `logs_available`/`log_status` values, pending records with a
+completed/failure required-check state, and completed checks without a
+conclusion are malformed rather than normalized optimistically.
+
 `log_status` is metadata, not a log payload:
 
 - `available` with a successful executed job can support `pass`;
@@ -123,6 +131,7 @@ does not contain candidate/workflow identity fields, so it remains visible as
 | workflow was never created | `workflow_never_created` | `ci_unavailable` |
 | candidate/target/workflow head or base mismatch | `stale_worktree_metadata` | `ci_unavailable` |
 | absent required job | `required_job_missing` | `ci_unavailable` |
+| contradictory execution, log, or check metadata | `malformed` | `malformed` |
 | malformed or contradictory metadata | `malformed` | `malformed` |
 | deploy-preview or Netlify check | `not_ci` | excluded from CI result |
 

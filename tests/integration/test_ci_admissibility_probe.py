@@ -406,6 +406,37 @@ def test_contradictory_pending_and_log_metadata_are_rejected():
     assert result["error"] == "contradictory_log_metadata"
 
 
+def test_missing_rich_job_workflow_binding_cannot_admit_success():
+    data = payload()
+    data["jobs"][0].pop("run_id")
+    data["jobs"][0].pop("workflow_name")
+    result = report(data)
+    assert result["classification"] == "malformed"
+    assert result["error"] == "missing_job_workflow_identity"
+
+
+def test_logs_available_flag_must_match_log_status():
+    data = payload()
+    data["jobs"][0].update({"logs_available": False, "log_status": "available", "log_http_status": 200})
+    result = report(data)
+    assert result["classification"] == "malformed"
+    assert result["error"] == "contradictory_log_metadata"
+
+
+def test_pending_job_and_check_states_cannot_claim_completed_evidence():
+    data = payload()
+    data["jobs"][0].update({"status": "queued", "conclusion": "pending", "required_check_status": "failure", "runner_id": None, "steps_executed": 0, "log_status": "not_queried"})
+    result = report(data)
+    assert result["classification"] == "malformed"
+    assert result["error"] == "contradictory_pending_job_metadata"
+
+    data = payload()
+    data["checks"] = [{"name": "ci-check", "kind": "ci", "status": "queued", "conclusion": "failure"}]
+    result = report(data)
+    assert result["classification"] == "malformed"
+    assert result["error"] == "contradictory_pending_check_metadata"
+
+
 def test_credential_bearing_urls_are_redacted():
     data = payload()
     data["checks"] = [

@@ -309,6 +309,8 @@ def _normalize_job(value: Any, *, expected_head_sha: str | None, canonical: bool
     if runner_id is not None and (isinstance(runner_id, bool) or not isinstance(runner_id, int) or runner_id < 0):
         raise EvidenceInputError("invalid_runner_id")
     runner_name = _optional_text(value.get("runner_name"), field="runner_name", limit=120)
+    if not canonical and status != "not_created" and (run_id is None or workflow_name is None):
+        raise EvidenceInputError("missing_job_workflow_identity")
     steps = _normalize_steps(value.get("steps"), value.get("steps_executed"))
     if steps > 0 and runner_id in {None, 0}:
         raise EvidenceInputError("contradictory_runner_steps")
@@ -323,9 +325,13 @@ def _normalize_job(value: Any, *, expected_head_sha: str | None, canonical: bool
     log_metadata, redacted_url = _log_metadata(
         {"status": log_value, "http_status": value.get("log_http_status"), "url": value.get("log_url")}
     )
+    if logs_available is not None and logs_available != (log_metadata["status"] == "available"):
+        raise EvidenceInputError("contradictory_log_metadata")
     required_check_status = value.get("required_check_status", conclusion if conclusion in CHECK_STATUSES else "pending")
     if required_check_status not in CHECK_STATUSES:
         raise EvidenceInputError("invalid_required_check_status")
+    if status in PENDING_STATUSES and required_check_status != "pending":
+        raise EvidenceInputError("contradictory_pending_job_metadata")
     if status == "completed" and required_check_status == "pending":
         raise EvidenceInputError("contradictory_required_check_status")
     updated_at = _timestamp(value.get("updated_at"), field="job_updated_at")
@@ -373,6 +379,10 @@ def _normalize_check(value: Any) -> dict[str, Any]:
         conclusion = _text(conclusion, field="check_conclusion", limit=30).lower()
     if status not in RUN_STATUSES or (conclusion is not None and conclusion not in CONCLUSIONS):
         raise EvidenceInputError("invalid_check_state")
+    if status in PENDING_STATUSES and conclusion not in {None, "pending"}:
+        raise EvidenceInputError("contradictory_pending_check_metadata")
+    if status == "completed" and conclusion in {None, "pending"}:
+        raise EvidenceInputError("contradictory_completed_check_metadata")
     url = None
     redacted = False
     if value.get("url") is not None:
