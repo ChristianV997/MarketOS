@@ -285,6 +285,9 @@ def _normalize_job(value: Any, *, expected_head_sha: str | None, canonical: bool
     _check_keys(value, allowed)
     name = _text(value.get("name"), field="job_name", limit=180)
     kind = _text(value.get("kind", "ci"), field="job_kind", limit=30).lower()
+    normalized_name = name.casefold().replace("_", "-")
+    if kind == "ci" and any(marker in normalized_name for marker in NON_CI_MARKERS):
+        kind = "deploy_preview"
     if kind not in {"ci", "deploy_preview", "non_ci"}:
         raise EvidenceInputError("invalid_job_kind")
     status = _text(value.get("status"), field="job_status", limit=30).lower()

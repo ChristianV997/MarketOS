@@ -211,6 +211,38 @@ def test_deploy_preview_failure_is_not_ci_failure():
     assert result["non_ci_checks"][0]["conclusion"] == "failure"
 
 
+def test_a_netlify_named_job_cannot_be_smuggled_in_as_a_passing_ci_job():
+    # _normalize_check reclassifies a netlify/deploy-preview-named entry to
+    # kind="deploy_preview" even when the caller declares kind="ci". A
+    # jobs[] entry had no equivalent reclassification, so a caller could
+    # declare kind="ci" on a Netlify-named job and have it reported as a
+    # genuine passing CI job (status "passed", classification "pass"),
+    # even though it can never be forced into required_jobs (which already
+    # rejects deploy-preview-marker names).
+    data = payload()
+    data["jobs"].append(
+        {
+            "name": "Netlify - Header rules",
+            "kind": "ci",
+            "required": False,
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": data["candidate_head_sha"],
+            "run_id": 42,
+            "workflow_name": "CI",
+            "runner_id": 999,
+            "steps_executed": 1,
+            "log_status": "available",
+            "required_check_status": "success",
+        }
+    )
+    result = report(data)
+    netlify_job = next(item for item in result["jobs"] if item["name"] == "Netlify - Header rules")
+    assert netlify_job["status"] == "not_ci"
+    assert netlify_job["classification"] == "not_ci"
+    assert result["classification"] == "pass"
+
+
 def test_stale_job_head_is_unavailable_not_candidate_pass():
     data = payload()
     job(data)["head_sha"] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
