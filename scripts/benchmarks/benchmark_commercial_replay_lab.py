@@ -394,6 +394,8 @@ class ScenarioReplayLaboratory:
                 "governor_outcome": gov.get("outcome") if isinstance(gov, dict) else None,
                 "approval_ledger_authorized": ledger.get("external_action_authorized") if isinstance(ledger, dict) else None,
                 "client_export_redaction": export_data.get("redaction_status") if isinstance(export_data, dict) else None,
+                "first_append_count": row.get("first_append_count", 0),
+                "second_append_idempotent_count": row.get("second_append_idempotent_count", 0),
                 "wall_ms": row.get("wall_ms", 0.0),
             })
 

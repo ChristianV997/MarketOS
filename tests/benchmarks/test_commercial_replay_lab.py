@@ -157,6 +157,8 @@ def test_canonical_replay_integration_does_not_self_certify_commerce_only_cli():
     for s_inv in result["scenario_invariants"]:
         assert s_inv["event_count"] == 37
         assert s_inv["event_scope"] == "cli_concat_commerce_plus_fulfillment"
+        assert s_inv["first_append_count"] == 37
+        assert s_inv["second_append_idempotent_count"] == 37
 
 
 def test_adversarial_authority_fail_closed_rejection():
@@ -209,3 +211,26 @@ def test_empty_records_do_not_vacuously_pass_invariants():
     cert = ScenarioReplayLaboratory.verify_scenario_invariants([])
     assert cert["all_passed"] is False
     assert cert["scenarios_certified"] == 0
+
+
+def test_commerce_17_event_lifecycle_repository_idempotent_append():
+    """Verify that 17-event commerce lifecycle exhibits idempotent append in repository."""
+    from backend.events.repository import InMemoryEventRepository
+
+    report = run_dry_run_lifecycle(hydroponics_positive_candidate())
+    events = lifecycle_events(report, workspace_id="ws-idempotency-test")
+    assert len(events) == 17
+    repo = InMemoryEventRepository()
+    first_append = repo.append_many(events)
+    assert len(first_append) == 17
+    assert all(res.appended is True and res.idempotent is False for res in first_append)
+
+    second_append = repo.append_many(events)
+    assert len(second_append) == 17
+    assert all(res.appended is False and res.idempotent is True for res in second_append)
+
+    streamed = list(repo.stream())
+    assert len(streamed) == 17
+    streamed_hashes = [e.replay_hash() for e in streamed]
+    original_hashes = [e.replay_hash() for e in events]
+    assert streamed_hashes == original_hashes
