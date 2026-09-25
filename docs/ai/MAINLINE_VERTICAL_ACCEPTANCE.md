@@ -29,9 +29,11 @@ runner to import an unmerged PR.
 
 The report includes `head_sha`, `origin_main_sha`, and `merge_base`. A
 mainline acceptance result is only comparable when these refs are refreshed.
-The runner now requires all three values to be identical. A PR or detached
-worktree is reported as `blocked` before replay, dogfood, or export authorities
-are invoked and cannot claim mainline acceptance; the system-test contract is
+The runner also requires a clean Git worktree, including no untracked files. If
+that status is dirty or unavailable, it returns `blocked` before any merged
+authority runs; downstream checks remain `not_run`. A PR or detached worktree
+is reported as `blocked` before replay, dogfood, or export authorities are
+invoked and cannot claim mainline acceptance; the system-test contract is
 not applicable there until it runs on exact refreshed `origin/main`.
 
 ## Authority Graph

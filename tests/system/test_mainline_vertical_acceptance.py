@@ -60,7 +60,7 @@ def test_non_mainline_execution_fails_closed(monkeypatch):
         ("merge-base", "HEAD", "origin/main"): "merge-base-sha",
     }
     monkeypatch.setattr(acceptance, "_git_value", lambda *args: refs[args])
-    monkeypatch.setattr(acceptance, "_status_hash", lambda: "stable-status")
+
     def unexpected_call(*args, **kwargs):
         raise AssertionError("non-mainline acceptance must not execute upstream authorities")
 
@@ -76,6 +76,45 @@ def test_non_mainline_execution_fails_closed(monkeypatch):
     assert result["checks"]["mainline_identity"] is False
     assert result["status"] == "blocked"
     assert result["replay"] == {"status": "not_run", "reason": "exact_ref_identity_required"}
+    for key in (
+        "dogfood",
+        "direct_commerce_scope",
+        "negative_and_identity_probes",
+        "trustos_export",
+        "service_delivery_upstream",
+    ):
+        assert result[key]["status"] == "not_run"
+
+
+def test_dirty_exact_mainline_is_blocked_before_upstream_authorities(monkeypatch):
+    refs = {
+        ("rev-parse", "HEAD"): "same-sha",
+        ("rev-parse", "origin/main"): "same-sha",
+        ("merge-base", "HEAD", "origin/main"): "same-sha",
+    }
+    monkeypatch.setattr(acceptance, "_git_value", lambda *args: refs[args])
+
+    def dirty_status(*args, **kwargs):
+        return acceptance.subprocess.CompletedProcess(args=[], returncode=0, stdout="?? dirty.md\n", stderr="")
+
+    monkeypatch.setattr(acceptance.subprocess, "run", dirty_status)
+
+    def unexpected_call(*args, **kwargs):
+        raise AssertionError("dirty mainline must not execute acceptance authorities")
+
+    monkeypatch.setattr(acceptance, "_run_replay", unexpected_call)
+    monkeypatch.setattr(acceptance, "_run_dogfood", unexpected_call)
+    monkeypatch.setattr(acceptance, "_run_direct_commerce_scope", unexpected_call)
+    monkeypatch.setattr(acceptance, "_run_cost_and_identity_probes", unexpected_call)
+    monkeypatch.setattr(acceptance, "_run_safe_export_probe", unexpected_call)
+    monkeypatch.setattr(acceptance, "_service_delivery_authority_status", unexpected_call)
+
+    result = acceptance.run_acceptance()
+
+    assert result["status"] == "blocked"
+    assert result["checks"]["mainline_identity"] is True
+    assert result["checks"]["worktree_clean"] is False
+    assert result["replay"] == {"status": "not_run", "reason": "clean_worktree_required"}
     for key in (
         "dogfood",
         "direct_commerce_scope",

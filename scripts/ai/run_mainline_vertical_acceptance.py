@@ -89,7 +89,8 @@ def _is_mainline_identity(head_sha: str, origin_main_sha: str, merge_base: str) 
     )
 
 
-def _status_hash() -> str:
+def _worktree_status() -> tuple[str, bool]:
+    """Return a status fingerprint and whether Git reports a clean tree."""
     try:
         result = subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=all"],
@@ -100,8 +101,9 @@ def _status_hash() -> str:
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return "unavailable"
-    return _stable_hash({"returncode": result.returncode, "status": result.stdout})
+        return "unavailable", False
+    fingerprint = _stable_hash({"returncode": result.returncode, "status": result.stdout})
+    return fingerprint, result.returncode == 0 and not result.stdout
 
 
 def _run_json(argv: list[str], *, timeout: float = 180.0) -> dict[str, Any]:
@@ -590,14 +592,17 @@ def _not_run_mainline_report(
     head_sha: str,
     origin_main_sha: str,
     merge_base: str,
+    reason: str = "exact_ref_identity_required",
+    mainline_identity: bool = False,
+    worktree_clean: bool | None = None,
 ) -> dict[str, Any]:
-    """Return a bounded report without executing non-mainline authorities."""
-    reason = "exact_ref_identity_required"
+    """Return a bounded report without executing acceptance authorities."""
     not_run = {"status": NOT_RUN, "reason": reason}
     return {
         "schema": SCHEMA,
         "status": BLOCKED,
-        "status_semantics": "passed requires exact refreshed mainline identity; non-mainline worktrees are blocked before upstream authorities run",
+        "status_semantics": "passed requires exact refreshed mainline identity and a clean worktree; non-mainline or dirty worktrees are blocked before upstream authorities run",
+        "reason": reason,
         "head_sha": head_sha,
         "origin_main_sha": origin_main_sha,
         "merge_base": merge_base,
@@ -618,7 +623,8 @@ def _not_run_mainline_report(
             "safe_export": False,
             "service_delivery_status_explicit": False,
             "worktree_unchanged": True,
-            "mainline_identity": False,
+            "worktree_clean": worktree_clean,
+            "mainline_identity": mainline_identity,
         },
         "replay": not_run,
         "dogfood": not_run,
@@ -641,7 +647,7 @@ def _not_run_mainline_report(
             "database_writes": False,
             "messages": False,
             "external_mutations": False,
-            "evidence_mode": "not_run_non_mainline",
+            "evidence_mode": "not_run_non_mainline" if not mainline_identity else "not_run_dirty_worktree",
             "ci": "ci_unavailable",
         },
         "rollback": "Delete this acceptance harness files; merged replay, event, economics, and TrustOS authorities are untouched.",
@@ -659,14 +665,23 @@ def run_acceptance() -> dict[str, Any]:
             origin_main_sha=origin_main_sha,
             merge_base=merge_base,
         )
-    before_status = _status_hash()
+    before_status, worktree_clean = _worktree_status()
+    if not worktree_clean:
+        return _not_run_mainline_report(
+            head_sha=head_sha,
+            origin_main_sha=origin_main_sha,
+            merge_base=merge_base,
+            reason="clean_worktree_required",
+            mainline_identity=True,
+            worktree_clean=False,
+        )
     replay = _run_replay()
     dogfood = _run_dogfood(replay)
     direct_scope = _run_direct_commerce_scope()
     probes = _run_cost_and_identity_probes()
     safe_export = _run_safe_export_probe()
     service_delivery = _service_delivery_authority_status()
-    after_status = _status_hash()
+    after_status, _ = _worktree_status()
     checks = {
         "replay": replay["status"] == PASS,
         "dogfood": dogfood["status"] == PASS,
@@ -675,12 +690,13 @@ def run_acceptance() -> dict[str, Any]:
         "safe_export": safe_export["status"] == PASS,
         "service_delivery_status_explicit": service_delivery["status"] in {PASS, UNAVAILABLE},
         "worktree_unchanged": before_status != "unavailable" and before_status == after_status,
+        "worktree_clean": True,
         "mainline_identity": mainline_identity,
     }
     return {
         "schema": SCHEMA,
         "status": PASS if all(checks.values()) else BLOCKED,
-        "status_semantics": "passed requires exact refreshed mainline identity; non-mainline worktrees are blocked and unavailable upstream authorities are never treated as passed",
+        "status_semantics": "passed requires exact refreshed mainline identity and a clean worktree; non-mainline or dirty worktrees are blocked and unavailable upstream authorities are never treated as passed",
         "head_sha": head_sha,
         "origin_main_sha": origin_main_sha,
         "merge_base": merge_base,
