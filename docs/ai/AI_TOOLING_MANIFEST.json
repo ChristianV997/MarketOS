@@ -21,8 +21,19 @@
     "read_only_probe",
     "source_metadata",
     "unavailable",
+    "timed_out",
+    "collection_failed",
     "not_run"
   ],
+  "state_rules": {
+    "installed_local_presence": "the executable or cache exists; it does not prove configuration, authentication, reachability, or execution",
+    "configured": "only record when a non-secret configuration surface was verified; private account values and credentials are never inspected",
+    "proposed_not_installed": "an official or reviewed reference exists but no local installation was observed",
+    "unavailable": "the named command or repository surface was not present",
+    "reference_only": "documented for architecture/provenance review and not enabled as a MarketOS authority",
+    "defer": "not approved for the current offline default; reconsider only with an explicit scoped review",
+    "reject": "incompatible with the current authority or safety boundary"
+  },
   "host_inventory": {
     "platform": "Windows",
     "commands_detected": {
@@ -71,9 +82,15 @@
         "state": "installed_local_presence",
         "path": "C:\\Program Files\\GitHub CLI\\gh.exe"
       },
+      "omniroute": {
+        "state": "installed_local_presence",
+        "path": "C:\\Users\\HP\\AppData\\Roaming\\npm\\omniroute.ps1",
+        "version": "3.8.49"
+      },
       "ollama": {
         "state": "installed_local_presence",
-        "path": "C:\\Users\\HP\\AppData\\Local\\Programs\\Ollama\\ollama.exe"
+        "path": "C:\\Users\\HP\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+        "version": "0.34.2"
       },
       "aider": {
         "state": "installed_local_presence",
@@ -83,7 +100,11 @@
     "runtime_checks": {
       "coderos_probe": "read_only_probe",
       "session_start": "actual_executed",
-      "check_dev_stack": "not_run",
+      "check_dev_stack": "actual_executed",
+      "omniroute_version": "actual_executed",
+      "ollama_version": "actual_executed",
+      "ollama_model_inventory": "actual_executed",
+      "routing_environment_names": "actual_executed",
       "credential_inspection": "not_run_by_policy",
       "provider_or_model_call": "not_run_by_policy"
     }
@@ -106,6 +127,7 @@
         "permissions": ["read local repository files", "write only when explicitly authorized by the host"],
         "capabilities": {"read_only": false, "write": true, "network": false},
         "model_usage": "skill instructions only; model/provider cost is host-dependent and not inferred",
+        "cost_class": "free_skill_assets_host_cost_unknown",
         "risks": ["large third-party instruction surface", "unreviewed skill changes could alter agent behavior", "local cache has no verified Git commit pin"],
         "cross_platform": "content is portable; command/runtime behavior varies by host",
         "disposition": "reference_only",
@@ -127,6 +149,7 @@
         "permissions": ["read repository context", "write only through explicitly invoked workflows"],
         "capabilities": {"read_only": false, "write": true, "network": false},
         "model_usage": "workflow instructions; native gstack runtime is not installed",
+        "cost_class": "free_skill_assets",
         "risks": ["adaptation can drift from upstream", "workflow prompts can broaden scope if not reviewed"],
         "cross_platform": "portable skill files; native browser/device workflows are host-dependent",
         "disposition": "reference_only",
@@ -148,6 +171,7 @@
         "permissions": ["read-only probe/health/snapshot when explicitly invoked"],
         "capabilities": {"read_only": true, "write": false, "network": false},
         "model_usage": "local control-plane metadata only; no model call performed",
+        "cost_class": "free_local_reference",
         "risks": ["must not be imported into MarketOS", "CoderOS workspace itself is separately dirty and frozen for this task"],
         "cross_platform": "Python CLI contract; host paths and optional tools vary",
         "disposition": "reference_only",
@@ -169,6 +193,7 @@
         "permissions": ["host-managed; no MarketOS installation permission granted"],
         "capabilities": {"read_only": false, "write": true, "network": "host-controlled"},
         "model_usage": "may use configured paid or local models; this manifest does not select a model",
+        "cost_class": "host_account_dependent",
         "risks": ["host updates are outside Git revision control", "system skills are not application authorities"],
         "cross_platform": "Codex host-dependent",
         "disposition": "reference_only",
@@ -192,6 +217,7 @@
         "permissions": ["Codex app-managed UI/tool access", "per-tool authorization"],
         "capabilities": {"read_only": false, "write": true, "network": "tool-dependent"},
         "model_usage": "host/account dependent; paid versus local is not asserted",
+        "cost_class": "host_account_dependent",
         "risks": ["MCP tools can expose files or external systems", "tool permissions must remain per-task and narrow"],
         "cross_platform": "Codex desktop host surface; bundled paths are platform-specific",
         "disposition": "reference_only",
@@ -213,6 +239,7 @@
         "permissions": ["would require explicit workspace and possibly account authorization"],
         "capabilities": {"read_only": false, "write": true, "network": true},
         "model_usage": "paid or subscription service; no account or model was inspected",
+        "cost_class": "paid_or_subscription",
         "risks": ["plugins may configure MCP servers", "credentials and external actions require separate review"],
         "cross_platform": "Claude Code supports Windows through documented host layers; exact plugin support varies",
         "disposition": "defer",
@@ -234,6 +261,7 @@
         "permissions": ["extension installation", "possible MCP/server and shell permissions"],
         "capabilities": {"read_only": false, "write": true, "network": true},
         "model_usage": "Google service or configured model; cost is account-dependent",
+        "cost_class": "host_account_dependent",
         "risks": ["installation copies extension content into the user profile", "extension MCP and shell tools can broaden authority"],
         "cross_platform": "CLI documentation covers Windows/macOS/Linux; extension contents remain platform-dependent",
         "disposition": "defer",
@@ -241,6 +269,28 @@
       }
     ],
     "connectors": [
+      {
+        "id": "github-cli",
+        "name": "GitHub CLI",
+        "installation_state": "installed_local_presence",
+        "local_surface": "C:\\Program Files\\GitHub CLI\\gh.exe",
+        "version": null,
+        "source": {
+          "url": "https://github.com/cli/cli",
+          "revision": null,
+          "revision_status": "local_binary_not_pinned",
+          "license": "MIT",
+          "license_source_url": "https://github.com/cli/cli/blob/trunk/LICENSE"
+        },
+        "permissions": ["explicit GitHub CLI operations only; repository and PR scope is command-dependent"],
+        "capabilities": {"read_only": false, "write": true, "network": true},
+        "model_usage": "none",
+        "cost_class": "free_cli_account_dependent",
+        "risks": ["GitHub credentials and write operations are host/account dependent", "this is the sole GitHub authority; no second GitHub connector is added"],
+        "cross_platform": "Windows/macOS/Linux supported by the official CLI",
+        "disposition": "reference_only",
+        "rollback": "disable or uninstall GitHub CLI through its package manager; revoke account authorization separately if needed"
+      },
       {
         "id": "mcp-registry",
         "name": "Official Model Context Protocol Registry",
@@ -257,6 +307,7 @@
         "permissions": ["none in MarketOS; discovery only"],
         "capabilities": {"read_only": true, "write": false, "network": true},
         "model_usage": "none",
+        "cost_class": "free_public_catalog_network",
         "risks": ["registry discovery does not establish server safety", "each server needs independent provenance, permissions, and license review"],
         "cross_platform": "HTTP service; client support varies",
         "disposition": "reference_only",
@@ -278,6 +329,7 @@
         "permissions": ["OAuth or API key", "Render workspace/resource access"],
         "capabilities": {"read_only": false, "write": true, "network": true},
         "model_usage": "host/model dependent; external service use may incur account cost",
+        "cost_class": "paid_or_account_dependent",
         "risks": ["supports deploys, environment changes, service/database creation, logs, and metrics", "could expose secrets or production resources"],
         "cross_platform": "hosted MCP is broadly reachable; client setup differs by platform",
         "disposition": "reject",
@@ -299,6 +351,7 @@
         "permissions": ["would require project/user skill installation", "API key for model calls"],
         "capabilities": {"read_only": false, "write": true, "network": true},
         "model_usage": "paid or free-tier routed models; usage and provider selection are account-dependent",
+        "cost_class": "paid_or_free_routed",
         "risks": ["would introduce a second model-routing authority", "skills can invoke network/model tools", "API keys and provider data require separate approval"],
         "cross_platform": "skill files are portable; runtime and provider behavior vary",
         "disposition": "reject",
@@ -322,6 +375,7 @@
         "permissions": ["Codex app-mediated tool authorization; server-specific permissions"],
         "capabilities": {"read_only": false, "write": true, "network": "server-dependent"},
         "model_usage": "none by the server itself; host model/account may incur cost",
+        "cost_class": "host_account_dependent",
         "risks": ["MCP tools can read or mutate external surfaces", "bundle presence is not proof a tool was invoked"],
         "cross_platform": "Codex app bundle; local server paths are platform-specific",
         "disposition": "reference_only",
@@ -343,6 +397,7 @@
         "permissions": ["read-only network access to public OpenAI documentation"],
         "capabilities": {"read_only": true, "write": false, "network": true},
         "model_usage": "none by the server; host model/account may incur cost",
+        "cost_class": "host_account_dependent",
         "risks": ["remote content can change", "network access is outside the offline default"],
         "cross_platform": "HTTP MCP service; client support varies",
         "disposition": "defer",
@@ -364,6 +419,7 @@
         "permissions": ["Render OAuth/API key and workspace/resource permissions"],
         "capabilities": {"read_only": false, "write": true, "network": true},
         "model_usage": "host/model dependent",
+        "cost_class": "paid_or_account_dependent",
         "risks": ["deploy, environment, database, and service mutations are supported", "secrets and production telemetry may enter model context"],
         "cross_platform": "hosted service; MCP client support varies",
         "disposition": "reject",
@@ -387,6 +443,7 @@
         "permissions": ["read-only probe/health/snapshot only for this MarketOS policy"],
         "capabilities": {"read_only": true, "write": false, "network": false},
         "model_usage": "local runtime metadata; no provider/model call performed",
+        "cost_class": "free_local_reference",
         "risks": ["separate repository and dirty state", "must not be imported or treated as MarketOS authority"],
         "cross_platform": "Python runtime; local operator paths vary",
         "disposition": "reference_only",
@@ -408,6 +465,7 @@
         "permissions": ["skill/plugin installation surface only; no MarketOS write authority"],
         "capabilities": {"read_only": false, "write": true, "network": "host-controlled"},
         "model_usage": "free/open-source skill assets; hosted ECC services may be paid; not enabled here",
+        "cost_class": "free_skill_assets_host_cost_unknown",
         "risks": ["source pin is not independently available in this cache", "large mutable instruction/plugin surface"],
         "cross_platform": "multi-harness assets; exact install/runtime support varies",
         "disposition": "reference_only",
@@ -429,6 +487,7 @@
         "permissions": ["cached workflow files; native runtime not available"],
         "capabilities": {"read_only": false, "write": true, "network": false},
         "model_usage": "host-dependent; no gstack model/runtime call performed",
+        "cost_class": "host_account_dependent",
         "risks": ["native `gstack` command is unavailable", "adapted workflows must not be mistaken for upstream behavior"],
         "cross_platform": "workflow files portable; native browser/device features vary",
         "disposition": "reference_only",
@@ -450,6 +509,7 @@
         "permissions": ["tool process permissions are host-dependent; no invocation performed"],
         "capabilities": {"read_only": false, "write": true, "network": "host-controlled"},
         "model_usage": "local or hosted provider dependent; no model/provider call performed",
+        "cost_class": "host_account_dependent",
         "risks": ["agent can learn from or act on local context", "no trustworthy local revision was established"],
         "cross_platform": "upstream supports common developer platforms; local binary support not independently verified",
         "disposition": "defer",
@@ -471,6 +531,7 @@
         "permissions": ["host CLI permissions; extension/MCP permissions require separate approval"],
         "capabilities": {"read_only": false, "write": true, "network": "host-controlled"},
         "model_usage": "Google-hosted model service; cost/account state not inspected",
+        "cost_class": "host_account_dependent",
         "risks": ["extensions can install MCP servers and shell commands", "no source revision pin for the local command"],
         "cross_platform": "Windows/macOS/Linux documented; extension behavior varies",
         "disposition": "defer",
@@ -492,6 +553,7 @@
         "permissions": ["GitHub repository connection and cloud VM execution require explicit authorization"],
         "capabilities": {"read_only": false, "write": true, "network": true},
         "model_usage": "Google-hosted service; free and paid plans exist; account state not inspected",
+        "cost_class": "free_or_paid_service_account_dependent",
         "risks": ["can clone repositories, modify files, and open PRs", "cloud execution and GitHub access are outside offline MarketOS evidence"],
         "cross_platform": "CLI package is cross-platform in documentation; service is cloud-hosted",
         "disposition": "defer",
@@ -513,6 +575,7 @@
         "permissions": ["host CLI permissions; xAI authentication would be required for service use"],
         "capabilities": {"read_only": false, "write": true, "network": true},
         "model_usage": "xAI-hosted; free/paid status depends on account and plan; not inspected",
+        "cost_class": "host_account_dependent",
         "risks": ["local binary provenance and license are not pinned", "network/provider calls and API keys are outside this task"],
         "cross_platform": "upstream documentation reports Windows/macOS/Linux support; local build not verified",
         "disposition": "defer",
@@ -534,6 +597,7 @@
         "permissions": ["local repository access and optional account/network access"],
         "capabilities": {"read_only": false, "write": true, "network": true},
         "model_usage": "Anthropic subscription/API; account and cost state not inspected",
+        "cost_class": "paid_or_subscription",
         "risks": ["can execute local changes and configure MCP", "automatic updates can change behavior without a Git pin"],
         "cross_platform": "Windows via documented host layer; macOS/Linux native support",
         "disposition": "defer",
@@ -546,19 +610,68 @@
         "local_surface": null,
         "version": null,
         "source": {
-          "url": "https://deepmind.google/technologies/gemini/",
+          "url": null,
           "revision": null,
-          "revision_status": "not_identified_as_a_local_installable_surface",
-          "license": "not applicable to this local inventory",
+          "revision_status": "unavailable_source_not_identified",
+          "license": "unavailable",
           "license_source_url": null
         },
         "permissions": [],
         "capabilities": {"read_only": false, "write": false, "network": false},
         "model_usage": "not run",
+        "cost_class": "not_applicable",
         "risks": ["name is ambiguous across products; do not infer a trusted implementation from a command label"],
         "cross_platform": "unavailable",
         "disposition": "defer",
         "rollback": "no installation exists in this inventory"
+      }
+    ],
+    "runtimes": [
+      {
+        "id": "omniroute",
+        "name": "OmniRoute local AI router",
+        "installation_state": "installed_local_presence",
+        "configuration_state": "not_configured_verified",
+        "local_surface": "C:\\Users\\HP\\AppData\\Roaming\\npm\\node_modules\\omniroute",
+        "version": "3.8.49",
+        "source": {
+          "url": "https://github.com/diegosouzapw/OmniRoute",
+          "revision": null,
+          "revision_status": "local_npm_package_not_git_pinned",
+          "license": "MIT",
+          "license_source_url": "https://github.com/diegosouzapw/OmniRoute/blob/main/LICENSE"
+        },
+        "permissions": ["local proxy/process permissions", "provider credentials would be required for upstream calls"],
+        "capabilities": {"read_only": false, "write": false, "network": true, "provider_calls": true},
+        "model_usage": "hosted/provider routing can incur paid or free-tier cost; no provider call performed",
+        "cost_class": "hosted_or_provider_dependent",
+        "risks": ["would create a second model-routing authority beside MarketOS routing", "auto-fallback and provider credentials can obscure cost and data flow", "local package contains an environment-file surface that was not read"],
+        "cross_platform": "Node package; runtime and provider behavior vary by host",
+        "disposition": "reject",
+        "rollback": "do not enable; uninstall the exact npm package and revoke any provider credentials through their owners"
+      },
+      {
+        "id": "ollama",
+        "name": "Ollama local inference runtime",
+        "installation_state": "installed_local_presence",
+        "configuration_state": "not_configured_verified",
+        "local_surface": "C:\\Users\\HP\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+        "version": "0.34.2",
+        "source": {
+          "url": "https://github.com/ollama/ollama",
+          "revision": null,
+          "revision_status": "local_binary_not_pinned",
+          "license": "MIT",
+          "license_source_url": "https://github.com/ollama/ollama/blob/main/LICENSE"
+        },
+        "permissions": ["local model cache and loopback service only when explicitly enabled"],
+        "capabilities": {"read_only": false, "write": false, "network": false, "provider_calls": false},
+        "model_usage": "local/free runtime; bounded dev-stack check confirmed model availability without recording model names, and no model call was made",
+        "cost_class": "local_free_or_host_hardware",
+        "risks": ["models and prompts remain host-sensitive", "local inference output still requires review and cannot authorize production actions"],
+        "cross_platform": "Windows/macOS/Linux runtime with host-specific model storage",
+        "disposition": "reference_only",
+        "rollback": "stop/disable the local service and uninstall the exact Ollama package if later required; no model cache was changed"
       }
     ]
   },

@@ -27,10 +27,16 @@ The manifest uses two independent fields:
   documented as `reference_only` unless a stronger reason exists to block
   their use entirely.
 
+Where present, `configuration_state` is intentionally conservative:
+`not_configured_verified` means the command/package was observed but no
+private profile, login, token, or account configuration was inspected. A
+configured state is never inferred from installation alone.
+
 Evidence classes are deliberately explicit: `actual_executed`,
 `installed_local_presence`, `read_only_probe`, `source_metadata`,
-`unavailable`, and `not_run`. A zero command result, missing log, or detected
-binary cannot be upgraded to execution evidence.
+`unavailable`, `timed_out`, `collection_failed`, and `not_run`. A zero command
+result, missing log, or detected binary cannot be upgraded to execution
+evidence.
 
 ## Observed local surfaces
 
@@ -43,12 +49,15 @@ binary cannot be upgraded to execution evidence.
 | Antigravity | Command unavailable | No trusted local implementation identified | `defer` |
 | Jules | Native executable | Google service/CLI docs; account and package revision not inspected | `defer` |
 | Grok | Native executable | Official `xai-org/grok-build` source identified, local revision/license not pinned | `defer` |
+| OmniRoute | Native npm command, version `3.8.49` | Local package metadata identifies MIT and `diegosouzapw/OmniRoute`; no Git pin | `reject` |
+| Ollama | Native executable, version `0.34.2` | Local/free runtime; bounded dev-stack check found a model inventory, but model names and binary revision are not recorded | `reference_only` |
 | CoderOS | Local repository plus read-only probe | MIT at local HEAD; separate repository and no MarketOS import | `reference_only` |
 | ECC | Cache `2.2.1` plus command | MIT in local cache; no Git revision pin in cache | `reference_only` |
 | gstack | Adaptation cache `0.1.0`, native command unavailable | MIT; upstream commit `85fd9db554ae4aaaa6d356d2daf873121ee85bdd` recorded in local notice | `reference_only` |
 | MCP Registry | No local connector | Discovery registry only; each server needs its own review | `reference_only` |
 | Render MCP | Not installed | Official server can deploy and change infrastructure | `reject` |
 | OpenRouter skills | Not installed | Would add hosted routing and credentials | `reject` |
+| GitHub CLI | Native executable | Official MIT CLI; remains the sole GitHub command authority | `reference_only` |
 
 The complete machine-readable records, paths, permissions, compatibility, and
 rollback instructions are in the JSON manifest. The local `.codex` and
@@ -78,6 +87,23 @@ the exact commit or immutable release, verify the license at that revision,
 review transitive dependencies, and run the bounded security review. Hosted
 MCP services and agent platforms need an additional permission and data-flow
 review even when their source repository is open.
+
+OmniRoute is explicitly rejected here because its local package describes a
+multi-provider router with automatic fallback. MarketOS must not gain a second
+routing authority beside its existing routing policy. Ollama is different: it
+is a local/free inference runtime and remains reference-only unless an operator
+selects it for a bounded offline task. The bounded dev-stack check confirmed
+that a model is available, but no model name was recorded and no model
+invocation was performed in this audit.
+
+The installed Claude, Hermes, Gemini, Jules, and Grok commands are executable
+presence only. No private configuration, profile, token, login, or account
+state was inspected. In particular, a Hermes binary does not prove that a
+Hermes profile exists, and a Jules GitHub/cloud authorization is not the same
+credential or permission as Render OAuth/API-key authorization.
+
+GitHub remains represented by the official `gh` CLI only. No second GitHub
+connector, MCP server, or custom PR authority is introduced by this manifest.
 
 ## Permission and model-cost policy
 
