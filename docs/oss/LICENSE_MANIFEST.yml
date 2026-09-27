@@ -92,3 +92,8 @@ components:
     reviewed_ref: pending-deferred-review
     distribution: sidecar
     notice: CustomerAutomationProvider adapter (backend/integrations/activepieces.py) built and tested — distinct from the internal-only n8n WorkflowAutomationProvider. MIT license, no legal-review gate needed.
+  - name: pyperf
+    license: MIT
+    reviewed_ref: 2.8.1
+    distribution: copy_pattern
+    notice: Offline BenchmarkSuite JSON 1.0 encoder in scripts/benchmarks/perf_engine.py. Pin c58426688e1a28b2519695a3869b98dc51f3a69d. No upstream source vendored. Preserve MIT notice (Copyright 2016, Red Hat, Inc. and Google Inc.).
