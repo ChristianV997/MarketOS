@@ -155,10 +155,20 @@ def _scan_unsafe(value: Any, path: str = "") -> None:
             raise ValidationExperimentInputError(f"sensitive payload at {path}")
 
 
-def _money(value: Any, name: str, currency: str, *, missing: list[str], explicit_zero_name: str | None = None) -> Money:
+def _money(value: Any, name: str, currency: str, *, missing: list[str], explicit_zero_name: str | None = None) -> Money | None:
+    """Return the field's Money value, or ``None`` when it was never supplied.
+
+    ``None`` here is a distinct, honest "unavailable" — never a fabricated
+    ``Money.zero(...)``. A caller-supplied zero (``{"amount": "0", ...}``)
+    still round-trips as an explicit ``Money`` with amount ``Decimal("0")``;
+    only an actually-missing field returns ``None``. This keeps "missing"
+    and "observed zero" distinguishable all the way into
+    ``calculate_scenarios``, which must never receive a fabricated zero in
+    place of a field this function recorded as missing.
+    """
     if value is None:
         missing.append(name)
-        return Money.zero(currency, source=f"assumed_{name}")
+        return None
     if not isinstance(value, Mapping):
         raise ValidationExperimentInputError(f"{name} must be an object")
     amount = _decimal(value.get("amount"), f"{name}.amount", required=True)
@@ -556,8 +566,29 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
         budget_money = _money(budget_value, "assumed_budget", currency, missing=[])
         budget = {"state": "assumed", **budget_money.to_dict()}
     refs = (EvidenceRef(evidence_id=f"validation-{candidate_id}", source_type="offline_validation", evidence_state="simulated", extraction_method="manual_fixture"),)
-    economics_results = calculate_scenarios(price, product_cost, assumptions=UnitEconomicsAssumptions(cac=cac, evidence_refs=refs))
-    economics = {"scenarios": {name: item.to_dict() for name, item in economics_results.items()}, "base_cost_state": "missing" if "product_cost" in missing_inputs else "explicit_zero" if product_cost.amount == 0 else "explicit", "missing_inputs": tuple(missing_inputs)}
+    # calculate_scenarios (backend.economics.kernel, the sole economics authority)
+    # requires real Money for price and product_cost; it has no "missing" input
+    # concept for either. A missing price or product_cost must never be
+    # papered over with a fabricated Money.zero(...) just to satisfy that
+    # signature -- doing so would let an unavailable field enter the real
+    # calculation indistinguishably from an observed zero. So scenarios are
+    # only ever computed when both are actually present; otherwise the
+    # economics section stays explicitly unavailable, and missing_inputs
+    # (already recorded by `_money`) is what downstream blocking depends on.
+    # cac has a genuine "missing" representation already: UnitEconomicsAssumptions
+    # accepts cac=None, so a missing cac is passed through as None rather than
+    # a fabricated zero.
+    if price is not None and product_cost is not None:
+        economics_results = calculate_scenarios(price, product_cost, assumptions=UnitEconomicsAssumptions(cac=cac, evidence_refs=refs))
+        scenarios = {name: item.to_dict() for name, item in economics_results.items()}
+        base_after = economics_results["base"].contribution_after_cac.amount
+        economics_status = "computed"
+    else:
+        economics_results = None
+        scenarios = {}
+        base_after = None
+        economics_status = "unavailable"
+    economics = {"scenarios": scenarios, "status": economics_status, "base_cost_state": "missing" if "product_cost" in missing_inputs else "explicit_zero" if product_cost.amount == 0 else "explicit", "missing_inputs": tuple(missing_inputs)}
     evidence = _evidence_summary(payload, as_of_dt)
     market, supplier, consumer = _pillar_reports(payload, evidence)
     opportunity = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
@@ -595,7 +626,6 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
         gaps.append("fixture_evidence_not_live")
     if not payload.get("opportunity_reports") and not payload.get("normalized_candidate") and not any(payload.get(key) for key in ("market_evidence", "supplier_evidence")):
         gaps.append("opportunity_evidence")
-    base_after = economics_results["base"].contribution_after_cac.amount
     budget_amount = float(budget_value.get("amount", 0)) if isinstance(budget_value, Mapping) else 0.0
     approval_sim = simulate_action("launch_ad", requested_budget=budget_amount, generated_at="offline-deterministic").to_dict()
     request = ExecutionDecisionRequest(request_id=f"validation-{candidate_id}", action_type="launch_ad_experiment", domain="ads_content", owner_department="validation", workspace_id=workspace_id, requested_amount=budget_amount, hypothesis=hypothesis, success_metric=measurement, kill_threshold=float(thresholds["kill_threshold"]), scale_threshold=float(thresholds["success_threshold"]), sample_size_target=sample_target, approval_state="approved" if payload.get("approval_state") == "approved" else "not_requested", trustos_decision="hard_block", workspace_decision="allow")
@@ -614,7 +644,7 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
         decision = "blocked_missing_economics"
     elif "supplier_evidence" in blockers:
         decision = "blocked_supplier_evidence"
-    elif base_after < 0:
+    elif base_after is not None and base_after < 0:
         decision = "kill_negative_unit_economics"
     elif "reachable_buyer" in blockers:
         decision = "hold_unreachable_buyer"
@@ -629,7 +659,7 @@ def build_validation_experiment_ledger(payload: Mapping[str, Any], *, expected_w
     else:
         decision = "iterate_inconclusive_result"
     workspace = build_client_workspace_isolation_report(workspace_type="client_growth_workspace", payload={"workspace_id": workspace_id, "status": "client_safe", "blockers": tuple(blockers), "evidence_required": tuple(gaps), "approvals_required": ("human_review",), "next_actions": (decision,)}).to_dict()
-    approval_state = "pending_review" if decision == "advance_to_human_review" else "blocked_by_policy" if blockers or base_after < 0 else "draft"
+    approval_state = "pending_review" if decision == "advance_to_human_review" else "blocked_by_policy" if blockers or (base_after is not None and base_after < 0) else "draft"
     limitations = tuple(sorted(set(evidence["limitations"] + (("external_execution_blocked",) if True else ()))))
     safety = {"read_only": True, "network_calls": False, "ads_launched": False, "spend_executed": False, "publishing_performed": False, "outreach_sent": False, "orders_created": False, "payments_created": False, "provider_calls": False, "customer_contact": False, "database_writes": False}
     offering_kind, validation_pipeline = _normalized_opportunity_pipeline(payload, evidence=evidence, economics=economics, result_statuses=result_statuses, decision=decision, gaps=tuple(gaps))

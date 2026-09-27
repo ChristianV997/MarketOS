@@ -67,7 +67,7 @@ or supply scores. Explicit zero money remains distinct from missing money.
 - Strong demand without `reachable_buyer`: `hold_unreachable_buyer`.
 - Negative base contribution after CAC: `kill_negative_unit_economics`.
 - Missing experiment budget: `blocked_missing_budget`.
-- Missing price, product cost, or CAC: `blocked_missing_economics`; missing is never treated as zero.
+- Missing price, product cost, or CAC: `blocked_missing_economics`; missing is never treated as zero. A missing price or product cost is never passed to `calculate_scenarios` as a fabricated `Money.zero(...)` — `economics["status"]` stays `"unavailable"` and `economics["scenarios"]` stays empty rather than reporting computed-looking numbers built on an absent input. A missing CAC alone still lets scenarios compute (`economics["status"] == "computed"`), since the kernel already represents "no CAC assumed" as `None`, not zero; the decision is still blocked pending the missing value.
 - Missing required supplier evidence: `blocked_supplier_evidence`; supplier identity or availability is never inferred.
 - Manual or unavailable result: retained as distinct classifications and never promoted as successful evidence.
 - Invalid simulated result: `reject_invalid_result`;

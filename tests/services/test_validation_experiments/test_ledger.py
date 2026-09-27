@@ -211,6 +211,68 @@ def test_missing_economics_cannot_advance_as_if_zero_cost():
     assert ledger.validation_pipeline["next_action"] == "resolve_unit_economics"
 
 
+def test_missing_product_cost_never_reaches_scenario_math_as_zero():
+    """A missing product_cost must not be fabricated into Money.zero(...)
+    and fed to calculate_scenarios -- the economics section must stay
+    unavailable, not a computed-looking scenario built on a fake input."""
+    ledger = build_validation_experiment_ledger(load("missing_cost.json"))
+    assert ledger.economics["status"] == "unavailable"
+    assert ledger.economics["scenarios"] == {}
+    assert "product_cost" in ledger.economics["missing_inputs"]
+
+
+def test_missing_price_never_reaches_scenario_math_as_zero():
+    payload = load("successful_result.json")
+    payload["price"] = None
+    ledger = build_validation_experiment_ledger(payload)
+    assert ledger.economics["status"] == "unavailable"
+    assert ledger.economics["scenarios"] == {}
+    assert "price" in ledger.economics["missing_inputs"]
+    assert ledger.decision == "blocked_missing_economics"
+
+
+def test_missing_cac_is_none_not_zero_and_scenarios_still_compute():
+    """cac is a genuinely optional kernel assumption (UnitEconomicsAssumptions
+    accepts cac=None); price and product_cost are still present, so
+    scenarios must compute normally -- a missing cac is not a reason to
+    withhold the whole economics section."""
+    with_cac = build_validation_experiment_ledger(load("successful_result.json"))
+    payload = load("successful_result.json")
+    payload["cac"] = None
+    without_cac = build_validation_experiment_ledger(payload)
+    assert without_cac.economics["status"] == "computed"
+    assert without_cac.economics["scenarios"]
+    assert "cac" in without_cac.economics["missing_inputs"]
+    # Dropping a real $2.00 cac must change the computed contribution --
+    # proving the missing value was actually passed through as None to the
+    # kernel, not silently treated as an already-zero cac.
+    assert (
+        without_cac.economics["scenarios"]["base"]["contribution_after_cac"]["amount"]
+        != with_cac.economics["scenarios"]["base"]["contribution_after_cac"]["amount"]
+    )
+
+
+def test_explicit_zero_cost_still_computes_real_scenarios():
+    """The counterpart to the missing-input tests above: an explicit zero
+    must remain valid and must still drive the real calculation, not be
+    withheld the way a missing value now is."""
+    ledger = build_validation_experiment_ledger(load("explicit_zero_cost.json"))
+    assert ledger.economics["status"] == "computed"
+    assert ledger.economics["base_cost_state"] == "explicit_zero"
+    assert "base" in ledger.economics["scenarios"]
+
+
+def test_missing_economics_ledger_remains_deterministic_and_currency_safe():
+    """Existing currency, finite-number, and fingerprint guarantees must
+    survive the missing-input path, not just the fully-populated path."""
+    payload = load("missing_cost.json")
+    first = build_validation_experiment_ledger(payload).to_dict()
+    second = build_validation_experiment_ledger(payload).to_dict()
+    assert first["fingerprint"] == second["fingerprint"]
+    assert first["economics"]["scenarios"] == {}
+    assert json.dumps(first)  # every value, including the missing-cost path, is JSON-finite/serializable
+
+
 def test_manual_and_unavailable_results_remain_distinct():
     payload = load("complete.json")
     payload["result_statuses"] = ["manual", "unavailable"]
