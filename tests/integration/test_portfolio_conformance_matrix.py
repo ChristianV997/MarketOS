@@ -468,3 +468,213 @@ def test_missing_versus_explicit_zero_economics():
     # PR without economics remains None/missing, not laundered into 0.0
     pr_no_econ = by_number(report, 275)
     assert pr_no_econ["economics"] is None
+
+
+def test_failed_step_in_step_list_cannot_be_flattened_into_pass():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_jobs"][0].pop("steps_executed", None)
+    target["ci_jobs"][0]["steps"] = [
+        {"name": "checkout", "status": "completed"},
+        {"name": "test-execution", "status": "failure"},
+    ]
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["classification"] == "ci_unavailable"
+    assert pr["ci"]["status"] == "unavailable"
+    assert pr["ci"]["admissible_evidence"] is False
+    assert pr["ci"]["jobs"][0]["classification"] == "incomplete_steps"
+    assert pr["ci"]["jobs"][0]["step_outcome"] == "incomplete"
+    assert "ci:ci_unavailable" in pr["blockers"]
+
+
+def test_skipped_step_in_step_list_cannot_be_flattened_into_pass():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_jobs"][0].pop("steps_executed", None)
+    target["ci_jobs"][0]["steps"] = [
+        {"name": "checkout", "status": "completed"},
+        {"name": "test-execution", "status": "skipped"},
+    ]
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["classification"] == "ci_unavailable"
+    assert pr["ci"]["admissible_evidence"] is False
+    assert pr["ci"]["jobs"][0]["classification"] == "incomplete_steps"
+    assert pr["ci"]["jobs"][0]["step_outcome"] == "incomplete"
+    assert "ci:ci_unavailable" in pr["blockers"]
+
+
+def test_pending_step_in_step_list_cannot_be_flattened_into_pass():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_jobs"][0].pop("steps_executed", None)
+    target["ci_jobs"][0]["steps"] = [
+        {"name": "checkout", "status": "completed"},
+        {"name": "test-execution", "status": "pending"},
+    ]
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["classification"] == "pending"
+    assert pr["ci"]["admissible_evidence"] is False
+    assert pr["ci"]["jobs"][0]["classification"] == "pending"
+    assert pr["ci"]["jobs"][0]["step_outcome"] == "pending"
+    assert "ci:pending" in pr["blockers"]
+
+
+def test_required_check_status_failure_cannot_be_flattened_into_pass():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_jobs"][0]["required_check_status"] = "failure"
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["classification"] == "executed_failure"
+    assert pr["ci"]["status"] == "failed"
+    assert pr["ci"]["admissible_evidence"] is False
+    assert pr["ci"]["jobs"][0]["classification"] == "executed_failure"
+    assert "ci:executed_failure" in pr["blockers"]
+
+
+def test_required_check_status_pending_cannot_be_flattened_into_pass():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_jobs"][0].update({"status": "in_progress", "conclusion": None, "required_check_status": "pending", "logs_available": False})
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["classification"] == "pending"
+    assert pr["ci"]["status"] == "pending"
+    assert pr["ci"]["admissible_evidence"] is False
+    assert pr["ci"]["jobs"][0]["classification"] == "pending"
+    assert "ci:pending" in pr["blockers"]
+
+
+def test_workflow_conclusion_failure_cannot_be_flattened_into_pass():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["workflow"] = {"name": "Agentic Quality Gate", "status": "completed", "conclusion": "failure"}
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["classification"] == "executed_failure"
+    assert pr["ci"]["status"] == "failed"
+    assert pr["ci"]["admissible_evidence"] is False
+    assert "ci:executed_failure" in pr["blockers"]
+
+
+def test_workflow_conclusion_pending_cannot_be_flattened_into_pass():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["workflow_conclusion"] = "pending"
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["classification"] == "pending"
+    assert pr["ci"]["status"] == "pending"
+    assert pr["ci"]["admissible_evidence"] is False
+    assert "ci:pending" in pr["blockers"]
+
+
+def test_ci_report_with_contradictory_diagnostic_state_fails_closed():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_report"] = {
+        "schema": "MarketOS.CIAdmissibilityReport.v1",
+        "status": "unavailable",
+        "classification": "ci_unavailable",
+        "diagnostic_state": "pass",  # Contradicts classification != pass
+        "diagnostic_states": ["pass"],
+        "admissible_evidence": False,
+        "candidate_head_sha": target["head_sha"],
+    }
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    assert report["portfolio_status"] == "malformed"
+    assert report["input"]["error"] == "contradictory_ci_diagnostic_metadata"
+
+
+def test_ci_report_with_contradictory_admissible_evidence_fails_closed():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_report"] = {
+        "schema": "MarketOS.CIAdmissibilityReport.v1",
+        "status": "failed",
+        "classification": "executed_failure",
+        "diagnostic_state": "executed_failure",
+        "diagnostic_states": ["executed_failure"],
+        "admissible_evidence": True,  # Contradicts classification != pass
+        "candidate_head_sha": target["head_sha"],
+    }
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    assert report["portfolio_status"] == "malformed"
+    assert report["input"]["error"] == "contradictory_ci_diagnostic_metadata"
+
+
+def test_ci_report_consumption_preserves_ci_unavailable_and_blocks():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_report"] = {
+        "schema": "MarketOS.CIAdmissibilityReport.v1",
+        "status": "unavailable",
+        "classification": "ci_unavailable",
+        "diagnostic_state": "zero_step_runnerless",
+        "diagnostic_states": ["zero_step_runnerless"],
+        "admissible_evidence": False,
+        "candidate_head_sha": target["head_sha"],
+        "required_jobs": ["test"],
+        "missing_required_jobs": [],
+        "jobs": [
+            {
+                "name": "test",
+                "classification": "zero_step_runnerless",
+                "status": "unavailable",
+                "required": True,
+            }
+        ],
+    }
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["classification"] == "ci_unavailable"
+    assert pr["ci"]["status"] == "unavailable"
+    assert pr["ci"]["admissible_evidence"] is False
+    assert pr["ci"]["diagnostic_state"] == "zero_step_runnerless"
+    assert "ci:ci_unavailable" in pr["blockers"]
+
+
+def test_non_ci_marker_evasion_with_dots_or_unicode_is_detected():
+    payload = fixture("mixed_portfolio.json")
+    payload["pull_requests"][0]["required_checks"] = ["netlify.deploy.preview"]
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    assert report["portfolio_status"] == "malformed"
+    assert report["input"]["error"] == "non_ci_check_in_required_checks"
+
+    # In ci_jobs, dots are recognized as non-ci and segregated
+    payload2 = fixture("mixed_portfolio.json")
+    target2 = next(item for item in payload2["pull_requests"] if item["number"] == 271)
+    target2["ci_jobs"].append(
+        {
+            "name": "netlify.marketos.deploy.preview",
+            "status": "completed",
+            "conclusion": "success",
+            "required": False,
+            "head_sha": target2["head_sha"],
+            "runner_id": 199,
+            "steps_executed": 2,
+            "logs_available": True,
+        }
+    )
+    report2 = build_matrix(payload2, repository_state=REPO_STATE)
+    pr2 = by_number(report2, 271)
+    assert pr2["ci"]["classification"] == "pass"
+    assert any(c["name"] == "netlify.marketos.deploy.preview" for c in pr2["ci"]["non_ci_checks"])
+
+
+def test_diagnostic_fields_never_report_pass_when_ci_is_not_pass():
+    report = matrix()
+    for pr in report["pull_requests"]:
+        ci = pr["ci"]
+        if ci["classification"] != "pass":
+            assert ci["diagnostic_state"] != "pass", f"PR #{pr['number']} had diagnostic_state 'pass' but classification '{ci['classification']}'"
+            assert "pass" not in ci["diagnostic_states"]
+            assert ci["admissible_evidence"] is False
+            assert ci["status"] != "passed"
+        else:
+            assert ci["diagnostic_state"] == "pass"
+            assert ci["admissible_evidence"] is True
+            assert ci["status"] == "passed"

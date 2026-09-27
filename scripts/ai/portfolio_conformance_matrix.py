@@ -12,6 +12,7 @@ import json
 import re
 import subprocess
 import sys
+import unicodedata
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping
@@ -40,8 +41,17 @@ UNSAFE_TEXT_RE = re.compile(r"[\x00-\x1f\x7f\u200b\u200c\u200d\u202a-\u202e\u206
 SECRET_ASSIGNMENT_RE = re.compile(r"(?i)(password|secret|token|api[_-]?key|private[_-]?key|authorization|credential)\s*[:=]\s*\S+")
 NON_CI_MARKERS = ("netlify", "deploy-preview", "deploy_preview", "preview-deploy")
 
-CI_STATUSES = frozenset({"completed", "queued", "in_progress", "pending", "waiting", "cancelled"})
-CI_CONCLUSIONS = frozenset({"success", "passed", "failure", "failed", "timed_out", "cancelled", "skipped", "neutral"})
+RUN_STATUSES = frozenset({"not_created", "queued", "in_progress", "completed", "waiting", "requested", "pending", "cancelled"})
+CONCLUSIONS = frozenset({"success", "passed", "failure", "failed", "neutral", "cancelled", "skipped", "timed_out", "action_required", "stale", "startup_failure", "pending"})
+CHECK_STATUSES = frozenset({"success", "passed", "failure", "failed", "neutral", "cancelled", "skipped", "pending", "timed_out"})
+LOG_STATUSES = frozenset({"available", "missing", "not_found", "forbidden", "unavailable", "not_queried"})
+PENDING_STATUSES = frozenset({"queued", "in_progress", "waiting", "requested", "pending"})
+STEP_SUCCESS_STATUSES = frozenset({"completed", "success"})
+STEP_INCOMPLETE_STATUSES = frozenset({"failure", "failed", "cancelled", "skipped", "timed_out", "action_required", "startup_failure"})
+STEP_STATUSES = STEP_SUCCESS_STATUSES | STEP_INCOMPLETE_STATUSES | PENDING_STATUSES
+
+CI_STATUSES = RUN_STATUSES
+CI_CONCLUSIONS = CONCLUSIONS
 LOCAL_EVIDENCE_CLASSES = frozenset(
     {
         "actual_executed",
@@ -131,6 +141,16 @@ def _path(value: Any) -> str:
     return result
 
 
+def _normalized_marker_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+
+
+def _is_non_ci_name(value: str) -> bool:
+    normalized = _normalized_marker_text(value)
+    return any(marker in normalized for marker in NON_CI_MARKERS)
+
+
 def _string_list(value: Any, *, field: str, limit: int, item_limit: int = MAX_STRING) -> list[str]:
     if not isinstance(value, list) or len(value) > limit:
         raise MatrixInputError(f"invalid_{field}")
@@ -150,20 +170,32 @@ def _normalize_dependency(value: Any) -> dict[str, Any]:
     return {"number": number, "head_sha": _sha(value.get("head_sha"), field="dependency_head_sha"), "available": available}
 
 
-def _normalize_steps(value: Any) -> int:
+def _normalize_steps(value: Any) -> tuple[int, str]:
     if not isinstance(value, list) or len(value) > MAX_STEPS_PER_JOB:
         raise MatrixInputError("invalid_ci_steps")
+    step_statuses: list[str] = []
     for item in value:
         if isinstance(item, str):
             _text(item, field="ci_step", limit=120)
+            status = "completed"
         elif isinstance(item, Mapping):
             _check_keys(item, {"name", "status"})
             _text(item.get("name"), field="ci_step_name", limit=120)
+            status = "completed"
             if item.get("status") is not None:
-                _text(item["status"], field="ci_step_status", limit=40)
+                status = _text(item["status"], field="ci_step_status", limit=40).lower()
         else:
             raise MatrixInputError("invalid_ci_step")
-    return len(value)
+        if status not in STEP_STATUSES:
+            raise MatrixInputError("invalid_ci_step_status")
+        step_statuses.append(status)
+    if any(status in STEP_INCOMPLETE_STATUSES for status in step_statuses):
+        step_outcome = "incomplete"
+    elif any(status in PENDING_STATUSES for status in step_statuses):
+        step_outcome = "pending"
+    else:
+        step_outcome = "success"
+    return len(value), step_outcome
 
 
 def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: str) -> dict[str, Any]:
@@ -174,6 +206,7 @@ def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: s
         {
             "name",
             "workflow_name",
+            "workflow_conclusion",
             "kind",
             "status",
             "conclusion",
@@ -182,26 +215,33 @@ def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: s
             "runner_id",
             "steps",
             "steps_executed",
+            "step_outcome",
             "logs_available",
+            "log_status",
+            "required_check_status",
         },
     )
     name = _text(value.get("name"), field="ci_job_name", limit=160)
     workflow_name = _optional_text(value.get("workflow_name"), field="ci_workflow_name", limit=180)
-    normalized_name = name.casefold().replace("_", "-")
+    workflow_conclusion = _optional_text(value.get("workflow_conclusion"), field="ci_workflow_conclusion", limit=40)
+    if workflow_conclusion is not None:
+        workflow_conclusion = workflow_conclusion.lower()
+        if workflow_conclusion not in CONCLUSIONS:
+            raise MatrixInputError("invalid_ci_workflow_conclusion")
     kind = _text(value.get("kind", "ci"), field="ci_job_kind", limit=40).lower()
-    if kind == "ci" and any(marker in normalized_name for marker in NON_CI_MARKERS):
+    if kind == "ci" and (_is_non_ci_name(name) or (workflow_name and _is_non_ci_name(workflow_name))):
         kind = "deploy_preview"
     if kind not in {"ci", "deploy_preview", "non_ci"}:
         raise MatrixInputError("invalid_ci_job_kind")
     if kind != "ci" and value.get("required") is True:
         raise MatrixInputError("non_ci_job_cannot_be_required")
     status = _text(value.get("status"), field="ci_job_status", limit=40).lower()
-    if status not in CI_STATUSES:
+    if status not in RUN_STATUSES:
         raise MatrixInputError("invalid_ci_job_status")
     conclusion = value.get("conclusion")
     if conclusion is not None:
         conclusion = _text(conclusion, field="ci_job_conclusion", limit=40).lower()
-        if conclusion not in CI_CONCLUSIONS:
+        if conclusion not in CONCLUSIONS:
             raise MatrixInputError("invalid_ci_job_conclusion")
     required = value.get("required", name in required_names and kind == "ci")
     if not isinstance(required, bool):
@@ -218,7 +258,7 @@ def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: s
     count_present = "steps_executed" in value
     if not steps_present and not count_present:
         raise MatrixInputError("missing_ci_step_evidence")
-    step_count = _normalize_steps(value["steps"]) if steps_present else None
+    step_count, derived_step_outcome = _normalize_steps(value["steps"]) if steps_present else (None, "success")
     if count_present:
         raw_count = value["steps_executed"]
         if not isinstance(raw_count, int) or isinstance(raw_count, bool) or raw_count < 0 or raw_count > MAX_STEPS_PER_JOB:
@@ -226,24 +266,62 @@ def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: s
         if step_count is not None and step_count != raw_count:
             raise MatrixInputError("ci_step_count_mismatch")
         step_count = raw_count
+    explicit_step_outcome = value.get("step_outcome")
+    if explicit_step_outcome is not None:
+        explicit_step_outcome = _text(explicit_step_outcome, field="step_outcome", limit=40).lower()
+        if explicit_step_outcome not in {"success", "incomplete", "pending"}:
+            raise MatrixInputError("invalid_step_outcome")
+        if steps_present and explicit_step_outcome != derived_step_outcome:
+            raise MatrixInputError("contradictory_step_outcome_metadata")
+        step_outcome = explicit_step_outcome
+    else:
+        step_outcome = derived_step_outcome
+
     logs_available = value.get("logs_available")
     if logs_available is not None and not isinstance(logs_available, bool):
         raise MatrixInputError("invalid_logs_available")
+    log_status = value.get("log_status")
+    if log_status is not None:
+        log_status = _text(log_status, field="log_status", limit=40).lower()
+        if log_status not in LOG_STATUSES:
+            raise MatrixInputError("invalid_log_status")
+        if logs_available is not None and logs_available != (log_status == "available"):
+            raise MatrixInputError("contradictory_log_metadata")
+        if logs_available is None:
+            logs_available = log_status == "available"
+
+    required_check_status = value.get("required_check_status")
+    if required_check_status is not None:
+        required_check_status = _text(required_check_status, field="required_check_status", limit=40).lower()
+        if required_check_status not in CHECK_STATUSES:
+            raise MatrixInputError("invalid_required_check_status")
+
     if status in {"queued", "pending", "waiting"}:
         if conclusion is not None or step_count != 0 or runner_id not in {None, 0} or logs_available is True:
+            raise MatrixInputError("contradictory_pending_ci_metadata")
+        if required_check_status not in {None, "pending"}:
             raise MatrixInputError("contradictory_pending_ci_metadata")
     elif status == "in_progress":
         if conclusion is not None or runner_id in {None, 0} or logs_available is True:
             raise MatrixInputError("contradictory_in_progress_ci_metadata")
+        if required_check_status not in {None, "pending"}:
+            raise MatrixInputError("contradictory_in_progress_ci_metadata")
     elif status == "completed":
         if conclusion is None:
             raise MatrixInputError("missing_completed_ci_conclusion")
+        if required_check_status == "pending":
+            raise MatrixInputError("contradictory_completed_ci_metadata")
     elif status == "cancelled":
         if conclusion != "cancelled":
             raise MatrixInputError("contradictory_cancelled_ci_metadata")
+    elif status == "not_created":
+        if conclusion is not None or step_count != 0 or runner_id not in {None, 0} or logs_available is True:
+            raise MatrixInputError("contradictory_not_created_ci_metadata")
+
     return {
         "name": name,
         "workflow_name": workflow_name,
+        "workflow_conclusion": workflow_conclusion,
         "kind": kind,
         "status": status,
         "conclusion": conclusion,
@@ -251,7 +329,10 @@ def _normalize_ci_job(value: Any, required_names: set[str], expected_head_sha: s
         "head_sha": head_sha,
         "runner_id": runner_id,
         "steps_executed": step_count,
+        "step_outcome": step_outcome,
         "logs_available": logs_available,
+        "log_status": log_status,
+        "required_check_status": required_check_status,
     }
 
 
@@ -298,6 +379,115 @@ def _normalize_economics(value: Any) -> dict[str, Any] | None:
     }
 
 
+def _normalize_workflow(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise MatrixInputError("invalid_workflow")
+    _check_keys(value, {"name", "status", "conclusion", "run_id", "head_sha", "base_sha", "created_at", "updated_at", "url"})
+    name = _text(value.get("name"), field="workflow_name", limit=180)
+    status = _text(value.get("status"), field="workflow_status", limit=40).lower()
+    if status not in RUN_STATUSES:
+        raise MatrixInputError("invalid_workflow_status")
+    conclusion = value.get("conclusion")
+    if conclusion is not None:
+        conclusion = _text(conclusion, field="workflow_conclusion", limit=40).lower()
+        if conclusion not in CONCLUSIONS:
+            raise MatrixInputError("invalid_workflow_conclusion")
+    return {"name": name, "status": status, "conclusion": conclusion}
+
+
+def _normalize_check(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise MatrixInputError("invalid_check")
+    _check_keys(value, {"name", "kind", "status", "conclusion", "url"})
+    name = _text(value.get("name"), field="check_name", limit=180)
+    kind = _text(value.get("kind", "ci"), field="check_kind", limit=40).lower()
+    if kind == "ci" and _is_non_ci_name(name):
+        kind = "deploy_preview"
+    status = _text(value.get("status"), field="check_status", limit=40).lower()
+    conclusion = value.get("conclusion")
+    if conclusion is not None:
+        conclusion = _text(conclusion, field="check_conclusion", limit=40).lower()
+    return {"name": name, "kind": kind, "status": status, "conclusion": conclusion}
+
+
+def _normalize_ci_report(value: Any, expected_head_sha: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise MatrixInputError("invalid_ci_report")
+    _check_keys(
+        value,
+        {
+            "schema",
+            "report_version",
+            "generated_at",
+            "source_schema",
+            "repository",
+            "candidate_head_sha",
+            "target_head_sha",
+            "target_base_sha",
+            "workflow",
+            "required_policy",
+            "status",
+            "classification",
+            "reason",
+            "diagnostic_state",
+            "diagnostic_states",
+            "context_classification",
+            "required_jobs",
+            "missing_required_jobs",
+            "required_checks",
+            "jobs",
+            "non_ci_checks",
+            "redacted_url_count",
+            "admissible_evidence",
+            "authority",
+            "blockers",
+            "operator_action",
+            "fingerprint",
+            "limits",
+        },
+    )
+    schema = _text(value.get("schema"), field="ci_report_schema", limit=60)
+    if schema != "MarketOS.CIAdmissibilityReport.v1":
+        raise MatrixInputError("unsupported_ci_report_schema")
+    candidate_head = value.get("candidate_head_sha")
+    if candidate_head is not None and _sha(candidate_head, field="ci_report_candidate_head_sha") != expected_head_sha:
+        raise MatrixInputError("ci_report_head_sha_mismatch")
+    classification = _text(value.get("classification"), field="ci_report_classification", limit=40)
+    status = _text(value.get("status"), field="ci_report_status", limit=40)
+    admissible = value.get("admissible_evidence")
+    if not isinstance(admissible, bool):
+        raise MatrixInputError("invalid_ci_report_admissible_evidence")
+    diagnostic_state = _optional_text(value.get("diagnostic_state"), field="ci_report_diagnostic_state", limit=60)
+    diagnostic_states = value.get("diagnostic_states", [])
+    if not isinstance(diagnostic_states, list):
+        raise MatrixInputError("invalid_ci_report_diagnostic_states")
+
+    # Audit for contradictions: diagnostic fields cannot contradict authoritative classification/status/admissibility
+    if diagnostic_state == "pass" and classification != "pass":
+        raise MatrixInputError("contradictory_ci_diagnostic_metadata")
+    if "pass" in diagnostic_states and classification != "pass":
+        raise MatrixInputError("contradictory_ci_diagnostic_metadata")
+    if admissible is True and classification != "pass":
+        raise MatrixInputError("contradictory_ci_diagnostic_metadata")
+    if classification == "pass" and (status != "passed" or admissible is not True):
+        raise MatrixInputError("contradictory_ci_diagnostic_metadata")
+
+    return {
+        "schema": schema,
+        "classification": classification,
+        "status": status,
+        "admissible_evidence": admissible,
+        "diagnostic_state": diagnostic_state or classification,
+        "diagnostic_states": sorted({_text(s, field="diagnostic_state_item", limit=60) for s in diagnostic_states}) if diagnostic_states else [diagnostic_state or classification],
+        "required_jobs": _string_list(value.get("required_jobs", []), field="ci_report_required_jobs", limit=MAX_JOBS_PER_PR, item_limit=160),
+        "missing_required_jobs": _string_list(value.get("missing_required_jobs", []), field="ci_report_missing_jobs", limit=MAX_JOBS_PER_PR, item_limit=160),
+        "jobs": value.get("jobs", []),
+        "non_ci_checks": value.get("non_ci_checks", []),
+    }
+
+
 def _normalize_pr(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise MatrixInputError("invalid_pull_request")
@@ -316,6 +506,10 @@ def _normalize_pr(value: Any) -> dict[str, Any]:
         "required_checks",
         "required_checks_source",
         "ci_jobs",
+        "ci_report",
+        "workflow",
+        "workflow_conclusion",
+        "checks",
         "local_evidence",
         "authority_claims",
         "workspace_id",
@@ -330,18 +524,25 @@ def _normalize_pr(value: Any) -> dict[str, Any]:
     state = _text(value.get("state"), field="pull_request_state", limit=20).lower()
     if state not in {"open", "closed", "merged"}:
         raise MatrixInputError("invalid_pull_request_state")
-    required_checks = _string_list(value.get("required_checks", []), field="required_checks", limit=MAX_JOBS_PER_PR, item_limit=160)
+    head_sha = _sha(value.get("head_sha"), field="head_sha")
+    base_sha = _sha(value.get("base_sha"), field="base_sha")
+
+    ci_report = _normalize_ci_report(value["ci_report"], head_sha) if "ci_report" in value else None
+
+    raw_required = value.get("required_checks")
+    if raw_required is None and ci_report is not None and ci_report.get("required_jobs"):
+        required_checks = sorted(ci_report["required_jobs"])
+    else:
+        required_checks = _string_list(raw_required or [], field="required_checks", limit=MAX_JOBS_PER_PR, item_limit=160)
     if not required_checks:
         raise MatrixInputError("empty_required_checks")
     for item in required_checks:
-        normalized = item.casefold().replace("_", "-")
-        if any(marker in normalized for marker in NON_CI_MARKERS):
+        if _is_non_ci_name(item):
             raise MatrixInputError("non_ci_check_in_required_checks")
-    required_checks_source = _text(value.get("required_checks_source"), field="required_checks_source", limit=60)
+    required_checks_source = _text(value.get("required_checks_source", "branch_protection_adapter"), field="required_checks_source", limit=60)
     if required_checks_source != "branch_protection_adapter":
         raise MatrixInputError("untrusted_required_checks_source")
-    base_sha = _sha(value.get("base_sha"), field="base_sha")
-    head_sha = _sha(value.get("head_sha"), field="head_sha")
+
     jobs_raw = value.get("ci_jobs", [])
     if not isinstance(jobs_raw, list) or len(jobs_raw) > MAX_JOBS_PER_PR:
         raise MatrixInputError("invalid_ci_jobs")
@@ -366,6 +567,17 @@ def _normalize_pr(value: Any) -> dict[str, Any]:
     candidate_id = _optional_text(value.get("candidate_id"), field="candidate_id", limit=100)
     client_id = _optional_text(value.get("client_id"), field="client_id", limit=100)
     economics = _normalize_economics(value.get("economics")) if "economics" in value else None
+    workflow = _normalize_workflow(value.get("workflow")) if "workflow" in value else None
+    workflow_conclusion = value.get("workflow_conclusion")
+    if workflow_conclusion is not None:
+        workflow_conclusion = _text(workflow_conclusion, field="workflow_conclusion", limit=40).lower()
+        if workflow_conclusion not in CONCLUSIONS:
+            raise MatrixInputError("invalid_workflow_conclusion")
+    checks_raw = value.get("checks", [])
+    if not isinstance(checks_raw, list) or len(checks_raw) > MAX_JOBS_PER_PR:
+        raise MatrixInputError("invalid_checks")
+    checks = [_normalize_check(c) for c in checks_raw]
+
     return {
         "number": number,
         "title": _text(value.get("title", f"PR #{number}"), field="pull_request_title"),
@@ -385,6 +597,10 @@ def _normalize_pr(value: Any) -> dict[str, Any]:
         "required_checks": required_checks,
         "required_checks_source": required_checks_source,
         "ci_jobs": jobs,
+        "ci_report": ci_report,
+        "workflow": workflow,
+        "workflow_conclusion": workflow_conclusion,
+        "checks": checks,
         "local_evidence": _normalize_local_evidence(value.get("local_evidence")),
         "authority_claims": _string_list(value.get("authority_claims", []), field="authority_claims", limit=20, item_limit=100),
     }
@@ -543,22 +759,53 @@ def _job_classification(job: Mapping[str, Any]) -> str:
     conclusion = job["conclusion"]
     steps = job["steps_executed"] or 0
     runner = job["runner_id"]
-    if status in {"queued", "in_progress", "pending", "waiting"}:
+    step_outcome = job.get("step_outcome", "success")
+    required_check_status = job.get("required_check_status")
+
+    if status == "not_created":
+        return "zero_step_runnerless"
+    if status in PENDING_STATUSES or required_check_status in PENDING_STATUSES or step_outcome == "pending":
         return "pending"
     if steps == 0 or runner is None or runner == 0:
         return "zero_step_runnerless"
     if status not in {"completed", "cancelled"} or conclusion is None:
         return "malformed"
-    if conclusion in {"timed_out"}:
+    if conclusion in {"timed_out"} or required_check_status == "timed_out":
         return "timed_out"
-    if conclusion in {"failure", "failed", "cancelled"}:
+    if conclusion in {"failure", "failed", "cancelled"} or required_check_status in {"failure", "failed", "cancelled"}:
         return "executed_failure"
+    if step_outcome == "incomplete":
+        return "incomplete_steps"
     if conclusion in {"success", "passed"}:
+        if required_check_status is not None and required_check_status not in {"success", "passed"}:
+            return "executed_failure" if required_check_status in {"failure", "failed", "cancelled"} else "ci_unavailable"
         return "pass" if job["logs_available"] is True else "unavailable_logs"
     return "malformed"
 
 
 def _ci_projection(pr: Mapping[str, Any]) -> dict[str, Any]:
+    if pr.get("ci_report"):
+        report = pr["ci_report"]
+        classification = report["classification"]
+        status = report["status"]
+        admissible = report["admissible_evidence"]
+        diagnostic_state = report["diagnostic_state"]
+        diagnostic_states = report["diagnostic_states"]
+        missing = report["missing_required_jobs"]
+        required_checks = sorted(set(pr["required_checks"]) | set(report["required_jobs"]))
+        return {
+            "classification": classification,
+            "status": status,
+            "admissible_evidence": admissible,
+            "diagnostic_state": diagnostic_state,
+            "diagnostic_states": diagnostic_states,
+            "required_checks": required_checks,
+            "required_checks_source": pr["required_checks_source"],
+            "missing_required": missing,
+            "jobs": report["jobs"],
+            "non_ci_checks": report["non_ci_checks"],
+        }
+
     jobs = []
     for job in pr["ci_jobs"]:
         classification = _job_classification(job)
@@ -573,8 +820,10 @@ def _ci_projection(pr: Mapping[str, Any]) -> dict[str, Any]:
                 "head_sha": job["head_sha"],
                 "classification": classification,
                 "steps_executed": job["steps_executed"],
+                "step_outcome": job.get("step_outcome"),
                 "runner_assigned": bool(job["runner_id"] and job["runner_id"] > 0),
                 "logs_available": job["logs_available"],
+                "required_check_status": job.get("required_check_status"),
             }
         )
     ci_jobs_only = [job for job in jobs if job.get("kind") == "ci"]
@@ -583,22 +832,83 @@ def _ci_projection(pr: Mapping[str, Any]) -> dict[str, Any]:
     missing = sorted(set(pr["required_checks"]) - names)
     required = [job for job in ci_jobs_only if job["required"]]
     required_classes = [job["classification"] for job in required]
+
+    workflow_conclusion = pr.get("workflow_conclusion")
+    if not workflow_conclusion and pr.get("workflow"):
+        workflow_conclusion = pr["workflow"].get("conclusion")
+
+    check_failures = False
+    check_timeouts = False
+    check_pending = False
+    for check in pr.get("checks", []):
+        if check.get("name") in pr["required_checks"] and check.get("kind", "ci") == "ci":
+            c_status = check.get("status")
+            c_conc = check.get("conclusion")
+            if c_status in PENDING_STATUSES or c_conc in PENDING_STATUSES:
+                check_pending = True
+            elif c_conc in {"failure", "failed", "cancelled"}:
+                check_failures = True
+            elif c_conc == "timed_out":
+                check_timeouts = True
+
     if any(item == "malformed" for item in required_classes):
         classification = "malformed"
-    elif any(item in {"executed_failure", "timed_out"} for item in required_classes):
-        classification = "executed_failure" if "executed_failure" in required_classes else "timed_out"
-    elif any(item == "pending" for item in required_classes):
+    elif any(item in {"executed_failure", "timed_out"} for item in required_classes) or check_failures or (workflow_conclusion in {"failure", "failed", "cancelled", "startup_failure"}):
+        classification = "executed_failure" if (any(item == "executed_failure" for item in required_classes) or check_failures or (workflow_conclusion in {"failure", "failed", "cancelled", "startup_failure"})) else "timed_out"
+    elif any(item == "pending" for item in required_classes) or check_pending or (workflow_conclusion in PENDING_STATUSES):
         classification = "pending"
-    elif missing or any(item == "zero_step_runnerless" for item in required_classes):
+    elif missing or any(item in {"zero_step_runnerless", "incomplete_steps"} for item in required_classes):
         classification = "ci_unavailable"
     elif any(item == "unavailable_logs" for item in required_classes):
         classification = "unavailable_logs"
+    elif workflow_conclusion and workflow_conclusion != "success":
+        classification = "ci_unavailable"
     elif required and all(item == "pass" for item in required_classes):
         classification = "pass"
     else:
         classification = "ci_unavailable"
+
+    status = (
+        "passed" if classification == "pass"
+        else "failed" if classification == "executed_failure"
+        else "timed_out" if classification == "timed_out"
+        else "pending" if classification == "pending"
+        else "malformed" if classification == "malformed"
+        else "unavailable"
+    )
+    admissible = classification == "pass"
+
+    non_pass_states = [c for c in required_classes if c != "pass"]
+    if missing:
+        non_pass_states.extend(f"missing_required:{name}" for name in missing)
+    if workflow_conclusion and workflow_conclusion != "success":
+        non_pass_states.append(f"workflow_{workflow_conclusion}")
+    if check_failures:
+        non_pass_states.append("required_check_failure")
+    if check_timeouts:
+        non_pass_states.append("required_check_timeout")
+    if check_pending:
+        non_pass_states.append("required_check_pending")
+
+    if classification == "pass":
+        diagnostic_state = "pass"
+        diagnostic_states = ["pass"]
+    elif len(set(non_pass_states)) == 1:
+        diagnostic_state = non_pass_states[0]
+        diagnostic_states = sorted(set(non_pass_states))
+    elif non_pass_states:
+        diagnostic_state = "mixed"
+        diagnostic_states = sorted(set(non_pass_states))
+    else:
+        diagnostic_state = classification
+        diagnostic_states = [classification]
+
     return {
         "classification": classification,
+        "status": status,
+        "admissible_evidence": admissible,
+        "diagnostic_state": diagnostic_state,
+        "diagnostic_states": diagnostic_states,
         "required_checks": sorted(pr["required_checks"]),
         "required_checks_source": pr["required_checks_source"],
         "missing_required": missing,

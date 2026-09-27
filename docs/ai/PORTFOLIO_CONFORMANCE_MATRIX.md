@@ -127,11 +127,21 @@ or a substitute for reviewing the source adapter. Every CI job must carry the
 exact PR `head_sha`, so evidence cannot be reused across heads.
 
 Deploy preview markers (`netlify`, `deploy-preview`, `deploy_preview`,
-`preview-deploy`) are strictly forbidden in `required_checks` and fail closed.
-Jobs carrying these markers or declaring `kind: "deploy_preview"` cannot be
-marked required, are segregated into `non_ci_checks`, and never satisfy CI
-requirements or promote CI status to `pass`. In-progress jobs cannot claim
-final logs are available.
+`preview-deploy`) are strictly forbidden in `required_checks` and fail closed
+under NFKC unicode normalization and separator collapsing. Jobs carrying these
+markers or declaring `kind: "deploy_preview"`, as well as jobs under workflows
+named with non-CI markers, cannot be marked required, are segregated into
+`non_ci_checks`, and never satisfy CI requirements or promote CI status to `pass`.
+In-progress jobs cannot claim final logs are available.
+
+PR rows may also supply an authoritative `ci_report` (`MarketOS.CIAdmissibilityReport.v1`).
+Diagnostic fields in `ci_report` or internal projections cannot contradict
+authoritative classification, status, or admissibility (e.g. `diagnostic_state: "pass"`
+with `classification != "pass"` fails closed as malformed). Step lists are audited
+for non-success outcomes: any incomplete or pending step forces the job to
+`incomplete_steps` / `pending`, preventing false passes even if an overarching
+conclusion claims success. Non-success workflow conclusions and failing required
+checks independently prevent CI pass.
 
 Portfolio rows must belong to a single workspace and client; conflicting
 `workspace_id` or `client_id` values fail closed. When provided, `economics`
@@ -161,9 +171,10 @@ classification.
 | timeout with a runner and executed steps | `timed_out` | Timeout remains a timeout |
 | queued, pending, waiting, or in progress | `pending` | No final result yet |
 | zero steps, runner ID zero, or missing runner | `zero_step_runnerless` | No admissible execution; PR result becomes `ci_unavailable` |
+| incomplete, skipped, or failed steps within step evidence | `incomplete_steps` | Steps did not complete successfully; PR result becomes `ci_unavailable` |
 | successful completion without logs | `unavailable_logs` | Cannot certify the success |
 | required check absent from the job set | `ci_unavailable` | Required evidence is missing |
-| unknown state/conclusion or inconsistent step metadata | `malformed` | Fail closed |
+| unknown state/conclusion or inconsistent step/diagnostic metadata | `malformed` | Fail closed |
 
 An executed failure has priority over incomplete evidence when both are present;
 the report retains both per-job classifications. A zero-step job with a
