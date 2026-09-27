@@ -10,7 +10,8 @@ in this module selects a category on a caller's behalf.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Mapping
 
 
 class CategoryTaxonomyError(ValueError):
@@ -68,7 +69,7 @@ class CategoryMappingCandidate:
         }
 
 
-TAXONOMY_SOURCE_PROVENANCE: dict[str, Any] = {
+TAXONOMY_SOURCE_PROVENANCE: Mapping[str, Any] = MappingProxyType({
     "repository_url": "https://github.com/Shopify/product-taxonomy",
     "version_tag": "v2026-08",
     "commit_sha": "2e9aa2e9b882383952c63d212add13eb80f46cf9",
@@ -77,7 +78,7 @@ TAXONOMY_SOURCE_PROVENANCE: dict[str, Any] = {
     "license_evidence_url": "https://github.com/Shopify/product-taxonomy/blob/v2026-08/LICENSE",
     "snapshot_levels_included": (1, 2, 3),
     "snapshot_path": "data/shopify_product_taxonomy/categories.v2026-08.partial.txt",
-}
+})
 
 
 @dataclass(frozen=True)
@@ -89,17 +90,31 @@ class CategoryMappingEvidence:
     normalized_input: str
     status: str  # "mapped" | "unmapped"
     candidates: tuple[CategoryMappingCandidate, ...] = ()
-    taxonomy_source: dict[str, Any] = field(default_factory=lambda: dict(TAXONOMY_SOURCE_PROVENANCE))
+    taxonomy_source: Mapping[str, Any] = field(
+        default_factory=lambda: MappingProxyType(dict(TAXONOMY_SOURCE_PROVENANCE))
+    )
     human_review_required: bool = True
     decision_authority: str = "none"
 
     def __post_init__(self) -> None:
+        if self.human_review_required is not True:
+            raise CategoryTaxonomyError(
+                "human_review_required must be True; category mapping cannot bypass human review"
+            )
+        if self.decision_authority != "none":
+            raise CategoryTaxonomyError(
+                f"decision_authority must be 'none'; category mapping evidence possesses no decision authority (got {self.decision_authority!r})"
+            )
         if self.status not in {"mapped", "unmapped"}:
             raise CategoryTaxonomyError(f"invalid category mapping status: {self.status!r}")
         if self.status == "unmapped" and self.candidates:
             raise CategoryTaxonomyError("unmapped evidence must not carry candidates")
         if self.status == "mapped" and not self.candidates:
             raise CategoryTaxonomyError("mapped evidence must carry at least one candidate")
+        if not isinstance(self.candidates, tuple):
+            object.__setattr__(self, "candidates", tuple(self.candidates))
+        if not isinstance(self.taxonomy_source, MappingProxyType):
+            object.__setattr__(self, "taxonomy_source", MappingProxyType(dict(self.taxonomy_source)))
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -135,3 +135,42 @@ class TestBundledSnapshot:
         explicit = load_taxonomy(_DEFAULT_SNAPSHOT_PATH)
         default = default_taxonomy()
         assert set(explicit.by_code) == set(default.by_code)
+
+
+class TestTaxonomyIndexImmutability:
+    def test_taxonomy_index_by_code_is_genuinely_immutable(self):
+        index = parse_taxonomy_text(VALID_TEXT)
+
+        with pytest.raises(TypeError):
+            index.by_code["new_code"] = None  # type: ignore[index]
+
+        with pytest.raises(AttributeError):
+            index.by_code.clear()  # type: ignore[attr-defined]
+
+        with pytest.raises(AttributeError):
+            index.by_code.pop("ap")  # type: ignore[attr-defined]
+
+    def test_default_taxonomy_cache_cannot_be_poisoned(self):
+        t1 = default_taxonomy()
+        orig_len = len(t1)
+
+        with pytest.raises(TypeError):
+            t1.by_code["malicious_code"] = None  # type: ignore[index]
+
+        with pytest.raises(AttributeError):
+            t1.by_code.clear()  # type: ignore[attr-defined]
+
+        t2 = default_taxonomy()
+        assert len(t2) == orig_len
+        assert "malicious_code" not in t2.by_code
+
+    def test_taxonomy_index_defensive_copy_on_construction(self):
+        from services.category_mapping.taxonomy_loader import TaxonomyIndex
+        index = parse_taxonomy_text(VALID_TEXT)
+        mutable_dict = dict(index.by_code)
+        custom_index = TaxonomyIndex(by_code=mutable_dict)
+
+        mutable_dict["extra_key"] = None  # type: ignore[assignment]
+        assert "extra_key" not in custom_index.by_code
+        with pytest.raises(TypeError):
+            custom_index.by_code["extra_key"] = None  # type: ignore[index]

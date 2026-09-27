@@ -4,9 +4,11 @@
 
 - **Upstream repository:** https://github.com/Shopify/product-taxonomy
 - **Pinned tag:** `v2026-08`
-- **Pinned commit:** `2e9aa2e9b882383952c63d212add13eb80f46cf9` (verified directly via
-  `git ls-remote --tags` and a raw-content fetch of `VERSION` at that exact commit
-  SHA — not taken from a cached or AI-summarized page render)
+- **Pinned commit:** `2e9aa2e9b882383952c63d212add13eb80f46cf9` (verified during
+  developer-time dataset curation against public open-source Git repository metadata
+  at that exact commit SHA — strictly a developer-time public source retrieval step,
+  never runtime or provider network access, and not taken from a cached or
+  AI-summarized page render)
 - **Upstream `VERSION` file content at that commit:** `2026-08`
 - **License:** MIT (`Copyright (c) Shopify`) — see `THIRD_PARTY_NOTICES.md` at the
   repository root and `../source_adaptation_registry.json` entry `src-shopify-product-taxonomy`.
@@ -60,14 +62,15 @@ gid://shopify/TaxonomyCategory/<code>   : <Ancestor name> > ... > <Category name
 
 ## Regenerating this snapshot
 
-The exact, reproducible steps used to produce this file from the pinned
-upstream source:
+The exact, reproducible offline curation steps used to produce this file from the pinned
+public upstream repository:
 
-1. Fetch `dist/en/categories.txt` at commit `2e9aa2e9b882383952c63d212add13eb80f46cf9`.
+1. Retrieve `dist/en/categories.txt` from a local clone of the public repository at commit `2e9aa2e9b882383952c63d212add13eb80f46cf9`.
 2. Keep every line whose GID code has 3 or fewer hyphen-separated segments.
 3. Prepend the provenance header above (as `#`-prefixed comment lines,
    matching the upstream file's own comment convention) in place of the
    upstream header.
 
-No network fetch happens at MarketOS runtime or test time — this file is the
-single, already-fetched, versioned input `services/category_mapping` loads.
+Public source retrieval is strictly an offline developer-time dataset preparation step.
+Zero network access and zero provider calls occur at MarketOS runtime or test time — this
+file is the single, already-curated, versioned local input `services/category_mapping` loads.

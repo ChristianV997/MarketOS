@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
+from typing import Mapping
 
 from .schemas import CategoryTaxonomyError, TaxonomyCategory
 
@@ -26,7 +28,11 @@ _LINE_RE = re.compile(r"^gid://shopify/TaxonomyCategory/(\S+)\s*:\s*(.+?)\s*$")
 class TaxonomyIndex:
     """An immutable, validated index over the loaded taxonomy snapshot."""
 
-    by_code: dict[str, TaxonomyCategory]
+    by_code: Mapping[str, TaxonomyCategory]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.by_code, MappingProxyType):
+            object.__setattr__(self, "by_code", MappingProxyType(dict(self.by_code)))
 
     def get(self, code: str) -> TaxonomyCategory | None:
         return self.by_code.get(code)

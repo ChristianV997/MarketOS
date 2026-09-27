@@ -119,3 +119,84 @@ class TestEvidenceInvariants:
 
         with pytest.raises(CategoryTaxonomyError):
             CategoryMappingEvidence(input_category="x", normalized_input="x", status="mapped", candidates=())
+
+    def test_construction_rejects_human_review_required_override(self):
+        import pytest
+        from services.category_mapping.schemas import CategoryTaxonomyError
+
+        with pytest.raises(CategoryTaxonomyError, match="human_review_required must be True"):
+            CategoryMappingEvidence(
+                input_category="x", normalized_input="x", status="unmapped", human_review_required=False
+            )
+
+        with pytest.raises(CategoryTaxonomyError, match="human_review_required must be True"):
+            CategoryMappingEvidence(
+                input_category="x", normalized_input="x", status="unmapped", human_review_required=None  # type: ignore[arg-type]
+            )
+
+    def test_construction_rejects_decision_authority_override(self):
+        import pytest
+        from services.category_mapping.schemas import CategoryTaxonomyError
+
+        for bad_authority in ("launch_authority", "publish", "auto_approved", "scoring_authority", ""):
+            with pytest.raises(CategoryTaxonomyError, match="decision_authority must be 'none'"):
+                CategoryMappingEvidence(
+                    input_category="x", normalized_input="x", status="unmapped", decision_authority=bad_authority
+                )
+
+    def test_replace_cannot_bypass_human_review_or_authority_invariants(self):
+        from dataclasses import replace
+        import pytest
+        from services.category_mapping.schemas import CategoryTaxonomyError
+
+        evidence = build_category_mapping_evidence("Bird Supplies", taxonomy=_fixture_taxonomy())
+
+        with pytest.raises(CategoryTaxonomyError, match="human_review_required must be True"):
+            replace(evidence, human_review_required=False)
+
+        with pytest.raises(CategoryTaxonomyError, match="decision_authority must be 'none'"):
+            replace(evidence, decision_authority="auto_approved")
+
+    def test_taxonomy_source_is_genuinely_immutable(self):
+        import pytest
+        evidence = build_category_mapping_evidence("Bird Supplies", taxonomy=_fixture_taxonomy())
+
+        with pytest.raises(TypeError):
+            evidence.taxonomy_source["repository_url"] = "https://evil.example.com"
+
+        with pytest.raises(AttributeError):
+            evidence.taxonomy_source.clear()
+
+        with pytest.raises(AttributeError):
+            evidence.taxonomy_source.pop("license")
+
+        # Defensively copied on construction
+        mutable_dict = {"custom_key": "custom_val"}
+        custom_evidence = CategoryMappingEvidence(
+            input_category="x",
+            normalized_input="x",
+            status="unmapped",
+            taxonomy_source=mutable_dict,
+        )
+        mutable_dict["custom_key"] = "mutated"
+        assert custom_evidence.taxonomy_source["custom_key"] == "custom_val"
+        with pytest.raises(TypeError):
+            custom_evidence.taxonomy_source["custom_key"] = "hacked"
+
+    def test_candidates_defensively_converted_to_immutable_tuple(self):
+        from services.category_mapping.schemas import CategoryMappingCandidate
+
+        cand = CategoryMappingCandidate(
+            code="ap", gid="gid://shopify/TaxonomyCategory/ap", name="Animals", full_path="Animals",
+            match_basis="exact_name", confidence=1.0,
+        )
+        cand_list = [cand]
+        evidence = CategoryMappingEvidence(
+            input_category="Animals",
+            normalized_input="animals",
+            status="mapped",
+            candidates=cand_list,  # type: ignore[arg-type]
+        )
+        assert isinstance(evidence.candidates, tuple)
+        cand_list.clear()
+        assert len(evidence.candidates) == 1

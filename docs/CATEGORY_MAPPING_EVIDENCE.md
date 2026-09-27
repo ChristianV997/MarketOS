@@ -51,16 +51,21 @@ confidence score, for a **human to review**.
 See `data/shopify_product_taxonomy/README.md` for the exact pinned tag,
 commit SHA, license, and regeneration steps. In summary: tag `v2026-08`,
 commit `2e9aa2e9b882383952c63d212add13eb80f46cf9`, license MIT, verified
-directly via `git ls-remote` and a raw-content fetch at that exact commit SHA
-(not a cached or AI-summarized page render — an unrelated tag,
+during developer-time dataset curation against the public open-source Git
+repository metadata at that exact commit SHA (an offline public source
+retrieval step performed during artifact preparation, completely separate from
+MarketOS runtime execution; not a runtime network or provider call, and not
+taken from a cached or AI-summarized page render — an unrelated tag,
 `v2026-08-patch`, was found during verification to resolve to a different
 commit whose `VERSION` file read `2026-11-unstable`, and was deliberately
 **not** used for exactly that reason).
 
 ## Safety
 
-Offline and read-only throughout. No network fetch at runtime or test time;
-no credentials; no provider calls; no commerce, publication, ad, or ordering
+Offline and read-only throughout. Public source retrieval occurred strictly as a
+developer-time artifact curation step from public open-source Git repository
+data; MarketOS executes with zero runtime network access, zero provider API
+calls, zero credentials read, and zero commerce, publication, ad, or ordering
 mutation anywhere in this vertical. Matching failures degrade to
 `category_mapping_evidence = None` on the audit result (logged at `debug`
 level) rather than aborting `run_product_audit`, matching that function's
