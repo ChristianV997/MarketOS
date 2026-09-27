@@ -1,0 +1,5 @@
+# Canonical test profile for the Python version declared in .python-version.
+# Keep runtime and development dependencies in their existing authoritative
+# manifests; this file is the single install entry point for local and CI tests.
+-r requirements.txt
+-r requirements-dev.txt

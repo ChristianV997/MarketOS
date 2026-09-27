@@ -59,12 +59,12 @@ jobs:
           # Keep CI aligned with the Docker production runtime.
           python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements-test.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-test.txt
 
       - name: Compile check
         run: python -m compileall -q .
@@ -154,14 +154,12 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+          cache-dependency-path: requirements-test.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r requirements-dev.txt
+          python -m pip install -r requirements-test.txt
 
       - name: ruff check (advisory)
         run: ruff check . || true
