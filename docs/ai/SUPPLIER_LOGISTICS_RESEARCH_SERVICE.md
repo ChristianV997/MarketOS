@@ -114,10 +114,16 @@ never promoted to verified by this module or anything that consumes it.
 scenario from the offer's `customs`/`returns_defects`/`shipping`
 profiles. `base` uses each known value unchanged. `best_case` and
 `worst_case` perturb **only** rates whose own evidence `quality` is
-`manual` or `fixture` (±15%, clamped to `[0, 1]`) -- an `observed`
-(confirmed) rate never moves, and a missing (`None`) rate never moves
-either; sensitivity analysis is applied to known-but-uncertain values,
-never invented for an unknown one.
+`manual`, `fixture`, `stale`, or `conflicting` (±15%, clamped to
+`[0, 1]`) -- an `observed` (confirmed) rate never moves, and a missing
+(`None`) rate never moves either; sensitivity analysis is applied to
+known-but-uncertain values, never invented for an unknown one. `stale`
+and `conflicting` are included alongside `manual`/`fixture` because they
+are the *same* known-but-uncertain shape (a number exists; what's in
+question is the evidence behind it) and `_QUALITY_SEVERITY` already
+scores them as higher risk, not lower -- excluding them from sensitivity
+would silently show identical best/worst-case numbers for evidence the
+risk matrix itself flags as worse than a plain manual claim.
 
 If a known `duty_rate`/`tax_rate` is missing on the offer's own
 `CustomsDutyTaxProfile`, the scenario falls back to the `MarketLane`'s

@@ -41,8 +41,13 @@ _SCENARIO_IDS = ("base", "best_case", "worst_case")
 # Only a value whose own evidence quality is already uncertain is subject
 # to sensitivity analysis; "observed" (confirmed) values never move, and a
 # missing value (None) never moves either -- it stays missing in every
-# scenario rather than being invented for a best/worst case.
-_UNCERTAIN_QUALITIES = frozenset({"manual", "fixture"})
+# scenario rather than being invented for a best/worst case. "stale" and
+# "conflicting" are both known-but-uncertain in exactly the same sense as
+# "manual"/"fixture" (a number exists; the evidence behind it is what's in
+# question) -- and _QUALITY_SEVERITY already scores them as a *higher*
+# risk than "manual"/"fixture", so excluding them here would silently
+# understate the very uncertainty the risk matrix flags as worse.
+_UNCERTAIN_QUALITIES = frozenset({"manual", "fixture", "stale", "conflicting"})
 _PERTURBATION = Decimal("0.15")
 
 _QUALITY_SEVERITY = {
@@ -111,7 +116,19 @@ def _landed_cost_scenarios(offer: SupplierLogisticsOffer, target_price: Money | 
 
 
 def _risk_entry(category: str, evidence: FieldEvidence, description: str) -> RiskMatrixEntry:
-    return RiskMatrixEntry(category=category, severity=_QUALITY_SEVERITY[evidence.quality], description=description, evidence=evidence)
+    severity = _QUALITY_SEVERITY[evidence.quality]
+    # quality="observed" alone is not a verification: it is a self-reported
+    # label a caller can attach to any claim, including a supplier's own
+    # unconfirmed quote. controls.is_verified is the single gate for
+    # whether an "observed" claim was actually backed by a human-confirmed
+    # EvidenceRef in a verified-like evidence_state; an "observed" claim
+    # that fails that gate is exactly as uncertain as a "manual" one and
+    # must not be scored as low risk alongside genuinely verified evidence
+    # -- a supplier self-claim must never become verified supplier proof
+    # just by being labeled "observed".
+    if evidence.quality == "observed" and not controls.is_verified(evidence):
+        severity = _QUALITY_SEVERITY["manual"]
+    return RiskMatrixEntry(category=category, severity=severity, description=description, evidence=evidence)
 
 
 def _goods_risk_entries(goods: GoodsLogisticsProfile) -> tuple[RiskMatrixEntry, ...]:
