@@ -35,16 +35,15 @@ def _jsonl_report(query: EventQuery) -> dict:
         path = Path(configured).resolve()
     except (OSError, RuntimeError, ValueError):
         return _empty_jsonl_report("jsonl_read_path_unconfigured")
-    if ARTIFACTS not in path.parents:
+    if path != ARTIFACTS and ARTIFACTS not in path.parents:
         raise HTTPException(403, "configured JSONL read path must remain under artifacts/")
     if not path.is_file():
         return _empty_jsonl_report("jsonl_read_path_unconfigured")
-    try:
-        if path.stat().st_size > MAX_JSONL_BYTES:
-            return _empty_jsonl_report("jsonl_read_path_oversized")
-    except OSError:
-        return _empty_jsonl_report("jsonl_file_unavailable")
-    events, warnings = load_events_from_jsonl(path)
+    events, warnings = load_events_from_jsonl(
+        path,
+        max_bytes=MAX_JSONL_BYTES,
+        oversized_warning="jsonl_read_path_oversized",
+    )
     return event_query_report(events, query, warnings)
 def _report(source: str, query: EventQuery) -> dict:
     if source == "supabase_staging": return query_supabase_canonical_events(query)

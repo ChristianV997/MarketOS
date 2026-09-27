@@ -1,11 +1,10 @@
 """Regression tests for GET /api/events JSONL path fail-closed behavior."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import HTTPException
 
 from api.routes import canonical_events
+from backend.events import query_service
 from backend.events.query_models import EventQuery
 
 
@@ -57,16 +56,39 @@ def test_jsonl_oversized_artifact_is_rejected_before_read(monkeypatch, tmp_path)
     monkeypatch.setattr(canonical_events, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(path))
 
-    def _must_not_load(_path):
-        raise AssertionError("oversized JSONL must not be parsed")
+    calls = []
+    original_loader = canonical_events.load_events_from_jsonl
 
-    monkeypatch.setattr(canonical_events, "load_events_from_jsonl", _must_not_load)
+    def _bounded_loader(path, *, max_bytes, oversized_warning):
+        calls.append(max_bytes)
+        return original_loader(path, max_bytes=max_bytes, oversized_warning=oversized_warning)
+
+    monkeypatch.setattr(canonical_events, "load_events_from_jsonl", _bounded_loader)
     report = canonical_events._jsonl_report(_query())
 
+    assert calls == [canonical_events.MAX_JSONL_BYTES]
     assert report["timeline"]["warnings"] == ["jsonl_read_path_oversized"]
     assert report["timeline"]["events"] == []
     assert report["read_only"] is True
     assert report["mutated"] is False
+
+
+def test_jsonl_oversized_actual_read_never_reaches_event_parser(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    path = artifacts / "events.jsonl"
+    path.write_bytes((b"{}\n" * ((canonical_events.MAX_JSONL_BYTES // 3) + 1)))
+    monkeypatch.setattr(canonical_events, "ARTIFACTS", artifacts.resolve())
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(path))
+
+    def _must_not_parse(_mapping):
+        raise AssertionError("oversized JSONL must not reach Event.from_dict")
+
+    monkeypatch.setattr(query_service.Event, "from_dict", _must_not_parse)
+    report = canonical_events._jsonl_report(_query())
+
+    assert report["timeline"]["warnings"] == ["jsonl_read_path_oversized"]
+    assert report["timeline"]["events"] == []
 
 
 def test_jsonl_path_outside_artifacts_still_forbidden(monkeypatch, tmp_path):

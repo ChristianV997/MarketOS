@@ -7,9 +7,19 @@ from typing import Any, Sequence
 from backend.contracts.events import Event
 from .query_models import CommerceRunSummary, CompetitionSummary, EventQuery, EventRecordView, EventTimeline, OpportunityRankingSummary, ResearchPortfolioSummary, ShopifyImportSummary
 
-def load_events_from_jsonl(path: str | Path) -> tuple[list[Event], list[str]]:
+def load_events_from_jsonl(
+    path: str | Path,
+    *,
+    max_bytes: int | None = None,
+    oversized_warning: str = "jsonl_file_oversized",
+) -> tuple[list[Event], list[str]]:
     events: list[Event] = []; warnings: list[str] = []
-    try: lines = Path(path).read_text(encoding="utf-8").splitlines()
+    try:
+        with Path(path).open("rb") as source:
+            raw = source.read() if max_bytes is None else source.read(max_bytes)
+            if max_bytes is not None and source.read(1):
+                return events, [oversized_warning]
+        lines = raw.decode("utf-8").splitlines()
     except OSError: return events, ["jsonl_file_unavailable"]
     for index, line in enumerate(lines, 1):
         try: events.append(Event.from_dict(json.loads(line)))
