@@ -451,6 +451,14 @@ def _average(values: Iterable[float]) -> float:
     return round(sum(values) / len(values), 4) if values else 0.0
 
 
+def _observed_or_default(value: float | int | None, default: float) -> float:
+    """An explicitly observed zero is real evidence and must never be
+    replaced by ``default`` -- only a genuinely missing (``None``) value
+    falls back. A bare ``value or default`` would treat 0 as falsy and
+    silently substitute default for a confirmed zero."""
+    return value if value is not None else default
+
+
 def _phrases(records: Iterable[ConsumerAttentionEvidence], field_name: str) -> tuple[str, ...]:
     values = []
     for record in records:
@@ -498,7 +506,17 @@ def score_candidate(
         return ConsumerAttentionScore(candidate_id, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "reject_low_attention", {}, ("no_consumer_attention_evidence",), voice_of_customer=VoiceOfCustomerEvidence())
     growth = _average(bounded(item.search_growth_signal) for item in evidence if item.search_growth_signal is not None)
     search = _average([bounded(item.search_growth_signal) for item in evidence if item.keyword or item.search_growth_signal is not None])
-    engagement = _average(min(1.0, ((item.engagement_count or (item.like_count or 0) + (item.comment_count or 0) + (item.share_count or 0)) / max(1, item.view_count or 10000)) * 10) for item in evidence)
+    engagement = _average(
+        min(
+            1.0,
+            (
+                _observed_or_default(item.engagement_count, (item.like_count or 0) + (item.comment_count or 0) + (item.share_count or 0))
+                / max(1, _observed_or_default(item.view_count, 10000))
+            )
+            * 10,
+        )
+        for item in evidence
+    )
     ad = _average(1.0 if item.ad_active_signal else 0.0 for item in evidence)
     reviews = _average(min(1.0, (item.review_count or 0) / 1000) for item in evidence if item.review_count is not None)
     voc = _average(min(1.0, ((item.review_count or 0) + (item.comment_count or 0)) / 500) for item in evidence)
@@ -538,7 +556,7 @@ def score_candidate(
     else:
         recommendation = "expand_consumer_research"
     contributions = {"search_demand_signal": search, "trend_growth_signal": growth, "social_engagement_signal": engagement, "ad_activity_signal": ad, "review_density_signal": reviews, "voice_of_customer_quality": voc, "pain_point_clarity": pains, "objection_density": objections, "creative_hook_diversity": hooks, "ugc_scriptability": ugc, "visual_demo_potential": visual, "intent_strength": intent, "source_diversity": diversity, "attention_saturation_risk": saturation}
-    ads = tuple(AdSignalEvidence(item.ad_platform or item.platform, item.ad_active_signal, item.creative_format or item.format, item.creator_style, bounded(((item.engagement_count or 0) / max(1, item.view_count or 10000)) * 10), item.source_confidence) for item in evidence if item.ad_active_signal or item.ad_platform)
+    ads = tuple(AdSignalEvidence(item.ad_platform or item.platform, item.ad_active_signal, item.creative_format or item.format, item.creator_style, bounded(((item.engagement_count or 0) / max(1, _observed_or_default(item.view_count, 10000))) * 10), item.source_confidence) for item in evidence if item.ad_active_signal or item.ad_platform)
     searches = tuple(SearchTrendEvidence(item.keyword or item.query, bounded(item.search_growth_signal), item.keyword_intent, item.trend_label, item.source_confidence) for item in evidence if item.keyword or item.search_growth_signal is not None)
     reviews_mined = tuple(ReviewMiningEvidence(item.review_count or 0, item.rating, item.sentiment_label, (item.pain_point,) if item.pain_point else (), (item.objection,) if item.objection else ()) for item in evidence if item.review_count or item.pain_point or item.objection)
     hook_items = tuple(CreativeHookEvidence(hook, next((name for name, keywords in ANGLE_RULES if any(keyword in hook.lower() for keyword in keywords)), "problem_solution"), sum(1 for item in evidence if item.hook == hook), confidence) for hook in creative["top_hooks"])

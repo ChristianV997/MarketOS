@@ -180,6 +180,30 @@ def test_quality_blocker_overrides_attractive_attention_score():
     assert "conflicting_consumer_observations" in score.reasons
 
 
+def test_explicit_zero_engagement_count_is_not_replaced_by_a_derived_sum():
+    """A caller who confirmed zero direct engagement events must get a low
+    social_engagement_signal -- not the same score as an unknown
+    engagement_count, which falls back to a like/comment/share proxy."""
+    common = dict(candidate_id="c1", query="q", source="s", source_type="fixture_demo", view_count=1000, like_count=500, comment_count=200, share_count=100)
+    zero = ConsumerAttentionEvidence(**common, engagement_count=0)
+    missing = ConsumerAttentionEvidence(**common)
+    zero_score = score_candidate("c1", [zero]).social_engagement_signal
+    missing_score = score_candidate("c1", [missing]).social_engagement_signal
+    assert zero_score == 0.0
+    assert missing_score > zero_score
+
+
+def test_explicit_zero_view_count_is_not_replaced_by_the_unknown_default():
+    """A caller who confirmed zero views (denominator max(1, 0) == 1) must
+    score differently from an unknown view_count (denominator 10000)."""
+    zero = ConsumerAttentionEvidence(candidate_id="c1", query="q", source="s", source_type="fixture_demo", engagement_count=50, view_count=0)
+    missing = ConsumerAttentionEvidence(candidate_id="c1", query="q", source="s", source_type="fixture_demo", engagement_count=50)
+    zero_score = score_candidate("c1", [zero]).social_engagement_signal
+    missing_score = score_candidate("c1", [missing]).social_engagement_signal
+    assert zero_score == 1.0
+    assert missing_score < zero_score
+
+
 def test_report_json_round_trip_is_deterministic():
     report = build_report([record()], evidence_mode="fixture_demo", as_of="2026-09-10T00:00:00Z").to_dict()
     first = json.dumps(report, sort_keys=True, separators=(",", ":"))
