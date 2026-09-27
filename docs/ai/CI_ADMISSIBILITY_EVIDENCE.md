@@ -102,7 +102,11 @@ metadata, and step evidence. The compatibility `MarketOS.CIEvidence.v1`
 adapter remains intentionally incomplete and is never upgraded by omission.
 Contradictory `logs_available`/`log_status` values, pending records with a
 completed/failure required-check state, and completed checks without a
-conclusion are malformed rather than normalized optimistically.
+conclusion are malformed rather than normalized optimistically. Top-level
+`checks` records currently carry no run, workflow, attempt, or candidate
+identity fields. A successful required check is therefore classified as
+`unbound_check_metadata` and cannot make the report admissible; only the
+identity-bound job record can attest to the candidate workflow execution.
 
 `log_status` is metadata, not a log payload:
 

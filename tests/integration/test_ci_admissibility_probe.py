@@ -62,6 +62,45 @@ def test_schema_and_success_require_bound_workflow_execution():
     assert result["admissible_evidence"] is True
 
 
+def test_unbound_required_check_cannot_admit_bound_job_from_another_run():
+    """A check without accepted identity fields cannot attest to run 42."""
+    data = payload()
+    data["checks"] = [
+        {
+            "name": "test",
+            "kind": "ci",
+            "status": "completed",
+            "conclusion": "success",
+        }
+    ]
+
+    result = report(data)
+
+    assert result["classification"] == "ci_unavailable"
+    assert result["admissible_evidence"] is False
+    assert result["required_checks"] == [
+        {
+            "classification": "unbound_check_metadata",
+            "conclusion": "success",
+            "identity_classification": "unbound",
+            "name": "test",
+            "status": "completed",
+        }
+    ]
+    assert result["diagnostic_state"] == "unbound_check_metadata"
+
+
+def test_job_run_mismatch_is_rejected_even_when_workflow_is_successful():
+    data = payload()
+    data["jobs"][0]["run_id"] = 43
+
+    result = report(data)
+
+    assert result["classification"] == "ci_unavailable"
+    assert result["jobs"][0]["identity_classification"] == "stale_job_metadata"
+    assert result["admissible_evidence"] is False
+
+
 def test_fixture_catalog_covers_required_admissibility_states():
     catalog = fixture("state_catalog.json")
     names = {item["name"] for item in catalog["cases"]}

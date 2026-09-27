@@ -420,7 +420,18 @@ def _normalize_check(value: Any) -> dict[str, Any]:
     redacted = False
     if value.get("url") is not None:
         url, redacted = _redact_url(value["url"])
-    return {"name": name, "kind": kind, "status": status, "conclusion": conclusion, "url": url, "url_redacted": redacted}
+    # The current check schema has no run, workflow, attempt, or candidate
+    # identity fields. Keep that limitation explicit so a successful check
+    # cannot be mistaken for evidence from the bound workflow run.
+    return {
+        "name": name,
+        "kind": kind,
+        "status": status,
+        "conclusion": conclusion,
+        "url": url,
+        "url_redacted": redacted,
+        "identity_classification": "unbound",
+    }
 
 
 def _adapt_canonical(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -691,13 +702,14 @@ def _overall_projection(data: Mapping[str, Any]) -> dict[str, Any]:
         elif check["conclusion"] != "success":
             check_classification = "executed_failure"
         else:
-            check_classification = "pass"
+            check_classification = "unbound_check_metadata"
         required_check_projections.append(
             {
                 "name": check["name"],
                 "status": check["status"],
                 "conclusion": check["conclusion"],
                 "classification": check_classification,
+                "identity_classification": check["identity_classification"],
             }
         )
         if check_classification != "pass":
@@ -717,7 +729,7 @@ def _overall_projection(data: Mapping[str, Any]) -> dict[str, Any]:
         classification, status, reason = "timed_out", "timed_out", "required_ci_job_timed_out"
     elif any(item == "pending" for item in required_states):
         classification, status, reason = "pending", "pending", "required_ci_job_not_complete"
-    elif any(item in {"zero_step_runnerless", "incomplete_steps", "unavailable_logs", "required_job_missing", "stale_metadata", "missing_workflow_context", "stale_worktree_metadata", "workflow_never_created", "non_ci_workflow"} for item in required_states) or context != "complete_workflow_context" or missing:
+    elif any(item in {"zero_step_runnerless", "incomplete_steps", "unavailable_logs", "required_job_missing", "stale_metadata", "missing_workflow_context", "stale_worktree_metadata", "workflow_never_created", "non_ci_workflow", "unbound_check_metadata"} for item in required_states) or context != "complete_workflow_context" or missing:
         classification, status, reason = "ci_unavailable", "unavailable", "required_ci_evidence_not_admissible"
     elif required and all(item == "pass" for item in required_states) and workflow.get("conclusion") == "success":
         classification, status, reason = "pass", "passed", "all_required_ci_jobs_executed"
