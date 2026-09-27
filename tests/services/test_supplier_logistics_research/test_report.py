@@ -63,7 +63,44 @@ class TestConflictingAndStaleEvidence:
         offer = offer_factory("goods_offer_conflicting_customs.json")
         report = build_supplier_logistics_report(offer, generated_at=GENERATED_AT)
         scenarios = {s.scenario_id: s.result for s in report.landed_cost_scenarios}
-        assert scenarios["worst_case"].duty.amount >= scenarios["best_case"].duty.amount
+        # Strict, not >=: this fixture's customs evidence quality is
+        # "conflicting", which must actually move between scenarios (see
+        # test_conflicting_evidence_is_not_silently_excluded_from_sensitivity
+        # below for the regression this guards against).
+        assert scenarios["worst_case"].duty.amount > scenarios["best_case"].duty.amount
+
+    def test_conflicting_evidence_is_not_silently_excluded_from_sensitivity(self, offer_factory):
+        """Regression guard: _UNCERTAIN_QUALITIES must include "conflicting"
+        (and "stale"), not just "manual"/"fixture". _QUALITY_SEVERITY scores
+        "conflicting"/"stale" as *higher* risk than "manual"/"fixture", so a
+        landed-cost scenario that fails to perturb them would silently show
+        identical best-case/worst-case numbers for evidence the risk matrix
+        itself flags as worse than a plain manual claim."""
+        offer = offer_factory("goods_offer_conflicting_customs.json")
+        report = build_supplier_logistics_report(offer, generated_at=GENERATED_AT)
+        customs_entry = next(e for e in report.risk_matrix if e.category == "customs_duty_tax")
+        assert customs_entry.evidence.quality == "conflicting"
+        scenarios = {s.scenario_id: s.result for s in report.landed_cost_scenarios}
+        assert scenarios["base"].duty.amount != scenarios["best_case"].duty.amount
+        assert scenarios["base"].duty.amount != scenarios["worst_case"].duty.amount
+
+    def test_stale_evidence_also_produces_a_moving_sensitivity_range(self, offer_factory):
+        offer = offer_factory("goods_offer_stale_customs.json")
+        report = build_supplier_logistics_report(offer, generated_at=GENERATED_AT)
+        customs_entry = next(e for e in report.risk_matrix if e.category == "customs_duty_tax")
+        assert customs_entry.evidence.quality == "stale"
+        scenarios = {s.scenario_id: s.result for s in report.landed_cost_scenarios}
+        assert scenarios["worst_case"].duty.amount > scenarios["best_case"].duty.amount
+
+    def test_genuinely_verified_observed_customs_evidence_never_moves(self, offer_factory):
+        """Regression guard: the fix above must not over-correct. A
+        confirmed, verified "observed" duty rate is not in
+        _UNCERTAIN_QUALITIES and must stay identical across all three
+        scenarios, same as before this fix."""
+        offer = offer_factory("goods_offer_observed.json")
+        report = build_supplier_logistics_report(offer, generated_at=GENERATED_AT)
+        scenarios = {s.scenario_id: s.result for s in report.landed_cost_scenarios}
+        assert scenarios["base"].duty.amount == scenarios["best_case"].duty.amount == scenarios["worst_case"].duty.amount
 
 
 class TestServiceOfferReport:

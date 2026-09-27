@@ -41,8 +41,13 @@ _SCENARIO_IDS = ("base", "best_case", "worst_case")
 # Only a value whose own evidence quality is already uncertain is subject
 # to sensitivity analysis; "observed" (confirmed) values never move, and a
 # missing value (None) never moves either -- it stays missing in every
-# scenario rather than being invented for a best/worst case.
-_UNCERTAIN_QUALITIES = frozenset({"manual", "fixture"})
+# scenario rather than being invented for a best/worst case. "stale" and
+# "conflicting" are both known-but-uncertain in exactly the same sense as
+# "manual"/"fixture" (a number exists; the evidence behind it is what's in
+# question) -- and _QUALITY_SEVERITY already scores them as a *higher*
+# risk than "manual"/"fixture", so excluding them here would silently
+# understate the very uncertainty the risk matrix flags as worse.
+_UNCERTAIN_QUALITIES = frozenset({"manual", "fixture", "stale", "conflicting"})
 _PERTURBATION = Decimal("0.15")
 
 _QUALITY_SEVERITY = {
