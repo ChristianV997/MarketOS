@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from scripts.ai import execution_bundle as bundle
-from scripts.ai.operator_task_packet import validate_packet
+from scripts.ai.operator_task_packet import ResumePacketError, build_resume_packet, validate_packet
 
 SNAPSHOT = {
     "schema": "MarketOS.AIContext.v1",
@@ -356,3 +356,212 @@ def test_pr_check_rejects_missing_pr_reference():
     result = bundle.pr_check(packet, pr_reference="", pr_changed_files=["scripts/ai/execution_bundle.py"])
     assert result["valid"] is False
     assert result["reason"] == "missing_pr_reference"
+
+
+# ---------------------------------------------------------------------------
+# resume -- the production consumer of validate_resume_packet()'s root-aware
+# filesystem containment. Before this phase existed, that containment check
+# (operator_task_packet._assert_filesystem_contained, wired via
+# validate_resume_packet's root= parameter) was reachable only by a caller
+# that happened to pass root explicitly -- nothing in this bundle, the one
+# module that actually produces MarketOS.AIResume.v1 packets via handoff(),
+# ever consumed one back. These tests exercise resume() directly (against a
+# real on-disk worktree, never a mocked filesystem); the true end-to-end
+# snapshot -> prepare -> execute -> handoff -> resume chain is covered
+# separately in tests/ai/test_ai_development_loop_e2e.py.
+# ---------------------------------------------------------------------------
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is not permitted on this platform/filesystem")
+
+
+def _resume_task_packet(tmp_path: Path, *, allowed_scope: str = "scope") -> dict:
+    return validate_packet(_task_packet(allowed_scope=[allowed_scope], worktree=str(tmp_path)))
+
+
+def _resume_packet(task_packet: dict, changed_files: list[str], **overrides) -> dict:
+    kwargs = dict(
+        context_snapshot_replay_hash="deadbeef" * 8,
+        worktree=task_packet["worktree"],
+        branch="claude/ai-chat-execution-bundle-and-resume-v5",
+        head_sha=task_packet["base_sha"],
+        base_sha=task_packet["base_sha"],
+        changed_files=changed_files,
+        tests_already_run=[],
+        tests_still_required=[],
+        open_blockers=[],
+        pending_decisions=[],
+        public_sources_inspected=[],
+        claims_not_yet_proven=[],
+        next_action="continue",
+    )
+    kwargs.update(overrides)
+    return build_resume_packet(task_packet, **kwargs)
+
+
+def test_resume_accepts_a_legitimate_in_root_in_scope_packet(tmp_path: Path):
+    (tmp_path / "scope").mkdir()
+    (tmp_path / "scope" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    task_packet = _resume_task_packet(tmp_path)
+    resume_packet = _resume_packet(task_packet, ["scope/a.py"])
+    result = bundle.resume(tmp_path, resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+    assert result["phase"] == "resume"
+    assert result["stale"] is False
+    assert result["resume"] == resume_packet
+
+
+def test_resume_rejects_root_none_it_can_never_silently_fall_back_to():
+    """root has no default and is never optional -- there is no call shape
+    that reaches validate_resume_packet with root=None through this
+    function, which is the whole point of this phase existing."""
+    task_packet = validate_packet(_task_packet())
+    resume_packet = _resume_packet(task_packet, ["scripts/ai/execution_bundle.py"])
+    with pytest.raises(bundle.ExecutionBundleError, match="Path root"):
+        bundle.resume(None, resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+
+def test_resume_rejects_missing_root(tmp_path: Path):
+    task_packet = _resume_task_packet(tmp_path)
+    (tmp_path / "scope").mkdir()
+    resume_packet = _resume_packet(task_packet, ["scope/a.py"])
+    with pytest.raises(ResumePacketError, match="does not exist"):
+        bundle.resume(tmp_path / "does-not-exist", resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+
+def test_resume_rejects_a_str_root_instead_of_path(tmp_path: Path):
+    """The PR description for this lane claims a str-instead-of-Path root
+    is one of the adversarial cases reproduced against this entrypoint,
+    but no test exercised it until now -- only root=None and a
+    nonexistent-but-genuine Path were covered. resume()'s own
+    isinstance(root, Path) check (never packet-supplied or unvalidated)
+    must reject a bare string before it ever reaches
+    validate_resume_packet/_assert_filesystem_contained, both of which
+    call .resolve() and would instead raise a raw, unhelpful AttributeError
+    on a str (no .resolve() method) rather than this module's own
+    ExecutionBundleError."""
+    (tmp_path / "scope").mkdir()
+    (tmp_path / "scope" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    task_packet = _resume_task_packet(tmp_path)
+    resume_packet = _resume_packet(task_packet, ["scope/a.py"])
+    with pytest.raises(bundle.ExecutionBundleError, match="Path root"):
+        bundle.resume(str(tmp_path), resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+
+def test_resume_rejects_path_traversal_in_changed_files(tmp_path: Path):
+    """A genuine resume packet cannot be *built* with a traversal entry
+    (build_resume_packet already rejects it) -- the threat this tests is a
+    hand-crafted/tampered packet loaded from disk with the traversal
+    smuggled in after the fact, exactly as a real resumed session would
+    encounter one."""
+    (tmp_path / "scope").mkdir()
+    (tmp_path / "scope" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    task_packet = _resume_task_packet(tmp_path)
+    resume_packet = dict(_resume_packet(task_packet, ["scope/a.py"]), changed_files=["../outside.py"])
+    with pytest.raises(ResumePacketError):
+        bundle.resume(tmp_path, resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+
+def test_resume_rejects_absolute_and_drive_letter_paths(tmp_path: Path):
+    (tmp_path / "scope").mkdir()
+    (tmp_path / "scope" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    task_packet = _resume_task_packet(tmp_path)
+    for bad_path in ("/etc/passwd", "C:/Windows/System32/evil.dll"):
+        resume_packet = dict(_resume_packet(task_packet, ["scope/a.py"]), changed_files=[bad_path])
+        with pytest.raises(ResumePacketError):
+            bundle.resume(tmp_path, resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+
+def test_resume_rejects_a_lexically_in_scope_but_out_of_scope_path(tmp_path: Path):
+    """allowed_scope=["scope"] must never admit a sibling directory that
+    merely shares the string prefix ("scope_evil") -- the same
+    prefix-confusion property _in_scope already guarantees, exercised here
+    at the resume() entrypoint rather than the helper directly."""
+    (tmp_path / "scope_evil").mkdir()
+    (tmp_path / "scope_evil" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    task_packet = _resume_task_packet(tmp_path, allowed_scope="scope")
+    resume_packet = _resume_packet(task_packet, ["scope_evil/a.py"])
+    with pytest.raises(ResumePacketError):
+        bundle.resume(tmp_path, resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+
+def test_resume_rejects_a_symlink_escaping_the_root(tmp_path: Path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-secret.py"
+    outside.write_text("secret\n", encoding="utf-8")
+    (tmp_path / "scope").mkdir()
+    link = tmp_path / "scope" / "evil.py"
+    _symlink_or_skip(link, outside)
+    task_packet = _resume_task_packet(tmp_path)
+    resume_packet = _resume_packet(task_packet, ["scope/evil.py"])
+    with pytest.raises(ResumePacketError, match="escapes the worktree root"):
+        bundle.resume(tmp_path, resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+
+def test_resume_rejects_an_in_root_symlink_that_escapes_allowed_scope(tmp_path: Path):
+    (tmp_path / "scope").mkdir()
+    (tmp_path / "other").mkdir()
+    (tmp_path / "other" / "b.py").write_text("y = 2\n", encoding="utf-8")
+    link = tmp_path / "scope" / "b.py"
+    _symlink_or_skip(link, tmp_path / "other" / "b.py")
+    task_packet = _resume_task_packet(tmp_path)
+    resume_packet = _resume_packet(task_packet, ["scope/b.py"])
+    with pytest.raises(ResumePacketError):
+        bundle.resume(tmp_path, resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+
+def test_resume_rejects_malformed_changed_files(tmp_path: Path):
+    task_packet = _resume_task_packet(tmp_path)
+    (tmp_path / "scope").mkdir()
+    resume_packet = dict(_resume_packet(task_packet, ["scope/a.py"]), changed_files="scope/a.py")
+    with pytest.raises(ResumePacketError, match="must be a list"):
+        bundle.resume(tmp_path, resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+
+
+def test_resume_rejects_a_stale_head_sha(tmp_path: Path):
+    """build_resume_packet's own current_head_sha comparison is
+    warning-only (correct at build time); resume() must escalate a
+    mismatch between the packet's recorded head_sha and the caller's live
+    HEAD into a hard rejection, since continuing work against a
+    provably-stale snapshot at the point of actually resuming is not
+    merely worth a warning."""
+    (tmp_path / "scope").mkdir()
+    (tmp_path / "scope" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    task_packet = _resume_task_packet(tmp_path)
+    resume_packet = _resume_packet(task_packet, ["scope/a.py"])
+    with pytest.raises(ResumePacketError, match="head_sha"):
+        bundle.resume(tmp_path, resume_packet, expected_task_packet=task_packet, current_head_sha="f" * 40)
+
+
+def test_resume_head_sha_comparison_is_case_insensitive(tmp_path: Path):
+    """A resume packet loaded from disk is not guaranteed to have kept
+    build_resume_packet's own lowercasing (validate_resume_packet never
+    mutates/re-normalizes a loaded packet's casing) -- a real, matching
+    live HEAD must not be rejected as "stale" purely because the stored
+    head_sha happens to be uppercase."""
+    (tmp_path / "scope").mkdir()
+    (tmp_path / "scope" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    task_packet = _resume_task_packet(tmp_path)
+    resume_packet = dict(_resume_packet(task_packet, ["scope/a.py"]), head_sha=task_packet["base_sha"].upper())
+    result = bundle.resume(tmp_path, resume_packet, expected_task_packet=task_packet, current_head_sha=task_packet["base_sha"])
+    assert result["stale"] is False
+
+
+def test_resume_rejects_changed_identity_or_lane():
+    task_packet = validate_packet(_task_packet())
+    resume_packet = _resume_packet(task_packet, ["scripts/ai/execution_bundle.py"])
+    hijacked = dict(task_packet, agent_id="a-different-agent")
+    with pytest.raises(ResumePacketError, match="ownership"):
+        bundle.resume(Path(task_packet["worktree"]), resume_packet, expected_task_packet=hijacked, current_head_sha=task_packet["base_sha"])
+
+
+def test_resume_rejects_widened_scope_via_task_packet_digest_mismatch(tmp_path: Path):
+    task_packet = _resume_task_packet(tmp_path)
+    (tmp_path / "scope").mkdir()
+    (tmp_path / "scope" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    resume_packet = _resume_packet(task_packet, ["scope/a.py"])
+    widened = dict(task_packet, allowed_scope=[*task_packet["allowed_scope"], "backend/"])
+    with pytest.raises(ResumePacketError, match="digest"):
+        bundle.resume(tmp_path, resume_packet, expected_task_packet=widened, current_head_sha=task_packet["base_sha"])
