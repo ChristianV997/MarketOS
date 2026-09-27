@@ -135,3 +135,13 @@ def test_empty_input_is_unavailable_and_deterministic() -> None:
     assert result.human_review["required"] is True
     assert "no component reports supplied" in result.limitations
     assert result.report_ids == []
+
+
+def test_synthesis_rejects_mixed_workspaces():
+    reports = [
+        {"report_id": "report-ws-1", "fingerprint": "fp-1", "service": "offers", "workspace_id": "workspace-1", "status": "completed", "facts": {}},
+        {"report_id": "report-ws-2", "fingerprint": "fp-2", "service": "engagement", "workspace_id": "workspace-2", "status": "completed", "facts": {}},
+    ]
+
+    with pytest.raises(PortfolioInputError, match="workspace mismatch"):
+        synthesize_portfolio(reports)

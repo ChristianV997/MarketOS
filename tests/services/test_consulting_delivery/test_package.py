@@ -245,3 +245,21 @@ def test_client_export_rechecks_mutable_nested_metadata():
 
     with pytest.raises(ValueError, match="workspace_isolation_violation"):
         pkg.as_deliverable_package()
+
+
+def test_client_export_enforces_size_bound_after_mutation():
+    pkg = build_consulting_delivery(
+        workspace_id="ws_123",
+        package_id="pkg_oversized_after_mutation",
+        title="Review Test",
+        objective="Must be reviewed",
+        executive_summary="",
+        metadata={},
+        sections=[DeliverableSection("s1", "section", 1, "small")],
+    )
+    pkg.sections[0].content_markdown = "X" * 600_000
+
+    with pytest.raises(ValueError, match="bounded_output_exceeded"):
+        pkg.to_dict()
+    with pytest.raises(ValueError, match="bounded_output_exceeded"):
+        pkg.as_deliverable_package()

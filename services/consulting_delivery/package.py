@@ -9,6 +9,8 @@ from typing import Any, Mapping
 from backend.deliverables.package import DeliverableArtifact, DeliverablePackage, DeliverableSection
 from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
 
+MAX_CLIENT_DELIVERY_BYTES = 500 * 1024
+
 # Allowed keys in the finalized consulting deliverable metadata
 ALLOWED_CONSULTING_KEYS = frozenset({
     "evidence_matrix",
@@ -108,6 +110,8 @@ class ConsultingDeliveryPackage:
         }
         if check_workspace_leakage(structured_metadata, client_safe=True):
             raise ValueError("workspace_isolation_violation")
+        if len(json.dumps(payload).encode("utf-8")) > MAX_CLIENT_DELIVERY_BYTES:
+            raise ValueError("bounded_output_exceeded: Generated deliverable exceeds 500KB size limit.")
         return payload
 
     def compute_fingerprint(self) -> str:

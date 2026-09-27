@@ -8,7 +8,7 @@ from backend.organization.report_registry import get_report_registry
 from backend.deliverables.registry import get_deliverable_registry
 from backend.deliverables.package import DeliverableSection
 
-from .package import build_consulting_delivery, ConsultingDeliveryPackage
+from .package import MAX_CLIENT_DELIVERY_BYTES, build_consulting_delivery, ConsultingDeliveryPackage
 
 
 def package_consulting_deliverable(
@@ -83,8 +83,8 @@ def package_consulting_deliverable(
     # Enforce bounded output directly on the structure
     # Hard bounds on payload to avoid massive uncontrolled deliverables
     pkg_dict = pkg.to_dict()
-    payload_size = len(json.dumps(pkg_dict))
-    if payload_size > 1024 * 500: # 500 KB limit
+    payload_size = len(json.dumps(pkg_dict).encode("utf-8"))
+    if payload_size > MAX_CLIENT_DELIVERY_BYTES: # 500 KB limit
         raise ValueError("bounded_output_exceeded: Generated deliverable exceeds 500KB size limit.")
 
     # Register output to deliverable registry

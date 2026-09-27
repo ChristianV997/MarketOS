@@ -94,6 +94,13 @@ def _normalize_report(report: Mapping[str, Any], workspace_id: str | None) -> di
     capabilities = report.get("capabilities", {})
     if not isinstance(capabilities, Mapping):
         raise ConsultingEvidenceInputError("invalid capabilities")
+    facts = report.get("facts", {})
+    if not isinstance(facts, Mapping):
+        raise ConsultingEvidenceInputError("invalid facts")
+    stale = report.get("stale", False)
+    conflicting = report.get("conflicting", False)
+    if not isinstance(stale, bool) or not isinstance(conflicting, bool):
+        raise ConsultingEvidenceInputError("invalid report evidence flags")
     return {
         "report_id": report_id,
         "fingerprint": fingerprint,
@@ -101,6 +108,10 @@ def _normalize_report(report: Mapping[str, Any], workspace_id: str | None) -> di
         "service_name": service_name,
         "status": status,
         "capabilities": capabilities,
+        "facts": facts,
+        "observed_at": _text(report.get("observed_at"), "observed_at", optional=True),
+        "stale": stale,
+        "conflicting": conflicting,
         "assumptions": _list_of_text(report.get("assumptions"), "assumptions"),
         "limitations": _list_of_text(report.get("limitations"), "limitations"),
     }
@@ -215,6 +226,8 @@ def build_evidence_register(
     normalized.sort(key=_report_sort_key)
     if normalized:
         workspace_id = workspace_id or normalized[0]["workspace_id"]
+        if any(report["workspace_id"] != workspace_id for report in normalized):
+            raise ConsultingEvidenceInputError("workspace mismatch")
     workspace_id = _text(workspace_id, "workspace_id")
     if not _WORKSPACE_ID.fullmatch(workspace_id):
         raise ConsultingEvidenceInputError("invalid workspace_id")
@@ -233,6 +246,13 @@ def build_evidence_register(
     for report in normalized:
         assumptions.update(report["assumptions"])
         limitations.update(report["limitations"])
+        if report["status"] != "completed":
+            gaps.add(f"{report['service_name']}:report_{report['status']}")
+        if report["stale"]:
+            limitations.add("stale evidence remains unresolved")
+            gaps.add(f"{report['service_name']}:stale_evidence")
+        if report["conflicting"]:
+            conflicts.add(f"{report['service_name']}:report")
         for area, raw in sorted(report["capabilities"].items(), key=lambda item: str(item[0])):
             area_name = _text(area, "capability area")
             if not isinstance(raw, Mapping):
@@ -248,10 +268,10 @@ def build_evidence_register(
             entry = {
                 "source_report_id": report["report_id"],
                 "source_fingerprint": report["fingerprint"],
-                "evidence_state": raw.get("freshness") or state,
+                "evidence_state": "stale" if report["stale"] else "conflict" if report["conflicting"] else raw.get("freshness") or state,
                 "facts": safe_facts,
                 "provenance": _list_of_text(raw.get("provenance"), "provenance"),
-                "observed_at": _text(raw.get("observed_at"), "observed_at", optional=True),
+                "observed_at": _text(raw.get("observed_at") or report["observed_at"], "observed_at", optional=True),
             }
             if raw.get("conflicts"):
                 entry["evidence_state"] = "conflict"
@@ -261,6 +281,18 @@ def build_evidence_register(
             evidence_by_area.setdefault(area_name, []).append(entry)
             for missing in _list_of_text(raw.get("missing"), "missing"):
                 gaps.add(f"{area_name}:{missing}")
+        for area, raw_facts in sorted(report["facts"].items(), key=lambda item: str(item[0])):
+            area_name = _text(area, "fact area")
+            evidence_by_area.setdefault(area_name, []).append({
+                "source_report_id": report["report_id"],
+                "source_fingerprint": report["fingerprint"],
+                "evidence_state": "stale" if report["stale"] else "conflict" if report["conflicting"] else "unknown",
+                "facts": _safe_value(raw_facts),
+                "provenance": [],
+                "observed_at": report["observed_at"],
+            })
+            capability_states.setdefault(area_name, "unknown")
+            gaps.add(area_name)
     for entries in evidence_by_area.values():
         entries.sort(key=lambda item: (item["source_report_id"], item["source_fingerprint"]))
     for report in normalized:

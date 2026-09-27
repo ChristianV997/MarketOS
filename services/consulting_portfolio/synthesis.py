@@ -192,6 +192,13 @@ def _normalize_reports(reports: Sequence[Mapping[str, Any]]) -> list[dict[str, A
         report_id = str(report.get("report_id", "")).strip()
         fingerprint = str(report.get("fingerprint", "")).strip()
         service = str(report.get("service", "")).strip()
+        raw_workspace_id = report.get("workspace_id")
+        if raw_workspace_id is None:
+            workspace_id = ""
+        elif not isinstance(raw_workspace_id, str) or not raw_workspace_id.strip():
+            raise PortfolioInputError(f"workspace_id is invalid for {report_id or 'report'}")
+        else:
+            workspace_id = raw_workspace_id.strip()
         if not report_id:
             raise PortfolioInputError("report_id is required")
         if report_id in seen:
@@ -210,12 +217,16 @@ def _normalize_reports(reports: Sequence[Mapping[str, Any]]) -> list[dict[str, A
             "report_id": report_id,
             "fingerprint": fingerprint,
             "service": service,
+            "workspace_id": workspace_id,
             "status": str(report.get("status", "unavailable")).strip().lower() or "unavailable",
             "observed_at": str(report.get("observed_at", "")),
             "stale": bool(report.get("stale", False)),
             "conflicting": bool(report.get("conflicting", False)),
             "facts": {str(key): value for key, value in facts.items()},
         })
+    workspace_ids = {item["workspace_id"] for item in normalized if item["workspace_id"]}
+    if len(workspace_ids) > 1 or (workspace_ids and any(not item["workspace_id"] for item in normalized)):
+        raise PortfolioInputError("workspace mismatch")
     return sorted(normalized, key=lambda item: item["report_id"])
 
 
