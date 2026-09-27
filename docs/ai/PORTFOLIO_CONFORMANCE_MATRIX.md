@@ -135,9 +135,13 @@ named with non-CI markers, cannot be marked required, are segregated into
 In-progress jobs cannot claim final logs are available.
 
 PR rows may also supply an authoritative `ci_report` (`MarketOS.CIAdmissibilityReport.v1`).
-Diagnostic fields in `ci_report` or internal projections cannot contradict
-authoritative classification, status, or admissibility (e.g. `diagnostic_state: "pass"`
-with `classification != "pass"` fails closed as malformed). Step lists are audited
+When supplied, `candidate_head_sha` and `target_head_sha` must match the PR `head_sha`,
+and `target_base_sha` must match `base_sha`. Diagnostic fields in `ci_report` or
+internal projections cannot contradict authoritative classification, status, or
+admissibility (e.g. `diagnostic_state: "pass"` with `classification != "pass"`, or a
+failing workflow conclusion alongside a claimed pass, fails closed as malformed).
+Any checks declared in PR-level `required_checks` that were omitted from `ci_report`
+required jobs are flagged as missing, forcing `ci_unavailable`. Step lists are audited
 for non-success outcomes: any incomplete or pending step forces the job to
 `incomplete_steps` / `pending`, preventing false passes even if an overarching
 conclusion claims success. Non-success workflow conclusions and failing required

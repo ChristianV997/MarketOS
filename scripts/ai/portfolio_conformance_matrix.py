@@ -412,7 +412,7 @@ def _normalize_check(value: Any) -> dict[str, Any]:
     return {"name": name, "kind": kind, "status": status, "conclusion": conclusion}
 
 
-def _normalize_ci_report(value: Any, expected_head_sha: str) -> dict[str, Any]:
+def _normalize_ci_report(value: Any, expected_head_sha: str, expected_base_sha: str | None = None) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise MatrixInputError("invalid_ci_report")
     _check_keys(
@@ -454,6 +454,12 @@ def _normalize_ci_report(value: Any, expected_head_sha: str) -> dict[str, Any]:
     candidate_head = value.get("candidate_head_sha")
     if candidate_head is not None and _sha(candidate_head, field="ci_report_candidate_head_sha") != expected_head_sha:
         raise MatrixInputError("ci_report_head_sha_mismatch")
+    target_head = value.get("target_head_sha")
+    if target_head is not None and _sha(target_head, field="ci_report_target_head_sha") != expected_head_sha:
+        raise MatrixInputError("ci_report_head_sha_mismatch")
+    target_base = value.get("target_base_sha")
+    if target_base is not None and expected_base_sha is not None and _sha(target_base, field="ci_report_target_base_sha") != expected_base_sha:
+        raise MatrixInputError("ci_report_base_sha_mismatch")
     classification = _text(value.get("classification"), field="ci_report_classification", limit=40)
     status = _text(value.get("status"), field="ci_report_status", limit=40)
     admissible = value.get("admissible_evidence")
@@ -473,6 +479,11 @@ def _normalize_ci_report(value: Any, expected_head_sha: str) -> dict[str, Any]:
         raise MatrixInputError("contradictory_ci_diagnostic_metadata")
     if classification == "pass" and (status != "passed" or admissible is not True):
         raise MatrixInputError("contradictory_ci_diagnostic_metadata")
+    workflow = value.get("workflow")
+    if isinstance(workflow, Mapping):
+        wf_conc = workflow.get("conclusion")
+        if isinstance(wf_conc, str) and wf_conc.lower() in {"failure", "failed", "cancelled", "startup_failure"} and classification == "pass":
+            raise MatrixInputError("contradictory_ci_diagnostic_metadata")
 
     return {
         "schema": schema,
@@ -527,7 +538,7 @@ def _normalize_pr(value: Any) -> dict[str, Any]:
     head_sha = _sha(value.get("head_sha"), field="head_sha")
     base_sha = _sha(value.get("base_sha"), field="base_sha")
 
-    ci_report = _normalize_ci_report(value["ci_report"], head_sha) if "ci_report" in value else None
+    ci_report = _normalize_ci_report(value["ci_report"], head_sha, base_sha) if "ci_report" in value else None
 
     raw_required = value.get("required_checks")
     if raw_required is None and ci_report is not None and ci_report.get("required_jobs"):
@@ -790,9 +801,72 @@ def _ci_projection(pr: Mapping[str, Any]) -> dict[str, Any]:
         status = report["status"]
         admissible = report["admissible_evidence"]
         diagnostic_state = report["diagnostic_state"]
-        diagnostic_states = report["diagnostic_states"]
-        missing = report["missing_required_jobs"]
-        required_checks = sorted(set(pr["required_checks"]) | set(report["required_jobs"]))
+        diagnostic_states = list(report["diagnostic_states"])
+        report_required = set(report.get("required_jobs", []))
+        pr_required = set(pr["required_checks"])
+        missing_from_report = pr_required - report_required
+        missing = sorted(set(report.get("missing_required_jobs", [])) | missing_from_report)
+        required_checks = sorted(pr_required | report_required)
+
+        workflow_conclusion = pr.get("workflow_conclusion")
+        if not workflow_conclusion and pr.get("workflow"):
+            workflow_conclusion = pr["workflow"].get("conclusion")
+
+        check_failures = False
+        check_timeouts = False
+        check_pending = False
+        for check in pr.get("checks", []):
+            if check.get("name") in required_checks and check.get("kind", "ci") == "ci":
+                c_status = check.get("status")
+                c_conc = check.get("conclusion")
+                if c_status in PENDING_STATUSES or c_conc in PENDING_STATUSES:
+                    check_pending = True
+                elif c_conc in {"failure", "failed", "cancelled"}:
+                    check_failures = True
+                elif c_conc == "timed_out":
+                    check_timeouts = True
+
+        if classification == "malformed":
+            pass
+        elif classification in {"executed_failure", "timed_out"} or check_failures or (workflow_conclusion in {"failure", "failed", "cancelled", "startup_failure"}):
+            classification = "executed_failure" if (classification == "executed_failure" or check_failures or (workflow_conclusion in {"failure", "failed", "cancelled", "startup_failure"})) else "timed_out"
+            status = "failed" if classification == "executed_failure" else "timed_out"
+            admissible = False
+        elif classification == "pending" or check_pending or (workflow_conclusion in PENDING_STATUSES):
+            classification = "pending"
+            status = "pending"
+            admissible = False
+        elif missing or (workflow_conclusion and workflow_conclusion != "success"):
+            classification = "ci_unavailable"
+            status = "unavailable"
+            admissible = False
+        elif classification == "pass":
+            classification = "pass"
+            status = "passed"
+            admissible = True
+        else:
+            classification = "ci_unavailable"
+            status = "unavailable"
+            admissible = False
+
+        if classification != "pass":
+            diagnostic_states = [s for s in diagnostic_states if s != "pass"]
+            for m in missing:
+                diagnostic_states.append(f"missing_required:{m}")
+            if workflow_conclusion and workflow_conclusion != "success":
+                diagnostic_states.append(f"workflow_{workflow_conclusion}")
+            if check_failures:
+                diagnostic_states.append("required_check_failure")
+            if check_timeouts:
+                diagnostic_states.append("required_check_timeout")
+            if check_pending:
+                diagnostic_states.append("required_check_pending")
+            diagnostic_states = sorted(set(diagnostic_states)) or [classification]
+            diagnostic_state = diagnostic_states[0] if len(diagnostic_states) == 1 else "mixed"
+        else:
+            diagnostic_state = "pass"
+            diagnostic_states = ["pass"]
+
         return {
             "classification": classification,
             "status": status,
