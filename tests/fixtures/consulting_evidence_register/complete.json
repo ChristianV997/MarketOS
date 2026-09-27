@@ -1,0 +1,42 @@
+[
+  {
+    "report_id": "report-demand",
+    "fingerprint": "fp-demand-001",
+    "workspace_id": "workspace_demo",
+    "service_name": "consumer_attention",
+    "status": "completed",
+    "capabilities": {
+      "demand": {
+        "state": "available",
+        "facts": {
+          "attention_signal": "observed interest in service buyers",
+          "audience": "independent operators"
+        },
+        "provenance": ["attention://fixture/service-buyers"],
+        "observed_at": "2026-09-20T00:00:00Z"
+      }
+    },
+    "assumptions": ["The fixture audience is representative only for offline review."],
+    "limitations": ["No live consumer contact or provider query was performed."]
+  },
+  {
+    "report_id": "report-supply",
+    "fingerprint": "fp-supply-001",
+    "workspace_id": "workspace_demo",
+    "service_name": "supplier_logistics",
+    "status": "completed",
+    "capabilities": {
+      "supply": {
+        "state": "available",
+        "facts": {
+          "lead_time_days": 14,
+          "supplier_evidence": "documented fixture quote"
+        },
+        "provenance": ["supplier://fixture/quote-001"],
+        "observed_at": "2026-09-21T00:00:00Z"
+      }
+    },
+    "assumptions": ["Supplier quote remains subject to human confirmation."],
+    "limitations": []
+  }
+]
