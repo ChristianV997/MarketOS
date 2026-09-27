@@ -16,6 +16,7 @@ import Services from "./pages/Services";
 import OperatorEventDashboard from "./pages/OperatorEventDashboard";
 import ServiceDeliveryWorkbench from "./pages/ServiceDeliveryWorkbench";
 import FirstPhaseEvidenceCockpitPage from "./pages/FirstPhaseEvidenceCockpit";
+import { MarketingStrategyPage } from "./features/marketing-strategy-workbench/MarketingStrategyPage";
 import { initPosthog } from "./lib/posthog";
 
 initPosthog(); // no-op unless VITE_POSTHOG_KEY is set — see lib/posthog.ts
@@ -38,6 +39,7 @@ const router = createBrowserRouter([
       { path: "/operator/events", element: <OperatorEventDashboard /> },
       { path: "/operator/services", element: <ServiceDeliveryWorkbench /> },
       { path: "/operator/first-phase", element: <FirstPhaseEvidenceCockpitPage /> },
+      { path: "/operator/marketing-strategy", element: <MarketingStrategyPage /> },
     ],
   },
 ]);

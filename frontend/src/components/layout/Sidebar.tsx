@@ -12,6 +12,7 @@ import {
   ListChecks,
   ClipboardList,
   Telescope,
+  Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SIDEBAR_NAV_ID, sidebarIsInert } from "./sidebarDrawer";
@@ -29,6 +30,7 @@ const NAV = [
   { to: "/operator/events", icon: ListChecks, label: "Operator Events" },
   { to: "/operator/services", icon: ClipboardList, label: "Service Workbench" },
   { to: "/operator/first-phase", icon: Telescope, label: "First-phase cockpit" },
+  { to: "/operator/marketing-strategy", icon: Megaphone, label: "Strategy plan" },
 ];
 
 export default function Sidebar({
