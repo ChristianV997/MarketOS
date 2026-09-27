@@ -12,20 +12,40 @@ from backend.adapters.research.cj_readonly_api import explain_cj_read_only_readi
 
 router = APIRouter(prefix="/api/events", tags=["canonical-events"])
 ROOT = Path(__file__).resolve().parents[2]; ARTIFACTS = (ROOT / "artifacts").resolve()
+# Operator JSONL bound: aligned with the workbench artifact window (1 MiB).
+MAX_JSONL_BYTES = 1_048_576
 
 def _query(workspace_id: str | None, event_type: str | None, aggregate_type: str | None, aggregate_id: str | None, limit: int, offset: int) -> EventQuery:
     return EventQuery(workspace_id, event_type, aggregate_type, aggregate_id, None, None, limit, offset)
+
+
+def _empty_jsonl_report(warning: str) -> dict:
+    return {
+        "timeline": {"events": [], "warnings": [warning]},
+        "commerce_runs": [], "shopify_imports": [], "opportunity_rankings": [], "competition_summaries": [],
+        "research_portfolios": [], "read_only": True, "network_calls": False, "mutated": False,
+    }
+
+
 def _jsonl_report(query: EventQuery) -> dict:
     configured = os.getenv("MARKETOS_EVENT_READ_JSONL_PATH", "")
     if not configured:
-        return {
-            "timeline": {"events": [], "warnings": ["jsonl_read_path_unconfigured"]},
-            "commerce_runs": [], "shopify_imports": [], "opportunity_rankings": [], "competition_summaries": [],
-            "research_portfolios": [], "read_only": True, "network_calls": False, "mutated": False,
-        }
-    path = Path(configured).resolve()
-    if ARTIFACTS not in path.parents: raise HTTPException(403, "configured JSONL read path must remain under artifacts/")
-    events, warnings = load_events_from_jsonl(path); return event_query_report(events, query, warnings)
+        return _empty_jsonl_report("jsonl_read_path_unconfigured")
+    try:
+        path = Path(configured).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return _empty_jsonl_report("jsonl_read_path_unconfigured")
+    if ARTIFACTS not in path.parents:
+        raise HTTPException(403, "configured JSONL read path must remain under artifacts/")
+    if not path.is_file():
+        return _empty_jsonl_report("jsonl_read_path_unconfigured")
+    try:
+        if path.stat().st_size > MAX_JSONL_BYTES:
+            return _empty_jsonl_report("jsonl_read_path_oversized")
+    except OSError:
+        return _empty_jsonl_report("jsonl_file_unavailable")
+    events, warnings = load_events_from_jsonl(path)
+    return event_query_report(events, query, warnings)
 def _report(source: str, query: EventQuery) -> dict:
     if source == "supabase_staging": return query_supabase_canonical_events(query)
     if source == "jsonl": return _jsonl_report(query)
