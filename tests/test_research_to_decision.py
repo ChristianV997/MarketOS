@@ -4,11 +4,24 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
-from scripts.research_to_decision import ResearchToDecisionError, build_research_to_decision, main
+import scripts.research_to_decision as rtd
+from scripts.research_to_decision import (
+    ResearchToDecisionError,
+    _open_verified_evidence_file,
+    _open_verified_evidence_file_windows,
+    _WIN32_FILE_ATTRIBUTE_DIRECTORY,
+    _WIN32_FILE_ATTRIBUTE_REPARSE_POINT,
+    _WIN32_INVALID_HANDLE_VALUE,
+    build_research_to_decision,
+    main,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -760,6 +773,44 @@ def test_document_digest_binding_rejects_path_traversal(tmp_path: Path) -> None:
         )
 
 
+def test_document_digest_binding_rejects_a_nul_byte_in_the_reference(tmp_path: Path) -> None:
+    """A NUL byte in document_evidence.reference must be rejected as a
+    clean ResearchToDecisionError, not surface an unhandled ValueError.
+    Path.resolve() raises ValueError("embedded null byte") deep inside
+    posixpath's realpath -- reproduced directly before this test existed.
+    Not a containment bypass (nothing is ever read), but an unhandled
+    exception breaks this module's fail-closed contract, which every
+    other rejection honors via ResearchToDecisionError."""
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    offer = _base_hydroponics_quote()
+    offer.update({"offer_id": "HYD-DOC-07", "supplier_sku": "HYD-DOC-07-SKU", "source_reference": "manual:evil\x00.pdf"})
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hyd-doc-7")
+    with pytest.raises(ResearchToDecisionError, match="safe reference"):
+        build_research_to_decision(
+            manifest,
+            base_dir=tmp_path,
+            supplier_evidence_root=evidence_root,
+            confirmed_supplier_document_evidence=[("HYD-DOC-07", "HYD-DOC-07-SKU", "manual:evil\x00.pdf", "0" * 64)],
+        )
+
+
+def test_supplier_input_path_rejects_a_nul_byte(tmp_path: Path) -> None:
+    """The same NUL-byte-crashes-Path.resolve() class of bug reproduced
+    via _resolve() directly (supplier_inputs.path), which shares _resolve
+    with document_evidence.reference and observation_inputs.path -- the
+    fix belongs in _resolve() itself, not only in the document-evidence
+    reference validator, since all three call sites share it."""
+    manifest = {
+        "captured_at": "2026-09-16T09:00:00-06:00",
+        "lane": dict(LANE),
+        "candidates": [{"candidate_id": "nul-byte-candidate"}],
+        "supplier_inputs": [{"path": "evil\x00.json"}],
+    }
+    with pytest.raises(ResearchToDecisionError, match="NUL byte"):
+        build_research_to_decision(manifest, base_dir=tmp_path)
+
+
 def _create_symlink_or_simulate(monkeypatch: pytest.MonkeyPatch, link: Path, target: Path) -> None:
     try:
         link.symlink_to(target)
@@ -812,6 +863,44 @@ def test_document_digest_binding_rejects_symlink_within_the_root(tmp_path: Path,
             base_dir=tmp_path,
             supplier_evidence_root=evidence_root,
             confirmed_supplier_document_evidence=[("HYD-DOC-04B", "HYD-DOC-04B-SKU", "manual:link.pdf", digest)],
+        )
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only; os.mkfifo does not exist on this platform")
+def test_document_digest_binding_rejects_a_named_pipe_without_hanging(tmp_path: Path) -> None:
+    """The FIFO-DoS closure has direct helper-level coverage
+    (``test_secure_open_rejects_a_named_pipe_without_hanging``), but that
+    alone does not prove the real caller ever reaches it, and the PR
+    description's claim of a live production-entrypoint FIFO reproduction
+    was previously untested at this level -- this closes that gap.
+
+    A FIFO placed statically at the reference path (as opposed to one
+    swapped in mid-race) is actually rejected one layer earlier than
+    ``_open_verified_evidence_file``'s O_NONBLOCK guard: ``_resolve()``
+    (called first, at line ~612) uses ``Path.is_file()``, a non-blocking
+    ``stat()``-based check that already reports False for a FIFO, so the
+    binding never reaches the open call at all for this static placement.
+    That earlier check is itself non-blocking (stat never blocks on a
+    FIFO; only an actual open()/read() against one with no writer does),
+    so the no-hang guarantee holds end to end -- just via a different,
+    earlier check than the FIFO-specific one. The O_NONBLOCK guard in
+    ``_open_verified_evidence_file`` remains real, load-bearing
+    defense-in-depth for the disclosed TOCTOU case: a file swapped for a
+    FIFO in the race window between ``_resolve()``'s check and the actual
+    open, which a static placement like this one cannot exercise."""
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    fifo = evidence_root / "hyd-quote.pdf"
+    os.mkfifo(fifo)
+    offer = _base_hydroponics_quote()
+    offer.update({"offer_id": "HYD-DOC-FIFO", "supplier_sku": "HYD-DOC-FIFO-SKU", "source_reference": "manual:hyd-quote.pdf"})
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hyd-doc-fifo")
+    with pytest.raises(ResearchToDecisionError, match="does not exist"):
+        build_research_to_decision(
+            manifest,
+            base_dir=tmp_path,
+            supplier_evidence_root=evidence_root,
+            confirmed_supplier_document_evidence=[("HYD-DOC-FIFO", "HYD-DOC-FIFO-SKU", "hyd-quote.pdf", "0" * 64)],
         )
 
 
@@ -973,3 +1062,418 @@ def test_document_digest_confirmation_omitted_reproduces_prior_behavior_exactly(
         manifest, base_dir=tmp_path, supplier_evidence_root=None, confirmed_supplier_document_evidence=()
     )
     assert report_without_new_params == report_with_empty_new_params
+
+
+# ---------------------------------------------------------------------------
+# Secure-read boundary: _open_verified_evidence_file (TOCTOU closure).
+#
+# These exercise the open-once/fstat-based read directly, distinct from the
+# path-level tests above (path traversal, root escape, reference matching).
+# The security question here is narrower and more concrete: once a path has
+# already been deemed safe to resolve, does the code that turns it into
+# hashed bytes ever perform a *separate* filesystem check-then-read against
+# the path string (the actual TOCTOU gap), or does it validate and read the
+# same open object throughout? No test here relies on real timing/sleeps --
+# each one proves the property deterministically, either by exercising the
+# real filesystem object type directly or by simulating "the earlier check
+# didn't catch it" and confirming the open-time guarantee still holds.
+# ---------------------------------------------------------------------------
+
+
+def test_secure_open_accepts_a_valid_in_root_regular_file(tmp_path: Path) -> None:
+    doc = tmp_path / "doc.pdf"
+    doc.write_bytes(b"genuine evidence bytes")
+    fd, file_stat = _open_verified_evidence_file(doc, label="x")
+    try:
+        assert file_stat.st_size == len(b"genuine evidence bytes")
+        assert os.read(fd, 1024) == b"genuine evidence bytes"
+    finally:
+        os.close(fd)
+
+
+def test_secure_open_rejects_a_symlinked_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "target.pdf"
+    target.write_bytes(b"data")
+    link = tmp_path / "link.pdf"
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError):
+        pytest.skip("this platform/runner cannot create symlinks (no Developer Mode / privilege)")
+    with pytest.raises(ResearchToDecisionError, match="symlink"):
+        _open_verified_evidence_file(link, label="x")
+
+
+def test_secure_open_rejects_a_directory() -> None:
+    # POSIX typically opens a directory descriptor and lets fstat reject it;
+    # Windows may deny os.open() before a descriptor is returned. Both paths
+    # must fail closed with the public domain error.
+    with pytest.raises(ResearchToDecisionError):
+        _open_verified_evidence_file(Path(__file__).resolve().parent, label="x")
+
+
+def test_secure_open_rejects_a_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(ResearchToDecisionError):
+        _open_verified_evidence_file(tmp_path / "does-not-exist.pdf", label="x")
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only; os.mkfifo does not exist on this platform")
+def test_secure_open_rejects_a_named_pipe_without_hanging(tmp_path: Path) -> None:
+    """Non-regular-file rejection must never block: a plain blocking
+    open() on a FIFO with no writer on the other end hangs forever, which
+    would itself be a denial-of-service the moment a caller placed a named
+    pipe inside the evidence root. This test times out (via pytest-timeout
+    if installed, or simply hangs the run and is visible in CI) rather
+    than silently passing if that regression is reintroduced -- it does
+    not itself use a sleep/timing race, it proves the call returns at
+    all."""
+    fifo = tmp_path / "pipe"
+    os.mkfifo(fifo)
+    with pytest.raises(ResearchToDecisionError, match="regular file"):
+        _open_verified_evidence_file(fifo, label="x")
+
+
+def test_secure_open_rejects_symlink_even_when_the_pre_open_walk_check_is_bypassed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deterministic proof that the open-time guarantee does not depend on
+    the caller's earlier walk-based symlink check having run correctly --
+    it is a second, independent layer. Simulates "the walk-check already
+    missed this" (e.g. because the file was replaced by a symlink in the
+    window between that check and this open) by monkeypatching
+    Path.is_symlink to always report False, then proving
+    _open_verified_evidence_file itself still refuses to follow the
+    symlink, via O_NOFOLLOW at open time."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("O_NOFOLLOW is POSIX-only -- on Windows this specific race is a disclosed, unfixed-by-stdlib limitation")
+    target = tmp_path / "target.pdf"
+    target.write_bytes(b"data")
+    link = tmp_path / "link.pdf"
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError):
+        pytest.skip("this platform/runner cannot create symlinks (no Developer Mode / privilege)")
+    monkeypatch.setattr(Path, "is_symlink", lambda self: False)
+    with pytest.raises(ResearchToDecisionError, match="symlink"):
+        _open_verified_evidence_file(link, label="x")
+
+
+def test_secure_open_without_o_nonblock_or_o_nofollow_still_reads_a_genuine_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Simulates the Windows code path on this (POSIX) test runner: with
+    O_NOFOLLOW/O_NONBLOCK unavailable, a genuine in-root regular file must
+    still open and read correctly -- the platform-specific denial
+    behavior only removes a guarantee, it must never break the ordinary
+    valid-file path."""
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    monkeypatch.delattr(os, "O_NONBLOCK", raising=False)
+    doc = tmp_path / "doc.pdf"
+    doc.write_bytes(b"still readable without the posix-only flags")
+    fd, file_stat = _open_verified_evidence_file(doc, label="x")
+    try:
+        assert os.read(fd, 1024) == b"still readable without the posix-only flags"
+    finally:
+        os.close(fd)
+
+
+def test_secure_open_without_o_nofollow_relies_solely_on_the_pre_open_walk_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Confirms the disclosed Windows limitation is real and precisely
+    scoped: with O_NOFOLLOW simulated unavailable, _open_verified_evidence_file
+    alone (i.e. without the caller's pre-open walk-check) does NOT reject a
+    symlink -- proving the walk-check in _supplier_document_evidence_bindings
+    is load-bearing on that platform, not redundant, and that this
+    function never silently claims a guarantee it cannot provide there."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("already running on a platform without O_NOFOLLOW; nothing to simulate")
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    target = tmp_path / "target.pdf"
+    target.write_bytes(b"data")
+    link = tmp_path / "link.pdf"
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError):
+        pytest.skip("this platform/runner cannot create symlinks (no Developer Mode / privilege)")
+    fd, file_stat = _open_verified_evidence_file(link, label="x")
+    os.close(fd)  # reaching here at all is the point: no guarantee without O_NOFOLLOW
+
+
+def test_document_digest_binding_rejects_a_symlinked_parent_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A symlinked *intermediate directory* on the path to the evidence
+    file -- distinct from the file itself being a symlink -- must also be
+    rejected by the per-component walk-check, which walks every path part
+    including intermediate directories, not just the final component."""
+    evidence_root = tmp_path / "evidence"
+    real_dir = evidence_root / "real_subdir"
+    real_dir.mkdir(parents=True)
+    real_file = real_dir / "quote.pdf"
+    real_file.write_bytes(_SYNTHETIC_QUOTE_BYTES)
+    digest = hashlib.sha256(_SYNTHETIC_QUOTE_BYTES).hexdigest()
+    linked_dir = evidence_root / "linked_subdir"
+    try:
+        linked_dir.symlink_to(real_dir, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        is_symlink = Path.is_symlink
+        monkeypatch.setattr(Path, "is_symlink", lambda path: path == linked_dir or is_symlink(path))
+    offer = _base_hydroponics_quote()
+    offer.update({"offer_id": "HYD-DOC-05", "supplier_sku": "HYD-DOC-05-SKU", "source_reference": "manual:linked_subdir/quote.pdf"})
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hyd-doc-5")
+    with pytest.raises(ResearchToDecisionError, match="symlink"):
+        build_research_to_decision(
+            manifest,
+            base_dir=tmp_path,
+            supplier_evidence_root=evidence_root,
+            confirmed_supplier_document_evidence=[("HYD-DOC-05", "HYD-DOC-05-SKU", "manual:linked_subdir/quote.pdf", digest)],
+        )
+
+
+def test_document_digest_binding_rejects_reference_pointing_at_a_directory(tmp_path: Path) -> None:
+    """A reference resolving to a directory rather than a file must be
+    rejected, not silently mishandled. _resolve()'s own is_file() check is
+    the first line of defense (raising "does not exist" for a directory,
+    since is_file() is False for one) -- _open_verified_evidence_file's
+    S_ISREG check is the deeper, race-closing layer for the case where a
+    regular file is swapped for a directory/non-regular node *after*
+    _resolve() looked at it (see the _open_verified_evidence_file-level
+    tests above for that property proven directly, without _resolve() in
+    the way)."""
+    evidence_root = tmp_path / "evidence"
+    as_dir = evidence_root / "not_a_file.pdf"
+    as_dir.mkdir(parents=True)
+    offer = _base_hydroponics_quote()
+    offer.update({"offer_id": "HYD-DOC-06", "supplier_sku": "HYD-DOC-06-SKU", "source_reference": "manual:not_a_file.pdf"})
+    manifest = _manual_quote_manifest(tmp_path, offer, candidate_id="hyd-doc-6")
+    with pytest.raises(ResearchToDecisionError, match="does not exist"):
+        build_research_to_decision(
+            manifest,
+            base_dir=tmp_path,
+            supplier_evidence_root=evidence_root,
+            confirmed_supplier_document_evidence=[("HYD-DOC-06", "HYD-DOC-06-SKU", "manual:not_a_file.pdf", "0" * 64)],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Windows secure-read path: _open_verified_evidence_file_windows.
+#
+# This sandbox is Linux; ``ctypes.WinDLL`` does not exist here at all, so the
+# real Win32 syscalls (CreateFileW, GetFileInformationByHandle, CloseHandle)
+# cannot be executed or verified by these tests, on this run, or in this
+# repository's CI (every workflow under .github/workflows/ runs on
+# ubuntu-latest only -- there is no Windows runner to fall back to). What
+# CAN be verified deterministically, and is verified below, is every line of
+# _open_verified_evidence_file_windows's own branching and descriptor-
+# ownership logic: the fake kernel32 installed via _win32_kernel32_dll (the
+# one seam that is genuinely Windows-only) drives that real Python function
+# body through each path, exactly as a real CreateFileW/GetFileInformation-
+# ByHandle response would. This is proof of the Python-level contract only
+# -- never sleep-based, never a substitute for real Windows CI execution.
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_win32_kernel32(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    create_file_result: int,
+    attributes: int = 0,
+    get_file_information_result: bool = True,
+) -> dict[str, list]:
+    calls: dict[str, list] = {"close_handle": [], "create_file": [], "get_file_information": []}
+
+    class _FakeKernel32:
+        def CreateFileW(self, *args: object) -> int:
+            calls["create_file"].append(args)
+            return create_file_result
+
+        def GetFileInformationByHandle(self, handle: int, info_ptr: object) -> bool:
+            calls["get_file_information"].append(handle)
+            if not get_file_information_result:
+                return False
+            info_ptr.contents.dwFileAttributes = attributes
+            return True
+
+        def CloseHandle(self, handle: int) -> bool:
+            calls["close_handle"].append(handle)
+            return True
+
+    monkeypatch.setattr(rtd, "_win32_kernel32_dll", lambda: _FakeKernel32())
+    return calls
+
+
+def _install_fake_msvcrt(monkeypatch: pytest.MonkeyPatch, *, open_osfhandle) -> None:
+    monkeypatch.setitem(sys.modules, "msvcrt", types.SimpleNamespace(open_osfhandle=open_osfhandle))
+
+
+_FAKE_WIN32_HANDLE = 4242
+
+
+def test_win32_open_accepts_a_valid_in_root_regular_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Success path: CreateFileW returns a handle, the fake's attributes
+    report neither a reparse point nor a directory, and the resulting fd
+    (wired here to a real POSIX fd over a real file, since the fake Win32
+    handle is only a sentinel int) reads the genuine bytes. CloseHandle
+    must never run once ownership has transferred to the fd -- a real
+    Windows double-close on the same handle is undefined behavior."""
+    doc = tmp_path / "doc.pdf"
+    doc.write_bytes(b"genuine windows-path evidence bytes")
+    real_fd_holder: dict[str, int] = {}
+
+    def fake_open_osfhandle(handle: int, flags: int) -> int:
+        assert handle == _FAKE_WIN32_HANDLE
+        assert flags & os.O_RDONLY == os.O_RDONLY
+        # Explicit binary mode must always be requested -- _open_osfhandle
+        # defaults to CRLF/Ctrl-Z text-mode translation without it, which
+        # would silently corrupt the hashed bytes of a genuine binary
+        # evidence file (see the O_BINARY comment at the call site).
+        assert flags & getattr(os, "O_BINARY", 0) == getattr(os, "O_BINARY", 0)
+        fd = os.open(doc, os.O_RDONLY)
+        real_fd_holder["fd"] = fd
+        return fd
+
+    calls = _install_fake_win32_kernel32(monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, attributes=0)
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=fake_open_osfhandle)
+    fd, file_stat = _open_verified_evidence_file_windows(doc, label="x")
+    try:
+        assert fd == real_fd_holder["fd"]
+        assert file_stat.st_size == len(b"genuine windows-path evidence bytes")
+        assert os.read(fd, 1024) == b"genuine windows-path evidence bytes"
+        assert calls["close_handle"] == []  # ownership transferred to the fd, not closed separately
+    finally:
+        os.close(fd)
+
+
+def test_win32_open_rejects_a_final_component_reparse_point(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Windows analogue of O_NOFOLLOW: CreateFileW with
+    FILE_FLAG_OPEN_REPARSE_POINT opens the reparse point itself rather
+    than following it, and GetFileInformationByHandle on that same handle
+    reports FILE_ATTRIBUTE_REPARSE_POINT -- this must be rejected before
+    msvcrt.open_osfhandle (i.e. before any read) ever runs, and the raw
+    handle must be closed since it never became an fd."""
+    doc = tmp_path / "link.pdf"
+    doc.write_bytes(b"placeholder")
+
+    def fake_open_osfhandle(*_args: object) -> int:
+        raise AssertionError("must not convert a rejected reparse-point handle to an fd")
+
+    calls = _install_fake_win32_kernel32(
+        monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, attributes=_WIN32_FILE_ATTRIBUTE_REPARSE_POINT
+    )
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=fake_open_osfhandle)
+    with pytest.raises(ResearchToDecisionError, match="symlink"):
+        _open_verified_evidence_file_windows(doc, label="x")
+    assert calls["close_handle"] == [_FAKE_WIN32_HANDLE]
+
+
+def test_win32_open_rejects_a_directory_reparse_point_junction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A junction (directory reparse point) reports both
+    FILE_ATTRIBUTE_REPARSE_POINT and FILE_ATTRIBUTE_DIRECTORY;
+    the reparse-point check runs first and must still reject it, with
+    the handle closed rather than leaked."""
+    calls = _install_fake_win32_kernel32(
+        monkeypatch,
+        create_file_result=_FAKE_WIN32_HANDLE,
+        attributes=_WIN32_FILE_ATTRIBUTE_REPARSE_POINT | _WIN32_FILE_ATTRIBUTE_DIRECTORY,
+    )
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=lambda *_a: (_ for _ in ()).throw(AssertionError("unreachable")))
+    with pytest.raises(ResearchToDecisionError, match="symlink"):
+        _open_verified_evidence_file_windows(tmp_path, label="x")
+    assert calls["close_handle"] == [_FAKE_WIN32_HANDLE]
+
+
+def test_win32_open_rejects_a_plain_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A directory that is not a reparse point (FILE_ATTRIBUTE_DIRECTORY
+    only) must also be rejected -- Windows has no S_ISREG-equivalent bit,
+    so "not a directory and not a reparse point" is the closest same-
+    handle approximation of "regular file" available."""
+    calls = _install_fake_win32_kernel32(monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, attributes=_WIN32_FILE_ATTRIBUTE_DIRECTORY)
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=lambda *_a: (_ for _ in ()).throw(AssertionError("unreachable")))
+    with pytest.raises(ResearchToDecisionError, match="regular file"):
+        _open_verified_evidence_file_windows(tmp_path, label="x")
+    assert calls["close_handle"] == [_FAKE_WIN32_HANDLE]
+
+
+def test_win32_open_rejects_when_create_file_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CreateFileW itself returning INVALID_HANDLE_VALUE (e.g. the file
+    was removed, or access is denied) must fail closed with no handle to
+    close -- CloseHandle must not be called on a value that never
+    represented an open handle."""
+    calls = _install_fake_win32_kernel32(monkeypatch, create_file_result=_WIN32_INVALID_HANDLE_VALUE)
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=lambda *_a: (_ for _ in ()).throw(AssertionError("unreachable")))
+    with pytest.raises(ResearchToDecisionError, match="could not be opened"):
+        _open_verified_evidence_file_windows(tmp_path / "missing.pdf", label="x")
+    assert calls["close_handle"] == []
+
+
+def test_win32_open_rejects_when_get_file_information_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful CreateFileW followed by a failing
+    GetFileInformationByHandle (e.g. the file vanished between the two
+    calls) must fail closed rather than proceeding with unknown
+    attributes, and must still close the handle it did obtain."""
+    calls = _install_fake_win32_kernel32(monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, get_file_information_result=False)
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=lambda *_a: (_ for _ in ()).throw(AssertionError("unreachable")))
+    with pytest.raises(ResearchToDecisionError, match="could not be inspected"):
+        _open_verified_evidence_file_windows(tmp_path, label="x")
+    assert calls["close_handle"] == [_FAKE_WIN32_HANDLE]
+
+
+def test_win32_open_same_handle_read_survives_a_path_level_file_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deterministic (non-sleep) proof of the invariant the whole design
+    relies on: once the handle/fd is obtained, replacing what the *path*
+    points to must not change what the *already-open descriptor* reads.
+    The fake wires the sentinel Win32 handle to a real descriptor opened
+    before the path is overwritten. POSIX can exercise the same-path
+    replacement directly. Windows' ``os.open`` test double cannot emulate
+    the ``FILE_SHARE_DELETE`` flags used by the production ``CreateFileW``
+    call, so the Windows test double uses a descriptor-bound copy instead;
+    that still proves the reader consumes the already-open descriptor and
+    does not reopen the path. This demonstrates the Python-level closure
+    principle without claiming real Win32 execution, which remains
+    unverified in this project (see the module docstring above)."""
+    doc = tmp_path / "doc.pdf"
+    doc.write_bytes(b"original bytes bound to the handle")
+
+    def fake_open_osfhandle(handle: int, _flags: int) -> int:
+        descriptor_source = doc
+        if os.name == "nt":
+            # A Python ``os.open`` handle does not expose the share-delete
+            # flags that the production CreateFileW call supplies. Keep the
+            # fake descriptor stable without making os.replace fail on the
+            # Windows test runner; the real Win32 share mode is covered by
+            # the audited production call and remains execution-unverified.
+            descriptor_source = tmp_path / "descriptor-bound-copy.pdf"
+            descriptor_source.write_bytes(doc.read_bytes())
+        return os.open(descriptor_source, os.O_RDONLY)
+
+    _install_fake_win32_kernel32(monkeypatch, create_file_result=_FAKE_WIN32_HANDLE, attributes=0)
+    _install_fake_msvcrt(monkeypatch, open_osfhandle=fake_open_osfhandle)
+    fd, file_stat = _open_verified_evidence_file_windows(doc, label="x")
+    try:
+        assert file_stat.st_size == len(b"original bytes bound to the handle")
+        # os.replace (not an in-place write) swaps in a genuinely different
+        # inode at the same path -- an in-place write/truncate would mutate
+        # the very inode the open descriptor already points to and would
+        # therefore prove nothing about a *replacement* race.
+        replacement = tmp_path / "replacement.pdf"
+        replacement.write_bytes(b"REPLACED CONTENT, different inode, same path")
+        os.replace(replacement, doc)
+        assert os.read(fd, 1024) == b"original bytes bound to the handle"
+    finally:
+        os.close(fd)
+
+
+def test_win32_open_dispatches_from_the_shared_entry_point_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_open_verified_evidence_file itself must route to the Windows
+    implementation when sys.platform reports win32, not only when called
+    directly -- proving the dispatch, not just the Windows function in
+    isolation."""
+    monkeypatch.setattr(rtd.sys, "platform", "win32")
+    sentinel = object()
+
+    def fake_windows_open(resolved: Path, *, label: str):
+        assert label == "x"
+        return sentinel
+
+    monkeypatch.setattr(rtd, "_open_verified_evidence_file_windows", fake_windows_open)
+    assert rtd._open_verified_evidence_file(Path("irrelevant"), label="x") is sentinel
