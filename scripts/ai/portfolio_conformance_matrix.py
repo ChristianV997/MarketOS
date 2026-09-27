@@ -49,6 +49,51 @@ PENDING_STATUSES = frozenset({"queued", "in_progress", "waiting", "requested", "
 STEP_SUCCESS_STATUSES = frozenset({"completed", "success"})
 STEP_INCOMPLETE_STATUSES = frozenset({"failure", "failed", "cancelled", "skipped", "timed_out", "action_required", "startup_failure"})
 STEP_STATUSES = STEP_SUCCESS_STATUSES | STEP_INCOMPLETE_STATUSES | PENDING_STATUSES
+CI_REPORT_CLASSIFICATIONS = frozenset(
+    {
+        "pass",
+        "ci_unavailable",
+        "executed_failure",
+        "timed_out",
+        "pending",
+        "malformed",
+    }
+)
+CI_REPORT_JOB_CLASSIFICATIONS = CI_REPORT_CLASSIFICATIONS | frozenset(
+    {
+        "zero_step_runnerless",
+        "incomplete_steps",
+        "unavailable_logs",
+        "stale_metadata",
+        "stale_job_metadata",
+        "stale_worktree_metadata",
+        "missing_workflow_context",
+        "workflow_never_created",
+        "non_ci_workflow",
+        "required_job_missing",
+        "unbound_check_metadata",
+        "not_ci",
+    }
+)
+CI_REPORT_JOB_KEYS = frozenset(
+    {
+        "name",
+        "required",
+        "status",
+        "conclusion",
+        "classification",
+        "execution_classification",
+        "identity_classification",
+        "context_classification",
+        "reason",
+        "runner_assigned",
+        "steps_executed",
+        "step_outcome",
+        "logs_available",
+        "log_status",
+        "log_http_status",
+    }
+)
 
 CI_STATUSES = RUN_STATUSES
 CI_CONCLUSIONS = CONCLUSIONS
@@ -412,6 +457,74 @@ def _normalize_check(value: Any) -> dict[str, Any]:
     return {"name": name, "kind": kind, "status": status, "conclusion": conclusion}
 
 
+def _normalize_ci_report_jobs(value: Any, required_jobs: list[str], classification: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > MAX_JOBS_PER_PR:
+        raise MatrixInputError("invalid_ci_report_jobs")
+    normalized: list[dict[str, Any]] = []
+    names: set[str] = set()
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise MatrixInputError("invalid_ci_report_job")
+        _check_keys(item, set(CI_REPORT_JOB_KEYS))
+        name = _text(item.get("name"), field="ci_report_job_name", limit=160)
+        if name in names:
+            raise MatrixInputError("duplicate_ci_report_job")
+        names.add(name)
+        job_classification = _text(item.get("classification"), field="ci_report_job_classification", limit=50)
+        if job_classification not in CI_REPORT_JOB_CLASSIFICATIONS:
+            raise MatrixInputError("invalid_ci_report_job_classification")
+        required = item.get("required", False)
+        if not isinstance(required, bool):
+            raise MatrixInputError("invalid_ci_report_job_required_flag")
+        normalized_item: dict[str, Any] = {
+            "name": name,
+            "required": required,
+            "classification": job_classification,
+        }
+        for field in ("status", "conclusion", "execution_classification", "identity_classification", "context_classification", "reason", "step_outcome", "log_status"):
+            if field in item and item[field] is not None:
+                normalized_item[field] = _text(item[field], field=f"ci_report_{field}", limit=120)
+        for field in ("runner_assigned", "logs_available"):
+            if field in item:
+                if not isinstance(item[field], bool):
+                    raise MatrixInputError(f"invalid_ci_report_{field}")
+                normalized_item[field] = item[field]
+        if "steps_executed" in item:
+            steps = item["steps_executed"]
+            if not isinstance(steps, int) or isinstance(steps, bool) or steps < 0 or steps > MAX_STEPS_PER_JOB:
+                raise MatrixInputError("invalid_ci_report_steps_executed")
+            normalized_item["steps_executed"] = steps
+        if "log_http_status" in item:
+            status_code = item["log_http_status"]
+            if not isinstance(status_code, int) or isinstance(status_code, bool) or not 100 <= status_code <= 599:
+                raise MatrixInputError("invalid_ci_report_log_http_status")
+            normalized_item["log_http_status"] = status_code
+        normalized.append(normalized_item)
+
+    return normalized
+
+
+def _ci_report_jobs_admissible(jobs: list[Mapping[str, Any]], required_jobs: list[str]) -> bool:
+    by_name = {item["name"]: item for item in jobs}
+    for required_name in required_jobs:
+        job = by_name.get(required_name)
+        if job is None or (
+            job["required"] is not True
+            or job["classification"] != "pass"
+            or job.get("execution_classification", "pass") != "pass"
+            or job.get("runner_assigned") is not True
+            or not isinstance(job.get("steps_executed"), int)
+            or job["steps_executed"] <= 0
+            or job.get("step_outcome", "success") != "success"
+            or job.get("logs_available") is not True
+            or job.get("log_status", "available") != "available"
+            or job.get("status", "passed") != "passed"
+            or job.get("conclusion", "success") != "success"
+        ):
+            return False
+    return True
+
+
 def _normalize_ci_report(value: Any, expected_head_sha: str, expected_base_sha: str | None = None) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise MatrixInputError("invalid_ci_report")
@@ -461,6 +574,8 @@ def _normalize_ci_report(value: Any, expected_head_sha: str, expected_base_sha: 
     if target_base is not None and expected_base_sha is not None and _sha(target_base, field="ci_report_target_base_sha") != expected_base_sha:
         raise MatrixInputError("ci_report_base_sha_mismatch")
     classification = _text(value.get("classification"), field="ci_report_classification", limit=40)
+    if classification not in CI_REPORT_CLASSIFICATIONS:
+        raise MatrixInputError("invalid_ci_report_classification")
     status = _text(value.get("status"), field="ci_report_status", limit=40)
     admissible = value.get("admissible_evidence")
     if not isinstance(admissible, bool):
@@ -485,6 +600,8 @@ def _normalize_ci_report(value: Any, expected_head_sha: str, expected_base_sha: 
         if isinstance(wf_conc, str) and wf_conc.lower() in {"failure", "failed", "cancelled", "startup_failure"} and classification == "pass":
             raise MatrixInputError("contradictory_ci_diagnostic_metadata")
 
+    required_jobs = _string_list(value.get("required_jobs", []), field="ci_report_required_jobs", limit=MAX_JOBS_PER_PR, item_limit=160)
+    normalized_jobs = _normalize_ci_report_jobs(value.get("jobs", []), required_jobs, classification)
     return {
         "schema": schema,
         "classification": classification,
@@ -492,9 +609,9 @@ def _normalize_ci_report(value: Any, expected_head_sha: str, expected_base_sha: 
         "admissible_evidence": admissible,
         "diagnostic_state": diagnostic_state or classification,
         "diagnostic_states": sorted({_text(s, field="diagnostic_state_item", limit=60) for s in diagnostic_states}) if diagnostic_states else [diagnostic_state or classification],
-        "required_jobs": _string_list(value.get("required_jobs", []), field="ci_report_required_jobs", limit=MAX_JOBS_PER_PR, item_limit=160),
+        "required_jobs": required_jobs,
         "missing_required_jobs": _string_list(value.get("missing_required_jobs", []), field="ci_report_missing_jobs", limit=MAX_JOBS_PER_PR, item_limit=160),
-        "jobs": value.get("jobs", []),
+        "jobs": normalized_jobs,
         "non_ci_checks": value.get("non_ci_checks", []),
     }
 
@@ -840,7 +957,7 @@ def _ci_projection(pr: Mapping[str, Any]) -> dict[str, Any]:
             classification = "ci_unavailable"
             status = "unavailable"
             admissible = False
-        elif classification == "pass":
+        elif classification == "pass" and _ci_report_jobs_admissible(report["jobs"], sorted(report_required)):
             classification = "pass"
             status = "passed"
             admissible = True

@@ -637,6 +637,66 @@ def test_ci_report_consumption_preserves_ci_unavailable_and_blocks():
     assert "ci:ci_unavailable" in pr["blockers"]
 
 
+def test_ci_report_pass_requires_admissible_evidence_for_each_required_job():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_report"] = {
+        "schema": "MarketOS.CIAdmissibilityReport.v1",
+        "status": "passed",
+        "classification": "pass",
+        "diagnostic_state": "pass",
+        "diagnostic_states": ["pass"],
+        "admissible_evidence": True,
+        "candidate_head_sha": target["head_sha"],
+        "required_jobs": ["test"],
+        "missing_required_jobs": [],
+        "jobs": [],
+        "non_ci_checks": [],
+    }
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["classification"] == "ci_unavailable"
+    assert pr["ci"]["admissible_evidence"] is False
+    assert "ci:ci_unavailable" in pr["blockers"]
+
+
+def test_ci_report_pass_rejects_runnerless_job_and_raw_fields():
+    payload = fixture("mixed_portfolio.json")
+    target = next(item for item in payload["pull_requests"] if item["number"] == 271)
+    target["ci_report"] = {
+        "schema": "MarketOS.CIAdmissibilityReport.v1",
+        "status": "passed",
+        "classification": "pass",
+        "diagnostic_state": "pass",
+        "diagnostic_states": ["pass"],
+        "admissible_evidence": True,
+        "candidate_head_sha": target["head_sha"],
+        "required_jobs": ["test"],
+        "missing_required_jobs": [],
+        "jobs": [
+            {
+                "name": "test",
+                "required": True,
+                "classification": "pass",
+                "runner_assigned": False,
+                "steps_executed": 0,
+                "logs_available": False,
+            }
+        ],
+        "non_ci_checks": [],
+    }
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    pr = by_number(report, 271)
+    assert pr["ci"]["classification"] == "ci_unavailable"
+    assert pr["ci"]["admissible_evidence"] is False
+
+    target["ci_report"]["jobs"][0]["raw_logs"] = "must not be echoed"
+    report = build_matrix(payload, repository_state=REPO_STATE)
+    assert report["portfolio_status"] == "malformed"
+    assert report["input"]["error"] == "unknown_or_forbidden_input_field"
+    assert "must not be echoed" not in json.dumps(report)
+
+
 def test_non_ci_marker_evasion_with_dots_or_unicode_is_detected():
     payload = fixture("mixed_portfolio.json")
     payload["pull_requests"][0]["required_checks"] = ["netlify.deploy.preview"]
@@ -813,6 +873,18 @@ def test_producer_consumer_boundary_matrix_covers_all_catalog_states():
             "jobs": [{"name": "test", "classification": exp_diag, "status": exp_status, "required": True}],
             "non_ci_checks": [],
         }
+        if exp_class == "pass":
+            target["ci_report"]["jobs"][0].update(
+                {
+                    "execution_classification": "pass",
+                    "conclusion": "success",
+                    "runner_assigned": True,
+                    "steps_executed": 1,
+                    "step_outcome": "success",
+                    "logs_available": True,
+                    "log_status": "available",
+                }
+            )
         report = build_matrix(payload, repository_state=REPO_STATE)
         pr = by_number(report, 271)
         assert pr["ci"]["classification"] == exp_class, f"Failed on {case_name}"
