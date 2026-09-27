@@ -78,6 +78,32 @@ class TestClientSafeDeliverable:
         assert deliverable.status == "completed"
         assert dv_registry.get_package(deliverable.package_id) is deliverable
 
+    def test_source_report_ids_distinguish_different_reports_for_the_same_candidate(
+        self, evidence_collection_engagement, package, workspace, ws_registry, dv_registry
+    ):
+        """Regression guard: source_report_ids must identify the specific
+        report a deliverable was built from, not merely the candidate --
+        the portfolio layer already has a deterministic report identity
+        (portfolio._report_id) for exactly this purpose; the deliverable
+        must reuse it rather than falling back to report.candidate_id,
+        which is identical across every offer/report for one candidate."""
+        from decimal import Decimal
+
+        first_report = build_report(build_goods_offer(candidate_id="cand-repeat", duty_rate=Decimal("0.03")), generated_at="2026-02-01T00:00:00Z")
+        second_report = build_report(build_goods_offer(candidate_id="cand-repeat", duty_rate=Decimal("0.09")), generated_at="2026-03-15T00:00:00Z")
+        assert first_report.candidate_id == second_report.candidate_id == "cand-repeat"
+
+        first_deliverable = build_client_safe_deliverable(
+            first_report, engagement=evidence_collection_engagement, package=package, workspace=workspace,
+            registry=ws_registry, deliverable_registry=dv_registry,
+        )
+        second_deliverable = build_client_safe_deliverable(
+            second_report, engagement=evidence_collection_engagement, package=package, workspace=workspace,
+            registry=ws_registry, deliverable_registry=dv_registry,
+        )
+        assert first_deliverable.source_report_ids != second_deliverable.source_report_ids
+        assert first_deliverable.source_report_ids != [first_report.candidate_id]
+
     def test_a_blocked_report_produces_a_blocked_deliverable_not_an_optimistic_one(
         self, evidence_collection_engagement, package, workspace, ws_registry, dv_registry
     ):

@@ -82,6 +82,8 @@ class TestCandidateBoundSupplierIdentity:
     def test_report_candidate_id_is_carried_through_to_the_deliverable_and_portfolio(
         self, evidence_collection_engagement, package, workspace, ws_registry, dv_registry
     ):
+        from services.supplier_logistics_consulting_integration.portfolio import _report_id
+
         offer = build_goods_offer(candidate_id="cand-identity-check", currency=package.currency)
         report = build_report(offer)
         assert report.candidate_id == "cand-identity-check"
@@ -89,7 +91,15 @@ class TestCandidateBoundSupplierIdentity:
             report, engagement=evidence_collection_engagement, package=package, workspace=workspace,
             registry=ws_registry, deliverable_registry=dv_registry,
         )
-        assert result.deliverable.source_report_ids == ["cand-identity-check"]
+        # candidate_id survives into the deliverable's own metadata...
+        assert result.deliverable.metadata["candidate_id"] == "cand-identity-check"
+        # ...but source_report_ids identifies the specific REPORT this
+        # deliverable was built from -- the same identity the portfolio
+        # layer already uses (build_portfolio_report dedupes report_ids by
+        # each entry's own .report_id) -- never the candidate_id, which
+        # would be identical across every report for the same candidate.
+        assert result.deliverable.source_report_ids == [_report_id(report)]
+        assert result.portfolio.report_ids == [_report_id(report)]
 
 
 _FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "supplier_logistics_consulting_integration"

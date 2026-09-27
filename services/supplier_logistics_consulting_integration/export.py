@@ -35,6 +35,7 @@ from evaluation.companyos.service_delivery import ClientEngagement, ClientFacing
 from services.supplier_logistics_research.schemas import SupplierLogisticsReport
 
 from . import controls
+from .portfolio import _report_id
 
 _EXPORT_PROVENANCE = "derived://supplier_logistics_research"
 
@@ -219,7 +220,7 @@ def build_client_safe_deliverable(
         title=f"{package.name}: supplier & logistics evidence for engagement {engagement.engagement_id}",
         objective=package.expected_outcome,
         status=status,
-        source_report_ids=[report.candidate_id],
+        source_report_ids=[_report_id(report)],
         sections=[section],
         executive_summary=exec_summary,
         recommendations=[action.description for action in report.next_actions if not action.blocking],
