@@ -207,15 +207,21 @@ def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, t
     monkeypatch.setattr(module, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
 
-    direct_report = module.workbench(_authenticated_request("service-delivery-fixture"))
+    # The producer stamps each row's workspace_id with the canonical
+    # ClientWorkspace(name=...).workspace_id (a deterministic_id("workspace", name)
+    # UUID5), never the raw display name -- so the route must be authenticated
+    # against that same canonical id, not the "service-delivery-fixture" name.
+    real_workspace_id = real_projection["workspace_id"]
+    direct_report = module.workbench(_authenticated_request(real_workspace_id))
     assert direct_report["live_endpoint_status"] == "available_read_only"
     assert direct_report["read_only"] is True
     assert direct_report["network_calls"] is False
     assert direct_report["mutated"] is False
     assert len(direct_report["engagements"]) == 11
 
-    # Test via FastAPI TestClient
-    app = _app_with_workspace("service-delivery-fixture")
+    # Test via FastAPI TestClient (same canonical workspace_id as above, not
+    # the raw "service-delivery-fixture" name)
+    app = _app_with_workspace(real_workspace_id)
     client = TestClient(app)
     response = client.get("/api/service-delivery/workbench")
     assert response.status_code == 200
