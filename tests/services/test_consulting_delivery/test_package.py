@@ -175,3 +175,73 @@ def test_direct_package_construction_cannot_claim_approval_or_delivery():
         )
         assert pkg.status == "review_required"
         assert pkg.metadata["review_required"] is True
+
+
+def test_client_export_normalizes_approval_claim_in_metadata():
+    pkg = build_consulting_delivery(
+        workspace_id="ws_123",
+        package_id="pkg_status_metadata",
+        title="Review Test",
+        objective="Must be reviewed",
+        executive_summary="",
+        metadata={"status": "approved"},
+    )
+
+    payload = pkg.to_dict()
+    canonical = pkg.as_deliverable_package()
+    assert payload["status"] == "review_required"
+    assert payload["metadata"]["status"] == "review_required"
+    assert canonical.status == "review_required"
+    assert canonical.metadata["status"] == "review_required"
+
+
+def test_delivery_status_cannot_be_mutated_after_construction():
+    pkg = build_consulting_delivery(
+        workspace_id="ws_123",
+        package_id="pkg_mutable_status",
+        title="Review Test",
+        objective="Must be reviewed",
+        executive_summary="",
+        metadata={},
+    )
+
+    pkg.status = "delivered"
+    assert pkg.status == "review_required"
+    assert pkg.to_dict()["status"] == "review_required"
+    assert pkg.as_deliverable_package().status == "review_required"
+
+
+def test_client_safe_boundary_covers_rendered_sections():
+    section = DeliverableSection(
+        section_id="section-synthetic-leak",
+        title="Synthetic fixture section",
+        order=1,
+        content_markdown="Synthetic test content.",
+        metadata={"internal_prompt": "synthetic fixture only"},
+    )
+
+    with pytest.raises(ValueError, match="workspace_isolation_violation"):
+        build_consulting_delivery(
+            workspace_id="ws_123",
+            package_id="pkg_section_leak",
+            title="Review Test",
+            objective="Must be reviewed",
+            executive_summary="",
+            metadata={},
+            sections=[section],
+        )
+
+
+def test_client_export_rechecks_mutable_nested_metadata():
+    pkg = build_consulting_delivery(
+        workspace_id="ws_123",
+        package_id="pkg_mutated_metadata",
+        title="Review Test",
+        objective="Must be reviewed",
+        executive_summary="",
+        metadata={"economics": {"summary": "synthetic safe fixture"}},
+    )
+    pkg.metadata["economics"] = {"internal_prompt": "synthetic fixture only"}
+
+    with pytest.raises(ValueError, match="workspace_isolation_violation"):
+        pkg.as_deliverable_package()

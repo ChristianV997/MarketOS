@@ -50,41 +50,49 @@ class ConsultingDeliveryPackage:
     status: str = "review_required"
     created_at: float = field(default_factory=time.time)
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "status":
+            value = "review_required"
+        super().__setattr__(name, value)
+
     def __post_init__(self):
         # Every package remains review-required until a separate human-controlled
         # process handles approval or delivery; this layer must not expose those
         # states as if it had authority to grant them.
-        if self.status != "review_required":
-            self.status = "review_required"
+        self.status = "review_required"
 
         # Scrub metadata to only allow safe keys
-        safe_metadata = {}
-        for k, v in self.metadata.items():
-            if k in ALLOWED_CONSULTING_KEYS:
-                safe_metadata[k] = v
-        self.metadata = safe_metadata
+        self.metadata = self._client_metadata()
 
+    def _client_metadata(self) -> dict[str, Any]:
+        safe_metadata = {
+            key: value
+            for key, value in self.metadata.items()
+            if key in ALLOWED_CONSULTING_KEYS
+        }
+        safe_metadata["status"] = "review_required"
         # Set human approval checklist
-        if "human_approval_checklist" not in self.metadata:
-            self.metadata["human_approval_checklist"] = {
+        if "human_approval_checklist" not in safe_metadata:
+            safe_metadata["human_approval_checklist"] = {
                 "legal_review_completed": False,
                 "tax_review_completed": False,
                 "economics_verified": False,
                 "supplier_verified": False
             }
 
-        self.metadata["review_required"] = self.status == "review_required"
+        safe_metadata["review_required"] = True
+        return safe_metadata
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "package_id": self.package_id,
             "workspace_id": self.workspace_id,
             "package_type": "client_consulting_deliverable",
             "title": self.title,
             "objective": self.objective,
             "executive_summary": self.executive_summary,
-            "status": self.status,
-            "metadata": self.metadata,
+            "status": "review_required",
+            "metadata": self._client_metadata(),
             "sections": [s.to_dict() for s in sorted(self.sections, key=lambda x: x.order)],
             "artifacts": [a.to_dict() for a in self.artifacts],
             "recommendations": self.recommendations,
@@ -93,6 +101,14 @@ class ConsultingDeliveryPackage:
             "next_actions": self.next_actions,
             "created_at": self.created_at
         }
+        structured_metadata = {
+            "package_metadata": payload["metadata"],
+            "section_metadata": [section.metadata for section in self.sections],
+            "artifact_metadata": [artifact.metadata for artifact in self.artifacts],
+        }
+        if check_workspace_leakage(structured_metadata, client_safe=True):
+            raise ValueError("workspace_isolation_violation")
+        return payload
 
     def compute_fingerprint(self) -> str:
         """Deterministic fingerprint based on core content, ignoring timestamps."""
@@ -107,6 +123,7 @@ class ConsultingDeliveryPackage:
 
     def as_deliverable_package(self) -> DeliverablePackage:
         """Render to the canonical DeliverablePackage for downstream systems."""
+        payload = self.to_dict()
         return DeliverablePackage(
             package_id=self.package_id,
             workspace_id=self.workspace_id,
@@ -114,8 +131,8 @@ class ConsultingDeliveryPackage:
             title=self.title,
             objective=self.objective,
             executive_summary=self.executive_summary,
-            status=self.status,
-            metadata=self.metadata,
+            status=payload["status"],
+            metadata=payload["metadata"],
             sections=sorted(self.sections, key=lambda x: x.order),
             artifacts=self.artifacts,
             recommendations=self.recommendations,
@@ -181,4 +198,6 @@ def build_consulting_delivery(
             content_markdown="Awaiting complete report data."
         ))
 
+    # Validate package, section, and artifact metadata with the shared TrustOS boundary.
+    pkg.to_dict()
     return pkg
