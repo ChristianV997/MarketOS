@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
@@ -49,7 +50,10 @@ CONCLUSIONS = frozenset({"success", "failure", "neutral", "cancelled", "skipped"
 CHECK_STATUSES = frozenset({"success", "failure", "neutral", "cancelled", "skipped", "pending", "timed_out"})
 LOG_STATUSES = frozenset({"available", "missing", "not_found", "forbidden", "unavailable", "not_queried"})
 PENDING_STATUSES = frozenset({"queued", "in_progress", "waiting", "requested", "pending"})
-NON_CI_MARKERS = ("netlify", "deploy-preview", "deploy_preview", "preview-deploy")
+STEP_SUCCESS_STATUSES = frozenset({"completed", "success"})
+STEP_INCOMPLETE_STATUSES = frozenset({"failure", "cancelled", "skipped", "timed_out", "action_required", "startup_failure"})
+STEP_STATUSES = STEP_SUCCESS_STATUSES | STEP_INCOMPLETE_STATUSES | PENDING_STATUSES
+NON_CI_MARKERS = ("netlify", "deploy-preview", "preview-deploy")
 FORBIDDEN_KEYS = frozenset({"body", "comments", "credentials", "environment", "logs", "raw_logs", "stdout", "stderr", "payload", "private_notes"})
 
 
@@ -119,6 +123,16 @@ def _text(value: Any, *, field: str, limit: int = MAX_STRING, allow_empty: bool 
     if SECRET_RE.search(value) or SECRET_ASSIGNMENT_RE.search(value):
         raise EvidenceInputError("secret_shaped_input")
     return value
+
+
+def _normalized_marker_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+
+
+def _is_non_ci_name(value: str) -> bool:
+    normalized = _normalized_marker_text(value)
+    return any(marker in normalized for marker in NON_CI_MARKERS)
 
 
 def _optional_text(value: Any, *, field: str, limit: int = MAX_STRING) -> str | None:
@@ -211,8 +225,9 @@ def _log_metadata(value: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
     return {"status": status, "http_status": http_status, "url": url}, redacted
 
 
-def _normalize_steps(value: Any, count: Any) -> int:
+def _normalize_steps(value: Any, count: Any) -> tuple[int, str]:
     list_count = None
+    step_statuses: list[str] = []
     if value is not None:
         if not isinstance(value, list) or len(value) > MAX_STEPS:
             raise EvidenceInputError("invalid_steps")
@@ -220,10 +235,15 @@ def _normalize_steps(value: Any, count: Any) -> int:
             if isinstance(item, Mapping):
                 _check_keys(item, {"name", "status"})
                 _text(item.get("name"), field="step_name", limit=160)
+                status = "completed"
                 if item.get("status") is not None:
-                    _text(item["status"], field="step_status", limit=40)
+                    status = _text(item["status"], field="step_status", limit=40).lower()
             else:
                 _text(item, field="step_name", limit=160)
+                status = "completed"
+            if status not in STEP_STATUSES:
+                raise EvidenceInputError("invalid_step_status")
+            step_statuses.append(status)
         list_count = len(value)
     if count is None and list_count is None:
         raise EvidenceInputError("missing_step_evidence")
@@ -231,7 +251,13 @@ def _normalize_steps(value: Any, count: Any) -> int:
         raise EvidenceInputError("invalid_steps_executed")
     if list_count is not None and count is not None and list_count != count:
         raise EvidenceInputError("step_count_mismatch")
-    return list_count if list_count is not None else count
+    if any(status in STEP_INCOMPLETE_STATUSES for status in step_statuses):
+        step_outcome = "incomplete"
+    elif any(status in PENDING_STATUSES for status in step_statuses):
+        step_outcome = "pending"
+    else:
+        step_outcome = "success"
+    return list_count if list_count is not None else count, step_outcome
 
 
 def _normalize_workflow(value: Any) -> dict[str, Any] | None:
@@ -285,8 +311,7 @@ def _normalize_job(value: Any, *, expected_head_sha: str | None, canonical: bool
     _check_keys(value, allowed)
     name = _text(value.get("name"), field="job_name", limit=180)
     kind = _text(value.get("kind", "ci"), field="job_kind", limit=30).lower()
-    normalized_name = name.casefold().replace("_", "-")
-    if kind == "ci" and any(marker in normalized_name for marker in NON_CI_MARKERS):
+    if kind == "ci" and _is_non_ci_name(name):
         kind = "deploy_preview"
     if kind not in {"ci", "deploy_preview", "non_ci"}:
         raise EvidenceInputError("invalid_job_kind")
@@ -302,19 +327,21 @@ def _normalize_job(value: Any, *, expected_head_sha: str | None, canonical: bool
         raise EvidenceInputError("contradictory_pending_job_metadata")
     if status == "completed" and conclusion in {None, "pending"}:
         raise EvidenceInputError("contradictory_completed_job_metadata")
-    required = value.get("required", name not in NON_CI_MARKERS)
+    required = value.get("required", not _is_non_ci_name(name))
     if not isinstance(required, bool):
         raise EvidenceInputError("invalid_job_required_flag")
     head_sha = _sha(value.get("head_sha"), field="job_head_sha", required=not canonical)
     run_id = _positive_int(value.get("run_id"), field="job_run_id", required=False)
     workflow_name = _optional_text(value.get("workflow_name"), field="job_workflow_name", limit=180)
+    if kind == "ci" and workflow_name is not None and _is_non_ci_name(workflow_name):
+        kind = "deploy_preview"
     runner_id = value.get("runner_id")
     if runner_id is not None and (isinstance(runner_id, bool) or not isinstance(runner_id, int) or runner_id < 0):
         raise EvidenceInputError("invalid_runner_id")
     runner_name = _optional_text(value.get("runner_name"), field="runner_name", limit=120)
     if not canonical and status != "not_created" and (run_id is None or workflow_name is None):
         raise EvidenceInputError("missing_job_workflow_identity")
-    steps = _normalize_steps(value.get("steps"), value.get("steps_executed"))
+    steps, step_outcome = _normalize_steps(value.get("steps"), value.get("steps_executed"))
     if steps > 0 and runner_id in {None, 0}:
         raise EvidenceInputError("contradictory_runner_steps")
     logs_available = value.get("logs_available")
@@ -331,6 +358,9 @@ def _normalize_job(value: Any, *, expected_head_sha: str | None, canonical: bool
     if logs_available is not None and logs_available != (log_metadata["status"] == "available"):
         raise EvidenceInputError("contradictory_log_metadata")
     required_check_status = value.get("required_check_status", conclusion if conclusion in CHECK_STATUSES else "pending")
+    if not isinstance(required_check_status, str):
+        raise EvidenceInputError("invalid_required_check_status")
+    required_check_status = required_check_status.lower()
     if required_check_status not in CHECK_STATUSES:
         raise EvidenceInputError("invalid_required_check_status")
     if status in PENDING_STATUSES and required_check_status != "pending":
@@ -354,6 +384,7 @@ def _normalize_job(value: Any, *, expected_head_sha: str | None, canonical: bool
         "runner_id": runner_id,
         "runner_name_present": bool(runner_name),
         "steps_executed": steps,
+        "step_outcome": step_outcome,
         "log_status": log_metadata["status"],
         "log_http_status": log_metadata["http_status"],
         "log_url": log_metadata["url"],
@@ -371,8 +402,7 @@ def _normalize_check(value: Any) -> dict[str, Any]:
     _check_keys(value, {"name", "kind", "status", "conclusion", "url"})
     name = _text(value.get("name"), field="check_name", limit=180)
     kind = _text(value.get("kind", "ci"), field="check_kind", limit=30).lower()
-    normalized_name = name.casefold().replace("_", "-")
-    if kind == "ci" and any(marker in normalized_name for marker in NON_CI_MARKERS):
+    if kind == "ci" and _is_non_ci_name(name):
         kind = "deploy_preview"
     if kind not in {"ci", "deploy_preview", "non_ci"}:
         raise EvidenceInputError("invalid_check_kind")
@@ -485,8 +515,7 @@ def _normalize_rich(value: Mapping[str, Any], *, trusted_source_schema: str) -> 
     required_names = []
     for name in required_jobs:
         item = _text(name, field="required_job_name", limit=180)
-        normalized = item.casefold().replace("_", "-")
-        if any(marker in normalized for marker in NON_CI_MARKERS):
+        if _is_non_ci_name(item):
             raise EvidenceInputError("non_ci_check_in_required_jobs")
         required_names.append(item)
     if len(set(required_names)) != len(required_names):
@@ -531,6 +560,8 @@ def _context_classification(data: Mapping[str, Any]) -> str:
         return "missing_workflow_context"
     if workflow.get("status") == "not_created":
         return "workflow_never_created"
+    if _is_non_ci_name(workflow.get("name", "")):
+        return "non_ci_workflow"
     if workflow.get("run_id") is None or workflow.get("head_sha") is None:
         return "missing_workflow_context"
     candidate = data.get("candidate_head_sha")
@@ -566,7 +597,11 @@ def _execution_projection(job: Mapping[str, Any], *, context: str, identity: str
     steps = job["steps_executed"]
     runner_assigned = job["runner_id"] is not None and job["runner_id"] > 0
     log_status = job["log_status"]
-    if status in PENDING_STATUSES:
+    if status == "not_created":
+        execution = "workflow_never_created"
+        job_status = "unavailable"
+        reason = "ci_job_was_not_created"
+    elif status in PENDING_STATUSES:
         execution = "pending"
         job_status = "pending"
         reason = "ci_job_not_completed"
@@ -582,6 +617,10 @@ def _execution_projection(job: Mapping[str, Any], *, context: str, identity: str
         execution = "executed_failure"
         job_status = "failed"
         reason = "ci_job_failed_after_execution"
+    elif job["step_outcome"] in {"incomplete", "pending"}:
+        execution = "incomplete_steps"
+        job_status = "unavailable"
+        reason = "ci_steps_did_not_complete_successfully"
     elif log_status != "available":
         execution = "unavailable_logs"
         job_status = "unavailable"
@@ -610,6 +649,7 @@ def _execution_projection(job: Mapping[str, Any], *, context: str, identity: str
         "conclusion": conclusion,
         "runner_assigned": runner_assigned,
         "steps_executed": steps,
+        "step_outcome": job["step_outcome"],
         "logs_available": job["logs_available"],
         "log_status": log_status,
         "log_http_status": job["log_http_status"],
@@ -640,10 +680,32 @@ def _overall_projection(data: Mapping[str, Any]) -> dict[str, Any]:
     for name in missing:
         projections.append({"name": name, "required": True, "status": "unavailable", "classification": "required_job_missing", "reason": "required_ci_job_missing"})
         states.append("required_job_missing")
+    required_check_projections = []
+    for check in data["checks"]:
+        if check["kind"] != "ci" or check["name"] not in expected:
+            continue
+        if check["status"] in PENDING_STATUSES or check["conclusion"] == "pending":
+            check_classification = "pending"
+        elif check["conclusion"] == "timed_out":
+            check_classification = "timed_out"
+        elif check["conclusion"] != "success":
+            check_classification = "executed_failure"
+        else:
+            check_classification = "pass"
+        required_check_projections.append(
+            {
+                "name": check["name"],
+                "status": check["status"],
+                "conclusion": check["conclusion"],
+                "classification": check_classification,
+            }
+        )
+        if check_classification != "pass":
+            states.append(check_classification)
     if context != "complete_workflow_context":
         states.append(context)
     required = [item for item in projections if item.get("required")]
-    required_states = [item["classification"] for item in required]
+    required_states = [item["classification"] for item in required] + [item["classification"] for item in required_check_projections]
     executed_steps = sum(int(item.get("steps_executed", 0) or 0) for item in required)
     workflow_failure = workflow.get("conclusion") in {"failure", "cancelled", "startup_failure"} and executed_steps > 0
     workflow_timeout = workflow.get("conclusion") == "timed_out" and executed_steps > 0
@@ -655,7 +717,7 @@ def _overall_projection(data: Mapping[str, Any]) -> dict[str, Any]:
         classification, status, reason = "timed_out", "timed_out", "required_ci_job_timed_out"
     elif any(item == "pending" for item in required_states):
         classification, status, reason = "pending", "pending", "required_ci_job_not_complete"
-    elif any(item in {"zero_step_runnerless", "unavailable_logs", "required_job_missing", "stale_metadata", "missing_workflow_context", "stale_worktree_metadata", "workflow_never_created"} for item in required_states) or context != "complete_workflow_context" or missing:
+    elif any(item in {"zero_step_runnerless", "incomplete_steps", "unavailable_logs", "required_job_missing", "stale_metadata", "missing_workflow_context", "stale_worktree_metadata", "workflow_never_created", "non_ci_workflow"} for item in required_states) or context != "complete_workflow_context" or missing:
         classification, status, reason = "ci_unavailable", "unavailable", "required_ci_evidence_not_admissible"
     elif required and all(item == "pass" for item in required_states) and workflow.get("conclusion") == "success":
         classification, status, reason = "pass", "passed", "all_required_ci_jobs_executed"
@@ -674,6 +736,7 @@ def _overall_projection(data: Mapping[str, Any]) -> dict[str, Any]:
         "context_classification": context,
         "required_jobs": sorted(expected),
         "missing_required_jobs": missing,
+        "required_checks": required_check_projections,
         "jobs": sorted(projections, key=lambda item: item["name"]),
         "non_ci_checks": [item for item in data["checks"] if item["kind"] in {"deploy_preview", "non_ci"}],
         "redacted_url_count": redacted_urls + sum(1 for item in data["checks"] if item["url_redacted"]),
@@ -687,6 +750,8 @@ def _operator_action(classification: str, context: str) -> str:
         return "collect sanitized workflow name, run ID, candidate head SHA, and conclusion before admitting CI success"
     if context == "workflow_never_created":
         return "confirm the workflow was created for this candidate before collecting CI evidence"
+    if context == "non_ci_workflow":
+        return "exclude deploy-preview and Netlify workflows from CI evidence and collect the repository CI workflow"
     if context == "stale_worktree_metadata":
         return "recollect evidence whose workflow, candidate, target, and base identities match"
     return {

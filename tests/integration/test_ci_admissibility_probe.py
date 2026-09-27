@@ -331,6 +331,22 @@ def test_workflow_not_created_is_distinct_from_a_completed_failure():
     assert result["jobs"][0]["classification"] == "workflow_never_created"
 
 
+def test_not_created_job_with_success_cannot_be_admitted_without_run_identity():
+    data = payload()
+    data["jobs"][0].update(
+        {
+            "status": "not_created",
+            "conclusion": "success",
+            "run_id": None,
+            "workflow_name": None,
+        }
+    )
+    result = report(data)
+    assert result["classification"] == "ci_unavailable"
+    assert result["diagnostic_state"] == "workflow_never_created"
+    assert result["jobs"][0]["classification"] == "workflow_never_created"
+
+
 def test_workflow_context_is_required_to_admit_success():
     data = payload()
     data["workflow"] = None
@@ -395,6 +411,61 @@ def test_mixed_failure_pending_and_zero_step_preserve_each_state():
     assert result["classification"] == "executed_failure"
     assert states == {"container": "zero_step_runnerless", "quality": "pending", "test": "executed_failure"}
     assert set(result["diagnostic_states"]) == {"executed_failure", "pending", "zero_step_runnerless"}
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled"])
+def test_required_ci_check_failure_or_cancellation_affects_verdict(conclusion: str):
+    data = payload()
+    data["checks"] = [{"name": "test", "kind": "ci", "status": "completed", "conclusion": conclusion}]
+    result = report(data)
+    assert result["classification"] == "executed_failure"
+    assert result["admissible_evidence"] is False
+
+
+@pytest.mark.parametrize("step_status", ["skipped", "failure", "cancelled"])
+def test_non_success_step_status_cannot_be_counted_as_success(step_status: str):
+    data = payload()
+    item = job(data)
+    item.pop("steps_executed")
+    item["steps"] = [{"name": "checkout", "status": step_status}]
+    result = report(data)
+    assert result["classification"] == "ci_unavailable"
+    assert result["jobs"][0]["classification"] == "incomplete_steps"
+    assert result["jobs"][0]["steps_executed"] == 1
+
+
+@pytest.mark.parametrize(
+    "workflow_name",
+    ["Netlify Deploy Preview", "deploy   preview", "DEPLOY\u2011PREVIEW"],
+)
+def test_non_ci_workflow_name_variants_cannot_admit_ci(workflow_name: str):
+    data = payload()
+    data["workflow"]["name"] = workflow_name
+    result = report(data)
+    assert result["classification"] == "ci_unavailable"
+    assert result["context_classification"] == "non_ci_workflow"
+    assert result["admissible_evidence"] is False
+
+
+@pytest.mark.parametrize("job_name", ["Deploy Preview", "deploy   preview", "DEPLOY\u2011PREVIEW"])
+def test_non_ci_job_name_variants_are_rejected_from_required_policy(job_name: str):
+    data = payload()
+    data["required_jobs"] = [job_name]
+    data["required_policy"]["jobs"] = [job_name]
+    data["required_policy"]["fingerprint"] = policy_digest(data["required_policy"])
+    data["jobs"][0]["name"] = job_name
+    result = report(data)
+    assert result["classification"] == "malformed"
+    assert result["error"] == "non_ci_check_in_required_jobs"
+
+
+@pytest.mark.parametrize("required_check_status", [[], {}, 1, True])
+def test_malformed_required_check_status_returns_structured_error(required_check_status):
+    data = payload()
+    data["jobs"][0]["required_check_status"] = required_check_status
+    result = report(data)
+    assert result["classification"] == "malformed"
+    assert result["error"] == "invalid_required_check_status"
 
 
 def test_canonical_cievidence_is_accepted_but_missing_context_stays_visible():

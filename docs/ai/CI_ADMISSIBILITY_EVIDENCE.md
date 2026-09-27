@@ -121,8 +121,11 @@ does not contain candidate/workflow identity fields, so it remains visible as
 | Evidence | Job classification | Overall result |
 |---|---|---|
 | runner ID `0`/absent or zero steps | `zero_step_runnerless` | `ci_unavailable` |
+| job status `not_created`, even with a success conclusion | `workflow_never_created` | `ci_unavailable` |
+| otherwise-successful job with skipped, failed, cancelled, or pending step evidence | `incomplete_steps` | `ci_unavailable` |
 | positive steps, runner, failure conclusion | `executed_failure` | `executed_failure` |
 | positive steps, runner, timeout conclusion | `timed_out` | `timed_out` |
+| required CI check failure or cancellation | `executed_failure` | `executed_failure` |
 | queued/in-progress/pending job | `pending` | `pending` |
 | successful execution without retrievable logs | `unavailable_logs` | `ci_unavailable` |
 | successful execution with bound workflow/head/log evidence | `pass` | `pass` |
@@ -131,12 +134,16 @@ does not contain candidate/workflow identity fields, so it remains visible as
 | workflow was never created | `workflow_never_created` | `ci_unavailable` |
 | candidate/target/workflow head or base mismatch | `stale_worktree_metadata` | `ci_unavailable` |
 | absent required job | `required_job_missing` | `ci_unavailable` |
+| Netlify/deploy-preview workflow name, including separator variants | `non_ci_workflow` | `ci_unavailable` |
 | contradictory execution, log, or check metadata | `malformed` | `malformed` |
 | malformed or contradictory metadata | `malformed` | `malformed` |
 | deploy-preview or Netlify check | `not_ci` | excluded from CI result |
 
-An overall `pass` requires every required job to execute successfully, have
-retrievable log metadata, and match the candidate workflow identity. A
+An overall `pass` requires every required job and named required CI check to
+execute successfully, have retrievable log metadata where applicable, and
+match the candidate workflow identity. A job marked `not_created` cannot pass
+even if an unbound success conclusion is supplied. Step lists are not treated
+as successful execution unless their statuses are successful. A
 workflow-level failure with no executed steps does not prove a code failure;
 the result remains `ci_unavailable`. Mixed evidence preserves per-job states
 and gives executed failures priority over incomplete evidence only when an
