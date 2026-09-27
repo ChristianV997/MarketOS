@@ -3,7 +3,7 @@ import type {
   Phase1Readiness,
   PublicMarketBenchmarkView,
   ResearchPortfolioSummaryView,
-} from "@/lib/canonicalEventsApi";
+} from "../../../lib/canonicalEventsApi.ts";
 import type {
   CandidatePillarCell,
   ControlPlaneSlot,
@@ -14,13 +14,13 @@ import type {
   FirstPhaseEvidencePacket,
   PillarId,
   RankedCandidateRow,
-} from "../contracts/firstPhaseEvidencePacket";
-import { classifyEvidenceClass } from "./classifyEvidence";
-import { derivePromotionState } from "./derivePromotionState";
-import { formatFreshnessLabel } from "./freshness";
-import { enrichDecisionReview } from "./mapDecisionReview";
-import { overlayResearchToDecisionProjection } from "./overlayResearchToDecision";
-import { adaptCommerceProjection } from "./overlayCommerceProjection";
+} from "../contracts/firstPhaseEvidencePacket.ts";
+import { classifyEvidenceClass } from "./classifyEvidence.ts";
+import { derivePromotionState } from "./derivePromotionState.ts";
+import { formatFreshnessLabel } from "./freshness.ts";
+import { enrichDecisionReview } from "./mapDecisionReview.ts";
+import { overlayResearchToDecisionProjection } from "./overlayResearchToDecision.ts";
+import { adaptCommerceProjection } from "./overlayCommerceProjection.ts";
 
 export interface ComposeCockpitInput {
   phase1Readiness: Phase1Readiness | null;
@@ -35,6 +35,22 @@ export interface ComposeCockpitInput {
   researchToDecisionProjection?: unknown;
   commerceProjection?: unknown;
   operatorWorkspaceId?: string | null;
+}
+
+const OFFLINE_EVIDENCE_MODES: ReadonlySet<EvidenceMode> = new Set([
+  "fixture_only",
+  "manual",
+  "simulated",
+  "unknown",
+]);
+
+/** Slot presence is not live proof. Offline modes never emit pillar status "available". */
+export function capSlotStatusForEvidenceMode(
+  status: CandidatePillarCell["status"],
+  evidenceMode: EvidenceMode,
+): CandidatePillarCell["status"] {
+  if (status === "available" && OFFLINE_EVIDENCE_MODES.has(evidenceMode)) return "partial";
+  return status;
 }
 
 export function normalizeEvidenceMode(value: string | null | undefined): EvidenceMode {
@@ -73,6 +89,7 @@ export interface OverlayDiagnostics {
   unmatchedServerIds: string[];
   unmatchedProjectionIds: string[];
   rankedCount: number;
+  evidenceMode?: EvidenceMode;
 }
 
 /** Prefer an explicit overlay; otherwise reuse extra report fields already on the #213 portfolio object. */
@@ -125,12 +142,17 @@ export function deriveState(
     overlay?.rankedCount
     ?? (Array.isArray(input.benchmark?.candidates) ? input.benchmark.candidates.length : 0);
   if (rankedCount === 0) return "empty";
+  if (overlay?.evidenceMode === "unknown") return "partial";
+  if (overlay?.evidenceMode && OFFLINE_EVIDENCE_MODES.has(overlay.evidenceMode)) return "partial";
   return "success";
 }
 
-function scoreStatus(score: number | null | undefined): CandidatePillarCell["status"] {
+function scoreStatus(
+  score: number | null | undefined,
+  evidenceMode: EvidenceMode,
+): CandidatePillarCell["status"] {
   if (score === null || score === undefined) return "unavailable";
-  if (score >= 0.7) return "available";
+  if (score >= 0.7) return capSlotStatusForEvidenceMode("available", evidenceMode);
   if (score >= 0.35) return "partial";
   return "blocked";
 }
@@ -146,10 +168,13 @@ function cellClass(
 
 function buildPillarCells(item: BenchmarkMatrixView["candidates"][number], evidenceMode: EvidenceMode): CandidatePillarCell[] {
   const family = "benchmark_matrix";
-  const marketStatus = scoreStatus(item.competition_evidence?.score);
-  const supplierStatus = scoreStatus(item.supplier_evidence?.score);
+  const marketStatus = scoreStatus(item.competition_evidence?.score, evidenceMode);
+  const supplierStatus = scoreStatus(item.supplier_evidence?.score, evidenceMode);
   const economicsStatus = item.economics?.margin_quality ? "partial" : "unavailable";
-  const provenanceStatus = evidenceMode === "unknown" ? "unavailable" : "available";
+  const provenanceStatus = capSlotStatusForEvidenceMode(
+    evidenceMode === "unknown" ? "unavailable" : "available",
+    evidenceMode,
+  );
   return [
     {
       pillarId: "market_evidence",
@@ -290,7 +315,10 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
     {
       id: "market_evidence",
       label: "Market evidence",
-      status: publicMarket || benchmark ? "available" : "unavailable",
+      status: capSlotStatusForEvidenceMode(
+        publicMarket || benchmark ? "available" : "unavailable",
+        evidenceMode,
+      ),
       summary: publicMarket
         ? `${publicMarket.competitor_offers_observed} observed offers · ${(publicMarket.pricing_coverage * 100).toFixed(0)}% pricing coverage`
         : benchmark
@@ -304,7 +332,10 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
         evidenceMode,
         pillarId: "market_evidence",
         sourceFamily: publicMarket ? "public_market_benchmark" : benchmark ? "benchmark_matrix" : null,
-        status: publicMarket || benchmark ? "available" : "unavailable",
+        status: capSlotStatusForEvidenceMode(
+          publicMarket || benchmark ? "available" : "unavailable",
+          evidenceMode,
+        ),
       }),
       blockedReasons: publicMarket?.remaining_supplier_blocker
         ? [publicMarket.remaining_supplier_blocker]
@@ -368,7 +399,10 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
     {
       id: "provenance",
       label: "Provenance",
-      status: evidenceMode === "unknown" ? "unavailable" : "available",
+      status: capSlotStatusForEvidenceMode(
+        evidenceMode === "unknown" ? "unavailable" : "available",
+        evidenceMode,
+      ),
       summary: `Evidence mode: ${evidenceMode.replace(/_/g, " ")}`,
       provenance: evidenceMode,
       freshness: null,
@@ -380,7 +414,7 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
     {
       id: "freshness",
       label: "Freshness",
-      status: freshness ? "available" : "partial",
+      status: capSlotStatusForEvidenceMode(freshness ? "available" : "partial", evidenceMode),
       summary: freshness
         ? `Research freshness ${freshness}`
         : "Freshness signals unavailable from research portfolio",
@@ -392,7 +426,7 @@ function buildPillars(input: ComposeCockpitInput, evidenceMode: EvidenceMode): E
         evidenceMode,
         pillarId: "freshness",
         sourceFamily: researchPortfolio ? "research_portfolio" : null,
-        status: freshness ? "available" : "partial",
+        status: capSlotStatusForEvidenceMode(freshness ? "available" : "partial", evidenceMode),
       }),
       blockedReasons: [],
     },
@@ -447,13 +481,17 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
   const mapped = overlayResearchToDecisionProjection(
     mapCandidates(input.benchmark, evidenceMode),
     projection,
+    Date.now(),
+    input.operatorWorkspaceId ?? null,
   );
   const commerce = adaptCommerceProjection(
     mapped.rows,
     input.commerceProjection,
     input.operatorWorkspaceId ?? null,
   );
-  const rankedCandidates = commerce.rows.map(enrichDecisionReview);
+  const rankedCandidates = commerce.accepted
+    ? commerce.rows.map(enrichDecisionReview)
+    : commerce.rows;
   const commerceFatal = commerce.warning && commerce.warning !== "commerce_client_projection_unavailable"
     ? commerce.warning
     : null;
@@ -464,6 +502,7 @@ export function composeCockpitViewModel(input: ComposeCockpitInput): FirstPhaseE
     unmatchedServerIds: mapped.unmatchedServerIds,
     unmatchedProjectionIds: mapped.unmatchedProjectionIds,
     rankedCount: rankedCandidates.length,
+    evidenceMode,
   });
   const pillars = buildPillars(input, evidenceMode);
   const warnings = [

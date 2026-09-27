@@ -6,6 +6,8 @@ import type {
 import { buildClientSafeServiceExport } from "./exportClientSafeEngagement.ts";
 import { filterEngagements, type WorkbenchFilters } from "./filterEngagements.ts";
 
+export const WORKBENCH_FILTER_WINDOW = 500;
+
 export type WorkbenchViewModel = {
   surface: SurfaceState;
   statusMessage: string;
@@ -14,7 +16,11 @@ export type WorkbenchViewModel = {
   selectedIndex: number;
   exportPreview: ReturnType<typeof buildClientSafeServiceExport> | null;
   liveEndpointUnavailable: boolean;
+  liveEndpointStatus: "unavailable" | "available_read_only";
+  envelopeAvailability: ServiceEngagementProjection["availability"] | "unknown";
   diagnostics: string[];
+  bounded: boolean;
+  pipelineEmptyCopy: string | null;
 };
 
 export function composeWorkbenchViewModel(input: {
@@ -33,25 +39,41 @@ export function composeWorkbenchViewModel(input: {
       selectedIndex: -1,
       exportPreview: null,
       liveEndpointUnavailable: true,
+      liveEndpointStatus: "unavailable",
+      envelopeAvailability: "unknown",
       diagnostics: [],
+      bounded: false,
+      pipelineEmptyCopy: "Loading the service-delivery workbench.",
     };
   }
 
   if (!input.projection) {
+    const statusMessage = input.errorMessage
+      ?? "No sanitized service-engagement projection is available.";
+    const unavailable = Boolean(input.errorMessage);
     return {
-      surface: input.errorMessage ? "unavailable" : "empty",
-      statusMessage: input.errorMessage
-        ?? "No sanitized service-engagement projection is available.",
+      surface: unavailable ? "unavailable" : "empty",
+      statusMessage,
       filtered: [],
       selected: null,
       selectedIndex: -1,
       exportPreview: null,
       liveEndpointUnavailable: true,
+      liveEndpointStatus: "unavailable",
+      envelopeAvailability: "unknown",
       diagnostics: input.errorMessage ? [input.errorMessage] : [],
+      bounded: false,
+      pipelineEmptyCopy: unavailable
+        ? "Canonical GET /api/service-delivery/workbench is unavailable. Demo fixtures are not substituted."
+        : "No sanitized service-engagement projection is available.",
     };
   }
 
-  const filtered = filterEngagements(input.projection.engagements, input.filters);
+  const filteredAll = filterEngagements(input.projection.engagements, input.filters, {
+    maxResults: WORKBENCH_FILTER_WINDOW + 1,
+  });
+  const bounded = filteredAll.length > WORKBENCH_FILTER_WINDOW;
+  const filtered = bounded ? filteredAll.slice(0, WORKBENCH_FILTER_WINDOW) : filteredAll;
   const selected = filtered.find((item) => item.engagement_id === input.selectedId)
     ?? filtered[0]
     ?? null;
@@ -59,31 +81,41 @@ export function composeWorkbenchViewModel(input: {
     ? filtered.findIndex((item) => item.engagement_id === selected.engagement_id)
     : -1;
 
-  // Live GET remains unavailable: never emit success or live_validated for fixture/manual copies.
+  const endpointAvailableReadOnly = input.projection.live_endpoint_status === "available_read_only";
+  const getSlot = endpointAvailableReadOnly ? "available_read_only" : "unavailable";
+  const envelope = input.projection.availability;
+  // GET slot presence never promotes fixture/manual evidence or enables mutations.
   let surface: SurfaceState = "unavailable";
-  let statusMessage = `${filtered.length} engagement(s) in the current filter. Source order is preserved. Canonical GET ${input.projection.live_endpoint} is unavailable. Fixture/manual/simulated rows are not live client evidence.`;
-  if (input.projection.availability === "unavailable" && input.projection.engagements.length === 0) {
+  let statusMessage = `${filtered.length} engagement(s) in the current filter. Envelope: ${envelope} (not live_validated). GET slot: ${getSlot}. Source order is preserved. Economics are display copies only.`;
+  if (envelope === "unavailable" && input.projection.engagements.length === 0) {
     surface = "unavailable";
-    statusMessage = "Canonical GET /api/service-delivery/workbench is unavailable. No sanitized engagements to review.";
+    statusMessage = `Envelope: unavailable. GET slot: ${getSlot}. No sanitized engagements to review. This is not a success state.`;
   } else if (input.projection.engagements.length === 0) {
     surface = "empty";
-    statusMessage = "No engagements in the sanitized projection.";
+    statusMessage = `Envelope: ${envelope}. GET slot: ${getSlot}. No engagements in the sanitized projection.`;
   } else if (filtered.length === 0) {
     surface = "empty";
-    statusMessage = "No engagements match the current filters. Clear filters to restore the source list.";
+    statusMessage = `Envelope: ${envelope}. GET slot: ${getSlot}. No engagements match the current filters. Clear filters to restore the source list.`;
   } else if (selected?.eligibility.data_inadequate || selected?.lifecycle_state === "data_inadequate") {
     surface = "blocked";
-    statusMessage = "Selected engagement is data_inadequate. The client must supply the listed records. Draft-ready is not commercially validated.";
+    statusMessage = `Envelope: ${envelope}. GET slot: ${getSlot}. Selected engagement is data_inadequate. Draft-ready is not commercially validated.`;
   } else if (selected?.stale) {
     surface = "stale";
-    statusMessage = "Selected engagement is stale. Do not treat displayed figures as current proof.";
-  } else if (input.projection.availability === "partial" || input.projection.availability === "fixture") {
+    statusMessage = `Envelope: ${envelope}. GET slot: ${getSlot}. Selected engagement is stale. Do not treat displayed figures as current proof.`;
+  } else if (envelope === "unavailable") {
+    surface = "unavailable";
+    statusMessage = `Envelope: unavailable. GET slot: ${getSlot}. This is not a success state and grants no mutation authority.`;
+  } else if (envelope === "partial" || envelope === "fixture") {
     surface = "partial";
-    statusMessage = "Partial/fixture projection: the live endpoint remains unavailable. These rows are not live-validated commercial proof.";
-  } else if (input.projection.availability === "manual_import") {
+    statusMessage = `Envelope: ${envelope} (not live_validated). GET slot: ${getSlot}. These rows are not commercial proof.`;
+  } else if (envelope === "manual_import") {
     surface = "partial";
-    statusMessage = "Manual-import / #261 plane copy. Not live-validated. Server order is preserved; economics are display copies only.";
+    statusMessage = `Envelope: manual_import (not live_validated). GET slot: ${getSlot}. Plane copy only. Server order is preserved; economics are display copies only.`;
   }
+  if (selected && surface !== "unavailable") {
+    statusMessage = `${statusMessage} Selected lifecycle: ${selected.lifecycle_state}.`;
+  }
+  // Fail-closed: fixture/manual/partial/unavailable envelopes never emit success.
 
   return {
     surface,
@@ -92,11 +124,21 @@ export function composeWorkbenchViewModel(input: {
     selected,
     selectedIndex,
     exportPreview: selected ? buildClientSafeServiceExport(selected) : null,
-    liveEndpointUnavailable: true,
+    liveEndpointUnavailable: !endpointAvailableReadOnly,
+    liveEndpointStatus: input.projection.live_endpoint_status,
+    envelopeAvailability: envelope,
     diagnostics: [
       ...(input.errorMessage ? [input.errorMessage] : []),
       ...input.projection.diagnostics,
     ],
+    bounded,
+    pipelineEmptyCopy: filtered.length > 0
+      ? null
+      : surface === "unavailable"
+        ? "Canonical GET /api/service-delivery/workbench is unavailable. Demo fixtures are not substituted."
+        : statusMessage.includes("Clear filters")
+          ? "No engagements match. Clear filters to recover the source list."
+          : "No engagements in the sanitized projection.",
   };
 }
 

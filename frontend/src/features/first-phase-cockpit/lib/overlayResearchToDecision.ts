@@ -4,12 +4,12 @@ import {
   RESEARCH_TO_DECISION_APPENDIX_VERSION,
   type EvidenceClass,
   type RankedCandidateRow,
-} from "../contracts/firstPhaseEvidencePacket";
-import { classifyEvidenceClass } from "./classifyEvidence";
-import { derivePromotionState } from "./derivePromotionState";
-import { containsSecretShapedValue } from "./exportClientSafeReport";
-import { formatFreshnessLabel, isStaleFreshness } from "./freshness";
-import { enrichDecisionReview } from "./mapDecisionReview";
+} from "../contracts/firstPhaseEvidencePacket.ts";
+import { classifyEvidenceClass } from "./classifyEvidence.ts";
+import { derivePromotionState } from "./derivePromotionState.ts";
+import { containsSecretShapedValue } from "./exportClientSafeReport.ts";
+import { formatFreshnessLabel, isStaleFreshness } from "./freshness.ts";
+import { enrichDecisionReview } from "./mapDecisionReview.ts";
 
 export type ProjectionValidationResult =
   | { ok: true; packet: ResearchToDecisionProjection }
@@ -26,6 +26,7 @@ export interface ProjectionAdapterResult {
 
 export interface ResearchToDecisionAuditRow {
   candidate_id?: string;
+  workspace_id?: string | null;
   sku?: string | null;
   supplier_sku?: string | null;
   title?: string;
@@ -64,14 +65,24 @@ export interface ResearchToDecisionAuditRow {
   } | null;
   decision?: string | null;
   next_action?: string | null;
+  action?: string | null;
+  evidence_gaps?: string[];
+  promotion_lifecycle?: Array<{
+    prior_state?: string | null;
+    next_state?: string | null;
+    reason_code?: string | null;
+  }>;
   hard_gates?: string[];
 }
 
 export interface ClientSafeProjectionCandidate {
   candidate_id?: string;
+  workspace_id?: string | null;
   title?: string;
   decision?: string | null;
   next_action?: string | null;
+  action?: string | null;
+  promotion_state?: string | null;
   risk_state?: string | null;
   freshness?: string | null;
   confidence?: ResearchToDecisionAuditRow["confidence"];
@@ -136,11 +147,70 @@ function indexUniqueAudits(
   return { ok: true, byId };
 }
 
+function declaredWorkspace(record: Record<string, unknown> | null | undefined): string | null {
+  if (!record || record.workspace_id == null) return null;
+  const value = String(record.workspace_id).trim();
+  return value || null;
+}
+
+function rejectsOperatorWorkspace(
+  packet: Record<string, unknown>,
+  appendix: Record<string, unknown>,
+  clientSafe: Record<string, unknown> | null,
+  operatorWorkspaceId: string | null,
+): boolean {
+  if (!operatorWorkspaceId) return false;
+  const packetWorkspace = declaredWorkspace(packet) ?? declaredWorkspace(appendix) ?? declaredWorkspace(clientSafe);
+  if (packetWorkspace && packetWorkspace !== operatorWorkspaceId) return true;
+  const audits = Array.isArray(appendix.candidate_audit) ? appendix.candidate_audit : [];
+  const safes = Array.isArray(clientSafe?.candidates) ? clientSafe.candidates : [];
+  for (const item of [...audits, ...safes]) {
+    const record = asRecord(item);
+    const workspace = declaredWorkspace(record);
+    if (workspace && workspace !== operatorWorkspaceId) return true;
+  }
+  return false;
+}
+
+const OVERLAY_SECRET_SKIP_APPENDIX_KEYS = new Set([
+  "input_audit",
+  "supplier_offers",
+  "promotion_lifecycle_contract",
+  "integration_contract",
+]);
+
+function overlaySecretScanTarget(
+  packet: Record<string, unknown>,
+  appendix: Record<string, unknown>,
+): unknown {
+  const scannedAppendix: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(appendix)) {
+    if (OVERLAY_SECRET_SKIP_APPENDIX_KEYS.has(key)) continue;
+    scannedAppendix[key] = value;
+  }
+  return {
+    report_version: packet.report_version,
+    workspace_id: packet.workspace_id,
+    appendix: scannedAppendix,
+    executive_summary: packet.executive_summary,
+  };
+}
+
 /** Fail-closed schema gate for the existing product-validation-report projection. Extra fields are ignored. */
-export function validateResearchToDecisionProjection(raw: unknown): ProjectionValidationResult {
+export function validateResearchToDecisionProjection(
+  raw: unknown,
+  operatorWorkspaceId: string | null = null,
+): ProjectionValidationResult {
   if (!raw || typeof raw !== "object") return { ok: false, reason: "projection_not_object" };
-  if (containsSecretShapedValue(raw)) return { ok: false, reason: "secret_shaped_value_rejected" };
   const packet = raw as Record<string, unknown>;
+  const appendixForScan = asRecord(packet.appendix);
+  if (
+    containsSecretShapedValue(
+      appendixForScan ? overlaySecretScanTarget(packet, appendixForScan) : packet,
+    )
+  ) {
+    return { ok: false, reason: "secret_shaped_value_rejected" };
+  }
   if (packet.report_version !== PRODUCT_VALIDATION_REPORT_VERSION) {
     return { ok: false, reason: "schema_version_unsupported" };
   }
@@ -153,6 +223,9 @@ export function validateResearchToDecisionProjection(raw: unknown): ProjectionVa
     return { ok: false, reason: "candidate_audit_malformed" };
   }
   const clientSafe = asRecord(appendix.client_safe_projection);
+  if (rejectsOperatorWorkspace(packet, appendix, clientSafe, operatorWorkspaceId)) {
+    return { ok: false, reason: "cross_workspace_rejected" };
+  }
   if (clientSafe?.launch_authorized === true) {
     return { ok: false, reason: "launch_authorized_rejected" };
   }
@@ -248,14 +321,42 @@ function mergeAudit(
     candidate_id: audit?.candidate_id ?? safe?.candidate_id,
     title: audit?.title ?? safe?.title,
     decision: audit?.decision ?? safe?.decision,
-    next_action: audit?.next_action ?? safe?.next_action,
+    next_action: audit?.next_action ?? audit?.action ?? safe?.next_action ?? safe?.action,
     risk_state: audit?.risk_state ?? safe?.risk_state,
     freshness: audit?.freshness ?? safe?.freshness,
     confidence: audit?.confidence ?? safe?.confidence,
     missing_evidence: audit?.missing_evidence ?? safe?.missing_evidence,
+    evidence_gaps: audit?.evidence_gaps,
+    promotion_lifecycle: audit?.promotion_lifecycle,
     hard_gates: audit?.hard_gates ?? safe?.hard_gates,
     evidence_refs: audit?.evidence_refs ?? safe?.evidence_refs,
   };
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    next.push(value);
+  }
+  return next;
+}
+
+function mapPromotionLifecycle(
+  raw: ResearchToDecisionAuditRow["promotion_lifecycle"],
+): RankedCandidateRow["promotionTransitions"] {
+  if (!raw?.length) return [];
+  return raw.map((item) => {
+    const to = item.next_state == null || item.next_state === "" ? null : String(item.next_state);
+    return {
+      from: item.prior_state == null ? null : String(item.prior_state),
+      to,
+      status: to ? "observed" as const : "unavailable" as const,
+      reason: item.reason_code == null ? null : String(item.reason_code),
+    };
+  });
 }
 
 /**
@@ -310,9 +411,14 @@ export function overlayResearchToDecisionAudits(
     const stale = declaredFreshness === "expired" || isStaleFreshness(freshnessLabel);
     const economicsMissing = economicsUnavailable(audit.economics);
     const mappedEconomics = economicsLabel(audit.economics);
-    const decision = audit.decision ?? audit.next_action ?? null;
-    const nextAction = audit.next_action ?? audit.decision ?? null;
+    const decision = audit.decision ?? audit.next_action ?? audit.action ?? null;
+    const nextAction = audit.next_action ?? audit.action ?? audit.decision ?? null;
     const hardGates = Array.isArray(audit.hard_gates) ? [...audit.hard_gates] : [];
+    const missingEvidence = uniqueStrings([
+      ...(Array.isArray(audit.missing_evidence) ? audit.missing_evidence.map(String) : []),
+      ...(Array.isArray(audit.evidence_gaps) ? audit.evidence_gaps.map(String) : []),
+    ]);
+    const promotionTransitions = mapPromotionLifecycle(audit.promotion_lifecycle);
     const promotion = derivePromotionState(
       audit.risk_state ?? audit.lifecycle_state ?? decision ?? row.commercialDecision,
     );
@@ -346,7 +452,7 @@ export function overlayResearchToDecisionAudits(
       supplierOffer: summarizeOffer(audit),
       offerDisposition: offerDispositionFromAudit(audit),
       assumptions: Array.isArray(audit.assumptions) ? [...audit.assumptions] : row.assumptions,
-      missingEvidence: Array.isArray(audit.missing_evidence) ? [...audit.missing_evidence] : row.missingEvidence,
+      missingEvidence: missingEvidence.length ? missingEvidence : row.missingEvidence,
       conflicts: Array.isArray(audit.conflicts) ? [...audit.conflicts] : row.conflicts,
       confidence: overall,
       confidenceSupplier: supplierConf,
@@ -362,7 +468,8 @@ export function overlayResearchToDecisionAudits(
         ? `marketplace_evidence_count_${competitionCount}`
         : row.competitionSummary,
       replayIdentity: options.replayIdentity ?? row.replayIdentity,
-      freshnessExpiry: expiry,
+      evidenceClass: stale ? "stale" : row.evidenceClass,
+      freshnessExpiry: expiry ?? (stale ? "expired" : row.freshnessExpiry),
       supplierEvidenceClass: supplierClass,
       consumerEvidenceClass: consumerClass,
       economicsUnavailable: economicsMissing,
@@ -391,6 +498,7 @@ export function overlayResearchToDecisionAudits(
         }
         return cell;
       }),
+      promotionTransitions: promotionTransitions.length ? promotionTransitions : row.promotionTransitions,
     });
   });
 
@@ -403,6 +511,7 @@ export function adaptResearchToDecisionProjection(
   rows: RankedCandidateRow[],
   raw: unknown,
   nowMs: number = Date.now(),
+  operatorWorkspaceId: string | null = null,
 ): ProjectionAdapterResult {
   if (raw == null) {
     return {
@@ -414,7 +523,7 @@ export function adaptResearchToDecisionProjection(
       unmatchedProjectionIds: [],
     };
   }
-  const validated = validateResearchToDecisionProjection(raw);
+  const validated = validateResearchToDecisionProjection(raw, operatorWorkspaceId);
   if (!validated.ok) {
     return {
       rows,
@@ -457,6 +566,7 @@ export function overlayResearchToDecisionProjection(
   rows: RankedCandidateRow[],
   raw: unknown,
   nowMs: number = Date.now(),
+  operatorWorkspaceId: string | null = null,
 ): ProjectionAdapterResult {
-  return adaptResearchToDecisionProjection(rows, raw, nowMs);
+  return adaptResearchToDecisionProjection(rows, raw, nowMs, operatorWorkspaceId);
 }

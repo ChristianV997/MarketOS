@@ -9,21 +9,25 @@ export default function ServiceDeliveryWorkbench() {
   const { view, filters, setFilters, setSelectedId, recovery } = useServiceDeliveryWorkbench();
   const tableRef = useRef<HTMLDivElement>(null);
   const skipInitialFocus = useRef(true);
+  const movePipelineFocus = useRef(false);
 
   useEffect(() => {
     if (skipInitialFocus.current) {
       skipInitialFocus.current = false;
       return;
     }
-    const selected = tableRef.current?.querySelector<HTMLElement>("[aria-selected='true']");
+    // Filter/auto-select must not steal focus from the search field.
+    if (!movePipelineFocus.current) return;
+    movePipelineFocus.current = false;
+    const selected = tableRef.current?.querySelector<HTMLElement>("button[aria-pressed='true']");
     selected?.focus();
   }, [view.selected?.engagement_id]);
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-4 overflow-x-hidden p-3 md:p-5">
+    <div className="mx-auto flex max-w-7xl flex-col gap-4 overflow-x-auto p-3 md:p-5">
       <a
         href="#pipeline-heading"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
       >
         Skip to service pipeline
       </a>
@@ -31,25 +35,45 @@ export default function ServiceDeliveryWorkbench() {
         <h1 className="text-xl font-semibold text-zinc-50">Service delivery workbench</h1>
         <p className="text-sm text-zinc-400">
           Operator review for Product Validation Sprint, Unit Economics + CAC/ROAS Diagnostic,
-          Launch Draft Pack, and Managed Acquisition and CRO. Read-only: the canonical GET is
-          unavailable, fixtures/manual/simulated rows are not live client evidence, and
-          draft-ready is not commercially validated.
+          Launch Draft Pack, and Managed Acquisition and CRO. GET slot is
+          {view.liveEndpointUnavailable ? " unavailable" : " available_read_only"}
+          ; envelope is {view.envelopeAvailability.replace(/_/g, " ")}.
+          Fixture, manual_import, assumption, and simulated classes are not live client evidence.
+          Draft-ready is not commercially validated. Economics are backend display copies only.
         </p>
       </header>
 
-      <WorkbenchStatusBanner surface={view.surface} message={view.statusMessage} />
+      <WorkbenchStatusBanner
+        surface={view.surface}
+        message={view.statusMessage}
+        diagnostics={view.diagnostics}
+        liveEndpointStatus={view.liveEndpointStatus}
+        envelopeAvailability={view.envelopeAvailability}
+      />
 
-      <FilterBar filters={filters} onChange={setFilters} count={view.filtered.length} />
+      <FilterBar
+        filters={filters}
+        onChange={setFilters}
+        count={view.filtered.length}
+        bounded={view.bounded}
+      />
 
       <div ref={tableRef}>
         <PipelineTable
           rows={view.filtered}
           selectedId={view.selected?.engagement_id ?? null}
-          onSelect={setSelectedId}
+          onSelect={(id) => {
+            movePipelineFocus.current = true;
+            setSelectedId(id);
+          }}
           onMove={(delta) => {
             const next = moveSelection(view.filtered, view.selected?.engagement_id ?? null, delta);
-            if (next) setSelectedId(next);
+            if (next) {
+              movePipelineFocus.current = true;
+              setSelectedId(next);
+            }
           }}
+          emptyCopy={view.pipelineEmptyCopy ?? "No engagements in the sanitized projection."}
         />
       </div>
 

@@ -3,7 +3,7 @@ import {
   type EvidenceClass,
   type EvidenceMode,
   type PillarId,
-} from "../contracts/firstPhaseEvidencePacket";
+} from "../contracts/firstPhaseEvidencePacket.ts";
 
 const OFFLINE_MODES: ReadonlySet<EvidenceMode> = new Set([
   "fixture_only",

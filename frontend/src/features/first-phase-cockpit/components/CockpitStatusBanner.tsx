@@ -67,6 +67,9 @@ export function CockpitStatusBanner({
         </span>
       </div>
       <p className="mt-3 text-xs text-zinc-300">{explanation}</p>
+      <p className="mt-1 text-[11px] text-zinc-400">
+        Packet state is compose completeness, not live proof. Launch remains unauthorized in this cockpit.
+      </p>
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
         {overallStatus && (
           <p>

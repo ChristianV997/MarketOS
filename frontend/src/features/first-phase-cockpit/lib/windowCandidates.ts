@@ -1,7 +1,7 @@
 import {
   CANDIDATE_WINDOW_SIZE,
   type RankedCandidateRow,
-} from "../contracts/firstPhaseEvidencePacket";
+} from "../contracts/firstPhaseEvidencePacket.ts";
 
 export interface CandidateWindow {
   visible: RankedCandidateRow[];

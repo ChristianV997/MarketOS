@@ -21,9 +21,15 @@ const SURFACE_STYLES: Record<SurfaceState, string> = {
 export function WorkbenchStatusBanner({
   surface,
   message,
+  diagnostics = [],
+  liveEndpointStatus = "unavailable",
+  envelopeAvailability = "unknown",
 }: {
   surface: SurfaceState;
   message: string;
+  diagnostics?: string[];
+  liveEndpointStatus?: "unavailable" | "available_read_only";
+  envelopeAvailability?: "fixture" | "unavailable" | "partial" | "manual_import" | "unknown";
 }) {
   return (
     <div
@@ -36,8 +42,20 @@ export function WorkbenchStatusBanner({
         <span className="font-medium uppercase tracking-wide text-[11px]">{surface}</span>
         <span className="ml-2">{message}</span>
       </p>
-      <p className="mt-1 text-[11px] opacity-80">
-        Read-only operator workbench. No client accounts, messages, publishing, campaign edits, or charges.
+      <p className="mt-1 flex flex-wrap gap-2 text-[11px]">
+        <span className="rounded border border-white/10 px-1.5 py-0.5">GET slot: {liveEndpointStatus.replace(/_/g, " ")}</span>
+        <span className="rounded border border-white/10 px-1.5 py-0.5">Envelope: {envelopeAvailability.replace(/_/g, " ")}</span>
+        <span className="rounded border border-white/10 px-1.5 py-0.5">Not live validated · not launch authorized</span>
+      </p>
+      {diagnostics.length > 0 ? (
+        <ul className="mt-1 list-disc pl-4 text-[11px]">
+          {diagnostics.slice(0, 8).map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="mt-1 text-[11px]">
+        Read-only operator workbench. GET slot presence is not commercial validation. No client accounts, messages, publishing, campaign edits, or charges.
       </p>
     </div>
   );
@@ -47,10 +65,12 @@ export function FilterBar({
   filters,
   onChange,
   count,
+  bounded = false,
 }: {
   filters: WorkbenchFilters;
   onChange: (next: WorkbenchFilters) => void;
   count: number;
+  bounded?: boolean;
 }) {
   return (
     <form
@@ -58,16 +78,16 @@ export function FilterBar({
       onSubmit={(event) => event.preventDefault()}
       aria-label="Filter engagements without changing source order"
     >
-      <label className="block text-[11px] uppercase tracking-widest text-zinc-500">
+      <label className="block text-[11px] uppercase tracking-widest text-zinc-400">
         Search
         <input
-          className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0a0a0b] px-2.5 py-1.5 text-sm text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
+          className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0a0a0b] px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
           value={filters.query}
           onChange={(event) => onChange({ ...filters, query: event.target.value })}
           placeholder="Client, engagement, service"
         />
       </label>
-      <label className="block text-[11px] uppercase tracking-widest text-zinc-500">
+      <label className="block text-[11px] uppercase tracking-widest text-zinc-400">
         Service
         <select
           className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0a0a0b] px-2.5 py-1.5 text-sm text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
@@ -83,7 +103,7 @@ export function FilterBar({
           ))}
         </select>
       </label>
-      <label className="block text-[11px] uppercase tracking-widest text-zinc-500">
+      <label className="block text-[11px] uppercase tracking-widest text-zinc-400">
         Lifecycle
         <select
           className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0a0a0b] px-2.5 py-1.5 text-sm text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
@@ -99,7 +119,7 @@ export function FilterBar({
           ))}
         </select>
       </label>
-      <label className="block text-[11px] uppercase tracking-widest text-zinc-500">
+      <label className="block text-[11px] uppercase tracking-widest text-zinc-400">
         Evidence class
         <select
           className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#0a0a0b] px-2.5 py-1.5 text-sm text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
@@ -116,7 +136,10 @@ export function FilterBar({
         </select>
       </label>
       <div className="md:col-span-4 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
-        <p>{count} visible · source order unchanged</p>
+        <p>
+          {count} visible · source order unchanged
+          {bounded ? " · list bounded at 500 rows; additional matches are not shown" : ""}
+        </p>
         <button
           type="button"
           className="rounded-md border border-white/[0.08] px-2 py-1 text-zinc-200 hover:bg-white/[0.04] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"

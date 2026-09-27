@@ -3,39 +3,16 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const WINDOW_SIZE = 50;
-const STABLE_TOP_N = 10;
+import {
+  CANDIDATE_WINDOW_SIZE,
+  STABLE_TOP_N,
+} from "../src/features/first-phase-cockpit/contracts/firstPhaseEvidencePacket.ts";
+import { composeCockpitViewModel } from "../src/features/first-phase-cockpit/lib/composeCockpitViewModel.ts";
+import { filterCandidates } from "../src/features/first-phase-cockpit/lib/filterCandidates.ts";
+import { windowCandidates } from "../src/features/first-phase-cockpit/lib/windowCandidates.ts";
+
 const SIZES = [1000, 5000, 10000];
 const featureRoot = new URL("../src/features/first-phase-cockpit/", import.meta.url);
-
-function filterCandidates(candidates, filter) {
-  const query = filter.query.trim().toLowerCase();
-  const filtered = [];
-  for (const candidate of candidates) {
-    if (filter.topN && candidate.rankIndex >= STABLE_TOP_N) continue;
-    if (filter.topOnly && !candidate.isTopCandidate) continue;
-    if (filter.risk !== "all") {
-      const risk = (candidate.riskLevel ?? "unknown").toLowerCase();
-      if (risk !== filter.risk) continue;
-    }
-    if (filter.decision !== "all" && (candidate.commercialDecision ?? "") !== filter.decision) continue;
-    if (query) {
-      const haystack = [candidate.candidateId, candidate.title, candidate.commercialDecision]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      if (!haystack.includes(query)) continue;
-    }
-    filtered.push(candidate);
-  }
-  return filtered;
-}
-
-function windowCandidates(candidates, windowStart, windowSize = WINDOW_SIZE) {
-  const size = Math.max(1, windowSize);
-  const start = candidates.length === 0 ? 0 : Math.min(Math.max(0, windowStart), Math.max(0, candidates.length - size));
-  return candidates.slice(start, start + size);
-}
 
 function normalizeRenderModel(rows, state) {
   return {
@@ -60,6 +37,31 @@ function normalizeExport(rows) {
   }));
 }
 
+function makeBenchmark(size) {
+  const risks = ["high", "medium", "low", "unknown"];
+  const candidates = [];
+  for (let index = 0; index < size; index += 1) {
+    candidates.push({
+      candidate: {
+        candidate_id: `cand-${String(index).padStart(5, "0")}`,
+        title: `Sanitized candidate ${index}`,
+      },
+      evidence_completeness: 0.2,
+      risk_level: risks[index % risks.length],
+      commercial_decision: "hold",
+      next_best_action: "review_evidence",
+    });
+  }
+  return {
+    evidence_mode: "unknown",
+    top_candidate_id: candidates[0].candidate.candidate_id,
+    candidates,
+    warnings: [],
+    read_only: true,
+    next_best_action: "review_evidence",
+  };
+}
+
 function makeSanitizedFixture(size) {
   const risks = ["high", "medium", "low", "unknown"];
   const decisions = ["hold", "investigate", "defer", "blocked"];
@@ -68,11 +70,13 @@ function makeSanitizedFixture(size) {
     rows.push({
       candidateId: `cand-${String(index).padStart(5, "0")}`,
       title: `Sanitized candidate ${index}`,
+      sku: null,
       rankIndex: index,
       riskLevel: risks[index % risks.length],
       commercialDecision: decisions[index % decisions.length],
       nextBestAction: "review_evidence",
-      evidenceClass: "fixture_screening",
+      evidenceClass: "fixture",
+      promotionState: "hold",
       isTopCandidate: index === 0,
     });
   }
@@ -92,6 +96,13 @@ function time(fn) {
 
 test("deterministic large-list cockpit benchmark preserves order and replay hashes", async () => {
   const timings = {};
+  const emptyFilter = {
+    query: "",
+    risk: "all",
+    decision: "all",
+    topOnly: false,
+    topN: false,
+  };
   for (const size of SIZES) {
     const fixture = makeSanitizedFixture(size);
     const firstIds = fixture.map((row) => row.candidateId);
@@ -102,11 +113,8 @@ test("deterministic large-list cockpit benchmark preserves order and replay hash
 
     const filtered = time(() =>
       filterCandidates(fixture, {
-        query: "",
+        ...emptyFilter,
         risk: "high",
-        decision: "all",
-        topOnly: false,
-        topN: false,
       }),
     );
     assert.ok(filtered.result.every((row) => row.riskLevel === "high"));
@@ -116,14 +124,33 @@ test("deterministic large-list cockpit benchmark preserves order and replay hash
       firstIds.filter((_, index) => index % 4 === 0),
     );
 
-    const windowed = time(() => windowCandidates(filtered.result, 0, WINDOW_SIZE));
-    assert.equal(windowed.result.length, Math.min(WINDOW_SIZE, filtered.result.length));
+    const windowed = time(() => windowCandidates(filtered.result, 0, CANDIDATE_WINDOW_SIZE));
+    assert.equal(windowed.result.visible.length, Math.min(CANDIDATE_WINDOW_SIZE, filtered.result.length));
     assert.deepEqual(
-      windowed.result.map((row) => row.candidateId),
-      filteredIds.slice(0, WINDOW_SIZE),
+      windowed.result.visible.map((row) => row.candidateId),
+      filteredIds.slice(0, CANDIDATE_WINDOW_SIZE),
     );
 
-    const render = time(() => normalizeRenderModel(windowed.result, "success"));
+    const composed = time(() =>
+      composeCockpitViewModel({
+        phase1Readiness: { overall_status: "ready" },
+        benchmark: makeBenchmark(size),
+        publicMarket: null,
+        researchPortfolio: null,
+        readinessError: false,
+        benchmarkError: false,
+        publicMarketError: false,
+        researchError: false,
+        isLoading: false,
+      }),
+    );
+    assert.equal(composed.result.rankedCandidates.length, size);
+    assert.deepEqual(
+      composed.result.rankedCandidates.map((row) => row.candidateId),
+      firstIds,
+    );
+    assert.notEqual(composed.result.state, "success");
+    assert.notEqual(composed.result.rankedCandidates[0].evidenceClass, "live_validated");
     const exported = time(() => normalizeExport(fixture));
     assert.equal(exported.result.length, size);
     assert.equal(exported.result[0].rank_index, 0);
@@ -133,50 +160,34 @@ test("deterministic large-list cockpit benchmark preserves order and replay hash
     const replayA = digest({
       ids: firstIds,
       filtered: filteredIds,
-      window: windowed.result.map((row) => row.candidateId),
+      window: windowed.result.visible.map((row) => row.candidateId),
       export: exported.result,
     });
     const replayB = digest({
       ids: fixture.map((row) => row.candidateId),
-      filtered: filterCandidates(fixture, {
-        query: "",
-        risk: "high",
-        decision: "all",
-        topOnly: false,
-        topN: false,
-      }).map((row) => row.candidateId),
+      filtered: filterCandidates(fixture, { ...emptyFilter, risk: "high" }).map((row) => row.candidateId),
       window: windowCandidates(
-        filterCandidates(fixture, {
-          query: "",
-          risk: "high",
-          decision: "all",
-          topOnly: false,
-          topN: false,
-        }),
+        filterCandidates(fixture, { ...emptyFilter, risk: "high" }),
         0,
-        WINDOW_SIZE,
-      ).map((row) => row.candidateId),
+        CANDIDATE_WINDOW_SIZE,
+      ).visible.map((row) => row.candidateId),
       export: normalizeExport(fixture),
     });
     assert.equal(replayA, replayB);
 
-    const topN = filterCandidates(fixture, {
-      query: "",
-      risk: "all",
-      decision: "all",
-      topOnly: false,
-      topN: true,
-    });
+    const topN = filterCandidates(fixture, { ...emptyFilter, topN: true });
     assert.equal(topN.length, STABLE_TOP_N);
     assert.deepEqual(
       topN.map((row) => row.candidateId),
       firstIds.slice(0, STABLE_TOP_N),
     );
 
+    const render = time(() => normalizeRenderModel(windowed.result.visible, composed.result.state));
     timings[size] = {
       normalize_ms: Number(normalized.elapsedMs.toFixed(3)),
       filter_ms: Number(filtered.elapsedMs.toFixed(3)),
       window_ms: Number(windowed.elapsedMs.toFixed(3)),
+      compose_ms: Number(composed.elapsedMs.toFixed(3)),
       render_model_ms: Number(render.elapsedMs.toFixed(3)),
       export_ms: Number(exported.elapsedMs.toFixed(3)),
       replay_sha256: replayA,
@@ -185,8 +196,12 @@ test("deterministic large-list cockpit benchmark preserves order and replay hash
 
   process.stdout.write(`${JSON.stringify({ cockpit_perf_benchmark: timings }, null, 2)}\n`);
 
+  const composeSource = await readFile(new URL("lib/composeCockpitViewModel.ts", featureRoot), "utf8");
   const filterSource = await readFile(new URL("lib/filterCandidates.ts", featureRoot), "utf8");
   const windowSource = await readFile(new URL("lib/windowCandidates.ts", featureRoot), "utf8");
+  assert.match(composeSource, /commerce\.accepted/);
+  assert.match(composeSource, /commerce\.rows\.map\(enrichDecisionReview\)/);
   assert.doesNotMatch(filterSource, /\.sort\(/);
+  assert.match(filterSource, /if \(filter\.topN && candidate\.rankIndex >= STABLE_TOP_N\) break;/);
   assert.doesNotMatch(windowSource, /\.sort\(/);
 });

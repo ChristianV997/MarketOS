@@ -58,7 +58,7 @@ export function RunMetadataPanel({
         </p>
       )}
       {unavailableReasons.length > 0 && (
-        <p className="mt-2 text-xs text-zinc-500">
+        <p className="mt-2 text-xs text-zinc-400">
           Unavailable: {unavailableReasons.map((reason) => reason.replace(/_/g, " ")).join(" · ")}
         </p>
       )}

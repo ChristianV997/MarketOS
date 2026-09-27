@@ -2,7 +2,7 @@ import {
   STABLE_TOP_N,
   type CandidateFilterState,
   type RankedCandidateRow,
-} from "../contracts/firstPhaseEvidencePacket";
+} from "../contracts/firstPhaseEvidencePacket.ts";
 
 export const DEFAULT_CANDIDATE_FILTER: CandidateFilterState = {
   query: "",
@@ -23,7 +23,7 @@ export function filterCandidates(
   const query = filter.query.trim().toLowerCase();
   const filtered: RankedCandidateRow[] = [];
   for (const candidate of candidates) {
-    if (filter.topN && candidate.rankIndex >= STABLE_TOP_N) continue;
+    if (filter.topN && candidate.rankIndex >= STABLE_TOP_N) break;
     if (filter.topOnly && !candidate.isTopCandidate) continue;
     if (filter.risk !== "all") {
       const risk = (candidate.riskLevel ?? "unknown").toLowerCase();

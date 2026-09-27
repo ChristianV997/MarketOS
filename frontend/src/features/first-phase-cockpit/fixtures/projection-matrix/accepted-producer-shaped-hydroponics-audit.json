@@ -1,0 +1,83 @@
+{
+  "report_version": "product-validation-report-v1",
+  "read_only": true,
+  "mutated": false,
+  "network_calls": false,
+  "evidence_mode": "manual_import",
+  "appendix": {
+    "research_to_decision_version": "v1",
+    "replay_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "input_audit": [
+      {
+        "label": "C:/Users/HP/Documents/MarketOS/tests/fixtures/research_to_decision/quote.json",
+        "role": "supplier",
+        "status": "accepted"
+      }
+    ],
+    "integration_contract": {
+      "authority": "scripts.research_to_decision.py",
+      "cockpit": "appendix.client_safe_projection"
+    },
+    "validation": {
+      "status": "hold_for_manual_review",
+      "read_only": true,
+      "network_calls": false
+    },
+    "client_safe_projection": {
+      "version": "research-to-decision-client-safe-v1",
+      "read_only": true,
+      "launch_authorized": false,
+      "network_calls": false,
+      "mutated": false,
+      "candidates": [
+        {
+          "candidate_id": "hydroponics-kit",
+          "title": "Compact hydroponics kit",
+          "decision": "expand_consumer_research",
+          "next_action": "expand_consumer_research",
+          "risk_state": "hold",
+          "freshness": "current",
+          "confidence": { "supplier": 0.5168, "marketplace": 0.3879 },
+          "missing_evidence": [],
+          "evidence_gaps": [],
+          "hard_gates": ["manual_evidence_is_not_live_supplier_proof", "no_launch_or_spend_authority"],
+          "evidence_refs": ["evidence:52e27e00e59f2513", "evidence:be94586da7dca06e", "evidence:aaaaaaaaaaaaaaaa"],
+          "promotion_state": "launch_authorized_false"
+        }
+      ]
+    },
+    "candidate_audit": [
+      {
+        "candidate_id": "hydroponics-kit",
+        "title": "Compact hydroponics kit",
+        "lifecycle_state": "evidence_collected",
+        "evidence_expiry": null,
+        "action": "expand_consumer_research",
+        "decision": "expand_consumer_research",
+        "next_action": "expand_consumer_research",
+        "evidence_gaps": [],
+        "missing_evidence": [],
+        "freshness": "current",
+        "risk_state": "hold",
+        "confidence": { "supplier": 0.5168, "marketplace": 0.3879 },
+        "hard_gates": ["manual_evidence_is_not_live_supplier_proof", "no_launch_or_spend_authority"],
+        "evidence_refs": ["evidence:52e27e00e59f2513", "evidence:be94586da7dca06e", "evidence:aaaaaaaaaaaaaaaa"],
+        "promotion_lifecycle": [
+          { "prior_state": "unavailable", "next_state": "discovered", "reason_code": "candidate_declared" },
+          { "prior_state": "discovered", "next_state": "normalized", "reason_code": "identity_normalized" },
+          { "prior_state": "normalized", "next_state": "screened", "reason_code": "screening_complete" },
+          { "prior_state": "screened", "next_state": "supplier_claimed", "reason_code": "supplier_offer_present" },
+          { "prior_state": "promotion_blocked", "next_state": "launch_authorized_false", "reason_code": "launch_authority_not_granted" }
+        ],
+        "safety_classification": "offline_manual_evidence_only"
+      }
+    ],
+    "source_authorities": {
+      "supplier": "evaluation.commerce.supplier_feasibility",
+      "packet": "evaluation.commerce.product_validation_report"
+    }
+  },
+  "executive_summary": {
+    "consumer_attention_signals": { "status": "consumer_attention_not_supplied" }
+  }
+}

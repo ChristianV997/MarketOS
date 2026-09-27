@@ -20,8 +20,8 @@ function digest(value) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-test("observed normalize/filter/compose/export timings for 1/10/100/500 (no ranking, replay-stable)", () => {
-  const sizes = [1, 10, 100, 500];
+test("observed normalize/filter/compose/export timings for 1/10/100/500/1000/5000/10000 (no ranking, replay-stable)", () => {
+  const sizes = [1, 10, 100, 500, 1000, 5000, 10000];
   const report = {};
   for (const size of sizes) {
     const built = size === 1
@@ -42,7 +42,7 @@ test("observed normalize/filter/compose/export timings for 1/10/100/500 (no rank
       selectedId: normalize.value.projection.engagements[0]?.engagement_id ?? null,
     }));
     const exported = timed(`export-${size}`, () =>
-      normalize.value.projection.engagements.map((item) => buildClientSafeServiceExport(item)));
+      compose.value.filtered.map((item) => buildClientSafeServiceExport(item)));
     const snapshot = normalizeWorkbenchRenderModel(normalize.value.projection);
     const replay = digest(snapshot);
     assert.deepEqual(
@@ -53,6 +53,8 @@ test("observed normalize/filter/compose/export timings for 1/10/100/500 (no rank
     assert.equal(digest(snapshot), replay);
     assert.equal(snapshot.frontend_calculates, true);
     assert.notEqual(compose.value.surface, "success");
+    assert.ok(compose.value.filtered.length <= 500);
+    if (size > 500) assert.equal(compose.value.bounded, true);
     report[size] = {
       build_ms: Number(built.elapsed.toFixed(3)),
       normalize_ms: Number(normalize.elapsed.toFixed(3)),
