@@ -1,0 +1,7 @@
+{
+  "credential_shaped": "Authorization: Bearer sk_live_51H8xyzAAAAAAAAAAAAAAAAAA",
+  "credential_shaped_key": {"api_key": "unrelated-but-flagged-by-key-name"},
+  "raw_html": "<html><body><script>alert(1)</script></body></html>",
+  "cross_client_reference": "see pricing notes copied from other_client's engagement file",
+  "safe_note": "supplier confirmed MOQ of 50 units via signed quote dated 2026-01-04"
+}

@@ -1,0 +1,30 @@
+{
+  "candidate_id": "cand-goods-missing",
+  "supplier_id": "supplier-beta",
+  "offer_id": "offer-beta-1",
+  "supplier_sku": "sku-beta-1",
+  "offering_kind": "goods",
+  "captured_at": "2026-01-05T00:00:00Z",
+  "quoted_price": {"amount": "9.99", "currency": "USD"},
+  "price_evidence": {"quality": "manual"},
+  "goods": {
+    "moq_availability": {
+      "evidence": {"quality": "missing"}
+    },
+    "lead_time": {
+      "evidence": {"quality": "missing"}
+    },
+    "fulfillment_mode": "unknown",
+    "customs": {
+      "evidence": {"quality": "missing"}
+    },
+    "returns_defects": {
+      "evidence": {"quality": "missing"}
+    },
+    "shipping": {
+      "evidence": {"quality": "missing"}
+    },
+    "supplier_evidence": {"quality": "manual"},
+    "logistics_evidence": {"quality": "missing"}
+  }
+}

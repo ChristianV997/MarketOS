@@ -1,0 +1,48 @@
+{
+  "candidate_id": "cand-goods-conflicting",
+  "supplier_id": "supplier-gamma",
+  "offer_id": "offer-gamma-1",
+  "supplier_sku": "sku-gamma-1",
+  "offering_kind": "goods",
+  "captured_at": "2026-01-05T00:00:00Z",
+  "quoted_price": {"amount": "20.00", "currency": "USD"},
+  "price_evidence": {"quality": "observed", "human_confirmed": true, "evidence_state": "observed"},
+  "lane": {
+    "lane_id": "lane-cn-us-2",
+    "origin": "CN",
+    "ship_from": "CN",
+    "warehouse": "MX",
+    "destination_country": "US",
+    "currency": "USD",
+    "tax_rate": "0.07",
+    "duty_rate": "0.03"
+  },
+  "goods": {
+    "moq_availability": {
+      "minimum_order_quantity": 100,
+      "availability_status": "limited",
+      "evidence": {"quality": "manual"}
+    },
+    "lead_time": {
+      "minimum_days": 15,
+      "maximum_days": 30,
+      "evidence": {"quality": "conflicting", "note": "supplier quoted 15-30 days; freight forwarder quoted 20-45 days"}
+    },
+    "fulfillment_mode": "direct_freight",
+    "customs": {
+      "duty_rate": "0.06",
+      "tax_rate": "0.07",
+      "evidence": {"quality": "conflicting", "note": "supplier claims 6% duty; HS-code lookup suggests 9%"}
+    },
+    "returns_defects": {
+      "return_rate": "0.05",
+      "evidence": {"quality": "manual"}
+    },
+    "shipping": {
+      "international_shipping": {"amount": "4.50", "currency": "USD"},
+      "evidence": {"quality": "manual"}
+    },
+    "supplier_evidence": {"quality": "manual"},
+    "logistics_evidence": {"quality": "stale", "observed_at": "2025-06-01T00:00:00Z"}
+  }
+}
