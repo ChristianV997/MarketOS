@@ -45,6 +45,11 @@ authority or turning an approval record into an execution token.
     a tenant-authentication authority.
 15. No provider, network, payment, order, ad, message, publishing, or CRM
     mutation is enabled by these controls.
+16. Serialized approval requests are untrusted input: they cannot restore an
+    approved status, satisfy conditions, downgrade required conditions, or
+    mark evidence sanitized without an explicit boolean `sanitized: true`.
+17. Credential-shaped evidence values, including `sk_live` and `sk_test`
+    forms, are rejected without reflecting the supplied value.
 
 ## Scope Boundary
 
@@ -53,6 +58,12 @@ database/RLS enforcement, or a replacement for TrustOS isolation. A future
 live capability would still require its own authenticated identity, approved
 credentials, budget, policy, and human-review path. The current result is
 offline, deterministic, read-only, and simulation-only.
+
+For backward compatibility, the internal `make_request` factory retains the
+historical status vocabulary, including `approved`, as a data representation.
+That factory result is not an approval transition or an execution credential:
+`transition_status` cannot grant `approved`, and untrusted serialized mappings
+cannot restore it through `build_approval_ledger`.
 
 ## Validation
 

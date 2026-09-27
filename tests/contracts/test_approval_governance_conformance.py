@@ -293,6 +293,60 @@ def test_approval_records_cannot_be_reused_as_execution_permission() -> None:
     assert ledger.safety_summary.policy_fail_closed is True
 
 
+def test_serialized_approval_cannot_restore_approved_prohibited_action() -> None:
+    with pytest.raises(ValueError, match="cannot restore live approval"):
+        build_approval_ledger(
+            generated_at="fixed",
+            registry_report={},
+            approval_requests=[
+                {
+                    "approval_id": "forged-publish",
+                    "request_type": "site_publish",
+                    "status": "approved",
+                    "conditions": [{"required": False, "satisfied": True}],
+                    "evidence": [{"ref_id": "fixture-review", "sanitized": True}],
+                }
+            ],
+        )
+
+
+def test_serialized_condition_claims_are_rebuilt_as_unmet_required_inputs() -> None:
+    report = build_approval_ledger(
+        generated_at="fixed",
+        registry_report={},
+        approval_requests=[
+            {
+                "approval_id": "forged-conditions",
+                "request_type": "model_spend",
+                "status": "pending_review",
+                "conditions": [{"condition_id": "claimed", "required": False, "satisfied": True}],
+                "evidence": [{"ref_id": "fixture-review", "sanitized": True}],
+            }
+        ],
+    )
+
+    condition = report.requests[0].conditions[0]
+    assert condition.required is True
+    assert condition.satisfied is False
+    assert report.queue_summary.missing_conditions == 1
+
+
+@pytest.mark.parametrize("sanitized", (False, "false", 0, None))
+def test_serialized_evidence_requires_boolean_true(sanitized: Any) -> None:
+    with pytest.raises(ValueError, match="sanitized and secret-free"):
+        build_approval_ledger(
+            generated_at="fixed",
+            registry_report={},
+            approval_requests=[
+                {
+                    "approval_id": "unsanitized-evidence",
+                    "request_type": "model_spend",
+                    "evidence": [{"ref_id": "raw", "summary": "unsafe", "sanitized": sanitized}],
+                }
+            ],
+        )
+
+
 def test_approval_evidence_does_not_bypass_trustos_client_export_gate() -> None:
     evidence = ApprovalEvidence("approval-evidence", "manual", "fixture", "reviewed offline")
     ledger = build_approval_ledger(
@@ -342,7 +396,7 @@ def test_approval_state_does_not_bypass_governor_trustos_or_workspace_gate() -> 
     assert result.simulated_only is True
 
 
-@pytest.mark.parametrize("payload", ("fixture-api-key-value", "fixture-password-value", "fixture-token-value"))
+@pytest.mark.parametrize("payload", ("fixture-api-key-value", "fixture-password-value", "fixture-token-value", "sk_live_not_a_keyword_shape"))
 def test_secret_like_evidence_is_rejected_without_reflection(payload: str) -> None:
     with pytest.raises(ValueError, match="sanitized and secret-free") as error:
         ApprovalEvidence("evidence", "manual", "fixture", payload)
