@@ -1,0 +1,9 @@
+{
+  "description": "Candidate/offer identifiers used by the multi-offer portfolio proof in tests/services/test_supplier_logistics_consulting_integration/test_pipeline.py::TestMultipleOffers. Kept as a fixture (rather than inline literals) so the same identifier set can be reused by future tests that need more than one independent offer without re-deriving it.",
+  "offers": [
+    {"candidate_id": "cand-multi-1", "offering_kind": "goods"},
+    {"candidate_id": "cand-multi-2", "offering_kind": "service"},
+    {"candidate_id": "cand-multi-3", "offering_kind": "hybrid"},
+    {"candidate_id": "cand-multi-4", "offering_kind": "unknown"}
+  ]
+}
