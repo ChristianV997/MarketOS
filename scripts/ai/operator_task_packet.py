@@ -141,6 +141,15 @@ WINDOWS_DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:/")
 
 def assert_safe_path(path: str, field: str) -> str:
     value = _normalize_path(_text(path, field))
+    # A NUL byte is invalid in a POSIX or Windows path and is rejected
+    # explicitly rather than left to whatever a downstream filesystem call
+    # happens to do with it: os.open() raises ValueError on one, but
+    # Path.exists()/is_symlink() instead swallow the resulting OSError and
+    # return False, which would otherwise let a garbage entry slide into
+    # _assert_filesystem_contained's "deleted file" ancestor-walk fallback
+    # rather than being refused outright at the point of first validation.
+    if "\x00" in value:
+        raise TaskPacketError(f"{field} must not contain a NUL byte")
     candidate = Path(value)
     if candidate.is_absolute() or ".." in candidate.parts or WINDOWS_DRIVE_ABSOLUTE.match(value):
         raise TaskPacketError(f"{field} must stay relative without '..'")
@@ -176,6 +185,54 @@ def _in_scope(path: str, allowed: list[str]) -> bool:
         if normalized == target or normalized.startswith(target.rstrip("/") + "/"):
             return True
     return False
+
+
+def _assert_filesystem_contained(changed_files: list[str], *, allowed_scope: list[str], root: Path) -> None:
+    """Resolve each ``changed_files`` entry against ``root`` and confirm it
+    stays inside both the worktree root and ``allowed_scope`` after
+    following symlinks -- ``_in_scope`` alone is pure string prefix
+    matching and cannot see that a lexically in-scope path is actually a
+    symlink (or has a symlinked ancestor directory) resolving somewhere
+    else entirely.
+
+    For a deleted/nonexistent ``changed_files`` entry, the walk-up stops
+    at the nearest existing path entry (including a dangling symlink) and
+    resolves it before checking the resulting path. A real file is not
+    required to exist for a legitimate deletion, but the resolved path
+    must remain inside both the worktree root and allowed scope.
+
+    This reuses ``_in_scope`` for the scope comparison (the single
+    canonical rule every consumer shares) and adds nothing beyond a
+    filesystem-resolution step in front of it -- it is not a second
+    scope authority, a generic path sandbox, or an OS-level filesystem
+    jail. It proves containment *at the moment of this check*; it does
+    not prevent a file from being replaced with a symlink afterward
+    (a TOCTOU race is out of scope here, exactly as for the other local,
+    single-operator path checks already in this codebase).
+    """
+    root_real = root.resolve()
+    if not root_real.is_dir():
+        raise ResumePacketError("resume filesystem root does not exist or is not a directory")
+    for item in changed_files:
+        # Every other consumer of a changed_files-shaped path in this module
+        # (_in_scope, assert_safe_path) normalizes backslashes first; doing
+        # the same here is required, not cosmetic -- joining a raw
+        # backslash-separated entry onto `root` produces one bogus filename
+        # component instead of nested directories, which would falsely
+        # reject (or, worse on a backslash-tolerant filesystem, falsely
+        # misresolve) an otherwise legitimate, already-validated path.
+        probe = root / _normalize_path(item)
+        while not probe.exists() and not probe.is_symlink() and probe != probe.parent:
+            probe = probe.parent
+        if not probe.exists() and not probe.is_symlink():
+            raise ResumePacketError(f"changed_files entry has no existing path or ancestor inside the worktree root: {item}")
+        resolved = probe.resolve()
+        try:
+            relative = resolved.relative_to(root_real)
+        except ValueError:
+            raise ResumePacketError(f"changed_files entry escapes the worktree root: {item}") from None
+        if not _in_scope(str(relative), allowed_scope):
+            raise ResumePacketError(f"changed_files entry resolves outside allowed_scope: {item}")
 
 
 def _secret_like(value: Any) -> bool:
@@ -478,12 +535,22 @@ def _revalidate_resume_fields(raw: dict[str, Any]) -> None:
         raise ResumePacketError(f"resume packet field validation failed: {exc}") from exc
 
 
-def validate_resume_packet(raw: Any, *, expected_task_packet: dict[str, Any] | None = None) -> dict[str, Any]:
+def validate_resume_packet(raw: Any, *, expected_task_packet: dict[str, Any] | None = None, root: Path | None = None) -> dict[str, Any]:
     """Validate a previously-built resume packet, e.g. loaded from disk.
 
     ``expected_task_packet``, when supplied, must match the resume packet's
     recorded ``agent_id``/``lane`` -- a mismatch means ownership changed
     mid-task, which is rejected rather than silently accepted.
+
+    ``root``, when supplied alongside ``expected_task_packet``, is the real
+    worktree/repository root on disk. It additionally resolves every
+    ``changed_files`` entry through the filesystem (see
+    ``_assert_filesystem_contained``) to catch a symlinked file or
+    ancestor directory that is lexically in ``allowed_scope`` but resolves
+    outside it -- a check ``_in_scope``'s pure string matching cannot make
+    on its own. Omitting ``root`` (the default) preserves the exact prior
+    lexical-only behavior for callers with no real filesystem context to
+    check against.
     """
     if not isinstance(raw, dict):
         raise ResumePacketError("resume packet root must be an object")
@@ -519,6 +586,8 @@ def validate_resume_packet(raw: Any, *, expected_task_packet: dict[str, Any] | N
             # other check (schema, ownership, digest, path-safety of each
             # individual changed_files entry) still passed.
             raise ResumePacketError(f"resume packet changed_files exceed allowed_scope: {out_of_scope}")
+        if root is not None:
+            _assert_filesystem_contained(raw.get("changed_files", []), allowed_scope=validated_expected["allowed_scope"], root=root)
     return raw
 
 

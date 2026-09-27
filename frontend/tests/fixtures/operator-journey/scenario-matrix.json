@@ -1,0 +1,2345 @@
+{
+  "schema": "MarketOS.OperatorBrowserScenarioMatrix.v1",
+  "rows": [
+    {
+      "route": "/operator/services",
+      "api_mode": "ok-fixture",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "ok-fixture",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "ok-fixture",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "ok-fixture",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "partial",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "partial",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "partial",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "partial",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "down",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "down",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "down",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "down",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "429",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "429",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "429",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "429",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "500",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "500",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "500",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "500",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "malformed",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "malformed",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "malformed",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "malformed",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "empty",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "empty",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "empty",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "empty",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "stale",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "stale",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "stale",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "stale",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "loading",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "loading",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "loading",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/services",
+      "api_mode": "loading",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "ok-fixture",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "ok-fixture",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "ok-fixture",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "ok-fixture",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "partial",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "partial",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "partial",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "partial",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "down",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "down",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "down",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "down",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "429",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "429",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "429",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "429",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "500",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "500",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "500",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "500",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "malformed",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "malformed",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "malformed",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "malformed",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "empty",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "empty",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "empty",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "empty",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "stale",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "stale",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "stale",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "stale",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "loading",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "loading",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "loading",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/first-phase",
+      "api_mode": "loading",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "ok-fixture",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "ok-fixture",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "ok-fixture",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "ok-fixture",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "partial",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "partial",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "partial",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "partial",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "down",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "down",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "down",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "down",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "429",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "429",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "429",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "429",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "500",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "500",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "500",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "500",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "malformed",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "malformed",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "malformed",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "malformed",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "empty",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "empty",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "empty",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "empty",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "stale",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "stale",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "stale",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "stale",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "loading",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "loading",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "loading",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/events",
+      "api_mode": "loading",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "ok-fixture",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "ok-fixture",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "ok-fixture",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "ok-fixture",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "partial",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "partial",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "partial",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "partial",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "down",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "down",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "down",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "down",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "429",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "429",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "429",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "429",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "500",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "500",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "500",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "500",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "malformed",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "malformed",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "malformed",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "malformed",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "empty",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "empty",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "empty",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "empty",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "stale",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "stale",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "stale",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "stale",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "loading",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "loading",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "loading",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/consulting-research",
+      "api_mode": "loading",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "ok-fixture",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "ok-fixture",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "ok-fixture",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "ok-fixture",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "blocked_or_partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "partial",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "partial",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "partial",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "partial",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "partial",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "down",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "down",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "down",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "down",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "429",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "429",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "429",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "429",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "500",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "500",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "500",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "500",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "malformed",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "malformed",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "malformed",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "malformed",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "unavailable",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "empty",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "empty",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "empty",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "empty",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "empty",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "stale",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "stale",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "stale",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "stale",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "stale",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "loading",
+      "width": 375,
+      "height": 812,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "loading",
+      "width": 390,
+      "height": 844,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "loading",
+      "width": 768,
+      "height": 1024,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    },
+    {
+      "route": "/operator/marketing-strategy",
+      "api_mode": "loading",
+      "width": 1440,
+      "height": 900,
+      "expected_surface": "loading",
+      "allowed_methods": [
+        "GET"
+      ],
+      "evidence_class": "fixture_browser_tested",
+      "live_validated": false,
+      "proves_react_production_screens": false
+    }
+  ]
+}

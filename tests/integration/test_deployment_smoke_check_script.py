@@ -1,5 +1,9 @@
+import json
 from pathlib import Path
 
+import pytest
+
+from scripts import deployment_smoke_check as smoke_cli
 from scripts.deployment_smoke_check import build_report
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,3 +40,14 @@ def test_paths_outside_artifacts_fail_closed():
     path_check = next(item for item in report["checks"] if item["name"] == "artifact_paths")
     assert path_check["status"] == "failed"
     assert report["status"] == "failed"
+
+
+@pytest.mark.parametrize(("status", "expected_exit"), [("passed", 0), ("partial", 1), ("failed", 1)])
+def test_smoke_cli_exit_code_tracks_readiness_status(monkeypatch, capsys, status, expected_exit):
+    monkeypatch.setattr(
+        smoke_cli,
+        "build_report",
+        lambda **_: {"status": status, "network_calls": False, "mutated": False, "checks": [], "next_actions": []},
+    )
+    assert smoke_cli.main(["--local", "--json"]) == expected_exit
+    assert json.loads(capsys.readouterr().out)["status"] == status

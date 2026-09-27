@@ -8,6 +8,7 @@ the action represented by a request.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+import re
 from typing import Any, Iterable, Mapping, Sequence
 
 REQUEST_TYPES = (
@@ -30,6 +31,11 @@ LIVE_ACTION_TYPES = frozenset({
     "invoice_creation", "payment_creation", "supplier_order", "ad_launch", "site_publish",
     "domain_change", "hosting_change", "customer_message",
 })
+_SENSITIVE_TEXT = re.compile(
+    r"(?:api[_-]?key|password|secret|token|bearer|private[_-]?key|"
+    r"(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9_-]{8,})",
+    re.IGNORECASE,
+)
 
 
 def _tuple(value: Any) -> tuple[str, ...]:
@@ -105,6 +111,11 @@ class ApprovalEvidence:
     source: str
     summary: str
     sanitized: bool = True
+
+    def __post_init__(self) -> None:
+        values = (self.ref_id, self.evidence_type, self.source, self.summary)
+        if not isinstance(self.sanitized, bool) or not self.sanitized or any(_SENSITIVE_TEXT.search(str(value)) for value in values):
+            raise ValueError("approval evidence must be sanitized and secret-free")
 
 
 @dataclass(frozen=True)
@@ -466,10 +477,32 @@ def _request_from_mapping(item: Mapping[str, Any], index: int) -> ApprovalReques
     if request_type not in REQUEST_TYPES:
         raise ValueError(f"unsupported approval request type: {request_type}")
     policy = _policy_map()[request_type]
-    conditions = tuple(ApprovalCondition(str(c.get("condition_id", f"condition-{i}")), str(c.get("description", "operator condition")), bool(c.get("required", True)), bool(c.get("satisfied", False)), str(c.get("evidence_ref", ""))) for i, c in enumerate(item.get("conditions", []), 1) if isinstance(c, Mapping))
+    if str(item.get("status", "pending_review")).strip().lower() == "approved":
+        raise ValueError("offline mode cannot restore live approval from serialized input")
+    conditions = tuple(
+        ApprovalCondition(
+            str(c.get("condition_id", f"condition-{i}")),
+            str(c.get("description", "operator condition")),
+            True,
+            False,
+            str(c.get("evidence_ref", "")),
+        )
+        for i, c in enumerate(item.get("conditions", []), 1)
+        if isinstance(c, Mapping)
+    )
     if not conditions:
         conditions = _conditions(policy)
-    evidence = tuple(ApprovalEvidence(str(e.get("ref_id", f"evidence-{i}")), str(e.get("evidence_type", "manual")), str(e.get("source", "sanitized_input")), str(e.get("summary", "Sanitized operator evidence")), True) for i, e in enumerate(item.get("evidence", []), 1) if isinstance(e, Mapping))
+    evidence = tuple(
+        ApprovalEvidence(
+            str(e.get("ref_id", f"evidence-{i}")),
+            str(e.get("evidence_type", "manual")),
+            str(e.get("source", "sanitized_input")),
+            str(e.get("summary", "Sanitized operator evidence")),
+            e.get("sanitized", False),
+        )
+        for i, e in enumerate(item.get("evidence", []), 1)
+        if isinstance(e, Mapping)
+    )
     return ApprovalRequest(
         str(item.get("approval_id", f"approval-{index}")), str(item.get("request_title", request_type.replace("_", " ").title())), request_type,
         str(item.get("requested_by_agent", "operator")), str(item.get("owner_department", "risk_approval")), str(item.get("linked_tool_id", "")), str(item.get("linked_workflow_id", "")), str(item.get("linked_skill_id", "")), str(item.get("linked_model_route_id", "")), str(item.get("target_resource", "offline-draft")), str(item.get("external_system", "none")), str(item.get("action_category", request_type)), str(item.get("side_effect_type", "none")), str(item.get("risk_level", policy.default_risk)), str(item.get("requested_mode", "simulation")), ApprovalScope(_tuple(item.get("resources", (item.get("target_resource", "offline-draft"),))), _tuple(item.get("actions", (request_type,))), _tuple(item.get("environments", ("offline",))), _tuple(item.get("constraints", ("no external execution",))), True), ApprovalBudgetCap(policy.budget_cap.scope, float(item.get("requested_budget", 0.0)), policy.budget_cap.monthly, "USD", 0.0), ApprovalExpiry(str(item.get("created_at", "offline-deterministic")), str(item.get("expires_at", "offline-deterministic-expiry"))), str(item.get("required_approver_role", policy.required_approver_role)), evidence, conditions, str(item.get("created_at", "offline-deterministic")), str(item.get("expires_at", "offline-deterministic-expiry")), str(item.get("status", "pending_review")), True, False, False, False,

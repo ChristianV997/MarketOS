@@ -1,0 +1,20 @@
+{
+  "candidate_id": "cand-service-1",
+  "supplier_id": "provider-delta",
+  "offer_id": "offer-delta-1",
+  "supplier_sku": "svc-delta-install",
+  "offering_kind": "service",
+  "captured_at": "2026-01-05T00:00:00Z",
+  "quoted_price": {"amount": "450.00", "currency": "USD"},
+  "price_evidence": {"quality": "manual"},
+  "service": {
+    "weekly_capacity_hours": "40",
+    "delivery_hours_per_unit": "3.5",
+    "business_hours": "Mon-Fri 09:00-17:00 America/Chicago",
+    "subcontractor_dependency": true,
+    "subcontractor_notes": "installation subcontracted to regional partners in 2 of 5 covered regions",
+    "sla_assumption": "next-business-day response claimed by provider; not independently confirmed",
+    "geographic_coverage": ["TX", "OK", "LA"],
+    "evidence": {"quality": "manual"}
+  }
+}

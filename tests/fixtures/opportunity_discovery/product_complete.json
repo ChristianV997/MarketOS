@@ -1,0 +1,52 @@
+{
+  "run_id": "fixture-product-complete",
+  "candidates": [
+    {
+      "candidate_id": "desk-lamp",
+      "name": "Desk lamp",
+      "offering_kind": "product",
+      "category": "home",
+      "geography": {
+        "lane_id": "cn-mx-home",
+        "origin": "CN",
+        "ship_from": "CN",
+        "warehouse": "CN",
+        "destination_country": "MX",
+        "currency": "MXN",
+        "tax_rate": "0",
+        "duty_rate": "0"
+      },
+      "evidence": [
+        {"evidence_id": "desk-demand", "area": "demand", "status": "observed_fact", "evidence_class": "fixture", "source_type": "fixture", "source_ref": "fixture://market/desk-lamp", "freshness": "current"},
+        {"evidence_id": "desk-supply", "area": "supply", "status": "observed_fact", "evidence_class": "manual", "source_type": "operator", "source_ref": "manual://supplier/desk-lamp", "freshness": "current"},
+        {"evidence_id": "desk-economics", "area": "economics", "status": "assumption", "evidence_class": "derived", "source_type": "kernel", "source_ref": "derived://economics/desk-lamp", "freshness": "current"}
+      ],
+      "metadata": {"reachable_buyer": true},
+      "economics": {
+        "currency": "MXN",
+        "price": {"amount": "900", "currency": "MXN", "source": "manual", "provenance": "manual", "evidence_state": "observed", "tax_inclusion_state": "exclusive"},
+        "product_cost": {"amount": "300", "currency": "MXN", "source": "manual", "provenance": "manual", "evidence_state": "observed"},
+        "assumptions": {
+          "supplier_shipping": {"amount": "80", "currency": "MXN", "source": "manual", "provenance": "manual", "evidence_state": "observed"},
+          "payment_fee_rate": "0.03",
+          "platform_fee_rate": "0.02",
+          "marketplace_fee_rate": "0.00",
+          "tax_rate": "0.16",
+          "duty_rate": "0.00",
+          "return_rate": "0.02",
+          "defect_rate": "0.01",
+          "warranty_rate": "0.01",
+          "support_reserve_rate": "0.01",
+          "chargeback_rate": "0.00",
+          "fx_reserve_rate": "0.00",
+          "discount_rate": "0.00"
+        }
+      },
+      "reports": {
+        "marketplace": {"evidence_mode": "fixture_demo", "candidates": [{"candidate_id": "desk-lamp", "query": "desk lamp", "score": {"overall_marketplace_opportunity": 0.80, "saturation_score": 0.20}}]},
+        "supplier": {"evidence_mode": "manual_import", "candidates": [{"candidate_id": "desk-lamp", "query": "desk lamp", "offers": [{"evidence_mode": "manual_import"}], "score": {"overall_supplier_feasibility": 0.80, "recommendation": "hold_for_manual_review", "economics": {"gross_margin_percent": 0.40}}}]},
+        "consumer": {"evidence_mode": "fixture_demo", "candidates": [{"candidate_id": "desk-lamp", "query": "desk lamp", "score": {"overall_consumer_attention": 0.75, "recommendation": "hold_for_manual_review", "voice_of_customer": {}}}]}
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "client_id": "fixture-client-alpha",
+  "workspace_id": "fixture-consulting-client",
+  "client_objective": "Evaluate a product opportunity for a bounded advisory sprint.",
+  "geography": "Mexico",
+  "language": "es-MX",
+  "scope": "Research, customer understanding, and client-safe recommendation.",
+  "offering_kind": "product",
+  "selected_deliverables": ["product_research", "customer_intelligence", "client_safe_export"],
+  "evidence": [
+    {"evidence_id": "market-observation-1", "evidence_class": "fixture", "state": "available", "source_ref": "fixture://consulting-engagement/market", "summary": "Bounded market observation"},
+    {"evidence_id": "manual-brief-1", "evidence_class": "manual", "state": "available", "source_ref": "manual://consulting-engagement/brief", "summary": "Client-provided scope brief"}
+  ],
+  "assumptions": ["Planning thresholds remain assumptions until reviewed."],
+  "conflicts": [],
+  "missing_information": [],
+  "linked_component_report_ids": ["report_fixture_product"],
+  "optional_upsell_recommendations": ["unit-service-economics"]
+}

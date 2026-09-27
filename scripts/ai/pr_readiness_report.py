@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover - direct script execution
 
 
 SECRET_VALUE = re.compile(r"(?:CJ_API_KEY|CJ_EMAIL|SUPABASE_SERVICE_ROLE_KEY|(?:api[_-]?key|token|secret|password))\s*[=:]\s*['\"]?[^\s'\"]{6,}", re.I)
-MUTATION = re.compile(r"(?:create[_ ]order|capture[_ ]payment|refund|fulfill|mutate[_ ]inventory|shopify.*(?:create|update|publish)|send[_ ]customer)", re.I)
+MUTATION = re.compile(r"(?:create[_ ]order|capture[_ ]payment|refund(?:[_ ](?:payment|order|transaction|customer)|\s*\()|fulfill|mutate[_ ]inventory|shopify.*(?:create|update|publish)|send[_ ]customer)", re.I)
 QUALITY_GATE_FAILURE_STATUSES = {"failed", "timed_out", "collection_failed", "blocked", "configuration_error"}
 
 

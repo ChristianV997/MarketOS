@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Any, Iterable
 
 
@@ -16,12 +17,25 @@ class ApprovalPolicy:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def _workspace_identifier(workspace: Any) -> str:
+    """Extract the already-authorized workspace identifier without trusting payload data."""
+    if isinstance(workspace, str):
+        return workspace.strip()
+    if isinstance(workspace, Mapping):
+        return str(workspace.get("workspace_id", "") or "").strip()
+    return str(getattr(workspace, "workspace_id", "") or "").strip()
+
+
 def evaluate_proposal_approval(proposal, agent_role, workspace=None, live_action_requested: bool = False,
                                policy: ApprovalPolicy | None = None, prior_decisions: Iterable[Any] = ()) -> dict[str, Any]:
     blocked: list[str] = []
     reviews: list[str] = []
     policy = policy or ApprovalPolicy()
-    if workspace is None or (isinstance(workspace, str) and not workspace.strip()): blocked.append("workspace_required")
+    workspace_id = _workspace_identifier(workspace)
+    if not workspace_id: blocked.append("workspace_required")
+    proposal_workspace_id = str(getattr(proposal, "workspace_id", "") or "").strip()
+    if proposal_workspace_id and workspace_id and proposal_workspace_id != workspace_id:
+        blocked.append("workspace_mismatch")
     if agent_role is None or not getattr(agent_role, "active", False): blocked.append("active_agent_required")
     if live_action_requested:
         blocked.append("human_approval_required_for_live_action")

@@ -1,0 +1,143 @@
+{
+  "schema": "MarketOS.PortfolioConformanceInput.v1",
+  "repository": "ChristianV997/MarketOS",
+  "origin_main": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+  "pull_requests": [
+    {
+      "number": 271,
+      "title": "service workbench base",
+      "state": "merged",
+      "is_draft": false,
+      "base_ref": "main",
+      "base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "head_ref": "service-workbench-base",
+      "head_sha": "1111111111111111111111111111111111111111",
+      "merge_base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "changed_files": ["backend/service_delivery/workbench.py"],
+      "depends_on": [],
+      "required_checks": ["test"],
+      "required_checks_source": "branch_protection_adapter",
+      "ci_jobs": [
+        {"name": "test", "status": "completed", "conclusion": "success", "required": true, "head_sha": "1111111111111111111111111111111111111111", "runner_id": 101, "steps": ["checkout", "test"], "logs_available": true}
+      ],
+      "local_evidence": {"classification": "actual_executed", "status": "passed", "fingerprint": "1111111111111111111111111111111111111111"}
+    },
+    {
+      "number": 275,
+      "title": "service projection",
+      "state": "open",
+      "is_draft": true,
+      "base_ref": "main",
+      "base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "head_ref": "service-projection",
+      "head_sha": "2222222222222222222222222222222222222222",
+      "merge_base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "changed_files": ["backend/service_delivery/workbench.py", "backend/service_delivery/projection.py"],
+      "depends_on": [{"number": 271, "head_sha": "1111111111111111111111111111111111111111", "available": true}],
+      "required_checks": ["test"],
+      "required_checks_source": "branch_protection_adapter",
+      "ci_jobs": [
+        {"name": "test", "status": "completed", "conclusion": "failure", "required": true, "head_sha": "2222222222222222222222222222222222222222", "runner_id": 102, "steps_executed": 3, "logs_available": true}
+      ],
+      "local_evidence": {"classification": "actual_executed", "status": "failed", "fingerprint": "2222222222222222222222222222222222222222"}
+    },
+    {
+      "number": 279,
+      "title": "commercial replay",
+      "state": "open",
+      "is_draft": true,
+      "base_ref": "main",
+      "base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "head_ref": "commercial-replay",
+      "head_sha": "3333333333333333333333333333333333333333",
+      "merge_base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "changed_files": ["scripts/run_commercial_replay_integration.py"],
+      "depends_on": [],
+      "required_checks": ["agentic-quality-gate", "test"],
+      "required_checks_source": "branch_protection_adapter",
+      "ci_jobs": [
+        {"name": "agentic-quality-gate", "status": "completed", "conclusion": "failure", "required": true, "head_sha": "3333333333333333333333333333333333333333", "runner_id": 0, "steps": [], "logs_available": false},
+        {"name": "test", "status": "completed", "conclusion": "success", "required": true, "head_sha": "3333333333333333333333333333333333333333", "runner_id": 0, "steps_executed": 0, "logs_available": false}
+      ],
+      "local_evidence": {"classification": "simulated_or_planned", "status": "passed", "fingerprint": "3333333333333333333333333333333333333333"}
+    },
+    {
+      "number": 281,
+      "title": "frontend readiness",
+      "state": "open",
+      "is_draft": false,
+      "base_ref": "main",
+      "base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "head_ref": "frontend-readiness",
+      "head_sha": "4444444444444444444444444444444444444444",
+      "merge_base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "changed_files": ["scripts/ai/pr_readiness_report.py"],
+      "depends_on": [],
+      "required_checks": ["test"],
+      "required_checks_source": "branch_protection_adapter",
+      "ci_jobs": [
+        {"name": "test", "status": "completed", "conclusion": "success", "required": true, "head_sha": "4444444444444444444444444444444444444444", "runner_id": 104, "steps_executed": 5, "logs_available": true}
+      ],
+      "authority_claims": ["pr_readiness"],
+      "local_evidence": {"classification": "manual", "status": "passed", "fingerprint": "4444444444444444444444444444444444444444"}
+    },
+    {
+      "number": 285,
+      "title": "pending operator docs",
+      "state": "open",
+      "is_draft": true,
+      "base_ref": "main",
+      "base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "head_ref": "pending-docs",
+      "head_sha": "5555555555555555555555555555555555555555",
+      "merge_base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "changed_files": ["docs/ai/PORTFOLIO_CONFORMANCE_MATRIX.md"],
+      "depends_on": [],
+      "required_checks": ["test"],
+      "required_checks_source": "branch_protection_adapter",
+      "ci_jobs": [
+        {"name": "test", "status": "queued", "conclusion": null, "required": true, "head_sha": "5555555555555555555555555555555555555555", "runner_id": null, "steps_executed": 0, "logs_available": null}
+      ],
+      "local_evidence": {"classification": "not_run", "status": "not_run"}
+    },
+    {
+      "number": 299,
+      "title": "release readiness",
+      "state": "open",
+      "is_draft": true,
+      "base_ref": "main",
+      "base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "head_ref": "release-readiness",
+      "head_sha": "6666666666666666666666666666666666666666",
+      "merge_base_sha": "df160af1aad615dcdee7934bcd7122898eb5eff1",
+      "changed_files": ["scripts/ai/pr_readiness_report.py"],
+      "depends_on": [],
+      "required_checks": ["test"],
+      "required_checks_source": "branch_protection_adapter",
+      "ci_jobs": [
+        {"name": "test", "status": "completed", "conclusion": "success", "required": true, "head_sha": "6666666666666666666666666666666666666666", "runner_id": 106, "steps_executed": 4, "logs_available": false}
+      ],
+      "authority_claims": ["pr_readiness"],
+      "local_evidence": {"classification": "fixture", "status": "passed", "fingerprint": "6666666666666666666666666666666666666666"}
+    },
+    {
+      "number": 300,
+      "title": "stacked workbench consumer",
+      "state": "open",
+      "is_draft": true,
+      "base_ref": "service-projection",
+      "base_sha": "2222222222222222222222222222222222222222",
+      "head_ref": "stacked-workbench",
+      "head_sha": "7777777777777777777777777777777777777777",
+      "merge_base_sha": "2222222222222222222222222222222222222222",
+      "changed_files": ["frontend/src/pages/OperatorEvents.tsx"],
+      "depends_on": [{"number": 275, "head_sha": "2222222222222222222222222222222222222222", "available": true}],
+      "required_checks": ["test"],
+      "required_checks_source": "branch_protection_adapter",
+      "ci_jobs": [
+        {"name": "test", "status": "completed", "conclusion": "success", "required": true, "head_sha": "7777777777777777777777777777777777777777", "runner_id": 107, "steps": ["checkout", "test"], "logs_available": true}
+      ],
+      "local_evidence": {"classification": "actual_executed", "status": "passed", "fingerprint": "7777777777777777777777777777777777777777"}
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema": "MarketOS.CIAdmissibilityFixtureCatalog.v1",
+  "cases": [
+    {"name": "zero_step_runnerless", "status": "completed", "conclusion": "failure", "runner_id": 0, "steps_executed": 0, "log_status": "unavailable", "expected": "ci_unavailable"},
+    {"name": "executed_failure_logs", "status": "completed", "conclusion": "failure", "runner_id": 101, "steps_executed": 4, "log_status": "available", "expected": "executed_failure"},
+    {"name": "executed_timeout", "status": "completed", "conclusion": "timed_out", "runner_id": 101, "steps_executed": 4, "log_status": "available", "expected": "timed_out"},
+    {"name": "executed_success", "status": "completed", "conclusion": "success", "runner_id": 101, "steps_executed": 4, "log_status": "available", "expected": "pass"},
+    {"name": "success_missing_logs", "status": "completed", "conclusion": "success", "runner_id": 101, "steps_executed": 4, "log_status": "not_found", "expected": "ci_unavailable"},
+    {"name": "failure_logs_404", "status": "completed", "conclusion": "failure", "runner_id": 101, "steps_executed": 4, "log_status": "not_found", "log_http_status": 404, "expected": "executed_failure"},
+    {"name": "pending_job", "status": "queued", "conclusion": "pending", "runner_id": null, "steps_executed": 0, "log_status": "not_queried", "expected": "pending"},
+    {"name": "deploy_preview_non_ci", "status": "completed", "conclusion": "failure", "runner_id": null, "steps_executed": 0, "log_status": "not_queried", "kind": "deploy_preview", "expected": "not_ci"},
+    {"name": "stale_job_metadata", "status": "completed", "conclusion": "success", "runner_id": 101, "steps_executed": 4, "log_status": "available", "identity": "stale", "expected": "ci_unavailable"},
+    {"name": "missing_workflow_context", "status": "completed", "conclusion": "success", "runner_id": 101, "steps_executed": 4, "log_status": "available", "workflow": null, "expected": "ci_unavailable"},
+    {"name": "mixed_jobs", "status": "completed", "conclusion": "failure", "runner_id": 101, "steps_executed": 4, "log_status": "available", "expected": "executed_failure"}
+  ]
+}

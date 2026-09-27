@@ -1,0 +1,79 @@
+{
+  "identity": {
+    "candidate_id": "cand-fixture-goods",
+    "origin_country": "CN",
+    "destination_country": "MX",
+    "hs_code": "8501.10"
+  },
+  "offering_kind": "goods",
+  "geography_kind": "known",
+  "lane": {
+    "lane_id": "lane-cn-mx",
+    "origin": "CN",
+    "destination_country": "MX",
+    "currency": "USD",
+    "duty_rate": "0.05",
+    "tax_rate": "0.16"
+  },
+  "trade_flow": {
+    "period": "2025",
+    "trade_value": {"amount": "500000", "currency": "USD"},
+    "trade_quantity": 10000,
+    "quantity_unit": "units",
+    "unit_value": {"amount": "50", "currency": "USD"},
+    "evidence": {
+      "quality": "observed",
+      "evidence_ref": {
+        "evidence_id": "fixture-trade-flow",
+        "source_type": "manual_import",
+        "evidence_state": "observed",
+        "human_confirmed": true
+      }
+    }
+  },
+  "destination_price": {
+    "observed_price": {"amount": "120", "currency": "USD"},
+    "price_type": "marketplace_listing",
+    "sample_size": 25,
+    "is_realized_sale": false,
+    "evidence": {
+      "quality": "observed",
+      "evidence_ref": {
+        "evidence_id": "fixture-destination-price",
+        "source_type": "manual_import",
+        "evidence_state": "observed",
+        "human_confirmed": true
+      }
+    }
+  },
+  "origin_supplier_cost": {"amount": "55", "currency": "USD"},
+  "origin_supplier_cost_evidence": {
+    "quality": "observed",
+    "evidence_ref": {
+      "evidence_id": "fixture-origin-cost",
+      "source_type": "manual_import",
+      "evidence_state": "observed",
+      "human_confirmed": true
+    }
+  },
+  "freight_duty": {
+    "international_shipping": {"amount": "15", "currency": "USD"},
+    "duty_rate": "0.05",
+    "tax_rate": "0.16",
+    "evidence": {"quality": "observed"}
+  },
+  "marketplace_fee_rate": "0.08",
+  "marketplace_fee_evidence": {"quality": "observed"},
+  "returns_lead_time": {
+    "return_rate": "0.03",
+    "lead_time_minimum_days": 10,
+    "lead_time_maximum_days": 25,
+    "evidence": {"quality": "observed"}
+  },
+  "regulatory": {
+    "status": "requires_evidence",
+    "requirement_note": "destination customs requires a certificate of origin",
+    "evidence": {"quality": "observed"}
+  },
+  "captured_at": "2026-01-15T00:00:00Z"
+}

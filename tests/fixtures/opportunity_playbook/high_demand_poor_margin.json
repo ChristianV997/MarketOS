@@ -1,0 +1,46 @@
+{
+  "scenario_id": "high_demand_poor_margin",
+  "offering_kind": "goods",
+  "opportunity_archetype": "ecommerce_goods",
+  "candidate_id": "fixture-candidate-margin-review",
+  "workspace_id": "fixture-workspace-methodology",
+  "geography": "synthetic destination market",
+  "language": "en",
+  "claims": [
+    {
+      "id": "claim-demand-signal",
+      "taxonomy": "fact",
+      "statement": "The supplied fixture contains a demand signal.",
+      "evidence_class": "manual",
+      "evidence_state": "available",
+      "source_ref": "fixture://high-demand-poor-margin/demand"
+    },
+    {
+      "id": "claim-margin",
+      "taxonomy": "inference",
+      "statement": "The stated planning inputs do not support a positive contribution.",
+      "evidence_class": "derived",
+      "evidence_state": "blocked",
+      "source_ref": "fixture://high-demand-poor-margin/economics"
+    }
+  ],
+  "evidence": [
+    {"id": "evidence-demand", "dimension": "reachable_buyer", "evidence_class": "manual", "evidence_state": "available", "source_ref": "fixture://high-demand-poor-margin/demand"},
+    {"id": "evidence-cost", "dimension": "unit_economics", "evidence_class": "manual", "evidence_state": "available", "source_ref": "fixture://high-demand-poor-margin/quote"}
+  ],
+  "economics": {
+    "currency": "USD",
+    "price": "planning_assumption",
+    "supplier_cost": "quoted_planning_input",
+    "shipping": "quoted_planning_input",
+    "duty": "unknown",
+    "tax": "unknown",
+    "returns": "unknown",
+    "platform_fees": "planning_assumption",
+    "cac": "unknown",
+    "fx": "not_applicable"
+  },
+  "blockers": ["economics_not_complete", "positive_contribution_not_proven"],
+  "experiment": {"decision": "whether to gather verified landed-cost evidence", "evidence_class": "planned", "stop_rule": "remain blocked if a required cost is unavailable"},
+  "expected": {"status": "blocked", "fatal_gate": "missing_or_negative_economics"}
+}
