@@ -345,12 +345,19 @@ def _offer_stack(title: str, hooks: list[str], pains: list[str], economics: Mapp
     )
 
 
-def _listing(title: str, offer: OfferStack, pains: list[str], context: Mapping[str, Any]) -> ProductListingDraft:
+def _listing(title: str, offer: OfferStack, pains: list[str], context: Mapping[str, Any], customer_language: str = "") -> ProductListingDraft:
     safe_title = _safe_copy(f"{title}: a simpler way to handle the task", context["prohibited_claims"])
+    if customer_language:
+        short_description = _safe_copy(
+            f"{customer_language} Draft copy from matching customer evidence, not a verified product promise.",
+            context["prohibited_claims"],
+        )
+    else:
+        short_description = _safe_copy(f"A draft listing for customers who want {pains[0].lower()}.", context["prohibited_claims"])
     return ProductListingDraft(
         title=safe_title,
         subtitle=_safe_copy(offer.primary_promise, context["prohibited_claims"]),
-        short_description=_safe_copy(f"A draft listing for customers who want {pains[0].lower()}.", context["prohibited_claims"]),
+        short_description=short_description,
         long_description=_safe_copy(f"{title} is presented here as a draft solution for {context['target_customer']}. Use the demonstrated workflow as the product story, then replace every TBD field with verified supplier and policy information before publishing.", context["prohibited_claims"]),
         bullet_benefits=tuple(offer.secondary_benefits),
         features=("Product demonstration-friendly format", "Evidence-led positioning", "Specifications pending supplier confirmation"),
@@ -364,10 +371,15 @@ def _listing(title: str, offer: OfferStack, pains: list[str], context: Mapping[s
     )
 
 
-def _landing(title: str, offer: OfferStack, pains: list[str], objections: list[str], recommendation: str) -> LandingPageDraft:
+def _landing(title: str, offer: OfferStack, pains: list[str], objections: list[str], recommendation: str, customer_language: str = "") -> LandingPageDraft:
     sections: dict[str, Mapping[str, Any]] = {}
+    hero_body = offer.primary_promise
+    hero_evidence = "Consumer hooks and synthesis"
+    if customer_language:
+        hero_body = f"{customer_language} Use this only as draft customer language; do not publish it as a result promise."
+        hero_evidence = "Matching consumer-attention landing hint or desired outcome"
     templates = {
-        "hero": (offer.headline_value_proposition, offer.primary_promise, "Verified product image or demo still", "Consumer hooks and synthesis", "Keep the promise specific and evidence-led."),
+        "hero": (offer.headline_value_proposition, hero_body, "Verified product image or demo still", hero_evidence, "Keep the promise specific and evidence-led."),
         "problem": ("The everyday friction is clear", f"Customers may be trying to solve: {pains[0]}.", "Customer-language quote or clean scenario photo", "Pain-point evidence", "Do not exaggerate severity."),
         "solution": (f"A focused way to approach {title}", offer.primary_promise, "Simple three-step product explanation", "Offer stack and creative hooks", "Confirm functionality before publishing."),
         "how_it_works": ("Show the workflow", "Use a short, observable sequence so the customer can judge the product for themselves.", "Hands-only demo or annotated storyboard", "Demo/UGC hypothesis", "No invented performance data."),
@@ -458,29 +470,68 @@ def _risks(synthesis: Mapping[str, Any], candidate: Mapping[str, Any], objection
     return LaunchRiskReview(supplier, ("Delivery window is not a publishing promise until confirmed.",), margin, ("Use approved, evidence-led claims only.",), consumer, market, ("Prepare support answers for the listed objections.",), ("Confirm return/refund terms before offer approval.",), ("Review platform policies before any future activation.",))
 
 
+def _bound_candidate(report: Mapping[str, Any] | None, candidate_id: str) -> tuple[Mapping[str, Any] | None, str]:
+    """Bind a source report to the draft candidate without reading foreign rows."""
+    if not isinstance(report, Mapping) or not report:
+        return None, "missing"
+    candidates = [item for item in report.get("candidates") or [] if isinstance(item, Mapping)]
+    if not candidates:
+        return None, "missing"
+    matched = next((item for item in candidates if str(item.get("candidate_id") or "") == candidate_id), None)
+    if matched is None:
+        return None, "mismatched"
+    return matched, "matched"
+
+
+def _customer_language(candidate: Mapping[str, Any] | None) -> str:
+    """Platform-neutral customer wording only. Claims and proof signals stay out."""
+    if not isinstance(candidate, Mapping):
+        return ""
+    score = candidate.get("score") if isinstance(candidate.get("score"), Mapping) else {}
+    voice = score.get("voice_of_customer") if isinstance(score.get("voice_of_customer"), Mapping) else {}
+    hints = _list(score.get("landing_page_copy_hints"), 3)
+    if hints:
+        return hints[0]
+    outcomes = _list(voice.get("desired_outcomes"), 3)
+    return outcomes[0] if outcomes else ""
+
+
+def _evidence_note(label: str, status: str) -> str:
+    if status == "matched":
+        return f"{label} matches this draft candidate and remains draft-only."
+    if status == "mismatched":
+        return f"{label} does not match this draft candidate and was not copied into the draft."
+    return f"{label} was not supplied; missing product facts stay TBD."
+
+
 def build_launch_draft_pack(*, synthesis: Mapping[str, Any], product_validation: Mapping[str, Any] | None = None, consumer_attention: Mapping[str, Any] | None = None, supplier_feasibility: Mapping[str, Any] | None = None, marketplace_trend: Mapping[str, Any] | None = None, client_context: Mapping[str, Any] | None = None) -> LaunchDraftPack:
     """Build one deterministic launch draft for the synthesis leader."""
     ctx = _context(client_context)
     candidate = _candidate(synthesis)
     title = _text(synthesis.get("top_candidate_title") or candidate.get("title") or candidate.get("query") or "Product candidate", 120)
     candidate_id = _text(synthesis.get("top_candidate_id") or candidate.get("candidate_id") or "candidate", 100)
+    evidence_candidate_id = str(synthesis.get("top_candidate_id") or candidate.get("candidate_id") or candidate_id).strip()
     hooks, pains, objections, angles = _hooks(synthesis, candidate), _pains(synthesis, candidate), _objections(synthesis, candidate), _angles(synthesis, candidate)
     econ, thresholds = _economics(synthesis, candidate), _thresholds(synthesis)
     recommendation = _text(synthesis.get("overall_recommendation") or "hold_for_manual_review", 80)
+    consumer_candidate, consumer_status = _bound_candidate(consumer_attention, evidence_candidate_id)
+    _supplier_candidate, supplier_status = _bound_candidate(supplier_feasibility, evidence_candidate_id)
+    customer_language = _safe_copy(_customer_language(consumer_candidate), ctx["prohibited_claims"])
     offer = _offer_stack(title, hooks, pains, econ, ctx, recommendation)
-    listing = _listing(title, offer, pains, ctx)
-    landing = _landing(title, offer, pains, objections, recommendation)
+    listing = _listing(title, offer, pains, ctx, customer_language)
+    landing = _landing(title, offer, pains, objections, recommendation, customer_language)
     ads = _ad_creatives(title, hooks, pains, objections, angles, ctx)
     ugc = _ugc(title, hooks, pains, objections, ctx)
     matrix = _matrix(title, list(ads.hooks), angles, thresholds)
     faq = _faq(objections, ctx)
     shopify, medusa = _payloads(title, offer, ctx)
-    supplier_present = bool(supplier_feasibility or any(item.get("evidence_mode") in {"live_readonly", "authenticated_live"} for item in candidate.get("evidence", []) if isinstance(item, Mapping)))
+    live_on_candidate = any(item.get("evidence_mode") in {"live_readonly", "authenticated_live"} for item in candidate.get("evidence", []) if isinstance(item, Mapping))
+    supplier_present = supplier_status == "matched" or live_on_candidate
     checklist = _checklist(synthesis, supplier_present)
     risks = _risks(synthesis, candidate, objections)
     mode = _text(synthesis.get("evidence_mode") or "fixture_demo", 40)
     market_access = candidate.get("market_access") or synthesis.get("market_access") or {}
-    operator_notes = ["No live calls were made.", "Draft payloads are not connected to Shopify or Medusa.", "Replace TBD fields with verified evidence before publishing.", "Next consulting upsell: generate a platform-agnostic website/store/funnel draft."]
+    operator_notes = ["No live calls were made.", "Draft payloads are not connected to Shopify or Medusa.", "Replace TBD fields with verified evidence before publishing.", "Next consulting upsell: generate a platform-agnostic website/store/funnel draft.", _evidence_note("Consumer attention evidence", consumer_status), _evidence_note("Supplier feasibility evidence", supplier_status)]
     if market_access:
         mx = next((item for item in market_access.get("jurisdictions", []) if item.get("jurisdiction") == "mexico"), None)
         if mx and mx.get("assessment_state") != "compliant":

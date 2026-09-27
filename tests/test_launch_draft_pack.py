@@ -172,3 +172,64 @@ def test_draft_pack_does_not_contain_activation_instructions(pack):
     raw = json.dumps(pack).lower()
     assert "shopify api" not in raw
     assert "launch ads" not in raw
+
+
+def test_matching_customer_language_becomes_platform_neutral_draft_copy(reports):
+    synthesis, market, supplier, consumer = reports
+    pack = build_launch_draft_pack(synthesis=synthesis, marketplace_trend=market, supplier_feasibility=supplier, consumer_attention=consumer).to_dict()
+    short = pack["product_listing"]["short_description"]
+    hero = pack["landing_page"]["sections"]["hero"]["body_copy"]
+    assert "quick portable printing" in short
+    assert "quick portable printing" in hero
+    assert "not a verified product promise" in short
+    assert "prints labels without ink" not in json.dumps(pack)
+    assert "visible print test" not in json.dumps(pack)
+    assert pack["product_listing"]["specifications"]["certifications"].startswith("TBD")
+    assert pack["launch_draft_status"] == "draft_only_pending_human_approval"
+    assert pack["approval_checklist"]["launch_authorized"] is False
+    assert pack["shopify_draft_payload"]["status"] == "draft"
+    assert pack["medusa_draft_payload"]["status"] == "draft"
+    assert pack["published"] is False
+    assert pack["ads_launched"] is False
+
+
+def test_missing_customer_evidence_does_not_invent_draft_language(reports):
+    synthesis, market, supplier, _consumer = reports
+    pack = build_launch_draft_pack(synthesis=synthesis, marketplace_trend=market, supplier_feasibility=supplier, consumer_attention=None).to_dict()
+    assert "quick portable printing" not in json.dumps(pack["product_listing"])
+    assert "customers who want" in pack["product_listing"]["short_description"]
+    assert any("Consumer attention evidence was not supplied" in note for note in pack["operator_notes"])
+    assert pack["approval_checklist"]["launch_authorized"] is False
+    assert pack["published"] is False
+
+
+def test_mismatched_evidence_is_not_copied_and_cannot_clear_draft_gates(reports):
+    synthesis, _market, _supplier, _consumer = reports
+    foreign_attention = {
+        "top_candidate_id": "other-product",
+        "candidates": [{
+            "candidate_id": "other-product",
+            "score": {
+                "landing_page_copy_hints": ["Lead with: FOREIGN_CUSTOMER_LANGUAGE"],
+                "voice_of_customer": {"desired_outcomes": ["FOREIGN_OUTCOME"], "claims": ["FOREIGN_CLAIM"], "proof_signals": ["FOREIGN_PROOF"]},
+            },
+        }],
+    }
+    foreign_supplier = {"top_candidate_id": "other-product", "candidates": [{"candidate_id": "other-product", "score": {"economics": {"target_sell_price": 1}}}]}
+    pack = build_launch_draft_pack(synthesis=synthesis, consumer_attention=foreign_attention, supplier_feasibility=foreign_supplier).to_dict()
+    raw = json.dumps(pack)
+    assert "FOREIGN_CUSTOMER_LANGUAGE" not in raw
+    assert "FOREIGN_OUTCOME" not in raw
+    assert "FOREIGN_CLAIM" not in raw
+    assert "FOREIGN_PROOF" not in raw
+    assert "other-product" not in raw
+    assert any("supplier proof is not live-observed" in item for item in pack["approval_checklist"]["blockers"])
+    assert any("does not match this draft candidate" in note for note in pack["operator_notes"])
+    assert pack["approval_checklist"]["launch_authorized"] is False
+    assert pack["published"] is False
+    assert pack["ads_launched"] is False
+    assert pack["orders_created"] is False
+    assert pack["payments_created"] is False
+    assert pack["customer_messages_sent"] is False
+    assert pack["shopify_draft_payload"]["status"] == "draft"
+    assert pack["medusa_draft_payload"]["status"] == "draft"
