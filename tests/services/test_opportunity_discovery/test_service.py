@@ -195,6 +195,54 @@ def test_discover_ranks_multiple_candidates_by_canonical_synthesis_score() -> No
     assert report.decisions[0].metrics["synthesis_score"] != report.decisions[1].metrics["synthesis_score"]
 
 
+@pytest.mark.parametrize("mode", ["discover", "evaluate", "compare", "validate", "review-results"])
+@pytest.mark.parametrize("score_state", ["missing", "null", "zero"])
+def test_synthesis_score_missing_and_zero_remain_distinct_across_modes(monkeypatch: pytest.MonkeyPatch, mode: str, score_state: str) -> None:
+    payload = ready_product()
+    if mode == "compare":
+        second = copy.deepcopy(payload["candidates"][0])
+        second["candidate_id"] = "desk-lamp-alt"
+        second["name"] = "Desk lamp alternative"
+        for report in second["reports"].values():
+            for item in report["candidates"]:
+                item["candidate_id"] = "desk-lamp-alt"
+        payload["candidates"].append(second)
+
+    def fake_synthesis(*reports: dict[str, object], **_: object) -> object:
+        candidate_ids = sorted(
+            {
+                item["candidate_id"]
+                for report in reports
+                if isinstance(report, dict)
+                for item in report.get("candidates", [])
+                if isinstance(item, dict)
+            }
+        )
+        score: dict[str, object] = {"supplier_feasibility": 0.5}
+        if score_state == "null":
+            score["combined_opportunity_score"] = None
+        elif score_state == "zero":
+            score["combined_opportunity_score"] = 0.0
+
+        class FakeReport:
+            def to_dict(self) -> dict[str, object]:
+                return {"candidates": [{"candidate_id": item, "score": score} for item in candidate_ids]}
+
+        return FakeReport()
+
+    monkeypatch.setattr("services.opportunity_discovery.service.build_product_opportunity_synthesis", fake_synthesis)
+    report = run_discovery(mode, payload)
+
+    if score_state == "zero":
+        assert all(item.synthesis["combined_opportunity_score"] == 0.0 for item in report.decisions)
+        assert all("synthesis_score_unavailable" not in item.evidence_gaps for item in report.decisions)
+        assert report.ranked_candidate_ids == tuple(sorted(item.candidate_id for item in report.decisions))
+    else:
+        assert all(item.synthesis["combined_opportunity_score"] is None for item in report.decisions)
+        assert all("synthesis_score_unavailable" in item.evidence_gaps for item in report.decisions)
+        assert report.ranked_candidate_ids == ()
+
+
 def test_service_missing_cost_is_unavailable_but_explicit_zero_is_preserved() -> None:
     missing = fixture("service_complete.json")
     missing["candidates"][0]["economics"]["scenarios"]["base"].pop("delivery_cost")

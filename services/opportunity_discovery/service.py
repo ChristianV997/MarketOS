@@ -813,11 +813,14 @@ def _synthesis(candidate: OpportunityCandidate) -> dict[str, Any]:
     recommendation = score.get("recommendation", {}) if isinstance(score, Mapping) else {}
     risk_profile = score.get("risk_profile", {}) if isinstance(score, Mapping) else {}
     if candidate_report is not None:
+        combined_score = score.get("combined_opportunity_score")
+        if combined_score is None:
+            combined_score = candidate_report.get("combined_opportunity")
         return {
             "status": "derived",
             "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
             "candidate_id": candidate.candidate_id,
-            "combined_opportunity_score": score.get("combined_opportunity_score", candidate_report.get("combined_opportunity", 0)),
+            "combined_opportunity_score": combined_score,
             "supplier_feasibility": score.get("supplier_feasibility", candidate_report.get("supplier_feasibility", 0)),
             "consumer_attention": score.get("consumer_attention", candidate_report.get("consumer_attention", 0)),
             "marketplace_opportunity": score.get("marketplace_opportunity", candidate_report.get("marketplace_opportunity", 0)),
@@ -828,7 +831,7 @@ def _synthesis(candidate: OpportunityCandidate) -> dict[str, Any]:
         "status": "derived",
         "authority": "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis",
         "candidate_id": candidate.candidate_id,
-        "combined_opportunity_score": report.get("combined_opportunity_score", 0),
+        "combined_opportunity_score": report.get("combined_opportunity_score"),
         "supplier_feasibility": report.get("supplier_feasibility", 0),
         "consumer_attention": report.get("consumer_attention", 0),
         "marketplace_opportunity": report.get("marketplace_opportunity", 0),
@@ -933,6 +936,8 @@ def _decision(candidate: OpportunityCandidate, *, mode: str, workspace: Any, reg
     if synthesis.get("status") == "malformed":
         blockers.append(str(synthesis.get("reason", "malformed_synthesis_report")))
         gaps.append("malformed_synthesis_report")
+    elif synthesis.get("status") == "derived" and synthesis.get("combined_opportunity_score") is None:
+        gaps.append("synthesis_score_unavailable")
     gaps = sorted(set(gaps))
     blockers = sorted(set(blockers))
     fatal = tuple(
