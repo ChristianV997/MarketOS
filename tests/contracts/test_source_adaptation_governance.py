@@ -2,7 +2,7 @@
 for MarketOS source-adaptation registry and governance acceptance pipeline.
 
 Tests:
-1. Canonical schema parsing and record validation across all 29 registered sources.
+1. Canonical schema parsing and record validation across all 30 registered sources.
 2. Deterministic stable hash verification.
 3. Secret-shape detection and redaction.
 4. Fail-closed rejection:
@@ -122,7 +122,10 @@ def test_stable_hash_is_deterministic_and_bit_identical():
 
     assert len(hash1) == 64
     assert hash1 == hash2
-    assert hash1 == "882bb2ee9d604d6ee5af05cb2125ad68a2b1fea56a3f23630150869c56e2e727"
+    # Re-pinned after deliberately adding src-shopify-product-taxonomy (30
+    # total records); see data/source_adaptation_registry.json and
+    # docs/CATEGORY_MAPPING_EVIDENCE.md.
+    assert hash1 == "ba52190e5adfc76289255e58d56ab59f4bd698be062c2665864106eb2c8914e4"
 
 
 
@@ -306,7 +309,7 @@ def test_canonical_work_orders_load_and_validate():
     assert wo_path.exists(), f"Work orders file missing: {wo_path}"
     registry = WorkOrderRegistry.load_from_file(wo_path)
 
-    assert len(registry.work_orders) == 29
+    assert len(registry.work_orders) == 30
     all_errors = []
     for wo in registry.work_orders.values():
         all_errors.extend(validate_work_order(wo))

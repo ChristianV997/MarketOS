@@ -38,7 +38,7 @@ def test_canonical_registry_and_work_orders_are_complete_and_one_to_one():
     work_order_ids = [order["work_order_id"] for order in work_orders]
     work_order_sources = [order["source_id"] for order in work_orders]
 
-    assert len(records) == len(work_orders) == 29
+    assert len(records) == len(work_orders) == 30
     assert len(source_ids) == len(set(source_ids))
     assert len(work_order_ids) == len(set(work_order_ids))
     assert len(work_order_sources) == len(set(work_order_sources))
@@ -217,11 +217,14 @@ def test_verified_license_evidence_urls_are_immutable():
 # Tracked-byte lock: GitHub Contents API / PR-body hashes previously claimed
 # 55,544 and 61,094 bytes. The actual git blobs on this branch are smaller.
 # Pin the working-tree SHA-256 so a truncated rewrite cannot pass JSON-parse-only tests.
-_CANONICAL_REGISTRY_BYTES = 54423
-_CANONICAL_REGISTRY_SHA256 = "447757bba178226e759e89f0e0803b9cc8ba1d6003c9e08439ffbf845c311bbc"
-_CANONICAL_WORK_ORDERS_BYTES = 59693
-_CANONICAL_WORK_ORDERS_SHA256 = "e12e9cc190ed457e70c1aa5e41e14ea2c782a29ec48d72e1ebaa3fb4898831dc"
-_CANONICAL_STABLE_HASH = "882bb2ee9d604d6ee5af05cb2125ad68a2b1fea56a3f23630150869c56e2e727"
+# Re-pinned after deliberately adding src-shopify-product-taxonomy (30 total
+# records/work-orders); see data/source_adaptation_registry.json and
+# docs/CATEGORY_MAPPING_EVIDENCE.md.
+_CANONICAL_REGISTRY_BYTES = 56722
+_CANONICAL_REGISTRY_SHA256 = "fbde6ba8f07a0d95ca8ff9fca68b5604812b19593f02b20ec7e9f5024789cc8a"
+_CANONICAL_WORK_ORDERS_BYTES = 62106
+_CANONICAL_WORK_ORDERS_SHA256 = "be08dc79776780bed594557659ef2e7dc43edc5fcf188c5732cfbe8a828ccd3c"
+_CANONICAL_STABLE_HASH = "ba52190e5adfc76289255e58d56ab59f4bd698be062c2665864106eb2c8914e4"
 
 _REQUIRED_VALIDATOR_SYMBOLS = frozenset({
     "validate_registry",
@@ -531,8 +534,8 @@ def test_builder_lf_line_endings_and_cross_platform_byte_reproducibility(tmp_pat
     temp_wo = tmp_path / "source_adaptation_work_orders.json"
 
     rec_count, wo_count = build_and_save(temp_reg, temp_wo)
-    assert rec_count == 29
-    assert wo_count == 29
+    assert rec_count == 30
+    assert wo_count == 30
 
     gen_reg_bytes = temp_reg.read_bytes()
     gen_wo_bytes = temp_wo.read_bytes()
@@ -585,8 +588,8 @@ def test_deterministic_builder_output_matches_tracked_files(tmp_path):
 
     reg = SourceAdaptationRegistry.load_from_file(temp_reg)
     wo_reg = WorkOrderRegistry.load_from_file(temp_wo)
-    assert len(reg.records) == 29
-    assert len(wo_reg.work_orders) == 29
+    assert len(reg.records) == 30
+    assert len(wo_reg.work_orders) == 30
     assert reg.compute_stable_hash() == _CANONICAL_STABLE_HASH
 
     # Idempotency: second execution must produce byte-identical output
