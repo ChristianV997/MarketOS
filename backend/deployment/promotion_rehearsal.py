@@ -23,7 +23,9 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -58,9 +60,20 @@ VALID_READINESS_STATES = frozenset({
     "failed",
     "unavailable",
     "not_run",
+    "collection_failed",
     "blocked",
     "malformed",
     "timed_out",
+    "ci_unavailable",
+})
+
+EVIDENCE_CLASSES = frozenset({
+    "actual_executed",
+    "fixture",
+    "manual",
+    "derived",
+    "simulated_or_planned",
+    "unavailable",
     "ci_unavailable",
 })
 
@@ -237,15 +250,22 @@ def classify_ci_evidence(
     logs_available: bool = True,
 ) -> dict[str, Any]:
     """Classify CI evidence state fail-closed. Zero-step CI is never passed."""
-    if total_steps == 0 or runners_active == 0 or not logs_available:
+    if total_steps == 0 or runners_active == 0:
         state = "ci_unavailable"
-        reason = "CI runners are inactive, steps count is zero, or build logs are inaccessible."
+        reason = "CI runners are inactive or the job reported zero executed steps."
     elif ci_status == "passed":
-        state = "passed"
-        reason = "All pipeline steps verified with accessible audit logs."
+        if logs_available:
+            state = "passed"
+            reason = "All pipeline steps verified with accessible audit logs."
+        else:
+            state = "ci_unavailable"
+            reason = "CI steps executed but success cannot be verified because logs are inaccessible."
     elif ci_status == "failed":
         state = "failed"
-        reason = "One or more CI validation checks failed."
+        reason = "One or more executed CI validation checks failed; log availability does not erase the failure."
+    elif ci_status == "timed_out":
+        state = "timed_out"
+        reason = "An executed CI validation check timed out."
     else:
         state = "ci_unavailable"
         reason = f"CI status '{ci_status}' cannot be promoted without verified logs."
@@ -256,6 +276,483 @@ def classify_ci_evidence(
         "runners_active": runners_active,
         "logs_available": logs_available,
         "classification_reason": reason,
+    }
+
+
+_GITHUB_ACTIONS_CONCLUSION_TO_CI_STATUS = {
+    "success": "passed",
+    "failure": "failed",
+    "timed_out": "timed_out",
+}
+
+# GitHub only ever sets a job's conclusion once status == "completed"; any
+# other status (queued/in_progress/waiting) means the run has not finished
+# and any conclusion value present is not yet trustworthy evidence.
+_GITHUB_ACTIONS_INCOMPLETE_STATUSES = frozenset({"queued", "in_progress", "waiting", "requested", "pending"})
+
+
+def _github_actions_unavailable(reason: str, *, pending: bool = False) -> dict[str, Any]:
+    return {
+        "state": "ci_unavailable",
+        "total_steps": 0,
+        "runners_active": 0,
+        "logs_available": False,
+        "runner_id": None,
+        "steps_executed": 0,
+        "runner_assigned": False,
+        "pending": pending,
+        "classification_reason": reason,
+    }
+
+
+def classify_github_actions_job(job: Mapping[str, Any] | None, *, logs_available: bool = False) -> dict[str, Any]:
+    """Classify a real GitHub Actions job response (the exact shape the
+    Jobs API returns: ``status``, ``runner_id``, and a ``steps`` list)
+    fail-closed.
+
+    A pure adapter over ``classify_ci_evidence`` -- it derives that
+    function's abstract ``total_steps``/``runners_active``/``ci_status``
+    parameters from the job's real fields and delegates to it, rather than
+    creating a second CI-admissibility authority. ``runner_id == 0`` (the
+    value GitHub reports when a workflow never actually started, before a
+    runner was ever assigned), a negative or otherwise implausible
+    ``runner_id``, and an empty/missing ``steps`` list are all treated as
+    no execution occurred, never as zero passing steps. ``job=None`` (the
+    run/job could not be fetched at all -- API error, no permission, or
+    the run does not exist) and a non-mapping ``job`` both fail closed to
+    ``ci_unavailable`` rather than raising or being silently ignored.
+
+    A job whose ``status`` is not yet ``"completed"`` (queued/in_progress)
+    is distinguished as *pending* (``result["pending"] is True``) rather
+    than folded into the same ``ci_unavailable`` a permanently-missing
+    runner produces: pending evidence may still arrive, so an
+    administrator reading this should re-check later, not treat it as a
+    dead end requiring intervention. The classification *state* still
+    stays within the existing closed vocabulary (``ci_unavailable`` --
+    conservative, since a pending run is not yet admissible evidence
+    either); ``pending`` is what makes the two cases distinguishable, per
+    the mission's explicit requirement to tell zero-step, executed
+    failure, timeout, unavailable logs, pending, and pass apart.
+
+    ``logs_available`` defaults to ``False``: unless a caller explicitly
+    confirms it fetched the job's logs, this never assumes they exist --
+    matching ``classify_ci_evidence``'s existing rule that an executed
+    "success" conclusion without verified logs is not admissible evidence.
+    """
+    if job is None:
+        return _github_actions_unavailable(
+            "job_unavailable: the GitHub Actions job could not be fetched (missing run, no access, or an API error)."
+        )
+    if not isinstance(job, Mapping):
+        return _github_actions_unavailable(f"job_malformed: expected a GitHub Actions job mapping, got {type(job).__name__}.")
+
+    status = str(job.get("status", "") or "").strip().lower()
+    if status in _GITHUB_ACTIONS_INCOMPLETE_STATUSES:
+        return _github_actions_unavailable(
+            f"job_pending: workflow status is '{status}' -- not yet completed, so any conclusion present is not admissible evidence.",
+            pending=True,
+        )
+
+    steps = job.get("steps")
+    steps_list = steps if isinstance(steps, list) else []
+    steps_executed = len(steps_list)
+
+    runner_id_raw = job.get("runner_id", 0)
+    runner_id = int(runner_id_raw) if isinstance(runner_id_raw, (int, float)) and not isinstance(runner_id_raw, bool) else 0
+    if runner_id < 0:
+        # GitHub never reports a negative runner_id for real evidence;
+        # treat an implausible value the same as "never assigned" rather
+        # than trusting it as a real, active runner.
+        runner_id = 0
+    runner_assigned = runner_id != 0
+
+    conclusion = job.get("conclusion")
+    ci_status = _GITHUB_ACTIONS_CONCLUSION_TO_CI_STATUS.get(str(conclusion), "ci_unavailable")
+
+    result = classify_ci_evidence(
+        ci_status=ci_status,
+        total_steps=steps_executed,
+        runners_active=1 if runner_assigned else 0,
+        logs_available=logs_available,
+    )
+    result["runner_id"] = runner_id
+    result["steps_executed"] = steps_executed
+    result["runner_assigned"] = runner_assigned
+    result["pending"] = False
+    return result
+
+
+def _harness_status(summary: Mapping[str, Any]) -> str:
+    """Reduce the existing harness counts without hiding an executed failure."""
+    for status in ("failed", "timed_out", "collection_failed", "malformed", "blocked", "unavailable", "not_run"):
+        if int(summary.get(status, 0) or 0) > 0:
+            return status
+    return "passed" if int(summary.get("total", 0) or 0) > 0 else "not_run"
+
+
+def _run_high_value_path_harness() -> dict[str, Any]:
+    """Execute the bounded offline harness; never synthesize a green result."""
+    try:
+        from scripts.run_high_value_path_harness import run_harness
+    except ModuleNotFoundError:
+        return {
+            "status": "unavailable",
+            "evidence_classification": "unavailable",
+            "reason": "high_value_path_harness_unavailable",
+            "paths_executed": 0,
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    try:
+        report = run_harness()
+    except Exception as exc:  # noqa: BLE001 - classify the executed harness failure
+        return {
+            "status": "failed",
+            "evidence_classification": "actual_executed",
+            "reason": f"high_value_path_harness_failed:{type(exc).__name__}",
+            "paths_executed": 0,
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    summary = report.get("summary") if isinstance(report, Mapping) else None
+    measurements = report.get("measurements") if isinstance(report, Mapping) else None
+    if not isinstance(summary, Mapping) or not isinstance(measurements, list):
+        return {
+            "status": "malformed",
+            "evidence_classification": "actual_executed",
+            "reason": "high_value_path_harness_report_malformed",
+            "paths_executed": 0,
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    status = _harness_status(summary)
+    replay_rows = [item for item in measurements if isinstance(item, Mapping) and item.get("replay_identity")]
+    return {
+        "schema": str(report.get("schema", "")),
+        "status": status,
+        "evidence_classification": "actual_executed",
+        "paths_executed": len(measurements),
+        "all_paths_passed": status == "passed",
+        "bit_identity_confirmed": bool(replay_rows) and all(item.get("repeated_match") is True for item in replay_rows),
+        "counts": {key: int(summary.get(key, 0) or 0) for key in ("passed", "failed", "unavailable", "not_run", "blocked", "malformed", "timed_out", "collection_failed", "total")},
+    }
+
+
+def _normalize_harness_results(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept only the small sanitized harness projection used by callers."""
+    status = value.get("status")
+    evidence_class = value.get("evidence_classification", "simulated_or_planned")
+    if status not in VALID_READINESS_STATES or evidence_class not in EVIDENCE_CLASSES:
+        return {
+            "status": "malformed",
+            "evidence_classification": "simulated_or_planned",
+            "reason": "high_value_path_summary_malformed",
+            "paths_executed": 0,
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    if value.get("stale") is True:
+        return {
+            "status": "unavailable",
+            "evidence_classification": evidence_class,
+            "reason": "high_value_path_evidence_stale",
+            "paths_executed": int(value.get("paths_executed", 0) or 0),
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    if value.get("partial") is True:
+        return {
+            "status": "unavailable",
+            "evidence_classification": evidence_class,
+            "reason": "high_value_path_evidence_incomplete",
+            "paths_executed": int(value.get("paths_executed", 0) or 0),
+            "all_paths_passed": False,
+            "bit_identity_confirmed": False,
+        }
+    if status == "passed" and value.get("all_paths_passed") is not True:
+        status = "malformed"
+    return {
+        "status": status,
+        "evidence_classification": evidence_class,
+        "paths_executed": int(value.get("paths_executed", 0) or 0),
+        "all_paths_passed": status == "passed",
+        "bit_identity_confirmed": bool(value.get("bit_identity_confirmed")),
+    }
+
+
+def _phase1_summary(environ: Mapping[str, str]) -> dict[str, Any]:
+    """Embed the canonical Phase 1 report without making it a new authority."""
+    try:
+        from evaluation.commerce.readiness import build_phase1_readiness
+
+        value = build_phase1_readiness(environ=environ).to_dict()
+    except Exception as exc:  # noqa: BLE001 - readiness evidence must fail closed
+        return {"status": "unavailable", "reason": f"phase1_report_unavailable:{type(exc).__name__}"}
+    deployment = value.get("deployment_readiness", {})
+    events = value.get("event_readiness", {})
+    return {
+        "report_version": value.get("report_version"),
+        "status": value.get("overall_status", "unknown"),
+        "overall_score": value.get("overall_score"),
+        "blocking_gates": list(value.get("blocking_gates", [])),
+        "advisory_warnings": list(value.get("advisory_warnings", [])),
+        "deployment_status": deployment.get("status", "unknown"),
+        "event_status": events.get("status", "unknown"),
+        "read_only": bool(value.get("read_only")),
+        "mutated": bool(value.get("mutated")),
+        "network_calls": bool(value.get("network_calls")),
+    }
+
+
+_OPERATOR_STACK_SCHEMA = "MarketOS.LocalOperatorStack.v1"
+_OPERATOR_STACK_DEFAULT_TIMEOUT_S = 60.0
+
+
+def _operator_stack_surfaces_summary(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Extract only the sanitized per-endpoint classification from the
+    runner's real output -- name/classification/http_status/reason, never
+    raw response bytes, and never the runner's own ``logs`` field (a real
+    stdout/stderr capture, up to and including process tracebacks), which
+    this bundle never emits (see ``test_raw_logs_are_never_emitted_into_
+    promotion_bundles``, a pre-existing, still-binding invariant)."""
+    surfaces = payload.get("surfaces")
+    if not isinstance(surfaces, list):
+        return []
+    summary: list[dict[str, Any]] = []
+    for item in surfaces:
+        if not isinstance(item, Mapping):
+            continue
+        summary.append(
+            {
+                "name": item.get("name"),
+                "plane": item.get("plane"),
+                "classification": item.get("classification"),
+                "http_status": item.get("http_status"),
+                "reason": item.get("reason"),
+            }
+        )
+    return summary
+
+
+def _operator_stack_evidence(
+    *,
+    execute: bool = False,
+    backend_only: bool = True,
+    timeout_s: float = _OPERATOR_STACK_DEFAULT_TIMEOUT_S,
+) -> dict[str, Any]:
+    """Report the existing operator-stack runner's real, bounded evidence
+    when it is present on this branch -- never invented, never assumed.
+
+    ``execute=False`` (the default) invokes the runner in its own default
+    ``--dry-run`` mode: instant and safe, no process is ever started. This
+    still proves the runner's preflight plan is valid without the cost or
+    risk of a real subprocess. ``execute=True`` opts into the runner's
+    ``--execute`` mode, which starts real fixture-only, loopback-only
+    local processes and always cleans them up (that script's own
+    documented guarantee, not reimplemented here) -- a caller must ask
+    for that cost/risk explicitly; it is never the default for a function
+    other code composes into a bundle.
+
+    This never imports the runner as a module (it stays #290's exclusive
+    authority) -- only ``subprocess``-invokes its CLI and parses its own
+    sanitized JSON output, which is itself already the documented
+    contract between this composition and that runner.
+    """
+    path = ROOT / "scripts" / "run_local_operator_stack.py"
+    if not path.is_file():
+        return {
+            "status": "unavailable",
+            "runner_present": False,
+            "command": "python scripts/run_local_operator_stack.py --json",
+            "reason": "runner_not_on_current_main",
+            "network_calls": False,
+            "mutated": False,
+        }
+
+    argv = [sys.executable, str(path), "--json", "--execute" if execute else "--dry-run"]
+    if backend_only:
+        argv.append("--backend-only")
+    command_text = shlex.join(argv)
+
+    process_options: dict[str, Any] = {}
+    if sys.platform == "win32":
+        process_options["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        process_options["start_new_session"] = True
+
+    try:
+        process = subprocess.Popen(
+            argv, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **process_options
+        )
+    except OSError as exc:
+        return {
+            "status": "unavailable",
+            "runner_present": True,
+            "command": command_text,
+            "reason": f"operator_stack_invocation_failed:{type(exc).__name__}",
+            "network_calls": False,
+            "mutated": False,
+        }
+
+    try:
+        stdout, _stderr = process.communicate(timeout=timeout_s)
+        returncode = process.returncode
+    except subprocess.TimeoutExpired:
+        _terminate_operator_stack_process(process)
+        return {
+            "status": "timed_out",
+            "runner_present": True,
+            "command": command_text,
+            "reason": f"operator_stack_exceeded_{int(timeout_s)}s",
+            "network_calls": False,
+            "mutated": False,
+        }
+    except (UnicodeDecodeError, ValueError) as exc:
+        # text=True decodes with the locale default codec and strict
+        # errors; a child that writes undecodable bytes to stdout/stderr
+        # must fail closed to malformed, not raise past this function.
+        # communicate() only returns after the process has already exited
+        # (or raised TimeoutExpired first, handled above), so the process
+        # is not force-killed here -- only reaped, defensively bounded, in
+        # case that assumption is ever wrong for a given platform/codec.
+        _terminate_operator_stack_process(process)
+        return {
+            "status": "malformed",
+            "runner_present": True,
+            "command": command_text,
+            "reason": f"operator_stack_output_undecodable:{type(exc).__name__}",
+            "network_calls": False,
+            "mutated": False,
+        }
+
+    try:
+        payload = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return {
+            "status": "malformed",
+            "runner_present": True,
+            "command": command_text,
+            "reason": "operator_stack_output_not_json",
+            "exit_code": returncode,
+            "network_calls": False,
+            "mutated": False,
+        }
+    if not isinstance(payload, Mapping) or payload.get("schema") != _OPERATOR_STACK_SCHEMA:
+        return {
+            "status": "malformed",
+            "runner_present": True,
+            "command": command_text,
+            "reason": "operator_stack_output_unexpected_schema",
+            "exit_code": returncode,
+            "network_calls": False,
+            "mutated": False,
+        }
+
+    classification = payload.get("classification")
+    return {
+        "status": classification if isinstance(classification, str) and classification else "malformed",
+        "runner_present": True,
+        "command": command_text,
+        "dry_run": bool(payload.get("dry_run", not execute)),
+        "mode": payload.get("mode"),
+        "surfaces": _operator_stack_surfaces_summary(payload),
+        "network_calls": bool(payload.get("external_network_calls", False)),
+        "mutated": bool(payload.get("mutated", False)),
+    }
+
+
+def _terminate_operator_stack_process(process: "subprocess.Popen[str]") -> None:
+    """Bound the runner subprocess's lifetime past our own timeout,
+    without relying solely on the runner's own documented cleanup (which
+    cannot run at all if we simply SIGKILL it -- SIGKILL cannot be caught,
+    so nothing downstream, including any grandchild the runner started in
+    its own separate process group/session, gets a chance to react).
+
+    Graceful first: on POSIX, deliver SIGINT to the runner's whole process
+    group (``start_new_session=True`` above makes it its own group
+    leader). CPython installs a default SIGINT handler that raises
+    KeyboardInterrupt in the *runner's* main thread -- exactly the signal
+    #290's own script documents itself as cleaning up on ("success,
+    failure, or interrupt"), so this gives its own try/finally-based
+    child cleanup (uvicorn, npm) a real chance to run, the same way a
+    developer's Ctrl-C would. Escalates to SIGKILL only if the runner
+    does not exit within a short grace period. On Windows, the closest
+    analogue (CTRL_BREAK_EVENT to the process group started via
+    CREATE_NEW_PROCESS_GROUP above) is used, matching the runner's own
+    internal Windows cleanup path -- unverified by execution on real
+    Windows in this sandbox, same disclosed limitation as this module's
+    other Windows-specific branches.
+    """
+    if process.poll() is not None:
+        return
+    try:
+        if sys.platform == "win32":
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            os.killpg(os.getpgid(process.pid), signal.SIGINT)
+    except (ProcessLookupError, PermissionError, OSError, AttributeError, ValueError):
+        pass
+    try:
+        process.communicate(timeout=10.0)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        if sys.platform == "win32":
+            process.kill()
+        else:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError, AttributeError, ValueError):
+        try:
+            process.kill()
+        except OSError:
+            pass
+    try:
+        process.communicate(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _event_read_path_evidence(environ: Mapping[str, str]) -> dict[str, Any]:
+    """Validate only a bounded local JSONL read path; never emit event payloads."""
+    raw_path = str(environ.get("MARKETOS_EVENT_READ_JSONL_PATH", "")).strip()
+    if not raw_path:
+        return {"status": "unavailable", "reason": "event_read_path_not_configured", "event_count": 0}
+    try:
+        path = Path(raw_path).resolve()
+        artifacts = (ROOT / "artifacts").resolve()
+        if path != artifacts and artifacts not in path.parents:
+            return {"status": "blocked", "reason": "event_read_path_outside_artifacts", "event_count": 0}
+        if not path.is_file():
+            return {"status": "unavailable", "reason": "event_read_path_missing", "event_count": 0}
+        if path.stat().st_size > 1_048_576:
+            return {"status": "malformed", "reason": "event_read_path_too_large", "event_count": 0}
+        from backend.events.query_service import load_events_from_jsonl
+
+        events, warnings = load_events_from_jsonl(path)
+        if warnings:
+            return {"status": "malformed", "reason": "event_read_path_malformed", "event_count": len(events), "warning_count": len(warnings)}
+        return {"status": "passed" if events else "not_run", "reason": "canonical_events_available" if events else "event_read_path_empty", "event_count": len(events)}
+    except (OSError, ValueError):
+        return {"status": "malformed", "reason": "event_read_path_unreadable", "event_count": 0}
+
+
+def _rollback_evidence(repository: Mapping[str, Any]) -> dict[str, Any]:
+    """Identify a prior revision without changing the worktree."""
+    current = str(repository.get("commit_sha", ""))
+    previous = ""
+    try:
+        result = subprocess.run(["git", "rev-parse", "HEAD^"], cwd=repository.get("worktree_path"), capture_output=True, text=True, timeout=5, check=False)
+        if result.returncode == 0:
+            previous = result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return {
+        "status": "passed" if current and previous else "unavailable",
+        "current_revision": current,
+        "previous_revision": previous or None,
+        "mutation_performed": False,
+        "command": "git revert --no-commit <current_revision> (operator-reviewed only)",
     }
 
 
@@ -270,8 +767,13 @@ class PromotionRehearsalBundle:
     live_mutation_guard: dict[str, Any]
     diagnostics_summary: dict[str, Any]
     ci_evidence: dict[str, Any]
+    ci_admissibility_diagnostic: dict[str, Any]
     coderos_status: dict[str, Any]
     high_value_path_summary: dict[str, Any]
+    phase1_readiness: dict[str, Any]
+    operator_stack: dict[str, Any]
+    event_read_path: dict[str, Any]
+    rollback_evidence: dict[str, Any]
     blockers: list[str] = field(default_factory=list)
     remediations: list[str] = field(default_factory=list)
     safe_next_action: str = ""
@@ -289,8 +791,13 @@ class PromotionRehearsalBundle:
             "live_mutation_guard": self.live_mutation_guard,
             "diagnostics_summary": self.diagnostics_summary,
             "ci_evidence": self.ci_evidence,
+            "ci_admissibility_diagnostic": self.ci_admissibility_diagnostic,
             "coderos_status": self.coderos_status,
             "high_value_path_summary": self.high_value_path_summary,
+            "phase1_readiness": self.phase1_readiness,
+            "operator_stack": self.operator_stack,
+            "event_read_path": self.event_read_path,
+            "rollback_evidence": self.rollback_evidence,
             "blockers": list(self.blockers),
             "remediations": list(self.remediations),
             "safe_next_action": self.safe_next_action,
@@ -309,7 +816,13 @@ class PromotionRehearsalBundle:
             "credential_classification": self.credential_classification,
             "live_mutation_guard": self.live_mutation_guard,
             "ci_evidence_state": self.ci_evidence.get("state", ""),
+            "ci_admissibility_diagnostic_status": self.ci_admissibility_diagnostic.get("status", ""),
             "coderos_status": self.coderos_status.get("status", ""),
+            "high_value_path_status": self.high_value_path_summary.get("status", ""),
+            "phase1_status": self.phase1_readiness.get("status", ""),
+            "operator_stack_status": self.operator_stack.get("status", ""),
+            "event_read_path_status": self.event_read_path.get("status", ""),
+            "rollback_status": self.rollback_evidence.get("status", ""),
             "blockers": sorted(self.blockers),
         }
         payload = json.dumps(deterministic_view, sort_keys=True, separators=(",", ":"))
@@ -321,9 +834,30 @@ def execute_promotion_rehearsal(
     environ: Mapping[str, str] | None = None,
     harness_results: dict[str, Any] | None = None,
     ci_override: dict[str, Any] | None = None,
+    github_actions_job: Mapping[str, Any] | None = None,
+    logs_available: bool = False,
     dockerfile_path: Path | None = None,
+    execute_operator_stack: bool = False,
+    operator_stack_backend_only: bool = True,
+    operator_stack_timeout_s: float = _OPERATOR_STACK_DEFAULT_TIMEOUT_S,
 ) -> PromotionRehearsalBundle:
-    """Execute complete deployment promotion rehearsal across composed authorities."""
+    """Execute complete deployment promotion rehearsal across composed authorities.
+
+    ``github_actions_job``, when supplied, is a real GitHub Actions Jobs
+    API response (``{"runner_id": ..., "steps": [...], "conclusion": ...}``)
+    classified via ``classify_github_actions_job`` -- it takes precedence
+    over the abstract ``ci_override`` shape when both are supplied, since
+    it carries more specific, directly-observed evidence. ``logs_available``
+    applies only to the ``github_actions_job`` path (``ci_override`` already
+    carries its own ``logs_available`` key).
+
+    ``execute_operator_stack`` defaults to ``False``: the operator-stack
+    evidence below is gathered via the existing runner's safe ``--dry-run``
+    mode (instant, no process started). Passing ``True`` opts into that
+    runner's ``--execute`` mode, which starts real fixture-only local
+    processes -- an explicit, caller-requested cost/risk, never a default
+    for this composition.
+    """
     if environment not in VALID_PROMOTION_ENVIRONMENTS:
         raise ValueError(f"Invalid environment '{environment}'. Must be one of {sorted(VALID_PROMOTION_ENVIRONMENTS)}")
 
@@ -364,7 +898,34 @@ def execute_promotion_rehearsal(
         blockers.append(f"live_mutations_forbidden in {environment}: Found active flags: {active_mutations}")
         remediations.append(f"Unset or disable live mutation flags: {active_mutations}")
 
-    # 6. Diagnostics
+    # 6. CI evidence classification. github_actions_job (real Jobs API
+    # evidence: runner_id, steps) takes precedence over the abstract
+    # ci_override shape when both are supplied, since it is the more
+    # specific, directly-observed input. Whichever path runs, its
+    # classified state/step-count feeds diagnose_zero_step_ci below
+    # (via ci_evidence_for_diagnostics) so the administrator-facing
+    # diagnostic always reflects what was actually observed rather than
+    # only doing so for the github_actions_job path specifically.
+    if github_actions_job is not None:
+        ci_eval = classify_github_actions_job(github_actions_job, logs_available=logs_available)
+        runner_id_for_diagnostics = ci_eval["runner_id"]
+    elif ci_override is not None:
+        ci_eval = classify_ci_evidence(**ci_override)
+        runner_id_for_diagnostics = None
+    else:
+        # Default environment CI check: local worktrees have no active CI runners attached
+        ci_eval = classify_ci_evidence(ci_status="ci_unavailable", total_steps=0, runners_active=0, logs_available=False)
+        runner_id_for_diagnostics = None
+    ci_evidence_for_diagnostics = {
+        "ci_status": ci_eval["state"],
+        "steps_executed": ci_eval["total_steps"],
+        "runner_id": runner_id_for_diagnostics,
+    }
+
+    # 7. Diagnostics. ci_evidence_for_diagnostics threads the real
+    # runner_id/steps evidence above into diagnose_zero_step_ci's
+    # administrator-facing message when it is available; omitted
+    # (None) reproduces the prior no-evidence behavior exactly.
     mode_mapping = {
         "local_dry_run": "local_dry_run",
         "isolated_worktree": "local_dry_run",
@@ -374,20 +935,24 @@ def execute_promotion_rehearsal(
         "live_provider_blocked": "staging",
     }
     diag_mode = mode_mapping[environment]
-    diag_report = run_all_diagnostics(environ=env, mode=diag_mode)
+    diag_report = run_all_diagnostics(environ=env, mode=diag_mode, ci_evidence=ci_evidence_for_diagnostics)
 
     diag_summary = {
         "status": diag_report["summary"]["status"],
         "detected_issues": diag_report["summary"]["detected_issues"],
         "total_checks": diag_report["summary"]["total_checks"],
     }
+    ci_admissibility_diagnostic = next(
+        (item for item in diag_report["diagnostics"] if item["code"] == "zero_step_ci"),
+        {"code": "zero_step_ci", "category": "continuous_integration", "status": "unavailable", "message": "", "remediation": "", "failure_details": {}},
+    )
     for item in diag_report["diagnostics"]:
         if item["status"] == "detected":
             remediations.append(f"[{item['code']}] {item['remediation']}")
             if item["category"] in {"environment_contract", "runtime_dependency"}:
                 blockers.append(f"diagnostic_{item['code']}: {item['message']}")
 
-    # 7. Environment contract check
+    # 8. Environment contract check
     env_report = validate_environment(environ=env, mode=diag_mode)
     if not env_report.ready:
         for b in env_report.blockers:
@@ -395,30 +960,59 @@ def execute_promotion_rehearsal(
         for w in env_report.warnings:
             remediations.append(f"Warning: {w}")
 
-    # 8. Password strength for private staging
+    # 9. Password strength for private staging
     if environment in {"private_staging", "authenticated_operator"}:
         pwd = str(env.get("POSTGRES_PASSWORD", "")).strip().lower()
         if pwd in INSECURE_PASSWORDS:
             blockers.append(f"insecure_database_password: The supplied database credential is an insecure default for {environment}")
             remediations.append("Generate and configure a high-entropy database password (>= 16 characters).")
 
-    # 9. CoderOS status
+    # 10. CoderOS status
     coderos = inspect_coderos_status(environ=env)
 
-    # 10. CI evidence classification
-    if ci_override is not None:
-        ci_eval = classify_ci_evidence(**ci_override)
+    # 11. Execute the existing bounded harness when no sanitized result was supplied.
+    if harness_results is None:
+        hvp_summary = _run_high_value_path_harness()
+    elif not isinstance(harness_results, Mapping):
+        hvp_summary = {"status": "malformed", "evidence_classification": "simulated_or_planned", "reason": "high_value_path_summary_malformed", "paths_executed": 0, "all_paths_passed": False, "bit_identity_confirmed": False}
     else:
-        # Default environment CI check: local worktrees have no active CI runners attached
-        ci_eval = classify_ci_evidence(ci_status="ci_unavailable", total_steps=0, runners_active=0, logs_available=False)
+        hvp_summary = _normalize_harness_results(harness_results)
 
-    # 11. High-value path summary
-    hvp_summary = harness_results or {
-        "status": "passed",
-        "all_paths_passed": True,
-        "paths_executed": 9,
-        "bit_identity_confirmed": True,
-    }
+    # 12. Compose existing readiness authorities; these are evidence surfaces,
+    # not a second gate or a substitute for the Phase 1 report.
+    phase1 = _phase1_summary(env)
+    operator_stack = _operator_stack_evidence(
+        execute=execute_operator_stack,
+        backend_only=operator_stack_backend_only,
+        timeout_s=operator_stack_timeout_s,
+    )
+    event_read_path = _event_read_path_evidence(env)
+    rollback = _rollback_evidence(repo_info)
+
+    if phase1.get("status") == "blocked":
+        blockers.append("phase1_readiness_blocked")
+        remediations.append("Resolve the blocking gates in the canonical Phase 1 readiness report before release promotion.")
+    if operator_stack["status"] != "passed":
+        blockers.append(f"operator_stack_{operator_stack['status']}")
+        remediations.append("Run the existing bounded local operator-stack rehearsal; do not infer runtime readiness from static configuration.")
+    if event_read_path["status"] != "passed":
+        blockers.append(f"event_read_path_{event_read_path['status']}")
+        remediations.append("Configure a sanitized canonical event JSONL read path under artifacts/ and verify it through the existing read view.")
+    if rollback["status"] != "passed":
+        blockers.append("rollback_evidence_unavailable")
+        remediations.append("Identify a prior known-good revision before any deployment promotion.")
+
+    # Executed failures take precedence over unavailable evidence. Missing CI
+    # evidence remains ci_unavailable and cannot be hidden by local passes.
+    hvp_status = hvp_summary.get("status")
+    if hvp_status != "passed":
+        if hvp_status in VALID_READINESS_STATES:
+            blockers.append(f"high_value_path_{hvp_status}")
+        else:
+            blockers.append("high_value_path_malformed")
+    ci_state = ci_eval.get("state")
+    if ci_state != "passed":
+        blockers.append(f"ci_evidence_{ci_state}")
 
     # Final readiness state resolution
     if any("live_mutations_forbidden" in b for b in blockers):
@@ -431,8 +1025,12 @@ def execute_promotion_rehearsal(
         readiness_state = "failed"
     elif any("missing_python_module" in b for b in blockers):
         readiness_state = "failed"
-    elif len(blockers) > 0:
-        readiness_state = "failed"
+    elif hvp_status in {"failed", "timed_out", "collection_failed", "malformed", "blocked", "unavailable", "not_run"}:
+        readiness_state = hvp_status
+    elif ci_state in {"failed", "timed_out", "unavailable", "ci_unavailable"}:
+        readiness_state = ci_state
+    elif phase1.get("status") == "blocked" or len(blockers) > 0:
+        readiness_state = "blocked"
     else:
         readiness_state = "passed"
 
@@ -452,8 +1050,13 @@ def execute_promotion_rehearsal(
         live_mutation_guard=live_guard,
         diagnostics_summary=diag_summary,
         ci_evidence=ci_eval,
+        ci_admissibility_diagnostic=ci_admissibility_diagnostic,
         coderos_status=coderos,
         high_value_path_summary=hvp_summary,
+        phase1_readiness=phase1,
+        operator_stack=operator_stack,
+        event_read_path=event_read_path,
+        rollback_evidence=rollback,
         blockers=sorted(set(blockers)),
         remediations=sorted(set(remediations)),
         safe_next_action=safe_next_action,

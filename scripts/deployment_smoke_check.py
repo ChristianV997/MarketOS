@@ -203,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         if target != ARTIFACTS and ARTIFACTS not in target.parents: parser.error("--output must stay under artifacts/")
         target.parent.mkdir(parents=True, exist_ok=True); target.write_text(rendered, encoding="utf-8")
     print(rendered, end="")
-    return 0
+    return 0 if report["status"] == "passed" else 1
 
 
 if __name__ == "__main__": raise SystemExit(main())
