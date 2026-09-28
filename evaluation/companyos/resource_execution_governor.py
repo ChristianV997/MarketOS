@@ -74,7 +74,7 @@ class ResourceBudget:
     requires_approval_above: float
     def __post_init__(self) -> None:
         amounts = (self.budget_limit, self.used_amount, self.reserved_amount, self.hard_cap, self.soft_cap, self.requires_approval_above)
-        if self.resource_type not in RESOURCE_TYPES or any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0 for value in amounts) or self.soft_cap > self.hard_cap or self.requires_approval_above > self.hard_cap:
+        if self.resource_type not in RESOURCE_TYPES or any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0 for value in amounts) or self.budget_limit > self.hard_cap or self.soft_cap > self.hard_cap or self.requires_approval_above > self.hard_cap:
             raise ValueError("invalid resource budget")
     @property
     def available_amount(self) -> float: return round(max(0.0, self.budget_limit - self.used_amount - self.reserved_amount), 4)
@@ -459,12 +459,15 @@ def _learning(action: str, required: bool | None = None) -> LearningCaptureRequi
 
 
 def _budget_check(request: ExecutionDecisionRequest, budgets: Sequence[ResourceBudget], *, prior_plan_amount: float = 0.0) -> BudgetCheckResult:
+    if not isinstance(prior_plan_amount, (int, float)) or isinstance(prior_plan_amount, bool) or not math.isfinite(prior_plan_amount) or prior_plan_amount < 0:
+        raise ValueError("prior plan amount must be finite and nonnegative")
     matches = tuple(item for item in budgets if item.resource_type == request.resource_type)
     if len(matches) > 1: return BudgetCheckResult(request.resource_type, request.requested_amount, 0.0, "conflict", "conflicting budget limits are registered for this resource", True)
     budget = matches[0] if matches else None
     if budget is None: return BudgetCheckResult(request.resource_type, request.requested_amount, 0.0, "missing", "no budget is registered for this resource", True)
+    budget_limit_remaining = max(0.0, budget.budget_limit - budget.used_amount - budget.reserved_amount - prior_plan_amount)
     hard_cap_remaining = max(0.0, budget.hard_cap - budget.used_amount - budget.reserved_amount - prior_plan_amount)
-    available = round(min(budget.available_amount, hard_cap_remaining), 4)
+    available = round(min(budget_limit_remaining, hard_cap_remaining), 4)
     projected_amount = budget.used_amount + budget.reserved_amount + prior_plan_amount + request.requested_amount
     if request.requested_amount > available:
         reason = "hard cap or aggregate planned budget exceeded" if prior_plan_amount else "hard cap or available budget exceeded"
@@ -474,6 +477,8 @@ def _budget_check(request: ExecutionDecisionRequest, budgets: Sequence[ResourceB
 
 
 def _quota_check(request: ExecutionDecisionRequest, *, prior_action_count: int = 0) -> QuotaCheckResult:
+    if not isinstance(prior_action_count, int) or isinstance(prior_action_count, bool) or prior_action_count < 0:
+        raise ValueError("prior action count must be a nonnegative integer")
     limits = {"screen_product_opportunities": (50, 0), "deep_validate_product": (5, 0), "promote_product_candidate": (2, 0), "generate_launch_draft": (2, 0), "generate_site_draft": (1, 0), "create_new_website": (1, 0), "create_new_brand": (1, 0), "generate_creative_batch": (10, 0), "generate_client_export": (5, 0)}
     limit, used = limits.get(request.action_type, (25, 0)); amount = 1.0
     if used + prior_action_count + amount > limit:
@@ -542,12 +547,20 @@ def _default_requests() -> tuple[ExecutionDecisionRequest, ...]:
     return (ExecutionDecisionRequest("decision-screen", "screen_product_opportunities", "intelligence", "intelligence", "internal-companyos", 0, "report_generation_quota"), ExecutionDecisionRequest("decision-website", "create_new_website", "website_store_funnel", "launch", "internal-companyos", 1, "website_build_capacity", existing_brand_fit=True), ExecutionDecisionRequest("decision-ad", "launch_ad_experiment", "ads_content", "consumer_attention", "internal-companyos", 25, "ad_spend"), ExecutionDecisionRequest("decision-frontier", "run_frontier_llm_synthesis", "model", "management", "internal-companyos", 5, "frontier_llm_budget", "frontier_llm", evidence_score=.40), ExecutionDecisionRequest("decision-provider", "run_provider_data_pull", "provider", "intelligence", "internal-companyos", 10, "data_provider_budget", provider_id="dataforseo", terms_privacy_complete=False, approval_state="not_requested"), ExecutionDecisionRequest("decision-runaway", "spawn_agent_workflow", "management", "operations", "internal-companyos", 0, "workflow_runtime", spawned_agents=5), ExecutionDecisionRequest("decision-kill", "kill_ad_experiment", "ads_content", "consumer_attention", "internal-companyos", 0, "ad_spend", metric_value=.01, kill_threshold=.02, sample_size=120, sample_size_target=100), ExecutionDecisionRequest("decision-scale", "scale_ad_budget", "ads_content", "finance", "internal-companyos", 20, "ad_spend", metric_value=.06, scale_threshold=.05, max_scale_increment=.20, approval_state="approved"))
 
 
-def build_resource_execution_governor_report(*, generated_at: str = "offline-deterministic", requests: Sequence[ExecutionDecisionRequest] | None = None, context: Mapping[str, Any] | None = None) -> ResourceExecutionGovernorReport:
+def build_resource_execution_governor_report(*, generated_at: str = "offline-deterministic", requests: Sequence[ExecutionDecisionRequest] | None = None, context: Mapping[str, Any] | None = None, budgets: Sequence[ResourceBudget] | None = None, portfolio: PortfolioPolicy | None = None, runaway: RunawayGuardPolicy | None = None, provider_policy: ProviderSpendPolicy | None = None) -> ResourceExecutionGovernorReport:
     """Evaluate a complete plan in request-id order with aggregate caps reserved."""
-    context = context or {}; budgets = _default_budgets(); portfolio = _portfolio(); runaway = _runaway(); provider_policy = _provider_policy()
+    context = context or {}
+    if budgets is None and "budgets" in context: budgets = context["budgets"]
+    budgets = _default_budgets() if budgets is None else tuple(budgets)
+    if portfolio is None and "portfolio" in context: portfolio = context["portfolio"]
+    portfolio = portfolio or _portfolio()
+    if runaway is None and "runaway" in context: runaway = context["runaway"]
+    runaway = runaway or _runaway()
+    if provider_policy is None and "provider_policy" in context: provider_policy = context["provider_policy"]
+    provider_policy = provider_policy or _provider_policy()
     requests = tuple(_default_requests() if requests is None else requests)
-    request_ids = [item.request_id for item in requests]
-    if any(not isinstance(request_id, str) or not request_id.strip() for request_id in request_ids) or len(request_ids) != len(set(request_ids)):
+    normalized_ids = [item.request_id.strip() for item in requests if isinstance(item.request_id, str)]
+    if any(not isinstance(item.request_id, str) or not item.request_id.strip() for item in requests) or len(normalized_ids) != len(set(normalized_ids)):
         raise ValueError("planned requests require non-empty unique request_id values; duplicate request_id is ambiguous")
     ordered_requests = tuple(sorted(requests, key=lambda item: (item.request_id, item.action_type, item.resource_type)))
     planned_amounts: dict[str, float] = {}; action_counts: dict[str, int] = {}; decisions_list: list[ExecutionDecisionResult] = []
