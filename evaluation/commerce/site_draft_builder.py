@@ -85,14 +85,39 @@ def _context(context: Mapping[str, Any] | None) -> dict[str, Any]:
 def _candidate(source: Mapping[str, Any] | None, launch: Mapping[str, Any] | None) -> tuple[str, str, str, list[str], list[str], list[str]]:
     source = dict(source or {})
     launch = dict(launch or {})
-    candidate_id = _text(source.get("top_candidate_id") or launch.get("candidate_id") or "candidate", 100)
-    title = _text(source.get("top_candidate_title") or launch.get("candidate_title") or "Product or service candidate", 140)
+    # candidate_id and title must come from the SAME upstream report. Resolving
+    # each field independently (source.get(...) or launch.get(...) per field)
+    # can pair one report's candidate_id with a different report's title/query
+    # for an unrelated candidate whenever the two reports don't both supply
+    # both fields -- a real cross-candidate evidence splice, not a style issue.
+    source_id = _text(source.get("top_candidate_id") or "", 100)
+    launch_id = _text(launch.get("candidate_id") or "", 100)
+    if source_id:
+        candidate_id = source_id
+        title = _text(source.get("top_candidate_title") or "Product or service candidate", 140)
+    elif launch_id:
+        candidate_id = launch_id
+        title = _text(launch.get("candidate_title") or "Product or service candidate", 140)
+    else:
+        candidate_id = "candidate"
+        title = "Product or service candidate"
     synthesis = source.get("candidates") or []
     candidate = next((item for item in synthesis if isinstance(item, Mapping) and item.get("candidate_id") == candidate_id), {})
     query = _text(candidate.get("query") or title, 160)
-    hooks = _list(source.get("top_hooks") or launch.get("ad_creatives", {}).get("hooks"), 10)
+    # launch.get("ad_creatives", {}) only substitutes the default when the key
+    # is ABSENT; an explicit ad_creatives=None (a plausible shape when upstream
+    # ad-creative generation failed or was skipped) crashed .get("hooks") with
+    # an AttributeError instead of degrading to an empty list.
+    ad_creatives = launch.get("ad_creatives")
+    ad_creatives = ad_creatives if isinstance(ad_creatives, Mapping) else {}
+    # "top_hooks"/"top_ad_angles" explicitly present as an empty list means the
+    # synthesis report found none -- that must not be conflated with "not
+    # supplied" and silently backfilled from launch's own ad_creatives.
+    hooks_raw = source["top_hooks"] if "top_hooks" in source else ad_creatives.get("hooks")
+    angles_raw = source["top_ad_angles"] if "top_ad_angles" in source else ad_creatives.get("angles")
+    hooks = _list(hooks_raw, 10)
     pains = _list(source.get("top_pain_points"), 6)
-    angles = _list(source.get("top_ad_angles") or launch.get("ad_creatives", {}).get("angles"), 8)
+    angles = _list(angles_raw, 8)
     return candidate_id, title, query, hooks, pains, angles
 
 

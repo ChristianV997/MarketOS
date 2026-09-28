@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from evaluation.commerce import site_draft_builder  # noqa: E402
-from evaluation.commerce.site_draft_builder import build_site_draft_pack  # noqa: E402
+from evaluation.commerce.site_draft_builder import _candidate, build_site_draft_pack  # noqa: E402
 from scripts.run_site_draft_e2e import FIXTURE_FILES, load_fixture, run_site_draft_e2e  # noqa: E402
 
 SECRET_TOKENS = (
@@ -345,3 +345,111 @@ class TestBuildSiteDraftPackDoesNotMutateCallerInputs:
         ).to_dict()
         assert pack_without_supplier["market_access"]["supplier_present"] is False
         assert "supplier_present" not in launch["market_access"]
+
+
+class TestCandidateIdentityIsNeverSplicedAcrossReports:
+    """Regression tests for _candidate(): candidate_id and title/query must
+    come from the SAME upstream report (opportunity_synthesis vs.
+    launch_draft_pack), never resolved independently per field. Resolving
+    each field with its own `source.get(...) or launch.get(...)` chain could
+    pair one report's candidate_id with a different report's title for an
+    unrelated candidate whenever the two reports didn't both supply both
+    fields -- a real cross-candidate evidence splice."""
+
+    def test_candidate_id_and_title_are_bound_to_the_same_source_report(self):
+        # opportunity_synthesis supplies only a title (no id); launch_draft_pack
+        # supplies a different candidate's id and title. The pre-fix code paired
+        # launch's id with synthesis's title -- two different candidates' data
+        # in one identity.
+        source = {"top_candidate_title": "Widget X"}
+        launch = {"candidate_id": "candidate-y", "candidate_title": "Widget Y"}
+        candidate_id, title, query, _hooks, _pains, _angles = _candidate(source, launch)
+        assert candidate_id == "candidate-y"
+        assert title == "Widget Y"
+        assert query == "Widget Y"
+
+    def test_source_report_takes_priority_when_it_supplies_both_fields(self):
+        source = {"top_candidate_id": "c1", "top_candidate_title": "Real Title"}
+        launch = {"candidate_id": "c1", "candidate_title": "Ignored Title"}
+        candidate_id, title, *_ = _candidate(source, launch)
+        assert candidate_id == "c1"
+        assert title == "Real Title"
+
+    def test_falls_back_to_launch_report_only_when_source_supplies_no_id_at_all(self):
+        source = {}
+        launch = {"candidate_id": "c2", "candidate_title": "Launch Title"}
+        candidate_id, title, *_ = _candidate(source, launch)
+        assert candidate_id == "c2"
+        assert title == "Launch Title"
+
+    def test_end_to_end_pack_never_pairs_a_launch_id_with_a_synthesis_title(self):
+        fixtures = {role: load_fixture(filename) for role, filename in FIXTURE_FILES.items()}
+        synthesis = fixtures["opportunity_synthesis"]
+        launch = fixtures["launch_draft_pack"]
+        real_candidate_id = launch.get("candidate_id")
+        synthesis.pop("top_candidate_id", None)
+        synthesis["top_candidate_title"] = "Unrelated Foreign Candidate Title"
+
+        pack = build_site_draft_pack(
+            launch_draft_pack=launch,
+            opportunity_synthesis=synthesis,
+            marketplace_trends=fixtures["marketplace_trends"],
+            supplier_feasibility=fixtures["supplier_feasibility"],
+            consumer_attention=fixtures["consumer_attention"],
+            client_context=fixtures["client_context"],
+        ).to_dict()
+
+        assert pack["candidate_id"] == real_candidate_id
+        assert pack["candidate_title"] != "Unrelated Foreign Candidate Title"
+
+
+class TestMalformedAndMissingEvidenceInputsDoNotCrashOrBackfillSilently:
+    """Regression tests for _candidate()'s ad_creatives handling."""
+
+    def test_an_explicit_none_ad_creatives_value_does_not_crash(self):
+        source = {}
+        launch = {"candidate_id": "c1", "ad_creatives": None}
+        candidate_id, _title, _query, hooks, _pains, angles = _candidate(source, launch)
+        assert candidate_id == "c1"
+        assert hooks == []
+        assert angles == []
+
+    def test_a_non_mapping_ad_creatives_value_does_not_crash(self):
+        source = {}
+        launch = {"candidate_id": "c1", "ad_creatives": "not-a-mapping"}
+        _candidate_id, _title, _query, hooks, _pains, angles = _candidate(source, launch)
+        assert hooks == []
+        assert angles == []
+
+    def test_explicit_empty_top_hooks_is_not_conflated_with_missing(self):
+        source = {"top_hooks": []}
+        launch = {"ad_creatives": {"hooks": ["launch_hook_should_not_appear"]}}
+        _candidate_id, _title, _query, hooks, _pains, _angles = _candidate(source, launch)
+        assert hooks == []
+
+    def test_explicit_empty_top_ad_angles_is_not_conflated_with_missing(self):
+        source = {"top_ad_angles": []}
+        launch = {"ad_creatives": {"angles": ["launch_angle_should_not_appear"]}}
+        _candidate_id, _title, _query, _hooks, _pains, angles = _candidate(source, launch)
+        assert angles == []
+
+    def test_missing_top_hooks_still_falls_back_to_launch_ad_creatives(self):
+        source = {}
+        launch = {"ad_creatives": {"hooks": ["expected_hook"]}}
+        _candidate_id, _title, _query, hooks, _pains, _angles = _candidate(source, launch)
+        assert hooks == ["expected_hook"]
+
+    def test_end_to_end_pack_build_survives_a_none_ad_creatives_value(self):
+        fixtures = {role: load_fixture(filename) for role, filename in FIXTURE_FILES.items()}
+        launch = fixtures["launch_draft_pack"]
+        launch["ad_creatives"] = None
+
+        pack = build_site_draft_pack(
+            launch_draft_pack=launch,
+            opportunity_synthesis=fixtures["opportunity_synthesis"],
+            marketplace_trends=fixtures["marketplace_trends"],
+            supplier_feasibility=fixtures["supplier_feasibility"],
+            consumer_attention=fixtures["consumer_attention"],
+            client_context=fixtures["client_context"],
+        ).to_dict()
+        assert pack["candidate_id"]
