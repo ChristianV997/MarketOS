@@ -1,0 +1,12 @@
+pull_request_rules:
+  - name: Request reviews automatically
+    conditions:
+      - -draft
+      - "#review-requested = 0"
+    actions:
+      request_reviews:
+        teams:
+          - "@acme/maintainers"
+        users:
+          copilot: 1
+          ChristianV997: 1
