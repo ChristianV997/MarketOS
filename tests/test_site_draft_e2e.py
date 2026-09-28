@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from evaluation.commerce import site_draft_builder  # noqa: E402
-from scripts.run_site_draft_e2e import run_site_draft_e2e  # noqa: E402
+from evaluation.commerce.site_draft_builder import build_site_draft_pack  # noqa: E402
+from scripts.run_site_draft_e2e import FIXTURE_FILES, load_fixture, run_site_draft_e2e  # noqa: E402
 
 SECRET_TOKENS = (
     "cj_api_key",
@@ -279,3 +280,68 @@ class TestExportSet:
         text = path.read_text(encoding="utf8")
         assert "Approval Checklist" in text
         assert "supplier" in text.lower()
+
+
+class TestBuildSiteDraftPackDoesNotMutateCallerInputs:
+    """Regression test: build_site_draft_pack must never write into a caller-
+    supplied launch_draft_pack/opportunity_synthesis mapping's nested
+    market_access dict. Reproduced against a real launch_draft_pack fixture
+    with an actual market_access sub-dict attached (the shipped fixtures
+    happen to have market_access=None, so this constructs the one real shape
+    that exercises the aliasing path: launch.get("market_access") returning
+    a caller-owned dict, not a freshly created one)."""
+
+    def _load_real_fixtures(self) -> dict:
+        return {role: load_fixture(filename) for role, filename in FIXTURE_FILES.items()}
+
+    def test_a_populated_market_access_dict_on_the_launch_pack_is_not_mutated(self):
+        fixtures = self._load_real_fixtures()
+        launch = fixtures["launch_draft_pack"]
+        launch["market_access"] = {
+            "jurisdictions": [{"jurisdiction": "mexico", "assessment_state": "pending"}]
+        }
+        original = dict(launch["market_access"])
+        original["jurisdictions"] = list(launch["market_access"]["jurisdictions"])
+
+        build_site_draft_pack(
+            launch_draft_pack=launch,
+            opportunity_synthesis=fixtures["opportunity_synthesis"],
+            marketplace_trends=fixtures["marketplace_trends"],
+            supplier_feasibility=fixtures["supplier_feasibility"],
+            consumer_attention=fixtures["consumer_attention"],
+            client_context=fixtures["client_context"],
+        )
+
+        assert launch["market_access"] == original, (
+            "build_site_draft_pack must not write supplier_present (or anything "
+            "else) into the caller's own launch_draft_pack['market_access'] dict"
+        )
+        assert "supplier_present" not in launch["market_access"]
+
+    def test_the_returned_pack_still_carries_the_correct_supplier_present_flag(self):
+        fixtures = self._load_real_fixtures()
+        launch = fixtures["launch_draft_pack"]
+        launch["market_access"] = {"jurisdictions": []}
+
+        pack_with_supplier = build_site_draft_pack(
+            launch_draft_pack=launch,
+            opportunity_synthesis=fixtures["opportunity_synthesis"],
+            marketplace_trends=fixtures["marketplace_trends"],
+            supplier_feasibility=fixtures["supplier_feasibility"],
+            consumer_attention=fixtures["consumer_attention"],
+            client_context=fixtures["client_context"],
+        ).to_dict()
+        assert pack_with_supplier["market_access"]["supplier_present"] is True
+
+        # Same launch dict, reused for a second build with no supplier evidence --
+        # must reflect the second call's own input, not a leftover from the first.
+        pack_without_supplier = build_site_draft_pack(
+            launch_draft_pack=launch,
+            opportunity_synthesis=fixtures["opportunity_synthesis"],
+            marketplace_trends=fixtures["marketplace_trends"],
+            supplier_feasibility=None,
+            consumer_attention=fixtures["consumer_attention"],
+            client_context=fixtures["client_context"],
+        ).to_dict()
+        assert pack_without_supplier["market_access"]["supplier_present"] is False
+        assert "supplier_present" not in launch["market_access"]

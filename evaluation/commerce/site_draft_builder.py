@@ -626,7 +626,11 @@ def build_site_draft_pack(*, launch_draft_pack: Mapping[str, Any] | None = None,
     evidence_mode = _text(synthesis.get("evidence_mode") or launch.get("evidence_mode") or "fixture_demo", 50)
     summary = f"{title} has a {selected_type} blueprint for {context['business_name']} based on {evidence_mode} evidence. It is implementation-ready planning material, not a published site or launch authorization."
     notes = ("No network calls were made.", "No route, domain, hosting, analytics, or platform mutation occurred.", "Replace every TBD field and complete approval blockers before implementation.")
-    market_access = launch.get("market_access") or synthesis.get("market_access") or {}
+    # Shallow-copy before writing: launch.get("market_access")/synthesis.get(...)
+    # is the caller's own nested dict, not a fresh one -- mutating it in place
+    # would silently corrupt the caller's launch_draft_pack/opportunity_synthesis
+    # object with a field this function never received permission to add.
+    market_access = dict(launch.get("market_access") or synthesis.get("market_access") or {})
     market_access["supplier_present"] = supplier_feasibility is not None
     return SiteDraftPack(VERSION, "deterministic", candidate_id, title, context["business_type"], selected_type, evidence_mode, "launch_draft_pack" if launch else "not_supplied", "opportunity_synthesis" if synthesis else "not_supplied", strategy, route_manifest, site_map, navigation, pages, _section_library(), catalog, _cms_models(), lead, seo, analytics, conversion, payloads, readiness, approval, _risks(context, readiness), notes, summary, market_access=market_access)
 
