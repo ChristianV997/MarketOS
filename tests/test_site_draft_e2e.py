@@ -516,3 +516,28 @@ class TestMalformedAndMissingEvidenceInputsDoNotCrashOrBackfillSilently:
             client_context=fixtures["client_context"],
         ).to_dict()
         assert pack["candidate_id"]
+
+    def test_e2e_matched_customer_language_carries_into_pages_and_payloads(self):
+        fixtures = {role: load_fixture(filename) for role, filename in FIXTURE_FILES.items()}
+        launch = dict(fixtures["launch_draft_pack"])
+        # mini-thermal-printer matches the candidate in the fixtures
+        launch["customer_language"] = "pocket-sized thermal printing with no ink refills needed"
+
+        pack = build_site_draft_pack(
+            launch_draft_pack=launch,
+            opportunity_synthesis=fixtures["opportunity_synthesis"],
+            marketplace_trends=fixtures["marketplace_trends"],
+            supplier_feasibility=fixtures["supplier_feasibility"],
+            consumer_attention=fixtures["consumer_attention"],
+            client_context=fixtures["client_context"],
+        ).to_dict()
+
+        hero = pack["pages"][0]["sections"][0]
+        assert hero["section_type"] == "hero"
+        assert "pocket-sized thermal printing with no ink refills needed" in hero["body"]
+        assert "Use this only as draft customer language; do not publish it as a result promise." in hero["body"]
+        assert hero["evidence_source_note"] == "Matching consumer-attention landing hint or desired outcome"
+
+        # Verify static site payload contains the matched customer language
+        static_pages = pack["platform_payloads"]["static_site"]["pages"]
+        assert any("pocket-sized thermal printing" in sec["body"] for page in static_pages for sec in page["sections"])

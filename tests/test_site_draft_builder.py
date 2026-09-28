@@ -190,3 +190,158 @@ def test_report_without_site_pack_degrades_cleanly(inputs):
     report = generate_validation_report(opportunity_synthesis=synthesis, marketplace_trends=market, supplier_feasibility=supplier, consumer_attention=consumer).to_dict()
     assert "site_draft_pack" not in report["executive_summary"]
     assert report["source_reports"]["site_draft_pack"] == "missing"
+
+
+class TestMatchedCustomerLanguage:
+    def test_matched_candidate_carries_customer_language_into_hero(self):
+        synthesis = {
+            "top_candidate_id": "printer-pro-1",
+            "top_candidate_title": "Printer Pro",
+            "candidates": [{"candidate_id": "printer-pro-1", "title": "Printer Pro"}],
+        }
+        launch = {
+            "candidate_id": "printer-pro-1",
+            "candidate_title": "Printer Pro",
+            "customer_language": "print shipping labels in under three seconds without ink",
+        }
+        pack = build_site_draft_pack(
+            launch_draft_pack=launch,
+            opportunity_synthesis=synthesis,
+        ).to_dict()
+        hero_sections = [
+            sec for page in pack["pages"] for sec in page["sections"] if sec["section_type"] == "hero"
+        ]
+        assert hero_sections
+        for hero in hero_sections:
+            assert "print shipping labels in under three seconds without ink" in hero["body"]
+            assert "Use this only as draft customer language; do not publish it as a result promise." in hero["body"]
+            assert hero["evidence_source_note"] == "Matching consumer-attention landing hint or desired outcome"
+            assert hero["blocks"][0]["content"]["body"] == hero["body"]
+
+    def test_matched_landing_hint_or_desired_outcome_from_launch(self):
+        synthesis = {
+            "top_candidate_id": "printer-pro-1",
+            "top_candidate_title": "Printer Pro",
+        }
+        launch = {
+            "candidate_id": "printer-pro-1",
+            "landing_hint": "reliable label printing on the go",
+        }
+        pack = build_site_draft_pack(launch_draft_pack=launch, opportunity_synthesis=synthesis).to_dict()
+        hero = pack["pages"][0]["sections"][0]
+        assert hero["section_type"] == "hero"
+        assert "reliable label printing on the go" in hero["body"]
+
+    def test_matched_landing_page_hero_extraction(self):
+        synthesis = {
+            "top_candidate_id": "printer-pro-1",
+            "top_candidate_title": "Printer Pro",
+        }
+        launch = {
+            "candidate_id": "printer-pro-1",
+            "landing_page": {
+                "sections": {
+                    "hero": {
+                        "body_copy": "fast wireless thermal printing Use this only as draft customer language; do not publish it as a result promise.",
+                        "evidence_source_note": "Matching consumer-attention landing hint or desired outcome",
+                    }
+                }
+            },
+        }
+        pack = build_site_draft_pack(launch_draft_pack=launch, opportunity_synthesis=synthesis).to_dict()
+        hero = pack["pages"][0]["sections"][0]
+        assert "fast wireless thermal printing" in hero["body"]
+        # Ensure disclaimer is not doubled
+        assert hero["body"].count("Use this only as draft customer language") == 1
+
+    def test_matched_consumer_attention_fallback(self):
+        synthesis = {
+            "top_candidate_id": "printer-pro-1",
+            "top_candidate_title": "Printer Pro",
+        }
+        launch = {
+            "candidate_id": "printer-pro-1",
+            "candidate_title": "Printer Pro",
+        }
+        attention = {
+            "candidates": [
+                {
+                    "candidate_id": "printer-pro-1",
+                    "score": {
+                        "landing_page_copy_hints": ["Lead with: compact and battery powered"],
+                        "voice_of_customer": {
+                            "desired_outcomes": ["print receipts anywhere"],
+                            "claims": ["10x faster than traditional printers"],
+                            "proof_signals": ["tested by 5000 businesses"],
+                        },
+                    },
+                }
+            ]
+        }
+        pack = build_site_draft_pack(
+            launch_draft_pack=launch,
+            opportunity_synthesis=synthesis,
+            consumer_attention=attention,
+        ).to_dict()
+        hero = pack["pages"][0]["sections"][0]
+        assert "Lead with: compact and battery powered" in hero["body"]
+        # Claims and proof signals must NEVER be promoted into page copy
+        raw_text = json.dumps(pack["pages"])
+        assert "10x faster than traditional printers" not in raw_text
+        assert "tested by 5000 businesses" not in raw_text
+
+    def test_mismatched_candidate_blocks_foreign_customer_language(self):
+        synthesis = {
+            "top_candidate_id": "canonical-candidate-1",
+            "top_candidate_title": "Canonical Product",
+            "top_hooks": ["Original verified hook"],
+        }
+        launch = {
+            "candidate_id": "foreign-candidate-2",
+            "candidate_title": "Foreign Product",
+            "customer_language": "foreign customer language that must be blocked",
+        }
+        pack = build_site_draft_pack(launch_draft_pack=launch, opportunity_synthesis=synthesis).to_dict()
+        raw_pages = json.dumps(pack["pages"])
+        assert "foreign customer language that must be blocked" not in raw_pages
+        # Falls back to canonical hook
+        hero = pack["pages"][0]["sections"][0]
+        assert hero["body"] == "Original verified hook"
+        assert hero["evidence_source_note"] == "Existing evidence reports and client context only."
+
+    def test_placeholder_candidate_id_blocks_language(self):
+        synthesis = {"top_candidate_id": "candidate"}
+        launch = {
+            "candidate_id": "candidate",
+            "customer_language": "unbound language with placeholder id",
+        }
+        pack = build_site_draft_pack(launch_draft_pack=launch, opportunity_synthesis=synthesis).to_dict()
+        assert "unbound language with placeholder id" not in json.dumps(pack["pages"])
+
+    @pytest.mark.parametrize("malformed_id", [True, False, 123, ["printer-pro-1"], {"id": "printer-pro-1"}])
+    def test_malformed_candidate_id_cannot_bind(self, malformed_id):
+        synthesis = {"top_candidate_id": "printer-pro-1"}
+        launch = {
+            "candidate_id": malformed_id,
+            "customer_language": "malformed identity leak attempt",
+        }
+        pack = build_site_draft_pack(launch_draft_pack=launch, opportunity_synthesis=synthesis).to_dict()
+        assert "malformed identity leak attempt" not in json.dumps(pack["pages"])
+
+    def test_prohibited_claims_and_safety_words_are_scrubbed(self):
+        synthesis = {"top_candidate_id": "health-widget-1", "top_candidate_title": "Health Widget"}
+        launch = {
+            "candidate_id": "health-widget-1",
+            "customer_language": "Guaranteed 100% cure clinically proven risk-free relief with miracle results",
+        }
+        client_context = {"prohibited_claims": ["miracle"]}
+        pack = build_site_draft_pack(
+            launch_draft_pack=launch,
+            opportunity_synthesis=synthesis,
+            client_context=client_context,
+        ).to_dict()
+        hero = pack["pages"][0]["sections"][0]
+        body = hero["body"]
+        for blocked in ["guaranteed", "cure", "clinically proven", "risk-free", "miracle"]:
+            assert blocked not in body.lower()
+        assert "evidence-led" in body
