@@ -8,13 +8,18 @@ category (the existing `category` field already accepted by
 against a pinned, offline snapshot of the
 [Shopify Product Taxonomy](https://github.com/Shopify/product-taxonomy),
 producing zero or more candidate taxonomy categories with a deterministic
-confidence score, for a **human to review**.
+confidence score, for a **human to review**. The evidence status is
+`"mapped"` only when one candidate remains, `"ambiguous"` when multiple
+plausible candidates remain, and `"unmapped"` when no candidates are found.
+An exact name match takes precedence over weaker token-overlap alternatives;
+multiple exact matches remain `"ambiguous"`.
 
 ## What this is not
 
 - **Not a ranker.** Candidates are not scored against each other's commercial
   merit, and nothing here decides which category is "correct" — it only
-  surfaces textual matches. `CategoryMappingEvidence.decision_authority` is
+  surfaces textual matches. An `"ambiguous"` result is explicitly incomplete,
+  not a selected category. `CategoryMappingEvidence.decision_authority` is
   always `"none"`; `human_review_required` is always `True`.
 - **Not supplier proof.** No supplier, price, inventory, or fulfillment claim
   is made or implied by a category match.

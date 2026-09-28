@@ -125,7 +125,7 @@ def test_stable_hash_is_deterministic_and_bit_identical():
     # Re-pinned after deliberately adding src-shopify-product-taxonomy (30
     # total records); see data/source_adaptation_registry.json and
     # docs/CATEGORY_MAPPING_EVIDENCE.md.
-    assert hash1 == "ba52190e5adfc76289255e58d56ab59f4bd698be062c2665864106eb2c8914e4"
+    assert hash1 == "3c33c0fb3d062f9139cb148e3c0f18716aa4b6b9f7748f86c609477e17b9c2a6"
 
 
 

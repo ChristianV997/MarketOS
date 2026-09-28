@@ -86,9 +86,13 @@ def build_category_mapping_evidence(
                     )
                 )
 
-    ordered = sorted(exact_matches, key=lambda c: c.code) + sorted(
-        overlap_matches, key=lambda c: (-c.confidence, c.code)
-    )
+    # An exact name match is stronger evidence than fuzzy token overlap. Do
+    # not append weaker alternatives to an otherwise unambiguous exact match:
+    # that would make a clear mapping look ambiguous to downstream reviewers.
+    if exact_matches:
+        ordered = sorted(exact_matches, key=lambda c: c.code)
+    else:
+        ordered = sorted(overlap_matches, key=lambda c: (-c.confidence, c.code))
     candidates: Sequence[CategoryMappingCandidate] = tuple(ordered[:_MAX_CANDIDATES])
 
     if not candidates:
@@ -99,9 +103,10 @@ def build_category_mapping_evidence(
             candidates=(),
         )
 
+    status = "mapped" if len(candidates) == 1 else "ambiguous"
     return CategoryMappingEvidence(
         input_category=str(free_text_category or ""),
         normalized_input=normalized_input,
-        status="mapped",
+        status=status,
         candidates=candidates,
     )

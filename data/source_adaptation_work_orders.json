@@ -1478,9 +1478,9 @@
       "data_persistence": "none"
     },
     "adaptation_mode": "copy_pattern",
-    "marketos_target_module": "services.py",
-    "marketos_target_symbol": "category_mapping",
-    "target_boundary_authority": "services.category_mapping",
+    "marketos_target_module": "services/category_mapping/mapper.py",
+    "marketos_target_symbol": "build_category_mapping_evidence",
+    "target_boundary_authority": "services.category_mapping.mapper.build_category_mapping_evidence",
     "duplicate_authority_result": "passed_no_duplicate",
     "required_changes": [
       "Adapt pattern from src-shopify-product-taxonomy into in-tree module",
@@ -1497,14 +1497,14 @@
       "git diff --check"
     ],
     "expected_artifacts": [
-      "services.py"
+      "services/category_mapping/mapper.py"
     ],
     "rollback_deactivation_strategy": "Delete services/category_mapping/ and data/shopify_product_taxonomy/, and remove the optional category_mapping_evidence field/call site from services/product_research; no other module depends on this package.",
     "attribution_notice": "Shopify Product Taxonomy MIT notice retained in THIRD_PARTY_NOTICES.md; pinned commit/tag/license recorded in data/shopify_product_taxonomy/README.md.",
     "source_freshness_days": 0,
     "review_state": "approved",
     "evidence_classification": "fixture_tested",
-    "work_order_hash": "d85e81827ce51b9290be52c9c57762e821f6c7d6603bcb46709f681aec99ef08"
+    "work_order_hash": "4d2deb23c1bc139554783fbdb557c25857a91dbf8d6818efe08a40e48fcd9064"
   },
   {
     "work_order_id": "wo-temporal",

@@ -71,6 +71,15 @@ def test_canonical_registry_and_work_orders_are_complete_and_one_to_one():
     assert crawl4ai_order.marketos_target_module == "backend/adapters/research/crawl4ai.py"
     assert crawl4ai_order.marketos_target_symbol == "Crawl4AIResearchAdapter"
 
+    taxonomy_order = order_registry.get_work_order("wo-shopify-product-taxonomy")
+    assert taxonomy_order is not None
+    assert taxonomy_order.target_boundary_authority == (
+        "services.category_mapping.mapper.build_category_mapping_evidence"
+    )
+    assert taxonomy_order.marketos_target_module == "services/category_mapping/mapper.py"
+    assert taxonomy_order.marketos_target_symbol == "build_category_mapping_evidence"
+    assert taxonomy_order.expected_artifacts == ("services/category_mapping/mapper.py",)
+
     gpu = registry.get_record("src-higgsfield-gpu-orchestration")
     desktop_bridge = registry.get_record("src-higgsfield-mcp-bridge")
     assert gpu is not None and gpu.adaptation_mode == AdaptationMode.REJECT.value
@@ -220,11 +229,11 @@ def test_verified_license_evidence_urls_are_immutable():
 # Re-pinned after deliberately adding src-shopify-product-taxonomy (30 total
 # records/work-orders); see data/source_adaptation_registry.json and
 # docs/CATEGORY_MAPPING_EVIDENCE.md.
-_CANONICAL_REGISTRY_BYTES = 56722
-_CANONICAL_REGISTRY_SHA256 = "fbde6ba8f07a0d95ca8ff9fca68b5604812b19593f02b20ec7e9f5024789cc8a"
-_CANONICAL_WORK_ORDERS_BYTES = 62106
-_CANONICAL_WORK_ORDERS_SHA256 = "be08dc79776780bed594557659ef2e7dc43edc5fcf188c5732cfbe8a828ccd3c"
-_CANONICAL_STABLE_HASH = "ba52190e5adfc76289255e58d56ab59f4bd698be062c2665864106eb2c8914e4"
+_CANONICAL_REGISTRY_BYTES = 56761
+_CANONICAL_REGISTRY_SHA256 = "34958dbecfeb5c8fdf86e663118f3b43cc794eb854b23947576a6497b7a52eb7"
+_CANONICAL_WORK_ORDERS_BYTES = 62208
+_CANONICAL_WORK_ORDERS_SHA256 = "2057bba12ca9d9c37a8d9740eee38373c9ebaebb34bb12bc72730411e5b85521"
+_CANONICAL_STABLE_HASH = "3c33c0fb3d062f9139cb148e3c0f18716aa4b6b9f7748f86c609477e17b9c2a6"
 
 _REQUIRED_VALIDATOR_SYMBOLS = frozenset({
     "validate_registry",

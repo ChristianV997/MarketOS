@@ -22,6 +22,7 @@ class TestExactAndUnmappedCategories:
     def test_exact_case_insensitive_name_match_gets_confidence_one(self):
         evidence = build_category_mapping_evidence("bird supplies", taxonomy=_fixture_taxonomy())
         assert evidence.status == "mapped"
+        assert len(evidence.candidates) == 1
         assert evidence.candidates[0].code == "ap-2-1"
         assert evidence.candidates[0].match_basis == "exact_name"
         assert evidence.candidates[0].confidence == 1.0
@@ -45,7 +46,8 @@ class TestExactAndUnmappedCategories:
 class TestTokenOverlapMatching:
     def test_partial_token_overlap_produces_a_bounded_non_exact_candidate(self):
         evidence = build_category_mapping_evidence("Pet Supplies Bird", taxonomy=_fixture_taxonomy())
-        assert evidence.status == "mapped"
+        assert evidence.status == "ambiguous"
+        assert len(evidence.candidates) > 1
         codes = {c.code for c in evidence.candidates}
         assert "ap-2-1" in codes  # "Bird Supplies" shares "supplies"/"bird" tokens
         for candidate in evidence.candidates:
@@ -54,6 +56,7 @@ class TestTokenOverlapMatching:
 
     def test_candidates_are_capped_and_sorted_deterministically(self):
         evidence = build_category_mapping_evidence("Supplies", taxonomy=_fixture_taxonomy())
+        assert evidence.status == "ambiguous"
         confidences = [c.confidence for c in evidence.candidates]
         assert confidences == sorted(confidences, reverse=True)
         assert len(evidence.candidates) <= 5
@@ -84,6 +87,11 @@ class TestEvidenceIsNotAnAuthority:
         evidence = build_category_mapping_evidence("Bird Supplies", taxonomy=_fixture_taxonomy())
         assert evidence.decision_authority == "none"
         assert evidence.human_review_required is True
+
+    def test_exact_match_wins_over_weaker_token_overlap(self):
+        evidence = build_category_mapping_evidence("Pet Supplies", taxonomy=_fixture_taxonomy())
+        assert evidence.status == "mapped"
+        assert [candidate.code for candidate in evidence.candidates] == ["ap-2"]
 
     def test_evidence_carries_taxonomy_source_provenance(self):
         evidence = build_category_mapping_evidence("Bird Supplies", taxonomy=_fixture_taxonomy())
@@ -119,6 +127,36 @@ class TestEvidenceInvariants:
 
         with pytest.raises(CategoryTaxonomyError):
             CategoryMappingEvidence(input_category="x", normalized_input="x", status="mapped", candidates=())
+
+    def test_construction_rejects_mapped_evidence_with_multiple_candidates(self):
+        import pytest
+        from services.category_mapping.schemas import CategoryMappingCandidate, CategoryTaxonomyError
+
+        candidate = CategoryMappingCandidate(
+            code="x", gid="gid://x", name="X", full_path="X", match_basis="exact_name", confidence=1.0
+        )
+        with pytest.raises(CategoryTaxonomyError, match="exactly one candidate"):
+            CategoryMappingEvidence(
+                input_category="x",
+                normalized_input="x",
+                status="mapped",
+                candidates=(candidate, candidate),
+            )
+
+    def test_construction_rejects_ambiguous_evidence_with_fewer_than_two_candidates(self):
+        import pytest
+        from services.category_mapping.schemas import CategoryMappingCandidate, CategoryTaxonomyError
+
+        candidate = CategoryMappingCandidate(
+            code="x", gid="gid://x", name="X", full_path="X", match_basis="exact_name", confidence=1.0
+        )
+        with pytest.raises(CategoryTaxonomyError, match="at least two candidates"):
+            CategoryMappingEvidence(
+                input_category="x",
+                normalized_input="x",
+                status="ambiguous",
+                candidates=(candidate,),
+            )
 
     def test_construction_rejects_human_review_required_override(self):
         import pytest

@@ -88,7 +88,7 @@ class CategoryMappingEvidence:
 
     input_category: str
     normalized_input: str
-    status: str  # "mapped" | "unmapped"
+    status: str  # "mapped" | "ambiguous" | "unmapped"
     candidates: tuple[CategoryMappingCandidate, ...] = ()
     taxonomy_source: Mapping[str, Any] = field(
         default_factory=lambda: MappingProxyType(dict(TAXONOMY_SOURCE_PROVENANCE))
@@ -105,12 +105,16 @@ class CategoryMappingEvidence:
             raise CategoryTaxonomyError(
                 f"decision_authority must be 'none'; category mapping evidence possesses no decision authority (got {self.decision_authority!r})"
             )
-        if self.status not in {"mapped", "unmapped"}:
+        if self.status not in {"mapped", "ambiguous", "unmapped"}:
             raise CategoryTaxonomyError(f"invalid category mapping status: {self.status!r}")
         if self.status == "unmapped" and self.candidates:
             raise CategoryTaxonomyError("unmapped evidence must not carry candidates")
         if self.status == "mapped" and not self.candidates:
             raise CategoryTaxonomyError("mapped evidence must carry at least one candidate")
+        if self.status == "mapped" and len(self.candidates) != 1:
+            raise CategoryTaxonomyError("mapped evidence must carry exactly one candidate")
+        if self.status == "ambiguous" and len(self.candidates) < 2:
+            raise CategoryTaxonomyError("ambiguous evidence must carry at least two candidates")
         if not isinstance(self.candidates, tuple):
             object.__setattr__(self, "candidates", tuple(self.candidates))
         if not isinstance(self.taxonomy_source, MappingProxyType):

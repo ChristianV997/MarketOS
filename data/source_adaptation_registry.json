@@ -1218,7 +1218,7 @@
       "data_persistence": "none"
     },
     "adaptation_mode": "copy_pattern",
-    "marketos_target_authority": "services.category_mapping",
+    "marketos_target_authority": "services.category_mapping.mapper.build_category_mapping_evidence",
     "expected_benefit": "Supplemental, human-reviewed category-mapping evidence for the existing marketplace/product-intake free-text category field, composing with (not replacing) evaluation.commerce.opportunity_synthesis and evaluation.trustos.client_workspace_isolation.",
     "compatibility_status": "compatible",
     "integration_status": "accepted_pattern",
