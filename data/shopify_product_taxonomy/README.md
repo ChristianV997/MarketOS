@@ -27,10 +27,12 @@ is the one pinned here.
 
 `categories.v2026-08.partial.txt` is **not** a full mirror of the upstream
 taxonomy. The upstream `dist/en/categories.txt` has 14,606 categories across
-8 hierarchy levels; this file keeps only the top **3** levels (levels 1–3:
+8 hierarchy levels; this file keeps the top **3** levels (levels 1–3:
 the 26 top-level verticals, their 218 direct children, and those children's
-1,619 direct children — 1,863 rows total, ~190 KB). Levels 4–8 (the remaining
-~12,743 more specific leaf categories) are excluded.
+1,619 direct children — 1,863 rows), plus a curated slice of deeper leaf
+nodes (levels 4–5) matching real MarketOS product fixtures (e.g. automatic
+pet feeders, espresso machines, coffee grinders, lunch containers, and
+resistance bands; 1,875 rows total, ~192 KB). Remaining leaf categories are excluded.
 
 This is a deliberate scope boundary, not an oversight:
 
@@ -53,7 +55,7 @@ gid://shopify/TaxonomyCategory/<code>   : <Ancestor name> > ... > <Category name
 
 - `<code>` is the upstream category code (e.g. `ap-2-1`); its hierarchy depth is
   the number of hyphen-separated segments (`ap` = level 1, `ap-2` = level 2,
-  `ap-2-1` = level 3).
+  `ap-2-1` = level 3, `ap-2-14-1` = level 4, `hg-11-7-4-3` = level 5).
 - The right-hand side is the full breadcrumb path from the top-level vertical
   down to the category itself, joined with ` > `.
 - Every category's parent code (all but the last hyphen-separated segment) is
@@ -66,7 +68,7 @@ The exact, reproducible offline curation steps used to produce this file from th
 public upstream repository:
 
 1. Retrieve `dist/en/categories.txt` from a local clone of the public repository at commit `2e9aa2e9b882383952c63d212add13eb80f46cf9`.
-2. Keep every line whose GID code has 3 or fewer hyphen-separated segments.
+2. Keep every line whose GID code has 3 or fewer hyphen-separated segments, plus the curated fixture-aligned level 4–5 categories.
 3. Prepend the provenance header above (as `#`-prefixed comment lines,
    matching the upstream file's own comment convention) in place of the
    upstream header.

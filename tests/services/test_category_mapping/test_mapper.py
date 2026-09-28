@@ -99,6 +99,7 @@ class TestEvidenceIsNotAnAuthority:
         assert source["repository_url"] == "https://github.com/Shopify/product-taxonomy"
         assert source["version_tag"] == "v2026-08"
         assert source["license"] == "MIT"
+        assert source["snapshot_levels_included"] == (1, 2, 3, 4, 5)
 
     def test_to_dict_round_trips_every_field(self):
         evidence = build_category_mapping_evidence("Bird Supplies", taxonomy=_fixture_taxonomy())
@@ -238,3 +239,45 @@ class TestEvidenceInvariants:
         assert isinstance(evidence.candidates, tuple)
         cand_list.clear()
         assert len(evidence.candidates) == 1
+
+
+class TestCuratedSubLevelThreeMappings:
+    def test_exact_matches_for_curated_sub_level_three_categories(self):
+        for input_text, expected_code, expected_name in [
+            ("Automatic Feeders", "ap-2-14-1", "Automatic Feeders"),
+            ("Espresso Machines", "hg-11-7-4-3", "Espresso Machines"),
+            ("Coffee Grinders", "hg-11-6-2-6", "Coffee Grinders"),
+            ("Lunch Boxes & Totes", "hg-11-3-7", "Lunch Boxes & Totes"),
+            ("Bento Boxes", "hg-11-3-7-5", "Bento Boxes"),
+            ("Flat Resistance Bands", "sg-2-6-4", "Flat Resistance Bands"),
+        ]:
+            evidence = build_category_mapping_evidence(input_text)
+            assert evidence.status == "mapped"
+            assert len(evidence.candidates) == 1
+            cand = evidence.candidates[0]
+            assert cand.code == expected_code
+            assert cand.name == expected_name
+            assert cand.match_basis == "exact_name"
+            assert cand.confidence == 1.0
+            assert evidence.human_review_required is True
+            assert evidence.decision_authority == "none"
+
+    def test_ambiguous_partial_matches_remain_ambiguous(self):
+        evidence = build_category_mapping_evidence("Resistance Bands")
+        assert evidence.status == "ambiguous"
+        assert len(evidence.candidates) >= 2
+        matched_codes = {c.code for c in evidence.candidates}
+        assert "sg-2-6-4" in matched_codes  # Flat Resistance Bands
+        assert evidence.human_review_required is True
+        assert evidence.decision_authority == "none"
+
+    def test_unmapped_inputs_still_fail_closed(self):
+        evidence = build_category_mapping_evidence("zzzzzzzz nonexistent nonsense")
+        assert evidence.status == "unmapped"
+        assert evidence.candidates == ()
+        assert evidence.human_review_required is True
+        assert evidence.decision_authority == "none"
+
+        empty_evidence = build_category_mapping_evidence("")
+        assert empty_evidence.status == "unmapped"
+        assert empty_evidence.candidates == ()

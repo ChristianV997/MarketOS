@@ -28,11 +28,12 @@ multiple exact matches remain `"ambiguous"`.
   any other provider.
 - **Not a launch/decision gate.** Nothing in this vertical blocks, approves,
   or authorizes a launch, publish, order, payment, or provider action.
-- **Not a full taxonomy mirror.** The bundled snapshot keeps only the top
+- **Not a full taxonomy mirror.** The bundled snapshot keeps the top
   3 of the upstream taxonomy's 8 hierarchy levels (26 verticals + their next
-  two child levels, 1,863 of the upstream's 14,606 categories). A category
-  string with no match in that partial snapshot is reported `"unmapped"`,
-  never guessed at or silently widened.
+  two child levels) plus a curated slice of levels 4–5 matching real
+  MarketOS candidate fixtures (1,875 of the upstream's 14,606 categories).
+  A category string with no match in that partial snapshot is reported
+  `"unmapped"`, never guessed at or silently widened.
 
 ## How it composes with existing MarketOS authorities
 

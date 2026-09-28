@@ -76,7 +76,7 @@ TAXONOMY_SOURCE_PROVENANCE: Mapping[str, Any] = MappingProxyType({
     "upstream_version_file": "2026-08",
     "license": "MIT",
     "license_evidence_url": "https://github.com/Shopify/product-taxonomy/blob/v2026-08/LICENSE",
-    "snapshot_levels_included": (1, 2, 3),
+    "snapshot_levels_included": (1, 2, 3, 4, 5),
     "snapshot_path": "data/shopify_product_taxonomy/categories.v2026-08.partial.txt",
 })
 

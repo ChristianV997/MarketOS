@@ -136,6 +136,53 @@ class TestBundledSnapshot:
         default = default_taxonomy()
         assert set(explicit.by_code) == set(default.by_code)
 
+    def test_curated_sub_level_three_categories_resolve_with_valid_parents(self):
+        index = default_taxonomy()
+        # Level 4 curated categories
+        feeder = index.get("ap-2-14-1")
+        assert feeder is not None
+        assert feeder.level == 4
+        assert feeder.name == "Automatic Feeders"
+        assert feeder.parent_code == "ap-2-14"
+        assert feeder.full_path == (
+            "Animals & Pet Supplies > Pet Supplies > Pet Bowls, Feeders & Waterers > Automatic Feeders"
+        )
+
+        flat_bands = index.get("sg-2-6-4")
+        assert flat_bands is not None
+        assert flat_bands.level == 4
+        assert flat_bands.name == "Flat Resistance Bands"
+        assert flat_bands.parent_code == "sg-2-6"
+
+        lunch_boxes = index.get("hg-11-3-7")
+        assert lunch_boxes is not None
+        assert lunch_boxes.level == 4
+        assert lunch_boxes.name == "Lunch Boxes & Totes"
+        assert lunch_boxes.parent_code == "hg-11-3"
+
+        # Level 5 curated categories
+        espresso = index.get("hg-11-7-4-3")
+        assert espresso is not None
+        assert espresso.level == 5
+        assert espresso.name == "Espresso Machines"
+        assert espresso.parent_code == "hg-11-7-4"
+        assert espresso.full_path == (
+            "Home & Garden > Kitchen & Dining > Kitchen Appliances > "
+            "Coffee Makers & Espresso Machines > Espresso Machines"
+        )
+
+        grinders = index.get("hg-11-6-2-6")
+        assert grinders is not None
+        assert grinders.level == 5
+        assert grinders.name == "Coffee Grinders"
+        assert grinders.parent_code == "hg-11-6-2"
+
+        bento = index.get("hg-11-3-7-5")
+        assert bento is not None
+        assert bento.level == 5
+        assert bento.name == "Bento Boxes"
+        assert bento.parent_code == "hg-11-3-7"
+
 
 class TestTaxonomyIndexImmutability:
     def test_taxonomy_index_by_code_is_genuinely_immutable(self):
