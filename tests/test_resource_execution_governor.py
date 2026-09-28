@@ -1090,3 +1090,85 @@ def test_replay_against_already_used_and_reserved_budget():
     assert decisions["replay-b"].budget_checks[0].status == "blocked"
     assert decisions["replay-b"].budget_checks[0].available_amount == 15.0
     assert "hard cap or aggregate planned budget exceeded" in decisions["replay-b"].budget_checks[0].reason
+
+
+def test_sequential_plan_chunks_carry_budget_and_quota_reservations():
+    first = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_frontier_llm_synthesis",
+                request_id="chunk-frontier-a",
+                requested_amount=60,
+                resource_type="frontier_llm_budget",
+                model_tier="frontier_llm",
+                evidence_score=.9,
+                approval_state="approved",
+            ),
+            base("generate_launch_draft", request_id="chunk-launch-a", resource_type="report_generation_quota"),
+        )
+    )
+    second = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_frontier_llm_synthesis",
+                request_id="chunk-frontier-b",
+                requested_amount=60,
+                resource_type="frontier_llm_budget",
+                model_tier="frontier_llm",
+                evidence_score=.9,
+                approval_state="approved",
+            ),
+            base("generate_launch_draft", request_id="chunk-launch-b", resource_type="report_generation_quota"),
+        ),
+        reservation_state=first.reservation_state,
+    )
+    decisions = {item.request_id: item for item in second.decisions}
+    assert decisions["chunk-frontier-b"].budget_checks[0].status == "blocked"
+    assert decisions["chunk-frontier-b"].budget_checks[0].available_amount == 40.0
+    assert decisions["chunk-launch-b"].quota_checks[0].status == "available"
+    assert second.reservation_state.budget_reservations == (
+        ("chunk-frontier-a", "frontier_llm_budget", 60),
+        ("chunk-launch-a", "report_generation_quota", 0.0),
+        ("chunk-launch-b", "report_generation_quota", 0.0),
+    )
+    assert len(second.reservation_state.quota_reservations) == 3
+    assert len({item[0] for item in second.reservation_state.quota_reservations}) == 3
+
+
+def test_reusing_a_reservation_state_is_idempotent_and_serializable():
+    request = base(
+        "run_frontier_llm_synthesis",
+        request_id="replay-reservation",
+        requested_amount=25,
+        resource_type="frontier_llm_budget",
+        model_tier="frontier_llm",
+        evidence_score=.9,
+        approval_state="approved",
+    )
+    first = build_resource_execution_governor_report(requests=(request,))
+    replay = build_resource_execution_governor_report(
+        requests=(request,),
+        reservation_state=first.to_dict()["reservation_state"],
+    )
+    assert replay.reservation_state == first.reservation_state
+    assert replay.decisions[0].budget_checks[0].status == "available"
+    assert replay.decisions[0].budget_checks[0].available_amount == first.decisions[0].budget_checks[0].available_amount
+
+
+def test_conflicting_request_reuse_fails_closed():
+    first = build_resource_execution_governor_report(
+        requests=(base("run_cheap_llm_task", request_id="conflict-reservation", requested_amount=5, resource_type="cheap_llm_budget", model_tier="cheap_llm"),)
+    )
+    with pytest.raises(ValueError, match="conflicts with an existing budget reservation"):
+        build_resource_execution_governor_report(
+            requests=(base("run_cheap_llm_task", request_id="conflict-reservation", requested_amount=6, resource_type="cheap_llm_budget", model_tier="cheap_llm"),),
+            reservation_state=first.reservation_state,
+        )
+
+
+def test_incomplete_reservation_state_fails_closed():
+    with pytest.raises(ValueError, match="reservation state is incomplete"):
+        build_resource_execution_governor_report(
+            requests=(base("screen_product_opportunities", request_id="malformed-state"),),
+            reservation_state={"budget_reservations": []},
+        )
