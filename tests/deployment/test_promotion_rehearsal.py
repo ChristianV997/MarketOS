@@ -19,6 +19,7 @@ Validates the 14 key requirements:
 
 from __future__ import annotations
 
+import ast
 import json
 import signal
 import subprocess
@@ -45,6 +46,32 @@ from backend.deployment.promotion_rehearsal import (
     redact_secrets,
 )
 from backend.deployment import promotion_rehearsal as rehearsal_module
+
+
+def test_deployment_rehearsal_does_not_depend_on_script_layer() -> None:
+    source_path = Path(__file__).resolve().parents[2] / "backend" / "deployment" / "promotion_rehearsal.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    imported_modules = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    imported_modules.update(
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    )
+    assert "scripts.run_high_value_path_harness" not in imported_modules
+
+
+def test_operator_harness_wrapper_delegates_to_canonical_module() -> None:
+    from backend.deployment import high_value_path_harness
+    import scripts.run_high_value_path_harness as operator_harness
+
+    assert operator_harness.run_harness is high_value_path_harness.run_harness
+    assert operator_harness.main is high_value_path_harness.main
+    assert operator_harness.PATH_IDS == high_value_path_harness.PATH_IDS
 
 
 def test_local_dry_run_requires_zero_credentials() -> None:
