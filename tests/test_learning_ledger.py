@@ -1402,3 +1402,91 @@ def test_sample_size_target_is_not_inferred_from_observed_sample_size():
     assert experiments["sample-size-observed"].observed_sample_size == 25
     assert experiments["sample-size-unknown"].sample_size_target is None
     assert experiments["sample-size-unknown"].observed_sample_size is None
+
+
+def test_provider_id_null_or_blank_does_not_create_provider_impact():
+    report = build_learning_ledger_report(context={"events": [
+        {
+            "learning_event_id": "provider-null-id",
+            "event_type": "provider_run",
+            "outcome": "win",
+            "action_taken": "run_provider_data_pull",
+            "provider_id": None,
+        },
+        {
+            "learning_event_id": "provider-blank-id",
+            "event_type": "provider_run",
+            "outcome": "win",
+            "action_taken": "run_provider_data_pull",
+            "provider_id": "   ",
+        },
+    ]})
+
+    assert report.provider_impacts == ()
+
+
+def test_derive_governor_influence_ignores_incidental_provider_on_non_provider_event():
+    report = build_learning_ledger_report(context={"events": [{
+        "learning_event_id": "model-event-with-provider",
+        "event_type": "model_routing_decision",
+        "outcome": "win",
+        "action_taken": "run_cheap_llm_task",
+        "provider_id": "incidental-provider-label",
+        "success_reasons": ["budget_efficient"],
+    }, {
+        "learning_event_id": "model-event-with-blocker",
+        "event_type": "model_routing_decision",
+        "outcome": "blocked",
+        "action_taken": "run_frontier_llm_synthesis",
+        "provider_id": "incidental-blocked-provider",
+        "failure_reasons": ["provider_blocker"],
+    }]})
+
+    influence_win = derive_governor_influence(report, action_type="run_cheap_llm_task")
+    assert influence_win.recommended_provider_id == ""
+    assert influence_win.avoid_provider_ids == ()
+
+    influence_block = derive_governor_influence(report, action_type="run_frontier_llm_synthesis")
+    assert influence_block.avoid_provider_ids == ()
+    assert influence_block.recommended_provider_id == ""
+
+
+def test_mapping_preserves_defaults_when_optional_fields_are_none():
+    report = build_learning_ledger_report(context={"events": [{
+        "learning_event_id": "event-with-nones",
+        "event_type": "product_validation",
+        "outcome": "win",
+        "candidate_id": None,
+        "action_taken": None,
+        "provider_id": None,
+        "client_visibility": None,
+        "owner_department": None,
+        "workspace_id": None,
+        "hypothesis": None,
+        "resource_governor_influence": None,
+        "failure_reasons": None,
+        "success_reasons": None,
+        "metrics": [{
+            "metric_id": None,
+            "name": "conversion_rate",
+            "value": 0.05,
+            "unit": None,
+            "source": None,
+        }],
+    }]})
+
+    event = report.events[0]
+    assert event.candidate_id == "candidate-placeholder"
+    assert event.action_taken == "product_validation"
+    assert event.provider_id == ""
+    assert event.client_visibility == "internal_only"
+    assert event.owner_department == "management"
+    assert event.workspace_id == "internal-companyos"
+    assert event.hypothesis.statement == "Sanitized fixture hypothesis."
+    assert event.resource_governor_influence == "Record the result before the next decision."
+    assert event.failure_reasons == ()
+    assert event.success_reasons == ()
+    metric = event.metrics[0]
+    assert metric.metric_id == "metric-event-with-nones-1-conversion_rate"
+    assert metric.unit == "unknown"
+    assert metric.source == "fixture"

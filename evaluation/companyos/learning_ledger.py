@@ -602,8 +602,9 @@ def _model_impacts(events: Sequence[LearningEvent]) -> tuple[LearningModelRoutin
 def _provider_impacts(events: Sequence[LearningEvent]) -> tuple[LearningProviderImpact, ...]:
     grouped: dict[str, list[LearningEvent]] = {}
     for event in events:
-        if event.event_type == "provider_run" and event.provider_id:
-            grouped.setdefault(event.provider_id, []).append(event)
+        provider_id = event.provider_id.strip()
+        if event.event_type == "provider_run" and provider_id:
+            grouped.setdefault(provider_id, []).append(event)
 
     def observed_metric(records: Sequence[LearningEvent], name: str) -> float | None:
         values = [metric.value for event in records for metric in event.metrics if metric.name == name and metric.value is not None]
@@ -806,8 +807,8 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     elif action_type == "run_cheap_llm_task" and wins and not losses:
         recommended_model_tier = "cheap_llm"
 
-    avoid_provider_ids = tuple(sorted({event.provider_id for event in matching_events if event.provider_id and "provider_blocker" in event.failure_reasons}))
-    ready_provider_ids = tuple(sorted({event.provider_id for event in matching_events if event.provider_id and event.outcome == "win"} - set(avoid_provider_ids)))
+    avoid_provider_ids = tuple(sorted({event.provider_id.strip() for event in matching_events if event.event_type == "provider_run" and event.provider_id.strip() and "provider_blocker" in event.failure_reasons}))
+    ready_provider_ids = tuple(sorted({event.provider_id.strip() for event in matching_events if event.event_type == "provider_run" and event.provider_id.strip() and event.outcome == "win"} - set(avoid_provider_ids)))
     recommended_provider_id = ready_provider_ids[0] if ready_provider_ids else ""
     if avoid_provider_ids: deprioritize = True
 
@@ -882,21 +883,24 @@ def _mapping_metrics(item: Mapping[str, Any], event_id: str) -> tuple[LearningMe
         name = str(raw_metric.get("name", "")).strip()
         if not name:
             raise ValueError("learning metric name is required")
-        metric_id = str(raw_metric.get("metric_id", f"metric-{event_id}-{index}-{name}"))
-        if not metric_id.strip():
-            raise ValueError("learning metric identity must be a non-empty string")
+        raw_metric_id = raw_metric.get("metric_id")
+        metric_id = f"metric-{event_id}-{index}-{name}" if raw_metric_id is None or not str(raw_metric_id).strip() else str(raw_metric_id).strip()
         metric_value = _optional_metric_float(raw_metric, "value")
         metric_target = _optional_metric_float(raw_metric, "target")
         if name in {"evidence_value", "schema_quality"} and any(value is not None and not 0 <= value <= 1 for value in (metric_value, metric_target)):
             raise ValueError(f"learning metric {name} must be between zero and one")
+        raw_unit = raw_metric.get("unit")
+        unit = "unknown" if raw_unit is None or not str(raw_unit).strip() else str(raw_unit).strip()
+        raw_source = raw_metric.get("source")
+        source = "fixture" if raw_source is None or not str(raw_source).strip() else str(raw_source).strip()
         metrics.append(LearningMetric(
             metric_id,
             name,
             metric_value,
             metric_target,
-            str(raw_metric.get("unit", "unknown")),
+            unit,
             _optional_metric_sample_size(raw_metric),
-            str(raw_metric.get("source", "fixture")),
+            source,
         ))
     return tuple(metrics)
 
@@ -922,8 +926,31 @@ def _from_mapping(item: Mapping[str, Any], index: int) -> LearningEvent:
             raise ValueError("learning event identity must be a non-empty string")
     else:
         event_id = f"fixture-event-{index}"
-    event_type = str(item.get("event_type", "companyos_review")); outcome = str(item.get("outcome", "inconclusive")); failures = tuple(str(x) for x in item.get("failure_reasons", ())); successes = tuple(str(x) for x in item.get("success_reasons", ()))
-    return _event(event_id, event_type, outcome, candidate=str(item.get("candidate_id", "candidate-placeholder")), failures=failures, successes=successes, action=str(item.get("action_taken", event_type)), cost=_event_float(item, "cost_estimate", 0.0), confidence=_event_float(item, "confidence", .7), metrics=_mapping_metrics(item, event_id), visibility=str(item.get("client_visibility", "internal_only")), department=str(item.get("owner_department", "management")), provider=str(item.get("provider_id", "")), workspace_id=str(item.get("workspace_id", "internal-companyos")), statement=str(item.get("hypothesis", "Sanitized fixture hypothesis.")), influence=str(item.get("resource_governor_influence", "Record the result before the next decision.")))
+    raw_event_type = item.get("event_type")
+    event_type = "companyos_review" if raw_event_type is None or not str(raw_event_type).strip() else str(raw_event_type).strip()
+    raw_outcome = item.get("outcome")
+    outcome = "inconclusive" if raw_outcome is None or not str(raw_outcome).strip() else str(raw_outcome).strip()
+    raw_failures = item.get("failure_reasons")
+    failures = tuple(str(x) for x in raw_failures) if raw_failures is not None else ()
+    raw_successes = item.get("success_reasons")
+    successes = tuple(str(x) for x in raw_successes) if raw_successes is not None else ()
+    raw_candidate = item.get("candidate_id")
+    candidate = "candidate-placeholder" if raw_candidate is None or not str(raw_candidate).strip() else str(raw_candidate).strip()
+    raw_action = item.get("action_taken")
+    action = event_type if raw_action is None or not str(raw_action).strip() else str(raw_action).strip()
+    raw_provider = item.get("provider_id")
+    provider = "" if raw_provider is None else str(raw_provider).strip()
+    raw_visibility = item.get("client_visibility")
+    visibility = "internal_only" if raw_visibility is None or not str(raw_visibility).strip() else str(raw_visibility).strip()
+    raw_department = item.get("owner_department")
+    department = "management" if raw_department is None or not str(raw_department).strip() else str(raw_department).strip()
+    raw_workspace = item.get("workspace_id")
+    workspace_id = "internal-companyos" if raw_workspace is None or not str(raw_workspace).strip() else str(raw_workspace).strip()
+    raw_statement = item.get("hypothesis")
+    statement = "Sanitized fixture hypothesis." if raw_statement is None or not str(raw_statement).strip() else str(raw_statement).strip()
+    raw_influence = item.get("resource_governor_influence")
+    influence = "Record the result before the next decision." if raw_influence is None or not str(raw_influence).strip() else str(raw_influence).strip()
+    return _event(event_id, event_type, outcome, candidate=candidate, failures=failures, successes=successes, action=action, cost=_event_float(item, "cost_estimate", 0.0), confidence=_event_float(item, "confidence", .7), metrics=_mapping_metrics(item, event_id), visibility=visibility, department=department, provider=provider, workspace_id=workspace_id, statement=statement, influence=influence)
 
 
 def _load_events(context: Mapping[str, Any] | None) -> tuple[LearningEvent, ...]:
