@@ -183,3 +183,90 @@ def test_existing_get_returns_in_jail_jsonl_events(monkeypatch, tmp_path):
     assert report["mutated"] is False
     assert report["timeline"]["events"][0]["event_id"] == "commerce-start"
     assert report["timeline"]["warnings"] == []
+
+
+def test_jsonl_nonexistent_file_returns_unconfigured_report(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    nonexistent = artifacts / "missing.jsonl"
+    monkeypatch.setattr(canonical_events, "ARTIFACTS", artifacts.resolve())
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(nonexistent))
+
+    report = canonical_events._jsonl_report(_query())
+
+    assert report["read_only"] is True
+    assert report["network_calls"] is False
+    assert report["mutated"] is False
+    assert report["timeline"]["events"] == []
+    assert report["timeline"]["warnings"] == ["jsonl_read_path_unconfigured"]
+
+
+def test_jsonl_malformed_and_non_finite_rows_do_not_leak_contents(monkeypatch, tmp_path):
+    import json
+
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    path = artifacts / "mixed.jsonl"
+    secret_marker = "SUPER_SECRET_VALUE_DO_NOT_LEAK_12345"
+    lines = [
+        b"{invalid_syntax\n",
+        f'{{"event_id": "{secret_marker}", "broken": true}}\n'.encode("utf-8"),
+        b'{"event_id": "e_nan", "workspace_id": "w", "aggregate_type": "a", "aggregate_id": "i", "event_type": "t", "schema_version": 1, "occurred_at": NaN, "source": "s", "payload": {}, "metadata": {}}\n',
+        _valid_event_line(),
+    ]
+    path.write_bytes(b"".join(lines))
+    monkeypatch.setattr(canonical_events, "ARTIFACTS", artifacts.resolve())
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(path))
+
+    report = canonical_events._jsonl_report(_query())
+
+    assert report["read_only"] is True
+    assert report["network_calls"] is False
+    assert report["mutated"] is False
+    assert len(report["timeline"]["events"]) == 1
+    assert report["timeline"]["events"][0]["event_id"] == "commerce-start"
+    assert "malformed_jsonl_row:1" in report["timeline"]["warnings"]
+    assert "malformed_jsonl_row:2" in report["timeline"]["warnings"]
+    assert "malformed_jsonl_row:3" in report["timeline"]["warnings"]
+    # Ensure raw secret content is not in warnings or any report field
+    serialized = json.dumps(report)
+    assert secret_marker not in serialized
+
+
+def test_jsonl_byte_cap_applies_to_stream_consumed_bytes(monkeypatch):
+    class StreamTracker:
+        def __init__(self, data: bytes):
+            self._data = data
+            self._pos = 0
+            self.read_calls: list[int] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self, size: int = -1) -> bytes:
+            self.read_calls.append(size)
+            if size == -1 or size is None:
+                chunk = self._data[self._pos:]
+                self._pos = len(self._data)
+                return chunk
+            chunk = self._data[self._pos : self._pos + size]
+            self._pos += len(chunk)
+            return chunk
+
+    stream = StreamTracker(b"a" * 100)
+    orig_open = query_service.Path.open
+
+    def mock_open(self, mode="r", *args, **kwargs):
+        if "b" in mode:
+            return stream
+        return orig_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(query_service.Path, "open", mock_open)
+    events, warnings = query_service.load_events_from_jsonl("dummy.jsonl", max_bytes=50, oversized_warning="oversized")
+
+    assert events == []
+    assert warnings == ["oversized"]
+    assert stream.read_calls == [50, 1]
