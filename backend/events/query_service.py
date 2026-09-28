@@ -20,7 +20,8 @@ def load_events_from_jsonl(
             if max_bytes is not None and source.read(1):
                 return events, [oversized_warning]
         lines = raw.decode("utf-8").splitlines()
-    except OSError: return events, ["jsonl_file_unavailable"]
+    except (OSError, UnicodeDecodeError):
+        return events, ["jsonl_file_unavailable"]
     for index, line in enumerate(lines, 1):
         try: events.append(Event.from_dict(json.loads(line)))
         except Exception: warnings.append(f"malformed_jsonl_row:{index}")

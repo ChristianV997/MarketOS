@@ -105,3 +105,81 @@ def test_jsonl_path_outside_artifacts_still_forbidden(monkeypatch, tmp_path):
         assert exc.status_code == 403
     else:
         raise AssertionError("expected HTTP 403 for a path outside artifacts/")
+
+
+def _valid_event_line() -> bytes:
+    from pathlib import Path
+
+    fixture = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "event_queries" / "mixed_canonical_events.jsonl"
+    return fixture.read_bytes().splitlines()[0] + b"\n"
+
+
+def test_exact_one_mib_jsonl_is_read_and_one_extra_byte_is_not(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    line = _valid_event_line()
+    exact = artifacts / "exact.jsonl"
+    body = line * (canonical_events.MAX_JSONL_BYTES // len(line))
+    remainder = canonical_events.MAX_JSONL_BYTES - len(body)
+    if remainder:
+        body += b" " * (remainder - 1) + b"\n"
+    assert len(body) == canonical_events.MAX_JSONL_BYTES
+    exact.write_bytes(body)
+    over = artifacts / "over.jsonl"
+    over.write_bytes(body + b"\n")
+    monkeypatch.setattr(canonical_events, "ARTIFACTS", artifacts.resolve())
+
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(exact))
+    accepted = canonical_events._jsonl_report(_query())
+    assert accepted["timeline"]["events"]
+    assert "jsonl_read_path_oversized" not in accepted["timeline"]["warnings"]
+    assert accepted["read_only"] is True
+    assert accepted["network_calls"] is False
+    assert accepted["mutated"] is False
+
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(over))
+    rejected = canonical_events._jsonl_report(_query())
+    assert rejected["timeline"]["events"] == []
+    assert rejected["timeline"]["warnings"] == ["jsonl_read_path_oversized"]
+
+
+def test_undecodable_jsonl_fail_closes_without_parsing(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    monkeypatch.setattr(canonical_events, "ARTIFACTS", artifacts.resolve())
+
+    def _must_not_parse(_mapping):
+        raise AssertionError("undecodable JSONL must not reach Event.from_dict")
+
+    monkeypatch.setattr(query_service.Event, "from_dict", _must_not_parse)
+    for name, payload in (
+        ("small.jsonl", b"\xff\xfe"),
+        ("exact.jsonl", b" " * (canonical_events.MAX_JSONL_BYTES - 1) + b"\xff"),
+    ):
+        path = artifacts / name
+        path.write_bytes(payload)
+        assert len(payload) <= canonical_events.MAX_JSONL_BYTES
+        monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(path))
+        report = canonical_events._jsonl_report(_query())
+        assert report["timeline"]["events"] == []
+        assert report["timeline"]["warnings"] == ["jsonl_file_unavailable"]
+        assert report["read_only"] is True
+        assert report["mutated"] is False
+        assert report["network_calls"] is False
+
+
+def test_existing_get_returns_in_jail_jsonl_events(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    path = artifacts / "events.jsonl"
+    path.write_bytes(_valid_event_line())
+    monkeypatch.setattr(canonical_events, "ARTIFACTS", artifacts.resolve())
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(path))
+
+    report = canonical_events.events(limit=100, offset=0, source="jsonl", request=None)
+
+    assert report["read_only"] is True
+    assert report["network_calls"] is False
+    assert report["mutated"] is False
+    assert report["timeline"]["events"][0]["event_id"] == "commerce-start"
+    assert report["timeline"]["warnings"] == []
