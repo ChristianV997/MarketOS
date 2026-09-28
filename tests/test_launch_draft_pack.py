@@ -261,3 +261,23 @@ def test_matching_evidence_binds_regardless_of_case_or_surrounding_whitespace(re
     pack = build_launch_draft_pack(synthesis=synthesis, consumer_attention=same_candidate_attention).to_dict()
     assert "real matching language" in pack["product_listing"]["short_description"]
     assert any("matches this draft candidate" in note for note in pack["operator_notes"] if "Consumer attention" in note)
+
+
+@pytest.mark.parametrize("malformed_id", [True, False, ["a", "b"], {"nested": "id"}])
+def test_malformed_non_string_identity_can_never_bind_an_unrelated_evidence_row(reports, malformed_id):
+    """A non-string top_candidate_id/candidate_id (bool, list, dict, ...) is
+    never a real product identifier. Coercing it with str() would still
+    produce a stable-looking key that could coincidentally collide with an
+    equally malformed candidate_id on an unrelated evidence row -- malformed
+    identity must bind nothing, exactly like the missing-identity case."""
+    synthesis, _market, _supplier, _consumer = reports
+    synthesis = {**synthesis, "top_candidate_id": malformed_id, "candidates": [{}]}
+    colliding_attention = {"candidates": [{"candidate_id": malformed_id, "score": {"landing_page_copy_hints": ["MALFORMED IDENTITY COLLISION LANGUAGE"]}}]}
+    pack = build_launch_draft_pack(synthesis=synthesis, consumer_attention=colliding_attention).to_dict()
+    raw = json.dumps(pack)
+    assert "MALFORMED IDENTITY COLLISION LANGUAGE" not in raw
+    assert any("was not supplied" in note for note in pack["operator_notes"] if "Consumer attention" in note)
+    assert pack["approval_checklist"]["launch_authorized"] is False
+    assert pack["published"] is False
+    assert pack["shopify_draft_payload"]["status"] == "draft"
+    assert pack["medusa_draft_payload"]["status"] == "draft"

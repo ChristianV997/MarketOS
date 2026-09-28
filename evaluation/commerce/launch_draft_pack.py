@@ -508,6 +508,20 @@ def _customer_language(candidate: Mapping[str, Any] | None) -> str:
     return outcomes[0] if outcomes else ""
 
 
+def _string_identity(value: Any) -> str:
+    """Return value only if it is genuinely a string identifier, else "".
+
+    A non-string value (bool, int, list, dict, ...) is never a real
+    candidate id. Coercing it with str() would still produce a
+    stable-looking identity string that could coincidentally collide with
+    an equally malformed candidate_id on an unrelated evidence row (e.g.
+    both sides being the boolean True, or both being the same list) --
+    a malformed identity must bind nothing, not just avoid the display
+    placeholder.
+    """
+    return value if isinstance(value, str) else ""
+
+
 def _evidence_note(label: str, status: str) -> str:
     if status == "matched":
         return f"{label} matches this draft candidate and remains draft-only."
@@ -523,10 +537,12 @@ def build_launch_draft_pack(*, synthesis: Mapping[str, Any], product_validation:
     title = _text(synthesis.get("top_candidate_title") or candidate.get("title") or candidate.get("query") or "Product candidate", 120)
     candidate_id = _text(synthesis.get("top_candidate_id") or candidate.get("candidate_id") or "candidate", 100)
     # Evidence binding must use a real identifier only -- never the "candidate"
-    # display placeholder above, which would let an unrelated report's row
-    # (e.g. one that also happens to say candidate_id: "candidate") bind by
-    # coincidence when this draft has no real candidate identity at all.
-    evidence_candidate_id = str(synthesis.get("top_candidate_id") or candidate.get("candidate_id") or "").strip()
+    # display placeholder above (which would let an unrelated report's row
+    # that also says candidate_id: "candidate" bind by coincidence when this
+    # draft has no real candidate identity at all), and never a non-string
+    # value coerced through str() (which could likewise coincidentally
+    # collide with an equally malformed candidate_id on an unrelated row).
+    evidence_candidate_id = (_string_identity(synthesis.get("top_candidate_id")) or _string_identity(candidate.get("candidate_id"))).strip()
     hooks, pains, objections, angles = _hooks(synthesis, candidate), _pains(synthesis, candidate), _objections(synthesis, candidate), _angles(synthesis, candidate)
     econ, thresholds = _economics(synthesis, candidate), _thresholds(synthesis)
     recommendation = _text(synthesis.get("overall_recommendation") or "hold_for_manual_review", 80)
