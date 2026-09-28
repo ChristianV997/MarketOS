@@ -304,8 +304,7 @@ def test_resource_influence_for_product_validation():
 
 
 def test_resource_influence_for_new_website():
-    item = next(item for item in build_learning_ledger_report().decision_influences if item.action_type == "create_new_website")
-    assert item.recommended_decision_modifier
+    assert not any(item.action_type == "create_new_website" for item in build_learning_ledger_report().decision_influences)
 
 
 def test_resource_influence_for_frontier_llm():
@@ -320,7 +319,7 @@ def test_resource_influence_for_scale_winner():
 
 
 def test_missing_learning_soft_block_is_influence():
-    item = next(item for item in build_learning_ledger_report().decision_influences if item.action_type == "generate_creative_batch")
+    item = next(item for item in build_learning_ledger_report().decision_influences if item.source_event_id == "event-missing-learning")
     assert item.missing_learning_blockers
 
 
@@ -368,7 +367,7 @@ def test_landing_page_pattern_is_summarized():
 
 def test_model_routing_impacts_cover_algorithmic_local_cheap_frontier_human():
     items = build_learning_ledger_report().model_routing_impacts
-    assert {"algorithmic", "cheap_llm", "algorithmic_or_cheap_llm", "human_review"}.issubset({item.recommended_model_tier_next_time for item in items})
+    assert {"algorithmic", "cheap_llm", "algorithmic_or_cheap_llm", "human_review"} == {item.recommended_model_tier_next_time for item in items}
 
 
 def test_frontier_waste_cost_note_present():
@@ -384,17 +383,20 @@ def test_cheap_success_is_recorded():
 
 def test_provider_learning_has_dataforseo():
     item = next(item for item in build_learning_ledger_report().provider_impacts if item.provider_id == "dataforseo")
-    assert item.evidence_value > 0
+    assert item.evidence_value == .72
+    assert item.schema_quality == .85
 
 
 def test_provider_learning_has_apify_plan_only():
     item = next(item for item in build_learning_ledger_report().provider_impacts if item.provider_id == "apify")
-    assert "plan" in item.recommended_next_provider_action
+    assert "plan-only" in item.recommended_next_provider_action
 
 
 def test_provider_terms_blocker_is_recorded():
     item = next(item for item in build_learning_ledger_report().provider_impacts if item.provider_id == "apify")
-    assert item.terms_privacy_blocker is True
+    assert "provider_blocker" in item.blocked_reason
+    assert item.terms_privacy_blocker is None
+    assert item.output_contract_blocker is None
 
 
 def test_manual_import_is_sufficient_for_early_screen():
@@ -641,11 +643,11 @@ def test_provider_costs_are_nonnegative():
 
 
 def test_provider_schema_quality_is_bounded():
-    assert all(0 <= item.schema_quality <= 1 for item in build_learning_ledger_report().provider_impacts)
+    assert all(item.schema_quality is None or 0 <= item.schema_quality <= 1 for item in build_learning_ledger_report().provider_impacts)
 
 
 def test_provider_evidence_value_is_bounded():
-    assert all(0 <= item.evidence_value <= 1 for item in build_learning_ledger_report().provider_impacts)
+    assert all(item.evidence_value is None or 0 <= item.evidence_value <= 1 for item in build_learning_ledger_report().provider_impacts)
 
 
 def test_summary_failure_rules_are_nonempty():
@@ -670,9 +672,9 @@ def test_context_without_events_uses_safe_defaults():
     assert report.events
 
 
-def test_empty_event_list_uses_safe_defaults():
+def test_empty_event_list_is_an_explicit_empty_batch():
     report = build_learning_ledger_report(context={"events": []})
-    assert report.events
+    assert not report.events
 
 
 def test_custom_cost_does_not_enable_spend():
@@ -1172,3 +1174,231 @@ def test_derive_governor_influence_warn_severity_rule_does_not_force_learning_re
     assert influence.do_not_repeat_rule_ids == ()
     assert influence.advisory_rule_ids == (original_rule.rule_id,)
     assert any("warn-severity" in reason for reason in influence.rationale)
+
+
+def test_explicit_empty_batch_does_not_load_demo_events():
+    report = build_learning_ledger_report(context={"events": []})
+
+    assert report.events == ()
+    assert report.experiments == ()
+    assert report.results == ()
+    assert report.portfolio_impacts == ()
+    assert report.model_routing_impacts == ()
+    assert report.provider_impacts == ()
+    assert report.trustos_impacts == ()
+    assert report.decision_influences == ()
+    assert "No learning events" in report.next_best_action
+
+
+def test_empty_events_argument_overrides_default_fixtures():
+    assert build_learning_ledger_report(events=[]).events == ()
+
+
+def test_fixture_mapping_preserves_missing_and_explicit_zero_metrics():
+    report = build_learning_ledger_report(context={"events": [
+        {
+            "learning_event_id": "metric-zero",
+            "event_type": "ad_experiment",
+            "outcome": "win",
+            "action_taken": "launch_ad_experiment",
+            "metrics": [{"name": "conversion_rate", "value": 0.0, "target": 0.0, "sample_size": 0, "unit": "ratio", "source": "fixture"}, {"name": "evidence_value", "value": 0.0, "sample_size": 0, "unit": "ratio", "source": "fixture"}],
+        },
+        {
+            "learning_event_id": "metric-missing",
+            "event_type": "ad_experiment",
+            "outcome": "win",
+            "action_taken": "launch_ad_experiment",
+            "metrics": [{"name": "conversion_rate", "unit": "ratio", "source": "fixture"}, {"name": "evidence_value", "unit": "ratio", "source": "fixture"}],
+        },
+        {
+            "learning_event_id": "provider-metric-zero",
+            "event_type": "provider_run",
+            "outcome": "win",
+            "action_taken": "run_provider_data_pull",
+            "provider_id": "provider-zero",
+            "metrics": [{"name": "evidence_value", "value": 0.0, "sample_size": 0, "unit": "ratio", "source": "fixture"}],
+        },
+        {
+            "learning_event_id": "provider-metric-missing",
+            "event_type": "provider_run",
+            "outcome": "win",
+            "action_taken": "run_provider_data_pull",
+            "provider_id": "provider-unreported",
+            "metrics": [{"name": "evidence_value", "unit": "ratio", "source": "fixture"}],
+        },
+    ]})
+    events = {event.learning_event_id: event for event in report.events}
+    zero = events["metric-zero"].metrics[0]
+    missing = events["metric-missing"].metrics[0]
+
+    assert (zero.value, zero.target, zero.sample_size) == (0.0, 0.0, 0)
+    assert (missing.value, missing.target, missing.sample_size) == (None, None, None)
+    providers = {item.provider_id: item for item in report.provider_impacts}
+    assert providers["provider-zero"].evidence_value == 0.0
+    assert providers["provider-unreported"].evidence_value is None
+    experiments = {item.event_refs[0]: item for item in report.experiments}
+    assert experiments["metric-zero"].observed_sample_size == 0
+    assert experiments["metric-missing"].observed_sample_size is None
+
+
+def test_duplicate_event_identity_is_idempotent_but_conflicts_fail_closed():
+    event = {"learning_event_id": "same-id", "event_type": "product_validation", "outcome": "win", "success_reasons": ["strong_demand"]}
+    duplicate_report = build_learning_ledger_report(context={"events": [event, dict(event)]})
+    assert [item.learning_event_id for item in duplicate_report.events] == ["same-id"]
+
+    conflict = {**event, "outcome": "loss", "failure_reasons": ["weak_demand"]}
+    with pytest.raises(ValueError, match="conflicting learning event identity"):
+        build_learning_ledger_report(context={"events": [event, conflict]})
+
+    typed_event = build_learning_ledger_report().events[0]
+    assert build_learning_ledger_report(events=[typed_event, typed_event]).events == (typed_event,)
+    with pytest.raises(ValueError, match="conflicting learning event identity"):
+        build_learning_ledger_report(events=[typed_event, replace(typed_event, outcome="win" if typed_event.outcome != "win" else "loss")])
+
+
+@pytest.mark.parametrize("metrics", [
+    {"name": "conversion_rate"},
+    [None],
+    [{"name": "evidence_value", "value": 1.1}],
+    [{"name": "conversion_rate", "value": True}],
+    [{"name": "conversion_rate", "sample_size": -1}],
+])
+def test_fixture_mapping_rejects_malformed_metric_records(metrics):
+    with pytest.raises(ValueError):
+        build_learning_ledger_report(context={"events": [{"learning_event_id": "bad-metric", "metrics": metrics}]})
+
+
+def test_batch_report_order_is_stable_by_event_identity():
+    events = [
+        {"learning_event_id": "z-event", "event_type": "product_validation", "outcome": "loss", "failure_reasons": ["weak_demand"]},
+        {"learning_event_id": "a-event", "event_type": "product_validation", "outcome": "win", "success_reasons": ["strong_demand"]},
+    ]
+    forward = build_learning_ledger_report(context={"events": events})
+    reverse = build_learning_ledger_report(context={"events": list(reversed(events))})
+
+    assert [event.learning_event_id for event in forward.events] == ["a-event", "z-event"]
+    assert forward.to_dict() == reverse.to_dict()
+
+
+def test_custom_batch_impacts_only_use_recorded_evidence():
+    events = [
+        {"learning_event_id": "product-win", "event_type": "product_validation", "outcome": "win", "candidate_id": "candidate-x", "action_taken": "validate_candidate", "success_reasons": ["strong_demand"]},
+        {"learning_event_id": "model-loss", "event_type": "model_routing_decision", "outcome": "loss", "action_taken": "run_frontier_llm_synthesis", "failure_reasons": ["model_cost_too_high"]},
+        {"learning_event_id": "provider-block", "event_type": "provider_run", "outcome": "blocked", "action_taken": "run_provider_data_pull", "provider_id": "fixture-search", "failure_reasons": ["provider_blocker"]},
+        {"learning_event_id": "trust-block", "event_type": "trustos_review", "outcome": "blocked", "action_taken": "generate_client_export", "failure_reasons": ["trust_blocker"]},
+    ]
+    report = build_learning_ledger_report(context={"events": events})
+
+    assert {item.portfolio_area for item in report.portfolio_impacts} == {"product-category"}
+    assert {item.model_route_id for item in report.model_routing_impacts} == {"frontier-reasoning"}
+    assert {item.provider_id for item in report.provider_impacts} == {"fixture-search"}
+    assert {item.blocker for item in report.trustos_impacts} == {"missing client isolation", "terms/privacy or provider activation"}
+    assert all(item.confidence == 0.7 for item in report.trustos_impacts)
+    assert {item.action_type for item in report.decision_influences} == {event["action_taken"] for event in events}
+    assert all(item.source_event_id in {event["learning_event_id"] for event in events} for item in report.decision_influences)
+    assert not any(item.action_type == "scale_ad_budget" for item in report.decision_influences)
+
+
+def test_model_route_with_conflicting_outcomes_requires_reconciliation():
+    report = build_learning_ledger_report(context={"events": [
+        {"learning_event_id": "route-win", "event_type": "model_routing_decision", "outcome": "win", "action_taken": "run_frontier_llm_synthesis", "success_reasons": ["budget_efficient"]},
+        {"learning_event_id": "route-loss", "event_type": "model_routing_decision", "outcome": "loss", "action_taken": "run_frontier_llm_synthesis", "failure_reasons": ["model_cost_too_high"]},
+    ]})
+    item = report.model_routing_impacts[0]
+
+    assert item.observed_outcome == "mixed"
+    assert item.recommended_model_tier_next_time == "review_conflicting_outcomes"
+    assert "route-loss" in item.cost_savings_note and "route-win" in item.cost_savings_note
+
+
+def test_loss_without_failure_reason_requests_evidence_instead_of_claiming_success():
+    report = build_learning_ledger_report(context={"events": [{
+        "learning_event_id": "loss-no-cause",
+        "event_type": "product_validation",
+        "outcome": "loss",
+        "action_taken": "validate_candidate",
+    }]})
+    recommendation = report.iteration_recommendations[0]
+
+    assert "success" not in recommendation.rationale
+    assert "failure reason" in recommendation.recommendation
+    assert recommendation.action_type == "run_companyos_review"
+    assert recommendation.source_event_id == "loss-no-cause"
+
+
+def test_inconclusive_event_with_recorded_metric_does_not_claim_metrics_missing():
+    report = build_learning_ledger_report(context={"events": [{
+        "learning_event_id": "inconclusive-with-metric",
+        "event_type": "ad_experiment",
+        "outcome": "inconclusive",
+        "action_taken": "launch_ad_experiment",
+        "metrics": [{"name": "conversion_rate", "value": 0.12, "target": 0.1, "sample_size": 100, "unit": "ratio"}],
+    }]})
+
+    recommendation = report.iteration_recommendations[0]
+    influence = report.decision_influences[0]
+    assert "missing outcome metrics" not in recommendation.recommendation
+    assert "without a failure reason or outcome metric" not in recommendation.rationale
+    assert "outcome metrics were not recorded" not in influence.missing_learning_blockers
+
+
+def test_metric_record_without_value_is_still_a_missing_metric_blocker():
+    report = build_learning_ledger_report(context={"events": [{
+        "learning_event_id": "inconclusive-null-metric",
+        "event_type": "ad_experiment",
+        "outcome": "inconclusive",
+        "action_taken": "launch_ad_experiment",
+        "metrics": [{"name": "conversion_rate", "value": None, "target": 0.1, "sample_size": 100, "unit": "ratio"}],
+    }]})
+
+    influence = report.decision_influences[0]
+    assert "outcome metrics were not recorded" in influence.missing_learning_blockers
+
+
+def test_provider_id_on_non_provider_event_does_not_create_provider_impact():
+    report = build_learning_ledger_report(context={"events": [{
+        "learning_event_id": "model-with-provider-label",
+        "event_type": "model_routing_decision",
+        "outcome": "win",
+        "action_taken": "run_cheap_llm_task",
+        "provider_id": "model-vendor-label",
+        "success_reasons": ["budget_efficient"],
+    }]})
+
+    assert report.provider_impacts == ()
+
+
+def test_duplicate_trustos_reason_in_one_event_counts_one_occurrence():
+    report = build_learning_ledger_report(context={"events": [{
+        "learning_event_id": "trust-duplicate-reason",
+        "event_type": "trustos_review",
+        "outcome": "blocked",
+        "action_taken": "generate_client_export",
+        "failure_reasons": ["trust_blocker", "trust_blocker"],
+    }]})
+
+    assert len(report.trustos_impacts) == 1
+    assert report.trustos_impacts[0].blocker == "missing client isolation"
+    assert report.trustos_impacts[0].occurrences == 1
+
+
+def test_sample_size_target_is_not_inferred_from_observed_sample_size():
+    report = build_learning_ledger_report(context={"events": [{
+        "learning_event_id": "sample-size-observed",
+        "event_type": "ad_experiment",
+        "outcome": "inconclusive",
+        "action_taken": "launch_ad_experiment",
+        "metrics": [{"name": "conversion_rate", "value": 0.12, "target": 0.1, "sample_size": 25, "unit": "ratio"}],
+    }, {
+        "learning_event_id": "sample-size-unknown",
+        "event_type": "ad_experiment",
+        "outcome": "inconclusive",
+        "action_taken": "launch_ad_experiment",
+        "metrics": [{"name": "conversion_rate", "value": 0.12, "target": 0.1, "unit": "ratio"}],
+    }]})
+    experiments = {experiment.event_refs[0]: experiment for experiment in report.experiments}
+
+    assert experiments["sample-size-observed"].sample_size_target is None
+    assert experiments["sample-size-observed"].observed_sample_size == 25
+    assert experiments["sample-size-unknown"].sample_size_target is None
+    assert experiments["sample-size-unknown"].observed_sample_size is None
