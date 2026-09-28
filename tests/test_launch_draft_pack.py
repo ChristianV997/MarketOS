@@ -233,3 +233,31 @@ def test_mismatched_evidence_is_not_copied_and_cannot_clear_draft_gates(reports)
     assert pack["customer_messages_sent"] is False
     assert pack["shopify_draft_payload"]["status"] == "draft"
     assert pack["medusa_draft_payload"]["status"] == "draft"
+
+
+def test_no_real_candidate_identity_cannot_bind_to_a_placeholder_sentinel(reports):
+    """A draft with no real candidate id (no top_candidate_id, no candidate
+    row id) must never match evidence keyed by the internal "candidate"
+    display placeholder -- that would let an unrelated report's row bind by
+    coincidence rather than by real product identity."""
+    synthesis, _market, _supplier, _consumer = reports
+    synthesis = {**synthesis, "top_candidate_id": None, "candidates": [{}]}
+    sentinel_attention = {"candidates": [{"candidate_id": "candidate", "score": {"landing_page_copy_hints": ["STOLEN CUSTOMER LANGUAGE FROM OTHER PRODUCT"]}}]}
+    pack = build_launch_draft_pack(synthesis=synthesis, consumer_attention=sentinel_attention).to_dict()
+    raw = json.dumps(pack)
+    assert "STOLEN CUSTOMER LANGUAGE FROM OTHER PRODUCT" not in raw
+    assert any("was not supplied" in note for note in pack["operator_notes"] if "Consumer attention" in note)
+    assert pack["approval_checklist"]["launch_authorized"] is False
+
+
+def test_matching_evidence_binds_regardless_of_case_or_surrounding_whitespace(reports):
+    """The synthesis/candidate id and the evidence report's own id come from
+    independent pipelines and are not guaranteed to agree on casing or
+    padding for the same real candidate -- matching must not silently drop
+    genuine evidence over that alone."""
+    synthesis, _market, _supplier, _consumer = reports
+    synthesis = {**synthesis, "top_candidate_id": " Widget-1 ", "candidates": [{"candidate_id": " Widget-1 "}]}
+    same_candidate_attention = {"candidates": [{"candidate_id": "widget-1", "score": {"landing_page_copy_hints": ["real matching language"]}}]}
+    pack = build_launch_draft_pack(synthesis=synthesis, consumer_attention=same_candidate_attention).to_dict()
+    assert "real matching language" in pack["product_listing"]["short_description"]
+    assert any("matches this draft candidate" in note for note in pack["operator_notes"] if "Consumer attention" in note)

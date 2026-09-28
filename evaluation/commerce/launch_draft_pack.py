@@ -471,13 +471,25 @@ def _risks(synthesis: Mapping[str, Any], candidate: Mapping[str, Any], objection
 
 
 def _bound_candidate(report: Mapping[str, Any] | None, candidate_id: str) -> tuple[Mapping[str, Any] | None, str]:
-    """Bind a source report to the draft candidate without reading foreign rows."""
+    """Bind a source report to the draft candidate without reading foreign rows.
+
+    ``candidate_id`` must be a real identifier from the synthesis/candidate,
+    never the display-only placeholder used when no candidate id exists --
+    matching against a placeholder would let an unrelated report's row bind
+    by coincidence rather than by real product identity. Comparison is
+    case/whitespace-insensitive since the synthesis and evidence pipelines
+    are independent sources that are not guaranteed to agree on casing for
+    the same id.
+    """
+    normalized_id = candidate_id.strip().casefold()
+    if not normalized_id:
+        return None, "missing"
     if not isinstance(report, Mapping) or not report:
         return None, "missing"
     candidates = [item for item in report.get("candidates") or [] if isinstance(item, Mapping)]
     if not candidates:
         return None, "missing"
-    matched = next((item for item in candidates if str(item.get("candidate_id") or "") == candidate_id), None)
+    matched = next((item for item in candidates if str(item.get("candidate_id") or "").strip().casefold() == normalized_id), None)
     if matched is None:
         return None, "mismatched"
     return matched, "matched"
@@ -510,7 +522,11 @@ def build_launch_draft_pack(*, synthesis: Mapping[str, Any], product_validation:
     candidate = _candidate(synthesis)
     title = _text(synthesis.get("top_candidate_title") or candidate.get("title") or candidate.get("query") or "Product candidate", 120)
     candidate_id = _text(synthesis.get("top_candidate_id") or candidate.get("candidate_id") or "candidate", 100)
-    evidence_candidate_id = str(synthesis.get("top_candidate_id") or candidate.get("candidate_id") or candidate_id).strip()
+    # Evidence binding must use a real identifier only -- never the "candidate"
+    # display placeholder above, which would let an unrelated report's row
+    # (e.g. one that also happens to say candidate_id: "candidate") bind by
+    # coincidence when this draft has no real candidate identity at all.
+    evidence_candidate_id = str(synthesis.get("top_candidate_id") or candidate.get("candidate_id") or "").strip()
     hooks, pains, objections, angles = _hooks(synthesis, candidate), _pains(synthesis, candidate), _objections(synthesis, candidate), _angles(synthesis, candidate)
     econ, thresholds = _economics(synthesis, candidate), _thresholds(synthesis)
     recommendation = _text(synthesis.get("overall_recommendation") or "hold_for_manual_review", 80)
