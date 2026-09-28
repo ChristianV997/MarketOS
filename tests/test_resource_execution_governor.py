@@ -1127,9 +1127,9 @@ def test_sequential_plan_chunks_carry_budget_and_quota_reservations():
     assert decisions["chunk-frontier-b"].budget_checks[0].available_amount == 40.0
     assert decisions["chunk-launch-b"].quota_checks[0].status == "available"
     assert second.reservation_state.budget_reservations == (
-        ("chunk-frontier-a", "frontier_llm_budget", 60),
-        ("chunk-launch-a", "report_generation_quota", 0.0),
-        ("chunk-launch-b", "report_generation_quota", 0.0),
+        ("chunk-frontier-a", "frontier_llm_budget", 60, "run_frontier_llm_synthesis"),
+        ("chunk-launch-a", "report_generation_quota", 0.0, "generate_launch_draft"),
+        ("chunk-launch-b", "report_generation_quota", 0.0, "generate_launch_draft"),
     )
     assert len(second.reservation_state.quota_reservations) == 3
     assert len({item[0] for item in second.reservation_state.quota_reservations}) == 3
@@ -1172,3 +1172,151 @@ def test_incomplete_reservation_state_fails_closed():
             requests=(base("screen_product_opportunities", request_id="malformed-state"),),
             reservation_state={"budget_reservations": []},
         )
+
+
+def test_reservation_replay_normalizes_request_id_across_chunks():
+    request_values = {
+        "action_type": "run_cheap_llm_task",
+        "requested_amount": 5,
+        "resource_type": "cheap_llm_budget",
+        "model_tier": "cheap_llm",
+    }
+    first = build_resource_execution_governor_report(
+        requests=(base(request_id="replay-normalization", **request_values),)
+    )
+    replay = build_resource_execution_governor_report(
+        requests=(base(request_id=" replay-normalization ", **request_values),),
+        reservation_state=first.reservation_state,
+    )
+
+    assert replay.reservation_state == first.reservation_state
+    assert replay.decisions[0].request_id == "replay-normalization"
+
+
+def test_whitespace_request_id_cannot_bypass_reservation_conflict_check():
+    first = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_cheap_llm_task",
+                request_id="reservation-conflict",
+                requested_amount=5,
+                resource_type="cheap_llm_budget",
+                model_tier="cheap_llm",
+            ),
+        )
+    )
+    conflicting = base(
+        "run_cheap_llm_task",
+        request_id=" reservation-conflict ",
+        requested_amount=6,
+        resource_type="cheap_llm_budget",
+        model_tier="cheap_llm",
+    )
+
+    with pytest.raises(ValueError, match="conflicts with an existing budget reservation"):
+        build_resource_execution_governor_report(
+            requests=(conflicting,),
+            reservation_state=first.reservation_state,
+        )
+
+
+def test_missing_quota_for_budget_reservation_fails_closed():
+    first = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "generate_site_draft",
+                request_id="website-reservation",
+                requested_amount=1,
+                resource_type="website_build_capacity",
+            ),
+        )
+    )
+    state = first.to_dict()["reservation_state"]
+    assert state["budget_reservations"]
+    assert state["quota_reservations"]
+    state["quota_reservations"] = []
+
+    with pytest.raises(ValueError, match="reservation state is incomplete"):
+        build_resource_execution_governor_report(
+            requests=(
+                base(
+                    "generate_site_draft",
+                    request_id="website-followup",
+                    requested_amount=1,
+                    resource_type="website_build_capacity",
+                ),
+            ),
+            reservation_state=state,
+        )
+
+
+def test_noncanonical_serialized_reservation_id_fails_closed():
+    first = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_cheap_llm_task",
+                request_id="canonical-reservation",
+                requested_amount=5,
+                resource_type="cheap_llm_budget",
+                model_tier="cheap_llm",
+            ),
+        )
+    )
+    state = first.to_dict()["reservation_state"]
+    state["budget_reservations"][0][0] = " canonical-reservation "
+
+    with pytest.raises(ValueError, match="invalid budget reservation state"):
+        build_resource_execution_governor_report(
+            requests=(
+                base(
+                    "run_cheap_llm_task",
+                    request_id="canonical-reservation",
+                    requested_amount=5,
+                    resource_type="cheap_llm_budget",
+                    model_tier="cheap_llm",
+                ),
+            ),
+            reservation_state=state,
+        )
+
+
+def test_budget_reservation_rejects_a_mismatched_historical_quota_action():
+    first = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_cheap_llm_task",
+                request_id="historic-cheap",
+                requested_amount=1,
+                resource_type="cheap_llm_budget",
+                model_tier="cheap_llm",
+            ),
+        )
+    )
+    state = first.to_dict()["reservation_state"]
+    state["quota_reservations"][0][1] = "screen_product_opportunities"
+    later_requests = tuple(
+        base(
+            "run_cheap_llm_task",
+            request_id=f"later-cheap-{index}",
+            requested_amount=0,
+            resource_type="cheap_llm_budget",
+            model_tier="cheap_llm",
+        )
+        for index in range(25)
+    )
+
+    with pytest.raises(ValueError, match="reservation state has conflicting quota action"):
+        build_resource_execution_governor_report(
+            requests=later_requests,
+            reservation_state=state,
+        )
+
+
+def test_legacy_budget_reservation_without_action_fails_closed():
+    state = {
+        "budget_reservations": [["legacy-state", "cheap_llm_budget", 1]],
+        "quota_reservations": [["legacy-state", "run_cheap_llm_task"]],
+    }
+
+    with pytest.raises(ValueError, match="invalid budget reservation state"):
+        build_resource_execution_governor_report(requests=(), reservation_state=state)

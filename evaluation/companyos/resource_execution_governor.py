@@ -106,27 +106,42 @@ class ResourceQuota:
 class ExecutionReservationState:
     """Serializable reservations carried between sequential plan evaluations."""
 
-    budget_reservations: tuple[tuple[str, str, float], ...] = ()
+    budget_reservations: tuple[tuple[str, str, float, str], ...] = ()
     quota_reservations: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         budget_ids: set[str] = set()
-        for request_id, resource_type, amount in self.budget_reservations:
-            if not isinstance(request_id, str) or not request_id.strip() or resource_type not in RESOURCE_TYPES:
+        budget_actions: dict[str, str] = {}
+        for request_id, resource_type, amount, action_type in self.budget_reservations:
+            if (
+                not isinstance(request_id, str)
+                or not request_id.strip()
+                or request_id != request_id.strip()
+                or resource_type not in RESOURCE_TYPES
+                or action_type not in ACTION_TYPES
+            ):
                 raise ValueError("invalid budget reservation state")
             if not isinstance(amount, (int, float)) or isinstance(amount, bool) or not math.isfinite(amount) or amount < 0:
                 raise ValueError("invalid budget reservation state")
             if request_id in budget_ids:
                 raise ValueError("duplicate budget reservation request_id")
             budget_ids.add(request_id)
+            budget_actions[request_id] = action_type
 
         quota_ids: set[str] = set()
+        quota_actions: dict[str, str] = {}
         for request_id, action_type in self.quota_reservations:
-            if not isinstance(request_id, str) or not request_id.strip() or action_type not in ACTION_TYPES:
+            if not isinstance(request_id, str) or not request_id.strip() or request_id != request_id.strip() or action_type not in ACTION_TYPES:
                 raise ValueError("invalid quota reservation state")
             if request_id in quota_ids:
                 raise ValueError("duplicate quota reservation request_id")
             quota_ids.add(request_id)
+            quota_actions[request_id] = action_type
+
+        if not budget_ids.issubset(quota_ids):
+            raise ValueError("reservation state is incomplete")
+        if any(budget_actions[request_id] != quota_actions[request_id] for request_id in budget_ids):
+            raise ValueError("reservation state has conflicting quota action")
 
     @classmethod
     def from_mapping(cls, value: "ExecutionReservationState | Mapping[str, Any] | None") -> "ExecutionReservationState":
@@ -140,15 +155,15 @@ class ExecutionReservationState:
         if not required_keys.issubset(value):
             raise ValueError("reservation state is incomplete")
 
-        budget_rows: list[tuple[str, str, float]] = []
+        budget_rows: list[tuple[str, str, float, str]] = []
         budget_values = value["budget_reservations"]
         if not isinstance(budget_values, (tuple, list)):
             raise ValueError("invalid budget reservation state")
         for row in budget_values:
             if isinstance(row, Mapping):
-                budget_rows.append((row.get("request_id", ""), row.get("resource_type", ""), row.get("amount", 0)))
-            elif isinstance(row, (tuple, list)) and len(row) == 3:
-                budget_rows.append((row[0], row[1], row[2]))
+                budget_rows.append((row.get("request_id", ""), row.get("resource_type", ""), row.get("amount", 0), row.get("action_type", "")))
+            elif isinstance(row, (tuple, list)) and len(row) == 4:
+                budget_rows.append((row[0], row[1], row[2], row[3]))
             else:
                 raise ValueError("invalid budget reservation state")
 
@@ -635,18 +650,24 @@ def build_resource_execution_governor_report(*, generated_at: str = "offline-det
         reservation_state = context.get("reservation_state")
     state = ExecutionReservationState.from_mapping(reservation_state)
     requests = tuple(_default_requests() if requests is None else requests)
+    requests = tuple(
+        replace(item, request_id=item.request_id.strip())
+        if isinstance(item.request_id, str)
+        else item
+        for item in requests
+    )
     normalized_ids = [item.request_id.strip() for item in requests if isinstance(item.request_id, str)]
     if any(not isinstance(item.request_id, str) or not item.request_id.strip() for item in requests) or len(normalized_ids) != len(set(normalized_ids)):
         raise ValueError("planned requests require non-empty unique request_id values; duplicate request_id is ambiguous")
     ordered_requests = tuple(sorted(requests, key=lambda item: (item.request_id, item.action_type, item.resource_type)))
-    planned_amounts = {resource: sum(amount for _, item_resource, amount in state.budget_reservations if item_resource == resource) for resource in RESOURCE_TYPES}
+    planned_amounts = {resource: sum(amount for _, item_resource, amount, _ in state.budget_reservations if item_resource == resource) for resource in RESOURCE_TYPES}
     action_counts = {action: sum(1 for _, item_action in state.quota_reservations if item_action == action) for action in ACTION_TYPES}
     budget_reservations = list(state.budget_reservations)
     quota_reservations = list(state.quota_reservations)
     decisions_list: list[ExecutionDecisionResult] = []
     for item in ordered_requests:
         existing_budget = next((entry for entry in budget_reservations if entry[0] == item.request_id), None)
-        if existing_budget is not None and (existing_budget[1] != item.resource_type or not math.isclose(existing_budget[2], item.requested_amount, rel_tol=0.0, abs_tol=1e-12)):
+        if existing_budget is not None and (existing_budget[1] != item.resource_type or not math.isclose(existing_budget[2], item.requested_amount, rel_tol=0.0, abs_tol=1e-12) or existing_budget[3] != item.action_type):
             raise ValueError("request_id conflicts with an existing budget reservation")
         existing_quota = next((entry for entry in quota_reservations if entry[0] == item.request_id), None)
         if existing_quota is not None and existing_quota[1] != item.action_type:
@@ -657,7 +678,7 @@ def build_resource_execution_governor_report(*, generated_at: str = "offline-det
         decisions_list.append(result)
         if not result.blockers and result.budget_checks[0].status in {"available", "soft_cap"}:
             if existing_budget is None:
-                budget_reservations.append((item.request_id, item.resource_type, item.requested_amount))
+                budget_reservations.append((item.request_id, item.resource_type, item.requested_amount, item.action_type))
                 planned_amounts[item.resource_type] = planned_amounts.get(item.resource_type, 0.0) + item.requested_amount
         if not result.blockers and result.quota_checks[0].status == "available": action_counts[item.action_type] = action_counts.get(item.action_type, 0) + 1
         if not result.blockers and result.quota_checks[0].status == "available" and existing_quota is None:
