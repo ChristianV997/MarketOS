@@ -8,6 +8,7 @@ the sanitized export set.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -18,8 +19,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from evaluation.commerce import site_draft_builder  # noqa: E402
 from evaluation.commerce.site_draft_builder import _candidate, build_site_draft_pack  # noqa: E402
+from scripts.generate_site_draft_pack import main as generate_site_draft_pack_main  # noqa: E402
 from scripts.run_site_draft_e2e import FIXTURE_FILES, load_fixture, run_site_draft_e2e  # noqa: E402
 
 SECRET_TOKENS = (
@@ -229,14 +230,14 @@ class TestSecretHygiene:
 
 class TestExportSet:
     def test_export_set_writes_expected_files(self, tmp_path):
-        pack = run_site_draft_e2e(output_dir=tmp_path)
+        run_site_draft_e2e(output_dir=tmp_path)
         names = {p.name for p in tmp_path.iterdir()}
         assert EXPECTED_EXPORT_FILES.issubset(names), (
             f"missing files: {EXPECTED_EXPORT_FILES - names}"
         )
 
     def test_export_files_are_valid_json_where_expected(self, tmp_path):
-        pack = run_site_draft_e2e(output_dir=tmp_path)
+        run_site_draft_e2e(output_dir=tmp_path)
         json_files = [
             "site_draft_pack.json",
             "route_manifest.json",
@@ -253,20 +254,20 @@ class TestExportSet:
             assert isinstance(data, dict)
 
     def test_export_files_contain_no_secrets(self, tmp_path):
-        pack = run_site_draft_e2e(output_dir=tmp_path)
+        run_site_draft_e2e(output_dir=tmp_path)
         raw = (tmp_path / "site_draft_pack.json").read_text(encoding="utf8").lower()
         for token in SECRET_TOKENS:
             assert token not in raw, f"leaked {token} in export"
 
     def test_export_files_have_status_draft(self, tmp_path):
-        pack = run_site_draft_e2e(output_dir=tmp_path)
+        run_site_draft_e2e(output_dir=tmp_path)
         static = json.loads(
             (tmp_path / "static_site_payload.json").read_text(encoding="utf8")
         )
         assert static["status"] == "draft"
 
     def test_conversion_test_plan_md_exists_and_has_content(self, tmp_path):
-        pack = run_site_draft_e2e(output_dir=tmp_path)
+        run_site_draft_e2e(output_dir=tmp_path)
         path = tmp_path / "conversion_test_plan.md"
         assert path.is_file()
         text = path.read_text(encoding="utf8")
@@ -274,12 +275,74 @@ class TestExportSet:
         assert "site-test-" in text
 
     def test_approval_checklist_md_exists_and_has_blockers(self, tmp_path):
-        pack = run_site_draft_e2e(output_dir=tmp_path)
+        run_site_draft_e2e(output_dir=tmp_path)
         path = tmp_path / "approval_checklist.md"
         assert path.is_file()
         text = path.read_text(encoding="utf8")
         assert "Approval Checklist" in text
         assert "supplier" in text.lower()
+
+    def test_repeated_runs_produce_identical_manifest_and_file_hashes(self, tmp_path):
+        dir_a = tmp_path / "run_a"
+        dir_b = tmp_path / "run_b"
+        run_site_draft_e2e(output_dir=dir_a)
+        run_site_draft_e2e(output_dir=dir_b)
+        hashes_a = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in dir_a.iterdir()}
+        hashes_b = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in dir_b.iterdir()}
+        assert hashes_a == hashes_b
+        assert len(hashes_a) >= len(EXPECTED_EXPORT_FILES)
+
+    def test_manifest_routes_are_relative_and_bounded(self, pack):
+        routes = pack["route_manifest"]["routes"]
+        assert routes, "route manifest must contain routes"
+        for entry in routes:
+            route_path = entry["route"]
+            assert route_path.startswith("/"), f"route {route_path} must start with /"
+            assert ".." not in route_path, f"route {route_path} contains traversal"
+            assert "\\" not in route_path, f"route {route_path} contains backslash"
+            assert "://" not in route_path, f"route {route_path} contains URL scheme"
+
+    def test_export_files_contain_no_machine_paths_or_temp_directories(self, tmp_path):
+        run_site_draft_e2e(output_dir=tmp_path)
+        tmp_str = str(tmp_path)
+        for p in tmp_path.iterdir():
+            text = p.read_text(encoding="utf8")
+            assert tmp_str not in text, f"machine temp path found in {p.name}"
+            assert r"C:\Users" not in text, f"machine user path found in {p.name}"
+            assert "/Users/" not in text, f"macOS user path found in {p.name}"
+            assert "/home/" not in text, f"linux user path found in {p.name}"
+
+    def test_all_export_platform_payloads_maintain_draft_and_non_publishing_flags(self, tmp_path):
+        pack = run_site_draft_e2e(output_dir=tmp_path)
+        platform_files = [
+            "static_site_payload.json",
+            "shopify_theme_draft_payload.json",
+            "medusa_storefront_draft_payload.json",
+            "woocommerce_draft_payload.json",
+            "webflow_cms_draft_payload.json",
+            "wix_headless_draft_payload.json",
+            "squarespace_draft_payload.json",
+            "carrd_microsite_payload.json",
+        ]
+        for fname in platform_files:
+            path = tmp_path / fname
+            payload = json.loads(path.read_text(encoding="utf8"))
+            assert payload.get("status") == "draft", f"{fname} status is not draft"
+        assert pack["read_only"] is True
+        assert pack["published"] is False
+        assert pack["approval_checklist"]["publishing_authorized"] is False
+
+    def test_export_fails_closed_without_writing_when_input_fails(self, tmp_path):
+        bad_context = tmp_path / "bad_context.json"
+        bad_context.write_text(json.dumps({"access_token": "secret_token"}), encoding="utf8")
+        out_dir = tmp_path / "failing_export"
+        with pytest.raises(SystemExit):
+            generate_site_draft_pack_main([
+                "--client-context", str(bad_context),
+                "--output", str(out_dir),
+                "--json",
+            ])
+        assert not out_dir.exists() or list(out_dir.iterdir()) == []
 
 
 class TestBuildSiteDraftPackDoesNotMutateCallerInputs:
