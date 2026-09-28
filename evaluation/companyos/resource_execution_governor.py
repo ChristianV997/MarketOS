@@ -1,6 +1,7 @@
 """Deterministic, offline resource and execution governance for CompanyOS."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from typing import Any, Mapping, Sequence
 
@@ -72,7 +73,8 @@ class ResourceBudget:
     soft_cap: float
     requires_approval_above: float
     def __post_init__(self) -> None:
-        if self.resource_type not in RESOURCE_TYPES or min(self.budget_limit, self.used_amount, self.reserved_amount, self.hard_cap, self.soft_cap, self.requires_approval_above) < 0:
+        amounts = (self.budget_limit, self.used_amount, self.reserved_amount, self.hard_cap, self.soft_cap, self.requires_approval_above)
+        if self.resource_type not in RESOURCE_TYPES or any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0 for value in amounts) or self.soft_cap > self.hard_cap or self.requires_approval_above > self.hard_cap:
             raise ValueError("invalid resource budget")
     @property
     def available_amount(self) -> float: return round(max(0.0, self.budget_limit - self.used_amount - self.reserved_amount), 4)
@@ -92,7 +94,8 @@ class ResourceQuota:
     unit: str
     hard_cap: bool
     def __post_init__(self) -> None:
-        if self.resource_type not in RESOURCE_TYPES or min(self.limit, self.used, self.reserved) < 0: raise ValueError("invalid resource quota")
+        amounts = (self.limit, self.used, self.reserved)
+        if self.resource_type not in RESOURCE_TYPES or any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0 for value in amounts): raise ValueError("invalid resource quota")
     @property
     def available(self) -> float: return max(0.0, self.limit - self.used - self.reserved)
     def to_dict(self) -> dict[str, Any]:
@@ -331,7 +334,7 @@ class ExecutionDecisionRequest:
     def __post_init__(self) -> None:
         if self.action_type not in ACTION_TYPES or self.resource_type not in RESOURCE_TYPES or self.model_tier not in MODEL_POLICY_TIERS:
             raise ValueError("invalid execution decision request")
-        if self.requested_amount < 0: raise ValueError("requested amount cannot be negative")
+        if not isinstance(self.requested_amount, (int, float)) or isinstance(self.requested_amount, bool) or not math.isfinite(self.requested_amount) or self.requested_amount < 0: raise ValueError("requested amount must be finite and nonnegative")
     def to_dict(self) -> dict[str, Any]: return _clean(self)
 
 
@@ -455,19 +458,28 @@ def _learning(action: str, required: bool | None = None) -> LearningCaptureRequi
     return LearningCaptureRequirement(required if required is not None else action in {"launch_ad_experiment", "generate_creative_batch", "deep_validate_product", "run_provider_data_pull", "run_frontier_llm_synthesis"}, learning_type, action, "success_metric_or_review_result", True, True, True, True, True)
 
 
-def _budget_check(request: ExecutionDecisionRequest, budgets: Sequence[ResourceBudget]) -> BudgetCheckResult:
-    budget = next((item for item in budgets if item.resource_type == request.resource_type), None)
+def _budget_check(request: ExecutionDecisionRequest, budgets: Sequence[ResourceBudget], *, prior_plan_amount: float = 0.0) -> BudgetCheckResult:
+    matches = tuple(item for item in budgets if item.resource_type == request.resource_type)
+    if len(matches) > 1: return BudgetCheckResult(request.resource_type, request.requested_amount, 0.0, "conflict", "conflicting budget limits are registered for this resource", True)
+    budget = matches[0] if matches else None
     if budget is None: return BudgetCheckResult(request.resource_type, request.requested_amount, 0.0, "missing", "no budget is registered for this resource", True)
-    if request.requested_amount > budget.hard_cap or request.requested_amount > budget.available_amount: return BudgetCheckResult(request.resource_type, request.requested_amount, budget.available_amount, "blocked", "hard cap or available budget exceeded", True)
-    if request.requested_amount > budget.soft_cap: return BudgetCheckResult(request.resource_type, request.requested_amount, budget.available_amount, "soft_cap", "soft cap exceeded; finance review required", True)
-    return BudgetCheckResult(request.resource_type, request.requested_amount, budget.available_amount, "available", "within budget", request.requested_amount > budget.requires_approval_above)
+    hard_cap_remaining = max(0.0, budget.hard_cap - budget.used_amount - budget.reserved_amount - prior_plan_amount)
+    available = round(min(budget.available_amount, hard_cap_remaining), 4)
+    projected_amount = budget.used_amount + budget.reserved_amount + prior_plan_amount + request.requested_amount
+    if request.requested_amount > available:
+        reason = "hard cap or aggregate planned budget exceeded" if prior_plan_amount else "hard cap or available budget exceeded"
+        return BudgetCheckResult(request.resource_type, request.requested_amount, available, "blocked", reason, True)
+    if projected_amount > budget.soft_cap: return BudgetCheckResult(request.resource_type, request.requested_amount, available, "soft_cap", "soft cap exceeded; finance review required", True)
+    return BudgetCheckResult(request.resource_type, request.requested_amount, available, "available", "within aggregate plan budget" if prior_plan_amount else "within budget", projected_amount > budget.requires_approval_above)
 
 
-def _quota_check(request: ExecutionDecisionRequest) -> QuotaCheckResult:
-    limits = {"screen_product_opportunities": (50, 0), "deep_validate_product": (5, 0), "promote_product_candidate": (2, 0), "generate_launch_draft": (2, 0), "generate_site_draft": (1, 0), "create_new_website": (1, 0), "create_new_brand": (1, 0), "generate_creative_batch": (10, 0), "client_export_quota": (5, 0)}
+def _quota_check(request: ExecutionDecisionRequest, *, prior_action_count: int = 0) -> QuotaCheckResult:
+    limits = {"screen_product_opportunities": (50, 0), "deep_validate_product": (5, 0), "promote_product_candidate": (2, 0), "generate_launch_draft": (2, 0), "generate_site_draft": (1, 0), "create_new_website": (1, 0), "create_new_brand": (1, 0), "generate_creative_batch": (10, 0), "generate_client_export": (5, 0)}
     limit, used = limits.get(request.action_type, (25, 0)); amount = 1.0
-    if used + amount > limit: return QuotaCheckResult(request.resource_type, amount, 0.0, "blocked", "action quota exceeded")
-    return QuotaCheckResult(request.resource_type, amount, float(limit - used - amount), "available", "within action quota")
+    if used + prior_action_count + amount > limit:
+        reason = "aggregate planned action quota exceeded" if prior_action_count else "action quota exceeded"
+        return QuotaCheckResult(request.resource_type, amount, 0.0, "blocked", reason)
+    return QuotaCheckResult(request.resource_type, amount, float(limit - used - prior_action_count - amount), "available", "within aggregate action quota" if prior_action_count else "within action quota")
 
 
 def _scores(request: ExecutionDecisionRequest) -> tuple[ExecutionPriorityScore, ExecutionRiskScore]:
@@ -476,11 +488,11 @@ def _scores(request: ExecutionDecisionRequest) -> tuple[ExecutionPriorityScore, 
     return ExecutionPriorityScore(request.portfolio_fit_score, request.evidence_score, request.opportunity_score, request.attention_score, priority), ExecutionRiskScore(float(request.requested_amount > 25), float(request.action_type in {"launch_ad_experiment", "scale_ad_budget", "increase_inventory_exposure"}), float(request.spawned_agents > 2 or request.retry_count > 2), risk, round((float(request.requested_amount > 25) + float(request.action_type in {"launch_ad_experiment", "scale_ad_budget", "increase_inventory_exposure"}) + float(request.spawned_agents > 2 or request.retry_count > 2) + risk) / 4, 3))
 
 
-def evaluate_execution_request(request: ExecutionDecisionRequest, *, budgets: Sequence[ResourceBudget] = (), portfolio: PortfolioPolicy | None = None, runaway: RunawayGuardPolicy | None = None, provider_policy: ProviderSpendPolicy | None = None) -> ExecutionDecisionResult:
-    budgets = tuple(budgets) or _default_budgets(); portfolio = portfolio or _portfolio(); runaway = runaway or _runaway(); provider_policy = provider_policy or _provider_policy()
-    budget = _budget_check(request, budgets); quota = _quota_check(request); blockers: list[str] = []; warnings: list[str] = []; approvals: list[ExecutionApprovalRequirement] = []
+def evaluate_execution_request(request: ExecutionDecisionRequest, *, budgets: Sequence[ResourceBudget] | None = None, portfolio: PortfolioPolicy | None = None, runaway: RunawayGuardPolicy | None = None, provider_policy: ProviderSpendPolicy | None = None, prior_plan_amount: float = 0.0, prior_action_count: int = 0) -> ExecutionDecisionResult:
+    budgets = _default_budgets() if budgets is None else tuple(budgets); portfolio = portfolio or _portfolio(); runaway = runaway or _runaway(); provider_policy = provider_policy or _provider_policy()
+    budget = _budget_check(request, budgets, prior_plan_amount=prior_plan_amount); quota = _quota_check(request, prior_action_count=prior_action_count); blockers: list[str] = []; warnings: list[str] = []; approvals: list[ExecutionApprovalRequirement] = []
     deps = tuple(item for item in _dependencies() if item.action_type == request.action_type)
-    if budget.status == "blocked": blockers.append(budget.reason)
+    if budget.status in {"blocked", "conflict"}: blockers.append(budget.reason)
     elif budget.status == "soft_cap": approvals.append(ExecutionApprovalRequirement(True, "budget_cap", "finance_manager", budget.reason, request.action_type))
     if quota.status == "blocked": blockers.append(quota.reason)
     if request.trustos_decision in {"hard_block", "blocked"}: blockers.append("TrustOS gate is blocked")
@@ -514,6 +526,8 @@ def evaluate_execution_request(request: ExecutionDecisionRequest, *, budgets: Se
     if request.model_tier == "blocked": blockers.append("model tier is blocked")
     if request.action_type in {"send_sales_outreach", "launch_ad_experiment", "scale_ad_budget", "create_new_website", "create_new_brand", "increase_inventory_exposure"} and request.approval_state != "approved": approvals.append(ExecutionApprovalRequirement(True, "approval_ledger", "human_operator", "external-world or material-capital action requires approval", request.action_type))
     if request.action_type == "generate_creative_batch" and request.previous_learning_required and not request.learning_captured: blockers.append("previous creative learning is missing")
+    if budget.status == "missing" and request.requested_amount > 0 and not approvals:
+        blockers.append(budget.reason)
     priority, risk = _scores(request)
     if blockers: outcome = "hard_block" if any("runaway" in item or "terms/privacy" in item or "TrustOS" in item or "workspace" in item or "provider output" in item for item in blockers) else "soft_block"
     elif budget.status == "soft_cap": outcome = "requires_finance_review"
@@ -529,9 +543,21 @@ def _default_requests() -> tuple[ExecutionDecisionRequest, ...]:
 
 
 def build_resource_execution_governor_report(*, generated_at: str = "offline-deterministic", requests: Sequence[ExecutionDecisionRequest] | None = None, context: Mapping[str, Any] | None = None) -> ResourceExecutionGovernorReport:
+    """Evaluate a complete plan in request-id order with aggregate caps reserved."""
     context = context or {}; budgets = _default_budgets(); portfolio = _portfolio(); runaway = _runaway(); provider_policy = _provider_policy()
-    requests = tuple(requests or _default_requests())
-    decisions = tuple(evaluate_execution_request(item, budgets=budgets, portfolio=portfolio, runaway=runaway, provider_policy=provider_policy) for item in requests)
+    requests = tuple(_default_requests() if requests is None else requests)
+    request_ids = [item.request_id for item in requests]
+    if any(not isinstance(request_id, str) or not request_id.strip() for request_id in request_ids) or len(request_ids) != len(set(request_ids)):
+        raise ValueError("planned requests require non-empty unique request_id values; duplicate request_id is ambiguous")
+    ordered_requests = tuple(sorted(requests, key=lambda item: (item.request_id, item.action_type, item.resource_type)))
+    planned_amounts: dict[str, float] = {}; action_counts: dict[str, int] = {}; decisions_list: list[ExecutionDecisionResult] = []
+    for item in ordered_requests:
+        result = evaluate_execution_request(item, budgets=budgets, portfolio=portfolio, runaway=runaway, provider_policy=provider_policy, prior_plan_amount=planned_amounts.get(item.resource_type, 0.0), prior_action_count=action_counts.get(item.action_type, 0))
+        decisions_list.append(result)
+        if not result.blockers and result.budget_checks[0].status in {"available", "soft_cap"}:
+            planned_amounts[item.resource_type] = planned_amounts.get(item.resource_type, 0.0) + item.requested_amount
+        if not result.blockers and result.quota_checks[0].status == "available": action_counts[item.action_type] = action_counts.get(item.action_type, 0) + 1
+    decisions = tuple(decisions_list)
     requirements = tuple(_learning(item) for item in ACTION_TYPES)
     return ResourceExecutionGovernorReport("resource-execution-governor-v1", generated_at, _action_catalog(), _resource_catalog(), decisions, budgets, tuple(ResourceQuota(f"quota-{item}", item, "management", "cycle", 50 if item == "report_generation_quota" else 10, 0, 0, "units", True) for item in ("report_generation_quota", "client_export_quota", "workflow_runtime")), _model_policy(), provider_policy, (DepartmentCapacityPolicy("capacity-finance", "finance", "frontier_llm_budget", 100, 25, 75), DepartmentCapacityPolicy("capacity-management", "management", "workflow_runtime", 100, 20, 80)), portfolio, _experiment_policy(), runaway, requirements, _dependencies(), ExecutionGovernorSafetySummary(), "Review hard blockers and approve only bounded, evidenced actions; capture learning before the next experiment.")
 
