@@ -1,3 +1,14 @@
+# MarketOS Mergify policy.
+# Consolidated from overlapping dashboard PRs #351 (queue scopes),
+# #352 (merge protections / auto-merge), #353 and #356 (workflow rules).
+# Safe defaults only:
+# - Do not auto-merge or enqueue. CI jobs often never produce a real
+#   success (zero-runner / runner_id=0). A missing check is not success.
+# - Do not reference check names that are not workflow jobs.
+#   CI jobs on main: semgrep-policy, test, quality-advisory, container-smoke.
+#   There is no "ci/build" check. quality-advisory is continue-on-error.
+# - Do not request placeholder teams (e.g. @acme/maintainers).
+# - Preserve the existing keep-up-to-date rule only.
 pull_request_rules:
   - name: Keep PRs up to date
     conditions:
