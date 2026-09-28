@@ -281,3 +281,58 @@ class TestCuratedSubLevelThreeMappings:
         empty_evidence = build_category_mapping_evidence("")
         assert empty_evidence.status == "unmapped"
         assert empty_evidence.candidates == ()
+
+
+class TestWeakEvidenceIsNeverMapped:
+    def test_single_token_overlap_candidate_is_weak_not_mapped(self):
+        evidence = build_category_mapping_evidence("Bird Widget", taxonomy=_fixture_taxonomy())
+        assert evidence.status == "weak_candidate"
+        assert [c.code for c in evidence.candidates] == ["ap-2-1"]
+        assert evidence.candidates[0].match_basis == "token_overlap"
+        assert evidence.candidates[0].confidence < 1.0
+
+    def test_real_snapshot_partial_word_overlap_is_not_mapped(self):
+        evidence = build_category_mapping_evidence("Activewear widget")
+        assert evidence.status == "weak_candidate"
+        assert evidence.candidates[0].match_basis == "token_overlap"
+
+    def test_exact_match_beats_overlap_on_real_snapshot(self):
+        evidence = build_category_mapping_evidence("Coffee Grinders")
+        assert evidence.status == "mapped"
+        assert [c.match_basis for c in evidence.candidates] == ["exact_name"]
+
+    def test_duplicate_exact_names_remain_ambiguous(self):
+        taxonomy = parse_taxonomy_text(
+            "gid://shopify/TaxonomyCategory/aa   : Apparel\n"
+            "gid://shopify/TaxonomyCategory/aa-1 : Apparel > Widgets\n"
+            "gid://shopify/TaxonomyCategory/bb   : Home\n"
+            "gid://shopify/TaxonomyCategory/bb-1 : Home > Widgets\n"
+        )
+        evidence = build_category_mapping_evidence("widgets", taxonomy=taxonomy)
+        assert evidence.status == "ambiguous"
+        assert [c.code for c in evidence.candidates] == ["aa-1", "bb-1"]
+        assert {c.match_basis for c in evidence.candidates} == {"exact_name"}
+
+    def test_schema_rejects_mapped_or_weak_status_on_the_wrong_basis(self):
+        import pytest
+
+        from services.category_mapping.schemas import CategoryMappingCandidate, CategoryTaxonomyError
+
+        def cand(basis):
+            return CategoryMappingCandidate(
+                code="x", gid="g", name="X", full_path="X", match_basis=basis, confidence=0.5
+            )
+
+        with pytest.raises(CategoryTaxonomyError):
+            CategoryMappingEvidence("x", "x", "mapped", (cand("token_overlap"),))
+        with pytest.raises(CategoryTaxonomyError):
+            CategoryMappingEvidence("x", "x", "weak_candidate", (cand("exact_name"),))
+        with pytest.raises(CategoryTaxonomyError):
+            CategoryMappingEvidence("x", "x", "weak_candidate", (cand("token_overlap"), cand("token_overlap")))
+
+    def test_category_beyond_partial_snapshot_is_unmapped_not_guessed(self):
+        # Upstream v2026-08 has deeper leaves that this partial snapshot omits.
+        evidence = build_category_mapping_evidence("qqzxv wxyzq")
+        assert evidence.status == "unmapped"
+        assert evidence.candidates == ()
+        assert evidence.taxonomy_source["version_tag"] == "v2026-08"

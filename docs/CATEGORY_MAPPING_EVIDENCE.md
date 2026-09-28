@@ -9,10 +9,13 @@ against a pinned, offline snapshot of the
 [Shopify Product Taxonomy](https://github.com/Shopify/product-taxonomy),
 producing zero or more candidate taxonomy categories with a deterministic
 confidence score, for a **human to review**. The evidence status is
-`"mapped"` only when one candidate remains, `"ambiguous"` when multiple
-plausible candidates remain, and `"unmapped"` when no candidates are found.
-An exact name match takes precedence over weaker token-overlap alternatives;
-multiple exact matches remain `"ambiguous"`.
+`"mapped"` only when exactly one candidate matches by exact (case-insensitive)
+name, `"ambiguous"` when multiple plausible candidates remain,
+`"weak_candidate"` when the only evidence is a single partial token-overlap
+candidate (shown for review, never treated as a mapping), and `"unmapped"`
+when no candidates are found. An exact name match takes precedence over
+weaker token-overlap alternatives; multiple exact matches remain
+`"ambiguous"`.
 
 ## What this is not
 

@@ -221,3 +221,25 @@ class TestTaxonomyIndexImmutability:
         assert "extra_key" not in custom_index.by_code
         with pytest.raises(TypeError):
             custom_index.by_code["extra_key"] = None  # type: ignore[index]
+
+
+class TestPartialSnapshotRepresentation:
+    def test_bundled_snapshot_is_declared_partial_and_pinned(self):
+        from services.category_mapping.schemas import TAXONOMY_SOURCE_PROVENANCE
+        from services.category_mapping.taxonomy_loader import _DEFAULT_SNAPSHOT_PATH
+
+        header = "\n".join(
+            line for line in _DEFAULT_SNAPSHOT_PATH.read_text(encoding="utf-8").splitlines() if line.startswith("#")
+        )
+        assert "PARTIAL SNAPSHOT" in header
+        assert "NOT a full taxonomy mirror" in header
+        assert TAXONOMY_SOURCE_PROVENANCE["commit_sha"] in header
+        assert TAXONOMY_SOURCE_PROVENANCE["version_tag"] in header
+
+    def test_bundled_snapshot_has_no_rows_deeper_than_level_five(self):
+        assert max(category.level for category in default_taxonomy()) <= 5
+
+    def test_snapshot_rows_are_sorted_deterministically_on_reload(self):
+        first = [c.code for c in load_taxonomy()]
+        second = [c.code for c in load_taxonomy()]
+        assert first == second

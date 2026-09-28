@@ -103,7 +103,15 @@ def build_category_mapping_evidence(
             candidates=(),
         )
 
-    status = "mapped" if len(candidates) == 1 else "ambiguous"
+    # Only a single exact name match is "mapped". A lone token-overlap
+    # candidate is partial-word evidence, not a mapping: it stays visible to
+    # the reviewer but is never upgraded to "mapped".
+    if len(candidates) > 1:
+        status = "ambiguous"
+    elif candidates[0].match_basis == "exact_name":
+        status = "mapped"
+    else:
+        status = "weak_candidate"
     return CategoryMappingEvidence(
         input_category=str(free_text_category or ""),
         normalized_input=normalized_input,
