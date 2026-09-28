@@ -3,7 +3,7 @@
 Upstream: https://github.com/psf/pyperf
 Pinned revision (authoritative tag 2.8.1): c58426688e1a28b2519695a3869b98dc51f3a69d
 License at pin: MIT (COPYING — Copyright 2016, Red Hat, Inc. and Google Inc.)
-Inspected at pin: pyperf/_bench.py, pyperf/_runner.py, COPYING
+Inspected at pin: pyperf/_bench.py, pyperf/_metadata.py, pyperf/_formatter.py, COPYING
 
 This module does not import, vendor, or depend on pyperf. It reproduces the
 JSON 1.0 suite shape documented in pyperf/_bench.py at the pin:
@@ -14,12 +14,13 @@ Host/CPU metadata collection from pyperf (`collect_metadata`, hostname,
 python_executable, aslr, platform, cpu_model_name) is intentionally omitted
 so the encoder stays offline and deterministic. Values are operator-supplied
 samples; this module never times a live workload, opens a socket, or reads
-credentials.
+credentials. Recognized host/secret/runtime metadata keys are rejected, but
+arbitrary caller-supplied free-text values are not content-scanned.
 
-Registry note: data/source_adaptation_registry.json currently pins
-c0e9eb8a78fd148f0746ba2b9cb030206dfd8478 for src-pyperf. That SHA is not a
-commit on psf/pyperf. This module uses the verified tag object instead and
-does not rewrite the frozen 29-record registry (stable-hash contract).
+Registry note: data/source_adaptation_registry.json currently records
+c0e9eb8a78fd148f0746ba2b9cb030206dfd8478 for src-pyperf, which differs from
+the verified 2.8.1 release commit. This module uses the verified release
+commit and does not rewrite the frozen 29-record registry (stable-hash contract).
 
 Rollback: delete this file and the matching contract test / notice row.
 Existing replay/lab benchmarks do not import this module.
@@ -45,16 +46,92 @@ REGISTRY_RECORDED_SHA = "c0e9eb8a78fd148f0746ba2b9cb030206dfd8478"
 
 _FORBIDDEN_METADATA_KEYS = frozenset(
     {
+        "architecture",
+        "cpu",
+        "cpuaffinity",
+        "cpucount",
+        "cpufrequency",
+        "cpumodelname",
+        "cwd",
+        "host",
         "hostname",
-        "python_executable",
-        "aslr",
+        "ip",
+        "ipaddress",
+        "kernel",
+        "macaddress",
+        "machine",
+        "machinename",
+        "networkcalls",
+        "networkinterface",
+        "os",
         "platform",
-        "cpu_model_name",
-        "cpu_affinity",
-        "cpu_count",
-        "cpu_frequency",
+        "pythonexecutable",
+        "pythonimplementation",
+        "pythonversion",
+        "aslr",
+        "system",
+        "user",
+        "username",
+        "workingdirectory",
+        "collecthostmetadata",
+        "device",
+        "environment",
+        "environmentvariables",
+        "hardware",
+        "runtime",
+        "runtimeversion",
     }
 )
+_FORBIDDEN_METADATA_MARKERS = (
+    "architecture",
+    "cpu",
+    "host",
+    "ipaddress",
+    "kernel",
+    "machine",
+    "macaddress",
+    "network",
+    "platform",
+    "processor",
+    "pythonexecutable",
+    "pythonimplementation",
+    "pythonversion",
+    "system",
+    "workingdirectory",
+)
+_SENSITIVE_METADATA_MARKERS = (
+    "accesskey",
+    "apikey",
+    "auth",
+    "bearer",
+    "cookie",
+    "credential",
+    "password",
+    "privatekey",
+    "secret",
+    "sessionid",
+    "token",
+)
+_RESERVED_METADATA_KEYS = frozenset({"name", "unit"})
+_UNSUPPORTED_RUNTIME_METADATA_KEYS = frozenset(
+    {
+        "boottime",
+        "calibrateloops",
+        "calibratewarmups",
+        "commandmaxrss",
+        "date",
+        "duration",
+        "innerloops",
+        "loadavg1min",
+        "loops",
+        "memmaxrss",
+        "mempeakpagefileusage",
+        "recalibrateloops",
+        "recalibratewarmups",
+        "uptime",
+    }
+)
+_SUPPORTED_UNITS = frozenset({"byte", "integer", "second"})
 
 
 class PerfEngineError(ValueError):
@@ -62,10 +139,12 @@ class PerfEngineError(ValueError):
 
 
 def _finite_positive(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise PerfEngineError(f"{name} must be a finite number > 0")
     try:
         number = float(value)
-    except (TypeError, ValueError) as exc:
-        raise PerfEngineError(f"{name} must be numeric") from exc
+    except OverflowError as exc:
+        raise PerfEngineError(f"{name} must be finite") from exc
     if not math.isfinite(number) or number <= 0.0:
         raise PerfEngineError(f"{name} must be a finite number > 0")
     return number
@@ -78,18 +157,48 @@ def _clean_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
         raise PerfEngineError("metadata must be an object")
     cleaned: dict[str, Any] = {}
     for key, value in metadata.items():
-        name = str(key)
-        lower = name.lower()
-        if lower in _FORBIDDEN_METADATA_KEYS:
-            raise PerfEngineError(f"host metadata {name} is not collected")
-        if any(
-            marker in lower
-            for marker in ("token", "secret", "password", "api_key", "credential")
+        if not isinstance(key, str) or not key.strip():
+            raise PerfEngineError("metadata keys must be non-empty strings")
+        name = key.strip()
+        normalized = "".join(character for character in name.casefold() if character.isalnum())
+        if normalized in _RESERVED_METADATA_KEYS:
+            raise PerfEngineError(f"metadata field {name} is reserved")
+        if normalized in _UNSUPPORTED_RUNTIME_METADATA_KEYS:
+            raise PerfEngineError(f"runtime metadata {name} is not supplied offline")
+        if normalized in _FORBIDDEN_METADATA_KEYS or any(
+            marker in normalized for marker in _FORBIDDEN_METADATA_MARKERS
         ):
+            raise PerfEngineError(f"host metadata {name} is not collected")
+        if any(marker in normalized for marker in _SENSITIVE_METADATA_MARKERS):
             raise PerfEngineError(f"sensitive metadata key {name}")
-        if isinstance(value, float) and not math.isfinite(value):
-            raise PerfEngineError(f"metadata {name} must be finite")
-        cleaned[name] = value
+        if normalized == "tags":
+            if name != "tags":
+                raise PerfEngineError("tags metadata key must be lowercase")
+            if not isinstance(value, (list, tuple)) or not value:
+                raise PerfEngineError("tags must be a non-empty list of strings")
+            tags = [tag.strip() if isinstance(tag, str) else "" for tag in value]
+            if any(
+                not tag
+                or tag.casefold() == "all"
+                or "\n" in tag
+                or chr(13) in tag
+                for tag in tags
+            ):
+                raise PerfEngineError("tags must be non-empty strings other than 'all'")
+            cleaned[name] = tags
+        elif isinstance(value, str):
+            text = value.strip()
+            if not text or "\n" in value or chr(13) in value:
+                raise PerfEngineError(f"metadata {name} must be a non-empty single-line string")
+            cleaned[name] = text
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                raise PerfEngineError(f"metadata {name} must be finite")
+            cleaned[name] = value
+        elif isinstance(value, (int, bool)):
+            cleaned[name] = value
+        else:
+            raise PerfEngineError(f"metadata {name} must be a JSON scalar or tags list")
     return cleaned
 
 
@@ -106,22 +215,41 @@ def run_benchmark(
     ``values`` are loop-normalized samples, matching pyperf JSON 1.0.
     Warmups are ``(loops, value)`` pairs. No process, network, or host probe runs.
     """
-    label = " ".join(str(name).split())
+    if not isinstance(name, str):
+        raise PerfEngineError("benchmark name must be a string")
+    label = " ".join(name.split())
     if not label:
         raise PerfEngineError("benchmark name is required")
-    samples = tuple(
-        _finite_positive(item, f"values[{index}]") for index, item in enumerate(values)
-    )
+    if not isinstance(unit, str) or unit not in _SUPPORTED_UNITS:
+        raise PerfEngineError(f"unit must be one of {', '.join(sorted(_SUPPORTED_UNITS))}")
+    if isinstance(values, (str, bytes, bytearray)):
+        raise PerfEngineError("values must be a non-empty sequence of numbers")
+    try:
+        samples = tuple(
+            _finite_positive(item, f"values[{index}]")
+            for index, item in enumerate(values)
+        )
+    except TypeError as exc:
+        raise PerfEngineError("values must be a non-empty sequence") from exc
     if not samples:
         raise PerfEngineError("values must be a non-empty sequence")
     warmup_rows: list[list[float | int]] = []
-    for index, item in enumerate(warmups or ()):
+    try:
+        warmup_items = tuple(warmups) if warmups is not None else ()
+    except TypeError as exc:
+        raise PerfEngineError("warmups must be a sequence") from exc
+    for index, item in enumerate(warmup_items):
         if not isinstance(item, (tuple, list)) or len(item) != 2:
             raise PerfEngineError(f"warmups[{index}] must be (loops, value)")
         loops, warmup_value = item
-        if not isinstance(loops, int) or loops < 1:
+        if isinstance(loops, bool) or not isinstance(loops, int) or loops < 1:
             raise PerfEngineError(f"warmups[{index}] loops must be an int >= 1")
-        measured = float(warmup_value)
+        if isinstance(warmup_value, bool) or not isinstance(warmup_value, (int, float)):
+            raise PerfEngineError(f"warmups[{index}] value must be numeric")
+        try:
+            measured = float(warmup_value)
+        except OverflowError as exc:
+            raise PerfEngineError(f"warmups[{index}] value must be finite") from exc
         if not math.isfinite(measured) or measured < 0.0:
             raise PerfEngineError(f"warmups[{index}] value must be finite and >= 0")
         warmup_rows.append([loops, measured])
@@ -142,8 +270,6 @@ def run_benchmark(
         "version": JSON_VERSION,
         "metadata": suite_metadata,
         "benchmarks": [{"metadata": bench_metadata, "runs": [run]}],
-        "read_only": True,
-        "mutated": False,
     }
     try:
         encoded = json.dumps(

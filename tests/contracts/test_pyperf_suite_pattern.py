@@ -18,6 +18,8 @@ from scripts.benchmarks.perf_engine import (
     SOURCE_ID,
     UPSTREAM_COMMIT_SHA,
     UPSTREAM_LICENSE,
+    UPSTREAM_LICENSE_EVIDENCE,
+    UPSTREAM_REPOSITORY,
     UPSTREAM_TAG,
     dump_suite,
     run_benchmark,
@@ -42,16 +44,23 @@ def test_run_benchmark_emits_pyperf_json_1_0_shape() -> None:
     assert bench["metadata"]["unit"] == "second"
     assert bench["runs"][0]["values"] == [0.001, 0.0012, 0.0009]
     assert "hostname" not in bench["metadata"]
-    dumped = json.loads(dump_suite(suite))
+    dumped_text = dump_suite(suite)
+    dumped = json.loads(dumped_text)
+    assert set(dumped) == {"version", "metadata", "benchmarks"}
     assert dumped["version"] == "1.0"
     assert "suite_fingerprint" not in dumped
     assert dumped["benchmarks"][0]["runs"][0]["values"][0] == 0.001
 
 
 def test_run_benchmark_is_deterministic() -> None:
-    first = run_benchmark("stable", (0.2, 0.25))
-    second = run_benchmark("stable", (0.2, 0.25))
+    first = run_benchmark(
+        "stable", (0.2, 0.25), metadata={"scenario": "fixture", "tags": ["offline"]}
+    )
+    second = run_benchmark(
+        "stable", (0.2, 0.25), metadata={"tags": ["offline"], "scenario": "fixture"}
+    )
     assert first["suite_fingerprint"] == second["suite_fingerprint"]
+    assert dump_suite(first) == dump_suite(second)
     assert len(first["suite_fingerprint"]) == 64
 
 
@@ -68,11 +77,79 @@ def test_run_benchmark_rejects_non_finite_and_non_positive_values() -> None:
         run_benchmark("bad", ())
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(None, id="none"),
+        pytest.param(True, id="boolean"),
+        pytest.param("0.1", id="numeric-string"),
+        pytest.param(10**1000, id="oversized-integer"),
+    ],
+)
+def test_run_benchmark_rejects_malformed_sample_types(value: object) -> None:
+    with pytest.raises(PerfEngineError):
+        run_benchmark("bad", (value,))
+
+
+@pytest.mark.parametrize("values", [None, "2", b"2", 2], ids=["none", "string", "bytes", "integer"])
+def test_run_benchmark_rejects_non_sequence_samples(values: object) -> None:
+    with pytest.raises(PerfEngineError):
+        run_benchmark("bad", values)  # type: ignore[arg-type]
+
+
 def test_run_benchmark_rejects_host_and_secret_metadata() -> None:
     with pytest.raises(PerfEngineError):
         run_benchmark("named", (0.1,), metadata={"hostname": "prod-box"})
     with pytest.raises(PerfEngineError):
         run_benchmark("named", (0.1,), metadata={"api_key": "not-a-secret-placeholder"})
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "host-name",
+        "cpu-model-name",
+        "python-executable",
+        "machine-model",
+        "host-id",
+        "environment-variables",
+        "api-key",
+        "private-key",
+    ],
+)
+def test_run_benchmark_rejects_normalized_host_and_secret_key_aliases(key: str) -> None:
+    with pytest.raises(PerfEngineError):
+        run_benchmark("named", (0.1,), metadata={key: "fixture-placeholder"})
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        pytest.param({"custom": {"nested": "value"}}, id="nested-object"),
+        pytest.param({"custom": None}, id="null-value"),
+        pytest.param({"custom": ""}, id="empty-string"),
+        pytest.param({"tags": ["all"]}, id="reserved-tag"),
+        pytest.param({"loops": 0}, id="special-pyperf-loops"),
+        pytest.param({"duration": -1.0}, id="special-pyperf-duration"),
+        pytest.param({"Tags": ["offline"]}, id="case-mismatched-tags"),
+        pytest.param({"name": "replacement"}, id="reserved-name"),
+        pytest.param({"unit": "cycles"}, id="reserved-unit"),
+    ],
+)
+def test_run_benchmark_rejects_malformed_or_reserved_metadata(metadata: dict) -> None:
+    with pytest.raises(PerfEngineError):
+        run_benchmark("named", (0.1,), metadata=metadata)
+
+
+@pytest.mark.parametrize("unit", ["second", "byte", "integer"])
+def test_run_benchmark_accepts_pyperf_units(unit: str) -> None:
+    suite = run_benchmark("named", (0.1,), unit=unit)
+    assert suite["benchmarks"][0]["metadata"]["unit"] == unit
+
+
+def test_run_benchmark_rejects_unknown_pyperf_unit() -> None:
+    with pytest.raises(PerfEngineError):
+        run_benchmark("named", (0.1,), unit="cycles")
 
 
 def test_warmups_match_pyperf_loops_value_pairs() -> None:
@@ -82,10 +159,44 @@ def test_warmups_match_pyperf_loops_value_pairs() -> None:
         run_benchmark("bad-warmup", (0.4,), warmups=((0, 0.5),))
 
 
+@pytest.mark.parametrize(
+    "warmups",
+    [
+        pytest.param(((True, 0.5),), id="boolean-loops"),
+        pytest.param(((1, "not-numeric"),), id="malformed-value"),
+        pytest.param(((1, 10**1000),), id="oversized-value"),
+        pytest.param(((1, math.inf),), id="non-finite-value"),
+        pytest.param(0, id="non-sequence-container"),
+    ],
+)
+def test_run_benchmark_rejects_malformed_warmups(warmups: tuple) -> None:
+    with pytest.raises(PerfEngineError):
+        run_benchmark("bad-warmup", (0.4,), warmups=warmups)
+
+
 def test_implementation_uses_verified_tag_not_stale_registry_sha() -> None:
     assert UPSTREAM_COMMIT_SHA == "c58426688e1a28b2519695a3869b98dc51f3a69d"
     assert UPSTREAM_COMMIT_SHA != REGISTRY_RECORDED_SHA
     assert len(UPSTREAM_COMMIT_SHA) == 40
+
+
+def test_upstream_pin_and_license_match_notice_and_manifest() -> None:
+    assert UPSTREAM_TAG == "2.8.1"
+    assert UPSTREAM_COMMIT_SHA == "c58426688e1a28b2519695a3869b98dc51f3a69d"
+    assert UPSTREAM_LICENSE == "MIT"
+    assert UPSTREAM_LICENSE_EVIDENCE == (
+        f"{UPSTREAM_REPOSITORY}/blob/{UPSTREAM_COMMIT_SHA}/COPYING"
+    )
+
+    notices = (_REPO_ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    assert f"| pyperf | {UPSTREAM_TAG} (`{UPSTREAM_COMMIT_SHA}`) | MIT |" in notices
+    assert "Copyright 2016, Red Hat, Inc. and Google Inc." in notices
+
+    manifest = (_REPO_ROOT / "docs" / "oss" / "LICENSE_MANIFEST.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "  - name: pyperf\n    license: MIT\n    reviewed_ref: 2.8.1\n" in manifest
+    assert f"Pin {UPSTREAM_COMMIT_SHA}. No upstream source vendored." in manifest
 
 
 def test_engine_does_not_import_pyperf_or_open_network() -> None:
@@ -98,6 +209,11 @@ def test_engine_does_not_import_pyperf_or_open_network() -> None:
             imported.append(node.module.split(".", 1)[0])
     forbidden = {
         "pyperf",
+        "os",
+        "platform",
+        "sys",
+        "time",
+        "timeit",
         "socket",
         "urllib",
         "http",
