@@ -257,6 +257,8 @@ class LearningGovernorInfluence:
     low_confidence_evidence: bool = False
     fixture_only_evidence: bool = False
     advisory_rule_ids: tuple[str, ...] = ()
+    iteration_action_type: str = ""
+    iteration_recommendation_source_event_id: str = ""
     def __post_init__(self) -> None:
         if self.evidence_mode not in GOVERNOR_EVIDENCE_MODES: raise ValueError("invalid governor evidence mode")
     def to_dict(self) -> dict[str, Any]: return _clean(self)
@@ -729,17 +731,20 @@ def _governor_influence_fingerprint(*parts: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
-def derive_governor_influence(report: "LearningLedgerReport", *, action_type: str, candidate_id: str = "candidate-placeholder", workspace_id: str = "internal-companyos", proposed_hypothesis: str = "", stale_event_ids: Sequence[str] = ()) -> LearningGovernorInfluence:
+def derive_governor_influence(report: "LearningLedgerReport", *, action_type: str, candidate_id: str = "candidate-placeholder", workspace_id: str = "internal-companyos", proposed_hypothesis: str = "", stale_event_ids: Sequence[str] = (), allow_action_type_fallback: bool = True) -> LearningGovernorInfluence:
     """Derive a `LearningGovernorInfluence` for one action/candidate pair
     from a real, already-built `LearningLedgerReport` -- the events and do-not-repeat rules the report actually contains. Its portfolio, model, provider, and decision summaries are likewise derived from those records.
 
     Every match (events, do-not-repeat rules) is scoped to `workspace_id`
     first, always -- a lesson recorded under one workspace can never
     influence a decision in another, even when action_type and
-    candidate_id happen to coincide. Matching then prefers events for this
-    exact `candidate_id`; if none exist, it falls back to every event
-    sharing `action_type` *within the same workspace* (a general,
-    not-candidate-specific lesson) and records that in `recency_label`.
+    candidate_id happen to coincide. An explicit `candidate_id` matches
+    only that candidate when `allow_action_type_fallback=False`; the default
+    preserves the legacy action-wide fallback and records it in
+    `recency_label`. The placeholder sentinel always retains action-wide
+    aggregation. Recommendations and rules are restricted to the selected
+    source events, so candidate-scoped callers can disable fallback to
+    prevent another candidate's lesson from leaking into the influence.
     No matching event at all yields `evidence_mode="not_run"` and every
     boolean signal `False` -- a caller with nothing on record gets no
     influence, by construction.
@@ -762,7 +767,12 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     """
     workspace_events = tuple(event for event in report.events if event.workspace_id == workspace_id)
     candidate_events = tuple(event for event in workspace_events if event.action_taken == action_type and event.candidate_id == candidate_id)
-    same_workspace_match = candidate_events or tuple(event for event in workspace_events if event.action_taken == action_type)
+    if candidate_events:
+        same_workspace_match = candidate_events
+    elif candidate_id == PLACEHOLDER_CANDIDATE_ID or allow_action_type_fallback:
+        same_workspace_match = tuple(event for event in workspace_events if event.action_taken == action_type)
+    else:
+        same_workspace_match = ()
     excluded_stale_event_ids = tuple(event.learning_event_id for event in same_workspace_match if event.learning_event_id in stale_event_ids)
     matching_events = tuple(event for event in same_workspace_match if event.learning_event_id not in stale_event_ids)[-_MAX_MATCHING_EVENTS:]
     if not matching_events:
@@ -777,8 +787,11 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     provenance = tuple(event.learning_event_id for event in matching_events)
     recency_label = "current_fixture_cycle" if candidate_events else "action_type_only_match"
 
-    events_by_id = {event.learning_event_id: event for event in workspace_events}
-    matching_rules = tuple(rule for rule in report.do_not_repeat_rules if action_type in rule.applies_to_action_types and rule.source_event_id in events_by_id)
+    matching_event_ids = {event.learning_event_id for event in matching_events}
+    matching_rules = tuple(sorted(
+        (rule for rule in report.do_not_repeat_rules if action_type in rule.applies_to_action_types and rule.source_event_id in matching_event_ids),
+        key=lambda rule: rule.rule_id,
+    ))
     # Severity-aware, matching this contract's own BLOCK_BEHAVIORS ladder
     # (warn < soft_block/hard_block/requires_approval): a "warn"-severity
     # rule is recorded and surfaced, but -- unlike the others -- never
@@ -812,8 +825,28 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     recommended_provider_id = ready_provider_ids[0] if ready_provider_ids else ""
     if avoid_provider_ids: deprioritize = True
 
-    matching_recommendations = tuple(rec for rec in report.iteration_recommendations if rec.action_type == action_type and rec.source_event_id in events_by_id)
-    iteration_recommendation = matching_recommendations[0].recommendation if matching_recommendations else ""
+    matching_recommendations = tuple(sorted(
+        (rec for rec in report.iteration_recommendations if rec.source_event_id in matching_event_ids),
+        key=lambda rec: (rec.source_event_id, rec.action_type, rec.recommendation),
+    ))
+    matching_decision_influences = tuple(sorted(
+        (item for item in report.decision_influences if item.source_event_id in matching_event_ids),
+        key=lambda item: item.source_event_id,
+    ))
+    if matching_recommendations:
+        selected_recommendation = matching_recommendations[0]
+        iteration_recommendation = selected_recommendation.recommendation
+        iteration_action_type = selected_recommendation.action_type
+        iteration_recommendation_source_event_id = selected_recommendation.source_event_id
+    elif matching_decision_influences:
+        selected_influence = matching_decision_influences[0]
+        iteration_recommendation = selected_influence.recommended_next_action
+        iteration_action_type = ""
+        iteration_recommendation_source_event_id = selected_influence.source_event_id
+    else:
+        iteration_recommendation = ""
+        iteration_action_type = ""
+        iteration_recommendation_source_event_id = ""
 
     rationale: list[str] = []
     if do_not_repeat_blocked: rationale.append(f"{len(blocking_rules)} do-not-repeat rule(s) apply to {action_type} and no new hypothesis was supplied")
@@ -833,8 +866,8 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     if not rationale: rationale.append("no actionable learning signal beyond the matched evidence")
 
     advisory_rule_ids = tuple(rule.rule_id for rule in advisory_rules)
-    fingerprint = _governor_influence_fingerprint(action_type, candidate_id, workspace_id, evidence_mode, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in blocking_rules), advisory_rule_ids, trustos_recurrence_blocked, kill_blocks_resumption, conflicting_evidence, low_confidence_evidence, fixture_only_evidence, recommended_model_tier, recommended_provider_id, avoid_provider_ids, excluded_stale_event_ids)
-    return LearningGovernorInfluence(action_type, candidate_id, workspace_id, evidence_mode, confidence, recency_label, provenance, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in blocking_rules), bool(trustos_recurrence_blocked), recommended_model_tier, deprioritize, tuple(rationale), kill_blocks_resumption=kill_blocks_resumption, conflicting_evidence=conflicting_evidence, recommended_provider_id=recommended_provider_id, avoid_provider_ids=avoid_provider_ids, iteration_recommendation=iteration_recommendation, excluded_stale_event_ids=excluded_stale_event_ids, fingerprint=fingerprint, low_confidence_evidence=low_confidence_evidence, fixture_only_evidence=fixture_only_evidence, advisory_rule_ids=advisory_rule_ids)
+    fingerprint = _governor_influence_fingerprint(action_type, candidate_id, workspace_id, evidence_mode, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in blocking_rules), advisory_rule_ids, trustos_recurrence_blocked, kill_blocks_resumption, conflicting_evidence, low_confidence_evidence, fixture_only_evidence, recommended_model_tier, recommended_provider_id, avoid_provider_ids, iteration_action_type, iteration_recommendation, iteration_recommendation_source_event_id, excluded_stale_event_ids)
+    return LearningGovernorInfluence(action_type, candidate_id, workspace_id, evidence_mode, confidence, recency_label, provenance, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in blocking_rules), bool(trustos_recurrence_blocked), recommended_model_tier, deprioritize, tuple(rationale), kill_blocks_resumption=kill_blocks_resumption, conflicting_evidence=conflicting_evidence, recommended_provider_id=recommended_provider_id, avoid_provider_ids=avoid_provider_ids, iteration_recommendation=iteration_recommendation, excluded_stale_event_ids=excluded_stale_event_ids, fingerprint=fingerprint, low_confidence_evidence=low_confidence_evidence, fixture_only_evidence=fixture_only_evidence, advisory_rule_ids=advisory_rule_ids, iteration_action_type=iteration_action_type, iteration_recommendation_source_event_id=iteration_recommendation_source_event_id)
 
 
 def _optional_metric_float(metric: Mapping[str, Any], field: str) -> float | None:
