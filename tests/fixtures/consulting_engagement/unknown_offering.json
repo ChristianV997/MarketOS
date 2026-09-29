@@ -1,0 +1,16 @@
+{
+  "client_id": "fixture-client-alpha",
+  "workspace_id": "fixture-consulting-client",
+  "client_objective": "Clarify an offering before selecting a delivery path.",
+  "geography": "Mexico",
+  "language": "es-MX",
+  "scope": "Initial classification only.",
+  "offering_kind": "unknown",
+  "selected_deliverables": ["client_safe_export"],
+  "evidence": [],
+  "assumptions": [],
+  "conflicts": [],
+  "missing_information": ["offering_kind_confirmation"],
+  "linked_component_report_ids": [],
+  "optional_upsell_recommendations": []
+}

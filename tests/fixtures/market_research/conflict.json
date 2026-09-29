@@ -1,0 +1,22 @@
+{
+  "marketplace_report": {
+    "evidence_mode": "sanitized_report",
+    "marketplaces_observed": ["ebay", "amazon"],
+    "candidates": [
+      {
+        "candidate_id": "conflict-a",
+        "title": "Portable Blender",
+        "query": "portable blender",
+        "offers": [{"source_family": "manufacturer_site"}],
+        "score": {"overall_marketplace_opportunity": 0.62, "saturation_score": 0.4}
+      },
+      {
+        "candidate_id": "conflict-b",
+        "title": "Portable Blender (duplicate listing)",
+        "query": "portable blender",
+        "offers": [{"source_family": "manufacturer_site"}],
+        "score": {"overall_marketplace_opportunity": 0.81, "saturation_score": 0.5}
+      }
+    ]
+  }
+}

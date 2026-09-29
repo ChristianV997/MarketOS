@@ -1,0 +1,60 @@
+{
+  "identity": {
+    "candidate_id": "cand-fixture-hybrid",
+    "origin_country": "CN",
+    "destination_country": "MX",
+    "hs_code": "8501.10"
+  },
+  "offering_kind": "hybrid",
+  "geography_kind": "known",
+  "lane": {
+    "lane_id": "lane-cn-mx-hybrid",
+    "origin": "CN",
+    "destination_country": "MX",
+    "currency": "USD",
+    "duty_rate": "0.05",
+    "tax_rate": "0.16"
+  },
+  "trade_flow": {
+    "period": "2025",
+    "trade_value": {"amount": "500000", "currency": "USD"},
+    "trade_quantity": 10000,
+    "quantity_unit": "units",
+    "unit_value": {"amount": "50", "currency": "USD"},
+    "evidence": {"quality": "observed"}
+  },
+  "destination_price": {
+    "observed_price": {"amount": "120", "currency": "USD"},
+    "price_type": "marketplace_listing",
+    "sample_size": 25,
+    "evidence": {"quality": "observed"}
+  },
+  "origin_supplier_cost": {"amount": "55", "currency": "USD"},
+  "origin_supplier_cost_evidence": {"quality": "observed"},
+  "freight_duty": {
+    "international_shipping": {"amount": "15", "currency": "USD"},
+    "duty_rate": "0.05",
+    "tax_rate": "0.16",
+    "evidence": {"quality": "observed"}
+  },
+  "marketplace_fee_rate": "0.08",
+  "marketplace_fee_evidence": {"quality": "observed"},
+  "returns_lead_time": {
+    "return_rate": "0.03",
+    "lead_time_minimum_days": 10,
+    "lead_time_maximum_days": 25,
+    "evidence": {"quality": "observed"}
+  },
+  "service_capacity": {
+    "geographic_coverage": ["MX-CMX"],
+    "weekly_capacity_hours": "20",
+    "subcontractor_dependency": false,
+    "sla_assumption": "installation within 48 hours, claimed by provider",
+    "evidence": {"quality": "manual"}
+  },
+  "regulatory": {
+    "status": "requires_evidence",
+    "evidence": {"quality": "observed"}
+  },
+  "captured_at": "2026-01-15T00:00:00Z"
+}

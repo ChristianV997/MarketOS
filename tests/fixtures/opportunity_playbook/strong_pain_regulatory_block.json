@@ -1,0 +1,21 @@
+{
+  "scenario_id": "strong_pain_regulatory_block",
+  "offering_kind": "physical_service",
+  "opportunity_archetype": "physical_services",
+  "candidate_id": "fixture-candidate-regulatory-review",
+  "workspace_id": "fixture-workspace-methodology",
+  "geography": "synthetic service geography",
+  "language": "en",
+  "claims": [
+    {"id": "claim-pain", "taxonomy": "fact", "statement": "A supplied observation describes recurring pain.", "evidence_class": "manual", "evidence_state": "available", "source_ref": "fixture://strong-pain-regulatory-block/pain"},
+    {"id": "claim-clearance", "taxonomy": "unknown", "statement": "Regulatory and professional requirements are not assessed.", "evidence_class": "unavailable", "evidence_state": "unknown", "source_ref": "fixture://strong-pain-regulatory-block/compliance"}
+  ],
+  "evidence": [
+    {"id": "evidence-pain", "dimension": "recurring_pain", "evidence_class": "manual", "evidence_state": "available", "source_ref": "fixture://strong-pain-regulatory-block/pain"},
+    {"id": "evidence-compliance", "dimension": "regulatory_risk", "evidence_class": "unavailable", "evidence_state": "unknown", "source_ref": "fixture://strong-pain-regulatory-block/compliance"}
+  ],
+  "economics": {"currency": "MXN", "price": "planning_assumption", "supplier_cost": "unknown", "shipping": "not_applicable", "duty": "not_applicable", "tax": "unknown", "returns": "unknown", "platform_fees": "unknown", "cac": "unknown", "fx": "not_applicable"},
+  "blockers": ["compliance_not_assessed", "service_capacity_unknown"],
+  "experiment": {"decision": "whether a qualified and permitted service path exists", "evidence_class": "planned", "stop_rule": "hold if requirements remain unknown"},
+  "expected": {"status": "review_required", "fatal_gate": "regulatory_status_unknown"}
+}
