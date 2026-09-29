@@ -6,10 +6,8 @@ evidence, call providers, or grant launch authority.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any, Mapping
-
-from .market_access_report import build_market_access_section
 
 RECOMMENDATIONS = frozenset(
     {
@@ -302,7 +300,6 @@ class ProductOpportunityCandidate:
     top_supplier_risks: tuple[str, ...] = ()
     top_marketplace_risks: tuple[str, ...] = ()
     top_consumer_risks: tuple[str, ...] = ()
-    market_access: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -365,7 +362,6 @@ class ProductOpportunitySynthesisReport:
     network_calls: bool = False
     mutated: bool = False
     alias_notes: tuple[str, ...] = ()
-    market_access: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -449,7 +445,7 @@ def _plan(candidate_id: str, recommendation: str) -> ProductOpportunityActionPla
     return ProductOpportunityActionPlan(candidate_id, recommendation, tuple({"window": window, "focus": focus, "task": task, "read_only": True} for window, task in days), ("Confirm evidence provenance.", "Confirm supplier proof status.", "Review assumptions and thresholds.", "Approve the next bounded validation step."))
 
 
-def _candidate(candidate_id: str, market: Mapping[str, Any] | None, supplier: Mapping[str, Any] | None, consumer: Mapping[str, Any] | None, *, use_consumer_weight: bool = True, market_report: Mapping[str, Any] | None = None, supplier_report: Mapping[str, Any] | None = None, consumer_report: Mapping[str, Any] | None = None, market_access_evidence: Mapping[str, Any] | None = None) -> tuple[ProductOpportunityCandidate, ProductOpportunityActionPlan]:
+def _candidate(candidate_id: str, market: Mapping[str, Any] | None, supplier: Mapping[str, Any] | None, consumer: Mapping[str, Any] | None, *, use_consumer_weight: bool = True, market_report: Mapping[str, Any] | None = None, supplier_report: Mapping[str, Any] | None = None, consumer_report: Mapping[str, Any] | None = None) -> tuple[ProductOpportunityCandidate, ProductOpportunityActionPlan]:
     market_score, supplier_score, consumer_score = _score(market), _score(supplier), _score(consumer)
     m, s, c = _bounded(market_score.get("overall_marketplace_opportunity")), _bounded(supplier_score.get("overall_supplier_feasibility")), _bounded(consumer_score.get("overall_consumer_attention"))
     combined = round(m * 0.4 + s * 0.35 + c * 0.25, 4) if use_consumer_weight else round(m * 0.55 + s * 0.45, 4)
@@ -470,9 +466,7 @@ def _candidate(candidate_id: str, market: Mapping[str, Any] | None, supplier: Ma
     score = ProductOpportunityScore(candidate_id, m, s, c, combined, confidence, grade, recommendation, risk, {"marketplace_weight": 0.4 if use_consumer_weight else 0.55, "supplier_weight": 0.35 if use_consumer_weight else 0.45, "consumer_weight": 0.25 if use_consumer_weight else 0.0, "raw_marketplace": m, "raw_supplier": s, "raw_consumer": c})
     action = _plan(candidate_id, recommendation.code)
     hooks = tuple(item.get("hook", "") for item in consumer_score.get("creative_hooks", []) if isinstance(item, Mapping) and item.get("hook"))
-    offering_kind = (market or {}).get("offering_kind") or (supplier or {}).get("offering_kind") or (consumer or {}).get("offering_kind")
-    market_access = build_market_access_section({"id": candidate_id, "offering_kind": offering_kind}, market_access_evidence)
-    result = ProductOpportunityCandidate(candidate_id, title, query, score, thresholds, economics, matrix, hooks, tuple(consumer_voc.get("pain_points", [])), tuple(consumer_voc.get("objections", [])), tuple(consumer_score.get("recommended_ad_angles", [])), tuple(risk.supplier_risks), tuple(risk.marketplace_risks), tuple(risk.consumer_risks), market_access)
+    result = ProductOpportunityCandidate(candidate_id, title, query, score, thresholds, economics, matrix, hooks, tuple(consumer_voc.get("pain_points", [])), tuple(consumer_voc.get("objections", [])), tuple(consumer_score.get("recommended_ad_angles", [])), tuple(risk.supplier_risks), tuple(risk.marketplace_risks), tuple(risk.consumer_risks))
     return result, action
 
 
@@ -483,15 +477,13 @@ def build_product_opportunity_synthesis(
     *,
     product_validation_report: Mapping[str, Any] | None = None,
     client_context: Mapping[str, Any] | None = None,
-    market_access_evidence: Mapping[str, Any] | None = None,
 ) -> ProductOpportunitySynthesisReport:
     (market, market_alias_notes), (supplier, supplier_alias_notes), (consumer, consumer_alias_notes) = _candidate_map(marketplace_report), _candidate_map(supplier_report), _candidate_map(consumer_report)
     alias_notes = tuple(market_alias_notes + supplier_alias_notes + consumer_alias_notes)
-    market_access_evidence = dict(market_access_evidence or {})
     candidates: list[ProductOpportunityCandidate] = []
     plans: dict[str, ProductOpportunityActionPlan] = {}
     for candidate_id in sorted(set(market) | set(supplier) | set(consumer)):
-        item, plan = _candidate(candidate_id, market.get(candidate_id), supplier.get(candidate_id), consumer.get(candidate_id), use_consumer_weight=consumer_report is not None, market_report=marketplace_report, supplier_report=supplier_report, consumer_report=consumer_report, market_access_evidence=market_access_evidence.get(candidate_id))
+        item, plan = _candidate(candidate_id, market.get(candidate_id), supplier.get(candidate_id), consumer.get(candidate_id), use_consumer_weight=consumer_report is not None, market_report=marketplace_report, supplier_report=supplier_report, consumer_report=consumer_report)
         candidates.append(item)
         plans[candidate_id] = plan
     candidates.sort(key=lambda item: (-item.score.combined_opportunity_score, item.candidate_id))
@@ -505,7 +497,7 @@ def build_product_opportunity_synthesis(
         client = f"{top.title} is the leading candidate at {top.score.combined_opportunity_score:.0%} combined opportunity. Recommendation: {rec.code}. This is validation guidance, not a profit guarantee or launch authorization."
         operator = f"Next action: {rec.next_action}. Confidence: {top.score.confidence_grade}. Risks: {', '.join(top.score.risk_profile.blockers) or 'none recorded'}."
         band = {"min": top.decision_thresholds.recommended_price_band_min, "max": top.decision_thresholds.recommended_price_band_max, "currency": "USD", "status": "observed_or_derived" if top.decision_thresholds.recommended_price_band_min is not None else "unavailable"}
-        return ProductOpportunitySynthesisReport("product-opportunity-synthesis-v1", "deterministic", mode, len(candidates), top.candidate_id, top.title, rec.code, top.score.combined_opportunity_score, top.score.marketplace_opportunity, top.score.supplier_feasibility, top.score.consumer_attention, top.unit_economics_summary, top.score.evidence_confidence, top.score.confidence_grade, top.score.risk_profile.to_dict(), top.decision_thresholds.to_dict(), {"kill_if_cpa_above": top.decision_thresholds.kill_if_cpa_above, "scale_if_cpa_below": top.decision_thresholds.scale_if_cpa_below, "kill_if_ctr_below": top.decision_thresholds.kill_if_ctr_below, "kill_if_add_to_cart_below": top.decision_thresholds.kill_if_add_to_cart_below, "scale_if_margin_above": top.decision_thresholds.scale_if_margin_above}, band, top.decision_thresholds.break_even_cpa, top.decision_thresholds.break_even_roas, top.top_hooks, top.top_pain_points, top.top_objections, top.top_ad_angles, top.top_supplier_risks, top.top_marketplace_risks, top.top_consumer_risks, rec.next_action, plan.days, client, operator, tuple(candidates), source_reports, alias_notes=alias_notes, market_access=top.market_access)
+        return ProductOpportunitySynthesisReport("product-opportunity-synthesis-v1", "deterministic", mode, len(candidates), top.candidate_id, top.title, rec.code, top.score.combined_opportunity_score, top.score.marketplace_opportunity, top.score.supplier_feasibility, top.score.consumer_attention, top.unit_economics_summary, top.score.evidence_confidence, top.score.confidence_grade, top.score.risk_profile.to_dict(), top.decision_thresholds.to_dict(), {"kill_if_cpa_above": top.decision_thresholds.kill_if_cpa_above, "scale_if_cpa_below": top.decision_thresholds.scale_if_cpa_below, "kill_if_ctr_below": top.decision_thresholds.kill_if_ctr_below, "kill_if_add_to_cart_below": top.decision_thresholds.kill_if_add_to_cart_below, "scale_if_margin_above": top.decision_thresholds.scale_if_margin_above}, band, top.decision_thresholds.break_even_cpa, top.decision_thresholds.break_even_roas, top.top_hooks, top.top_pain_points, top.top_objections, top.top_ad_angles, top.top_supplier_risks, top.top_marketplace_risks, top.top_consumer_risks, rec.next_action, plan.days, client, operator, tuple(candidates), source_reports, alias_notes=alias_notes)
     return ProductOpportunitySynthesisReport(
         report_version="product-opportunity-synthesis-v1",
         generated_at="deterministic",
@@ -541,7 +533,6 @@ def build_product_opportunity_synthesis(
         candidates=(),
         source_reports=source_reports,
         alias_notes=alias_notes,
-        market_access=build_market_access_section({"id": ""}),
     )
 
 

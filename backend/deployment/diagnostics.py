@@ -443,54 +443,12 @@ def diagnose_service_delivery_readiness(
     )
 
 
-def _zero_step_ci_diagnosis(ci_evidence: Any) -> DiagnosticResult:
-    """Resolve the diagnose_zero_step_ci() call from optional caller-supplied
-    CI evidence, failing closed rather than silently ignoring a malformed
-    value.
-
-    Before this existed, run_all_diagnostics() always called
-    diagnose_zero_step_ci() with no arguments -- so a caller's actual,
-    observed CI evidence (e.g. from a real GitHub Actions job with
-    runner_id=0 or an empty steps list) never reached this diagnostic's
-    administrator-facing message at all, no matter what was really
-    observed. diagnose_zero_step_ci() itself is unchanged and still the
-    single authority for this classification; this only decides what
-    gets passed into it.
-    """
-    if ci_evidence is None:
-        return diagnose_zero_step_ci()
-    if not isinstance(ci_evidence, Mapping):
-        return DiagnosticResult(
-            code="zero_step_ci",
-            category="continuous_integration",
-            status="detected",
-            message="CI evidence supplied to diagnostics was not a mapping and could not be classified.",
-            remediation="Pass a {ci_status, steps_executed, runner_id} mapping, or omit ci_evidence entirely.",
-            failure_details={"ci_status": "malformed", "steps_executed": 0, "runner_id": None},
-        )
-    try:
-        steps_executed = int(ci_evidence.get("steps_executed", 0) or 0)
-    except (TypeError, ValueError):
-        steps_executed = 0
-    runner_id_raw = ci_evidence.get("runner_id")
-    runner_id = int(runner_id_raw) if isinstance(runner_id_raw, (int, float)) and not isinstance(runner_id_raw, bool) else None
-    ci_status = str(ci_evidence.get("ci_status", "ci_unavailable") or "ci_unavailable")
-    return diagnose_zero_step_ci(ci_status=ci_status, steps_executed=steps_executed, runner_id=runner_id)
-
-
 def run_all_diagnostics(
     environ: Mapping[str, str] | None = None,
     mode: str = "local_dry_run",
     include_service_delivery: bool = False,
-    ci_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Execute all diagnostic checks and aggregate results.
-
-    ``ci_evidence``, when supplied, threads a caller's actual observed CI
-    state ({ci_status, steps_executed, runner_id}) into the zero-step-CI
-    diagnostic instead of that check always running with no evidence at
-    all. Omitting it (the default) reproduces the prior behavior exactly.
-    """
+    """Execute all diagnostic checks and aggregate results."""
     results = [
         diagnose_missing_python_module("fastapi"),
         diagnose_missing_node_dependency(),
@@ -498,7 +456,7 @@ def run_all_diagnostics(
         diagnose_missing_optional_provider("dataforseo", environ=environ),
         diagnose_missing_docker(),
         diagnose_unavailable_ollama(),
-        _zero_step_ci_diagnosis(ci_evidence),
+        diagnose_zero_step_ci(),
         diagnose_missing_runner(),
         diagnose_port_collision(3000),
         diagnose_invalid_environment_contract(environ=environ, mode=mode),

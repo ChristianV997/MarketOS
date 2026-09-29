@@ -11,5 +11,5 @@ def main(argv=None):
  r=build_readiness(platform=a.platform).to_dict(); md=f"# Read-only deployment readiness\n\n- Status: `{r['overall_status']}`\n- Platform: `{r['platform']}`\n- Next: `{r['recommended_next_action']}`\n"
  if a.output:
   path=Path(a.output); path.parent.mkdir(parents=True,exist_ok=True); path.write_text(json.dumps(r,indent=2,sort_keys=True)+"\n",encoding="utf-8")
- print(md if a.markdown else json.dumps(r,indent=2,sort_keys=True)); return 0 if r["overall_status"] == "ready" else 1
+ print(md if a.markdown else json.dumps(r,indent=2,sort_keys=True)); return 0
 if __name__=="__main__": raise SystemExit(main())

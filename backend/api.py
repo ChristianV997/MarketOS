@@ -180,11 +180,6 @@ try:
     except ImportError:
         pass
     try:
-        from api.routes.service_delivery_workbench import router as _service_delivery_workbench_router
-        app.include_router(_service_delivery_workbench_router)
-    except ImportError:
-        pass
-    try:
         from api.routes.deployment_readiness import router as _deployment_readiness_router
         app.include_router(_deployment_readiness_router)
     except ImportError:

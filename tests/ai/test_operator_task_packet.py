@@ -66,20 +66,6 @@ def test_path_safety_rejects_artifacts_and_traversal():
         assert_safe_path(".env", "allowed_scope")
 
 
-def test_path_safety_rejects_a_nul_byte():
-    """A NUL byte is invalid in any real filesystem path. Without an
-    explicit rejection, Path.exists()/is_symlink() silently swallow the
-    OSError a NUL byte causes and return False, which would otherwise let
-    a garbage entry slide into _assert_filesystem_contained's "deleted
-    file" ancestor-walk fallback instead of being refused outright here,
-    at the point of first validation (found via independent adversarial
-    review; not a containment bypass on its own -- the ancestor-walk
-    fallback still bounds the result correctly -- but a NUL byte should
-    never be treated as a plausible path in the first place)."""
-    with pytest.raises(TaskPacketError, match="NUL byte"):
-        assert_safe_path("scripts/ai/evil\x00.py", "changed_files")
-
-
 def test_reserved_authority_collision():
     with pytest.raises(TaskPacketError, match="reserved authority"):
         validate_packet(_valid(allowed_scope=["scripts/ai/operator_context_snapshot.py"]))

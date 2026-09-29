@@ -57,8 +57,8 @@ KNOWN_LOCKFILES = (
     "uv.lock", "poetry.lock", "Pipfile.lock", "package-lock.json", "pnpm-lock.yaml",
     "yarn.lock", "bun.lock", "bun.lockb",
 )
-SAFE_FRONTEND_TOKENS = ("eslint", "jest", "tsc", "vite", "vitest", "webpack", "node")
-SAFE_FRONTEND_COMMANDS = {"eslint", "jest", "tsc", "vite", "vitest", "webpack", "node"}
+SAFE_FRONTEND_TOKENS = ("eslint", "jest", "tsc", "vite", "vitest", "webpack")
+SAFE_FRONTEND_COMMANDS = {"eslint", "jest", "tsc", "vite", "vitest", "webpack"}
 UNSAFE_FRONTEND_MARKERS = (
     "curl", "docker", "git ", "invoke-webrequest", "npm install", "pnpm add",
     "pnpm install", "publish", "scp ", "secret", "ssh ", "token", "wget",
@@ -559,8 +559,6 @@ def _safe_frontend_script(script: Any) -> bool:
             tokens.pop(0)
         command = tokens[0].replace("\\", "/").rsplit("/", 1)[-1] if tokens else ""
         if command not in SAFE_FRONTEND_COMMANDS:
-            return False
-        if command == "node" and tokens[1:] != ["--experimental-strip-types", "--test"]:
             return False
     return True
 

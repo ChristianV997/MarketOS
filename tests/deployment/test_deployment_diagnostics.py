@@ -85,56 +85,6 @@ def test_diagnose_missing_runner():
     assert res.status in {"ok", "detected"}
 
 
-def test_run_all_diagnostics_defaults_to_unassigned_runner_when_no_ci_evidence_supplied():
-    """Backward compatibility: omitting ci_evidence (the prior call shape)
-    must reproduce the exact prior no-args diagnose_zero_step_ci() behavior."""
-    report = run_all_diagnostics(environ={}, mode="local_dry_run")
-    zero_step = next(item for item in report["diagnostics"] if item["code"] == "zero_step_ci")
-    assert zero_step["failure_details"]["runner_id"] is None
-    assert zero_step["failure_details"]["steps_executed"] == 0
-
-
-def test_run_all_diagnostics_threads_real_ci_evidence_into_zero_step_diagnosis():
-    """A caller with real GitHub Actions evidence (runner_id=0, zero steps)
-    must have that exact evidence reach diagnose_zero_step_ci -- before this,
-    run_all_diagnostics always called diagnose_zero_step_ci() with no
-    arguments, so the caller's actual CI evidence (e.g. from
-    classify_github_actions_job) never reached the administrator-facing
-    diagnostic message at all, regardless of what was really observed."""
-    report = run_all_diagnostics(
-        environ={},
-        mode="local_dry_run",
-        ci_evidence={"ci_status": "ci_unavailable", "steps_executed": 0, "runner_id": 0},
-    )
-    zero_step = next(item for item in report["diagnostics"] if item["code"] == "zero_step_ci")
-    assert zero_step["status"] == "detected"
-    assert zero_step["failure_details"]["runner_id"] == 0
-    assert zero_step["failure_details"]["runner_assigned"] is False
-
-
-def test_run_all_diagnostics_reflects_a_real_assigned_runner_with_executed_steps():
-    """The same wiring must also report a healthy, non-zero-step CI run
-    accurately -- this is not a one-way "always detect" shortcut."""
-    report = run_all_diagnostics(
-        environ={},
-        mode="local_dry_run",
-        ci_evidence={"ci_status": "passed", "steps_executed": 6, "runner_id": 4821},
-    )
-    zero_step = next(item for item in report["diagnostics"] if item["code"] == "zero_step_ci")
-    assert zero_step["status"] == "ok"
-    assert zero_step["failure_details"]["runner_id"] == 4821
-
-
-def test_run_all_diagnostics_fails_closed_on_malformed_ci_evidence():
-    """A non-mapping ci_evidence must not crash run_all_diagnostics or be
-    silently ignored as if it were never supplied -- it is surfaced as its
-    own detected diagnostic instead."""
-    report = run_all_diagnostics(environ={}, mode="local_dry_run", ci_evidence="not-a-mapping")
-    zero_step = next(item for item in report["diagnostics"] if item["code"] == "zero_step_ci")
-    assert zero_step["status"] == "detected"
-    assert zero_step["failure_details"]["ci_status"] == "malformed"
-
-
 def test_diagnose_malformed_report():
     # Non-dict
     res_bad_root = diagnose_malformed_report(["item"], ("schema", "status"))
