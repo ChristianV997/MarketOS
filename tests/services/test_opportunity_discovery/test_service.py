@@ -599,6 +599,46 @@ def test_cli_smoke_is_json_and_does_not_claim_live_validation(tmp_path: Path) ->
     assert output["safety"]["launch_authorized"] is False
 
 
+def _cli_json(tmp_path: Path, payload: dict) -> dict:
+    input_path = tmp_path / "input.json"
+    input_path.write_text(json.dumps(payload), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "scripts/run_opportunity_discovery.py", "--mode", "evaluate", "--input", str(input_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    return json.loads(result.stdout)
+
+
+def test_json_report_exposes_evidence_gaps_in_deterministic_order(tmp_path: Path) -> None:
+    payload = product()
+    payload["candidates"][0]["economics"]["assumptions"].pop("supplier_shipping")
+
+    output = _cli_json(tmp_path, payload)
+    report = run_discovery("evaluate", payload)
+    gaps = output["decisions"][0]["evidence_gaps"]
+
+    assert "shipping" in gaps
+    assert gaps == sorted(set(gaps))
+    assert gaps == list(report.decisions[0].evidence_gaps)
+    assert output["decisions"][0]["recommendation"] == "needs_evidence"
+    markdown = render_markdown(report).replace("\\", "")
+    for gap in gaps:
+        assert gap in markdown
+
+
+def test_json_report_evidence_gaps_is_an_empty_list_when_complete(tmp_path: Path) -> None:
+    output = _cli_json(tmp_path, ready_product())
+    decision = output["decisions"][0]
+
+    assert decision["evidence_gaps"] == []
+    assert decision["readiness"] == "ready"
+    assert "## Evidence Gaps" not in render_markdown(run_discovery("evaluate", ready_product()))
+
+
 @pytest.mark.parametrize("mode", ["discover", "evaluate", "compare", "validate", "review-results"])
 def test_cli_executes_every_discovery_mode_with_deterministic_json(mode: str, tmp_path: Path) -> None:
     payload = product()
