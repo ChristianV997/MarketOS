@@ -130,7 +130,6 @@ def _execute_stages(
     context: dict[str, Any] | None = None,
     force_start_stage: bool = False,
 ) -> WorkflowRun:
-    registry = get_workflow_registry()
     context = context or _context_from_run(run)
     run.status = "running"
     run.started_at = run.started_at or time.time()

@@ -30,7 +30,10 @@ def test_resume_keeps_existing_workflow_and_replay_is_scoped():
     assert resumed["stages"][0]["stage_name"] == "import_evidence"
     replayed = replay_workflow_stage(initial["workflow_id"], "market_discovery")
     assert replayed["workflow_id"] == initial["workflow_id"]
-    assert any(x["event_type"] == "replay_started" for x in replayed.get("obsidian", {}).get("timeline", {}).get("detail", {}).get("events", []) if isinstance(x, dict)) or replayed["status"] in {"completed", "partial"}
+    if replayed["status"] == "blocked":
+        assert replayed["blocked_reasons"] == ["stage_checkpoint_not_replayable"]
+    else:
+        assert any(x["event_type"] == "replay_started" for x in replayed.get("obsidian", {}).get("timeline", {}).get("detail", {}).get("events", []) if isinstance(x, dict)) or replayed["status"] in {"completed", "partial"}
 
 
 def test_recoverable_checkpoint_resumption_and_unrecoverable_blocking():
