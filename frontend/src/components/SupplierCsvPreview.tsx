@@ -54,6 +54,7 @@ export function SupplierCsvPreview({
   const [fileName, setFileName] = useState<string>(file?.name || "");
   const [preview, setPreview] = useState<SupplierCsvPreviewResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Parse whenever csvText changes
@@ -71,23 +72,34 @@ export function SupplierCsvPreview({
   // Handle external file prop changes
   useEffect(() => {
     if (file) {
+      setParseError(null);
       setFileName(file.name);
       file.text().then((text) => {
         setCsvText(text);
       }).catch(() => {
         setCsvText("");
+        setParseError("Failed to read file.");
       });
     }
   }, [file]);
 
+  const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (!selected) return;
+    setParseError(null);
+    if (selected.size > MAX_FILE_SIZE_BYTES) {
+      setParseError(`File too large. Maximum size is 5MB.`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     setFileName(selected.name);
     selected.text().then((text) => {
       setCsvText(text);
     }).catch(() => {
       setCsvText("");
+      setParseError("Failed to read file.");
     });
   }, []);
 
@@ -96,12 +108,21 @@ export function SupplierCsvPreview({
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files?.[0];
     if (!droppedFile) return;
-    if (!droppedFile.name.endsWith(".csv")) return;
+    setParseError(null);
+    if (!droppedFile.name.endsWith(".csv")) {
+      setParseError("Only .csv files are supported.");
+      return;
+    }
+    if (droppedFile.size > MAX_FILE_SIZE_BYTES) {
+      setParseError(`File too large. Maximum size is 5MB.`);
+      return;
+    }
     setFileName(droppedFile.name);
     droppedFile.text().then((text) => {
       setCsvText(text);
     }).catch(() => {
       setCsvText("");
+      setParseError("Failed to read file.");
     });
   }, []);
 
@@ -109,6 +130,7 @@ export function SupplierCsvPreview({
     setCsvText("");
     setFileName("");
     setPreview(null);
+    setParseError(null);
     onPreviewChange?.(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -184,6 +206,12 @@ export function SupplierCsvPreview({
           <p className="text-xs text-gray-500 mt-1">
             Local browser preview only — no files are transmitted or persisted.
           </p>
+          {parseError && (
+            <div className="mt-4 flex items-center gap-2 rounded bg-red-950/40 px-3 py-2 text-sm text-red-400 border border-red-800/50">
+              <AlertTriangle className="h-4 w-4" />
+              <span>{parseError}</span>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -306,12 +334,12 @@ export function SupplierCsvPreview({
                   const isSelected = Boolean(
                     selectedCandidateId && row.candidateId && row.candidateId === selectedCandidateId
                   );
-                  const isSelectable = Boolean(row.candidateId && onSelectCandidateId);
+                  const isSelectable = Boolean(row.candidateId && row.isValid && onSelectCandidateId);
                   return (
                     <tr
                       key={row.rowIndex}
                       onClick={() => {
-                        if (row.candidateId) {
+                        if (row.candidateId && row.isValid) {
                           onSelectCandidateId?.(row.candidateId);
                         }
                       }}
