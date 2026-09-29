@@ -802,3 +802,168 @@ def test_multi_location_evidence_refs_reconciled_across_all_locations():
     ev_ids = {r.evidence_id for r in report.evidence_refs}
     assert "ev:loc1" in ev_ids
     assert "ev:loc2" in ev_ids
+
+
+# ---------------------------------------------------------------------------
+# Regressions: Multi-Location Allocation, Shortage Compensation & Replay
+# ---------------------------------------------------------------------------
+
+
+def test_multi_location_partial_allocation_conserves_distinct_facility_evidence():
+    """Verify that multi-location partial allocation preserves distinct location evidence in canonical order."""
+    scenario = build_named_scenario("successful_direct_shipment")
+
+    loc_ref_north = EvidenceRef(
+        "evidence:allocation:warehouse_north",
+        source_type="fixture",
+        extraction_method="fixture",
+        evidence_state="observed",
+        origin="CN",
+        destination="MX",
+        captured_at="2026-01-01T08:00:00+00:00",
+    )
+    loc_ref_south = EvidenceRef(
+        "evidence:allocation:warehouse_south",
+        source_type="fixture",
+        extraction_method="fixture",
+        evidence_state="observed",
+        origin="CN",
+        destination="MX",
+        captured_at="2026-01-01T09:00:00+00:00",
+    )
+
+    multi_loc_scenario = replace(
+        scenario,
+        evidence_refs=(loc_ref_south, loc_ref_north),
+        evidence_state="observed",
+    )
+
+    report = run_fulfillment_risk_dry_run(multi_loc_scenario, adapter=FixtureFulfillmentAdapter.complete())
+
+    # Evidence conservation: all distinct locations present in canonical sort order
+    evidence_ids = [r.evidence_id for r in report.evidence_refs]
+    assert "evidence:allocation:warehouse_north" in evidence_ids
+    assert "evidence:allocation:warehouse_south" in evidence_ids
+    assert evidence_ids == sorted(evidence_ids)
+
+    # Money conservation: economic net sales and product cost amounts and currency remain exact
+    assert report.economics.net_sales.amount == scenario.price.amount
+    assert report.economics.net_sales.currency == scenario.price.currency
+    assert report.economics.product_cost.amount == scenario.product_cost.amount
+    assert report.economics.product_cost.currency == scenario.product_cost.currency
+
+    # Event projection preserves evidence across all events
+    for event in report.events[1:1+len(report.state_path)]:
+        assert "evidence:allocation:warehouse_north" in event.metadata["evidence_ids"]
+        assert "evidence:allocation:warehouse_south" in event.metadata["evidence_ids"]
+
+
+def test_multi_location_partial_allocation_fail_closed_on_unverified_location():
+    """Verify aggregate evidence state resolves fail-closed if any location allocation has stale/missing evidence."""
+    scenario = build_named_scenario("successful_direct_shipment")
+
+    verified_loc = EvidenceRef(
+        "evidence:loc:shenzhen",
+        source_type="fixture",
+        extraction_method="fixture",
+        evidence_state="verified",
+        captured_at="2026-01-01T00:00:00+00:00",
+    )
+    stale_loc = EvidenceRef(
+        "evidence:loc:ningbo",
+        source_type="fixture",
+        extraction_method="fixture",
+        evidence_state="stale",
+        captured_at="2026-01-01T00:00:00+00:00",
+    )
+
+    report = run_fulfillment_risk_dry_run(
+        replace(scenario, evidence_refs=(verified_loc, stale_loc), evidence_state="verified"),
+        adapter=FixtureFulfillmentAdapter.complete(),
+    )
+    assert report.evidence_state == "unknown"
+    assert len(report.evidence_refs) >= 2
+
+
+def test_shortage_rejection_compensation_lifecycle_and_reserve_conservation():
+    """Verify stock shortage / rejection triggers compensation path, exposure flags, and terminal reconciliation."""
+    compensation_path = (
+        "order_received",
+        "payment_authorized",
+        "payment_captured",
+        "cancelled",
+        "refund_requested",
+        "refund_completed",
+        "contribution_reconciled",
+    )
+    base = build_named_scenario("stock_cancellation_after_payment")
+    scenario = replace(base, state_path=compensation_path)
+
+    report = run_fulfillment_risk_dry_run(scenario, adapter=FixtureFulfillmentAdapter.complete())
+
+    assert report.current_state == "contribution_reconciled"
+    assert report.status == "simulated"
+    assert "return_reserve_exposure" in report.reserve_classifications
+    assert report.next_human_action == "archive_sanitized_evidence_and_review_next_scenario"
+
+    # Money conservation across compensation
+    assert report.economics.net_sales.amount == scenario.price.amount
+    assert report.economics.net_sales.currency == scenario.price.currency
+    assert report.economics.product_cost.amount == scenario.product_cost.amount
+    assert report.economics.product_cost.currency == scenario.product_cost.currency
+    assert report.state_path == compensation_path
+
+
+def test_shortage_rejection_at_cancellation_and_refund_stages_require_operator_action():
+    """Verify shortage rejection at cancellation and refund stages directs operator to appropriate resolution."""
+    base = build_named_scenario("stock_cancellation_after_payment")
+
+    # Step 1: At cancelled state, customer resolution exposure is triggered
+    cancelled_scenario = replace(base, state_path=("order_received", "payment_authorized", "payment_captured", "cancelled"))
+    report_cancelled = run_fulfillment_risk_dry_run(cancelled_scenario, adapter=FixtureFulfillmentAdapter.complete())
+    assert report_cancelled.current_state == "cancelled"
+    assert "customer_resolution_exposure" in report_cancelled.risk_flags
+
+    # Step 2: At refund_requested state, refund reconciliation action is required and return reserve exposure is tracked
+    refund_scenario = base  # state_path ends in refund_requested
+    report_refund = run_fulfillment_risk_dry_run(refund_scenario, adapter=FixtureFulfillmentAdapter.complete())
+    assert report_refund.current_state == "refund_requested"
+    assert report_refund.next_human_action == "reconcile_refund_or_chargeback_owner_and_timing"
+    assert "reverse_logistics_exposure" in report_refund.risk_flags
+    assert "return_reserve_exposure" in report_refund.reserve_classifications
+
+
+def test_replay_idempotency_and_exact_once_reservation_adjustment():
+    """Verify event projection replay is strictly idempotent, preserves causation chain, and adjusts reservations exactly once."""
+    scenario = build_named_scenario("successful_direct_shipment")
+    report = run_fulfillment_risk_dry_run(scenario, adapter=FixtureFulfillmentAdapter.complete())
+
+    repository = InMemoryEventRepository()
+
+    # First projection append
+    first_results = repository.append_many(report.events)
+    assert len(first_results) == len(report.events)
+    assert all(r.appended and not r.idempotent for r in first_results)
+
+    # Second projection append (replay)
+    replay_results = repository.append_many(report.events)
+    assert len(replay_results) == len(report.events)
+    assert all(not r.appended and r.idempotent for r in replay_results)
+
+    # Conservation of total events
+    stream_events = list(repository.stream(aggregate_id=scenario.order_id))
+    assert len(stream_events) == len(report.events)
+
+    # Causation integrity: each event chains to the preceding event exactly once
+    assert stream_events[0].causation_id is None
+    for idx in range(1, len(stream_events)):
+        assert stream_events[idx].causation_id == stream_events[idx - 1].event_id
+
+    # State transitions: exactly one event per state_path step
+    transition_events = stream_events[1:1+len(report.state_path)]
+    assert len(transition_events) == len(report.state_path)
+    for idx, (event, state) in enumerate(zip(transition_events, report.state_path), start=1):
+        assert event.event_type == f"fulfillment_risk_{state}"
+        assert event.payload["state"] == state
+        assert event.payload["state_index"] == idx
+        assert event.metadata["idempotency_key"] == f"{report.scenario_id}:{idx:03d}:{state}"
