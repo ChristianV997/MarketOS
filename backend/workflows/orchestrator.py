@@ -81,6 +81,38 @@ def _persist(run: WorkflowRun) -> None:
     get_workflow_registry().update_workflow(run)
 
 
+def _sync_run_state(run: WorkflowRun) -> None:
+    seen_refs: set[tuple[Any, ...]] = set()
+    aggregated_refs: list[dict[str, Any]] = []
+    for s in run.stages:
+        for ref in s.produced_object_ids:
+            key = (ref.get("object_type"), ref.get("object_id"), ref.get("relation"))
+            if key not in seen_refs:
+                seen_refs.add(key)
+                aggregated_refs.append(ref)
+    run.produced_object_ids = aggregated_refs
+
+    active_warnings: list[str] = []
+    for w in run.warnings:
+        if w not in active_warnings:
+            active_warnings.append(w)
+    for s in run.stages:
+        for w in s.warnings:
+            if w not in active_warnings:
+                active_warnings.append(w)
+    run.warnings = active_warnings
+
+    active_errors: list[str] = []
+    for s in run.stages:
+        if s.status in {"failed", "blocked"}:
+            for err in (s.errors or s.blocked_reasons):
+                if err not in active_errors:
+                    active_errors.append(err)
+    if run.status in {"blocked", "failed"} and not active_errors:
+        active_errors = list(dict.fromkeys(run.errors))
+    run.errors = active_errors
+
+
 def _context_from_run(run: WorkflowRun) -> dict[str, Any]:
     """Return a conservative context for recovery.
 
@@ -96,6 +128,7 @@ def _execute_stages(
     start_index: int = 0,
     stop_after_stage: str | None = None,
     context: dict[str, Any] | None = None,
+    force_start_stage: bool = False,
 ) -> WorkflowRun:
     registry = get_workflow_registry()
     context = context or _context_from_run(run)
@@ -105,7 +138,11 @@ def _execute_stages(
 
     for index in range(start_index, len(run.stages)):
         stage = run.stages[index]
-        if stage.status in {"completed", "skipped", "recovered"} and stop_after_stage != stage.stage_name:
+        if (
+            stage.status in {"completed", "skipped", "recovered"}
+            and stop_after_stage != stage.stage_name
+            and not (force_start_stage and index == start_index)
+        ):
             continue
 
         run.current_stage = stage.stage_name
@@ -126,9 +163,6 @@ def _execute_stages(
             stage.output_summary = {"status": stage.status}
             stage.produced_object_ids = list(result.get("produced_object_ids", []))
             context.update(result.get("next_context", {}))
-            run.produced_object_ids.extend(stage.produced_object_ids)
-            run.warnings.extend(stage.warnings)
-            run.errors.extend(stage.errors)
 
             if stage.status in {"blocked", "failed"}:
                 run.status = "partial"
@@ -143,18 +177,30 @@ def _execute_stages(
             stage.status = "failed"
             stage.errors.append(info["message"])
             stage.metadata["failure_classification"] = info
-            run.errors.append(info["message"])
             run.status = "partial"
             _event(run, stage.stage_name, "stage_failed", info["message"], info["severity"])
 
         stage.finished_at = time.time()
+        classification = stage.metadata.get("failure_classification")
+        if classification:
+            is_safety = classification.get("category") in {"blocked_by_safety", "unsafe_path"}
+            recoverable = False if is_safety else bool(classification.get("recoverable", False))
+            replayable = False if (is_safety or stage.status == "blocked") else True
+        elif stage.status in {"failed", "blocked"}:
+            recoverable = False
+            replayable = stage.status != "blocked"
+        else:
+            recoverable = True
+            replayable = True
+
         _checkpoint(
             run,
             stage,
             "failure" if stage.status in {"failed", "blocked"} else "after_stage",
-            recoverable=stage.status not in {"failed"},
-            replayable=stage.status not in {"blocked"},
+            recoverable=recoverable,
+            replayable=replayable,
         )
+        _sync_run_state(run)
         _persist(run)
         if stop_after_stage == stage.stage_name:
             break
@@ -164,6 +210,7 @@ def _execute_stages(
     has_failure = any(stage.status in {"failed", "blocked"} for stage in run.stages if stage.finished_at)
     run.status = "partial" if has_failure or not all_finished else "completed"
     run.finished_at = time.time()
+    _sync_run_state(run)
     run.final_output = build_workflow_summary(run)
     _persist(run)
     _event(run, "", "workflow_completed" if run.status == "completed" else "workflow_partial", f"Workflow {run.status}")
@@ -227,11 +274,23 @@ def run_workflow(
         _persist(run)
         return run.to_dict()
 
+    start_index = 0
     if resume_from_checkpoint_id:
-        checkpoint = next((item for item in run.checkpoints if item.checkpoint_id == resume_from_checkpoint_id), None)
+        checkpoint = registry.checkpoints.get(resume_from_checkpoint_id)
         if checkpoint is None:
-            run.warnings.append("resume_checkpoint_ignored: checkpoint belongs to a new run")
-    completed = _execute_stages(run, 0, stop_after_stage)
+            checkpoint = next((item for item in run.checkpoints if item.checkpoint_id == resume_from_checkpoint_id), None)
+        if checkpoint is None:
+            run.warnings.append("resume_checkpoint_ignored: checkpoint not found")
+        elif not checkpoint.recoverable:
+            run.warnings.append("resume_checkpoint_ignored: checkpoint not recoverable")
+        else:
+            matching_index = next((idx for idx, s in enumerate(run.stages) if s.stage_name == checkpoint.stage_name), None)
+            if matching_index is not None:
+                start_index = matching_index
+                run.warnings.append(f"resumed_from_checkpoint:{checkpoint.checkpoint_id}")
+            else:
+                run.warnings.append("resume_checkpoint_ignored: stage not in plan")
+    completed = _execute_stages(run, start_index, stop_after_stage, force_start_stage=bool(resume_from_checkpoint_id and start_index > 0))
     result = completed.to_dict()
     result["obsidian"] = _sync_workflow_notes(completed)
     return result
@@ -251,6 +310,8 @@ def resume_workflow(
     if checkpoint_id:
         checkpoint = next((item for item in run.checkpoints if item.checkpoint_id == checkpoint_id), None)
         if checkpoint is None:
+            checkpoint = registry.checkpoints.get(checkpoint_id)
+        if checkpoint is None:
             return {"status": "not_found", "workflow_id": workflow_id, "checkpoint_id": checkpoint_id}
         if not checkpoint.recoverable:
             return {"status": "blocked", "workflow_id": workflow_id, "blocked_reasons": ["checkpoint_not_recoverable"]}
@@ -263,7 +324,7 @@ def resume_workflow(
 
     _event(run, stage_name, "recovery_started", "Workflow recovery started")
     run.warnings.append(f"recovery_from_stage:{stage_name}")
-    recovered = _execute_stages(run, stage_index)
+    recovered = _execute_stages(run, stage_index, force_start_stage=True)
     _event(run, stage_name, "recovery_completed", "Workflow recovery completed")
     result = recovered.to_dict()
     result["obsidian"] = _sync_workflow_notes(recovered)
@@ -292,7 +353,8 @@ def replay_workflow_stage(workflow_id: str, stage_name: str, reason: str = "manu
     # intact; new refs are marked as replay output by the stage metadata.
     replayed = _execute_stages(run, run.stages.index(stage), stage_name)
     for ref in stage.produced_object_ids:
-        ref.setdefault("relation", "replay_of")
+        ref["relation"] = "replay_of"
+    _sync_run_state(replayed)
     _event(replayed, stage_name, "replay_completed", "Workflow stage replay completed", refs=stage.produced_object_ids)
     result = replayed.to_dict()
     result["obsidian"] = _sync_workflow_notes(replayed)
