@@ -16,7 +16,7 @@ from backend.discovery.import_registry import get_import_registry
 from backend.discovery.market_discovery_runner import run_market_discovery
 from backend.discovery.refinement_registry import get_refinement_registry
 from backend.discovery.refinement_runner import run_import_refine_compare, run_refinement_cycle
-from backend.obsidian.sync import sync_acquisition_plan_note, sync_connector_stub_note
+from backend.obsidian.sync import sync_connector_stub_note
 from backend.obsidian.sync import sync_evidence_import_note
 from backend.discovery.opportunity_registry import get_opportunity_registry
 from backend.discovery.opportunity_pipeline_builder import refresh_opportunity_pipeline
@@ -26,6 +26,17 @@ from backend.discovery.validation_sprint_registry import get_validation_sprint_r
 from backend.discovery.validation_sprint_runner import run_validation_sprint
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
+
+
+@router.post("/opportunity-discovery")
+def opportunity_discovery(mode: str = Query("evaluate"), payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    """Run the canonical offline opportunity-discovery service read-only."""
+    from services.opportunity_discovery import OpportunityDiscoveryError, run_discovery
+
+    try:
+        return run_discovery(mode, payload).to_dict()
+    except OpportunityDiscoveryError as exc:
+        return {"status": "malformed", "error": exc.code}
 
 
 @router.post("/source-calibration")
