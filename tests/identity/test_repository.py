@@ -42,6 +42,8 @@ def test_membership_is_keyed_by_issuer_and_subject(seeded):
         lambda r: r.add_member("bad id", ISSUER, "u"),
         lambda r: r.add_member("ws_owner_alice", "", "u"),
         lambda r: r.add_member("ws_owner_alice", ISSUER, "u\x00"),
+        lambda r: r.add_member("ws_owner_alice", ISSUER, " user_x"),
+        lambda r: r.add_member("ws_owner_alice", ISSUER + " ", "user_x"),
     ],
 )
 def test_provisioning_rejects_invalid_input_before_touching_storage(seeded, call):

@@ -30,6 +30,8 @@ def handler(access: WorkspaceAccess = Depends(resolve_workspace_access)): ...
 
 `workspace_identity`, `workspace_members`, `owner_portfolio_items`, `client_profiles`, `client_profile_entries`, plus `.down.sql` and a Postgres-only `.rls.sql` (RLS on, no policies, matching `deploy/supabase/schema.sql`).
 
+**Operator note:** on a database with a public data API (e.g. Supabase `public` schema) the `.rls.sql` file **must** be applied right after `.up.sql`; the portable `.up.sql` alone leaves these tables, including `workspace_members`, readable through that API. Nothing in this repo applies either file automatically.
+
 * **Prerequisite:** the existing `workspaces` table from `deploy/supabase/schema.sql`. The migration never creates, alters or drops it, so there is one workspace catalog in Postgres.
 * Owner data can only attach to `internal` workspaces and client data only to `client_service` workspaces (composite FK + CHECK). `workspace_type` reuses `backend.workspaces.client_workspace.WORKSPACE_TYPES`.
 * `evidence_label` has no live/measured value. Client social accounts are `connection_state = 'record_only'` by constraint. No `ON DELETE CASCADE`.

@@ -53,6 +53,8 @@ def test_valid_claims_yield_the_verified_principal():
         {"exp": True},
         {"exp": math.nan},
         {"exp": math.inf},
+        {"exp": 10**400},
+        {"nbf": 10**400},
         {"nbf": NOW + 30},
         {"nbf": "soon"},
         {"azp": _MISSING},
