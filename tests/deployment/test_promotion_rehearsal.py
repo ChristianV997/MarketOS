@@ -523,17 +523,16 @@ def _fake_operator_stack_payload(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
-def test_operator_stack_evidence_reports_unavailable_when_the_runner_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The exact current-branch state: #290's runner is not merged here.
-    subprocess.Popen must never even be called in this case."""
-    called = []
-    monkeypatch.setattr(rehearsal_module.subprocess, "Popen", lambda *a, **k: called.append(1))
+def test_operator_stack_evidence_reports_installed_runner_as_read_only() -> None:
+    """The installed runner is available, but default rehearsal stays dry-run."""
     from backend.deployment.promotion_rehearsal import _operator_stack_evidence
 
     result = _operator_stack_evidence()
-    assert result["status"] == "unavailable"
-    assert result["runner_present"] is False
-    assert called == []
+    assert result["status"] == "not_run"
+    assert result["runner_present"] is True
+    assert result["dry_run"] is True
+    assert result["network_calls"] is False
+    assert result["mutated"] is False
 
 
 class _FakePopen:
