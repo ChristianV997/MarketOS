@@ -37,11 +37,8 @@ def test_resume_keeps_existing_workflow_and_replay_is_scoped():
 
 
 def test_recoverable_checkpoint_resumption_and_unrecoverable_blocking():
-    # Test that recoverable failures produce recoverable checkpoints and allow resumption,
-    # while unrecoverable failures produce non-recoverable checkpoints and block resumption.
     registry = get_workflow_registry()
 
-    # 1. Recoverable failure (missing evidence)
     with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
         mock_exec.side_effect = Exception("missing evidence for discovery")
         failed_run = run_workflow(
@@ -56,14 +53,12 @@ def test_recoverable_checkpoint_resumption_and_unrecoverable_blocking():
     assert cp.recoverable is True
     assert cp.replayable is True
 
-    # Resuming from the recoverable checkpoint succeeds
     with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
         mock_exec.return_value = {"status": "completed", "output": {"data": 123}, "produced_object_ids": []}
         resumed = resume_workflow(failed_run["workflow_id"], checkpoint_id=cp.checkpoint_id)
     assert resumed["status"] in {"completed", "partial"}
     assert resumed["workflow_id"] == failed_run["workflow_id"]
 
-    # 2. Unrecoverable failure (unsafe path escape)
     with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
         mock_exec.side_effect = Exception("unsafe path escape detected")
         unrec_run = run_workflow(
@@ -78,15 +73,12 @@ def test_recoverable_checkpoint_resumption_and_unrecoverable_blocking():
     assert unrec_cp.recoverable is False
     assert unrec_cp.replayable is False
 
-    # Resuming from unrecoverable checkpoint is blocked
     blocked_resume = resume_workflow(unrec_run["workflow_id"], checkpoint_id=unrec_cp.checkpoint_id)
     assert blocked_resume["status"] == "blocked"
     assert "checkpoint_not_recoverable" in blocked_resume["blocked_reasons"]
 
 
 def test_recovery_clears_stale_errors_and_deduplicates_produced_objects():
-    # Test idempotency: when a failed stage is recovered, stale errors are cleared
-    # and produced_object_ids are deduplicated across runs and replays.
     with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
         mock_exec.side_effect = Exception("temporary unavailable service error")
         initial = run_workflow(
@@ -98,19 +90,16 @@ def test_recovery_clears_stale_errors_and_deduplicates_produced_objects():
     assert initial["status"] == "partial"
     assert len(initial["errors"]) > 0
 
-    # Recover the stage with success and produced objects
     mock_obj = [{"object_type": "discovery_run", "object_id": "disc_101", "registry": "marketos", "relation": "produced"}]
     with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
         mock_exec.return_value = {"status": "completed", "output": {}, "produced_object_ids": mock_obj}
         resumed = resume_workflow(initial["workflow_id"], from_stage="import_evidence")
 
-    # Workflow completed, errors cleared, operator_actions_required empty of old errors
     assert resumed["status"] == "completed"
     assert resumed["errors"] == []
     assert not any("temporary unavailable" in act for act in resumed["final_output"]["operator_actions_required"])
     assert any(x["object_id"] == "disc_101" for x in resumed["produced_object_ids"])
 
-    # Replay stage: refs marked replay_of and deduplicated
     with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
         mock_exec.return_value = {"status": "completed", "output": {}, "produced_object_ids": mock_obj}
         replayed = replay_workflow_stage(initial["workflow_id"], "import_evidence")
@@ -118,13 +107,11 @@ def test_recovery_clears_stale_errors_and_deduplicates_produced_objects():
     assert replayed["status"] == "completed"
     replayed_refs = [x for x in replayed["stages"][0]["produced_object_ids"]]
     assert all(x.get("relation") == "replay_of" for x in replayed_refs)
-    # Check that produced_object_ids on workflow is deduplicated
     disc_ids = [x["object_id"] for x in replayed["produced_object_ids"] if x["object_id"] == "disc_101"]
     assert len(disc_ids) == 1
 
 
 def test_run_workflow_with_resume_from_checkpoint_id():
-    # Test starting a workflow from an existing checkpoint
     registry = get_workflow_registry()
     with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
         mock_exec.return_value = {"status": "completed", "output": {}, "produced_object_ids": []}
@@ -147,3 +134,72 @@ def test_run_workflow_with_resume_from_checkpoint_id():
         )
     assert second["status"] == "completed"
     assert any("resumed_from_checkpoint" in w for w in second["warnings"])
+
+
+def _event_types(workflow_id, stage_name=None, event_type=None):
+    events = get_workflow_registry().list_timeline(workflow_id)
+    if stage_name is not None:
+        events = [e for e in events if e.stage_name == stage_name]
+    if event_type is not None:
+        events = [e for e in events if e.event_type == event_type]
+    return [e.event_type for e in events]
+
+
+def test_interrupt_restart_replay_is_idempotent_for_completed_work():
+    """Interrupt after a completed stage, resume from its after_stage checkpoint,
+    then replay that same completed work. Transitions and emitted stage/workflow
+    events must not duplicate; produced refs and final status stay stable.
+    """
+    registry = get_workflow_registry()
+    produced = [{"object_type": "evidence_import", "object_id": "imp_1", "registry": "marketos", "relation": "produced"}]
+
+    with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
+        mock_exec.return_value = {"status": "completed", "output": {"ok": True}, "produced_object_ids": produced}
+        interrupted = run_workflow(
+            workspace_id="test-interrupt-replay",
+            workflow_type="import_discovery_cycle",
+            payload={},
+            stop_after_stage="import_evidence",
+        )
+
+    assert interrupted["status"] == "partial"
+    import_stage = next(s for s in interrupted["stages"] if s["stage_name"] == "import_evidence")
+    assert import_stage["status"] == "completed"
+    cp = registry.latest_checkpoint(interrupted["workflow_id"], "import_evidence")
+    assert cp is not None
+    assert cp.checkpoint_type == "after_stage"
+    assert cp.recoverable is True
+    assert cp.replayable is True
+    assert _event_types(interrupted["workflow_id"], "import_evidence", "stage_completed") == ["stage_completed"]
+    assert _event_types(interrupted["workflow_id"], "", "workflow_partial") == ["workflow_partial"]
+    completed_ids = [x["object_id"] for x in interrupted["produced_object_ids"]]
+    assert completed_ids == ["imp_1"]
+
+    with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
+        mock_exec.return_value = {"status": "completed", "output": {}, "produced_object_ids": []}
+        restarted = resume_workflow(interrupted["workflow_id"], checkpoint_id=cp.checkpoint_id)
+
+    restarted_import = next(s for s in restarted["stages"] if s["stage_name"] == "import_evidence")
+    assert restarted["workflow_id"] == interrupted["workflow_id"]
+    assert restarted_import["status"] == "completed"
+    assert restarted_import["retry_count"] == 0
+    called_stages = [call.args[1].stage_name for call in mock_exec.call_args_list]
+    assert "import_evidence" not in called_stages
+    assert _event_types(interrupted["workflow_id"], "import_evidence", "stage_started") == ["stage_started"]
+    assert _event_types(interrupted["workflow_id"], "import_evidence", "stage_completed") == ["stage_completed"]
+    assert [x["object_id"] for x in restarted["produced_object_ids"] if x["object_id"] == "imp_1"] == ["imp_1"]
+
+    with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
+        mock_exec.return_value = {"status": "completed", "output": {"ok": True}, "produced_object_ids": produced}
+        replayed = replay_workflow_stage(interrupted["workflow_id"], "import_evidence")
+
+    assert replayed["status"] == restarted["status"]
+    assert mock_exec.call_count == 0
+    replayed_import = next(s for s in replayed["stages"] if s["stage_name"] == "import_evidence")
+    assert replayed_import["status"] == "completed"
+    assert _event_types(interrupted["workflow_id"], "import_evidence", "stage_completed") == ["stage_completed"]
+    assert _event_types(interrupted["workflow_id"], "", "workflow_completed") == ["workflow_completed"]
+    assert _event_types(interrupted["workflow_id"], "import_evidence", "replay_started") == ["replay_started"]
+    assert _event_types(interrupted["workflow_id"], "import_evidence", "replay_completed") == ["replay_completed"]
+    assert all(x.get("relation") == "replay_of" for x in replayed_import["produced_object_ids"])
+    assert [x["object_id"] for x in replayed["produced_object_ids"] if x["object_id"] == "imp_1"] == ["imp_1"]
