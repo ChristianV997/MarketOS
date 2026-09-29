@@ -334,6 +334,158 @@ class TestReconcileBrand:
         assert len(result["actions"]) == 1
         assert result["actions"][0]["action"] == "reprice"
 
+    def test_conflicting_inventory_order_is_conservative_and_deterministic(self, commerce):
+        import backend.commerce.inventory_sync as inv_mod
+        from evaluation.contracts import SupplierOffer
+
+        available = SupplierOffer(
+            supplier_id="cjdropshipping",
+            product_id="jade-roller",
+            unit_cost=5.0,
+            shipping_cost=3.0,
+            inventory_units=10,
+        )
+        stockout = SupplierOffer(
+            supplier_id="cjdropshipping",
+            product_id="jade-roller",
+            unit_cost=5.0,
+            shipping_cost=3.0,
+            inventory_units=0,
+        )
+        _, catalog, brand = commerce
+
+        forward = inv_mod.reconcile_brand(brand, offers=[available, stockout])
+        reverse = inv_mod.reconcile_brand(brand, offers=[stockout, available])
+
+        assert forward["actions"] == reverse["actions"]
+        assert forward["actions"] == [{
+            "action": "pause_stockout",
+            "product_id": "jade-roller",
+            "reason": "zero_inventory_units",
+            "provenance": {
+                "supplier": "cjdropshipping",
+                "supplier_product_id": "jade-roller",
+                "provenance": "unknown",
+            },
+        }]
+        assert catalog.get("jade-roller").status == STATUS_LIVE
+
+    def test_conflicting_positive_quantities_fail_closed_in_both_orders(self, commerce):
+        import backend.commerce.inventory_sync as inv_mod
+        from evaluation.contracts import SupplierOffer
+
+        offers = [
+            SupplierOffer(
+                supplier_id="cjdropshipping",
+                product_id="jade-roller",
+                unit_cost=5.0,
+                shipping_cost=3.0,
+                inventory_units=10,
+            ),
+            SupplierOffer(
+                supplier_id="cjdropshipping",
+                product_id="jade-roller",
+                unit_cost=5.0,
+                shipping_cost=3.0,
+                inventory_units=20,
+            ),
+        ]
+        _, _, brand = commerce
+
+        forward = inv_mod.reconcile_brand(brand, offers=offers)
+        reverse = inv_mod.reconcile_brand(brand, offers=list(reversed(offers)))
+
+        assert forward["actions"] == reverse["actions"]
+        assert forward["actions"][0]["action"] == "pause_stockout"
+        assert forward["actions"][0]["reason"] == "no_supplier_quote"
+
+    def test_duplicate_observations_use_stable_provenance_order(self, commerce):
+        from evaluation.contracts import DataQuality, SupplierOffer
+        import backend.commerce.inventory_sync as inv_mod
+
+        first = SupplierOffer(
+            supplier_id="cjdropshipping",
+            product_id="jade-roller",
+            unit_cost=5.0,
+            shipping_cost=3.0,
+            quality=DataQuality(source_ref="feed-b"),
+        )
+        second = SupplierOffer(
+            supplier_id="cjdropshipping",
+            product_id="jade-roller",
+            unit_cost=5.0,
+            shipping_cost=3.0,
+            quality=DataQuality(source_ref="feed-a"),
+        )
+        _, _, brand = commerce
+
+        forward = inv_mod.reconcile_brand(brand, offers=[first, second])
+        reverse = inv_mod.reconcile_brand(brand, offers=[second, first])
+
+        assert forward["actions"] == reverse["actions"]
+        assert forward["actions"][0]["provenance"]["source_ref"] == "feed-a"
+
+    def test_missing_and_explicit_zero_inventory_remain_distinct(self, commerce):
+        from evaluation.contracts import SupplierOffer
+        import backend.commerce.inventory_sync as inv_mod
+
+        missing = SupplierOffer(
+            supplier_id="cjdropshipping",
+            product_id="jade-roller",
+            unit_cost=3.6,
+            shipping_cost=2.4,
+            inventory_units=None,
+        )
+        explicit_zero = SupplierOffer(
+            supplier_id="cjdropshipping",
+            product_id="jade-roller",
+            unit_cost=3.6,
+            shipping_cost=2.4,
+            inventory_units=0,
+        )
+        _, _, brand = commerce
+
+        missing_result = inv_mod.reconcile_brand(brand, offers=[missing])
+        zero_result = inv_mod.reconcile_brand(brand, offers=[explicit_zero])
+        mixed_result = inv_mod.reconcile_brand(brand, offers=[missing, explicit_zero])
+
+        assert missing_result["actions"] == []
+        assert zero_result["actions"][0]["reason"] == "zero_inventory_units"
+        assert mixed_result["actions"][0]["reason"] == "zero_inventory_units"
+
+    def test_fresh_observation_wins_over_stale_reordering(self, commerce):
+        from datetime import datetime, timedelta, timezone
+        from evaluation.contracts import DataQuality, SupplierOffer
+        import backend.commerce.inventory_sync as inv_mod
+
+        stale = SupplierOffer(
+            supplier_id="cjdropshipping",
+            product_id="jade-roller",
+            unit_cost=5.0,
+            shipping_cost=3.0,
+            inventory_units=0,
+            quality=DataQuality(
+                observed_at=datetime.now(timezone.utc) - timedelta(days=5),
+                source_ref="stale-feed",
+            ),
+        )
+        fresh = SupplierOffer(
+            supplier_id="cjdropshipping",
+            product_id="jade-roller",
+            unit_cost=5.0,
+            shipping_cost=3.0,
+            inventory_units=10,
+            quality=DataQuality(source_ref="fresh-feed"),
+        )
+        _, _, brand = commerce
+
+        forward = inv_mod.reconcile_brand(brand, offers=[stale, fresh])
+        reverse = inv_mod.reconcile_brand(brand, offers=[fresh, stale])
+
+        assert forward["actions"] == reverse["actions"]
+        assert forward["actions"][0]["action"] == "reprice"
+        assert forward["actions"][0]["provenance"]["source_ref"] == "fresh-feed"
+
     def test_reconcile_all_brands_with_offers_by_brand(self, commerce):
         import backend.commerce.inventory_sync as inv_mod
         from evaluation.contracts import SupplierOffer

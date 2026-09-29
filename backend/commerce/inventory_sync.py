@@ -98,6 +98,126 @@ def _is_stale_observation(quote: Any, *, max_age_hours: float = 48.0) -> bool:
     return "stale_data" in reasons
 
 
+_MISSING = object()
+
+
+def _quote_value(quote: Any, *names: str) -> Any:
+    """Read a quote field without collapsing missing fields into zero values."""
+    for name in names:
+        if isinstance(quote, Mapping):
+            if name in quote:
+                return quote[name]
+        elif hasattr(quote, name):
+            return getattr(quote, name)
+    return _MISSING
+
+
+def _quote_identity(quote: Any) -> tuple[str, str]:
+    supplier = _quote_value(quote, "supplier", "supplier_id")
+    product_id = _quote_value(quote, "product_id", "supplier_product_id")
+    return (
+        "" if supplier is _MISSING or supplier is None else str(supplier),
+        "" if product_id is _MISSING or product_id is None else str(product_id),
+    )
+
+
+def _inventory_signature(quote: Any) -> tuple[str, Any]:
+    """Return a stable quantity state, retaining unknown versus explicit zero."""
+    units = _quote_value(quote, "inventory_units")
+    if units is _MISSING or units is None:
+        return ("unknown", None)
+    try:
+        return ("quantity", int(units))
+    except (TypeError, ValueError):
+        return ("invalid", str(units))
+
+
+def _numeric_field_signature(value: Any) -> tuple[str, Any]:
+    if value is _MISSING or value is None:
+        return ("missing", None)
+    try:
+        return ("number", round(float(value), 8))
+    except (TypeError, ValueError):
+        return ("invalid", str(value))
+
+
+def _landed_cost_signature(quote: Any) -> tuple[str, Any]:
+    """Keep missing cost evidence distinct from an explicit numeric zero."""
+    landed = _quote_value(quote, "landed_cost")
+    if landed is not _MISSING:
+        return ("landed", _numeric_field_signature(landed))
+
+    unit_cost = _quote_value(quote, "unit_cost", "cost")
+    shipping = _quote_value(quote, "shipping_cost", "shipping")
+    if unit_cost is _MISSING and shipping is _MISSING:
+        return ("missing", None)
+    return (
+        "components",
+        _numeric_field_signature(unit_cost),
+        _numeric_field_signature(shipping),
+    )
+
+
+def _reconciliation_signature(quote: Any) -> tuple[Any, ...]:
+    """Fields whose disagreement could change reconciliation or its safety."""
+    stock_ok = _quote_value(quote, "stock_ok")
+    in_stock = _quote_value(quote, "in_stock")
+    currency = _quote_value(quote, "currency")
+    return (
+        _quote_identity(quote),
+        _inventory_signature(quote),
+        ("missing" if stock_ok is _MISSING else stock_ok),
+        ("missing" if in_stock is _MISSING else in_stock),
+        _landed_cost_signature(quote),
+        ("missing" if currency is _MISSING else currency),
+    )
+
+
+def _stable_observation_key(quote: Any) -> tuple[str, ...]:
+    """Sort equivalent observations without depending on input order."""
+    quality = _quote_value(quote, "quality")
+    quality_values = tuple(
+        str(_quote_value(quality, field))
+        if _quote_value(quality, field) is not _MISSING
+        else ""
+        for field in ("provenance", "attribution", "completeness", "source_ref", "observed_at")
+    )
+    return (
+        *_quote_identity(quote),
+        repr(_reconciliation_signature(quote)),
+        *quality_values,
+    )
+
+
+def _select_consistent_observation(quotes: Sequence[Any]) -> Any | None:
+    """Select a deterministic quote or fail closed on fresh disagreement.
+
+    Stale observations are retained only when no fresh observation exists so
+    callers can preserve the existing skip-stale classification. If fresh
+    observations disagree, an explicit out-of-stock observation is the only
+    safe representative; otherwise no quote is returned.
+    """
+    if not quotes:
+        return None
+
+    fresh_quotes = [quote for quote in quotes if not _is_stale_observation(quote)]
+    candidates = fresh_quotes or list(quotes)
+    if not fresh_quotes:
+        return sorted(candidates, key=_stable_observation_key)[0]
+
+    signatures = {_reconciliation_signature(quote) for quote in candidates}
+    if len(signatures) == 1:
+        return sorted(candidates, key=_stable_observation_key)[0]
+
+    # A disagreement containing an explicit stockout must not be resolved to
+    # an optimistic in-stock observation. Preserve the zero/out-of-stock
+    # classification and its provenance while failing closed on other conflicts.
+    conservative = [quote for quote in candidates if _is_out_of_stock(quote)[0]]
+    if conservative:
+        return sorted(conservative, key=_stable_observation_key)[0]
+    return None
+
+
 def _extract_provenance(entry: Any, quote: Any | None) -> dict[str, Any]:
     """Extract supplier and quality provenance for auditability."""
     prov: dict[str, Any] = {
@@ -164,23 +284,22 @@ def _requote(
     if entry.supplier and entry.supplier_product_id:
         exact_matches = [
             q for q in quotes
-            if (getattr(q, "supplier", "") or getattr(q, "supplier_id", "") or (isinstance(q, dict) and q.get("supplier"))) == entry.supplier
-            and (getattr(q, "product_id", "") or getattr(q, "supplier_product_id", "") or (isinstance(q, dict) and q.get("product_id"))) == entry.supplier_product_id
+            if _quote_identity(q) == (entry.supplier, entry.supplier_product_id)
         ]
         if exact_matches:
-            return exact_matches[0]
+            return _select_consistent_observation(exact_matches)
 
     # Match on supplier name
     if entry.supplier:
         matches = [
             q for q in quotes
-            if (getattr(q, "supplier", "") or getattr(q, "supplier_id", "") or (isinstance(q, dict) and q.get("supplier"))) == entry.supplier
+            if _quote_identity(q)[0] == entry.supplier
         ]
         if matches:
-            return matches[0]
+            return _select_consistent_observation(matches)
         return None  # bound supplier no longer quoting -> treat as stockout
 
-    return quotes[0]
+    return _select_consistent_observation(quotes)
 
 
 def _reprice_action(entry: Any, quote: Any) -> dict[str, Any] | None:
