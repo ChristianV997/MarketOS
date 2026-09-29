@@ -1,13 +1,15 @@
 import { useRef, type KeyboardEvent } from "react";
-import { adjacentCandidateIndex, shouldHandoffDetailFocus } from "../../first-phase-cockpit/lib/keyboardNav";
-import type { OpportunityRow } from "../contracts/ownerResearch";
+import type { DroppedRow, OpportunityRow } from "../contracts/ownerResearch";
 import { formatReportedScore, humanize } from "../lib/format";
+import { resolveListboxKey } from "../lib/listboxKeys";
+import { describeHiddenRows } from "../lib/stateCopy";
 
 export const OPPORTUNITY_DETAIL_ID = "owner-opportunity-detail";
 const LISTBOX_HINT_ID = "owner-ranked-hint";
-const NAV_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"]);
 const CHIP_PILLARS = new Set(["market_evidence", "supplier_feasibility", "economics", "consumer_attention"]);
 
+const JUMP_LINK =
+  "mt-2 inline-flex min-h-[44px] items-center rounded text-sm text-sky-300 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 lg:hidden";
 const CHIP = "inline-flex items-center rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[11px] text-zinc-200";
 
 function freshnessChip(row: OpportunityRow): string {
@@ -19,16 +21,20 @@ function freshnessChip(row: OpportunityRow): string {
   }
 }
 
-/** Screen-reader summary. The option's children are presentational, so this carries everything. */
+/**
+ * Screen-reader summary. The option's children are presentational, so this
+ * carries the state; the candidate id is exposed as the option's description
+ * (aria-describedby) so a long id is not re-read as part of every name.
+ */
 export function describeOption(row: OpportunityRow): string {
+  const gates = row.hardGates.length;
   const parts = [
     `Rank ${row.rankNumber ?? `position ${row.position}`}`,
     row.title ?? "Untitled candidate",
-    `candidate ${row.candidateId}`,
     `evidence ${humanize(row.provenance.evidenceClass)}`,
   ];
   if (row.partial) parts.push("partial evidence");
-  if (row.hardGates.length > 0) parts.push(`${row.hardGates.length} blocking gates`);
+  if (gates > 0) parts.push(`${gates} blocking ${gates === 1 ? "gate" : "gates"}`);
   if (row.inPortfolio === true) parts.push("in curated portfolio");
   parts.push(freshnessChip(row).toLowerCase());
   return parts.join(", ");
@@ -44,30 +50,33 @@ export function RankedOpportunityList({
   selectedId,
   onSelect,
   onActivate,
+  hiddenRows,
 }: {
   rows: readonly OpportunityRow[];
   selectedId: string | null;
   onSelect: (candidateId: string) => void;
   onActivate?: (candidateId: string) => void;
+  /** Rows the adapter dropped (duplicate/malformed ids, rows past the cap); named here so a candidate never vanishes silently. */
+  hiddenRows?: readonly DroppedRow[];
 }) {
   const optionRefs = useRef<Array<HTMLLIElement | null>>([]);
   if (rows.length === 0) return null;
+  const hidden = describeHiddenRows(hiddenRows ?? []);
 
   const found = rows.findIndex((row) => row.candidateId === selectedId);
   const activeIndex = found >= 0 ? found : 0;
 
   function handleKeyDown(event: KeyboardEvent<HTMLLIElement>, index: number) {
-    if (shouldHandoffDetailFocus(event.key)) {
-      event.preventDefault();
-      onActivate?.(rows[index].candidateId);
-      return;
-    }
-    if (!NAV_KEYS.has(event.key)) return;
+    const action = resolveListboxKey(event, index, rows.length);
+    if (!action.handled) return;
     event.preventDefault();
-    const next = adjacentCandidateIndex(rows.length, index, event.key);
-    if (next < 0 || next === index) return;
-    onSelect(rows[next].candidateId);
-    queueMicrotask(() => optionRefs.current[next]?.focus());
+    if (action.kind === "activate") {
+      onActivate?.(rows[index].candidateId);
+    } else if (action.kind === "move") {
+      const next = action.nextIndex;
+      onSelect(rows[next].candidateId);
+      queueMicrotask(() => optionRefs.current[next]?.focus());
+    }
   }
 
   return (
@@ -79,10 +88,12 @@ export function RankedOpportunityList({
       <p id={LISTBOX_HINT_ID} className="mt-1 text-xs text-zinc-400">
         Arrow keys move the selection; Home and End jump to the first and last candidate; Enter opens the details.
       </p>
-      <a
-        href={`#${OPPORTUNITY_DETAIL_ID}`}
-        className="mt-2 inline-flex min-h-[44px] items-center rounded text-sm text-sky-300 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 lg:hidden"
-      >
+      {hidden.total > 0 ? (
+        <p data-hidden-rows={hidden.total} className="mt-1 text-xs text-amber-200 [overflow-wrap:anywhere]">
+          {hidden.total} ranked row{hidden.total === 1 ? "" : "s"} not shown: {hidden.text}. Each is listed in the ranking details above.
+        </p>
+      ) : null}
+      <a href={`#${OPPORTUNITY_DETAIL_ID}`} className={JUMP_LINK}>
         Jump to selected candidate details
       </a>
       <ul
@@ -90,7 +101,7 @@ export function RankedOpportunityList({
         aria-labelledby="owner-ranked-heading"
         aria-describedby={LISTBOX_HINT_ID}
         aria-orientation="vertical"
-        className="mt-3 space-y-2 lg:max-h-[70vh] lg:overflow-y-auto lg:pr-1"
+        className="mt-3 space-y-2 lg:max-h-[70vh] lg:overflow-y-auto lg:p-1"
       >
         {rows.map((row, index) => {
           const selected = index === activeIndex;
@@ -101,6 +112,7 @@ export function RankedOpportunityList({
               role="option"
               aria-selected={selected}
               aria-label={describeOption(row)}
+              aria-describedby={`owner-opp-id-${index}`}
               tabIndex={selected ? 0 : -1}
               data-candidate-id={row.candidateId}
               ref={(element) => {
@@ -118,7 +130,7 @@ export function RankedOpportunityList({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium [overflow-wrap:anywhere]">{row.title ?? "Untitled candidate"}</p>
-                  <p className="font-mono text-[11px] text-zinc-400 [overflow-wrap:anywhere]">{row.candidateId}</p>
+                  <p id={`owner-opp-id-${index}`} className="font-mono text-[11px] text-zinc-400 [overflow-wrap:anywhere]">{row.candidateId}</p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <span className={CHIP}>Evidence: {humanize(row.provenance.evidenceClass)}</span>
                     <span className={CHIP}>{freshnessChip(row)}</span>
@@ -141,6 +153,9 @@ export function RankedOpportunityList({
           );
         })}
       </ul>
+      <a href={`#${OPPORTUNITY_DETAIL_ID}`} className={JUMP_LINK}>
+        Jump to selected candidate details
+      </a>
     </section>
   );
 }

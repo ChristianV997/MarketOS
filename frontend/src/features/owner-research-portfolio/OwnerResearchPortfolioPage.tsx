@@ -7,6 +7,7 @@ import {
   FIXTURE_RANKING_PACKET,
   FIXTURE_WORKSPACE_ID,
 } from "./fixtures/ownerResearchFixtures";
+import { useNow } from "./hooks/useNow";
 import { useOwnerPortfolio } from "./hooks/useOwnerPortfolio";
 import { adaptPortfolioPayload } from "./lib/adaptPortfolioReadModel";
 import { adaptRankingPacket } from "./lib/adaptRankingReadModel";
@@ -34,16 +35,17 @@ function LiveOwnerResearch({
 }) {
   // Canonical ranking read model: composed from the existing read-only endpoints.
   const { packet, isLoading, hasErrors } = useFirstPhaseEvidenceCockpit();
-  const { portfolio, refresh } = useOwnerPortfolio(workspaceId);
+  const nowMs = useNow();
+  const { portfolio, refresh } = useOwnerPortfolio(workspaceId, { nowMs });
   const ranking = useMemo(
     () =>
       adaptRankingPacket({
         packet,
         loading: isLoading,
         loadError: hasErrors ? "canonical_read_failed" : null,
-        nowMs: Date.now(),
+        nowMs,
       }),
-    [packet, isLoading, hasErrors],
+    [packet, isLoading, hasErrors, nowMs],
   );
 
   return (
@@ -63,7 +65,7 @@ function LiveOwnerResearch({
 }
 
 function FixtureOwnerResearch({ onDraftResearch }: { onDraftResearch?: (request: DraftResearchRequest) => void }) {
-  const nowMs = useMemo(() => Date.now(), []);
+  const nowMs = useNow();
   const ranking = useMemo(
     () => adaptRankingPacket({ packet: FIXTURE_RANKING_PACKET, loading: false, loadError: null, nowMs }),
     [nowMs],

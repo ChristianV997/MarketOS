@@ -17,6 +17,8 @@ const QUALIFIER_STYLE: Record<SurfaceQualifier, string> = {
 
 const QUALIFIER_ORDER: readonly SurfaceQualifier[] = ["fixture", "stale", "partial", "blocked"];
 
+const MAX_REASONS_SHOWN = 20;
+
 export const SCOPE_LABEL: Record<SurfaceScope, string> = {
   ranking: "Ranking",
   portfolio: "Portfolio",
@@ -39,8 +41,9 @@ export function SurfaceStateBanner({
   /** Expand the reason list by default (blocked gates); errors and unavailable always expand. */
   openReasons?: boolean;
 }) {
-  const shownReasons = reasons.slice(0, 20);
-  if (phase === "ready" && shownReasons.length === 0) return null;
+  const shownReasons = reasons.slice(0, MAX_REASONS_SHOWN);
+  const hiddenReasons = reasons.length - shownReasons.length;
+  if (phase === "ready" && reasons.length === 0) return null;
 
   const phaseCopy = phase === "ready" ? null : PHASE_COPY[scope][phase];
 
@@ -62,18 +65,19 @@ export function SurfaceStateBanner({
         </div>
       ) : null}
 
-      {shownReasons.length > 0 ? (
+      {reasons.length > 0 ? (
         <details
           open={phase === "error" || phase === "unavailable" || openReasons}
           className="rounded-lg border border-zinc-700 bg-zinc-900/40 px-3 text-xs text-zinc-300"
         >
           <summary className="cursor-pointer py-3.5 text-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400">
-            {SCOPE_LABEL[scope]} details ({shownReasons.length})
+            {SCOPE_LABEL[scope]} details ({reasons.length})
           </summary>
           <ul className="list-disc space-y-1 pb-3 pl-5">
             {shownReasons.map((reason) => (
               <li key={reason} className="font-mono [overflow-wrap:anywhere]">{reason}</li>
             ))}
+            {hiddenReasons > 0 ? <li data-reasons-hidden={hiddenReasons}>+{hiddenReasons} more not shown</li> : null}
           </ul>
         </details>
       ) : null}

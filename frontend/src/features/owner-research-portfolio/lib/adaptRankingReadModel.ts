@@ -100,16 +100,16 @@ function mapRows(
 
   for (let index = 0; index < candidates.length; index += 1) {
     if (rows.length >= MAX_RANKED_ROWS) {
-      dropped.push({ reason: "rows_truncated", candidateId: null });
+      dropped.push({ reason: "rows_truncated", candidateId: null, count: candidates.length - index });
       break;
     }
     const candidate = candidates[index];
     if (!isStableCandidateId(candidate?.candidateId)) {
-      dropped.push({ reason: "invalid_candidate_id", candidateId: null });
+      dropped.push({ reason: "invalid_candidate_id", candidateId: null, count: 1 });
       continue;
     }
     if (seen.has(candidate.candidateId)) {
-      dropped.push({ reason: "duplicate_candidate_id", candidateId: candidate.candidateId });
+      dropped.push({ reason: "duplicate_candidate_id", candidateId: candidate.candidateId, count: 1 });
       continue;
     }
     seen.add(candidate.candidateId);
@@ -126,7 +126,10 @@ function mapRows(
     if (row.rankNumber <= previous) warnings.push(`rank_order_inconsistent:${row.candidateId}`);
     previous = Math.max(previous, row.rankNumber);
   }
-  for (const item of dropped) warnings.push(item.candidateId ? `${item.reason}:${item.candidateId}` : item.reason);
+  for (const item of dropped) {
+    if (item.candidateId) warnings.push(`${item.reason}:${item.candidateId}`);
+    else warnings.push(item.reason === "rows_truncated" ? `${item.reason}:${item.count}` : item.reason);
+  }
   return { rows, dropped, warnings };
 }
 

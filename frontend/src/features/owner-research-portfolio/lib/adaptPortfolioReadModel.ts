@@ -12,6 +12,7 @@ import {
   type SurfaceQualifier,
 } from "../contracts/ownerResearch";
 import { isStableCandidateId } from "./candidateId";
+import type { PortfolioFetchResult } from "./portfolioApi";
 import { describeFreshness, FRESHNESS_NOT_REPORTED } from "./freshnessView";
 import { stringList } from "./format";
 
@@ -59,15 +60,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const SECRET_KEY = /(secret|token|password|passwd|api[_-]?key|authorization|credential|private[_-]?key|cookie)/i;
+const MAX_SCAN_DEPTH = 10;
+const MAX_SCAN_NODES = 20_000;
 
-/** Bounded deep scan: a credential-shaped key anywhere rejects the whole payload. */
-function hasSecretShapedKey(value: unknown, depth = 0, budget = { nodes: 5000 }): boolean {
-  if (depth > 6 || budget.nodes-- <= 0) return false;
-  if (Array.isArray(value)) return value.some((item) => hasSecretShapedKey(item, depth + 1, budget));
-  if (!isRecord(value)) return false;
-  return Object.entries(value).some(
-    ([key, item]) => SECRET_KEY.test(key) || hasSecretShapedKey(item, depth + 1, budget),
-  );
+type KeyScan = "clean" | "secret" | "too_complex";
+
+/**
+ * Bounded deep scan for credential-shaped keys. It fails CLOSED: a payload too
+ * deep or too large to scan completely is rejected, never waved through.
+ */
+export function scanForSecretKeys(root: unknown): KeyScan {
+  let nodes = 0;
+  const visit = (value: unknown, depth: number): KeyScan => {
+    nodes += 1;
+    if (depth > MAX_SCAN_DEPTH || nodes > MAX_SCAN_NODES) return "too_complex";
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const result = visit(item, depth + 1);
+        if (result !== "clean") return result;
+      }
+      return "clean";
+    }
+    if (!isRecord(value)) return "clean";
+    for (const [key, item] of Object.entries(value)) {
+      if (SECRET_KEY.test(key)) return "secret";
+      const result = visit(item, depth + 1);
+      if (result !== "clean") return result;
+    }
+    return "clean";
+  };
+  return visit(root, 0);
 }
 
 export function parseEvidenceMode(value: unknown): EvidenceMode {
@@ -100,7 +122,9 @@ export function adaptPortfolioPayload(payload: unknown, ctx: PortfolioAdapterCon
   const expected = ctx.expectedWorkspaceId?.trim() ? ctx.expectedWorkspaceId : null;
   if (!expected) return portfolioUnavailable("workspace_not_selected");
   if (!isRecord(payload)) return portfolioError("portfolio_payload_not_object", expected);
-  if (hasSecretShapedKey(payload)) return portfolioError("secret_shaped_field_rejected", expected);
+  const keyScan = scanForSecretKeys(payload);
+  if (keyScan === "secret") return portfolioError("secret_shaped_field_rejected", expected);
+  if (keyScan === "too_complex") return portfolioError("payload_too_complex", expected);
   if (payload.schema_version !== OWNER_PORTFOLIO_SCHEMA_VERSION) {
     return portfolioError("unsupported_schema_version", expected);
   }
@@ -183,6 +207,27 @@ export function adaptPortfolioPayload(payload: unknown, ctx: PortfolioAdapterCon
 }
 
 /**
+ * The ONE mapping from a fetch outcome to a portfolio model (used by the hook).
+ * The expected workspace is always the one REQUESTED, never one taken from the
+ * payload, so a response can only ever be shown for the workspace that asked.
+ * `null` means the request is still in flight.
+ */
+export function resultToPortfolioModel(
+  result: PortfolioFetchResult | null,
+  ctx: { workspaceId: string | null; nowMs: number },
+): PortfolioReviewModel {
+  const workspaceId = ctx.workspaceId?.trim() ? ctx.workspaceId : null;
+  if (!workspaceId) return portfolioUnavailable("workspace_not_selected");
+  if (result === null) return portfolioLoading(workspaceId);
+  if (result.kind === "ok") {
+    return adaptPortfolioPayload(result.payload, { expectedWorkspaceId: workspaceId, nowMs: ctx.nowMs });
+  }
+  return result.kind === "unavailable"
+    ? portfolioUnavailable(result.reason, workspaceId)
+    : portfolioError(result.reason, workspaceId);
+}
+
+/**
  * Whether draft-research actions may be used. Every condition is required; the
  * backend must EXPLICITLY report eligibility, and no local count can substitute
  * for that. Returns every blocking reason so the UI can always say why.
@@ -201,6 +246,12 @@ export function evaluateDraftResearchGate(
       reasons.push("Fixture / simulation data cannot enable draft research.");
     }
     if (portfolio.qualifiers.includes("stale")) reasons.push("Portfolio evidence is stale.");
+    if (portfolio.freshness.status === "invalid") {
+      reasons.push("Portfolio freshness could not be verified (invalid date).");
+    }
+    if (portfolio.qualifiers.includes("partial")) {
+      reasons.push("Some portfolio entries were ignored as invalid, so the portfolio cannot be trusted for drafting.");
+    }
     if (portfolio.evidenceMode === "unknown") reasons.push("Portfolio provenance is not reported.");
     if (!portfolio.eligibility.reported) {
       reasons.push("The backend has not reported draft-research eligibility.");
