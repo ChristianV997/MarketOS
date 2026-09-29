@@ -107,8 +107,10 @@ def test_recovery_clears_stale_errors_and_deduplicates_produced_objects():
     assert replayed["status"] == "completed"
     replayed_refs = [x for x in replayed["stages"][0]["produced_object_ids"]]
     assert all(x.get("relation") == "replay_of" for x in replayed_refs)
-    disc_ids = [x["object_id"] for x in replayed["produced_object_ids"] if x["object_id"] == "disc_101"]
-    assert len(disc_ids) == 1
+    # The mock returns one shared ref for every stage; only the replayed stage's ref is retagged.
+    disc_refs = [(x["object_id"], x["relation"]) for x in replayed["produced_object_ids"] if x["object_id"] == "disc_101"]
+    assert len(disc_refs) == len(set(disc_refs))
+    assert disc_refs.count(("disc_101", "replay_of")) == 1
 
 
 def test_run_workflow_with_resume_from_checkpoint_id():

@@ -17,18 +17,10 @@ from .workflow_registry import get_workflow_registry
 from .workflow_safety import validate_workflow_payload_safe
 from .workflow_summary import build_workflow_summary
 
-_IDEMPOTENT_EVENTS = frozenset(
-    {
-        "stage_started",
-        "stage_completed",
-        "stage_skipped",
-        "stage_failed",
-        "stage_blocked",
-        "workflow_created",
-        "workflow_completed",
-        "workflow_partial",
-    }
-)
+# Only workflow-level markers are de-duplicated. Stage events are never repeated
+# by re-entry (finished stages are skipped), so a stage_* event is always a real
+# new attempt and must be recorded.
+_IDEMPOTENT_EVENTS = frozenset({"workflow_created", "workflow_completed", "workflow_partial"})
 
 
 def _id(prefix: str) -> str:
@@ -166,6 +158,8 @@ def _execute_stages(
         stage.status = "running"
         stage.started_at = time.time()
         stage.finished_at = None
+        stage.errors = []
+        stage.metadata.pop("failure_classification", None)
         stage.input_summary = {"keys": sorted(run.input_payload)}
         _event(run, stage.stage_name, "stage_started", "Stage started")
         _checkpoint(run, stage, "before_stage")
@@ -369,8 +363,8 @@ def replay_workflow_stage(workflow_id: str, stage_name: str, reason: str = "manu
     # Replay only the requested stage on the existing run. Existing refs remain
     # intact; new refs are marked as replay output by the stage metadata.
     replayed = _execute_stages(run, run.stages.index(stage), stage_name)
-    for ref in stage.produced_object_ids:
-        ref["relation"] = "replay_of"
+    # Tag copies: earlier timeline events and checkpoints share the original ref dicts.
+    stage.produced_object_ids = [{**ref, "relation": "replay_of"} for ref in stage.produced_object_ids]
     _sync_run_state(replayed)
     _event(replayed, stage_name, "replay_completed", "Workflow stage replay completed", refs=stage.produced_object_ids)
     result = replayed.to_dict()
