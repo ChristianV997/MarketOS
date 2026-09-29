@@ -17,6 +17,19 @@ from .workflow_registry import get_workflow_registry
 from .workflow_safety import validate_workflow_payload_safe
 from .workflow_summary import build_workflow_summary
 
+_IDEMPOTENT_EVENTS = frozenset(
+    {
+        "stage_started",
+        "stage_completed",
+        "stage_skipped",
+        "stage_failed",
+        "stage_blocked",
+        "workflow_created",
+        "workflow_completed",
+        "workflow_partial",
+    }
+)
+
 
 def _id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
@@ -38,6 +51,10 @@ def _event(
     severity: str = "info",
     refs: list[dict[str, Any]] | None = None,
 ) -> WorkflowTimelineEvent:
+    if event_type in _IDEMPOTENT_EVENTS:
+        for existing in get_workflow_registry().list_timeline(run.workflow_id):
+            if existing.stage_name == stage_name and existing.event_type == event_type:
+                return existing
     event = WorkflowTimelineEvent(
         _id("event"),
         run.workflow_id,
@@ -137,11 +154,12 @@ def _execute_stages(
 
     for index in range(start_index, len(run.stages)):
         stage = run.stages[index]
-        if (
-            stage.status in {"completed", "skipped", "recovered"}
-            and stop_after_stage != stage.stage_name
-            and not (force_start_stage and index == start_index)
-        ):
+        # Completed work is idempotent: interrupt/restart/replay must not
+        # re-enter a finished stage or emit another transition. force_start
+        # still re-runs failed/blocked/pending stages.
+        if stage.status in {"completed", "skipped", "recovered"}:
+            if stop_after_stage == stage.stage_name:
+                break
             continue
 
         run.current_stage = stage.stage_name
