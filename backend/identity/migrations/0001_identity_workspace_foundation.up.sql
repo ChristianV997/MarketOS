@@ -8,6 +8,11 @@
 -- be exercised in tests. Postgres-only row-level security lives in the matching
 -- .rls.sql file. Foreign keys deliberately have no ON DELETE CASCADE.
 --
+-- SECURITY: on any database that exposes a public data API (e.g. Supabase's
+-- `public` schema), apply 0001_identity_workspace_foundation.rls.sql immediately
+-- after this file. Without it these tables, including workspace_members, are
+-- readable through that API.
+--
 -- workspace_type reuses backend.workspaces.client_workspace.WORKSPACE_TYPES:
 --   'internal'       -> the owner's own portfolio workspace
 --   'client_service' -> one consulting client, operator-managed

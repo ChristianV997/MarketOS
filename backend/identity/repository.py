@@ -129,6 +129,13 @@ def _text(value: Any, field: str, *, max_len: int = 200) -> str:
     return cleaned
 
 
+def _identity_key(value: Any, field: str) -> str:
+    """Identity keys are matched exactly, so padded values are rejected, never normalized."""
+    if not isinstance(value, str) or value != value.strip():
+        raise ValueError(f"{field} is invalid")
+    return _text(value, field, max_len=256)
+
+
 def _optional_text(value: Any, field: str) -> str | None:
     return None if value is None else _text(value, field)
 
@@ -219,8 +226,8 @@ class PostgresWorkspaceRepository:
     def add_member(self, workspace_id: str, issuer: str, subject: str) -> None:
         if not isinstance(workspace_id, str) or not WORKSPACE_ID_PATTERN.fullmatch(workspace_id):
             raise ValueError("workspace_id is invalid")
-        issuer = _text(issuer, "issuer", max_len=256)
-        subject = _text(subject, "subject", max_len=256)
+        issuer = _identity_key(issuer, "issuer")
+        subject = _identity_key(subject, "subject")
         now = self._clock()
 
         def operation(cursor: Any) -> None:
