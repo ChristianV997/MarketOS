@@ -110,9 +110,27 @@ class ExecutionReservationState:
     quota_reservations: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
+        def freeze_rows(
+            rows: Any, width: int, message: str
+        ) -> tuple[tuple[Any, ...], ...]:
+            if not isinstance(rows, (tuple, list)):
+                raise ValueError(message)
+            frozen: list[tuple[Any, ...]] = []
+            for row in rows:
+                if not isinstance(row, (tuple, list)) or len(row) != width:
+                    raise ValueError(message)
+                frozen.append(tuple(row))
+            return tuple(frozen)
+
+        budget_rows = freeze_rows(
+            self.budget_reservations, 4, "invalid budget reservation state"
+        )
+        quota_rows = freeze_rows(
+            self.quota_reservations, 2, "invalid quota reservation state"
+        )
         budget_ids: set[str] = set()
         budget_actions: dict[str, str] = {}
-        for request_id, resource_type, amount, action_type in self.budget_reservations:
+        for request_id, resource_type, amount, action_type in budget_rows:
             if (
                 not isinstance(request_id, str)
                 or not request_id.strip()
@@ -121,7 +139,16 @@ class ExecutionReservationState:
                 or action_type not in ACTION_TYPES
             ):
                 raise ValueError("invalid budget reservation state")
-            if not isinstance(amount, (int, float)) or isinstance(amount, bool) or not math.isfinite(amount) or amount < 0:
+            try:
+                finite_amount = math.isfinite(amount)
+            except (OverflowError, TypeError):
+                finite_amount = False
+            if (
+                not isinstance(amount, (int, float))
+                or isinstance(amount, bool)
+                or not finite_amount
+                or amount < 0
+            ):
                 raise ValueError("invalid budget reservation state")
             if request_id in budget_ids:
                 raise ValueError("duplicate budget reservation request_id")
@@ -130,8 +157,13 @@ class ExecutionReservationState:
 
         quota_ids: set[str] = set()
         quota_actions: dict[str, str] = {}
-        for request_id, action_type in self.quota_reservations:
-            if not isinstance(request_id, str) or not request_id.strip() or request_id != request_id.strip() or action_type not in ACTION_TYPES:
+        for request_id, action_type in quota_rows:
+            if (
+                not isinstance(request_id, str)
+                or not request_id.strip()
+                or request_id != request_id.strip()
+                or action_type not in ACTION_TYPES
+            ):
                 raise ValueError("invalid quota reservation state")
             if request_id in quota_ids:
                 raise ValueError("duplicate quota reservation request_id")
@@ -142,6 +174,17 @@ class ExecutionReservationState:
             raise ValueError("reservation state is incomplete")
         if any(budget_actions[request_id] != quota_actions[request_id] for request_id in budget_ids):
             raise ValueError("reservation state has conflicting quota action")
+
+        object.__setattr__(
+            self,
+            "budget_reservations",
+            tuple(sorted(budget_rows, key=lambda row: row[0])),
+        )
+        object.__setattr__(
+            self,
+            "quota_reservations",
+            tuple(sorted(quota_rows, key=lambda row: row[0])),
+        )
 
     @classmethod
     def from_mapping(cls, value: "ExecutionReservationState | Mapping[str, Any] | None") -> "ExecutionReservationState":
@@ -550,7 +593,7 @@ def _budget_check(request: ExecutionDecisionRequest, budgets: Sequence[ResourceB
     if budget is None: return BudgetCheckResult(request.resource_type, request.requested_amount, 0.0, "missing", "no budget is registered for this resource", True)
     budget_limit_remaining = max(0.0, budget.budget_limit - budget.used_amount - budget.reserved_amount - prior_plan_amount)
     hard_cap_remaining = max(0.0, budget.hard_cap - budget.used_amount - budget.reserved_amount - prior_plan_amount)
-    available = round(min(budget_limit_remaining, hard_cap_remaining), 4)
+    available = min(budget_limit_remaining, hard_cap_remaining)
     projected_amount = budget.used_amount + budget.reserved_amount + prior_plan_amount + request.requested_amount
     if request.requested_amount > available:
         reason = "hard cap or aggregate planned budget exceeded" if prior_plan_amount else "hard cap or available budget exceeded"
@@ -667,7 +710,7 @@ def build_resource_execution_governor_report(*, generated_at: str = "offline-det
     decisions_list: list[ExecutionDecisionResult] = []
     for item in ordered_requests:
         existing_budget = next((entry for entry in budget_reservations if entry[0] == item.request_id), None)
-        if existing_budget is not None and (existing_budget[1] != item.resource_type or not math.isclose(existing_budget[2], item.requested_amount, rel_tol=0.0, abs_tol=1e-12) or existing_budget[3] != item.action_type):
+        if existing_budget is not None and (existing_budget[1] != item.resource_type or existing_budget[2] != item.requested_amount or existing_budget[3] != item.action_type):
             raise ValueError("request_id conflicts with an existing budget reservation")
         existing_quota = next((entry for entry in quota_reservations if entry[0] == item.request_id), None)
         if existing_quota is not None and existing_quota[1] != item.action_type:
