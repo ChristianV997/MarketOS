@@ -217,7 +217,7 @@ def _offer_from_record(record: dict[str, Any], url: str, *, source: str, extract
     field_status = {name: "missing" for name in _EVIDENCE_FIELDS}
     if record.get("name"):
         field_status["title"] = "observed"
-    if record.get("selling_price"):
+    if record.get("selling_price") or (extraction_method == "manual_import" and "selling_price" in record and record["selling_price"] is not None):
         field_status["price"] = "observed"
         field_status["currency"] = "observed"
     if record.get("availability"):
@@ -240,12 +240,59 @@ def _offer_from_record(record: dict[str, Any], url: str, *, source: str, extract
         source=source, source_url=url, crawl_timestamp=time.time(),
         external_listing_id=str(record.get("product_id") or hashlib.sha256(url.encode()).hexdigest()[:16]),
         title=str(record.get("name", "")), field_status=field_status,
-        price=record.get("selling_price") or None, currency=str(record.get("currency", "USD")),
+        price=float(record["selling_price"]) if field_status["price"] == "observed" else None, currency=str(record.get("currency", "USD")),
         availability=str(record.get("availability", "")), shipping_cost=record.get("shipping_cost"),
         brand=str(record.get("brand", "")), seller=str(record.get("seller", "")),
         rating=record.get("rating"), review_count=record.get("review_count"), image=str(record.get("image", "")),
         extraction_method=extraction_method, confidence=confidence, warnings=warnings,
     )
+
+
+
+import csv
+import io
+from pathlib import Path
+
+def _read_import_text(path: str | Path, *, encoding: str = "utf-8") -> str:
+    with open(path, "r", encoding=encoding) as f:
+        return f.read()
+
+def import_csv(path: str | Path, *, default_source: str = "manual_csv_import") -> list[CompetitorOffer]:
+    """Offline evidence intake for competitor offers without network access."""
+    rows = list(csv.DictReader(io.StringIO(_read_import_text(path, encoding="utf-8-sig"))))
+    offers = []
+    for row in rows:
+        if not row.get("url") and not row.get("source_url"):
+            continue
+        url = row.get("url") or row.get("source_url", "")
+        record = {
+            "name": row.get("title") or row.get("name"),
+            "currency": row.get("currency", "USD"),
+            "availability": row.get("availability"),
+            "brand": row.get("brand"),
+            "seller": row.get("seller"),
+            "image": row.get("image"),
+        }
+
+        # Preserve explicit zero vs missing semantics for price
+        if "price" in row and row["price"].strip() != "":
+            record["selling_price"] = float(row["price"])
+        elif "selling_price" in row and row["selling_price"].strip() != "":
+            record["selling_price"] = float(row["selling_price"])
+
+        # Preserve explicit zero vs missing semantics for shipping_cost
+        if "shipping_cost" in row and row["shipping_cost"].strip() != "":
+            record["shipping_cost"] = float(row["shipping_cost"])
+
+        if "rating" in row and row["rating"].strip() != "":
+            record["rating"] = float(row["rating"])
+        if "review_count" in row and row["review_count"].strip() != "":
+            record["review_count"] = int(row["review_count"])
+
+        source = str(row.get("source") or default_source)
+        offers.append(_offer_from_record(record, url, source=source, extraction_method="manual_import"))
+
+    return offers
 
 
 def _extract_from_jsonld(html: str, url: str, *, source: str) -> CompetitorOffer | None:
@@ -338,5 +385,5 @@ def health() -> AdapterHealth:
 
 __all__ = [
     "CompetitorOffer", "FIELD_STATUSES", "KNOWN_SOURCE_LABELS", "SOURCE_PREFIX",
-    "fetch_competitor_offer", "health", "score_offers",
+    "fetch_competitor_offer", "health", "score_offers", "import_csv",
 ]
