@@ -1,7 +1,7 @@
 # AI-chat execution bundle
 
 `scripts/ai/execution_bundle.py` (`MarketOS.AIExecutionBundle.v1`) is the
-eight-phase orchestrator that wires the existing AI-chat authorities into
+seven-phase orchestrator that wires the existing AI-chat authorities into
 one workflow. It is not a second context snapshot, quality gate, readiness
 authority, event system, or CoderOS runtime.
 
@@ -10,7 +10,7 @@ authority, event system, or CoderOS runtime.
 - `#252` `scripts/ai/operator_context_snapshot.py` (`MarketOS.AIContext.v1`) --
   consumed by reference via its `replay_hash`; never recomputed here.
 - `scripts/ai/operator_task_packet.py` (`MarketOS.AITask.v1` /
-  `MarketOS.AIResume.v1`) -- `prepare`, `handoff`, and `resume`.
+  `MarketOS.AIResume.v1`) -- `prepare` and `handoff`.
 - `scripts/ai/worktree_safety.py` (`MarketOS.WorktreeSafety.v1`) -- `admit`.
 - `scripts/ai/select_tests.py` -- `select`.
 - `scripts/ai/agent_output_eval.py` (`MarketOS.AgentEval.v1`) -- `evaluate`.
@@ -35,53 +35,9 @@ authority, event system, or CoderOS runtime.
    copy-paste command manifest rendered in both POSIX and PowerShell form
    (`render_command`; informational only, never auto-executed) plus a
    compact human-readable block.
-7. `resume(root, resume_packet_raw, *, expected_task_packet, current_head_sha)`
-   -- the mandatory counterpart to `handoff`, invoked by a later session
-   picking a resume packet back up. `root` is a required `Path` positional
-   parameter (never optional, never read from the packet's own `worktree`
-   field or the process cwd), so this is the one and only production path
-   into `operator_task_packet.validate_resume_packet`'s root-aware
-   filesystem containment (`_assert_filesystem_contained`) -- before this
-   phase existed, that containment check was reachable only from tests.
-   `current_head_sha` must be the caller's own freshly observed
-   `git rev-parse HEAD`, never a value taken from the packet itself; a
-   mismatch against the packet's own `head_sha` (compared case-
-   insensitively) is a hard rejection here, not the warning-only
-   comparison `build_resume_packet` performs at build time.
-8. `pr_check(task_packet, pr_reference, pr_changed_files)` -- validates a PR
+7. `pr_check(task_packet, pr_reference, pr_changed_files)` -- validates a PR
    reference exists and its changed paths stay inside `allowed_scope`.
    Makes no network call itself; `pr_changed_files` is caller-supplied.
-
-## Resume-boundary security model
-
-`validate_resume_packet` (via `resume`, its only production caller) proves,
-before a resume packet is trusted:
-
-- **Ownership**: the packet's `agent_id`/`lane` match the caller's own task
-  packet.
-- **Non-substitution**: `task_packet_digest` (a canonical sha256 over the
-  validated task packet) matches the caller's task packet exactly -- a
-  resumed session cannot present a scope-widened task packet and have it
-  silently accepted merely because `agent_id`/`lane` still match.
-- **Lexical scope containment**: every `changed_files` entry is inside
-  `allowed_scope` per `_in_scope` (shared with `agent_output_eval` and
-  `pr_check` -- one scope-matching implementation, not three).
-- **Filesystem-resolved containment** (`root` required by `resume`): a
-  `changed_files` entry that is lexically in scope but is, or has a
-  symlinked ancestor that is, a symlink resolving outside the worktree
-  root or outside `allowed_scope` is rejected by real `Path.resolve()` +
-  `Path.relative_to()` resolution, not string matching.
-- **Freshness**: a stale `head_sha` (the live worktree has moved on) is a
-  hard rejection at `resume()`, not a warning.
-
-**Disclosed, not fixed**: this is an admission-time check, not an OS-level
-sandbox -- a file could theoretically be swapped for a symlink between this
-check and a later read (TOCTOU), matching this codebase's existing
-precedent for other local, single-operator path checks. Genuine Windows
-case-insensitive-filesystem semantics are not exercised on a POSIX
-validator host, though Windows absolute/drive-letter/UNC paths and
-backslash-separated traversal are rejected regardless of host OS (see
-`tests/ai/test_ai_development_loop_windows_conformance.py`).
 
 ## Safety model
 

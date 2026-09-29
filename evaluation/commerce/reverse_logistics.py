@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Mapping
 
-from .canonical import EvidenceReference
+from backend.economics.kernel import EvidenceRef as EvidenceReference
 
 @dataclass(frozen=True)
 class ReturnEligibilityDecision:

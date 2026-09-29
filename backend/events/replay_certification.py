@@ -27,9 +27,8 @@ def validate_event_sequence(events):
 def assert_no_live_authority(events):
     violations=[]
     for event in events:
-        if event.aggregate_type=="advisory":
-            text=json.dumps({"event_type":event.event_type,"payload":event.payload,"metadata":event.metadata},sort_keys=True).lower()
-            if any(token in text for token in _LIVE):violations.append(f"advisory_authority:{event.event_id}")
+        text=json.dumps({"event_type":event.event_type,"payload":event.payload,"metadata":event.metadata},sort_keys=True).lower()
+        if event.aggregate_type=="advisory" and any(token in text for token in _LIVE):violations.append(f"advisory_authority:{event.event_id}")
         if event.payload.get("live_authority") is True:violations.append(f"live_authority:{event.event_id}")
     return violations
 def summarize_workflow(events):

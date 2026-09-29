@@ -32,7 +32,6 @@ from .validator import (
     generate_evidence_bundle,
     validate_registry,
     validate_source_record,
-    validate_source_work_order_correspondence,
     validate_target_boundary_collisions,
     validate_work_order,
 )
@@ -67,7 +66,6 @@ __all__ = [
     "redact_secrets",
     "validate_registry",
     "validate_source_record",
-    "validate_source_work_order_correspondence",
     "validate_target_boundary_collisions",
     "validate_work_order",
 ]

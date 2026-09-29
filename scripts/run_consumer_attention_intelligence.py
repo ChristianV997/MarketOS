@@ -28,7 +28,7 @@ DEFAULT_SOURCE_FIXTURES = {
 
 
 def markdown(report: dict) -> str:
-    lines = ["# Consumer Attention and Creative Evidence", "", f"Evidence mode: `{report['evidence_mode']}` (offline; not ad authorization)", f"Candidates: {report['candidate_count']}", f"Evidence rows: {report['evidence_count']}", f"Platforms: {', '.join(report['platforms_observed']) or 'none'}", f"Freshness: `{report['freshness_status']}` (explicit reference time required)", f"Offering kinds: {', '.join(report['offering_kinds']) or 'unknown'}", f"Geographies: {', '.join(report['geographies']) or 'unspecified'}", f"Languages: {', '.join(report['languages']) or 'unspecified'}", f"Conflicts: {report['conflict_count']}", f"Top candidate: `{report['top_candidate_id'] or 'none'}`", f"Next action: `{report['next_best_action']}`", "", "## Attention scores", "", "| Candidate | Attention | VOC quality | Hook diversity | Objection risk | Recommendation |", "| --- | ---: | ---: | ---: | ---: | --- |"]
+    lines = ["# Consumer Attention and Creative Evidence", "", f"Evidence mode: `{report['evidence_mode']}` (offline; not ad authorization)", f"Candidates: {report['candidate_count']}", f"Evidence rows: {report['evidence_count']}", f"Platforms: {', '.join(report['platforms_observed']) or 'none'}", f"Top candidate: `{report['top_candidate_id'] or 'none'}`", f"Next action: `{report['next_best_action']}`", "", "## Attention scores", "", "| Candidate | Attention | VOC quality | Hook diversity | Objection risk | Recommendation |", "| --- | ---: | ---: | ---: | ---: | --- |"]
     for item in report["candidates"]:
         score = item["score"]
         lines.append(f"| {item['candidate_id']} | {score['overall_consumer_attention']:.0%} | {score['voice_of_customer_quality']:.0%} | {score['creative_hook_diversity']:.0%} | {score['objection_density']:.0%} | `{score['recommendation']}` |")
@@ -79,7 +79,7 @@ def _write_output(directory: str, report: dict, text: str) -> None:
     (target / "consumer_attention_report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf8")
     (target / "consumer_attention_report.md").write_text(text, encoding="utf8")
     (target / "creative_angle_summary.md").write_text(creative_summary(report), encoding="utf8")
-    (target / "consumer_source_summary.json").write_text(json.dumps({"platforms": report["platforms_observed"], "candidate_count": report["candidate_count"], "evidence_count": report["evidence_count"], "freshness_status": report["freshness_status"], "offering_kinds": report["offering_kinds"], "geographies": report["geographies"], "languages": report["languages"], "conflict_count": report["conflict_count"], "read_only": True, "network_calls": False, "mutated": False}, indent=2, sort_keys=True) + "\n", encoding="utf8")
+    (target / "consumer_source_summary.json").write_text(json.dumps({"platforms": report["platforms_observed"], "candidate_count": report["candidate_count"], "evidence_count": report["evidence_count"], "read_only": True, "network_calls": False, "mutated": False}, indent=2, sort_keys=True) + "\n", encoding="utf8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,8 +88,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manual-import")
     parser.add_argument("--source", choices=SOURCE_PLATFORMS)
     parser.add_argument("--max-candidates", type=int, default=10)
-    parser.add_argument("--as-of", help="Timezone-aware ISO-8601 reference time for freshness")
-    parser.add_argument("--freshness-days", type=int, default=90)
     parser.add_argument("--output")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--markdown", action="store_true")
@@ -98,8 +96,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("choose --json or --markdown")
     if args.max_candidates < 1:
         parser.error("max-candidates must be positive")
-    if args.freshness_days < 1:
-        parser.error("freshness-days must be positive")
     try:
         if args.manual_import:
             records = import_csv(args.manual_import, platform=args.source or "manual")
@@ -110,15 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         records = _bounded(records, args)
     except (OSError, ValueError, json.JSONDecodeError, ConsumerAttentionImportError) as exc:
         parser.error(str(exc))
-    try:
-        report = build_report(
-            records,
-            evidence_mode="manual_import" if args.manual_import else "fixture_demo",
-            as_of=args.as_of,
-            max_age_days=args.freshness_days,
-        ).to_dict()
-    except ValueError as exc:
-        parser.error(str(exc))
+    report = build_report(records, evidence_mode="manual_import" if args.manual_import else "fixture_demo").to_dict()
     text = markdown(report)
     if args.output:
         _write_output(args.output, report, text)

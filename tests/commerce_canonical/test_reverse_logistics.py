@@ -1,5 +1,5 @@
 
-from evaluation.commerce.canonical import EvidenceReference
+from backend.economics.kernel import EvidenceRef as EvidenceReference
 from evaluation.commerce.reverse_logistics import evaluate_return_eligibility
 
 def test_return_eligible_standard():

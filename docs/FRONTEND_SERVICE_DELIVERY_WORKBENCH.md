@@ -15,13 +15,11 @@ Accepted **inputs**:
 | `service-engagement-projection-v1` | Existing #264 workbench projection |
 | `service-delivery-plane-v1` | PR #261 `ServiceDeliveryPlaneReport` / `ClientEngagement.to_dict()` copies, including `package_id` aliases |
 
-Output schema is always `service-engagement-projection-v1`; endpoint status is `available_read_only` only for a validated sanitized artifact, otherwise `unavailable`.
+Output schema is always `service-engagement-projection-v1` with `live_endpoint_status: "unavailable"` until a canonical HTTP route exists.
 
-Canonical probe: `GET /api/service-delivery/workbench` via `#213` `frontend/src/lib/apiBase.ts` (`resolveApiBaseUrl` + `joinApiPath`). The backend route is GET-only and reads only an operator-configured artifact beneath `artifacts/`; there is no second API client and no frontend `ServiceEconomics` calculator.
+Canonical probe: `GET /api/service-delivery/workbench` via `#213` `frontend/src/lib/apiBase.ts` (`resolveApiBaseUrl` + `joinApiPath`). There is no second API client and no frontend `ServiceEconomics` calculator.
 
-HTTP route: available read-only when `MARKETOS_SERVICE_DELIVERY_PROJECTION` points to a safe artifact; otherwise the response is explicitly `unavailable`. Read-only availability never means live validation, client approval, or mutation authority.
-
-GET fail-closes (empty `engagements`, `live_endpoint_status: unavailable`) on missing/outside-`artifacts/` paths, canonical path-resolution errors (including unsafe symlink resolution), malformed or non-finite JSON (`NaN`/`Infinity`) input, unsupported schema/version, unsafe `read_only`/`network_calls`/`mutated` flags, TrustOS leakage, non-array or non-object rows, missing/duplicate `engagement_id`, display-economics currency mismatch (`economics.fee` vs `economics.contribution`), payloads larger than 1 MiB, or more than 500 engagements. Missing contribution/fee copies stay missing; amounts are never recalculated. POST is not registered. The #275 producer is a sibling of this branch, not git ancestry; the route reads an artifact file and does not import the producer at request time.
+HTTP route on origin/main: **unavailable**. Missing GET is fixture/manual-import display, never `success` or `live_validated`.
 
 ## State taxonomy
 

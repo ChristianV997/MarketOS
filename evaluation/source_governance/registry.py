@@ -289,7 +289,7 @@ class SourceAdaptationRegistry:
     def save_to_file(self, path: str | Path) -> None:
         p = Path(path).resolve()
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "w", encoding="utf-8", newline="\n") as f:
+        with open(p, "w", encoding="utf-8") as f:
             json.dump(self.to_list(), f, indent=2, ensure_ascii=False)
             f.write("\n")
 
@@ -553,9 +553,6 @@ def generate_work_order_from_source_record(
     elif record.source_id == "src-great-expectations":
         target_mod = "evaluation/quality.py"
         target_sym = "evaluate_quality"
-    elif record.source_id == "src-crawl4ai":
-        target_mod = "backend/adapters/research/crawl4ai.py"
-        target_sym = "Crawl4AIResearchAdapter"
     elif record.source_id == "src-pyperf":
         target_mod = "scripts/benchmarks/perf_engine.py"
         target_sym = "run_benchmark"
@@ -588,12 +585,7 @@ def generate_work_order_from_source_record(
         req_changes.append(f"Enforce negative regression test blocking {record.source_id}")
         proh_changes.append(f"do_not_vendor_{record.source_id}")
     elif record.adaptation_mode == AdaptationMode.DEFER.value:
-        if record.source_id == "src-crawl4ai":
-            req_changes.append(
-                "Verify the immutable upstream commit and version tag against authoritative sources before enabling an active mode"
-            )
-        else:
-            req_changes.append("Maintain deferred status until required infrastructure is approved")
+        req_changes.append(f"Maintain deferred status until required infrastructure is approved")
 
     # Review state determination
     if record.adaptation_mode in (AdaptationMode.COPY_PATTERN.value, AdaptationMode.EMULATE.value):
@@ -674,6 +666,6 @@ class WorkOrderRegistry:
     def save_to_file(self, path: str | Path) -> None:
         p = Path(path).resolve()
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "w", encoding="utf-8", newline="\n") as f:
+        with open(p, "w", encoding="utf-8") as f:
             json.dump(self.to_list(), f, indent=2, ensure_ascii=False)
             f.write("\n")

@@ -3,5 +3,3 @@
 .cursor/*.mjs text eol=lf
 .cursor/*.json text eol=lf
 *.sh text eol=lf
-data/source_adaptation_registry.json text eol=lf
-data/source_adaptation_work_orders.json text eol=lf

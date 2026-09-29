@@ -163,28 +163,3 @@ def test_supplier_feasibility_can_consume_a_market_lane():
 
     result = supplier_economics(target_sell_price="100", unit_cost="20", shipping_cost="10", lane=lane)
     assert result.gross_margin is not None and result.gross_margin < 100
-
-
-def test_service_economics_preserves_unprovided_client_impact_as_unknown():
-    result = calculate_service_economics(
-        "generic-service",
-        Money("500", "USD"),
-        delivery_hours="5",
-        delivery_cost=Money("100", "USD"),
-        tooling_cost=Money("25", "USD"),
-        pass_through_cost=Money("0", "USD"),
-        refund_revision_reserve=Money("25", "USD"),
-    )
-
-    assert result.contribution.amount == Decimal("350")
-    assert result.incremental_contribution is None
-    assert result.orders_required_to_recover_fee is None
-    assert result.roi is None
-    assert result.to_dict()["incremental_contribution"] is None
-    with pytest.raises(EconomicsError, match="performance evidence must be complete"):
-        calculate_service_economics(
-            "generic-service",
-            Money("500", "USD"),
-            ad_spend=Money("0", "USD"),
-            delivery_hours="5",
-        )
