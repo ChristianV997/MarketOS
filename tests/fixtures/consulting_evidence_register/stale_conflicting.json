@@ -1,0 +1,35 @@
+[
+  {
+    "report_id": "report-econ-old",
+    "fingerprint": "fp-econ-old",
+    "workspace_id": "workspace_demo",
+    "service_name": "consulting_economics",
+    "status": "completed",
+    "capabilities": {
+      "economics": {
+        "state": "available",
+        "facts": {"unit_cost": 100},
+        "provenance": ["economics://fixture/old"],
+        "observed_at": "2025-01-01T00:00:00Z",
+        "freshness": "stale"
+      }
+    }
+  },
+  {
+    "report_id": "report-econ-current",
+    "fingerprint": "fp-econ-current",
+    "workspace_id": "workspace_demo",
+    "service_name": "consulting_economics",
+    "status": "completed",
+    "capabilities": {
+      "economics": {
+        "state": "available",
+        "facts": {"unit_cost": 120},
+        "provenance": ["economics://fixture/current"],
+        "observed_at": "2026-09-21T00:00:00Z",
+        "freshness": "fresh",
+        "conflicts": ["unit_cost"]
+      }
+    }
+  }
+]

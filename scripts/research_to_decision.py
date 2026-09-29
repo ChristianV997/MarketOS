@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import errno
 import hashlib
 import json
+import os
 import re
+import stat as stat_module
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -236,7 +239,15 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
         if "://" in reference or parsed.scheme not in {"fixture", "file", "manual"}:
             raise ResearchToDecisionError(f"{field} must be a safe reference")
     path = Path(parsed.path or reference)
-    if path.is_absolute() or ".." in path.parts or any(char in reference for char in "<>\r\n"):
+    if path.is_absolute() or ".." in path.parts or any(char in reference for char in "<>\r\n\x00"):
+        # \x00 specifically: Path.resolve() raises an unhandled ValueError
+        # ("embedded null byte") deep inside posixpath's realpath, not a
+        # ResearchToDecisionError -- reproduced via
+        # _supplier_document_evidence_bindings -> _resolve -> .resolve().
+        # Not a containment bypass (nothing is ever read), but an
+        # unhandled exception is not the fail-closed contract every other
+        # rejection in this module honors; reject it here instead, before
+        # any of this reference's later checks or filesystem calls run.
         raise ResearchToDecisionError(f"{field} must be a safe reference")
     return reference
 
@@ -263,6 +274,254 @@ def _operator_supplier_confirmations(values: Sequence[Sequence[str]]) -> set[tup
     return confirmations
 
 
+# Stdlib-only Win32 access (``ctypes`` + ``msvcrt``) -- no ``pywin32``.
+# Windows has no ``O_NOFOLLOW``-equivalent ``os.open()`` flag, but
+# ``CreateFileW`` with ``FILE_FLAG_OPEN_REPARSE_POINT`` is the documented
+# Win32 primitive that plays the same role: it opens a reparse point
+# (symlink/junction) *as itself*, atomically, instead of following it, so
+# the resulting handle can be inspected and rejected before any bytes are
+# read through it. ``FILE_FLAG_BACKUP_SEMANTICS`` is required alongside it
+# so the call also succeeds for directory reparse points (junctions),
+# which are rejected explicitly below rather than by the open failing.
+#
+# ``ctypes.wintypes`` is pure Python (plain type aliases) and importable
+# on every platform; only ``ctypes.WinDLL`` itself requires real Windows.
+# The constants, struct, and function below are therefore defined
+# unconditionally so their branching/cleanup logic can be exercised by
+# deterministic tests on any platform (via ``_win32_kernel32_dll``, the
+# one seam a test replaces) -- only the actual DLL bind is deferred to
+# first real use, which happens only when ``_open_verified_evidence_file``
+# dispatches to this path on genuine Windows.
+import ctypes
+from ctypes import wintypes
+
+_WIN32_INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+_WIN32_GENERIC_READ = 0x80000000
+_WIN32_FILE_SHARE_READ = 0x00000001
+_WIN32_FILE_SHARE_WRITE = 0x00000002
+_WIN32_FILE_SHARE_DELETE = 0x00000004
+_WIN32_OPEN_EXISTING = 3
+_WIN32_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+_WIN32_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+_WIN32_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+_WIN32_FILE_ATTRIBUTE_DIRECTORY = 0x00000010
+
+
+class _Win32ByHandleFileInformation(ctypes.Structure):
+    _fields_ = [
+        ("dwFileAttributes", wintypes.DWORD),
+        ("ftCreationTime", wintypes.FILETIME),
+        ("ftLastAccessTime", wintypes.FILETIME),
+        ("ftLastWriteTime", wintypes.FILETIME),
+        ("dwVolumeSerialNumber", wintypes.DWORD),
+        ("nFileSizeHigh", wintypes.DWORD),
+        ("nFileSizeLow", wintypes.DWORD),
+        ("nNumberOfLinks", wintypes.DWORD),
+        ("nFileIndexHigh", wintypes.DWORD),
+        ("nFileIndexLow", wintypes.DWORD),
+    ]
+
+
+def _win32_get_last_error() -> int | None:
+    """``ctypes.get_last_error()`` is itself Windows-only (undefined on
+    POSIX ctypes builds); this indirection is purely diagnostic message
+    text and degrades to ``None`` off-Windows so the branching logic
+    around it stays exercisable by tests on any platform. Real Windows
+    always has the attribute, so production behavior is unaffected."""
+    getter = getattr(ctypes, "get_last_error", None)
+    return getter() if getter is not None else None
+
+
+_win32_kernel32_dll_cache: Any = None
+
+
+def _win32_kernel32_dll() -> Any:
+    """Bind and cache the real ``kernel32`` DLL. Isolated in its own
+    function -- rather than a module-level ``ctypes.WinDLL(...)`` call --
+    so tests on non-Windows platforms (where ``ctypes.WinDLL`` does not
+    exist at all) can monkeypatch this one seam and exercise the rest of
+    ``_open_verified_evidence_file_windows`` for real, instead of every
+    Windows-only line being unreachable/untestable dead code elsewhere."""
+    global _win32_kernel32_dll_cache
+    if _win32_kernel32_dll_cache is None:
+        dll = ctypes.WinDLL("kernel32", use_last_error=True)
+        # HANDLE is pointer-sized. Without explicit argtypes/restype,
+        # ctypes defaults to a 32-bit ``c_int`` return, which
+        # truncates/corrupts real Win64 handle values -- required for
+        # correctness, not style, even though only reachable on Windows.
+        dll.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        dll.CreateFileW.restype = wintypes.HANDLE
+        dll.GetFileInformationByHandle.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(_Win32ByHandleFileInformation),
+        ]
+        dll.GetFileInformationByHandle.restype = wintypes.BOOL
+        dll.CloseHandle.argtypes = [wintypes.HANDLE]
+        dll.CloseHandle.restype = wintypes.BOOL
+        _win32_kernel32_dll_cache = dll
+    return _win32_kernel32_dll_cache
+
+
+def _open_verified_evidence_file_windows(resolved: Path, *, label: str) -> tuple[int, os.stat_result]:
+    """Windows counterpart of the POSIX open in
+    ``_open_verified_evidence_file``, using the same single-handle
+    contract: one ``CreateFileW`` call backs both the reparse-point/
+    directory rejection and the bytes that get hashed, so nothing between
+    the check and the read can swap what was checked.
+
+    UNVERIFIED ON REAL WINDOWS: this repository has no Windows CI runner
+    (every workflow under ``.github/workflows/`` runs on ``ubuntu-latest``
+    only, confirmed by direct inspection) and this development environment
+    is Linux-only, so this function has never actually executed against
+    the real Win32 API in this project. It is written strictly from
+    documented ``CreateFileW`` / ``GetFileInformationByHandle`` semantics
+    (reparse points are opened, not followed, when
+    ``FILE_FLAG_OPEN_REPARSE_POINT`` is set; the resulting handle's
+    attributes reveal that fact). Treat this as a reviewed-but-execution-
+    unverified implementation, not a proven one, until it runs on a real
+    Windows host. Only ``_win32_kernel32_dll`` and the platform's
+    ``msvcrt`` module are Windows-only; everything else in this function
+    is plain Python and is exercised directly by tests on any platform via
+    those two seams.
+    """
+    import msvcrt
+
+    kernel32 = _win32_kernel32_dll()
+    handle = kernel32.CreateFileW(
+        str(resolved),
+        _WIN32_GENERIC_READ,
+        _WIN32_FILE_SHARE_READ | _WIN32_FILE_SHARE_WRITE | _WIN32_FILE_SHARE_DELETE,
+        None,
+        _WIN32_OPEN_EXISTING,
+        _WIN32_FILE_FLAG_BACKUP_SEMANTICS | _WIN32_FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    if handle is None or handle == _WIN32_INVALID_HANDLE_VALUE:
+        error_code = _win32_get_last_error()
+        raise ResearchToDecisionError(f"{label} could not be opened: Win32 error {error_code}")
+    fd = -1
+    try:
+        info = _Win32ByHandleFileInformation()
+        # ``ctypes.pointer(info)`` (not the lighter ``byref(info)``) so the
+        # same call is dereferenceable from a plain-Python fake in tests,
+        # not only when routed through a real C call.
+        if not kernel32.GetFileInformationByHandle(handle, ctypes.pointer(info)):
+            error_code = _win32_get_last_error()
+            raise ResearchToDecisionError(f"{label} could not be inspected: Win32 error {error_code}")
+        if info.dwFileAttributes & _WIN32_FILE_ATTRIBUTE_REPARSE_POINT:
+            raise ResearchToDecisionError(f"{label} must not be a symlink")
+        if info.dwFileAttributes & _WIN32_FILE_ATTRIBUTE_DIRECTORY:
+            raise ResearchToDecisionError(f"{label} must be a regular file")
+        # Windows' attribute model has no direct equivalent of POSIX
+        # S_ISREG; "not a directory and not a reparse point" is the
+        # closest available same-handle approximation of "regular file"
+        # and is the same test a caller could not bypass by racing the
+        # path, since it reads the handle, not the path.
+        # os.O_BINARY (Windows-only; absent on this Linux sandbox, hence
+        # getattr) is passed explicitly rather than relying on
+        # _open_osfhandle's CRT-documented binary-unless-O_TEXT default:
+        # hashed evidence bytes must never go through CRLF/Ctrl-Z text-mode
+        # translation, and this removes any doubt rather than depending on
+        # an unverified-on-real-Windows default.
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        # open_osfhandle takes ownership of the Win32 handle once it
+        # succeeds; CloseHandle must not also run below, or the fd's
+        # eventual os.close() would double-close the same handle.
+        handle = None
+        file_stat = os.fstat(fd)
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        elif handle is not None:
+            kernel32.CloseHandle(handle)
+        raise
+    return fd, file_stat
+
+
+def _open_verified_evidence_file(resolved: Path, *, label: str) -> tuple[int, os.stat_result]:
+    """Open ``resolved`` exactly once and validate the *same open file
+    descriptor* that will be hashed -- never a separate stat-by-path call
+    followed by a separate open-by-path call. That split is the actual
+    TOCTOU gap: two filesystem accesses to the same path string, with no
+    guarantee the second one still sees what the first one measured. This
+    function performs a single open and derives every subsequent check
+    (regular-file status, size) from that resulting descriptor, so nothing
+    between the check and the read can change what was checked -- both
+    operate on the same open kernel object, not on the path.
+
+    On POSIX, ``os.O_NOFOLLOW`` is additionally included, which makes the
+    open itself atomically fail (``ELOOP``) if the final path component is
+    a symlink at the instant of the call -- closing the window between the
+    caller's earlier per-component symlink walk and this open.
+
+    On Windows, ``os.open()`` exposes no ``O_NOFOLLOW``-equivalent flag at
+    all (Python does not define ``os.O_NOFOLLOW`` there), so this function
+    instead uses ``CreateFileW`` with ``FILE_FLAG_OPEN_REPARSE_POINT``
+    directly via ``ctypes`` (stdlib-only, no ``pywin32``) -- see
+    ``_open_verified_evidence_file_windows``. That closes the same
+    final-component race POSIX closes, by the same shape of mechanism: one
+    handle, opened without following a terminal reparse point, inspected
+    and read through itself. It is, however, UNVERIFIED BY EXECUTION ON
+    REAL WINDOWS in this project (no Windows CI runner exists in this
+    repository, and this sandbox is Linux-only) -- see that function's
+    docstring for the precise scope of that caveat.
+
+    On every platform, the caller's pre-open per-component symlink/
+    reparse-point walk remains the only mitigation for an *intermediate*
+    directory being swapped for a reparse point mid-walk; Python's
+    standard library exposes no portable ``openat``-style relative open to
+    close that structurally distinct race, and it stays disclosed, not
+    fixed (see ``_supplier_document_evidence_bindings`` for the full
+    disclosure). This function's guarantee is narrowly about the *final*
+    path component tested against the *same* handle used to read.
+    """
+    if sys.platform == "win32":
+        return _open_verified_evidence_file_windows(resolved, label=label)
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    nonblocking = hasattr(os, "O_NONBLOCK")
+    if nonblocking:
+        # A plain blocking open() on a FIFO with no writer on the other
+        # end hangs forever -- a real denial-of-service the moment a
+        # caller places a named pipe inside the evidence root (confirmed
+        # by direct reproduction). O_NONBLOCK makes the open return
+        # immediately instead; the descriptor is then confirmed to be a
+        # regular file (a FIFO fails that check and is rejected) and the
+        # flag is cleared again below before any read happens, since
+        # nonblocking mode has no defined effect on a genuine regular file.
+        flags |= os.O_NONBLOCK
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise ResearchToDecisionError(f"{label} must not be a symlink") from exc
+        raise ResearchToDecisionError(f"{label} could not be opened: {exc.strerror or exc}") from exc
+    try:
+        file_stat = os.fstat(fd)
+        if not stat_module.S_ISREG(file_stat.st_mode):
+            raise ResearchToDecisionError(f"{label} must be a regular file")
+        if nonblocking:
+            import fcntl
+
+            current_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, current_flags & ~os.O_NONBLOCK)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, file_stat
+
+
 def _supplier_document_evidence_bindings(
     values: Sequence[Sequence[str]],
     *,
@@ -280,6 +539,34 @@ def _supplier_document_evidence_bindings(
     both remain local, offline claims about evidence the operator supplied.
     Raw document content is read only to hash it and is never retained,
     logged, or included in any returned structure.
+
+    Secure-read guarantee: the file is opened exactly once
+    (``_open_verified_evidence_file``), and the regular-file check, size
+    cap, and hashed bytes all come from that single open descriptor --
+    there is no separate stat-then-open sequence against the path string
+    for the file itself. On POSIX this additionally uses ``O_NOFOLLOW``,
+    so a symlink swapped in for the final path component between the
+    walk-check below and the open fails the open itself rather than being
+    silently followed. On Windows, the same final-component race is closed
+    by a different, stdlib-only mechanism (``ctypes``-based ``CreateFileW``
+    with ``FILE_FLAG_OPEN_REPARSE_POINT``; no ``pywin32``) that opens a
+    reparse point as itself rather than following it and inspects/reads
+    that same handle -- see ``_open_verified_evidence_file_windows``. That
+    Windows path is reviewed against documented Win32 semantics but is
+    UNVERIFIED BY EXECUTION ON REAL WINDOWS: this repository has no
+    Windows CI runner (every workflow runs on ``ubuntu-latest``) and this
+    development sandbox is Linux-only, so treat the Windows final-
+    component guarantee as designed-and-reviewed, not proven, until it
+    runs on a real Windows host. This is still NOT "race-free" in an
+    unqualified sense on either platform: the per-component walk-check
+    below for *intermediate* directories (a symlinked parent) has its own,
+    structurally unavoidable race without ``openat``-style relative opens,
+    which Python's standard library does not portably expose on either
+    platform -- disclosed, not fixed. What IS eliminated for the final
+    file itself, on both POSIX (by kernel enforcement) and Windows (by a
+    same-handle check that is correct by design but not yet executed on
+    real Windows), is the split between "checked via the path" and "read
+    via the path", which was the concrete, reproduced gap.
     """
     if not isinstance(values, (list, tuple)) or len(values) > MAX_RECORDS:
         raise ResearchToDecisionError("supplier document evidence bindings must be a bounded list")
@@ -325,11 +612,20 @@ def _supplier_document_evidence_bindings(
         resolved = _resolve(root, relative_path, label="document_evidence.reference")
         if resolved.suffix.lower() not in SUPPORTED_EVIDENCE_DOCUMENT_EXTENSIONS:
             raise ResearchToDecisionError(f"document_evidence.reference has an unsupported format: {resolved.suffix or 'none'}")
-        size = resolved.stat().st_size
-        if size > MAX_EVIDENCE_DOCUMENT_BYTES:
-            raise ResearchToDecisionError(f"document_evidence.reference exceeds {MAX_EVIDENCE_DOCUMENT_BYTES} bytes")
-        with resolved.open("rb") as evidence_file:
-            document_bytes = evidence_file.read(MAX_EVIDENCE_DOCUMENT_BYTES + 1)
+        # Open exactly once; every check below (regular-file, size, and the
+        # bytes that get hashed) comes from that same descriptor -- see
+        # _open_verified_evidence_file's docstring for the exact guarantee
+        # and its disclosed Windows/intermediate-symlink limitations.
+        fd, file_stat = _open_verified_evidence_file(resolved, label="document_evidence.reference")
+        try:
+            if file_stat.st_size > MAX_EVIDENCE_DOCUMENT_BYTES:
+                raise ResearchToDecisionError(f"document_evidence.reference exceeds {MAX_EVIDENCE_DOCUMENT_BYTES} bytes")
+            with os.fdopen(fd, "rb") as evidence_file:
+                fd = -1  # evidence_file now owns the descriptor; do not close it twice
+                document_bytes = evidence_file.read(MAX_EVIDENCE_DOCUMENT_BYTES + 1)
+        finally:
+            if fd >= 0:
+                os.close(fd)
         if len(document_bytes) > MAX_EVIDENCE_DOCUMENT_BYTES:
             raise ResearchToDecisionError(f"document_evidence.reference exceeds {MAX_EVIDENCE_DOCUMENT_BYTES} bytes")
         size = len(document_bytes)
@@ -392,6 +688,16 @@ def _text_list(value: Any, field: str, *, required: bool = False) -> list[str]:
 
 def _resolve(base_dir: Path, value: Any, *, label: str) -> Path:
     raw = _text(value, label, required=True)
+    if "\x00" in raw:
+        # Path.resolve() below raises an unhandled ValueError ("embedded
+        # null byte") deep inside posixpath's realpath rather than the
+        # ResearchToDecisionError every other rejection in this module
+        # produces -- reproduced via supplier_inputs.path,
+        # observation_inputs.path, and document_evidence.reference, all
+        # three of which share this function. Not a containment bypass
+        # (nothing is ever read before this point), but an unhandled
+        # exception is not this module's fail-closed contract.
+        raise ResearchToDecisionError(f"{label} must not contain a NUL byte")
     candidate = Path(raw)
     if candidate.is_absolute() or ".." in candidate.parts:
         raise ResearchToDecisionError(f"{label} must remain relative to the manifest")

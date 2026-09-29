@@ -1,0 +1,24 @@
+{
+  "candidate_id": "cand-1",
+  "workspace_id": "workspace-operator-1",
+  "offering_kind": "goods",
+  "geography": "MX",
+  "language": "es",
+  "as_of": "2026-09-23",
+  "marketplace_report": {
+    "evidence_mode": "sanitized_report",
+    "marketplaces_observed": ["ebay"],
+    "candidates": [
+      {"candidate_id": "cand-1", "query": "portable blender", "observed_at": "2026-08-01",
+       "score": {"overall_marketplace_opportunity": 0.7, "saturation_score": 0.4}}
+    ]
+  },
+  "supplier_report": {
+    "evidence_mode": "sanitized_report",
+    "candidates": [
+      {"candidate_id": "cand-1", "query": "portable blender",
+       "offers": [{"supplier": "supplier-a", "shipping_cost": 4.5}],
+       "score": {"overall_supplier_feasibility": 0.6, "economics": {"shipping_cost": 4.5}}}
+    ]
+  }
+}

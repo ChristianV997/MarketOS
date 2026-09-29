@@ -1,0 +1,36 @@
+{
+  "as_of": "2026-09-22",
+  "stale_marketplace_report": {
+    "evidence_mode": "sanitized_report",
+    "candidates": [
+      {
+        "candidate_id": "cand-stale",
+        "query": "stale candidate",
+        "observed_at": "2024-01-01",
+        "score": {"overall_marketplace_opportunity": 0.5, "saturation_score": 0.3}
+      }
+    ]
+  },
+  "future_marketplace_report": {
+    "evidence_mode": "sanitized_report",
+    "candidates": [
+      {
+        "candidate_id": "cand-future",
+        "query": "future candidate",
+        "observed_at": "2027-01-01",
+        "score": {"overall_marketplace_opportunity": 0.5, "saturation_score": 0.3}
+      }
+    ]
+  },
+  "unknown_marketplace_report": {
+    "evidence_mode": "sanitized_report",
+    "candidates": [
+      {
+        "candidate_id": "cand-unknown",
+        "query": "unknown candidate",
+        "observed_at": "not-a-real-date",
+        "score": {"overall_marketplace_opportunity": 0.5, "saturation_score": 0.3}
+      }
+    ]
+  }
+}

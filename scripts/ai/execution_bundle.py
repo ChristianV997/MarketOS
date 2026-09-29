@@ -55,13 +55,15 @@ from typing import Any, Mapping, Sequence
 from scripts.ai import agent_output_eval, select_tests, worktree_safety
 from scripts.ai.operator_task_packet import (
     SECRET_SHAPED,
+    ResumePacketError,
     _normalize_path,
     build_resume_packet,
     validate_packet,
+    validate_resume_packet,
 )
 
 SCHEMA = "MarketOS.AIExecutionBundle.v1"
-PHASES = ("prepare", "admit", "select", "execute", "evaluate", "handoff", "pr")
+PHASES = ("prepare", "admit", "select", "execute", "evaluate", "handoff", "resume", "pr")
 
 # The complete, closed classification vocabulary for one executed (or not
 # executed) command. Distinct from operator_task_packet.EVIDENCE_CLASSES
@@ -464,6 +466,60 @@ def _render_human_handoff(task_packet: Mapping[str, Any], resume: Mapping[str, A
 
 
 # ---------------------------------------------------------------------------
+# Phase: resume -- the counterpart to handoff, invoked by a later, separate
+# session that is picking a resume packet back up. Before this phase
+# existed, validate_resume_packet()'s root-aware filesystem containment
+# (operator_task_packet.py's _assert_filesystem_contained, wired via its
+# optional root= parameter) was reachable only by a caller that happened to
+# pass root explicitly -- nothing in this bundle, the one module that
+# actually produces MarketOS.AIResume.v1 packets via handoff(), ever
+# consumed one back. This phase is that consumer: it makes root mandatory
+# (a required positional parameter, never defaulted to None, never read
+# from the resume packet's own worktree field or from the process cwd) and
+# additionally requires the caller's live head_sha, rejecting a resume
+# whose recorded head_sha no longer matches reality rather than merely
+# warning about it (build_resume_packet's own current_head_sha comparison
+# is warning-only, which is correct at *build* time -- a warning baked
+# into the artifact for a human to read -- but resuming work against a
+# provably stale snapshot is a hard failure, not advisory, at this later
+# consumption point).
+# ---------------------------------------------------------------------------
+
+
+def resume(
+    root: Path,
+    resume_packet_raw: Mapping[str, Any],
+    *,
+    expected_task_packet: Mapping[str, Any],
+    current_head_sha: str,
+) -> dict[str, Any]:
+    """Validate a previously-handed-off resume packet before treating it as
+    authorization to continue work.
+
+    ``root`` is the caller's own trusted worktree root -- the exact same
+    parameter shape ``admit()`` already requires -- and is required, not
+    optional: there is no path through this function that reaches
+    ``validate_resume_packet`` with ``root=None``, which is what made the
+    filesystem-aware containment check opt-in rather than mandatory before
+    this phase existed. ``current_head_sha`` must be the caller's own
+    freshly observed ``git rev-parse HEAD`` (or equivalent), never a value
+    copied from the resume packet itself, so that a stale packet (one
+    recorded before someone else committed) is rejected here rather than
+    merely flagged as a warning.
+    """
+    if not isinstance(root, Path):
+        raise ExecutionBundleError(f"resume requires a Path root (got {type(root).__name__}) -- never packet-supplied or unvalidated")
+    validated = validate_resume_packet(
+        dict(resume_packet_raw),
+        expected_task_packet=dict(expected_task_packet),
+        root=root,
+    )
+    if not current_head_sha or current_head_sha.lower() != str(validated["head_sha"]).lower():
+        raise ResumePacketError("resume packet head_sha no longer matches the live worktree HEAD; refresh the snapshot before resuming")
+    return {"phase": "resume", "resume": validated, "stale": False}
+
+
+# ---------------------------------------------------------------------------
 # Phase 7: pr
 # ---------------------------------------------------------------------------
 
@@ -505,5 +561,6 @@ __all__ = [
     "to_evidence_classification",
     "evaluate",
     "handoff",
+    "resume",
     "pr_check",
 ]

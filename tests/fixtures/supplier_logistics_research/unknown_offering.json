@@ -1,0 +1,10 @@
+{
+  "candidate_id": "cand-unknown-1",
+  "supplier_id": "supplier-zeta",
+  "offer_id": "offer-zeta-1",
+  "supplier_sku": "sku-zeta-1",
+  "offering_kind": "unknown",
+  "captured_at": "2026-01-05T00:00:00Z",
+  "quoted_price": null,
+  "price_evidence": {"quality": "missing"}
+}

@@ -24,6 +24,12 @@ function: given an engagement, package, economics result, data-quality
 assessment, and deliverable, it returns one `ServiceDeliveryArtifact` value.
 It stores nothing itself.
 
+`build_service_engagement_projection()` scopes every non-empty envelope to
+exactly one `workspace_id` and rejects rows from different workspaces or rows
+without a workspace identity. The read-only API route must bind that envelope
+identity to its authenticated request principal before serving it; a payload
+field alone is not authentication.
+
 ## Compatibility with PR #247
 
 As of this writing, PR #247's research-to-decision projection module does
@@ -85,6 +91,241 @@ to promote fixture/manual/simulated evidence into `live_validated`. This is
 directly regression-tested
 (`test_supplier_tier_cannot_launder_fixture_evidence_into_live_validated`,
 `test_non_live_evidence_states_never_classify_as_live_validated`).
+
+## Producing the frontend-consumable projection (PR #264 / #271)
+
+`evaluation.companyos.service_delivery_projection` is the producer that
+turns engagement + package + data-quality + economics + artifact objects
+into the `service-delivery-plane-v1`-shaped envelope the documented
+frontend adapter already knows how to consume. PR #271 owns
+`GET /api/service-delivery/workbench`. This branch and #271 are siblings of
+`main`; producer tests may mirror GET validation to prove envelope
+compatibility, but that mirror is not a merged route and is not a second
+API.
+
+The GET contract (owned by #271) fail-closes on missing/unsafe artifacts,
+unsupported schema versions, leakage, non-object rows, missing/duplicate
+`engagement_id`, display-economics currency mismatch, and oversized
+payloads. This producer never recalculates money, never upgrades evidence
+to live validation, and never emits POST or provider calls.
+
+This module does not reimplement that adapter's translation logic — it
+only supplies keys the adapter already reads (`evidence_set[].evidence_class`,
+`economics`, `financial_readiness`, `capacity`, `next_best_action`,
+`intake`, `eligibility`), falling back to the adapter's own defaults for
+anything it omits (e.g. `deliverables`, which the adapter derives from the
+existing `deliverable_ids` list when a richer object isn't supplied).
+
+### Producer-side fail-closed invariants
+
+The producer validates the projection before any consumer receives it; it
+does not rely on a future route or frontend to repair malformed input:
+
+- Each row must contain non-empty `workspace_id`, `engagement_id`, `client_id`,
+  and `package_id` values. Nested intake identity, when present, must match
+  the row identity, and every row must belong to the same workspace.
+- Engagement IDs must be unique within one envelope. The engagement identity
+  is verified against the canonical `ClientEngagement` identity builder, and
+  an optional `ServiceDeliveryArtifact` must match the engagement and package
+  identities, use the canonical schema, pass `verify_artifact_id()`, and carry
+  a `client_safe` or `redacted` export status.
+- Projection and row safety flags are exact: `read_only: true`,
+  `network_calls: false`, and `mutated: false`. These flags describe an
+  offline planning projection and do not grant execution authority.
+- Display-only fee and contribution values may contain at most one currency;
+  mixed currencies are rejected rather than converted or silently compared.
+  Missing economics remain unavailable, while an explicitly supplied zero is
+  preserved as a numeric zero by the canonical economics authority.
+- Envelopes are bounded at `MAX_ENGAGEMENTS = 500` rows and
+  `MAX_PROJECTION_BYTES = 1 MiB` after deterministic JSON serialization with
+  `allow_nan=False`. Non-finite or non-serializable values fail closed.
+- TrustOS workspace-leakage checks remain the export boundary. Leakage errors
+  are deliberately non-reflective and do not expose field paths or raw input.
+
+The CLI writer applies a second canonical path-jail check: its resolved output
+must remain below the repository `artifacts/` directory. It writes only a
+deterministic, read-only JSON projection and performs no provider, network,
+payment, order, messaging, publishing, or database mutation.
+
+Two things this producer gets right that are easy to get wrong:
+
+- **Fee display uses `ServiceEconomics.service_fee`, not `ClientEngagement.fee`.**
+  The engagement's own `fee` is the package's default-currency quote fixed
+  at intake time and is never updated afterward; `service_fee` is the exact
+  value actually passed into `calculate_service_economics`. Using the
+  engagement's fee would silently show the wrong currency for any
+  engagement whose actual computed fee differs from the package's default
+  currency (e.g. an MXN client on a USD-default package).
+- **`row["data_quality_state"]` is always taken from the `ClientDataQualityAssessment`
+  passed to `build_service_engagement_row()`, never from
+  `engagement.data_quality_state`.** The latter only updates when a caller
+  explicitly threads it through `transition_engagement(..., data_quality_state=...)`;
+  trusting it directly would silently emit a stale value whenever a caller
+  (as this module's own first draft did) computes a fresh assessment but
+  forgets that step.
+- **`row["missing_data"]` is set explicitly from `ClientDataQualityAssessment.missing_fields`**
+  (merged with `engagement.missing_information`), not left to the
+  engagement's own `missing_information` field, which has the identical
+  staleness problem as `data_quality_state` above and is only a fallback
+  the frontend adapter reads when `missing_data` itself is absent.
+
+`scripts/generate_service_delivery_projection.py` demonstrates the full,
+offline, deterministic pipeline end to end and writes an example projection
+to `artifacts/service_delivery_projection.json` — the exact location and
+shape `MARKETOS_SERVICE_DELIVERY_PROJECTION` (PR #271) is willing to read
+from.
+
+### Real combined-worktree verification (lane ...-RECONCILIATION-V2)
+
+Because PR #271's route and PR #277's frontend acceptance tests are not
+merged into `main`, they cannot be imported from this branch's own
+worktree. A separate, throwaway worktree (never pushed, never committed to)
+was built by merging `origin/main` + PR #271's branch + PR #277's branch +
+this branch, purely to run the **real** modules end to end rather than a
+reproduction of their logic:
+
+- `from api.routes import service_delivery_workbench as module; module.workbench()`
+  against this producer's real generated `artifacts/service_delivery_projection.json`
+  — real result: `live_endpoint_status: "available_read_only"`, 4 engagements.
+- The same real route, exercised against 5 real negative cases (missing env
+  var, path outside `artifacts/`, malformed JSON, a leaking payload, an
+  unsafe `mutated: true` flag) — real result: `"unavailable"` in every case,
+  each with its own specific diagnostic.
+- The real route's own output piped through the real, unmodified
+  `adaptServiceProjection.ts` and `composeWorkbenchViewModel.ts` (via
+  `NODE_OPTIONS=--experimental-strip-types node`, no build step, no
+  `node_modules` required — matching how #271/#277 validate themselves) —
+  real result: adapter does not reject, `live_endpoint_status` round-trips
+  as `"available_read_only"`, surface is `"partial"` (never `"success"`),
+  and the status message never claims live validation.
+- The real, existing frontend test suites (`frontend/tests/service-delivery-workbench.test.mjs`,
+  23/23; `frontend/tests/readonly-cockpit-browser-acceptance.test.mjs`, 8/8)
+  and the real, #271-owned `tests/integration/test_service_delivery_workbench_api.py`
+  (importing the real route module directly) all run unmodified in that
+  combined worktree alongside this module's own tests — 210/210 combined
+  with this module's Python suites.
+
+This is genuine integration evidence, not a reproduction: every check in
+this section imports and executes another team's actual, unmodified code.
+
+### Deeper real-composition verification (lane SERVICE-DELIVERY-REAL-COMPOSITION-V3)
+
+V2's combined-worktree run above proved a single success case plus 5
+negative cases against the real route. This lane rebuilt a fresh combined
+worktree (`origin/main` + #271's head + #277's head + this branch's then-
+current head `ac58dd8`, merged with no conflicts) and widened the real
+(non-reproduced) execution to the full flow the mission specified:
+
+`ClientEngagement -> ClientDataQualityAssessment -> ServiceEconomics
+(backend.economics.kernel) -> ServiceDeliveryArtifact -> TrustOS client
+workspace isolation -> the real #271 GET route -> the real #277/#264
+frontend adapter and compose step`.
+
+- All 4 priority packages x all 15 real, non-pseudo `ClientEngagement`
+  lifecycle states (`eligible`, `data_inadequate`, `scoped`,
+  `evidence_collection`, `analysis`, `draft_ready`, `client_review`,
+  `revision_requested`, `approved`, `delivered`, `paused`, `cancelled`,
+  `rejected`, `renewal_candidate`, `upsell_candidate`) were driven through
+  this producer's real functions, projected, and served through the real,
+  unmodified `api.routes.service_delivery_workbench.workbench()` —
+  **60/60** returned `available_read_only` with the correct
+  `lifecycle_state` and `service_id` round-tripped exactly.
+- The same real route was re-exercised against 6 real negative cases
+  (missing env var, path outside `artifacts/`, malformed JSON, a leaking
+  payload, an unsafe `mutated: true` flag, an unsupported schema version)
+  — **6/6** returned `"unavailable"` with the correct per-case diagnostic.
+  `"unavailable"` is confirmed as a frontend/envelope-level outcome only;
+  it is never emitted as a `ClientEngagement.lifecycle_state`.
+- A 5-engagement, multi-package, multi-currency (MXN + USD), multi-state
+  projection (including a `data_inadequate` and a `cancelled` row) was
+  built by this producer, served through the real route, and piped through
+  the real, unmodified `adaptServiceProjection.ts` and
+  `composeWorkbenchViewModel.ts` — the adapter accepted it
+  (`rejected: false`), all 5 lifecycle states and service IDs round-tripped
+  exactly, `live_endpoint_status` stayed `"available_read_only"`, the
+  composed view model's `surface` was `"partial"` (never `"success"`), and
+  every engagement's `internal_prompt` / `internal_formula` /
+  `private_operator_notes` fields were confirmed `null` (present-but-null
+  is the frontend contract's own shape, not a leak).
+- Exact-value checks against the real kernel output (not the frontend's
+  display copies): `economics.service_fee` matched `row["economics"]["fee"]`
+  to the exact `Decimal` for both MXN and USD; `delivery_cost`,
+  `tooling_cost`, `pass_through_cost`, and `refund_revision_reserve` all
+  shared the engagement's currency; `row["data_quality_state"]` matched
+  `ClientDataQualityAssessment.status` exactly; `row["missing_data"]` was
+  empty only when the assessment reported no missing fields; the capacity
+  signal correctly reported `"unavailable"` (fail-closed) rather than
+  fabricating a number when capacity inputs were not supplied.
+- The real, existing frontend suites (`service-delivery-workbench.test.mjs`,
+  `readonly-cockpit-browser-acceptance.test.mjs`,
+  `service-workbench-producer-acceptance.test.mjs` — **47/47**) and the
+  real, #271-owned `tests/integration/test_service_delivery_workbench_api.py`
+  (**5/5**, importing the real route module directly) ran unmodified in the
+  combined worktree, alongside this module's own suites — **517 passed**
+  combined.
+- No new defect was found in the producer this round. Two mistakes were
+  found and fixed in the throwaway verification harness itself (an assumed
+  adapter return shape, and a naive leak-detection substring check that
+  flagged the frontend's own always-present, always-`null` internal-field
+  keys) — neither harness file was committed or pushed.
+- Environment note, reported for honesty: this sandbox did not have
+  `fastapi`, `scipy`, `scikit-learn`, or `pytest` installed at the start of
+  this lane. They are declared in `requirements.txt` and were installed
+  before any of the real-module execution above could run at all; without
+  them, `api.routes.service_delivery_workbench` cannot even be imported.
+  That means genuine execution was only possible after this install step.
+
+As before, the combined worktree was never pushed and is deleted after use;
+only this file and this branch's own producer/test files are committed.
+
+### Untested-corner audit (lane SERVICE-PRODUCER-ROUTE-WORKBENCH-CONTRACT-V4)
+
+V3's matrix started every engagement's walk from `screening`, and only ever
+used MXN and USD. This lane rebuilt the combined worktree again (same
+heads: main `e6a2e88`, #271 `6afb459`, #277 `ac00d2e`, #275 `ac1d302`,
+merged with no conflicts) specifically to close those two gaps, and to
+re-verify from source (not from PR descriptions) that no duplicate
+economics/catalog authority exists and that `data_inadequate` genuinely
+blocks deliverable content — rather than re-running checks V3 already
+covered.
+
+- **Raw `intake` state** (a fresh `ClientEngagement`'s actual starting
+  state, never previously exercised end to end): built and served through
+  the real route for all 4 packages — `available_read_only`,
+  `lifecycle_state: "intake"` on every row. Piped through the real
+  frontend adapter, `normalizeLifecycle()`'s existing rule (backend
+  `intake` + `data_inadequate=true` → displayed `data_inadequate`) fired
+  correctly, and the composed view model's `surface` was `"blocked"` —
+  never a false "ready" state. This is the adapter's own pre-existing
+  logic; nothing here needed a change.
+- **CAD**, not just MXN/USD: a full `draft_ready` engagement was built and
+  priced in CAD end to end (kernel → producer → real route → real
+  adapter). `economics.service_fee` and `row["economics"]["fee"]["amount_label"]`
+  matched exactly, currency stayed `"CAD"` at every layer, and the real
+  `backend.economics.kernel.calculate_service_economics` was independently
+  confirmed to raise `CurrencyMismatchError` when called directly with a
+  USD fee and a CAD ad-spend value — currency mixing fails closed at the
+  canonical kernel, not by convention in this producer.
+- **Catalog-duplication check, from source**: `evaluation.companyos.service_delivery.default_service_delivery_packages()`
+  calls `catalog[package_id] = package_map(default_service_catalog())[package_id]`
+  and wraps that catalog-owned `ServicePackage` (price band included)
+  in a `ClientFacingServicePackage` — it does not redefine prices. Only
+  delivery-cost assumptions (labor/tooling/pass-through/reserve, not price
+  or economics authority) are added at this layer. No second service
+  catalog or price book exists.
+- **`data_inadequate` blocks deliverable content, from source**:
+  `build_client_service_deliverable()` short-circuits on
+  `data_quality.data_inadequate or economics is None` and emits a
+  "no diagnostic is produced until the missing evidence below is supplied"
+  body instead of package-specific analysis — confirmed by reading the
+  function, not inferred from its name.
+- Full regression after this audit: 517 Python tests (combined worktree,
+  including the real #271-owned integration test) and 47 real frontend
+  tests — unchanged, all passing.
+
+No producer, route, or adapter defect was found. No code file needed a
+change; this section documents new evidence, and the combined worktree
+(again, never pushed) was deleted after use.
 
 ## Compatibility rules for future changes to this module
 

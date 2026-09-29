@@ -1,0 +1,21 @@
+{
+  "scenario_id": "weak_demand_strong_supply_gap",
+  "offering_kind": "goods",
+  "opportunity_archetype": "evidence_discovered",
+  "candidate_id": "fixture-candidate-supply-gap",
+  "workspace_id": "fixture-workspace-methodology",
+  "geography": "synthetic destination market",
+  "language": "en",
+  "claims": [
+    {"id": "claim-supply-gap", "taxonomy": "fact", "statement": "A bounded fixture reports a supply gap.", "evidence_class": "observed", "evidence_state": "available", "source_ref": "fixture://weak-demand-strong-supply-gap/supply"},
+    {"id": "claim-demand", "taxonomy": "unknown", "statement": "Reachable buyer demand is not established.", "evidence_class": "unavailable", "evidence_state": "missing", "source_ref": "fixture://weak-demand-strong-supply-gap/demand"}
+  ],
+  "evidence": [
+    {"id": "evidence-supply", "dimension": "supply_gap", "evidence_class": "observed", "evidence_state": "available", "source_ref": "fixture://weak-demand-strong-supply-gap/supply"},
+    {"id": "evidence-buyer", "dimension": "reachable_buyer", "evidence_class": "unavailable", "evidence_state": "missing", "source_ref": "fixture://weak-demand-strong-supply-gap/demand"}
+  ],
+  "economics": {"currency": "USD", "price": "unknown", "supplier_cost": "unknown", "shipping": "unknown", "duty": "unknown", "tax": "unknown", "returns": "unknown", "platform_fees": "unknown", "cac": "unknown", "fx": "not_applicable"},
+  "blockers": ["no_reachable_buyer_evidence", "supply_gap_is_not_demand"],
+  "experiment": {"decision": "whether a reachable buyer exists", "evidence_class": "planned", "stop_rule": "defer if the target channel cannot be identified"},
+  "expected": {"status": "needs_evidence", "fatal_gate": "reachable_buyer_missing"}
+}

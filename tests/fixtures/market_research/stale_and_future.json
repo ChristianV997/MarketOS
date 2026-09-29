@@ -1,0 +1,27 @@
+{
+  "as_of": "2026-09-22",
+  "stale_marketplace_report": {
+    "evidence_mode": "sanitized_report",
+    "marketplaces_observed": ["ebay"],
+    "candidates": [
+      {
+        "candidate_id": "stale-1",
+        "title": "Stale Candidate",
+        "observed_at": "2024-01-01",
+        "score": {"overall_marketplace_opportunity": 0.5, "saturation_score": 0.3}
+      }
+    ]
+  },
+  "future_marketplace_report": {
+    "evidence_mode": "sanitized_report",
+    "marketplaces_observed": ["ebay"],
+    "candidates": [
+      {
+        "candidate_id": "future-1",
+        "title": "Future-Dated Candidate",
+        "observed_at": "2027-01-01",
+        "score": {"overall_marketplace_opportunity": 0.5, "saturation_score": 0.3}
+      }
+    ]
+  }
+}

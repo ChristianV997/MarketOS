@@ -41,8 +41,8 @@ def test_api_selector_includes_read_view_regressions():
     assert any("canonical_events_api_readonly" in command for command in commands)
 
 
-def test_frontend_selector_builds_without_adding_tests():
-    assert select_tests.select(["frontend/src/pages/OperatorEventDashboard.tsx"])["recommended_commands"][0] == "cd frontend && npm run build"
+def test_frontend_selector_runs_validation_harness():
+    assert select_tests.select(["frontend/src/pages/OperatorEventDashboard.tsx"])["recommended_commands"][0] == "python scripts/ai/run_frontend_validation.py --json"
 
 
 def test_agent_script_selector_includes_session_finish():
@@ -96,6 +96,15 @@ def test_pr_readiness_blocks_secret_value_like_diff():
 def test_pr_readiness_blocks_provider_mutation_terms():
     report = pr_readiness_report.report(["backend/x.py"], "client.create_order()", branch="codex/test")
     assert report["detections"]["provider_mutation_like_detected"] is True
+
+
+def test_pr_readiness_does_not_treat_refund_reserve_field_as_provider_mutation():
+    report = pr_readiness_report.report(
+        ["evaluation/companyos/service_market_research.py"],
+        'refund_revision_reserve = "bounded fixture evidence"',
+        branch="codex/test",
+    )
+    assert report["detections"]["provider_mutation_like_detected"] is False
 
 
 def test_pr_readiness_docs_only_is_ready_for_review():

@@ -1,0 +1,21 @@
+{
+  "scenario_id": "digital_service_insufficient_distribution",
+  "offering_kind": "digital_service",
+  "opportunity_archetype": "digital_services",
+  "candidate_id": "fixture-candidate-digital-distribution",
+  "workspace_id": "fixture-workspace-methodology",
+  "geography": "synthetic service market",
+  "language": "en",
+  "claims": [
+    {"id": "claim-pain", "taxonomy": "fact", "statement": "A bounded fixture describes a recurring service pain.", "evidence_class": "manual", "evidence_state": "available", "source_ref": "fixture://digital-service-insufficient-distribution/pain"},
+    {"id": "claim-distribution", "taxonomy": "hypothesis", "statement": "A distribution route may be found, but it is not evidenced.", "evidence_class": "planned", "evidence_state": "unknown", "source_ref": "fixture://digital-service-insufficient-distribution/distribution"}
+  ],
+  "evidence": [
+    {"id": "evidence-pain", "dimension": "recurring_pain", "evidence_class": "manual", "evidence_state": "available", "source_ref": "fixture://digital-service-insufficient-distribution/pain"},
+    {"id": "evidence-distribution", "dimension": "reachable_buyer", "evidence_class": "unavailable", "evidence_state": "missing", "source_ref": "fixture://digital-service-insufficient-distribution/distribution"}
+  ],
+  "economics": {"currency": "USD", "price": "planning_assumption", "supplier_cost": "not_applicable", "shipping": "not_applicable", "duty": "not_applicable", "tax": "unknown", "returns": "unknown", "platform_fees": "unknown", "cac": "unknown", "fx": "not_applicable"},
+  "blockers": ["distribution_not_evidenced", "service_capacity_unknown", "cac_unknown"],
+  "experiment": {"decision": "whether a bounded distribution channel can reach buyers", "evidence_class": "planned", "stop_rule": "remain blocked if the channel and audience cannot be identified"},
+  "expected": {"status": "needs_evidence", "fatal_gate": "distribution_missing"}
+}
