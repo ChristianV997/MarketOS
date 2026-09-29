@@ -91,6 +91,8 @@ def test_unavailable_freight_is_a_gap_not_zero_cost() -> None:
 
     assert decision.recommendation == "needs_evidence"
     assert "shipping" in decision.evidence_gaps
+    assert "## Evidence Gaps" in render_markdown(report)
+    assert "- `desk-lamp`: shipping" in render_markdown(report)
     assert decision.scenarios["base"]["status"] == "unavailable"
 
 
@@ -524,10 +526,30 @@ def test_path_escape_source_reference_is_rejected(source_ref: str) -> None:
     {"decisions": ["not-a-decision"]},
     {"decisions": [{"candidate_id": "../escape", "blockers": []}]},
     {"decisions": [{"candidate_id": "candidate-1", "blockers": [{"unsafe": True}]}]},
+    {"decisions": [{"candidate_id": "candidate-1", "evidence_gaps": "shipping"}]},
 ])
 def test_markdown_rejects_malformed_decision_shape(report: dict) -> None:
     with pytest.raises(OpportunityDiscoveryError):
         render_markdown(report)
+
+
+def test_markdown_escapes_untrusted_evidence_gap_markup() -> None:
+    report = {
+        "decisions": [
+            {
+                "candidate_id": "candidate-1",
+                "blockers": [],
+                "evidence_gaps": ["shipping|Injected\n# heading"],
+            }
+        ]
+    }
+
+    rendered = render_markdown(report)
+
+    assert "- `candidate-1`: shipping\\|Injected \\# heading" in rendered
+    assert "\n# heading" not in rendered
+    legacy = render_markdown({"decisions": [{"candidate_id": "candidate-1", "blockers": []}]})
+    assert "## Evidence Gaps" not in legacy
 
 
 def test_live_claim_is_downgraded_and_does_not_upgrade_evidence() -> None:
