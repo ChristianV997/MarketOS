@@ -9,10 +9,20 @@ import { MODE_COPY } from "../lib/stateCopy";
 const CHIP = "inline-flex items-center rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[11px] text-zinc-200";
 
 function eligibilityLabel(portfolio: PortfolioReviewModel): { key: string; text: string } {
-  if (portfolio.phase === "loading" || portfolio.phase === "error" || portfolio.phase === "unavailable") {
+  if (portfolio.phase === "loading") {
+    return { key: "unknown", text: "Eligibility unknown: the portfolio is still loading." };
+  }
+  if (portfolio.phase === "error" || portfolio.phase === "unavailable") {
     return { key: "unknown", text: "Eligibility unknown: the portfolio is not available." };
   }
   if (!portfolio.eligibility.reported) return { key: "not_reported", text: "Eligibility not reported by the backend." };
+  if (portfolio.qualifiers.includes("fixture")) {
+    // Fixture data has no backend behind it: never word it as a backend decision.
+    return {
+      key: "fixture",
+      text: `Fixture data reports ${portfolio.eligibility.eligible ? "eligible" : "not eligible"}: a simulation, not a backend decision.`,
+    };
+  }
   return portfolio.eligibility.eligible
     ? { key: "eligible", text: "Backend reports eligible for draft research." }
     : { key: "not_eligible", text: "Backend reports not eligible for draft research." };
@@ -58,7 +68,7 @@ export function PortfolioProgressPanel({
           <span aria-hidden="true">{count === null ? "—" : count}/{portfolio.required}</span>
           <span className="sr-only">
             {count === null
-              ? `Progress unknown: portfolio not available, ${portfolio.required} distinct active candidates required`
+              ? `Progress unknown: the portfolio is ${portfolio.phase === "loading" ? "still loading" : "not available"}, ${portfolio.required} distinct active candidates required`
               : `${count} of ${portfolio.required} distinct active candidates`}
           </span>
         </p>
@@ -66,7 +76,7 @@ export function PortfolioProgressPanel({
           <progress
             value={Math.min(count, portfolio.required)}
             max={portfolio.required}
-            aria-label={`Distinct active candidates toward ${portfolio.required}`}
+            aria-hidden="true"
             className="h-2 w-40 max-w-full accent-sky-400"
           />
         ) : null}
@@ -121,7 +131,7 @@ export function PortfolioProgressPanel({
               disabled={!gate.enabled}
               data-draft-action={action.id}
               onClick={() => {
-                if (gate.enabled) onDraftResearch?.({ actionId: action.id, activeCandidateIds: portfolio.activeCandidateIds });
+                if (gate.enabled) onDraftResearch?.({ actionId: action.id, activeCandidateIds: [...portfolio.activeCandidateIds] });
               }}
               className="min-h-[44px] rounded-lg border border-sky-400/70 bg-sky-500/10 px-3 py-2 text-left text-sm text-sky-100 hover:bg-sky-500/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-900 disabled:text-zinc-400"
             >

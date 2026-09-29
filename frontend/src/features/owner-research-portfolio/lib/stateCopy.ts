@@ -1,4 +1,11 @@
-import type { EvidenceMode, SurfacePhase, SurfaceQualifier, SurfaceScope } from "../contracts/ownerResearch";
+import {
+  MAX_RANKED_ROWS,
+  type DroppedRow,
+  type EvidenceMode,
+  type SurfacePhase,
+  type SurfaceQualifier,
+  type SurfaceScope,
+} from "../contracts/ownerResearch";
 
 /** User-facing copy for every state. Each phase and qualifier reads differently on purpose. */
 
@@ -67,6 +74,28 @@ export const MODE_COPY: Record<EvidenceMode, { label: string; body: string }> = 
   live_readonly: { label: "Live read-only", body: "The backend reports a read-only live path. This page still cannot change anything." },
   unknown: { label: "Mode not reported", body: "Provenance is not reported. Treat every value as unverified." },
 };
+
+const HIDDEN_ROW_TEXT: Record<DroppedRow["reason"], (count: number) => string> = {
+  duplicate_candidate_id: (count) => `${count} duplicate candidate ID${count === 1 ? "" : "s"}`,
+  invalid_candidate_id: (count) => `${count} malformed candidate ID${count === 1 ? "" : "s"}`,
+  rows_truncated: (count) => `${count} past the ${MAX_RANKED_ROWS}-row limit`,
+};
+
+/**
+ * What the ranked list left out and why, in words. The total is the sum of the
+ * rows the adapter dropped (a truncation entry stands for every row past the cap).
+ */
+export function describeHiddenRows(dropped: readonly DroppedRow[]): { total: number; text: string } {
+  const byReason = new Map<DroppedRow["reason"], number>();
+  let total = 0;
+  for (const item of dropped) {
+    const soFar = byReason.get(item.reason);
+    byReason.set(item.reason, soFar === undefined ? item.count : soFar + item.count);
+    total += item.count;
+  }
+  const text = [...byReason.entries()].map(([reason, count]) => HIDDEN_ROW_TEXT[reason](count)).join(", ");
+  return { total, text };
+}
 
 export const SAFETY_NOTE =
   "Advisory research view. It never publishes, spends, orders, calls providers or changes data. Nothing here is live validated unless a value is labelled Live read-only.";

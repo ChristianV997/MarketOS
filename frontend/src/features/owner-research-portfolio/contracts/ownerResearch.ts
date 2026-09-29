@@ -195,6 +195,8 @@ export interface RankingRunMeta {
 export interface DroppedRow {
   reason: "invalid_candidate_id" | "duplicate_candidate_id" | "rows_truncated";
   candidateId: string | null;
+  /** Ranked rows this entry stands for: 1, except rows_truncated, which covers every row past the cap. */
+  count: number;
 }
 
 export interface OpportunityReviewModel {

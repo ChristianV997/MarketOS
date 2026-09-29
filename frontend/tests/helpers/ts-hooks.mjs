@@ -61,7 +61,11 @@ export async function load(url, context, nextLoad) {
         sourceMap: false,
       },
     });
-    return { format: "module", source: outputText, shortCircuit: true };
+    // Node has no Vite `import.meta.env`. Route `import.meta` through a global a test can set
+    // (globalThis.__IMPORT_META__ = { env: { VITE_API_BASE_URL: "..." } }) so code reading the
+    // API-origin authority can actually be exercised instead of always seeing "".
+    const source = outputText.replace(/\bimport\.meta\b/g, "(globalThis.__IMPORT_META__ ?? {})");
+    return { format: "module", source, shortCircuit: true };
   }
   return nextLoad(url, context);
 }

@@ -6,7 +6,8 @@ import type {
 } from "../contracts/ownerResearch";
 import { markPortfolioMembership } from "../lib/adaptRankingReadModel";
 import { evaluateDraftResearchGate } from "../lib/adaptPortfolioReadModel";
-import { humanize, NOT_REPORTED } from "../lib/format";
+import { announceSurface } from "../lib/announce";
+import { humanize, NOT_REPORTED, uniqueStrings } from "../lib/format";
 import { MODE_COPY, SAFETY_NOTE } from "../lib/stateCopy";
 import { OpportunityDetail } from "./OpportunityDetail";
 import { PortfolioProgressPanel } from "./PortfolioProgressPanel";
@@ -24,7 +25,7 @@ export interface OwnerResearchWorkspaceProps {
   initialSelectedId?: string | null;
 }
 
-const CHIP = "inline-flex items-center rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[11px] text-zinc-200";
+const WRAP = "[overflow-wrap:anywhere]";
 
 function RunSummary({ ranking }: { ranking: OpportunityReviewModel }) {
   const { run, evidenceMode } = ranking;
@@ -32,25 +33,29 @@ function RunSummary({ ranking }: { ranking: OpportunityReviewModel }) {
   const mode = MODE_COPY[evidenceMode];
   return (
     <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs text-zinc-300" aria-label="Ranking run provenance">
-      <div>
+      <div className="min-w-0">
         <dt className="inline text-zinc-400">Evidence mode: </dt>
-        <dd className="inline" data-run-mode={evidenceMode}>{mode.label}</dd>
+        <dd className={`inline ${WRAP}`} data-run-mode={evidenceMode}>
+          {mode.label}. {mode.body}
+        </dd>
       </div>
-      <div>
+      <div className="min-w-0">
         <dt className="inline text-zinc-400">Backend status: </dt>
-        <dd className="inline">{humanize(run.overallStatus)}</dd>
+        <dd className={`inline ${WRAP}`}>{humanize(run.overallStatus)}</dd>
       </div>
-      <div>
+      <div className="min-w-0">
         <dt className="inline text-zinc-400">Sources: </dt>
-        <dd className="inline break-words">{run.sourceLabels.length > 0 ? run.sourceLabels.join(", ") : NOT_REPORTED}</dd>
+        <dd className={`inline ${WRAP}`}>{run.sourceLabels.length > 0 ? run.sourceLabels.join(", ") : NOT_REPORTED}</dd>
       </div>
-      <div>
+      <div className="min-w-0">
         <dt className="inline text-zinc-400">Ranking freshness: </dt>
-        <dd className="inline" data-run-freshness={run.freshness.status}>{run.freshness.label}</dd>
+        <dd className={`inline ${WRAP}`} data-run-freshness={run.freshness.status}>{run.freshness.label}</dd>
       </div>
-      <div>
-        <dt className="inline text-zinc-400">Network calls reported: </dt>
-        <dd className="inline">{run.networkCalls ? "yes" : "no"}</dd>
+      <div className="min-w-0">
+        <dt className="inline text-zinc-400">Network calls: </dt>
+        <dd className="inline" data-run-network={run.networkCalls ? "reported" : "none_reported"}>
+          {run.networkCalls ? "reported by the backend" : "none reported"}
+        </dd>
       </div>
     </dl>
   );
@@ -80,6 +85,12 @@ export function OwnerResearchWorkspace({
     () => evaluateDraftResearchGate(portfolio, { handlerConnected: typeof onDraftResearch === "function" }),
     [portfolio, onDraftResearch],
   );
+  // Adapter warnings (dropped duplicate/malformed rows, rank problems) must be visible, not just counted.
+  const rankingDetails = useMemo(
+    () => uniqueStrings([...ranking.reasons, ...ranking.warnings]),
+    [ranking.reasons, ranking.warnings],
+  );
+  const announcement = announceSurface(ranking, portfolio);
 
   function focusDetail() {
     document.getElementById(OPPORTUNITY_DETAIL_ID)?.focus();
@@ -87,6 +98,10 @@ export function OwnerResearchWorkspace({
 
   return (
     <section aria-labelledby="owner-research-heading" data-owner-research-workspace className="min-w-0 space-y-4 text-zinc-100">
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-live-summary>
+        {announcement}
+      </p>
+
       <header>
         <h1 id="owner-research-heading" className="text-lg font-semibold">Owner research: opportunity review</h1>
         <p className="mt-1 text-sm text-zinc-300">{SAFETY_NOTE}</p>
@@ -102,7 +117,7 @@ export function OwnerResearchWorkspace({
       <SurfaceStateBanner
         scope="ranking"
         phase={ranking.phase}
-        reasons={ranking.reasons}
+        reasons={rankingDetails}
         openReasons={ranking.qualifiers.includes("blocked")}
       />
       <SurfaceStateBanner scope="portfolio" phase={portfolio.phase} reasons={portfolio.reasons} />
@@ -119,6 +134,7 @@ export function OwnerResearchWorkspace({
           <RankedOpportunityList
             rows={rows}
             selectedId={selectedRow?.candidateId ?? null}
+            hiddenRows={ranking.dropped}
             onSelect={setSelectedId}
             onActivate={(candidateId) => {
               setSelectedId(candidateId);
@@ -127,7 +143,18 @@ export function OwnerResearchWorkspace({
           />
           <OpportunityDetail row={selectedRow} run={ranking.run} />
         </div>
-      ) : null}
+      ) : (
+        <section
+          aria-labelledby="owner-ranked-heading"
+          data-ranked-empty
+          className="min-w-0 rounded-lg border border-dashed border-zinc-700 bg-zinc-900/30 p-3 sm:p-4"
+        >
+          <h2 id="owner-ranked-heading" className="text-base font-semibold text-zinc-100">Ranked opportunities</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            No ranked candidates are shown. The ranking state above explains why.
+          </p>
+        </section>
+      )}
     </section>
   );
 }

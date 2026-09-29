@@ -19,12 +19,17 @@ const {
   portfolioError,
   portfolioLoading,
   portfolioUnavailable,
+  resultToPortfolioModel,
+  scanForSecretKeys,
 } = await importSrc(`${FEATURE}/lib/adaptPortfolioReadModel`);
+const { resolveListboxKey } = await importSrc(`${FEATURE}/lib/listboxKeys`);
+const { announceSurface } = await importSrc(`${FEATURE}/lib/announce`);
 const { buildPortfolioUrl, fetchOwnerPortfolioPayload, MAX_PORTFOLIO_RESPONSE_CHARS } = await importSrc(`${FEATURE}/lib/portfolioApi`);
 const { isStableCandidateId } = await importSrc(`${FEATURE}/lib/candidateId`);
 const { describeFreshness } = await importSrc(`${FEATURE}/lib/freshnessView`);
 const { formatReportedScore, NOT_REPORTED } = await importSrc(`${FEATURE}/lib/format`);
 const contracts = await importSrc(`${FEATURE}/contracts/ownerResearch`);
+const stateCopy = await importSrc(`${FEATURE}/lib/stateCopy`);
 
 // ---------------------------------------------------------------- builders
 
@@ -567,4 +572,299 @@ test("api: fetch + adapter end to end - a 404 never renders as 0/3 and a valid p
   const okResult = await fetchOwnerPortfolioPayload({ workspaceId: "ws-1", fetchImpl: ok.fetchImpl });
   assert.equal(okResult.kind, "ok");
   assert.equal(adaptPortfolio(okResult.payload).activeCount, 2);
+});
+
+
+// ============================================================================
+// Review follow-ups: gaps where a plausible bug would have passed the suite.
+// ============================================================================
+
+// ------------------------------------------- hook mapping (pure, tenant-scoped)
+
+test("hook mapping: the workspace REQUESTED is authoritative, never the one the payload claims", () => {
+  const foreign = resultToPortfolioModel({ kind: "ok", payload: portfolioPayload({ workspace_id: "ws-evil" }) }, { workspaceId: "ws-1", nowMs: NOW });
+  assert.equal(foreign.phase, "error");
+  assert.deepEqual(foreign.reasons, ["workspace_mismatch"]);
+  assert.equal(foreign.activeCount, null, "a foreign tenant's portfolio is never counted");
+
+  const own = resultToPortfolioModel({ kind: "ok", payload: portfolioPayload() }, { workspaceId: "ws-1", nowMs: NOW });
+  assert.equal(own.phase, "ready");
+  assert.equal(own.workspaceId, "ws-1");
+});
+
+test("hook mapping: every outcome maps to its own phase and none of them reads as an empty portfolio", () => {
+  const ctx = { workspaceId: "ws-1", nowMs: NOW };
+  const loading = resultToPortfolioModel(null, ctx);
+  const unavailable = resultToPortfolioModel({ kind: "unavailable", reason: "endpoint_not_available" }, ctx);
+  const failed = resultToPortfolioModel({ kind: "error", reason: "http_500" }, ctx);
+  assert.deepEqual([loading.phase, unavailable.phase, failed.phase], ["loading", "unavailable", "error"]);
+  assert.deepEqual(unavailable.reasons, ["endpoint_not_available"]);
+  assert.deepEqual(failed.reasons, ["http_500"]);
+  for (const model of [loading, unavailable, failed]) {
+    assert.equal(model.activeCount, null, `${model.phase} must not read as zero`);
+    assert.equal(model.workspaceId, "ws-1");
+    assert.notEqual(model.phase, "empty");
+  }
+});
+
+test("hook mapping: no selected workspace wins over any outcome, including a successful payload", () => {
+  for (const workspaceId of [null, "", "   "]) {
+    for (const result of [null, { kind: "ok", payload: portfolioPayload() }, { kind: "error", reason: "http_500" }]) {
+      const model = resultToPortfolioModel(result, { workspaceId, nowMs: NOW });
+      assert.equal(model.phase, "unavailable");
+      assert.deepEqual(model.reasons, ["workspace_not_selected"]);
+      assert.equal(model.activeCount, null);
+    }
+  }
+});
+
+test("hook mapping: freshness advances with the clock for the SAME fetched payload", () => {
+  const result = { kind: "ok", payload: portfolioPayload({ generated_at: "2026-09-29T11:00:00Z", expires_at: undefined }) };
+  const early = resultToPortfolioModel(result, { workspaceId: "ws-1", nowMs: Date.parse("2026-09-29T12:00:00Z") });
+  const later = resultToPortfolioModel(result, { workspaceId: "ws-1", nowMs: Date.parse("2026-09-30T13:00:00Z") });
+  assert.equal(early.freshness.status, "fresh");
+  assert.equal(later.freshness.status, "stale");
+  assert.ok(later.qualifiers.includes("stale"));
+  assert.equal(evaluateDraftResearchGate(early, { handlerConnected: true }).enabled, true);
+  assert.equal(evaluateDraftResearchGate(later, { handlerConnected: true }).enabled, false, "a portfolio that ages out stops enabling actions");
+});
+
+// ------------------------------------------ tenant + mutation-authority variants
+
+test("tenant: workspace ids are compared exactly - case and whitespace variants are foreign tenants", () => {
+  for (const claimed of ["WS-1", "Ws-1", " ws-1", "ws-1 ", "ws-1\n", "ws_1", "ws-10", "ws-"]) {
+    const model = adaptPortfolio(portfolioPayload({ workspace_id: claimed }));
+    assert.equal(model.phase, "error", JSON.stringify(claimed));
+    assert.deepEqual(model.reasons, ["workspace_mismatch"], JSON.stringify(claimed));
+  }
+  for (const claimed of [undefined, null, 7, {}, [], "   "]) {
+    const model = adaptPortfolio(portfolioPayload({ workspace_id: claimed }));
+    assert.equal(model.phase, "error", JSON.stringify(claimed));
+    assert.deepEqual(model.reasons, ["workspace_id_missing"], JSON.stringify(claimed));
+  }
+});
+
+test("mutation authority: only a literal read_only:true with mutated:false is accepted", () => {
+  for (const overrides of [
+    { mutated: undefined },
+    { mutated: null },
+    { mutated: "false" },
+    { mutated: 0 },
+    { mutated: true },
+    { read_only: undefined },
+    { read_only: null },
+    { read_only: "true" },
+    { read_only: 1 },
+    { read_only: false },
+  ]) {
+    const model = adaptPortfolio(portfolioPayload(overrides));
+    assert.equal(model.phase, "error", JSON.stringify(overrides));
+    assert.deepEqual(model.reasons, ["mutation_authority_rejected"], JSON.stringify(overrides));
+  }
+  assert.equal(adaptPortfolio(portfolioPayload({ read_only: true, mutated: false })).phase, "ready");
+});
+
+// ------------------------------------------------ gate: pinned fail-open/closed
+
+test("gate: unverifiable or degraded portfolios fail closed", () => {
+  const invalidFreshness = evaluateDraftResearchGate(adaptPortfolio(portfolioPayload({ generated_at: "not-a-date" })), { handlerConnected: true });
+  assert.equal(invalidFreshness.enabled, false);
+  assert.ok(invalidFreshness.reasons.some((reason) => /freshness could not be verified/.test(reason)));
+
+  const partial = adaptPortfolio(
+    portfolioPayload({ items: [...portfolioPayload().items, { candidate_id: "  padded  ", status: "active" }] }),
+  );
+  assert.equal(partial.activeCount, 3, "three valid ids");
+  assert.ok(partial.qualifiers.includes("partial"));
+  const partialGate = evaluateDraftResearchGate(partial, { handlerConnected: true });
+  assert.equal(partialGate.enabled, false, "3 valid + 1 malformed entry is not trusted for drafting");
+  assert.ok(partialGate.reasons.some((reason) => /ignored as invalid/.test(reason)));
+});
+
+test("gate: the documented pass-through cases stay enabled (unreported freshness, manual evidence)", () => {
+  const unreported = adaptPortfolio(portfolioPayload({ generated_at: undefined, expires_at: undefined }));
+  assert.equal(unreported.freshness.status, "not_reported");
+  assert.equal(evaluateDraftResearchGate(unreported, { handlerConnected: true }).enabled, true);
+
+  const manual = adaptPortfolio(portfolioPayload({ evidence_mode: "manual_import" }));
+  assert.equal(manual.evidenceMode, "manual");
+  assert.equal(evaluateDraftResearchGate(manual, { handlerConnected: true }).enabled, true, "operator-curated evidence may be drafted from");
+});
+
+test("gate: every reason is reported, not only the first", () => {
+  const model = adaptPortfolio(
+    portfolioPayload({ evidence_mode: "fixture_only", expires_at: "2026-09-01T00:00:00Z", draft_research: { eligible: false, reasons: ["gate_open"] } }),
+  );
+  const gate = evaluateDraftResearchGate(model, { handlerConnected: false });
+  assert.equal(gate.enabled, false);
+  for (const pattern of [/Fixture \/ simulation/, /stale/, /not eligible/, /gate_open/, /No draft-research service is connected/]) {
+    assert.ok(gate.reasons.some((reason) => pattern.test(reason)), `${pattern} in ${JSON.stringify(gate.reasons)}`);
+  }
+});
+
+// ------------------------------------------------- secret scan: fails closed
+
+test("secret scan: every credential-shaped key pattern is rejected, at any nesting the scan covers", () => {
+  const keys = ["client_secret", "access_token", "password", "passwd", "apiKey", "api-key", "api_key", "Authorization", "credentials", "private_key", "private-key", "session_cookie"];
+  for (const key of keys) {
+    const nested = adaptPortfolio(portfolioPayload({ items: [{ candidate_id: "a", status: "active", meta: { deep: { [key]: "x" } } }] }));
+    assert.deepEqual(nested.reasons, ["secret_shaped_field_rejected"], key);
+    const arrayed = adaptPortfolio(portfolioPayload({ extras: [[{ [key]: "x" }]] }));
+    assert.deepEqual(arrayed.reasons, ["secret_shaped_field_rejected"], `${key} in arrays`);
+  }
+  assert.equal(scanForSecretKeys({ candidate_id: "a", status: "active", sku: "S", supplier_offer_count: 3 }), "clean");
+  assert.equal(scanForSecretKeys({ reasons: ["credential_missing"] }), "clean", "values are not keys");
+});
+
+test("secret scan: a payload too deep or too large to scan is rejected, never waved through", () => {
+  let deep = { api_key: "x" };
+  for (let level = 0; level < 12; level += 1) deep = { wrap: deep };
+  assert.equal(scanForSecretKeys(deep), "too_complex");
+  const deepModel = adaptPortfolio(portfolioPayload({ extras: deep }));
+  assert.deepEqual(deepModel.reasons, ["payload_too_complex"]);
+
+  const wide = adaptPortfolio(portfolioPayload({ items: [{ candidate_id: "a", status: "active", blob: new Array(25_000).fill(1) }] }));
+  assert.deepEqual(wide.reasons, ["payload_too_complex"]);
+  assert.equal(wide.activeCount, null);
+});
+
+// -------------------------------------------------------------- limits
+
+test("limits: exactly 500 portfolio items are accepted, 501 are rejected", () => {
+  const at = (count) => Array.from({ length: count }, (_, index) => ({ candidate_id: `c-${index}`, status: "active" }));
+  const ok = adaptPortfolio(portfolioPayload({ items: at(500), draft_research: { eligible: true } }));
+  assert.equal(ok.phase, "ready");
+  assert.equal(ok.activeCount, 500);
+  assert.deepEqual(adaptPortfolio(portfolioPayload({ items: at(501) })).reasons, ["items_exceed_limit"]);
+});
+
+test("limits: ranked rows beyond the cap are dropped and flagged, not silently cut", () => {
+  assert.equal(contracts.MAX_RANKED_ROWS, 200);
+  const rows = Array.from({ length: 201 }, (_, index) => rankedRow(`cand-${index}`, { rankIndex: index }));
+  const model = adaptRanking(packetWith(rows));
+  assert.equal(model.rows.length, 200);
+  assert.deepEqual(model.dropped, [{ reason: "rows_truncated", candidateId: null, count: 1 }]);
+  assert.ok(model.warnings.includes("rows_truncated:1"));
+  assert.ok(model.qualifiers.includes("partial"));
+});
+
+test("limits: a truncation entry counts every row past the cap", () => {
+  const rows = Array.from({ length: 205 }, (_, index) => rankedRow(`cand-${index}`, { rankIndex: index }));
+  const model = adaptRanking(packetWith(rows));
+  assert.equal(model.rows.length, 200);
+  assert.deepEqual(model.dropped, [{ reason: "rows_truncated", candidateId: null, count: 5 }]);
+  assert.ok(model.warnings.includes("rows_truncated:5"));
+  assert.equal(stateCopy.describeHiddenRows(model.dropped).total, 5);
+});
+
+test("describeHiddenRows: sums counts per reason and never invents a zero", () => {
+  const { describeHiddenRows } = stateCopy;
+  assert.deepEqual(describeHiddenRows([]), { total: 0, text: "" });
+  assert.deepEqual(
+    describeHiddenRows([
+      { reason: "duplicate_candidate_id", candidateId: "a", count: 1 },
+      { reason: "invalid_candidate_id", candidateId: null, count: 1 },
+      { reason: "duplicate_candidate_id", candidateId: "b", count: 1 },
+      { reason: "rows_truncated", candidateId: null, count: 7 },
+    ]),
+    { total: 10, text: "2 duplicate candidate IDs, 1 malformed candidate ID, 7 past the 200-row limit" },
+  );
+});
+
+// ---------------------------------------------- "never re-sorts", for real
+
+test("ranking: order is preserved even when every metric the adapter reads is anti-sorted", () => {
+  const anti = (id, index, overrides) => {
+    const cells = rankedRow(id).pillarCells.map((cell) => ({ ...cell, score: overrides.pillar }));
+    return rankedRow(id, { rankIndex: index, evidenceCompleteness: overrides.completeness, confidence: overrides.confidence, pillarCells: cells });
+  };
+  const rows = [
+    anti("first-but-weakest", 0, { completeness: 0.1, confidence: 0.1, pillar: 0.1 }),
+    anti("second-but-strongest", 1, { completeness: 0.9, confidence: 0.9, pillar: 0.9 }),
+    anti("third-mid", 2, { completeness: 0.5, confidence: 0.5, pillar: 0.5 }),
+  ];
+  const model = adaptRanking(packetWith(rows));
+  assert.deepEqual(model.rows.map((row) => row.candidateId), ["first-but-weakest", "second-but-strongest", "third-mid"]);
+  assert.deepEqual(model.rows.map((row) => row.rankNumber), [1, 2, 3]);
+  assert.deepEqual(model.rows.map((row) => row.evidenceCompleteness), [0.1, 0.9, 0.5], "values are carried through, not used to reorder");
+  // Joining a portfolio that holds only the LAST-ranked id must not float it to the top.
+  const joined = markPortfolioMembership(model.rows, ["third-mid"]);
+  assert.deepEqual(joined.map((row) => row.candidateId), ["first-but-weakest", "second-but-strongest", "third-mid"]);
+  assert.deepEqual(joined.map((row) => row.inPortfolio), [false, false, true]);
+});
+
+// -------------------------------------------- API origin authority (apiBase.ts)
+
+test("api origin: the URL comes from apiBase's VITE_API_BASE_URL, then VITE_API_URL, else same-origin", async () => {
+  const seen = [];
+  const stub = async (url) => {
+    seen.push(url);
+    return { status: 200, ok: true, text: async () => JSON.stringify(portfolioPayload()) };
+  };
+  try {
+    globalThis.__IMPORT_META__ = { env: { VITE_API_BASE_URL: "https://api.example.test/", VITE_API_URL: "https://legacy.example.test" } };
+    assert.equal(buildPortfolioUrl("ws-1"), "https://api.example.test/api/owner-research/portfolio?workspace_id=ws-1");
+    await fetchOwnerPortfolioPayload({ workspaceId: "ws-1", fetchImpl: stub });
+    assert.equal(seen.at(-1), "https://api.example.test/api/owner-research/portfolio?workspace_id=ws-1", "the fetch itself uses the authority");
+
+    globalThis.__IMPORT_META__ = { env: { VITE_API_URL: "https://legacy.example.test/" } };
+    assert.equal(buildPortfolioUrl("ws-1"), "https://legacy.example.test/api/owner-research/portfolio?workspace_id=ws-1");
+
+    globalThis.__IMPORT_META__ = { env: {} };
+    assert.equal(buildPortfolioUrl("ws-1"), "/api/owner-research/portfolio?workspace_id=ws-1");
+  } finally {
+    delete globalThis.__IMPORT_META__;
+  }
+  assert.equal(buildPortfolioUrl("ws-1"), "/api/owner-research/portfolio?workspace_id=ws-1", "no env at all stays same-origin");
+});
+
+// ------------------------------------------------------ listbox key handling
+
+test("listbox keys: arrows, Home and End move; boundaries consume the key without wrapping", () => {
+  const key = (name, extra = {}) => ({ key: name, ...extra });
+  assert.deepEqual(resolveListboxKey(key("ArrowDown"), 0, 3), { handled: true, kind: "move", nextIndex: 1 });
+  assert.deepEqual(resolveListboxKey(key("ArrowUp"), 2, 3), { handled: true, kind: "move", nextIndex: 1 });
+  assert.deepEqual(resolveListboxKey(key("End"), 0, 3), { handled: true, kind: "move", nextIndex: 2 });
+  assert.deepEqual(resolveListboxKey(key("Home"), 2, 3), { handled: true, kind: "move", nextIndex: 0 });
+  assert.deepEqual(resolveListboxKey(key("ArrowDown"), 2, 3), { handled: true, kind: "none" }, "no wrap at the end");
+  assert.deepEqual(resolveListboxKey(key("ArrowUp"), 0, 3), { handled: true, kind: "none" }, "no wrap at the start");
+  assert.deepEqual(resolveListboxKey(key("Home"), 0, 3), { handled: true, kind: "none" });
+  assert.deepEqual(resolveListboxKey(key("ArrowDown"), 0, 1), { handled: true, kind: "none" }, "single option");
+});
+
+test("listbox keys: Enter and Space hand focus to details; nothing else is consumed", () => {
+  assert.deepEqual(resolveListboxKey({ key: "Enter" }, 1, 3), { handled: true, kind: "activate" });
+  assert.deepEqual(resolveListboxKey({ key: " " }, 1, 3), { handled: true, kind: "activate" });
+  for (const name of ["Tab", "Escape", "a", "PageDown", "ArrowLeft", "ArrowRight", "Shift", "F5"]) {
+    assert.deepEqual(resolveListboxKey({ key: name }, 1, 3), { handled: false }, name);
+  }
+  assert.deepEqual(resolveListboxKey({ key: "ArrowDown" }, 0, 0), { handled: false }, "empty list");
+});
+
+test("listbox keys: Ctrl, Cmd and Alt combinations are left to the browser", () => {
+  for (const key of ["Home", "End", "ArrowUp", "ArrowDown", "Enter", " "]) {
+    for (const modifier of ["ctrlKey", "metaKey", "altKey"]) {
+      assert.deepEqual(resolveListboxKey({ key, [modifier]: true }, 1, 3), { handled: false }, `${modifier}+${key}`);
+    }
+  }
+  assert.equal(resolveListboxKey({ key: "ArrowDown", shiftKey: true }, 0, 3).handled, true, "Shift alone does not disable navigation");
+});
+
+// -------------------------------------------------------- live-region summary
+
+test("live region: announces state changes and never announces an unknown portfolio as zero", () => {
+  const LIVE = { fingerprint: { evidenceMode: "live_readonly" } };
+  const ready = announceSurface(adaptRanking(packetWith([rankedRow("a"), rankedRow("b", { rankIndex: 1 })], LIVE)), adaptPortfolio(portfolioPayload()));
+  assert.equal(ready, "Ranking ready: 2 candidates in backend order. Portfolio: 3 of 3 distinct active candidates.");
+
+  const one = announceSurface(adaptRanking(packetWith([rankedRow("a")], LIVE)), adaptPortfolio(portfolioPayload({ items: [] })));
+  assert.match(one, /^Ranking ready: 1 candidate in backend order\. Portfolio: 0 of 3 distinct active candidates\.$/, "a real empty portfolio is zero");
+
+  const loading = adaptRankingPacket({ packet: null, loading: true, loadError: null, nowMs: NOW });
+  for (const unknown of [portfolioLoading("ws-1"), portfolioUnavailable("endpoint_not_available", "ws-1"), portfolioError("http_500", "ws-1")]) {
+    const text = announceSurface(loading, unknown);
+    assert.doesNotMatch(text, /\b0 of 3\b/, `${unknown.phase}: ${text}`);
+    assert.match(text, /^Ranking is loading\. Portfolio (is loading|is unavailable|failed to load)\./);
+  }
+  assert.match(announceSurface(adaptRanking(packetWith([rankedRow("a")], { fingerprint: { evidenceMode: "fixture_only" } })), adaptPortfolio(portfolioPayload())), /Notices: fixture\.$/);
 });
