@@ -20,7 +20,6 @@ def commerce(monkeypatch):
     import backend.commerce.brands as brands_mod
     import backend.commerce.catalog as cat_mod
     import backend.commerce.storefront as sf_mod
-    import backend.commerce.inventory_sync as inv_mod
 
     registry = BrandRegistry()
     catalog = ProductCatalog()
