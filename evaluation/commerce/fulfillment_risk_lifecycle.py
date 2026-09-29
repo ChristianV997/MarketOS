@@ -187,6 +187,32 @@ def _evidence_state(refs: Sequence[EvidenceRef], explicit: str) -> str:
     return "observed"
 
 
+def reconcile_evidence_refs(refs: Sequence[EvidenceRef]) -> tuple[EvidenceRef, ...]:
+    """Deterministically deduplicate and reconcile evidence references by evidence_id.
+
+    When multiple references share an evidence_id, the reference with the latest
+    captured_at timestamp takes precedence. Equal or empty timestamps are
+    tie-broken deterministically by canonical serialization.
+    Results are returned in canonical order sorted by evidence_id.
+    """
+    by_id: dict[str, EvidenceRef] = {}
+    for ref in refs:
+        if not isinstance(ref, EvidenceRef):
+            raise ValueError("invalid evidence_ref")
+        existing = by_id.get(ref.evidence_id)
+        if existing is None:
+            by_id[ref.evidence_id] = ref
+            continue
+        ref_captured = ref.captured_at or ""
+        existing_captured = existing.captured_at or ""
+        if ref_captured > existing_captured:
+            by_id[ref.evidence_id] = ref
+        elif ref_captured == existing_captured:
+            if canonical_json(ref.to_dict()) > canonical_json(existing.to_dict()):
+                by_id[ref.evidence_id] = ref
+    return tuple(sorted(by_id.values(), key=lambda item: item.evidence_id))
+
+
 @dataclass(frozen=True)
 class FulfillmentResponsibilityMap:
     """Accountability and route contract for one simulated order."""
@@ -683,7 +709,7 @@ def run_fulfillment_risk_dry_run(
         lane=scenario.lane,
         assumptions=scenario.assumptions,
     )
-    all_refs = tuple(dict.fromkeys((*scenario.evidence_refs, *scenario.responsibilities.evidence_refs, *economics.evidence_refs)))
+    all_refs = reconcile_evidence_refs((*scenario.evidence_refs, *scenario.responsibilities.evidence_refs, *economics.evidence_refs))
     evidence_state = _evidence_state(all_refs, scenario.evidence_state)
     observations = _observe_ports(scenario, adapter)
     blockers = set(scenario.responsibilities.blockers)
@@ -841,4 +867,5 @@ __all__ = [
     "FulfillmentPortBundle",
     "FixtureFulfillmentAdapter", "FulfillmentRiskReport", "canonical_json", "project_fulfillment_events",
     "run_fulfillment_risk_dry_run", "append_report_events", "build_named_scenario", "build_named_adapter",
+    "reconcile_evidence_refs",
 ]
