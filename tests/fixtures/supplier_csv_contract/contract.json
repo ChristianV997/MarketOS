@@ -1,0 +1,616 @@
+{
+  "contract_version": 1,
+  "scope": "Supplier catalog CSV: browser preview (frontend/src/lib/supplierCsvParser.ts) vs backend manual importer (backend.adapters.research.supplier_feasibility.import_csv + evaluation.commerce.supplier_feasibility.build_report).",
+  "authority": "The backend importer decides what is imported. The preview may be stricter and must say so, but must not be more permissive or show different values for the same identity.",
+  "invariants": [
+    "candidate_id comes only from an explicit identity column; product/supplier display text is never identity.",
+    "Every imported row is evidence_mode=manual_import (manual/unverified); row metadata cannot upgrade it and it is not live supplier proof.",
+    "Missing cost stays null and is distinct from an explicit 0; landed cost exists only when unit and shipping are both numeric.",
+    "Unparseable and non-finite costs are never numeric.",
+    "No network calls, mutation or launch authority is implied by either layer."
+  ],
+  "projection": {
+    "fields": [
+      "candidate_id",
+      "unit_cost",
+      "shipping_cost",
+      "landed_cost",
+      "moq"
+    ],
+    "landed_cost_tolerance": 0.005,
+    "non_finite_token": {
+      "nan": "nan",
+      "inf": "inf"
+    },
+    "row_order": "sorted by candidate_id",
+    "preview_rejects_row_issues": [
+      "missing_candidate_id",
+      "unsupported_supplier",
+      "duplicate_candidate_id"
+    ],
+    "preview_rejects_file_issues": [
+      "raw_html_rejected"
+    ],
+    "note": "Cases list only the fields they assert. A preview row is 'importable' unless it carries an issue in preview_rejects_row_issues; other preview issues (missing/malformed cost, column count) are advisory strictness. A preview file is 'rejected' only if it emits an issue in preview_rejects_file_issues (proposed code; rename here if the owner picks another)."
+  },
+  "difference_status": {
+    "defect": "Real disagreement; the case is xfail(strict) until the named owner fixes it, then the entry must be removed.",
+    "intentional": "Deliberate, visible difference; the layer's actual behaviour is pinned exactly."
+  },
+  "cases": [
+    {
+      "id": "documented_sample",
+      "summary": "The documented template row imports as one manual offer.",
+      "csv_file": "tests/fixtures/evidence_imports/supplier_catalog_sample.csv",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "candidate-recovery-accessory",
+            "unit_cost": 8.5,
+            "shipping_cost": 3.0,
+            "landed_cost": 11.5,
+            "moq": 20
+          }
+        ]
+      },
+      "preview": {
+        "valid": true
+      },
+      "differences": {
+        "frontend": {
+          "status": "defect",
+          "owner": "#364",
+          "note": "Preview flags the documented row unsupported_supplier: 'synthetic supplier' is a backend manual alias (PR #359) the preview does not know.",
+          "actual": {
+            "rows": []
+          }
+        }
+      }
+    },
+    {
+      "id": "explicit_id_not_display_name",
+      "summary": "Identity is the explicit candidate_id, never the product display text.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nSKU-42,Wireless Charger Stand,4,1,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "SKU-42",
+            "unit_cost": 4.0,
+            "shipping_cost": 1.0,
+            "landed_cost": 5.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing_identity_column",
+      "summary": "No candidate_id (or documented alias) column: nothing is importable, display name is not promoted.",
+      "csv": "product,supplier_cost,shipping_cost,supplier\nJust A Display Name,4,1,manual\n",
+      "expected": {
+        "rows": []
+      }
+    },
+    {
+      "id": "blank_identity_cell",
+      "summary": "A blank candidate_id cell fails closed even when a display name is present.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\n,Only A Display Name,4,1,manual\n",
+      "expected": {
+        "rows": []
+      }
+    },
+    {
+      "id": "identity_trimmed_case_preserved",
+      "summary": "Identity is trimmed but its case is preserved verbatim.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\n  padded-id  ,Disp,4,1,manual\nCase-Id,Disp,4,1,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "Case-Id",
+            "unit_cost": 4.0,
+            "shipping_cost": 1.0,
+            "landed_cost": 5.0
+          },
+          {
+            "candidate_id": "padded-id",
+            "unit_cost": 4.0,
+            "shipping_cost": 1.0,
+            "landed_cost": 5.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "documented_product_id_alias",
+      "summary": "product_id is a documented identity alias.",
+      "csv": "product_id,product,supplier_cost,shipping_cost,supplier\nPID-1,Disp,4,1,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "PID-1",
+            "unit_cost": 4.0,
+            "shipping_cost": 1.0,
+            "landed_cost": 5.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "candidate_id_wins_over_alias",
+      "summary": "When both columns exist, candidate_id is the identity.",
+      "csv": "product_id,candidate_id,product,supplier_cost,shipping_cost,supplier\nPID-9,CAND-9,Disp,4,1,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "CAND-9",
+            "unit_cost": 4.0,
+            "shipping_cost": 1.0,
+            "landed_cost": 5.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing_shipping_is_null",
+      "summary": "Missing shipping stays null and blocks a landed cost; it is never zero.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nMS-1,Disp,8.50,,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "MS-1",
+            "unit_cost": 8.5,
+            "shipping_cost": null,
+            "landed_cost": null
+          }
+        ]
+      },
+      "preview": {
+        "valid": false,
+        "issues": [
+          "missing_shipping_cost"
+        ]
+      }
+    },
+    {
+      "id": "missing_unit_cost_is_null",
+      "summary": "Missing unit cost stays null and blocks a landed cost.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nMU-1,Disp,,3.00,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "MU-1",
+            "unit_cost": null,
+            "shipping_cost": 3.0,
+            "landed_cost": null
+          }
+        ]
+      },
+      "preview": {
+        "valid": false,
+        "issues": [
+          "missing_unit_cost"
+        ]
+      }
+    },
+    {
+      "id": "explicit_zero_is_not_missing",
+      "summary": "Explicit 0 and 0.00 are preserved as zero, including the derived landed cost.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nZ-1,Disp,0,0,manual\nZ-2,Disp,0.00,0.00,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "Z-1",
+            "unit_cost": 0.0,
+            "shipping_cost": 0.0,
+            "landed_cost": 0.0
+          },
+          {
+            "candidate_id": "Z-2",
+            "unit_cost": 0.0,
+            "shipping_cost": 0.0,
+            "landed_cost": 0.0
+          }
+        ]
+      },
+      "preview": {
+        "valid": true
+      }
+    },
+    {
+      "id": "zero_unit_missing_shipping",
+      "summary": "Explicit zero unit cost with missing shipping: zero stays zero, shipping and landed stay null.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nZM-1,Disp,0,,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "ZM-1",
+            "unit_cost": 0.0,
+            "shipping_cost": null,
+            "landed_cost": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "malformed_cost_is_null_not_zero",
+      "summary": "Unparseable cost text becomes null, never zero.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nMC-1,Disp,abc,1,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "MC-1",
+            "unit_cost": null,
+            "shipping_cost": 1.0,
+            "landed_cost": null
+          }
+        ]
+      },
+      "preview": {
+        "valid": false,
+        "issues": [
+          "malformed_unit_cost"
+        ]
+      }
+    },
+    {
+      "id": "currency_prefix_and_thousands",
+      "summary": "$/USD prefixes and thousands separators are read the same way.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nCP-1,Disp,$12.50,USD 3.00,manual\nCP-2,Disp,\"1,234.50\",1,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "CP-1",
+            "unit_cost": 12.5,
+            "shipping_cost": 3.0,
+            "landed_cost": 15.5
+          },
+          {
+            "candidate_id": "CP-2",
+            "unit_cost": 1234.5,
+            "shipping_cost": 1.0,
+            "landed_cost": 1235.5
+          }
+        ]
+      }
+    },
+    {
+      "id": "unknown_vendor_display_name_rejected",
+      "summary": "An unrecognised vendor display name is not accepted as supplier identity.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nUV-1,Disp,4,1,Acme Supplier Display Name\n",
+      "expected": {
+        "rows": []
+      }
+    },
+    {
+      "id": "row_metadata_cannot_claim_live",
+      "summary": "Row-level evidence_mode/observed claims cannot upgrade manual evidence.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier,evidence_mode,observed_at\nEV-1,Disp,4,1,manual,live_readonly,2026-09-01\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "EV-1",
+            "unit_cost": 4.0,
+            "shipping_cost": 1.0,
+            "landed_cost": 5.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "duplicate_candidate_id_keeps_first",
+      "summary": "A repeated candidate_id keeps the first row on both sides.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nDUP-1,Disp A,5,1,manual\nDUP-1,Disp B,4,1,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "DUP-1",
+            "unit_cost": 5.0,
+            "shipping_cost": 1.0,
+            "landed_cost": 6.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "bom_crlf_quoted_newline",
+      "summary": "BOM, CRLF and quoted commas/newlines do not disturb identity or cost.",
+      "csv": "\ufeffcandidate_id,product,supplier_cost,shipping_cost,supplier\r\nQ-1,\"Disp, with comma \"\"quoted\"\"\nline two\",4,1,manual\r\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "Q-1",
+            "unit_cost": 4.0,
+            "shipping_cost": 1.0,
+            "landed_cost": 5.0
+          }
+        ]
+      }
+    },
+    {
+      "id": "short_row_keeps_missing_shipping",
+      "summary": "A short row leaves shipping null on both sides; the preview additionally flags the shape.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nSH-1,Disp,4\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "SH-1",
+            "unit_cost": 4.0,
+            "shipping_cost": null,
+            "landed_cost": null
+          }
+        ]
+      },
+      "preview": {
+        "valid": false,
+        "issues": [
+          "malformed_column_count",
+          "missing_shipping_cost"
+        ]
+      }
+    },
+    {
+      "id": "currency_suffix",
+      "summary": "Backend reads a trailing currency code; the preview reports it malformed (stricter, visible).",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nCS-1,Disp,5 USD,2.00 USD,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "CS-1",
+            "unit_cost": 5.0,
+            "shipping_cost": 2.0,
+            "landed_cost": 7.0
+          }
+        ]
+      },
+      "differences": {
+        "frontend": {
+          "status": "intentional",
+          "owner": "#364",
+          "note": "Preview flags malformed_unit_cost/malformed_shipping_cost instead of parsing a suffix; never silent.",
+          "actual": {
+            "rows": [
+              {
+                "candidate_id": "CS-1",
+                "unit_cost": null,
+                "shipping_cost": null,
+                "landed_cost": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "bare_id_column_not_a_preview_alias",
+      "summary": "Backend accepts a bare 'id' column; the preview only accepts documented aliases.",
+      "csv": "id,product,supplier_cost,shipping_cost,supplier\nID-1,Disp,4,1,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "ID-1",
+            "unit_cost": 4.0,
+            "shipping_cost": 1.0,
+            "landed_cost": 5.0
+          }
+        ]
+      },
+      "differences": {
+        "frontend": {
+          "status": "intentional",
+          "owner": "#364",
+          "note": "Preview reports missing_candidate_id_column (stricter, visible); the documented aliases are candidate_id/product_id/supplier_product_id.",
+          "actual": {
+            "rows": []
+          }
+        }
+      }
+    },
+    {
+      "id": "yen_prefix",
+      "summary": "A yen-prefixed cost is unavailable to the backend importer.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nY-1,Disp,\u00a55,1,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "Y-1",
+            "unit_cost": null,
+            "shipping_cost": 1.0,
+            "landed_cost": null
+          }
+        ]
+      },
+      "differences": {
+        "frontend": {
+          "status": "defect",
+          "owner": "#364",
+          "note": "Preview strips a leading yen sign and shows 5 / landed 6 for a value the importer treats as missing.",
+          "actual": {
+            "rows": [
+              {
+                "candidate_id": "Y-1",
+                "unit_cost": 5.0,
+                "shipping_cost": 1.0,
+                "landed_cost": 6.0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "moq_zero_preserved",
+      "summary": "moq 0 is carried through unchanged.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,moq,supplier\nMQ-1,Disp,4,1,0,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "MQ-1",
+            "unit_cost": 4.0,
+            "shipping_cost": 1.0,
+            "landed_cost": 5.0,
+            "moq": 0
+          }
+        ]
+      },
+      "differences": {
+        "frontend": {
+          "status": "defect",
+          "owner": "#364",
+          "note": "Preview clamps moq to a minimum of 1 (moqNonNegative uses Math.max(1, n)), showing 1 for a CSV value of 0.",
+          "actual": {
+            "rows": [
+              {
+                "candidate_id": "MQ-1",
+                "unit_cost": 4.0,
+                "shipping_cost": 1.0,
+                "landed_cost": 5.0,
+                "moq": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "header_case_variant",
+      "summary": "Headers are matched exactly; a case variant is not silently accepted.",
+      "csv": "Candidate_ID,Product,Supplier_Cost,Shipping_Cost,Supplier\nHC-1,Disp,4,1,manual\n",
+      "expected": {
+        "rows": []
+      },
+      "differences": {
+        "frontend": {
+          "status": "defect",
+          "owner": "#364",
+          "note": "Preview lower-cases/normalises headers and shows a valid row; the importer matches exactly and imports nothing.",
+          "actual": {
+            "rows": [
+              {
+                "candidate_id": "HC-1",
+                "unit_cost": 4.0,
+                "shipping_cost": 1.0,
+                "landed_cost": 5.0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "header_spacing_variant",
+      "summary": "A spaced header is not silently accepted.",
+      "csv": "Candidate ID,Product,Supplier Cost,Shipping Cost,Supplier\nHS-1,Disp,4,1,manual\n",
+      "expected": {
+        "rows": []
+      },
+      "differences": {
+        "frontend": {
+          "status": "defect",
+          "owner": "#364",
+          "note": "Same normalisation gap as header_case_variant, for spaces/hyphens.",
+          "actual": {
+            "rows": [
+              {
+                "candidate_id": "HS-1",
+                "unit_cost": 4.0,
+                "shipping_cost": 1.0,
+                "landed_cost": 5.0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "raw_html_rejects_file",
+      "summary": "Raw HTML/script markers reject the whole file.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nRH-1,<script>alert(1)</script>,4,1,manual\n",
+      "expected": {
+        "file_rejected": true,
+        "rows": []
+      },
+      "differences": {
+        "frontend": {
+          "status": "defect",
+          "owner": "#364",
+          "note": "Preview has no raw-HTML rejection and reports the row importable.",
+          "actual": {
+            "file_rejected": false,
+            "rows": [
+              {
+                "candidate_id": "RH-1",
+                "unit_cost": 4.0,
+                "shipping_cost": 1.0,
+                "landed_cost": 5.0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "nonfinite_cost_is_not_numeric",
+      "summary": "nan / Infinity are not costs on either side.",
+      "csv": "candidate_id,product,supplier_cost,shipping_cost,supplier\nNF-1,Disp,nan,1,manual\nNF-2,Disp,Infinity,1,manual\n",
+      "expected": {
+        "rows": [
+          {
+            "candidate_id": "NF-1",
+            "unit_cost": null,
+            "shipping_cost": 1.0,
+            "landed_cost": null
+          },
+          {
+            "candidate_id": "NF-2",
+            "unit_cost": null,
+            "shipping_cost": 1.0,
+            "landed_cost": null
+          }
+        ]
+      },
+      "differences": {
+        "backend": {
+          "status": "defect",
+          "owner": "shared helper evaluation/commerce/supplier_feasibility.number (neither PR)",
+          "note": "float('nan')/float('inf') pass number(), so the importer returns NaN/inf unit and landed costs.",
+          "actual": {
+            "rows": [
+              {
+                "candidate_id": "NF-1",
+                "unit_cost": "nan",
+                "shipping_cost": 1.0,
+                "landed_cost": "nan"
+              },
+              {
+                "candidate_id": "NF-2",
+                "unit_cost": "inf",
+                "shipping_cost": 1.0,
+                "landed_cost": "inf"
+              }
+            ]
+          }
+        },
+        "frontend": {
+          "status": "defect",
+          "owner": "#364",
+          "note": "Number('Infinity') is finite-unchecked, so the preview shows an infinite cost as valid.",
+          "actual": {
+            "rows": [
+              {
+                "candidate_id": "NF-1",
+                "unit_cost": null,
+                "shipping_cost": 1.0,
+                "landed_cost": null
+              },
+              {
+                "candidate_id": "NF-2",
+                "unit_cost": "inf",
+                "shipping_cost": 1.0,
+                "landed_cost": "inf"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
