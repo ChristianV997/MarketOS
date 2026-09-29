@@ -32,14 +32,14 @@ SAMPLE_CSV_PATH = ROOT / "tests" / "fixtures" / "evidence_imports" / "supplier_c
 
 
 def test_documented_supplier_catalog_sample_imports_usable_manual_record():
-    """Documented supplier catalog sample CSV must import at least one usable manual evidence record."""
+    """Documented supplier catalog sample imports with an explicit stable identity."""
     assert SAMPLE_CSV_PATH.is_file(), f"Sample CSV fixture not found at {SAMPLE_CSV_PATH}"
     records = import_csv(SAMPLE_CSV_PATH)
     assert len(records) >= 1, "Expected at least one record imported from documented supplier_catalog_sample.csv"
 
     record = records[0]
     assert isinstance(record, SupplierFeasibilityEvidence)
-    assert record.candidate_id, "Candidate ID must not be empty"
+    assert record.candidate_id == "candidate-recovery-accessory"
     assert record.unit_cost == pytest.approx(8.50)
     assert record.shipping_cost == pytest.approx(3.00)
     assert record.estimated_landed_cost == pytest.approx(11.50)
@@ -61,6 +61,7 @@ def test_generated_supplier_catalog_template_contract(tmp_path):
     data_file = tmp_path / "catalog_populated.csv"
     row = {
         "category": "home fitness",
+        "candidate_id": "candidate-recovery-accessory",
         "product": "recovery accessory",
         "supplier_cost": "8.50",
         "shipping_cost": "3.00",
@@ -77,7 +78,7 @@ def test_generated_supplier_catalog_template_contract(tmp_path):
     records = import_csv(data_file)
     assert len(records) == 1, "Expected 1 record imported from template-conforming CSV"
     record = records[0]
-    assert record.candidate_id == "recovery accessory" or record.candidate_id
+    assert record.candidate_id == "candidate-recovery-accessory"
     assert record.unit_cost == pytest.approx(8.50)
     assert record.shipping_cost == pytest.approx(3.00)
     assert record.estimated_landed_cost == pytest.approx(11.50)
@@ -119,8 +120,8 @@ def test_display_name_and_candidate_id_separation():
     assert record.query in {"High Density Recovery Roller", "Professional High Density Foam Roller 36in", "SKU-990-REC"}
 
 
-def test_product_column_populates_candidate_identity_when_explicit_id_omitted():
-    """When candidate_id is omitted, product column provides candidate identity and display title."""
+def test_product_display_name_without_explicit_id_is_rejected():
+    """A mutable display name must not be promoted into stable candidate identity."""
     row = {
         "product": "recovery accessory",
         "supplier_cost": "8.50",
@@ -128,11 +129,58 @@ def test_product_column_populates_candidate_identity_when_explicit_id_omitted():
         "lead_time_days": "12",
         "supplier": "manual",
     }
-    record = normalize_record(row, mode="manual_import")
-    assert record is not None
-    assert record.candidate_id == "recovery accessory"
-    assert record.supplier_title in {"recovery accessory", ""}
-    assert record.query == "recovery accessory"
+    assert normalize_record(row, mode="manual_import") is None
+
+
+def test_explicit_zero_costs_remain_distinct_from_missing():
+    row = normalize_record(
+        {
+            "candidate_id": "zero-cost-offer",
+            "product": "zero-cost fixture",
+            "supplier_cost": "0",
+            "shipping_cost": "0",
+            "supplier": "manual",
+        },
+        mode="manual_import",
+    )
+    assert row is not None
+    assert row.unit_cost == 0
+    assert row.shipping_cost == 0
+    assert row.estimated_landed_cost == 0
+    assert row.field_provenance["unit_cost"] == "manual_import"
+    assert row.field_provenance["shipping_cost"] == "manual_import"
+
+
+def test_manual_metadata_cannot_upgrade_evidence_or_field_provenance():
+    row = normalize_record(
+        {
+            "candidate_id": "manual-offer",
+            "product": "manual product",
+            "supplier_cost": "4.00",
+            "evidence_mode": "live_readonly",
+            "field_provenance": {"unit_cost": "live_readonly"},
+            "supplier": "manual",
+        },
+        mode="manual_import",
+    )
+    assert row is not None
+    assert row.evidence_mode == "manual_import"
+    assert row.field_provenance["unit_cost"] == "manual_import"
+    assert "evidence_mode_overridden" in row.warnings
+    assert "field_provenance_overridden" in row.warnings
+
+
+def test_unknown_supplier_display_name_is_rejected():
+    row = normalize_record(
+        {
+            "candidate_id": "unknown-supplier-offer",
+            "product": "manual product",
+            "supplier": "Acme Supplier Display Name",
+            "supplier_cost": "4.00",
+        },
+        mode="manual_import",
+    )
+    assert row is None
 
 
 @pytest.mark.parametrize(
@@ -228,7 +276,7 @@ def test_truthful_manual_unverified_status_with_no_mutation(tmp_path):
     ],
 )
 def test_missing_or_empty_candidate_identity_fails_closed(empty_row):
-    """Rows lacking both candidate_id and product identity must fail closed (return None)."""
+    """Rows without an explicit stable identity must fail closed (return None)."""
     assert normalize_record(empty_row, mode="manual_import") is None
 
 

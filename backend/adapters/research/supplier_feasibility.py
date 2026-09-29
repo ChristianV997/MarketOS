@@ -120,6 +120,13 @@ def _fallback_provenance(mode: str) -> str:
     return "manual_import" if mode == "manual_import" else "fixture"
 
 
+def _manual_provenance(value: str) -> str:
+    """Prevent caller metadata from upgrading a manual row to live evidence."""
+    if value in {"observed", "live_readonly", "mutated"}:
+        return "manual_import"
+    return value
+
+
 def _apply_aliases(row: Mapping[str, Any]) -> dict[str, Any]:
     """Copy public dump keys onto existing evidence fields. Not an identity authority."""
     result = dict(row)
@@ -198,7 +205,14 @@ def _provenance(row: Mapping[str, Any], mode: str) -> dict[str, str]:
     raw = row.get("field_provenance")
     result = {}
     if isinstance(raw, Mapping):
-        result = {str(key): str(value) if str(value) in PROVENANCE else "malformed" for key, value in raw.items()}
+        result = {
+            str(key): (
+                _manual_provenance(str(value))
+                if mode == "manual_import" and str(value) in PROVENANCE
+                else str(value) if str(value) in PROVENANCE else "malformed"
+            )
+            for key, value in raw.items()
+        }
     fallback = _fallback_provenance(mode)
     fields = (
         "supplier_product_id", "supplier_title", "supplier_sku", "variant_count", "moq", "unit_cost", "shipping_cost",
@@ -241,8 +255,6 @@ def normalize_record(
         source_type = default_source_type if default_source_type in SOURCE_TYPES else "fixture_demo"
     candidate_val = _value(merged, "candidate_id", "product_id", "supplier_product_id")
     candidate_id = str(candidate_val or "").strip()
-    if not candidate_id and isinstance(row.get("product"), str):
-        candidate_id = str(row.get("product") or "").strip()
     if not candidate_id:
         return None
     delivery_min = integer(_value(merged, "delivery_min_days", "min_delivery_days"))
@@ -255,6 +267,12 @@ def normalize_record(
     shipping_cost = number(_value(merged, "shipping_cost", "shipping", "freight_cost"))
     landed = number(_value(merged, "estimated_landed_cost", "landed_cost"))
     warnings = [str(item) for item in merged.get("warnings", []) if isinstance(item, str)]
+    raw_field_provenance = merged.get("field_provenance")
+    if mode == "manual_import" and isinstance(raw_field_provenance, Mapping) and any(
+        str(value) in {"observed", "live_readonly", "mutated"}
+        for value in raw_field_provenance.values()
+    ):
+        warnings.append("field_provenance_overridden")
     if landed is None and unit_cost is not None and shipping_cost is not None:
         landed = unit_cost + shipping_cost
         if "landed_cost_derived" not in warnings:
@@ -270,6 +288,9 @@ def normalize_record(
     inventory = normalize_inventory_status(_value(merged, "inventory_status", "stock_status", "availability"), quantity)
     raw_evidence_mode = _value(merged, "evidence_mode")
     evidence_mode = str(raw_evidence_mode) if raw_evidence_mode is not None else mode
+    if mode == "manual_import" and evidence_mode != "manual_import":
+        evidence_mode = "manual_import"
+        warnings.append("evidence_mode_overridden")
     observed = _value(merged, "observed_at", "captured_at")
     raw_confidence = _value(merged, "source_confidence", "confidence")
     parsed_confidence = number(raw_confidence)
