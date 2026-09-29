@@ -52,6 +52,47 @@ def test_documented_supplier_catalog_sample_imports_usable_manual_record():
     assert record.mutated is False
 
 
+def test_documented_csv_reaches_report_without_identity_or_cost_coercion(tmp_path):
+    """The importer and report consumer preserve identity, provenance, missing, and zero."""
+    csv_file = tmp_path / "catalog_with_cost_boundaries.csv"
+    csv_file.write_text(
+        SAMPLE_CSV_PATH.read_text(encoding="utf-8")
+        + ""
+        + "home fitness,candidate-missing-shipping,missing shipping,8.50,,20,12,0.95,manual\n"
+        + "home fitness,candidate-explicit-zero,explicit zero,0,0,1,12,0.95,manual\n",
+        encoding="utf-8",
+    )
+
+    records = import_csv(csv_file)
+    report = build_report(records, evidence_mode="manual_import").to_dict()
+    candidates = {item["candidate_id"]: item for item in report["candidates"]}
+
+    assert set(candidates) == {
+        "candidate-recovery-accessory",
+        "candidate-missing-shipping",
+        "candidate-explicit-zero",
+    }
+    assert report["evidence_mode"] == "manual_import"
+    assert "supplier_feasibility_is_not_live_supplier_authorization" in report["warnings"]
+
+    missing_offer = candidates["candidate-missing-shipping"]["offers"][0]
+    missing_economics = candidates["candidate-missing-shipping"]["score"]["economics"]
+    assert missing_offer["candidate_id"] == "candidate-missing-shipping"
+    assert missing_offer["evidence_mode"] == "manual_import"
+    assert missing_offer["shipping_cost"] is None
+    assert missing_economics["shipping_cost"] is None
+    assert "shipping_cost_missing" in missing_economics["assumptions"]
+
+    zero_offer = candidates["candidate-explicit-zero"]["offers"][0]
+    zero_economics = candidates["candidate-explicit-zero"]["score"]["economics"]
+    assert zero_offer["candidate_id"] == "candidate-explicit-zero"
+    assert zero_offer["shipping_cost"] == 0
+    assert zero_offer["estimated_landed_cost"] == 0
+    assert zero_economics["shipping_cost"] == 0
+    assert zero_economics["estimated_landed_cost"] == 0
+    assert "shipping_cost_missing" not in zero_economics["assumptions"]
+
+
 def test_generated_supplier_catalog_template_contract(tmp_path):
     """Importing a populated supplier_catalog_csv template imports a valid manual record."""
     required, optional = _FIELDS["supplier_catalog_csv"]
