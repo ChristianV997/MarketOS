@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import Shell from "./components/layout/Shell";
 import Dashboard from "./pages/Dashboard";
+import OwnerDashboardPage from "./pages/OwnerDashboard";
 import Campaigns from "./pages/Campaigns";
 import Products from "./pages/Products";
 import Creatives from "./pages/Creatives";
@@ -27,6 +28,7 @@ const router = createBrowserRouter([
     element: <Shell />,
     children: [
       { path: "/", element: <Dashboard /> },
+      { path: "/owner", element: <OwnerDashboardPage /> },
       { path: "/campaigns", element: <Campaigns /> },
       { path: "/products", element: <Products /> },
       { path: "/creatives", element: <Creatives /> },
