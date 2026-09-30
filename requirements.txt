@@ -78,3 +78,8 @@ pytest-asyncio
 pytest-xdist
 PyYAML>=6.0.3
 streamlit
+sqlalchemy>=2.0.0
+alembic
+psycopg2-binary
+passlib[bcrypt]
+python-jose[cryptography]

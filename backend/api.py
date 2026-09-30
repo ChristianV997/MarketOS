@@ -32,6 +32,8 @@ from typing import Any
 import numpy as np
 from fastapi import Body, FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
+from backend.auth.router import router as auth_router
+
 from fastapi.responses import JSONResponse, PlainTextResponse
 from backend.security.cors import parse_allowed_origins
 from backend.security.request_context import RequestContextMiddleware
@@ -735,6 +737,8 @@ except ImportError:
 try:
     from api.routes.storefront import router as _storefront_router
     app.include_router(_storefront_router)
+    app.include_router(auth_router, prefix="/api/v1")
+
 except ImportError:
     pass
 
