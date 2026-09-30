@@ -35,6 +35,11 @@ def test_full_fixture_preserves_identity_evidence_and_canonical_ranking() -> Non
     assert {evidence["area"] for evidence in item["evidence"]} == {"demand", "supply", "economics"}
     assert item["evidence"][1]["source_ref"].startswith("manual://")
     assert report["safety"]["launch_authorized"] is False
+    assert report["snapshot_resolution"] == {
+        "source": "input_payload",
+        "persisted": False,
+        "resolver": "unavailable",
+    }
 
 
 def test_partial_and_missing_evidence_remain_visible() -> None:
@@ -98,6 +103,46 @@ def test_projection_does_not_export_raw_reports_or_internal_formula_fields() -> 
     assert "prompt" not in encoded.lower()
     assert "formula" not in encoded.lower()
     assert "source_code" not in encoded.lower()
+
+
+def test_projection_preserves_canonical_rank_order_before_unranked_candidates() -> None:
+    payload = product_payload()
+    second = copy.deepcopy(payload["candidates"][0])
+    second["candidate_id"] = "aaa-lamp"
+    for report in second["reports"].values():
+        for report_candidate in report.get("candidates", []):
+            report_candidate["candidate_id"] = "aaa-lamp"
+    second["reports"]["marketplace"]["candidates"][0]["score"][
+        "overall_marketplace_opportunity"
+    ] = 0.7
+    second["reports"]["supplier"]["candidates"][0]["score"][
+        "overall_supplier_feasibility"
+    ] = 0.7
+    second["reports"]["consumer"]["candidates"][0]["score"][
+        "overall_consumer_attention"
+    ] = 0.7
+    payload["candidates"].append(second)
+
+    result = build_owner_opportunity_read_model("compare", payload).to_dict()
+
+    assert result["ranked_candidate_ids"] == ["desk-lamp", "aaa-lamp"]
+    assert [item["candidate_id"] for item in result["opportunities"]] == result[
+        "ranked_candidate_ids"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error_code"),
+    [
+        ({"workspace": object()}, "invalid_workspace"),
+        ({"registry": object()}, "invalid_workspace_registry"),
+    ],
+)
+def test_workspace_authorities_are_explicitly_typed(
+    kwargs: dict[str, object], error_code: str
+) -> None:
+    with pytest.raises(OwnerOpportunityReadModelError, match=error_code):
+        build_owner_opportunity_read_model("discover", {"candidates": []}, **kwargs)
 
 
 def test_workspace_mismatch_is_rejected_before_discovery() -> None:

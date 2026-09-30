@@ -3,7 +3,8 @@
 This module is a boundary adapter for the existing offline discovery service.
 It deliberately does not rank, calculate economics, authorize actions, or
 wire authentication.  The integration owner can expose this contract through
-an authenticated read route without leaking the raw discovery payload.
+an authenticated read route without leaking the raw discovery payload.  The
+input payload is the only snapshot source; durable run lookup is not available.
 """
 from __future__ import annotations
 
@@ -29,6 +30,11 @@ from services.opportunity_discovery.service import (
 READ_MODEL_VERSION = "owner-opportunity-read-model-v1"
 SYNTHESIS_AUTHORITY = "evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis"
 MAX_READ_MODEL_BYTES = 128 * 1024
+SNAPSHOT_RESOLUTION = {
+    "source": "input_payload",
+    "persisted": False,
+    "resolver": "unavailable",
+}
 _INTERNAL_VALUE = re.compile(r"(?:system\s+prompt|internal\s+prompt|raw\s+payload|source\s+code|\bformula\b)", re.IGNORECASE)
 
 _ECONOMIC_OUTPUT_FIELDS = frozenset(
@@ -243,6 +249,23 @@ def _safety_view(run: DiscoveryRun) -> dict[str, Any]:
     }
 
 
+def _ordered_candidates(run: DiscoveryRun) -> tuple[OpportunityCandidate, ...]:
+    """Put ranked candidates first, then retain deterministic unranked items."""
+    by_id = {candidate.candidate_id: candidate for candidate in run.candidates}
+    ranked = tuple(
+        by_id[candidate_id]
+        for candidate_id in run.ranked_candidate_ids
+        if candidate_id in by_id
+    )
+    ranked_ids = {candidate.candidate_id for candidate in ranked}
+    remainder = tuple(
+        candidate
+        for candidate in run.candidates
+        if candidate.candidate_id not in ranked_ids
+    )
+    return ranked + remainder
+
+
 def build_owner_opportunity_read_model(
     mode: str,
     payload: Mapping[str, Any],
@@ -274,7 +297,7 @@ def build_owner_opportunity_read_model(
     decisions = {item.candidate_id: item for item in run.decisions}
     opportunities = tuple(
         _opportunity_view(candidate, decisions[candidate.candidate_id])
-        for candidate in run.candidates
+        for candidate in _ordered_candidates(run)
         if candidate.candidate_id in decisions
     )
     body = {
@@ -289,6 +312,7 @@ def build_owner_opportunity_read_model(
         "next_best_action": run.next_best_action,
         "workspace_id": workspace.workspace_id if workspace is not None else None,
         "workspace_binding": "injected" if workspace is not None else "not_provided",
+        "snapshot_resolution": dict(SNAPSHOT_RESOLUTION),
         "authorities": {
             "input_and_evidence_gates": "services.opportunity_discovery.service.run_discovery",
             "economics": "backend.economics.kernel",
@@ -312,6 +336,7 @@ def build_owner_opportunity_read_model(
         next_best_action=run.next_best_action,
         workspace_id=safe_body["workspace_id"],
         workspace_binding=safe_body["workspace_binding"],
+        snapshot_resolution=safe_body["snapshot_resolution"],
         authorities=safe_body["authorities"],
         safety=safe_body["safety"],
         fingerprint=_fingerprint(safe_body),
@@ -333,6 +358,7 @@ class OwnerOpportunityReadModel:
     next_best_action: str
     workspace_id: str | None
     workspace_binding: str
+    snapshot_resolution: Mapping[str, Any]
     authorities: Mapping[str, str]
     safety: Mapping[str, Any]
     fingerprint: str
@@ -350,6 +376,7 @@ class OwnerOpportunityReadModel:
             "next_best_action": self.next_best_action,
             "workspace_id": self.workspace_id,
             "workspace_binding": self.workspace_binding,
+            "snapshot_resolution": dict(self.snapshot_resolution),
             "authorities": dict(self.authorities),
             "safety": dict(self.safety),
         }
@@ -362,6 +389,7 @@ __all__ = [
     "OwnerOpportunityReadModel",
     "OwnerOpportunityReadModelError",
     "READ_MODEL_VERSION",
+    "SNAPSHOT_RESOLUTION",
     "SYNTHESIS_AUTHORITY",
     "build_owner_opportunity_read_model",
 ]
