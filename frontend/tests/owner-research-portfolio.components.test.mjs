@@ -860,9 +860,8 @@ test("guard (AST): no zero-for-missing defaults - no `?? 0`, `|| 0`, `??= 0` or 
 });
 
 test("guard: the feature is not mounted by any shared file (tripwire - update MOUNTED_BY when the integration PR lands)", async () => {
-  // Deliberately empty: this slice is UNMOUNTED. The integration change that adds a route/sidebar entry
-  // must list its files here, which is the moment a reviewer confirms the mount is intentional.
-  const MOUNTED_BY = [];
+  // Mounted in main.tsx as part of the operator research portfolio route.
+  const MOUNTED_BY = ["main.tsx"];
   const importers = [];
   for (const file of await tsFiles(srcRoot)) {
     if (file.startsWith(featureRoot + path.sep)) continue;

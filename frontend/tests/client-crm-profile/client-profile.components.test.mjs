@@ -540,7 +540,7 @@ test("guard (AST): no identity or connection concepts in identifiers; no passwor
 });
 
 test("guard: the page is not mounted in shared routing, Sidebar or Shell (update MOUNTED_BY when integrating)", async () => {
-  const MOUNTED_BY = [];
+  const MOUNTED_BY = ["main.tsx"];
   const shared = ["main.tsx", "components/layout/Shell.tsx", "components/layout/Sidebar.tsx"];
   const found = [];
   for (const file of shared) {
