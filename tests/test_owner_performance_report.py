@@ -236,3 +236,21 @@ def test_currency_case_is_canonical_and_not_converted():
         build_owner_performance_report(payload)
     assert exc.value.code == "currency_mismatch"
     assert report["revenue"]["amount"] != "0"
+
+
+def test_derived_and_non_observed_refs_do_not_stay_observed():
+    revenue = _line("revenue", "100.00")
+    revenue["evidence_ref"] = {"evidence_id": "ev-rev", "evidence_state": "observed"}
+    payload = _base()
+    payload["lines"] = [revenue, *[line for line in payload["lines"] if line["metric"] != "revenue"]]
+    report = build_owner_performance_report(payload).to_dict()
+    assert report["revenue"]["evidence_ref"]["evidence_state"] == "observed"
+    assert report["contribution"]["evidence_state"] == "derived"
+    assert report["contribution"]["evidence_ref"] is None
+    assert report["realized_profit"]["evidence_state"] == "derived"
+    assert report["realized_profit"]["evidence_ref"] is None
+    fixture = _line("fees", "1.00", evidence_class="fixture")
+    fixture["evidence_ref"] = {"evidence_id": "ev-fee", "evidence_state": "observed"}
+    with pytest.raises(OwnerPerformanceReportError) as exc:
+        build_owner_performance_report(_base(lines=[fixture]))
+    assert exc.value.code == "invalid_evidence"

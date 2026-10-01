@@ -90,15 +90,18 @@ def _public_evidence_state(classes: set[str]) -> str:
     return _CLASS_TO_STATE[next(iter(classes))]
 
 
-def _evidence(raw: Mapping[str, Any] | None) -> EvidenceRef | None:
+def _evidence(raw: Mapping[str, Any] | None, evidence_class: str) -> EvidenceRef | None:
     if raw is None:
         return None
     if not isinstance(raw, Mapping):
         raise OwnerPerformanceReportError("invalid_evidence")
     try:
-        return EvidenceRef.from_dict(raw)
+        ref = EvidenceRef.from_dict(raw)
     except EconomicsError as exc:
         raise OwnerPerformanceReportError("invalid_evidence") from exc
+    if evidence_class != "observed" and ref.evidence_state in {"observed", "verified", "live_readonly"}:
+        raise OwnerPerformanceReportError("invalid_evidence")
+    return ref
 
 
 def _money_view(
@@ -122,7 +125,11 @@ def _money_view(
     payload = money.to_dict()
     payload["status"] = status
     payload["evidence_classes"] = evidence_classes
-    payload["evidence_state"] = "derived" if status == "derived" else _public_evidence_state(set(evidence_classes))
+    published_state = "derived" if status == "derived" else _public_evidence_state(set(evidence_classes))
+    payload["evidence_state"] = published_state
+    ref = payload.get("evidence_ref")
+    if status == "derived" or not isinstance(ref, dict) or ref.get("evidence_state") != published_state:
+        payload["evidence_ref"] = None
     payload["missing_reason"] = None
     return payload
 
@@ -154,7 +161,7 @@ def _parse_line(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
             source=str(raw.get("source", evidence_class)),
             provenance=str(raw.get("provenance", evidence_class)),
             evidence_state=_evidence_state(raw.get("evidence_state"), evidence_class),
-            evidence_ref=_evidence(raw.get("evidence_ref")),
+            evidence_ref=_evidence(raw.get("evidence_ref"), str(evidence_class)),
         )
     except EconomicsError as exc:
         raise OwnerPerformanceReportError("invalid_line_money") from exc
