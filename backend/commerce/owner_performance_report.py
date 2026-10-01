@@ -45,7 +45,7 @@ def _fingerprint(value: Any) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
 
 
-def _period(payload: Mapping[str, Any]) -> tuple[str, str]:
+def _period(payload: Mapping[str, Any]) -> tuple[date, date]:
     start = payload.get("period_start")
     end = payload.get("period_end")
     if not isinstance(start, str) or not isinstance(end, str):
@@ -57,12 +57,12 @@ def _period(payload: Mapping[str, Any]) -> tuple[str, str]:
         raise OwnerPerformanceReportError("invalid_period") from exc
     if end_date < start_date:
         raise OwnerPerformanceReportError("period_end_before_start")
-    return start, end
+    return start_date, end_date
 
 
 _CLASS_TO_STATE = {
     "observed": "observed",
-    "manual": "observed",
+    "manual": "unknown",
     "fixture": "fixture",
     "modeled": "derived",
     "assumed": "assumed",
@@ -70,11 +70,24 @@ _CLASS_TO_STATE = {
 
 
 def _evidence_state(explicit: Any, evidence_class: str) -> str:
-    if explicit is None:
-        return _CLASS_TO_STATE[evidence_class]
-    if not isinstance(explicit, str):
-        raise OwnerPerformanceReportError("invalid_evidence_state")
-    return explicit
+    expected = _CLASS_TO_STATE[evidence_class]
+    if explicit is None or explicit == expected:
+        return expected
+    raise OwnerPerformanceReportError("invalid_evidence_state")
+
+
+def _rollup_status(classes: set[str]) -> str:
+    if len(classes) == 1:
+        return next(iter(classes))
+    if not classes:
+        return "unavailable"
+    return "mixed"
+
+
+def _public_evidence_state(classes: set[str]) -> str:
+    if len(classes) != 1:
+        return "unknown"
+    return _CLASS_TO_STATE[next(iter(classes))]
 
 
 def _evidence(raw: Mapping[str, Any] | None) -> EvidenceRef | None:
@@ -88,7 +101,14 @@ def _evidence(raw: Mapping[str, Any] | None) -> EvidenceRef | None:
         raise OwnerPerformanceReportError("invalid_evidence") from exc
 
 
-def _money_view(money: Money | None, *, status: str, missing_reason: str | None = None) -> dict[str, Any]:
+def _money_view(
+    money: Money | None,
+    *,
+    status: str,
+    classes: set[str] | None = None,
+    missing_reason: str | None = None,
+) -> dict[str, Any]:
+    evidence_classes = sorted(classes or ())
     if money is None:
         return {
             "status": status,
@@ -96,10 +116,13 @@ def _money_view(money: Money | None, *, status: str, missing_reason: str | None 
             "currency": None,
             "provenance": "unavailable",
             "evidence_state": "missing",
+            "evidence_classes": evidence_classes,
             "missing_reason": missing_reason,
         }
     payload = money.to_dict()
     payload["status"] = status
+    payload["evidence_classes"] = evidence_classes
+    payload["evidence_state"] = "derived" if status == "derived" else _public_evidence_state(set(evidence_classes))
     payload["missing_reason"] = None
     return payload
 
@@ -145,10 +168,10 @@ def _parse_line(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
     }
 
 
-def _sum_metric(lines: list[dict[str, Any]], metric: str, currency: str) -> tuple[Money | None, list[str], str]:
+def _sum_metric(lines: list[dict[str, Any]], metric: str, currency: str) -> tuple[Money | None, list[str], str, set[str]]:
     matched = [line for line in lines if line["metric"] == metric]
     if not matched:
-        return None, [f"{metric}_absent"], "unavailable"
+        return None, [f"{metric}_absent"], "unavailable", set()
     total: Money | None = None
     classes: set[str] = set()
     for line in matched:
@@ -158,16 +181,8 @@ def _sum_metric(lines: list[dict[str, Any]], metric: str, currency: str) -> tupl
         classes.add(line["evidence_class"])
         total = money if total is None else total + money
     if total is None:
-        return None, [f"{metric}_absent"], "unavailable"
-    if classes <= {"observed", "manual"}:
-        status = "observed"
-    elif classes <= {"fixture"}:
-        status = "fixture"
-    elif classes <= {"modeled", "assumed"}:
-        status = "modeled"
-    else:
-        status = "mixed"
-    return total, [], status
+        return None, [f"{metric}_absent"], "unavailable", set()
+    return total, [], _rollup_status(classes), classes
 
 
 def _contribution(
@@ -202,7 +217,7 @@ def build_owner_performance_report(payload: Mapping[str, Any]) -> "OwnerPerforma
     if not isinstance(currency, str):
         raise OwnerPerformanceReportError("invalid_currency")
     try:
-        Money.zero(currency)
+        currency = Money.zero(currency).currency
     except EconomicsError as exc:
         raise OwnerPerformanceReportError("invalid_currency") from exc
     period_start, period_end = _period(payload)
@@ -214,28 +229,38 @@ def build_owner_performance_report(payload: Mapping[str, Any]) -> "OwnerPerforma
     excluded_before_period = 0
     for index, raw in enumerate(raw_lines):
         line = _parse_line(raw, index)
-        if line["occurred_on"] < period_start:
+        occurred_on = date.fromisoformat(line["occurred_on"])
+        if occurred_on < period_start:
             excluded_before_period += 1
             continue
-        if line["occurred_on"] > period_end:
+        if occurred_on > period_end:
             excluded_after_period += 1
             continue
+        line["occurred_on"] = occurred_on.isoformat()
         parsed.append(line)
-    parsed.sort(key=lambda item: (item["occurred_on"], item["metric"], item["index"]))
+    parsed.sort(key=lambda item: (
+        item["occurred_on"],
+        item["metric"],
+        item["campaign_id"] or "",
+        item["evidence_class"],
+        str(item["money"].amount),
+        _canonical(item["money"].evidence_ref.to_dict()) if item["money"].evidence_ref else "",
+    ))
 
     missing: list[str] = []
-    revenue, miss, revenue_status = _sum_metric(parsed, "revenue", currency)
+    revenue, miss, revenue_status, revenue_classes = _sum_metric(parsed, "revenue", currency)
     missing.extend(miss)
-    refunds, miss, refunds_status = _sum_metric(parsed, "refunds", currency)
+    refunds, miss, refunds_status, refund_classes = _sum_metric(parsed, "refunds", currency)
     missing.extend(miss)
-    product_cost, miss, product_status = _sum_metric(parsed, "product_cost", currency)
+    product_cost, miss, product_status, product_classes = _sum_metric(parsed, "product_cost", currency)
     missing.extend(miss)
-    shipping, miss, shipping_status = _sum_metric(parsed, "shipping_cost", currency)
+    shipping, miss, shipping_status, shipping_classes = _sum_metric(parsed, "shipping_cost", currency)
     missing.extend(miss)
-    fees, miss, fees_status = _sum_metric(parsed, "fees", currency)
+    fees, miss, fees_status, fee_classes = _sum_metric(parsed, "fees", currency)
     missing.extend(miss)
-    ad_spend, miss, spend_status = _sum_metric(parsed, "ad_spend", currency)
+    ad_spend, miss, spend_status, spend_classes = _sum_metric(parsed, "ad_spend", currency)
     missing.extend(miss)
+    contribution_classes = revenue_classes | refund_classes | product_classes | shipping_classes | fee_classes
 
     contribution, contribution_status = _contribution(
         revenue,
@@ -259,23 +284,31 @@ def build_owner_performance_report(payload: Mapping[str, Any]) -> "OwnerPerforma
     campaign_ids = sorted({line["campaign_id"] for line in parsed if line["campaign_id"]})
     for campaign_id in campaign_ids:
         group = [line for line in parsed if line["campaign_id"] == campaign_id]
-        spend, _, status = _sum_metric(group, "ad_spend", currency)
-        attributed_revenue, _, rev_status = _sum_metric(group, "revenue", currency)
+        spend, _, status, spend_row_classes = _sum_metric(group, "ad_spend", currency)
+        attributed_revenue, _, rev_status, revenue_row_classes = _sum_metric(group, "revenue", currency)
         campaign_rows.append(
             {
                 "campaign_id": campaign_id,
-                "ad_spend": _money_view(spend, status=status, missing_reason=None if spend else "ad_spend_absent"),
+                "ad_spend": _money_view(
+                    spend,
+                    status=status,
+                    classes=spend_row_classes,
+                    missing_reason=None if spend else "ad_spend_absent",
+                ),
                 "attributed_revenue": _money_view(
                     attributed_revenue,
                     status=rev_status,
-                    missing_reason=None if attributed_revenue else "attribution_absent",
+                    classes=revenue_row_classes,
+                    missing_reason=None if attributed_revenue else "revenue_absent",
                 ),
                 "lift": _money_view(None, status="unavailable", missing_reason="causal_lift_unsupported"),
                 "causal_attribution": False,
+                "ads_ran_proven": False,
             }
         )
 
     evidence_classes = sorted({line["evidence_class"] for line in parsed})
+    profit_classes = contribution_classes | spend_classes
     quality = {
         "line_count": len(parsed),
         "excluded_before_period": excluded_before_period,
@@ -284,29 +317,31 @@ def build_owner_performance_report(payload: Mapping[str, Any]) -> "OwnerPerforma
         "confidence": "high" if evidence_classes == ["observed"] and not missing else "partial" if parsed else "none",
         "claims": {
             "campaign_lift": False,
-            "realized_profit": realized_profit_status != "unavailable",
+            "realized_profit": realized_profit is not None and profit_classes == {"observed"},
             "causal_attribution": False,
         },
     }
     body = {
         "schema": REPORT_VERSION,
-        "period_start": period_start,
-        "period_end": period_end,
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
         "currency": currency,
-        "revenue": _money_view(revenue, status=revenue_status, missing_reason=None if revenue else "revenue_absent"),
-        "refunds": _money_view(refunds, status=refunds_status, missing_reason=None if refunds else "refunds_absent"),
-        "product_cost": _money_view(product_cost, status=product_status, missing_reason=None if product_cost else "product_cost_absent"),
-        "shipping_cost": _money_view(shipping, status=shipping_status, missing_reason=None if shipping else "shipping_cost_absent"),
-        "fees": _money_view(fees, status=fees_status, missing_reason=None if fees else "fees_absent"),
-        "ad_spend": _money_view(ad_spend, status=spend_status, missing_reason=None if ad_spend else "ad_spend_absent"),
+        "revenue": _money_view(revenue, status=revenue_status, classes=revenue_classes, missing_reason=None if revenue else "revenue_absent"),
+        "refunds": _money_view(refunds, status=refunds_status, classes=refund_classes, missing_reason=None if refunds else "refunds_absent"),
+        "product_cost": _money_view(product_cost, status=product_status, classes=product_classes, missing_reason=None if product_cost else "product_cost_absent"),
+        "shipping_cost": _money_view(shipping, status=shipping_status, classes=shipping_classes, missing_reason=None if shipping else "shipping_cost_absent"),
+        "fees": _money_view(fees, status=fees_status, classes=fee_classes, missing_reason=None if fees else "fees_absent"),
+        "ad_spend": _money_view(ad_spend, status=spend_status, classes=spend_classes, missing_reason=None if ad_spend else "ad_spend_absent"),
         "contribution": _money_view(
             contribution,
             status=contribution_status,
+            classes=contribution_classes,
             missing_reason=None if contribution else "incomplete_contribution_inputs",
         ),
         "realized_profit": _money_view(
             realized_profit,
             status=realized_profit_status,
+            classes=profit_classes,
             missing_reason=None if realized_profit is not None else "incomplete_profit_inputs",
         ),
         "campaigns": campaign_rows,

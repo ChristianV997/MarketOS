@@ -50,7 +50,10 @@ def test_complete_observed_period_is_reproducible_and_derived():
     assert first["refunds"]["amount"] == "10.00"
     assert first["contribution"]["status"] == "derived"
     assert first["contribution"]["amount"] == "42.00"
+    assert first["contribution"]["evidence_state"] == "derived"
     assert first["realized_profit"]["amount"] == "30.00"
+    assert first["realized_profit"]["evidence_state"] == "derived"
+    assert first["evidence_quality"]["claims"]["realized_profit"] is True
     assert first["evidence_quality"]["claims"]["campaign_lift"] is False
     assert first["evidence_quality"]["claims"]["causal_attribution"] is False
     assert first["campaigns"][0]["lift"]["status"] == "unavailable"
@@ -135,4 +138,101 @@ def test_campaign_rows_are_ordered_and_do_not_claim_lift():
     report = build_owner_performance_report(payload).to_dict()
     assert [row["campaign_id"] for row in report["campaigns"]] == ["camp-a", "camp-b"]
     assert report["campaigns"][1]["attributed_revenue"]["status"] == "unavailable"
+    assert report["campaigns"][1]["attributed_revenue"]["amount"] is None
     assert report["campaigns"][0]["causal_attribution"] is False
+    assert report["campaigns"][0]["ads_ran_proven"] is False
+    assert report["campaigns"][0]["lift"]["status"] == "unavailable"
+
+
+def test_manual_and_mixed_inputs_are_not_labeled_observed():
+    manual = build_owner_performance_report(
+        _base(lines=[_line("ad_spend", "12.00", evidence_class="manual", campaign_id="camp-a")])
+    ).to_dict()
+    assert manual["ad_spend"]["status"] == "manual"
+    assert manual["ad_spend"]["evidence_state"] != "observed"
+    assert manual["ad_spend"]["evidence_classes"] == ["manual"]
+    assert manual["campaigns"][0]["ads_ran_proven"] is False
+    assert manual["campaigns"][0]["causal_attribution"] is False
+    assert manual["safety"]["ads_launched"] is False
+    mixed = build_owner_performance_report(
+        _base(lines=[
+            _line("revenue", "10.00", evidence_class="observed"),
+            _line("revenue", "5.00", evidence_class="manual"),
+        ])
+    ).to_dict()
+    assert mixed["revenue"]["status"] == "mixed"
+    assert mixed["revenue"]["evidence_state"] != "observed"
+    assert mixed["revenue"]["evidence_classes"] == ["manual", "observed"]
+    assert mixed["revenue"]["amount"] == "15.00"
+
+
+def test_assumed_cost_is_not_relabeled_modeled():
+    report = build_owner_performance_report(
+        _base(lines=[_line("product_cost", "4.00", evidence_class="assumed")])
+    ).to_dict()
+    assert report["product_cost"]["status"] == "assumed"
+    assert report["product_cost"]["evidence_classes"] == ["assumed"]
+    assert report["product_cost"]["evidence_state"] == "assumed"
+
+
+def test_fixture_profit_is_calculated_without_a_realized_claim():
+    report = build_owner_performance_report(
+        _base(lines=[
+            _line("revenue", "80.00", evidence_class="fixture"),
+            _line("refunds", "0.00", evidence_class="fixture"),
+            _line("product_cost", "20.00", evidence_class="fixture"),
+            _line("shipping_cost", "0.00", evidence_class="fixture"),
+            _line("fees", "0.00", evidence_class="fixture"),
+            _line("ad_spend", "5.00", evidence_class="fixture", campaign_id="camp-a"),
+        ])
+    ).to_dict()
+    assert report["realized_profit"]["status"] == "derived"
+    assert report["realized_profit"]["amount"] == "55.00"
+    assert report["realized_profit"]["evidence_state"] == "derived"
+    assert report["evidence_quality"]["claims"]["realized_profit"] is False
+    assert report["evidence_quality"]["claims"]["campaign_lift"] is False
+    assert report["campaigns"][0]["lift"]["amount"] is None
+
+
+def test_same_day_reorder_keeps_fingerprint_and_period_edges_include_bounds():
+    lines = [
+        _line("revenue", "10.00", evidence_class="fixture"),
+        _line("revenue", "1.00", evidence_class="observed"),
+    ]
+    first = build_owner_performance_report(_base(lines=lines))
+    second = build_owner_performance_report(_base(lines=list(reversed(lines))))
+    assert first.fingerprint == second.fingerprint
+    assert first.to_dict()["revenue"]["status"] == "mixed"
+    assert first.to_dict()["revenue"]["amount"] == "11.00"
+    bounded = build_owner_performance_report(
+        _base(lines=[
+            _line("revenue", "1.00", occurred_on="2026-09-01"),
+            _line("revenue", "2.00", occurred_on="2026-09-30"),
+            _line("revenue", "9.00", occurred_on="2026-08-31"),
+        ])
+    ).to_dict()
+    assert bounded["revenue"]["amount"] == "3.00"
+    assert bounded["period_start"] == "2026-09-01"
+    assert bounded["period_end"] == "2026-09-30"
+    assert bounded["evidence_quality"]["excluded_before_period"] == 1
+    left = _line("revenue", "1.00")
+    right = _line("revenue", "1.00")
+    left["evidence_ref"] = {"evidence_id": "ev-b", "evidence_state": "observed"}
+    right["evidence_ref"] = {"evidence_id": "ev-a", "evidence_state": "observed"}
+    forward = build_owner_performance_report(_base(lines=[left, right]))
+    backward = build_owner_performance_report(_base(lines=[right, left]))
+    assert forward.fingerprint == backward.fingerprint
+
+
+def test_currency_case_is_canonical_and_not_converted():
+    report = build_owner_performance_report(
+        _base(currency="usd", lines=[_line("revenue", "10.00", currency="USD")])
+    ).to_dict()
+    assert report["currency"] == "USD"
+    assert report["revenue"]["currency"] == "USD"
+    assert report["revenue"]["amount"] == "10.00"
+    payload = _base(lines=[_line("revenue", "10.00", currency="mxn")])
+    with pytest.raises(OwnerPerformanceReportError) as exc:
+        build_owner_performance_report(payload)
+    assert exc.value.code == "currency_mismatch"
+    assert report["revenue"]["amount"] != "0"
