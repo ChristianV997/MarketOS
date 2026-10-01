@@ -11,7 +11,9 @@ from typing import Any, Mapping, Sequence
 
 GATE_VERSION = "owner-brand-planning-gate-v1"
 MINIMUM_ELIGIBLE_PRODUCTS = 3
-INELIGIBLE_STATUSES = frozenset({"archived", "inactive", "removed", "paused"})
+# Matches backend.commerce.catalog.STATUS_LIVE. Draft/paused are catalog
+# statuses but are not active inventory for this gate.
+ACTIVE_STATUSES = frozenset({"live"})
 _ID_MAX = 128
 
 
@@ -31,6 +33,28 @@ def _well_formed_id(value: Any) -> str | None:
     if any(ord(char) < 32 for char in value):
         return None
     return value
+
+
+def _row_identity(raw: Mapping[str, Any]) -> str | None:
+    product_id = _well_formed_id(raw.get("product_id"))
+    candidate_id = _well_formed_id(raw.get("candidate_id"))
+    if product_id and candidate_id and product_id != candidate_id:
+        return None
+    return product_id or candidate_id
+
+
+def _row_qualifies(raw: Mapping[str, Any]) -> tuple[bool, str]:
+    status = raw.get("status")
+    if status is None or status == "":
+        return False, "status_missing"
+    if not isinstance(status, str) or status not in ACTIVE_STATUSES:
+        return False, "status_not_active"
+    eligible_flag = raw.get("eligible")
+    if eligible_flag is None:
+        return False, "eligibility_unknown"
+    if eligible_flag is not True:
+        return False, "ineligible"
+    return True, "qualifying"
 
 
 def evaluate_owner_brand_planning_gate(
@@ -54,45 +78,42 @@ def evaluate_owner_brand_planning_gate(
     if not isinstance(inventory, (list, tuple)):
         raise OwnerBrandPlanningGateError("inventory_must_be_sequence")
 
-    eligible_ids: list[str] = []
-    seen_eligible: set[str] = set()
     discarded: list[str] = []
+    observations: dict[str, set[str]] = {}
     for index, raw in enumerate(inventory):
         if not isinstance(raw, Mapping):
             discarded.append(f"malformed_row:{index}")
             continue
-        product_id = _well_formed_id(raw.get("product_id") or raw.get("candidate_id"))
+        product_id = _row_identity(raw)
         if product_id is None:
             discarded.append(f"malformed_id:{index}")
             continue
-        status = raw.get("status")
-        if isinstance(status, str) and status in INELIGIBLE_STATUSES:
-            discarded.append(f"ineligible_status:{product_id}")
-            continue
-        eligible_flag = raw.get("eligible")
-        if eligible_flag is None:
-            discarded.append(f"eligibility_unknown:{product_id}")
-            continue
-        if eligible_flag is not True:
-            discarded.append(f"ineligible:{product_id}")
-            continue
-        if product_id in seen_eligible:
-            discarded.append(f"duplicate_id:{product_id}")
-            continue
-        seen_eligible.add(product_id)
-        eligible_ids.append(product_id)
+        qualifies, code = _row_qualifies(raw)
+        observations.setdefault(product_id, set()).add(code)
+        if not qualifies:
+            discarded.append(f"{code}:{product_id}")
 
-    eligible_ids = tuple(sorted(eligible_ids))
-    count = len(eligible_ids)
+    eligible_ids: list[str] = []
+    for product_id in sorted(observations):
+        codes = observations[product_id]
+        if codes == {"qualifying"}:
+            eligible_ids.append(product_id)
+            continue
+        if "qualifying" in codes:
+            discarded.append(f"duplicate_conflict:{product_id}")
+
+    eligible_ids_tuple = tuple(eligible_ids)
+    count = len(eligible_ids_tuple)
+    discarded_tuple = tuple(sorted(set(discarded)))
     if count >= MINIMUM_ELIGIBLE_PRODUCTS:
         return OwnerBrandPlanningGate(
             status="eligible",
             eligible=True,
             eligible_count=count,
             required_count=MINIMUM_ELIGIBLE_PRODUCTS,
-            eligible_product_ids=eligible_ids,
+            eligible_product_ids=eligible_ids_tuple,
             reasons=(),
-            discarded=tuple(sorted(set(discarded))),
+            discarded=discarded_tuple,
         )
     reasons = ["insufficient_eligible_products"]
     if count == 0 and not inventory:
@@ -102,9 +123,9 @@ def evaluate_owner_brand_planning_gate(
         eligible=False,
         eligible_count=count,
         required_count=MINIMUM_ELIGIBLE_PRODUCTS,
-        eligible_product_ids=eligible_ids,
+        eligible_product_ids=eligible_ids_tuple,
         reasons=tuple(reasons),
-        discarded=tuple(sorted(set(discarded))),
+        discarded=discarded_tuple,
     )
 
 
@@ -136,6 +157,7 @@ class OwnerBrandPlanningGate:
 
 
 __all__ = [
+    "ACTIVE_STATUSES",
     "GATE_VERSION",
     "MINIMUM_ELIGIBLE_PRODUCTS",
     "OwnerBrandPlanningGate",
