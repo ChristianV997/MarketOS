@@ -29,10 +29,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-import numpy as np
-from fastapi import Body, FastAPI, Header, Query
+from fastapi import Body, FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
 from backend.security.cors import parse_allowed_origins
 from backend.security.request_context import RequestContextMiddleware
 
@@ -132,6 +131,8 @@ try:
     from api.routes.discovery import router as _discovery_router
     from api.routes.organization import router as _organization_router
     app.include_router(_organization_router)
+    from api.routes.client_profile import router as _client_profile_router
+    app.include_router(_client_profile_router)
     app.include_router(_governance_router)
     app.include_router(_discovery_router)
     try:
@@ -440,9 +441,9 @@ def _cac_estimate() -> float | None:
 # ── Step 52: Production Hardening + Agent Hierarchy singletons ───────────────
 # (used by api.routes.agents_risk and api.routes.decisions via _core.<name>)
 
-from core.risk.global_risk_engine import global_risk_engine as _global_risk_engine
-from backend.agents.agent_metrics import agent_metrics_registry as _agent_metrics
-from backend.learning.world_model_calibration import world_model_calibrator as _wm_calibrator
+from core.risk.global_risk_engine import global_risk_engine as _global_risk_engine  # noqa: F401 - exported through backend.api for route modules
+from backend.agents.agent_metrics import agent_metrics_registry as _agent_metrics  # noqa: F401 - exported through backend.api for route modules
+from backend.learning.world_model_calibration import world_model_calibrator as _wm_calibrator  # noqa: F401 - exported through backend.api for route modules
 from agents.hierarchy import ScalingAgent, GeoAgent, AudienceAgent, RiskAgent
 
 _scaling_agent = ScalingAgent()
@@ -945,7 +946,6 @@ def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
         bundle_data = data.get("bundle") if isinstance(data.get("bundle"), dict) else data
         from backend.commerce.contracts import CreativeBundle
         from backend.commerce.loop import CommerceLoop
-        from backend.contracts.adapters import SidecarContext
         bundle = CreativeBundle(**{key: value for key, value in bundle_data.items() if key in CreativeBundle.__dataclass_fields__})
         records = CommerceLoop().publish_creatives(
             [bundle], dry_run=dry_run,
