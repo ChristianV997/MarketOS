@@ -91,3 +91,152 @@ def test_bounds_and_cli_do_not_touch_the_network(monkeypatch, tmp_path: Path):
     assert blocked.returncode == 1
     assert json.loads(blocked.stdout)["rejections"][0]["code"] == "file_too_large"
     assert "x" * 20 not in blocked.stdout
+
+
+def test_ordinary_product_text_is_not_treated_as_contact():
+    text = (
+        "listing_id,title,seller,brand,availability,price,currency,shipping_cost\n"
+        "a1,Copper Bottle 500ml 2 @ pack,ACME Supply,Northwind,in stock,10,USD,\n"
+        "a2,Model 12-34-5678 UPC 012345678905,ACME Supply,Northwind,ships in 2 days,0,USD,0\n"
+    )
+    result = import_manual_competitor_csv(text, candidate_id="cand-1")
+    assert result["status"] == "accepted"
+    by_id = {offer["external_listing_id"]: offer for offer in result["offers"]}
+    assert by_id["a1"]["title"] == "Copper Bottle 500ml 2 @ pack"
+    assert by_id["a1"]["seller"] == "ACME Supply"
+    assert by_id["a1"]["shipping_cost"] is None
+    assert by_id["a2"]["price"] == 0.0
+    assert by_id["a2"]["shipping_cost"] == 0.0
+    assert by_id["a2"]["title"] == "Model 12-34-5678 UPC 012345678905"
+    unknown = import_manual_competitor_csv(
+        "listing_id,headphones,price\na1,Studio Pro,10\n",
+        candidate_id="cand-1",
+    )
+    assert unknown["rejections"][0]["field"] == "headphones"
+    assert "Studio Pro" not in json.dumps(unknown)
+
+
+def test_contact_canaries_never_reach_records_warnings_or_errors():
+    canaries = (
+        "canary.ada@secret.test",
+        "canary(at)secret.test",
+        "canary[at]secret.test",
+        "canary.ada @ secret.test",
+        "(415) 555-0199",
+        "+44 20 7946 0958",
+        "415-555-0134",
+        "mailto:canary.ada@secret.test",
+        "tel:+1-415-555-0199",
+        "https://cdn.example/p.png?e=canary.ada%40secret.test",
+        "canary.ada" + "&" + "amp;#64;secret.test",
+    )
+    fields = ("listing_id", "title", "seller", "brand", "availability", "source", "source_url", "image")
+    for field in fields:
+        for canary in canaries:
+            row = {
+                "listing_id": "bad1",
+                "title": "Copper Bottle",
+                "seller": "ACME Supply",
+                "brand": "Northwind",
+                "availability": "in stock",
+                "source": "manual",
+                "source_url": "https://shop.example/copper",
+                "image": "https://cdn.example/copper.png",
+                "price": "10",
+                "currency": "USD",
+            }
+            row[field] = canary
+            columns = list(row)
+            text = ",".join(columns) + "\n" + ",".join(row[column] for column in columns) + "\n"
+            result = import_manual_competitor_csv(text, candidate_id="cand-1")
+            blob = json.dumps(result)
+            assert canary not in blob, (field, canary)
+            assert "canary.ada" not in blob, (field, canary)
+            assert result["offer_count"] == 0
+    kept = (
+        "listing_id,title,price,currency\n"
+        "good1,Copper Bottle,10,USD\n"
+        "bad1,leak canary.ada@secret.test,9,USD\n"
+    )
+    mixed = import_manual_competitor_csv(kept, candidate_id="cand-1")
+    assert mixed["offer_count"] == 1
+    assert mixed["offers"][0]["external_listing_id"] == "good1"
+    assert "canary.ada@secret.test" not in json.dumps(mixed)
+    header_cases = (
+        "canary.ada@secret.test",
+        "(415) 555-0199",
+        "4155550199",
+    )
+    for header in header_cases:
+        text = f"listing_id,title,{header},price,currency\na1,Copper Bottle,hidden-canary-cell,10,USD\n"
+        result = import_manual_competitor_csv(text, candidate_id="cand-1")
+        blob = json.dumps(result)
+        assert header not in blob
+        assert "hidden-canary-cell" not in blob
+        assert result["status"] == "accepted"
+        assert result["offers"][0]["title"] == "Copper Bottle"
+    labeled = import_manual_competitor_csv(
+        "listing_id,title,customer email,price,currency\na1,Copper Bottle,canary.ada@secret.test,10,USD\n",
+        candidate_id="cand-1",
+    )
+    assert "canary.ada@secret.test" not in json.dumps(labeled)
+    assert labeled["status"] == "accepted"
+    assert labeled["offers"][0]["title"] == "Copper Bottle"
+    phone_id = "415-555-0199"
+    rejected_id = import_manual_competitor_csv("listing_id,price\na1,1\n", candidate_id=phone_id)
+    assert phone_id not in json.dumps(rejected_id)
+    assert rejected_id["candidate_id"] is None
+    assert rejected_id["rejections"][0]["code"] == "invalid_candidate_id"
+    email_id = import_manual_competitor_csv(
+        "listing_id,price\na1,1\n",
+        candidate_id="canary.ada@secret.test",
+    )
+    assert "canary.ada@secret.test" not in json.dumps(email_id)
+
+
+def test_cli_exception_and_streams_do_not_echo_canaries(capsys, monkeypatch, tmp_path: Path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "import_competitor_evidence_cli",
+        ROOT / "scripts" / "import_competitor_evidence.py",
+    )
+    assert spec is not None and spec.loader is not None
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    canary = "canary.ada@secret.test"
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError(f"boom {canary}")
+
+    monkeypatch.setattr(cli, "import_manual_competitor_csv", explode)
+    path = tmp_path / "offers.csv"
+    path.write_text("listing_id,title,price,currency\na1,Copper Bottle,3,USD\n", encoding="utf-8")
+    code = cli.main(["--csv", str(path), "--candidate-id", "cand-1"])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert canary not in captured.out
+    assert canary not in captured.err
+    assert "boom" not in captured.out
+    assert "Traceback" not in captured.err
+    leaked = tmp_path / "leaked.csv"
+    leaked.write_text(
+        "listing_id,title,price,currency\ngood1,Copper Bottle,4,USD\nbad1,canary.ada@secret.test,4,USD\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, "scripts/import_competitor_evidence.py", "--csv", str(leaked), "--candidate-id", "cand-1"],
+        cwd=ROOT, check=False, capture_output=True, text=True,
+    )
+    assert canary not in completed.stdout
+    assert canary not in completed.stderr
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert payload["offer_count"] == 1
+    blocked_id = subprocess.run(
+        [sys.executable, "scripts/import_competitor_evidence.py", "--csv", str(path), "--candidate-id", canary],
+        cwd=ROOT, check=False, capture_output=True, text=True,
+    )
+    assert canary not in blocked_id.stdout
+    assert canary not in blocked_id.stderr
+    assert blocked_id.returncode == 1

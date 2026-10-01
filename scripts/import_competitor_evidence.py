@@ -40,7 +40,22 @@ def main(argv: list[str] | None = None) -> int:
         report = {"status": "rejected", "rejections": [{"code": "undecodable"}], "evidence_class": "manual", "network_calls": False}
         print(json.dumps(report, sort_keys=True))
         return 1
-    report = import_manual_competitor_csv(text, candidate_id=args.candidate_id, max_bytes=MAX_RESPONSE_BYTES, max_rows=MAX_ROWS)
+    try:
+        report = import_manual_competitor_csv(
+            text, candidate_id=args.candidate_id, max_bytes=MAX_RESPONSE_BYTES, max_rows=MAX_ROWS,
+        )
+    except Exception:
+        report = {
+            "status": "rejected",
+            "rejections": [{"code": "import_failed"}],
+            "evidence_class": "manual",
+            "evidence_state": "manual_import",
+            "live_validated": False,
+            "network_calls": False,
+            "provider_calls": False,
+        }
+        print(json.dumps(report, sort_keys=True))
+        return 1
     print(json.dumps(report, sort_keys=True))
     return 0 if report["status"] == "accepted" else 1
 

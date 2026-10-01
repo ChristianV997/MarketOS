@@ -340,6 +340,17 @@ _PII_HEADERS = {
     "email", "phone", "name", "customer", "customer name", "address", "notes", "note",
     "billing name", "billing address", "shipping name", "shipping address",
 }
+_PII_HEADER_TOKENS = {"email", "e-mail", "phone", "mobile", "tel", "telephone", "fax", "whatsapp"}
+_EMAIL = re.compile(
+    r"(?i)(?<![\w])[a-z0-9._%+\-]{1,64}\s*@\s*[a-z0-9][a-z0-9.\-]{0,80}\.[a-z]{2,24}(?![\w])"
+)
+_OBFUSCATED_EMAIL = re.compile(
+    r"(?i)(?<![\w])[a-z0-9._%+\-]{1,64}\s*(?:\(\s*at\s*\)|\[\s*at\s*\]|\{\s*at\s*\})\s*"
+    r"[a-z0-9][a-z0-9.\-]{0,80}\.[a-z]{2,24}(?![\w])"
+)
+_NANP = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]\d{3}[-.\s]\d{4}(?!\d)")
+_INTL_PHONE = re.compile(r"(?<!\w)\+\d{1,3}(?:[-.\s()]+\d{2,4}){2,5}(?!\d)")
+_CONTACT_SCHEME = re.compile(r"(?i)(?:mailto|tel)\s*:")
 _MAPPED_HEADERS = {
     "listing id": "listing_id", "external listing id": "listing_id", "listing_id": "listing_id",
     "title": "title", "price": "price", "currency": "currency", "availability": "availability",
@@ -355,8 +366,28 @@ def _csv_header(value: str) -> str:
     return text
 
 
+def _contact_like(value: str) -> bool:
+    """High-confidence email or phone only. Ordinary product text, including '@' and SKUs, stays."""
+    if not value:
+        return False
+    text = value
+    for token in ("&" + "amp;#64;", "&#64;", "%2540", "%40"):
+        text = text.replace(token, "@")
+    if _CONTACT_SCHEME.search(text) or _EMAIL.search(text) or _OBFUSCATED_EMAIL.search(text) or _NANP.search(text):
+        return True
+    match = _INTL_PHONE.search(text)
+    return match is not None and len(re.sub(r"\D", "", match.group(0))) >= 8
+
+
+def _header_is_sensitive(header: str) -> bool:
+    if _contact_like(header):
+        return True
+    digits = re.sub(r"\D", "", header)
+    return not re.search(r"[a-z]", header) and 10 <= len(digits) <= 15
+
+
 def _public_header(header: str) -> str:
-    if "@" in header or not re.fullmatch(r"[a-z0-9 ]{1,48}", header):
+    if _header_is_sensitive(header) or not re.fullmatch(r"[a-z0-9 ]{1,48}", header):
         return "redacted"
     return header
 
@@ -390,15 +421,18 @@ def _manual_amount(raw: str) -> tuple[float | None, str | None]:
 
 
 def _classify_manual_header(header: str) -> str:
-    if header in _PII_HEADERS or header.startswith("billing ") or header.startswith("shipping address"):
+    tokens = set(header.split())
+    if (
+        _header_is_sensitive(header)
+        or header in _PII_HEADERS
+        or bool(tokens & _PII_HEADER_TOKENS)
+        or header.startswith("billing ")
+        or header.startswith("shipping address")
+    ):
         return "pii"
     if header in _MAPPED_HEADERS:
         return "mapped"
     return "unsupported"
-
-
-def _contact_like(value: str) -> bool:
-    return "@" in value or re.search(r"\d{3}[-.\s]\d{3}[-.\s]\d{4}", value) is not None
 
 
 def import_manual_competitor_csv(
@@ -413,15 +447,20 @@ def import_manual_competitor_csv(
     ``candidate_id`` must be supplied explicitly. Titles and seller names are never
     used as that id. Blank amounts stay missing; explicit zero stays zero.
     """
-    if not isinstance(candidate_id, str) or not _CANDIDATE_ID.fullmatch(candidate_id):
+    if not isinstance(candidate_id, str) or not _CANDIDATE_ID.fullmatch(candidate_id) or _contact_like(candidate_id):
         return _manual_result(None, (_manual_rejection(None, "invalid_candidate_id"),))
     if len(text.encode("utf-8")) > max_bytes:
         return _manual_result(candidate_id, (_manual_rejection(None, "file_too_large"),))
-    reader = csv.DictReader(io.StringIO(text))
-    if not reader.fieldnames:
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        fieldnames = list(reader.fieldnames or [])
+        raw_rows = list(enumerate(reader, start=2))
+    except csv.Error:
+        return _manual_result(candidate_id, (_manual_rejection(None, "invalid_csv"),))
+    if not fieldnames:
         return _manual_result(candidate_id, (_manual_rejection(None, "empty_csv"),))
-    headers = [_csv_header(name) for name in reader.fieldnames if name and name.strip()]
-    if any(not name or not name.strip() for name in reader.fieldnames) or len(headers) != len(set(headers)):
+    headers = [_csv_header(name) for name in fieldnames if name and name.strip()]
+    if any(not name or not name.strip() for name in fieldnames) or len(headers) != len(set(headers)):
         return _manual_result(candidate_id, (_manual_rejection(None, "invalid_header"),))
     unsupported = [header for header in headers if _classify_manual_header(header) == "unsupported"]
     if unsupported:
@@ -433,7 +472,7 @@ def import_manual_competitor_csv(
     offers: dict[str, dict[str, Any]] = {}
     conflicts: set[str] = set()
     row_count = 0
-    for row_number, raw in enumerate(reader, start=2):
+    for row_number, raw in raw_rows:
         row_count += 1
         if row_count > max_rows:
             return _manual_result(candidate_id, (_manual_rejection(None, "row_limit_exceeded"),))
@@ -453,8 +492,14 @@ def import_manual_competitor_csv(
         title = " ".join(mapped.get("title", "").split()).strip()
         seller = " ".join(mapped.get("seller", "").split()).strip()
         brand = " ".join(mapped.get("brand", "").split()).strip()
-        if any(_contact_like(value) for value in (title, seller, brand, listing_id)):
-            rejections.append(_manual_rejection(row_number, "malformed_identity", "listing id"))
+        availability = " ".join(mapped.get("availability", "").split()).strip()
+        source_url_raw = mapped.get("source_url", "").strip()
+        source_raw = mapped.get("source", "").strip()
+        image_raw = mapped.get("image", "").strip()
+        if any(_contact_like(value) for value in (
+            title, seller, brand, listing_id, availability, source_url_raw, source_raw, image_raw,
+        )):
+            rejections.append(_manual_rejection(row_number, "contact_data_rejected"))
             conflicts.add(listing_id)
             continue
         price, price_error = _manual_amount(mapped.get("price", ""))
