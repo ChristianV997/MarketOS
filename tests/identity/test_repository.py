@@ -297,13 +297,15 @@ class _RecordingConnection:
 
 
 def test_format_paramstyle_emits_percent_s_placeholders():
-    connection = _RecordingConnection(rows=[("ws_a", "internal", "Alice WS")])
+    connection = _RecordingConnection(rows=[("ws_a", "internal", "Alice WS", "internal_operator")])
     repo = PostgresWorkspaceRepository(lambda: connection)
     (access,) = repo.memberships_for(ALICE)
     (sql, params), = connection.executed
     assert "%s" in sql and "?" not in sql
     assert params == (ALICE.issuer, ALICE.subject)
-    assert (access.workspace_id, access.workspace_type, access.display_name) == ("ws_a", "internal", "Alice WS")
+    assert (access.workspace_id, access.workspace_type, access.display_name, access.role) == (
+        "ws_a", "internal", "Alice WS", "internal_operator"
+    )
     assert connection.commits == 0 and connection.closed is True
 
 

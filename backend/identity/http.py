@@ -23,9 +23,11 @@ from .errors import (
     IdentityFoundationError,
     IdentityProviderUnavailable,
     StorageUnavailable,
+    WorkspaceAccessDenied,
 )
 from .principal import MAX_TOKEN_LENGTH, TokenVerifier, VerifiedPrincipal
-from .workspaces import WorkspaceAccess, WorkspaceRepository, resolve_workspace
+from .roles import role_grants
+from .workspaces import WorkspaceAccess, WorkspaceRepository, resolve_sole_workspace, resolve_workspace
 
 WORKSPACE_HEADER = "X-MarketOS-Workspace"
 
@@ -96,3 +98,30 @@ def resolve_workspace_access(
         return resolve_workspace(principal, requested_workspace, repository)
     except IdentityFoundationError as exc:
         raise http_exception(exc) from None
+
+
+def require_workspace_permission(workspace_type: str, permission: str):
+    """Dependency factory: the principal's sole ``workspace_type`` membership, if its role grants ``permission``.
+
+    Unlike ``resolve_workspace_access`` this path reads no workspace selector at all
+    (no header, query or body): the workspace comes from registered memberships only.
+    A missing or unknown role fails closed with 403, and any unexpected repository
+    failure is reported as 503 without detail.
+    """
+
+    def dependency(
+        principal: VerifiedPrincipal = Depends(require_principal),
+        repository: WorkspaceRepository = Depends(get_workspace_repository),
+    ) -> WorkspaceAccess:
+        try:
+            access = resolve_sole_workspace(principal, repository, workspace_type)
+            if not role_grants(access.role, permission):
+                raise WorkspaceAccessDenied("role_not_authorized")
+            return access
+        except IdentityFoundationError as exc:
+            raise http_exception(exc) from None
+        except Exception as exc:
+            _log.warning("workspace membership lookup failed: %s", type(exc).__name__)
+            raise http_exception(StorageUnavailable()) from None
+
+    return dependency

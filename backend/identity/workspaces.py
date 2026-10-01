@@ -27,6 +27,7 @@ class WorkspaceAccess:
     workspace_id: str
     workspace_type: str
     display_name: str
+    role: str | None = None
 
 
 class WorkspaceRepository(Protocol):
@@ -61,4 +62,26 @@ def resolve_workspace(
         raise WorkspaceAccessDenied("no_workspace_membership")
     if len(memberships) > 1:
         raise WorkspaceSelectionRequired()
+    return memberships[0]
+
+
+def resolve_sole_workspace(
+    principal: VerifiedPrincipal,
+    repository: WorkspaceRepository,
+    workspace_type: str,
+) -> WorkspaceAccess:
+    """Resolve the principal's single workspace of ``workspace_type`` from memberships alone.
+
+    No client-supplied selector exists on this path. Zero memberships and several
+    memberships both fail closed (403), so a caller can never choose a workspace.
+    """
+    memberships = [
+        m
+        for m in repository.memberships_for(principal)
+        if m.issuer == principal.issuer and m.subject == principal.subject and m.workspace_type == workspace_type
+    ]
+    if not memberships:
+        raise WorkspaceAccessDenied("no_workspace_membership")
+    if len(memberships) > 1:
+        raise WorkspaceAccessDenied("workspace_ambiguous")
     return memberships[0]

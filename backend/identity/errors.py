@@ -37,6 +37,20 @@ class WorkspaceAccessDenied(IdentityFoundationError):
     code = "workspace_not_authorized"
 
 
+class ProfileNotFound(IdentityFoundationError):
+    """The workspace has no client profile yet (HTTP 404)."""
+
+    status_code = 404
+    code = "profile_not_found"
+
+
+class ProfileExportRejected(IdentityFoundationError):
+    """A stored profile failed the TrustOS client-workspace leakage check (HTTP 500, fail closed)."""
+
+    status_code = 500
+    code = "profile_export_rejected"
+
+
 class StorageConflict(IdentityFoundationError):
     """A database constraint rejected the write (HTTP 409)."""
 

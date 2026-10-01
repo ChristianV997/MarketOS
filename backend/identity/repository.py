@@ -19,13 +19,20 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
-from .errors import IdentityFoundationError, StorageConflict, StorageUnavailable, WorkspaceAccessDenied
+from .errors import (
+    IdentityFoundationError,
+    ProfileNotFound,
+    StorageConflict,
+    StorageUnavailable,
+    WorkspaceAccessDenied,
+)
 from .principal import VerifiedPrincipal
+from .roles import ROLES, role_grants
 from .workspaces import WORKSPACE_ID_PATTERN, WorkspaceAccess
 
 OWNER_TYPE = "internal"
@@ -45,15 +52,17 @@ _CONFLICT_ERRORS = frozenset({"IntegrityError"})
 _SQL = {
     "workspace_insert": "INSERT INTO workspaces (workspace_id, name) VALUES (?, ?)",
     "identity_insert": "INSERT INTO workspace_identity (workspace_id, workspace_type, created_at) VALUES (?, ?, ?)",
-    "member_insert": "INSERT INTO workspace_members (issuer, subject, workspace_id, created_at) VALUES (?, ?, ?, ?)",
+    "member_insert": (
+        "INSERT INTO workspace_members (issuer, subject, workspace_id, role, created_at) VALUES (?, ?, ?, ?, ?)"
+    ),
     "memberships": (
-        "SELECT m.workspace_id, i.workspace_type, w.name FROM workspace_members m "
+        "SELECT m.workspace_id, i.workspace_type, w.name, m.role FROM workspace_members m "
         "JOIN workspace_identity i ON i.workspace_id = m.workspace_id "
         "JOIN workspaces w ON w.workspace_id = m.workspace_id "
         "WHERE m.issuer = ? AND m.subject = ? ORDER BY m.workspace_id"
     ),
     "member_type": (
-        "SELECT i.workspace_type FROM workspace_members m "
+        "SELECT i.workspace_type, m.role FROM workspace_members m "
         "JOIN workspace_identity i ON i.workspace_id = m.workspace_id "
         "WHERE m.issuer = ? AND m.subject = ? AND m.workspace_id = ?"
     ),
@@ -72,6 +81,14 @@ _SQL = {
         "company_name = excluded.company_name, business_type = excluded.business_type, "
         "updated_at = excluded.updated_at"
     ),
+    "profile_insert": (
+        "INSERT INTO client_profiles (workspace_id, company_name, business_type, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?)"
+    ),
+    "profile_update": (
+        "UPDATE client_profiles SET company_name = ?, business_type = ?, updated_at = ? WHERE workspace_id = ?"
+    ),
+    "entry_delete_kind": "DELETE FROM client_profile_entries WHERE workspace_id = ? AND kind = ?",
     "profile_get": "SELECT workspace_id, company_name, business_type FROM client_profiles WHERE workspace_id = ?",
     "entry_insert": (
         "INSERT INTO client_profile_entries (entry_id, workspace_id, kind, label, platform, created_at) "
@@ -109,6 +126,24 @@ class ClientProfile:
     company_name: str
     business_type: str
     entries: tuple[ProfileEntry, ...] = ()
+
+
+EntryInput = tuple[str, str, "str | None"]  # (kind, label, platform)
+
+
+def _clean_entries(entries: Sequence[EntryInput]) -> tuple[EntryInput, ...]:
+    cleaned: list[EntryInput] = []
+    for kind, label, platform in entries:
+        _choice(kind, "kind", ENTRY_KINDS)
+        label = _text(label, "label")
+        if kind == "social_account":
+            platform = _text(platform, "platform", max_len=64)
+        elif platform is not None:
+            raise ValueError("platform is only valid for social_account entries")
+        cleaned.append((kind, label, platform))
+    if len({(k, label, p or "") for k, label, p in cleaned}) != len(cleaned):
+        raise ValueError("duplicate entries")
+    return tuple(cleaned)
 
 
 def new_workspace_id() -> str:
@@ -200,13 +235,18 @@ class PostgresWorkspaceRepository:
         finally:
             _quietly(connection.close)
 
-    def _require_access(self, cursor: Any, access: WorkspaceAccess, expected_type: str) -> None:
+    def _require_access(
+        self, cursor: Any, access: WorkspaceAccess, expected_type: str, permission: str | None = None
+    ) -> None:
         cursor.execute(self._q("member_type"), (access.issuer, access.subject, access.workspace_id))
         row = cursor.fetchone()
         if row is None:
             raise WorkspaceAccessDenied()
         if row[0] != expected_type:
             raise WorkspaceAccessDenied("workspace_type_mismatch")
+        # The stored role is authoritative; the role carried on ``access`` is never trusted.
+        if permission is not None and not role_grants(row[1], permission):
+            raise WorkspaceAccessDenied("role_not_authorized")
 
     # -- provisioning (operator/bootstrap; deliberately not exposed by any route) --
 
@@ -223,15 +263,17 @@ class PostgresWorkspaceRepository:
 
         self._run(operation, write=True)
 
-    def add_member(self, workspace_id: str, issuer: str, subject: str) -> None:
+    def add_member(self, workspace_id: str, issuer: str, subject: str, role: str | None = None) -> None:
         if not isinstance(workspace_id, str) or not WORKSPACE_ID_PATTERN.fullmatch(workspace_id):
             raise ValueError("workspace_id is invalid")
         issuer = _identity_key(issuer, "issuer")
         subject = _identity_key(subject, "subject")
+        if role is not None:
+            _choice(role, "role", ROLES)
         now = self._clock()
 
         def operation(cursor: Any) -> None:
-            cursor.execute(self._q("member_insert"), (issuer, subject, workspace_id, now))
+            cursor.execute(self._q("member_insert"), (issuer, subject, workspace_id, role, now))
 
         self._run(operation, write=True)
 
@@ -247,6 +289,7 @@ class PostgresWorkspaceRepository:
                     workspace_id=row[0],
                     workspace_type=row[1],
                     display_name=row[2],
+                    role=row[3],
                 )
                 for row in cursor.fetchall()
             )
@@ -345,12 +388,89 @@ class PostgresWorkspaceRepository:
         self._run(operation, write=True)
         return ProfileEntry(entry_id, kind, label, platform, "record_only")
 
-    def get_client_profile(self, access: WorkspaceAccess) -> ClientProfile | None:
+    def get_client_profile(self, access: WorkspaceAccess, *, permission: str | None = None) -> ClientProfile | None:
         def operation(cursor: Any) -> ClientProfile | None:
-            self._require_access(cursor, access, CLIENT_TYPE)
+            self._require_access(cursor, access, CLIENT_TYPE, permission)
             return self._read_profile(cursor, access.workspace_id)
 
         return self._run(operation)
+
+    def _insert_entries(
+        self, cursor: Any, workspace_id: str, entries: Sequence[EntryInput], now: str
+    ) -> None:
+        for seq, (kind, label, platform) in enumerate(entries):
+            # The sequence prefix keeps read order equal to input order within one write.
+            entry_id = f"pe_{seq:04d}_{uuid.uuid4().hex}"
+            cursor.execute(self._q("entry_insert"), (entry_id, workspace_id, kind, label, platform or "", now))
+
+    def create_client_profile(
+        self,
+        access: WorkspaceAccess,
+        *,
+        company_name: str,
+        business_type: str,
+        entries: Sequence[EntryInput] = (),
+        permission: str,
+    ) -> ClientProfile:
+        company_name = _text(company_name, "company_name")
+        _choice(business_type, "business_type", BUSINESS_TYPES)
+        clean_entries = _clean_entries(entries)
+        now = self._clock()
+
+        def operation(cursor: Any) -> ClientProfile:
+            self._require_access(cursor, access, CLIENT_TYPE, permission)
+            if self._read_profile(cursor, access.workspace_id) is not None:
+                raise StorageConflict("profile_exists")
+            cursor.execute(
+                self._q("profile_insert"), (access.workspace_id, company_name, business_type, now, now)
+            )
+            self._insert_entries(cursor, access.workspace_id, clean_entries, now)
+            profile = self._read_profile(cursor, access.workspace_id)
+            assert profile is not None
+            return profile
+
+        return self._run(operation, write=True)
+
+    def update_client_profile(
+        self,
+        access: WorkspaceAccess,
+        *,
+        company_name: str | None = None,
+        business_type: str | None = None,
+        replace_entries: Mapping[str, Sequence[EntryInput]] | None = None,
+        permission: str,
+    ) -> ClientProfile:
+        if company_name is not None:
+            company_name = _text(company_name, "company_name")
+        if business_type is not None:
+            _choice(business_type, "business_type", BUSINESS_TYPES)
+        replacements = {kind: _clean_entries(items) for kind, items in (replace_entries or {}).items()}
+        for kind in replacements:
+            _choice(kind, "kind", ENTRY_KINDS)
+        now = self._clock()
+
+        def operation(cursor: Any) -> ClientProfile:
+            self._require_access(cursor, access, CLIENT_TYPE, permission)
+            current = self._read_profile(cursor, access.workspace_id)
+            if current is None:
+                raise ProfileNotFound()
+            cursor.execute(
+                self._q("profile_update"),
+                (
+                    company_name if company_name is not None else current.company_name,
+                    business_type if business_type is not None else current.business_type,
+                    now,
+                    access.workspace_id,
+                ),
+            )
+            for kind, items in replacements.items():
+                cursor.execute(self._q("entry_delete_kind"), (access.workspace_id, kind))
+                self._insert_entries(cursor, access.workspace_id, items, now)
+            updated = self._read_profile(cursor, access.workspace_id)
+            assert updated is not None
+            return updated
+
+        return self._run(operation, write=True)
 
 
 def _quietly(call: Callable[[], Any]) -> None:

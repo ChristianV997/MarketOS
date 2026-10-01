@@ -19,6 +19,8 @@ from backend.identity.workspaces import WorkspaceAccess
 MIGRATIONS = Path(__file__).resolve().parents[2] / "backend" / "identity" / "migrations"
 UP_SQL = MIGRATIONS / "0001_identity_workspace_foundation.up.sql"
 DOWN_SQL = MIGRATIONS / "0001_identity_workspace_foundation.down.sql"
+UP2_SQL = MIGRATIONS / "0002_workspace_member_roles.up.sql"
+DOWN2_SQL = MIGRATIONS / "0002_workspace_member_roles.down.sql"
 RLS_SQL = MIGRATIONS / "0001_identity_workspace_foundation.rls.sql"
 
 PREREQUISITE_SQL = """
@@ -61,6 +63,7 @@ def db_path(tmp_path: Path) -> Path:
     connection = sqlite3.connect(path)
     connection.executescript(PREREQUISITE_SQL)
     connection.executescript(UP_SQL.read_text(encoding="utf-8"))
+    connection.executescript(UP2_SQL.read_text(encoding="utf-8"))
     connection.commit()
     connection.close()
     return path

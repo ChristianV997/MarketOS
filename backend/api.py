@@ -132,6 +132,8 @@ try:
     from api.routes.discovery import router as _discovery_router
     from api.routes.organization import router as _organization_router
     app.include_router(_organization_router)
+    from api.routes.client_profile import router as _client_profile_router
+    app.include_router(_client_profile_router)
     app.include_router(_governance_router)
     app.include_router(_discovery_router)
     try:
