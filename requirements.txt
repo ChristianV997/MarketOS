@@ -54,7 +54,6 @@ ShopifyAPI
 stripe
 facebook-business
 tiktok-business-api-sdk-official
-evidently
 
 # ── inference kernel ──────────────────────────────────────────────────────────
 openai>=3.19.2         # OpenAI provider (cloud completions + embeddings)
