@@ -53,7 +53,18 @@ class ShopifyOrderObservation(_Model):
 @dataclass(frozen=True)
 class ShopifyLineItemObservation(_Model):
     line_item_id: str; order_id: str; product_id: str | None; variant_id: str | None; title: str; sku: str
-    quantity: int; price: float | None; total_discount: float | None; fulfillment_status: str; metadata: dict[str, Any] = field(default_factory=dict)
+    quantity: int | None; price: float | None; total_discount: float | None; fulfillment_status: str; metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ShopifyRefundObservation(_Model):
+    """Observed refund fact from a manual export. This does not issue a refund."""
+    refund_id: str
+    order_id: str
+    created_at: str | None
+    currency: str
+    amount: float | None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -69,6 +80,7 @@ class ShopifyImportBatch(_Model):
     collections: tuple[ShopifyCollectionObservation, ...]; orders: tuple[ShopifyOrderObservation, ...]
     line_items: tuple[ShopifyLineItemObservation, ...]; customers: tuple[ShopifyCustomerObservation, ...]
     warnings: tuple[str, ...] = (); skipped_records: tuple[str, ...] = (); metadata: dict[str, Any] = field(default_factory=dict)
+    refunds: tuple[ShopifyRefundObservation, ...] = ()
 
 
 @dataclass(frozen=True)
