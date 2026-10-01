@@ -33,6 +33,7 @@ def shopify_batch_events(batch: ShopifyImportBatch, context: ShopifyStoreContext
         *[("shopify_variant_observed", "shopify_variant", item.variant_id, item.to_dict()) for item in batch.variants],
         *[("shopify_collection_observed", "shopify_collection", item.collection_id, item.to_dict()) for item in batch.collections],
         *[("shopify_order_observed", "shopify_order", item.order_id, item.to_dict()) for item in batch.orders],
+        *[("shopify_refund_observed", "shopify_refund", item.refund_id, item.to_dict()) for item in batch.refunds],
         *[("shopify_line_item_observed", "shopify_line_item", item.line_item_id, item.to_dict()) for item in batch.line_items],
         *[("shopify_customer_observed", "shopify_customer", item.customer_id, item.to_dict()) for item in batch.customers],
         ("shopify_store_context_built", "shopify_store_context", context.batch_id, context.to_dict()),
