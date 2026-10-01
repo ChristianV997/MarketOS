@@ -6,6 +6,7 @@ import { PLATFORM_LABEL, stepOfPath } from "../lib/validateProfile.ts";
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, WRAP } from "./Fields.tsx";
 import { DetailsOnlyBadge } from "./StepSocial.tsx";
 import { ERROR_SUMMARY_ID, StepHeading, type StepProps } from "./StepChrome.tsx";
+import { SAVE_ERROR_TEXT } from "../lib/errorCopy.ts";
 import { NOT_PROVIDED } from "../lib/text.ts";
 
 const AVAILABILITY_TEXT = { in_stock: "In stock", made_to_order: "Made to order", dropship: "Dropshipped", preorder: "Pre-order", unknown: "Not sure" } as const;
@@ -38,19 +39,10 @@ const SAVE_COPY: Record<SaveView, { title: string; body: string }> = {
   demo: { title: "Demo only: not saved", body: "Nothing you entered is stored or sent anywhere. Saving needs a secure, signed-in storage service that is not connected to this page." },
   unsaved: { title: "Not saved yet", body: "Confirm below to save this profile." },
   saving: { title: "Saving", body: "Please wait. Your entries are kept." },
-  saved: { title: "Profile saved", body: "The saved profile matches what you see here." },
+  saved: { title: "Profile saved", body: "The server accepted the save, and the saved profile matches what you see here." },
   changed_since_saved: { title: "Changed since last save", body: "The saved profile is older than what you see here. Confirm again to save the changes." },
   error: { title: "Saving failed", body: "Your entries are still here." },
 };
-
-const SAVE_ERROR_TEXT = {
-  unauthenticated: "You are not signed in, so nothing was saved.",
-  forbidden: "This account is not allowed to save this profile.",
-  validation: "The server rejected some values. Review the entries and try again.",
-  conflict: "The profile was changed elsewhere. Reload and review before saving.",
-  unavailable: "The service is not reachable right now. Try again later.",
-  unknown: "Something went wrong. Try again.",
-} as const;
 
 export function StepReview({
   state,

@@ -162,10 +162,28 @@ export interface ClientProfileDraftPayload {
 /** Persistence seam. Supplied by an authenticated integration; absent in demo mode. */
 export type SaveClientProfile = (payload: ClientProfileDraftPayload) => Promise<void>;
 
+/**
+ * Why a profile request failed, as a short code. One code per failure the UI
+ * words differently: 401, 403, 404, 409, 503, a 2xx body that is not a valid
+ * profile, and a request that never got a response.
+ */
+export const PROFILE_ERROR_CODES = [
+  "unauthenticated",
+  "forbidden",
+  "not_found",
+  "conflict",
+  "unavailable",
+  "malformed_response",
+  "network",
+  "validation",
+  "unknown",
+] as const;
+export type ProfileErrorCode = (typeof PROFILE_ERROR_CODES)[number];
+
 /** A save failure the UI may show. Raw error text is never displayed. */
 export class ProfileSaveError extends Error {
-  readonly code: "unauthenticated" | "forbidden" | "validation" | "conflict" | "unavailable";
-  constructor(code: ProfileSaveError["code"]) {
+  readonly code: ProfileErrorCode;
+  constructor(code: ProfileErrorCode) {
     super(code);
     this.name = "ProfileSaveError";
     this.code = code;

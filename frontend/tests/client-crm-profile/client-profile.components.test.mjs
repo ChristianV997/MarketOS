@@ -20,7 +20,7 @@ import ts from "typescript";
 
 import { FEATURE_ROOT, importFeature } from "./load.mjs";
 
-const Page = (await importFeature("ClientProfileOnboardingPage.tsx")).default;
+const Page = (await importFeature("ClientProfileWizard.tsx")).default;
 const { initialWizardState, EMPTY_DRAFT } = await importFeature("lib/wizardState.ts");
 const { validateProfile } = await importFeature("lib/validateProfile.ts");
 const { focusId } = await importFeature("lib/focusTargets.ts");
@@ -399,20 +399,27 @@ test("saved / changed / saving / failed states each use their own wording and ne
   const savingButton = tagsOf(saving, "button", (t) => has(t, "data-confirm"))[0];
   assert.equal(attr(savingButton, "aria-disabled"), "true", "aria-disabled keeps focus on the button while saving");
   assert.ok(!has(savingButton, "disabled"));
+  const seen = new Set();
   for (const [code, message] of [
     ["unauthenticated", /not signed in/],
     ["forbidden", /not allowed to save/],
-    ["validation", /server rejected some values/],
+    ["not_found", /service could not be found/],
     ["conflict", /changed elsewhere/],
-    ["unavailable", /not reachable/],
+    ["unavailable", /unavailable right now/],
+    ["malformed_response", /could not read, so it cannot confirm anything was saved/],
+    ["network", /could not be reached/],
+    ["validation", /server rejected some values/],
     ["unknown", /Something went wrong/],
   ]) {
     const failed = asStep("review", draft, { save: { status: "error", code } }, props);
     assert.match(failed, /data-save-view="error"/);
     assert.match(text(failed), /Saving failed/);
     assert.match(text(failed), message, code);
-    assert.match(text(failed), /Your entries are still here|nothing was lost/i);
+    assert.match(text(failed), /Your entries are still here/);
+    assert.doesNotMatch(text(failed), /Profile saved/, code);
+    seen.add(text(failed.match(/data-panel="saved-profile".*?<\/section>/s)[0]));
   }
+  assert.equal(seen.size, 9, "every failure code reads differently");
 });
 const html2 = (html, view) => {
   assert.match(html, new RegExp(`data-save-view="${view}"`));
@@ -465,7 +472,7 @@ test("touch targets and wrapping are built into the shared control classes", asy
   assert.match(fields, /BUTTON_PRIMARY =\s*\n?\s*"[^"]*min-h-\[44px\]/);
   assert.match(fields, /BUTTON_SECONDARY =\s*\n?\s*"[^"]*min-h-\[44px\]/);
   assert.match(fields, /overflow-wrap:anywhere/);
-  const page = await readFile(new URL("ClientProfileOnboardingPage.tsx", FEATURE_ROOT), "utf8");
+  const page = await readFile(new URL("ClientProfileWizard.tsx", FEATURE_ROOT), "utf8");
   assert.match(page, /lg:grid-cols-\[14rem_minmax\(0,1fr\)\]/, "steps stack below lg and sit beside the form at lg");
 });
 
@@ -508,6 +515,10 @@ test("guard (AST): the feature imports only react and its own files", async () =
     for (const specifier of scan(file, source).imports) {
       const ok = specifier === "react" || specifier.startsWith("./") || specifier.startsWith("../");
       assert.ok(ok, `${file} imports ${specifier}`);
+      if (specifier === "../../../lib/apiBase.ts") {
+        assert.equal(file, path.join("lib", "clientProfileApi.ts"), "only the API client may reach the shared API-origin helper");
+        continue;
+      }
       if (specifier.startsWith("../")) {
         const resolved = path.normalize(path.join(path.dirname(file), specifier));
         assert.ok(!resolved.startsWith(".."), `${file} reaches outside the feature via ${specifier}`);
@@ -518,13 +529,15 @@ test("guard (AST): the feature imports only react and its own files", async () =
 
 test("guard (AST): no network, storage, cookies, analytics, logging, HTML injection or eval", async () => {
   const forbidden = [
-    "fetch", "XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon", "localStorage", "sessionStorage", "indexedDB",
+    "XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon", "localStorage", "sessionStorage", "indexedDB",
     "cookie", "console", "posthog", "capturePageview", "dangerouslySetInnerHTML", "innerHTML", "eval", "Function",
-    "useQuery", "useMutation", "location", "history", "window", "postMessage",
+    "useQuery", "useMutation", "location", "history", "window", "postMessage", "useSearchParams", "URLSearchParams", "useLocation", "useParams",
   ];
   for (const { file, source } of await featureSources()) {
     const { identifiers } = scan(file, source);
     for (const name of forbidden) assert.ok(!identifiers.has(name), `${file} uses ${name}`);
+    // The one network primitive is allowed in exactly one file.
+    assert.equal(identifiers.has("fetch"), file === path.join("lib", "clientProfileApi.ts"), `${file}: fetch usage`);
   }
 });
 

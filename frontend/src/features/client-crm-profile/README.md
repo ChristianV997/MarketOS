@@ -1,42 +1,65 @@
 # Client CRM profile onboarding (frontend slice)
 
-Status: **implemented, unit/component tested, browser-checked in a throwaway
-harness (not in CI), NOT mounted, NOT connected to any API, NOT live validated.**
+Status: **wired to `/api/organization/client-profile` through a same-origin API
+client, mocked-network tested and browser-checked in a throwaway harness. NOT
+verified against a real backend: the endpoint and its schema are not in this
+repository. Not live validated.**
 
 A guided, client-facing company profile: company identity and business type
 (service B2C, service B2B, product), categories / segments / target markets,
 products or services (with inventory details for product businesses), and social
 account **details** (plain handles and links), then a review step that lists
-anything missing. It is separate from the owner dashboard: no owner navigation,
-no shared state with the operator surfaces, and it loads nothing.
+anything missing. It is separate from the owner dashboard: no owner navigation and
+no shared state with the operator surfaces.
 
-## Persistence: demo mode by default
+## Server contract (ASSUMED shape)
 
-Verified on main when this was written:
+`ClientProfileOnboardingPage` (default source `"server"`) calls one same-origin
+endpoint with `credentials: "same-origin"`:
 
-* there is no client-profile endpoint;
-* there is no authentication or session identity in `api/` or `backend/api.py`;
-* `api/onboarding.py` is an in-memory store-setup wizard keyed by a client-supplied
-  session id (not a client profile, not tenant-scoped);
-* `ClientWorkspace` has no profile fields and derives `workspace_id` from its name.
+| Method | When | Success |
+|---|---|---|
+| `GET` | on page load | `200` with the profile; `404` = no saved profile yet (create mode) |
+| `POST` | first save, while GET returned 404 | `200`/`201` with the profile, or `204` |
+| `PATCH` | every later save (and when GET returned a profile) | `200` with the profile, or `204` |
 
-So the page runs in **demo mode**: it is labelled, stores nothing, sends nothing,
-loads no real client information, and its confirm button says "demo, not saved".
-`contracts/clientProfileDraft.ts` is therefore a *frontend-proposed draft*
-(`client-profile-draft-v0`), not a canonical schema. When a backend contract
-exists it replaces this file.
+Request and response bodies use the `client-profile-draft-v0` shape in
+`contracts/clientProfileDraft.ts`. **That shape is an assumption**: the backend
+contract was not available. If it differs, change only `lib/clientProfileApi.ts`
+and `lib/serverProfile.ts`. A 2xx reply whose body is not a valid profile
+(including any account claiming a status other than `not_connected`) is treated as
+`malformed_response`, never as success.
+
+Failures are separate codes with separate wording, for both load and save:
+`401` unauthenticated, `403` forbidden, `404` not_found (save), `409` conflict,
+`503` unavailable, `400`/`422` validation, a 2xx that cannot be trusted
+(`malformed_response`), a request that got no response (`network`), anything else
+`unknown`. Raw server text is never shown. "Profile saved" appears only after a
+trustworthy 2xx and only while the form still matches what was sent.
+
+If the initial GET fails (anything but 404) the form is not shown at all, because
+the page cannot tell whether a profile exists; it shows the failure and a retry.
+
+## Demo vs server
+
+`source="server"` is the default and what the routes mount. `source="demo"` shows
+fictional sample data, makes no request and stores nothing; it is selected only by
+the code that mounts the page. **No URL parameter, stored value or user-picked id
+selects fixture vs live data or a tenant.** Demo is labelled "fictional demo data:
+not observed, not saved and not connected".
 
 ## Identity and tenant safety
 
 * The contract and the UI have **no workspace, tenant, client or owner id** field.
   A value the user types or selects must never decide whose profile this is; the
   server must derive it from the authenticated session.
-* `onSave` is the only persistence seam. A host passes it **only** when saving goes
-  through authenticated, tenant-scoped storage. Passing it switches the page from
-  demo to save wording; "saved" is shown only after the promise resolves and only
-  while the form still equals what was saved.
-* Save failures are shown as short codes (`ProfileSaveError`); raw error text is
-  never displayed.
+* The server decides whose profile this is from the session cookie. The URL,
+  headers and body contain no workspace, tenant or client identifier, and the page
+  keeps no tenant state (`lib/clientProfileApi.ts` is the only network code; an AST
+  test enforces that).
+* `ClientProfileWizard` takes an `onSave` function; the container supplies the API
+  client. "Saved" is shown only after it resolves and only while the form still
+  equals what was saved.
 
 ## Saved profile vs connected account
 
@@ -64,14 +87,10 @@ detection, tags, payload, wizard reducer, save runner); `hooks/useProfileWizard.
 Tests: `frontend/tests/client-crm-profile/` (with a test-only loader built on the
 repo's own `typescript`; no new dependency).
 
-## Not mounted: integration dependencies
+## Remaining backend dependencies
 
-1. A **client** route group with its own layout that supplies a `<main>` landmark.
-   Do not mount inside the owner `Shell`/Sidebar (owner navigation and operator
-   state would appear next to client data).
-2. Authenticated, tenant-scoped profile API (create/read/update) owned by the
-   backend, with the schema above replaced by the canonical one.
-3. A host that passes `onSave` mapping HTTP outcomes to `ProfileSaveError` codes,
-   and a sign-in path for the `unauthenticated` case.
-4. A load path (initial profile) with explicit loading and error states; not built
-   because there is nothing to load from.
+1. The authenticated, tenant-scoped `/api/organization/client-profile` GET/POST/PATCH
+   endpoint with a published schema; replace the assumed shape if it differs.
+2. A sign-in path for the `unauthenticated` case (this page only reports it).
+3. CSRF protection for cookie-authenticated POST/PATCH is the server's job.
+4. Until 1 is integrated nothing here has run end to end.

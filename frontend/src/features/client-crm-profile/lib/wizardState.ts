@@ -6,6 +6,7 @@ import {
   type BusinessType,
   type OfferingDraft,
   type ProfileDraft,
+  type ProfileErrorCode,
   type SocialAccountDraft,
   type StepId,
 } from "../contracts/clientProfileDraft.ts";
@@ -19,7 +20,7 @@ export type SaveState =
   | { status: "idle" }
   | { status: "saving" }
   | { status: "saved" }
-  | { status: "error"; code: "unauthenticated" | "forbidden" | "validation" | "conflict" | "unavailable" | "unknown" };
+  | { status: "error"; code: ProfileErrorCode };
 
 /** Asks the view to move focus after the next render. `nonce` makes repeat requests distinct. */
 export interface FocusRequest {
