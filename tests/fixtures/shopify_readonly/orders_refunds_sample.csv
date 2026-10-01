@@ -1,0 +1,4 @@
+Name,Email,Financial Status,Currency,Subtotal,Total,Created at,Lineitem quantity,Lineitem name,Lineitem sku,Lineitem price,Billing Name,Billing Address1,Billing Phone,Id,Refunded Amount
+#1001,ada@example.test,paid,USD,40.00,40.00,2024-01-02,1,Espresso Maker,SKU-1,25.00,Ada Example,1 Main Street,555-0100,1001,5.00
+#1001,ada@example.test,paid,USD,40.00,40.00,2024-01-02,1,Travel Cup,SKU-2,15.00,Ada Example,1 Main Street,555-0100,1001,5.00
+#1002,ada@example.test,paid,USD,0.00,,2024-01-03,0,Sample,SKU-3,0.00,Ada Example,1 Main Street,555-0100,1002,0.00
