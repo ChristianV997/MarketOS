@@ -114,7 +114,16 @@ def build_store_context(batch: ShopifyImportBatch) -> ShopifyStoreContext:
     total = round(sum(values), 2); item_counts = Counter(item.title for item in batch.line_items if item.title)
     warnings = list(batch.warnings)
     if not batch.orders: warnings.append("no_orders_observed: no revenue or demand conclusion can be made")
-    return ShopifyStoreContext(batch.workspace_id, batch.batch_id, len(batch.products), len(batch.variants), len(batch.collections), len(batch.orders), len(batch.customers), tuple(sorted({order.currency for order in batch.orders if order.currency})), sum(product.status == "active" for product in batch.products), sum(variant.inventory_quantity is not None and variant.inventory_quantity <= 0 for variant in batch.variants), total, round(total / len(values), 2) if values else 0.0, tuple(title for title, _ in item_counts.most_common(5)), tuple(warnings), True, {"source": batch.source, "read_only": True, "advisory": True})
+    currencies = {order.currency for order in batch.orders if order.currency}
+    currencies.update(refund.currency for refund in batch.refunds if refund.currency)
+    metadata = {"source": batch.source, "read_only": True, "advisory": True}
+    if batch.refunds:
+        explicit = [refund.amount for refund in batch.refunds if refund.amount is not None]
+        metadata["refund_count"] = len(batch.refunds)
+        metadata["observed_refund_total"] = round(sum(explicit), 2) if explicit else None
+        metadata["refund_amount_missing_count"] = sum(refund.amount is None for refund in batch.refunds)
+        metadata["evidence_state"] = "manual_import"
+    return ShopifyStoreContext(batch.workspace_id, batch.batch_id, len(batch.products), len(batch.variants), len(batch.collections), len(batch.orders), len(batch.customers), tuple(sorted(currencies)), sum(product.status == "active" for product in batch.products), sum(variant.inventory_quantity is not None and variant.inventory_quantity <= 0 for variant in batch.variants), total, round(total / len(values), 2) if values else 0.0, tuple(title for title, _ in item_counts.most_common(5)), tuple(warnings), True, metadata)
 
 
 def import_shopify_readonly(path: str | Path, workspace_id: str = "commerce-mvp-dry-run", mode: str = "fixture", limit: int | None = None) -> tuple[ShopifyImportBatch, ShopifyStoreContext]:
