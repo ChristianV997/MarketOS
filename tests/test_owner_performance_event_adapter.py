@@ -11,7 +11,10 @@ it is importable (it lives on PR #368 and is skipped on a base without it).
 from __future__ import annotations
 
 import importlib.util
+import json
 import random
+import re
+import unicodedata
 from decimal import Decimal
 
 import pytest
@@ -324,8 +327,11 @@ def test_money_related_events_that_are_intentionally_unmapped_are_counted_with_t
 
 def test_no_causal_or_live_claims_and_read_only_flags_are_always_stated():
     coverage = run(shopify_events([order("1")])).coverage
-    assert coverage["claims"] == {"campaign_lift": False, "causal_attribution": False, "live_platform_validated": False, "observed_class_produced": False}
-    assert coverage["safety"] == {"read_only": True, "network_calls": False, "provider_calls": False, "mutated": False}
+    assert coverage["claims"] == {"campaign_lift": False, "causal_attribution": False, "ads_ran_proven": False, "live_platform_validated": False, "observed_class_produced": False}
+    assert coverage["safety"] == {
+        "read_only": True, "network_calls": False, "provider_calls": False, "mutated": False,
+        "ads_launched": False, "payments_created": False, "publishing": False, "launch_authorized": False,
+    }
     assert "campaign" not in {key for line in run(shopify_events([order("1")])).payload["lines"] for key in line if line.get("campaign_id")}
 
 
@@ -373,6 +379,141 @@ def test_the_adapter_does_not_mutate_its_input_events():
     assert [event.canonical_json() for event in events] == before
 
 
+# ------------------------------------------------------------ privacy-safe references, hostile events, amount hygiene
+
+def shopify_event(**over):
+    (event,) = [e for e in shopify_events([order("1")]) if e.event_type == "shopify_order_observed"]
+    fields = {name: getattr(event, name) for name in ("event_id", "workspace_id", "aggregate_type", "aggregate_id", "event_type", "schema_version", "occurred_at", "source", "payload", "metadata")}
+    return Event(**{**fields, **over})
+
+
+def _fields(event):
+    return {name: getattr(event, name) for name in ("workspace_id", "aggregate_type", "aggregate_id", "event_type", "schema_version", "occurred_at", "source", "payload", "metadata")}
+
+
+def no_control_chars(value) -> bool:
+    """Walks the strings themselves: json.dumps would escape a control character and hide it."""
+    if isinstance(value, str):
+        return not any(unicodedata.category(char) == "Cc" for char in value)
+    if isinstance(value, dict):
+        return all(no_control_chars(key) and no_control_chars(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return all(no_control_chars(item) for item in value)
+    return True
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["/home/user/secret/export.csv?token=abc", "https://user:pw@shop.example/export?key=1", "manual://a/b", "manual://x?y=1", "C:\\exports\\orders.csv", "manual://" + "a" * 80],
+)
+def test_source_paths_urls_and_credentials_are_withheld_not_echoed(source):
+    event = shopify_event(metadata={**shopify_event().metadata, "source": source})
+    result = run([event])
+    (line,) = lines_of(result, "revenue")
+    ref = line["evidence_ref"]
+    assert ref["source_url"] == "" and "source_reference_withheld" in ref["warnings"]
+    for leaked in ("secret", "token", "pw", "shop.example", "exports", "key=1"):
+        assert leaked not in json.dumps(result.to_dict()), leaked
+
+
+def test_a_plain_scheme_label_source_is_kept_for_provenance():
+    result = run(shopify_events([order("1")], source="manual://shopify-export-1"))
+    (line,) = lines_of(result, "revenue")
+    assert line["evidence_ref"]["source_url"] == "manual://shopify-export-1"
+    assert "source_reference_withheld" not in line["evidence_ref"]["warnings"]
+
+
+def test_customer_and_order_text_never_reaches_the_payload_or_coverage():
+    result = run(shopify_events([order("1", customer={"id": "c-1", "email": "buyer@example.test"}, email="buyer@example.test", note="call 555-0100")]))
+    blob = json.dumps(result.to_dict())
+    for private in ("buyer@example.test", "555-0100", "customer_ref", "order_name", "#1"):
+        assert private not in blob, private
+
+
+@pytest.mark.parametrize("field", ["event_id", "aggregate_id", "source", "aggregate_type"])
+def test_a_control_character_in_a_reference_field_is_sanitised_not_passed_to_the_report(field):
+    event = shopify_event(**{field: shopify_event().__dict__[field] + "\x07bad"})
+    result = run([event])
+    assert len(lines_of(result, "revenue")) == 1, "one malformed reference never drops or poisons the line"
+    assert no_control_chars(result.to_dict())
+    ref = lines_of(result)[0]["evidence_ref"]
+    assert re.fullmatch(r"[A-Za-z0-9._:@=+-]{1,128}|ref:[0-9a-f]{16}", ref["evidence_id"])
+
+
+def test_a_control_character_in_the_metadata_source_is_withheld():
+    event = shopify_event(metadata={**shopify_event().metadata, "source": "manual://x\nsecond"})
+    ref = lines_of(run([event]))[0]["evidence_ref"]
+    assert ref["source_url"] == "" and no_control_chars(ref)
+
+
+def test_an_unrepresentable_event_time_does_not_crash_the_adapter():
+    result = run([shopify_event(occurred_at=1e20)])
+    (line,) = lines_of(result, "revenue")
+    assert line["evidence_ref"]["captured_at"] == "" and "event_time_unavailable" in line["evidence_ref"]["warnings"]
+    ledger = ledger_event("AdSpendObserved", 1e20, amount=5.0, currency="USD", evidence_class="manual")
+    assert run([ledger]).coverage["excluded"] == {"event_date_unavailable": 1}
+
+
+def test_event_id_is_the_identity_a_repeat_with_different_content_is_counted_and_resolves_deterministically():
+    first = shopify_event()
+    changed = shopify_event(payload={**first.payload, "subtotal_price": 999.0})
+    same_time_a, same_time_b = run([first, changed]), run([changed, first])
+    assert same_time_a.to_dict() == same_time_b.to_dict(), "identical id and time, different content: order of arrival never decides"
+    assert same_time_a.coverage["event_id_content_conflicts"] == 1 and same_time_a.coverage["duplicate_event_ids_ignored"] == 1
+    later = shopify_event(payload={**first.payload, "subtotal_price": 999.0}, occurred_at=first.occurred_at + 5)
+    result = run([later, first])
+    assert amounts(result, "revenue") == [Decimal("40")], "the earliest observation of an id wins, as in the event repository"
+    assert result.coverage["event_id_content_conflicts"] == 1
+    assert run([first, first]).coverage["event_id_content_conflicts"] == 0, "an exact replay is a duplicate, not a conflict"
+
+
+def test_equal_timestamps_are_ordered_by_event_id_then_content_independent_of_input_order():
+    events = [
+        Event(f"e-{n}", None, "workflow", f"w{n}", "AdSpendObserved", 1, MARCH_10, source="legacy.workflow_event_store",
+              payload={"workspace_id": WS, "amount": float(n), "currency": "USD", "evidence_class": "manual", "channel": f"c{n}"})
+        for n in (3, 1, 2)
+    ]
+    base = run(events)
+    assert [line["evidence_ref"]["evidence_id"] for line in lines_of(base)] == ["e-1", "e-2", "e-3"], "ties resolve by event id"
+    for seed in range(4):
+        shuffled = list(events)
+        random.Random(seed).shuffle(shuffled)
+        assert run(shuffled).to_dict() == base.to_dict()
+
+
+@pytest.mark.parametrize(
+    ("amount", "plain"),
+    [("1E+3", "1000"), (1e-07, "0.0000001"), ("12.50", "12.50"), (Decimal("2E+2"), "200"), (123456.789, "123456.789")],
+)
+def test_amounts_are_emitted_as_fixed_point_never_scientific_notation(amount, plain):
+    (line,) = lines_of(run([ledger_event("AdSpendObserved", MARCH_10, amount=amount, currency="USD", evidence_class="manual")]))
+    assert line["amount"] == plain and "E" not in line["amount"].upper()
+    (shop,) = lines_of(run(shopify_events([order("1", subtotal_price=str(amount))])))
+    assert Decimal(shop["amount"]) == Decimal(str(amount)) and "E" not in shop["amount"].upper()
+
+
+@pytest.mark.parametrize("amount", ["1E+999999", "1e15", "1000000000000000", "0.123456789", "9" * 40])
+def test_implausible_amounts_are_excluded_with_a_reason_not_passed_to_the_report(amount):
+    result = run([ledger_event("AdSpendObserved", MARCH_10, amount=amount, currency="USD", evidence_class="manual")])
+    assert result.payload["lines"] == [] and result.coverage["excluded"] == {"amount_out_of_range": 1}
+    shop = run(shopify_events([order("1", subtotal_price=amount)]))
+    assert shop.payload["lines"] == [] and set(shop.coverage["excluded"]) <= {"amount_out_of_range", "amount_unavailable"}
+
+
+def test_nothing_in_the_output_implies_launched_ads_payments_publishing_or_live_data():
+    result = run([*shopify_events([order("1")], mode="manual"), ledger_event("AdSpendObserved", MARCH_10, channel="meta", amount=15.0, currency="USD", evidence_class="manual"), ledger_event("PaymentCaptured", MARCH_10, order_id="1", amount=99.0)])
+    allowed = {"revenue", "refunds", "product_cost", "shipping_cost", "fees", "ad_spend"}
+    assert {line["metric"] for line in lines_of(result)} <= allowed, "no payment, payout, campaign or launch metric exists"
+    assert result.coverage["unsupported_event_types"]["PaymentCaptured"] == 1 and "PaymentCaptured" in result.coverage["intentionally_not_mapped"]
+    assert all(line["campaign_id"] is None for line in lines_of(result))
+    safety, claims = result.coverage["safety"], result.coverage["claims"]
+    assert not any(safety[key] for key in ("ads_launched", "payments_created", "publishing", "launch_authorized", "network_calls", "provider_calls", "mutated"))
+    assert not any(claims.values())
+    text = json.dumps(result.payload).lower()
+    for word in ("launched", "published", "payout", "payment_captured", "paymentcaptured", "live_readonly", "verified"):
+        assert word not in text, word
+
+
 # ------------------------------------------------------------ with the real report builder (PR #368)
 
 REPORT_PRESENT = importlib.util.find_spec("backend.commerce.owner_performance_report") is not None
@@ -413,3 +554,55 @@ class TestThroughTheOwnerPerformanceReport:
         assert "ad_spend_required_for_realized_profit" not in report["missing_inputs"]
         assert "refunds_required_for_contribution" in report["missing_inputs"]
         assert report["evidence_quality"]["claims"]["campaign_lift"] is False
+
+    # -- the seam as the owner dashboard (PR #376) reads it: amounts as text, explicit_zeros, evidence classes, safety flags
+
+    def test_mixed_manual_and_fixture_revenue_is_reported_mixed_with_both_classes_and_no_single_source_ref(self):
+        events = [*shopify_events([order("1")], mode="fixture", source="manual://fixture-export"), *shopify_events([order("2", subtotal_price="10.00")], mode="manual", source="manual://real-export")]
+        report = self.build(run(events).payload)
+        assert report["revenue"]["status"] == "mixed" and Decimal(report["revenue"]["amount"]) == Decimal("50")
+        assert report["evidence_quality"]["evidence_classes"] == ["fixture", "manual"], "the dashboard's fixture banner keys off this list"
+        assert report["revenue"]["evidence_state"] == "unknown" and report["revenue"]["evidence_ref"] is None
+
+    def test_explicit_zero_revenue_is_listed_as_an_explicit_zero_and_a_missing_one_is_not(self):
+        zero = self.build(run(shopify_events([order("1", subtotal_price="0.00")])).payload)
+        assert zero["explicit_zeros"] == ["revenue"] and re.fullmatch(r"-?(?:0+|0+\.0+)", zero["revenue"]["amount"]), "the dashboard's zero test must match"
+        absent = self.build(run(shopify_events([order("1", subtotal_price=None)])).payload)
+        assert absent["explicit_zeros"] == [] and absent["revenue"]["amount"] is None and absent["revenue"]["missing_reason"] == "revenue_absent"
+
+    def test_period_bounds_are_inclusive_and_exclusions_are_counted_by_the_report(self):
+        orders = [order("a", created_at="2026-02-28T23:59:59Z"), order("b", created_at="2026-03-01T00:00:00Z"), order("c", created_at="2026-03-31T23:59:59Z"), order("d", created_at="2026-04-01T00:00:00Z")]
+        report = self.build(run(shopify_events(orders)).payload)
+        assert Decimal(report["revenue"]["amount"]) == Decimal("80")
+        assert (report["evidence_quality"]["excluded_before_period"], report["evidence_quality"]["excluded_after_period"], report["evidence_quality"]["line_count"]) == (1, 1, 2)
+
+    def test_other_currencies_never_reach_the_report_and_never_trip_its_currency_mismatch(self):
+        report = self.build(run([*shopify_events([order("1")]), *shopify_events([order("2", currency="EUR", subtotal_price="500.00")], source="manual://eur")]).payload)
+        assert report["currency"] == "USD" and Decimal(report["revenue"]["amount"]) == Decimal("40")
+
+    def test_hostile_events_cannot_make_the_report_reject_or_leak(self):
+        base = shopify_event()
+        hostile = [
+            Event(base.event_id + "-1", **{**_fields(base), "source": "backend.ecommerce.shopify_readonly\nx"}),
+            Event(base.event_id + "-2", **{**_fields(base), "metadata": {**base.metadata, "source": "https://user:pw@shop.example/o?token=abc"}}),
+            Event(base.event_id + "-3\x07", **{**_fields(base), "aggregate_id": "9\x00"}),
+            Event(base.event_id + "-4", **{**_fields(base), "occurred_at": 1e20}),
+        ]
+        result = run([*shopify_events([order("1")]), *hostile])
+        report = self.build(result.payload)  # would raise OwnerPerformanceReportError("invalid_evidence") before sanitising
+        assert report["evidence_quality"]["line_count"] >= 1
+        blob = json.dumps({"report": report, "adapter": result.to_dict()})
+        for leaked in ("pw@", "token=abc", "shop.example", "\\u0007", "\\u0000"):
+            assert leaked not in blob, leaked
+
+    def test_report_safety_and_claims_stay_false_for_ad_spend_and_paid_orders(self):
+        events = [
+            *shopify_events([order("1")], mode="manual"),
+            ledger_event("AdSpendObserved", MARCH_10, channel="meta", amount=15.0, currency="USD", evidence_class="observed"),
+            ledger_event("PaymentCaptured", MARCH_10, order_id="1", amount=99.0),
+        ]
+        report = self.build(run(events).payload)
+        assert not any(report["safety"][key] for key in ("ads_launched", "payments_created", "publishing", "launch_authorized", "network_calls", "provider_calls"))
+        assert report["campaigns"] == [] and report["evidence_quality"]["claims"]["causal_attribution"] is False and report["evidence_quality"]["claims"]["campaign_lift"] is False
+        assert report["ad_spend"]["status"] == "observed", "recorded spend is shown as recorded; it proves neither delivery nor results"
+        assert report["realized_profit"]["status"] == "unavailable" and report["evidence_quality"]["claims"]["realized_profit"] is False

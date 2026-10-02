@@ -29,6 +29,13 @@ Supported events (everything else is counted, with a reason, in ``coverage``):
     writers default ``amount`` to ``0.0``, so an explicit zero cannot be told
     apart from "not provided".
 
+References are privacy-safe: an event's ``source`` (which may be a local path or a
+URL with credentials or a query string), ids and labels are copied into
+``evidence_ref`` only when they match a conservative pattern; anything else is
+withheld or replaced by a short digest, never echoed.  A malformed event can
+therefore be excluded or sanitised but can never make the report builder reject
+the whole report.
+
 Idempotency: events are de-duplicated by ``event_id``; Shopify orders are
 further de-duplicated by ``(workspace, order_id)`` across re-imports, newest
 observation wins, and a differing older observation is counted as a conflict.
@@ -38,6 +45,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -76,6 +84,14 @@ NOT_MAPPED_REASONS = {
     "commerce_mvp_unit_economics_estimated": "modeled, advisory dry-run estimate; not period evidence",
     "metrics.ingested": "runtime metrics blob; no currency, period or evidence class",
 }
+
+# Reference hygiene.  The report builder rejects control characters in any evidence
+# field (one bad event would fail the whole report) and its output reaches the API and UI.
+_SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@=+-]{0,127}$")
+_SAFE_SOURCE_REF = re.compile(r"^[a-z][a-z0-9+.-]{0,15}://[A-Za-z0-9._-]{1,64}$")
+_SAFE_TIMESTAMP = re.compile(r"^[0-9T:.+Z -]{1,40}$")
+_AMOUNT_LIMIT = Decimal("1e15")
+_AMOUNT_MAX_PLACES = 8
 
 _SHOPIFY_SIGNATURE_KEYS = ("order_id", "currency", "subtotal_price", "created_at", "financial_status", "cancelled_at")
 
@@ -144,6 +160,35 @@ def _currency(value: Any) -> str | None:
         return None
 
 
+def _plausible(amount: Decimal) -> bool:
+    """A money amount the report and UI can show: below 1e15 with at most 8 decimal places."""
+    exponent = amount.as_tuple().exponent
+    return amount < _AMOUNT_LIMIT and isinstance(exponent, int) and exponent >= -_AMOUNT_MAX_PLACES
+
+
+def _plain(amount: Decimal) -> str:
+    """Fixed-point text ("1000", never "1E+3") so the report and UI never see scientific notation."""
+    return format(amount, "f")
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(str(value).encode("utf-8", "backslashreplace")).hexdigest()[:16]
+
+
+def _safe_ref(value: Any) -> str:
+    """The value itself when it is a plain identifier, else a stable short digest (never the raw text)."""
+    return value if isinstance(value, str) and _SAFE_REF.fullmatch(value) else f"ref:{_digest(value)}"
+
+
+def _safe_source(value: Any) -> str:
+    """A bare ``scheme://label`` reference (for example ``manual://export-1``); paths, queries, userinfo and ports are withheld."""
+    return value if isinstance(value, str) and _SAFE_SOURCE_REF.fullmatch(value) else ""
+
+
+def _safe_label(value: Any) -> str:
+    return value if isinstance(value, str) and _SAFE_REF.fullmatch(value) else "unrecognized_source"
+
+
 def _date_as_written(value: Any) -> date | None:
     """Calendar date exactly as written in an ISO timestamp (no timezone shifting)."""
     if not isinstance(value, str) or not value.strip():
@@ -154,11 +199,16 @@ def _date_as_written(value: Any) -> date | None:
         return None
 
 
-def _epoch_date(value: float) -> date | None:
+def _epoch_datetime(value: float) -> datetime | None:
     try:
-        return datetime.fromtimestamp(value, tz=timezone.utc).date()
+        return datetime.fromtimestamp(value, tz=timezone.utc)
     except (OverflowError, OSError, ValueError):
         return None
+
+
+def _epoch_date(value: float) -> date | None:
+    moment = _epoch_datetime(value)
+    return moment.date() if moment is not None else None
 
 
 def _event_workspace(event: Event) -> str | None:
@@ -172,17 +222,24 @@ def _event_workspace(event: Event) -> str | None:
 
 
 def _evidence_ref(event: Event, *, state: str, extra_warnings: Sequence[str] = ()) -> dict[str, Any]:
+    source = event.metadata.get("source")
+    warnings = list(extra_warnings)
+    if source and not _safe_source(source):
+        warnings.append("source_reference_withheld")
+    moment = _epoch_datetime(event.occurred_at)
+    if moment is None:
+        warnings.append("event_time_unavailable")
     return {
-        "evidence_id": event.event_id,
+        "evidence_id": _safe_ref(event.event_id),
         "source_type": "canonical_event",
-        "source_url": str(event.metadata.get("source") or ""),
-        "document_ref": f"{event.aggregate_type}:{event.aggregate_id}",
-        "origin": event.source,
-        "captured_at": datetime.fromtimestamp(event.occurred_at, tz=timezone.utc).isoformat(),
+        "source_url": _safe_source(source),
+        "document_ref": f"{_safe_label(event.aggregate_type)}:{_safe_ref(event.aggregate_id)}",
+        "origin": _safe_label(event.source),
+        "captured_at": moment.isoformat() if moment is not None else "",
         "extraction_method": ADAPTER_VERSION,
         "evidence_state": state,
         "snapshot_hash": event.replay_hash(),
-        "warnings": list(extra_warnings),
+        "warnings": warnings,
     }
 
 
@@ -231,8 +288,24 @@ def adapt_events_to_performance_report_payload(
     source_refs: list[dict[str, str]] = []
     considered = 0
 
+    # The replay hash is also the tie-breaker below: two events with the same id and time but
+    # different content must resolve the same way whatever order the caller passed them in.
+    hashed: list[tuple[Event, str]] = []
+    for event in events:
+        try:
+            hashed.append((event, event.replay_hash()))
+        except (ValueError, UnicodeError):
+            excluded["event_not_serializable"] += 1
+
+    # An event id is the canonical identity (the event repository ignores a repeated id), so the
+    # earliest observation wins; a repeat whose content differs is counted, never silently merged.
+    content_by_id: dict[str, set[str]] = {}
+    for event, digest in hashed:
+        content_by_id.setdefault(event.event_id, set()).add(digest)
+    event_id_content_conflicts = sum(1 for digests in content_by_id.values() if len(digests) > 1)
+
     # Deterministic order regardless of how the caller sorted or repeated events.
-    for event in sorted(events, key=lambda item: (item.occurred_at, item.event_id)):
+    for event in (item[0] for item in sorted(hashed, key=lambda item: (item[0].occurred_at, item[0].event_id, item[1]))):
         if event.event_id in seen_ids:
             duplicate_event_ids += 1
             continue
@@ -306,6 +379,7 @@ def adapt_events_to_performance_report_payload(
         "currency": currency,
         "events_received": len(events),
         "duplicate_event_ids_ignored": duplicate_event_ids,
+        "event_id_content_conflicts": event_id_content_conflicts,
         "events_considered": considered,
         "lines_emitted": len(kept),
         "lines_in_period": in_period,
@@ -332,10 +406,20 @@ def adapt_events_to_performance_report_payload(
         "claims": {
             "campaign_lift": False,
             "causal_attribution": False,
+            "ads_ran_proven": False,
             "live_platform_validated": False,
             "observed_class_produced": any(line["evidence_class"] == "observed" for line in kept),
         },
-        "safety": {"read_only": True, "network_calls": False, "provider_calls": False, "mutated": False},
+        "safety": {
+            "read_only": True,
+            "network_calls": False,
+            "provider_calls": False,
+            "mutated": False,
+            "ads_launched": False,
+            "payments_created": False,
+            "publishing": False,
+            "launch_authorized": False,
+        },
     }
     payload = {"currency": currency, "period_start": start.isoformat(), "period_end": end.isoformat(), "lines": kept}
     fingerprint = hashlib.sha256(_canonical({"payload": payload, "coverage": coverage}).encode()).hexdigest()
@@ -345,9 +429,9 @@ def adapt_events_to_performance_report_payload(
 def _source_ref(event: Event, metric: str) -> dict[str, str]:
     return {
         "metric": metric,
-        "event_id": event.event_id,
+        "event_id": _safe_ref(event.event_id),
         "event_type": event.event_type,
-        "aggregate": f"{event.aggregate_type}:{event.aggregate_id}",
+        "aggregate": f"{_safe_label(event.aggregate_type)}:{_safe_ref(event.aggregate_id)}",
         "replay_hash": event.replay_hash(),
     }
 
@@ -375,12 +459,16 @@ def _shopify_line(event: Event, currency: str, excluded: Counter[str], notes: Co
     if amount is None:
         excluded["amount_unavailable"] += 1
         return None
+    if not _plausible(amount):
+        excluded["amount_out_of_range"] += 1
+        return None
     created = _date_as_written(payload.get("created_at"))
     if created is None:
         excluded["order_date_unavailable"] += 1
         return None
 
-    warnings = ["amount_is_subtotal_excluding_tax_and_shipping", f"order_created_at={payload.get('created_at')}"]
+    written = payload.get("created_at").strip()  # parsed above, so a non-empty string
+    warnings = ["amount_is_subtotal_excluding_tax_and_shipping", f"order_created_at={written if _SAFE_TIMESTAMP.fullmatch(written) else created.isoformat()}"]
     if status in SHOPIFY_REFUND_STATUSES:
         warnings.append("order_has_refund_status_refund_amount_not_in_event")
         notes["revenue_orders_with_unquantified_refunds"] += 1
@@ -388,10 +476,10 @@ def _shopify_line(event: Event, currency: str, excluded: Counter[str], notes: Co
         "metric": "revenue",
         "evidence_class": evidence_class,
         "occurred_on": created.isoformat(),
-        "amount": str(amount),
+        "amount": _plain(amount),
         "currency": order_currency,
         "source": SHOPIFY_ORDER_EVENT,
-        "provenance": f"canonical_event:{event.source}:{mode}",
+        "provenance": f"canonical_event:{_safe_label(event.source)}:{mode}",
         "evidence_ref": _evidence_ref(event, state=_CLASS_STATE[evidence_class], extra_warnings=warnings),
         "campaign_id": None,
     }
@@ -417,6 +505,9 @@ def _ledger_line(event: Event, excluded: Counter[str]) -> dict[str, Any] | None:
     if amount == 0:
         excluded["zero_amount_not_distinguishable_from_default"] += 1
         return None
+    if not _plausible(amount):
+        excluded["amount_out_of_range"] += 1
+        return None
     occurred = _epoch_date(event.occurred_at)
     if occurred is None:
         excluded["event_date_unavailable"] += 1
@@ -425,10 +516,10 @@ def _ledger_line(event: Event, excluded: Counter[str]) -> dict[str, Any] | None:
         "metric": LEDGER_METRIC[event.event_type],
         "evidence_class": evidence_class,
         "occurred_on": occurred.isoformat(),
-        "amount": str(amount),
+        "amount": _plain(amount),
         "currency": order_currency,
         "source": event.event_type,
-        "provenance": f"canonical_event:{event.source}",
+        "provenance": f"canonical_event:{_safe_label(event.source)}",
         "evidence_ref": _evidence_ref(event, state=_CLASS_STATE[evidence_class]),
         "campaign_id": None,
     }
