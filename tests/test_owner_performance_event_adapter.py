@@ -149,11 +149,11 @@ def test_explicit_zero_subtotal_is_a_real_zero_but_a_missing_subtotal_is_not():
     assert run(shopify_events([order("1", subtotal_price=None)])).payload["lines"] == []
 
 
-def test_refunded_orders_keep_gross_revenue_but_flag_that_refund_amounts_are_not_in_the_event():
+def test_refunded_orders_keep_gross_revenue_but_flag_that_refund_amounts_are_not_mapped():
     result = run(shopify_events([order("1", financial_status="partially_refunded"), order("2", financial_status="refunded")]))
     assert len(lines_of(result, "revenue")) == 2 and lines_of(result, "refunds") == []
-    assert result.coverage["notes"] == {"revenue_orders_with_unquantified_refunds": 2}
-    assert all("order_has_refund_status_refund_amount_not_in_event" in line["evidence_ref"]["warnings"] for line in lines_of(result))
+    assert result.coverage["notes"] == {"revenue_orders_with_unmapped_refunds": 2}
+    assert all("order_has_refund_status_refund_amount_not_mapped" in line["evidence_ref"]["warnings"] for line in lines_of(result))
     assert "refunds" in result.coverage["metrics_without_lines"], "refund status is never turned into a refund amount or a zero"
 
 
@@ -191,36 +191,71 @@ def test_replayed_batches_and_duplicate_event_ids_do_not_double_count():
     assert sum(amounts(twice, "revenue")) == Decimal("50")
 
 
-def test_reimport_in_a_new_batch_counts_each_order_once_newest_observation_wins():
-    first = shopify_events([order("1", subtotal_price="40.00")], source="manual://export-1")
-    second = shopify_events([order("1", subtotal_price="45.00"), order("2", subtotal_price="5.00")], source="manual://export-2")
-    for event in second:  # make the second import strictly newer
-        object.__setattr__(event, "occurred_at", event.occurred_at + 10_000)
+def reimport(first_orders, second_orders):
+    first = shopify_events(first_orders, source="manual://export-1")
+    second = shopify_events(second_orders, source="manual://export-2")
+    return first, second
+
+
+def test_differing_reimports_of_one_order_are_excluded_not_resolved_by_a_pseudo_time():
+    """The producer's import time is hash-derived, so neither export can be shown to be newer."""
+    first, second = reimport([order("1", subtotal_price="40.00"), order("3")], [order("1", subtotal_price="45.00"), order("2", subtotal_price="5.00")])
     result = run([*first, *second])
-    assert sorted(amounts(result, "revenue")) == [Decimal("5"), Decimal("45")]
-    assert run([*second, *first]).to_dict() == result.to_dict(), "the newest observation wins whatever order events arrive in"
-    assert result.coverage["shopify_orders"] == {"distinct_orders": 2, "older_duplicate_observations_dropped": 1, "conflicting_duplicate_observations": 1}
+    assert sorted(amounts(result, "revenue")) == [Decimal("5"), Decimal("40")], "only orders with a single consistent observation count"
+    assert result.coverage["excluded"] == {"order_observation_conflict": 1}
+    assert result.coverage["shopify_orders"] == {"distinct_orders": 3, "duplicate_observations_dropped": 1, "conflicting_duplicate_observations": 1}
+    assert result.coverage["all_supported_events_used"] is False
+    for later_first in (False, True):  # whichever export happens to carry the larger import time
+        shifted = [*first, *second]
+        for event in (second if later_first else first):
+            object.__setattr__(event, "occurred_at", event.occurred_at + 10_000)
+        for variant in (shifted, list(reversed(shifted))):
+            again = run(variant)
+            assert [(l["amount"], l["occurred_on"]) for l in again.payload["lines"]] == [(l["amount"], l["occurred_on"]) for l in result.payload["lines"]]
+            assert again.coverage["excluded"] == result.coverage["excluded"]
+        for event in (second if later_first else first):
+            object.__setattr__(event, "occurred_at", event.occurred_at - 10_000)
 
 
-def test_identical_reimport_is_a_duplicate_not_a_conflict():
+def test_a_paid_then_cancelled_order_is_never_counted_whichever_export_looks_newer():
+    first, second = reimport([order("1")], [order("1", cancelled_at="2026-03-20T00:00:00Z")])
+    for shift_second in (True, False):
+        for event in (second if shift_second else first):
+            object.__setattr__(event, "occurred_at", event.occurred_at + 10_000)
+        result = run([*first, *second])
+        assert lines_of(result) == [] and result.coverage["excluded"] == {"order_observation_conflict": 1}
+        for event in (second if shift_second else first):
+            object.__setattr__(event, "occurred_at", event.occurred_at - 10_000)
+
+
+def test_an_identical_reimport_of_the_same_export_is_the_same_events_and_counts_once():
+    """The producer derives batch id, event ids and import time from the export content, so a re-import is byte-identical."""
     first = shopify_events([order("1")], source="manual://a")
     second = shopify_events([order("1")], source="manual://b")
-    for event in second:
-        object.__setattr__(event, "occurred_at", event.occurred_at + 10_000)
+    assert [e.event_id for e in first] == [e.event_id for e in second]
     result = run([*first, *second])
-    assert len(lines_of(result)) == 1
-    # Identical content hashes to the same batch id, so the events are the same events: caught by event_id.
+    assert len(lines_of(result)) == 1 and Decimal(lines_of(result)[0]["amount"]) == Decimal("40")
     assert result.coverage["duplicate_event_ids_ignored"] == len(first)
-    assert result.coverage["shopify_orders"]["conflicting_duplicate_observations"] == 0
+    assert result.coverage["event_id_content_conflicts"] == 0 and result.coverage["all_supported_events_used"] is True
 
 
-def test_a_newer_cancellation_removes_an_order_an_older_import_had_as_paid():
-    first = shopify_events([order("1")], source="manual://a")
-    second = shopify_events([order("1", cancelled_at="2026-03-20T00:00:00Z")], source="manual://b")
-    for event in second:
-        object.__setattr__(event, "occurred_at", event.occurred_at + 10_000)
+def test_the_same_order_unchanged_in_two_different_exports_counts_once_and_is_not_a_conflict():
+    first, second = reimport([order("1"), order("3")], [order("1"), order("2", subtotal_price="5.00")])
     result = run([*first, *second])
-    assert lines_of(result) == [] and result.coverage["excluded"] == {"order_cancelled": 1}
+    assert sorted(amounts(result, "revenue")) == [Decimal("5"), Decimal("40"), Decimal("40")]
+    assert result.coverage["shopify_orders"] == {"distinct_orders": 3, "duplicate_observations_dropped": 1, "conflicting_duplicate_observations": 0}
+    assert result.coverage["excluded"] == {} and result.coverage["all_supported_events_used"] is True
+
+
+@pytest.mark.parametrize("variant", [" 1 ", "gid://shopify/Order/1", "  gid://shopify/Order/1"])
+def test_the_same_order_under_a_padded_or_gid_id_is_one_order(variant):
+    first = shopify_events([order("1")], source="manual://a")
+    events = shopify_events([order("1")], source="manual://b")
+    for event in events:
+        if event.event_type == "shopify_order_observed":
+            event.payload["order_id"] = variant
+    result = run([*first, *events])
+    assert len(lines_of(result, "revenue")) == 1 and result.coverage["shopify_orders"]["distinct_orders"] == 1
 
 
 def test_output_is_independent_of_input_order():
@@ -449,7 +484,7 @@ def test_a_control_character_in_the_metadata_source_is_withheld():
 def test_an_unrepresentable_event_time_does_not_crash_the_adapter():
     result = run([shopify_event(occurred_at=1e20)])
     (line,) = lines_of(result, "revenue")
-    assert line["evidence_ref"]["captured_at"] == "" and "event_time_unavailable" in line["evidence_ref"]["warnings"]
+    assert line["evidence_ref"]["captured_at"] == ""
     ledger = ledger_event("AdSpendObserved", 1e20, amount=5.0, currency="USD", evidence_class="manual")
     assert run([ledger]).coverage["excluded"] == {"event_date_unavailable": 1}
 
@@ -495,7 +530,7 @@ def test_amounts_are_emitted_as_fixed_point_never_scientific_notation(amount, pl
 @pytest.mark.parametrize("amount", ["1E+999999", "1e15", "1000000000000000", "0.123456789", "9" * 40])
 def test_implausible_amounts_are_excluded_with_a_reason_not_passed_to_the_report(amount):
     result = run([ledger_event("AdSpendObserved", MARCH_10, amount=amount, currency="USD", evidence_class="manual")])
-    assert result.payload["lines"] == [] and result.coverage["excluded"] == {"amount_out_of_range": 1}
+    assert result.payload["lines"] == [] and set(result.coverage["excluded"]) <= {"amount_out_of_range", "amount_unavailable"} and sum(result.coverage["excluded"].values()) == 1
     shop = run(shopify_events([order("1", subtotal_price=amount)]))
     assert shop.payload["lines"] == [] and set(shop.coverage["excluded"]) <= {"amount_out_of_range", "amount_unavailable"}
 
@@ -512,6 +547,84 @@ def test_nothing_in_the_output_implies_launched_ads_payments_publishing_or_live_
     text = json.dumps(result.payload).lower()
     for word in ("launched", "published", "payout", "payment_captured", "paymentcaptured", "live_readonly", "verified"):
         assert word not in text, word
+
+
+# ------------------------------------------------------------ independent-review regressions
+
+def test_an_event_mutated_after_construction_is_counted_not_raised():
+    event = ledger_event("AdSpendObserved", MARCH_10, amount=5.0, currency="USD", evidence_class="manual")
+    event.payload["x"] = object()
+    ok = ledger_event("AdSpendObserved", MARCH_10 + 1, amount=6.0, currency="USD", evidence_class="manual")
+    result = run([event, ok])
+    assert result.coverage["excluded"] == {"event_not_serializable": 1} and amounts(result, "ad_spend") == [Decimal("6")]
+
+
+def test_the_shopify_refund_fact_is_named_as_not_mapped_rather_than_described_as_missing():
+    events = shopify_events([order("1", financial_status="refunded")])
+    result = run(events)
+    assert "shopify_refund_observed" in NOT_MAPPED_REASONS
+    assert all("not_in_event" not in warning for line in lines_of(result) for warning in line["evidence_ref"]["warnings"])
+
+
+def test_other_tenants_events_do_not_make_this_workspace_look_incomplete_or_suppress_its_events():
+    mine = shopify_events([order("1")])
+    theirs = [Event(e.event_id, "ws-someone-else", e.aggregate_type, e.aggregate_id, e.event_type, 1, e.occurred_at - 1, source=e.source, payload=e.payload, metadata=e.metadata) for e in mine]
+    result = run([*mine, *theirs])
+    assert amounts(result, "revenue") == [Decimal("40")], "a colliding id in another workspace, even an earlier one, cannot suppress this workspace's event"
+    assert result.coverage["excluded"].get("other_workspace", 0) >= 1 and result.coverage["all_supported_events_used"] is True
+    assert run([*mine]).payload == result.payload
+
+
+def test_all_supported_events_used_is_false_when_anything_of_this_workspace_was_set_aside():
+    conflict = run([shopify_event(), shopify_event(payload={**shopify_event().payload, "subtotal_price": 999.0})])
+    assert conflict.coverage["event_id_content_conflicts"] == 1 and conflict.coverage["all_supported_events_used"] is False
+    assert run([shopify_event(), shopify_event()]).coverage["all_supported_events_used"] is True
+
+
+def test_date_policy_names_each_source_and_the_two_can_differ_for_the_same_instant():
+    instant = 1_769_920_200.0  # 2026-02-01T05:30:00Z == 2026-02-01T00:30:00-05:00 == 2026-01-31T... as written below
+    shop = run(shopify_events([order("1", created_at="2026-01-31T23:30:00-05:00")]), period_start="2026-01-01", period_end="2026-01-31")
+    ledger = run([ledger_event("AdSpendObserved", instant, amount=5.0, currency="USD", evidence_class="manual")], period_start="2026-01-01", period_end="2026-01-31")
+    assert lines_of(shop)[0]["occurred_on"] == "2026-01-31" and lines_of(ledger)[0]["occurred_on"] == "2026-02-01"
+    policy = shop.coverage["date_policy"]
+    assert "shopify" in policy and "ledger" in policy and "UTC" in policy and "no timezone shifting" in policy
+
+
+@pytest.mark.parametrize("ts", [0, 0.0, -5.0])
+def test_a_missing_event_time_is_unknown_not_1970(ts):
+    event = Event("z1", None, "workflow", "w", "AdSpendObserved", 1, ts, source="legacy.workflow_event_store", payload={"workspace_id": WS, "amount": 5.0, "currency": "USD", "evidence_class": "manual"})
+    result = run([event], period_start="1969-12-01", period_end="1970-12-31")
+    assert result.payload["lines"] == [] and result.coverage["excluded"] == {"event_date_unavailable": 1}
+
+
+def test_negative_zero_is_a_plain_zero_and_malformed_number_text_is_not_an_amount():
+    (zero,) = lines_of(run(shopify_events([order("1", subtotal_price=-0.0)])))
+    assert zero["amount"] in {"0.0", "0"} and not zero["amount"].startswith("-")
+    for text in ("1_0", "\u0661\u0662", "1e", "--1", "0x10", "1,000.00", "", "nan", "inf"):
+        result = run([ledger_event("AdSpendObserved", MARCH_10, amount=text, currency="USD", evidence_class="manual")])
+        assert result.payload["lines"] == [], text
+
+
+def test_the_refund_note_never_counts_an_order_that_was_excluded_for_currency():
+    result = run(shopify_events([order("1", currency="EUR", financial_status="refunded"), order("2")]))
+    assert result.coverage["excluded"] == {"currency_mismatch": 1} and result.coverage["notes"] == {}
+
+
+def test_identical_ledger_payloads_on_different_days_are_distinct_events_but_true_replays_collapse():
+    def spend(ts, event_id):
+        return Event(event_id, None, "workflow", "w1", "AdSpendObserved", 1, ts, source="legacy.workflow_event_store", payload={"workspace_id": WS, "amount": 5.0, "currency": "USD", "evidence_class": "manual"})
+    day_one, day_two = spend(MARCH_10, "a"), spend(MARCH_10 + 86_400, "b")
+    assert len(lines_of(run([day_one, day_two]), "ad_spend")) == 2
+    replay = run([day_one, spend(MARCH_10, "other-id")])
+    assert len(lines_of(replay, "ad_spend")) == 1 and replay.coverage["ledger_duplicates_ignored"] == 1
+
+
+def test_shopify_lines_do_not_present_the_import_batch_pseudo_time_as_a_capture_time():
+    (line,) = lines_of(run(shopify_events([order("1")])))
+    ref = line["evidence_ref"]
+    assert ref["captured_at"] == "" and "captured_at_withheld_import_batch_time_is_not_observation_time" in ref["warnings"]
+    ledger = lines_of(run([ledger_event("AdSpendObserved", MARCH_10, amount=5.0, currency="USD", evidence_class="manual")]))[0]["evidence_ref"]
+    assert ledger["captured_at"].startswith("2026-03-10")
 
 
 # ------------------------------------------------------------ with the real report builder (PR #368)

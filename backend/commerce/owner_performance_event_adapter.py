@@ -36,10 +36,18 @@ withheld or replaced by a short digest, never echoed.  A malformed event can
 therefore be excluded or sanitised but can never make the report builder reject
 the whole report.
 
-Idempotency: events are de-duplicated by ``event_id``; Shopify orders are
-further de-duplicated by ``(workspace, order_id)`` across re-imports, newest
-observation wins, and a differing older observation is counted as a conflict.
-Output is independent of input order and of duplicate presence.
+Idempotency: events are de-duplicated by ``(workspace, event_id)``; Shopify orders are
+further de-duplicated by ``(workspace, order_id)`` across re-imports.  Identical
+re-observations count once.  Observations of one order that DIFFER (for example paid
+in one export, cancelled in another) are not resolved by recency, because the
+producer's import time is a hash-derived pseudo-time and proves nothing about
+which export is newer: that order is excluded and counted
+(``order_observation_conflict``), never guessed.  Output is independent of input
+order and of duplicate presence.
+
+Dates: Shopify lines use the calendar date as written in ``created_at``; ledger lines
+use the UTC date of the event time.  Neither is shifted, so an instant near midnight
+can fall on different days for the two sources.
 """
 from __future__ import annotations
 
@@ -61,8 +69,9 @@ MAX_EVENTS = 50_000
 
 SHOPIFY_ORDER_EVENT = "shopify_order_observed"
 SHOPIFY_IMPORT_MODE_CLASS = {"fixture": "fixture", "manual": "manual"}
-# Order statuses that count as a (gross) sale. Refund AMOUNTS are not in the event,
-# so refunded statuses stay revenue-eligible but flag that refunds are unavailable.
+# Order statuses that count as a (gross) sale. The order event carries no refund amount
+# (``shopify_refund_observed`` facts exist but are not mapped here), so refunded statuses
+# stay revenue-eligible but flag that refunds are unavailable.
 SHOPIFY_REVENUE_STATUSES = frozenset({"paid", "partially_refunded", "refunded"})
 SHOPIFY_REFUND_STATUSES = frozenset({"partially_refunded", "refunded"})
 
@@ -75,6 +84,7 @@ LEDGER_EVIDENCE_CLASSES = frozenset({"observed", "manual", "fixture", "modeled",
 
 # Event types that exist and look money-related but are intentionally NOT mapped.
 NOT_MAPPED_REASONS = {
+    "shopify_refund_observed": "refund facts exist in Shopify batches but this adapter does not map them; refunds stay unavailable, never guessed",
     "OrderCreated": "ledger revenue has no currency/evidence class and would double count Shopify orders",
     "PaymentCaptured": "cash collected is not revenue; no currency/evidence class recorded",
     "OrderCanceled": "no amount; cancellations are handled via Shopify order status",
@@ -138,17 +148,26 @@ def _validate_inputs(workspace_id: Any, period_start: Any, period_end: Any, curr
     return workspace_id, start, end, normalized
 
 
+_PLAIN_NUMBER = re.compile(r"^-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]{1,4})?$")
+
+
 def _decimal(value: Any) -> Decimal | None:
     """Exact decimal for a real, finite, non-negative number; None otherwise (never a default)."""
     if isinstance(value, bool) or not isinstance(value, (int, float, str, Decimal)):
         return None
     try:
-        result = value if isinstance(value, Decimal) else Decimal(str(value).strip())
+        if isinstance(value, Decimal):
+            result = value
+        else:
+            text = str(value).strip()
+            if not _PLAIN_NUMBER.fullmatch(text):  # no underscores, non-ASCII digits, inf or nan
+                return None
+            result = Decimal(text)
     except Exception:  # noqa: BLE001 - any unparsable value is simply "not a usable amount"
         return None
     if not result.is_finite() or result < 0:
         return None
-    return result
+    return result.copy_abs() if result == 0 else result  # "-0" is a zero, not a negative sign
 
 
 def _currency(value: Any) -> str | None:
@@ -200,6 +219,8 @@ def _date_as_written(value: Any) -> date | None:
 
 
 def _epoch_datetime(value: float) -> datetime | None:
+    if value <= 0:  # Event.from_workflow_record defaults a missing ts to 0.0; that is "unknown", not 1970
+        return None
     try:
         return datetime.fromtimestamp(value, tz=timezone.utc)
     except (OverflowError, OSError, ValueError):
@@ -221,13 +242,16 @@ def _event_workspace(event: Event) -> str | None:
     return declared or in_payload
 
 
-def _evidence_ref(event: Event, *, state: str, extra_warnings: Sequence[str] = ()) -> dict[str, Any]:
+def _evidence_ref(event: Event, *, state: str, extra_warnings: Sequence[str] = (), event_time_is_observation: bool = True) -> dict[str, Any]:
     source = event.metadata.get("source")
     warnings = list(extra_warnings)
     if source and not _safe_source(source):
         warnings.append("source_reference_withheld")
     moment = _epoch_datetime(event.occurred_at)
-    if moment is None:
+    if not event_time_is_observation:
+        moment = None  # the Shopify import time is a hash-derived batch pseudo-time, not when anything was observed
+        warnings.append("captured_at_withheld_import_batch_time_is_not_observation_time")
+    elif moment is None:
         warnings.append("event_time_unavailable")
     return {
         "evidence_id": _safe_ref(event.event_id),
@@ -248,9 +272,10 @@ _CLASS_STATE = {"manual": "unknown", "fixture": "fixture", "modeled": "derived",
 
 def _shopify_observation_key(event: Event) -> tuple[str, str] | None:
     order_id = event.payload.get("order_id")
-    if not isinstance(order_id, str) or not order_id.strip():
+    if not isinstance(order_id, str):
         return None
-    return ("shopify_order", order_id)
+    order_id = order_id.strip().removeprefix("gid://shopify/Order/").strip()
+    return ("shopify_order", order_id) if order_id else None
 
 
 def _signature(event: Event) -> str:
@@ -276,12 +301,9 @@ def adapt_events_to_performance_report_payload(
 
     excluded: Counter[str] = Counter()
     unsupported: Counter[str] = Counter()
-    notes: Counter[str] = Counter()
-    seen_ids: set[str] = set()
+    seen_ids: set[tuple[str | None, str]] = set()
     duplicate_event_ids = 0
-    shopify_latest: dict[tuple[str, str], Event] = {}
-    shopify_dropped = 0
-    shopify_conflicts = 0
+    shopify_observations: dict[tuple[str, str], list[Event]] = {}
     ledger_seen: set[str] = set()
     ledger_duplicates = 0
     lines: list[dict[str, Any]] = []
@@ -294,22 +316,30 @@ def adapt_events_to_performance_report_payload(
     for event in events:
         try:
             hashed.append((event, event.replay_hash()))
-        except (ValueError, UnicodeError):
+        except (ValueError, TypeError, UnicodeError):  # e.g. a payload mutated after construction
             excluded["event_not_serializable"] += 1
 
     # An event id is the canonical identity (the event repository ignores a repeated id), so the
     # earliest observation wins; a repeat whose content differs is counted, never silently merged.
-    content_by_id: dict[str, set[str]] = {}
-    for event, digest in hashed:
-        content_by_id.setdefault(event.event_id, set()).add(digest)
+    # Identity is per workspace, so another tenant's events can never change this workspace's result.
+    # "Content" is the data (type, aggregate, time, payload); a different source label or batch metadata
+    # on an otherwise identical event is not a conflict.
+    content_by_id: dict[tuple[str | None, str], set[str]] = {}
+    for event, _ in hashed:
+        if event.event_type != SHOPIFY_ORDER_EVENT and event.event_type not in LEDGER_METRIC:
+            continue  # only events this adapter reads can conflict; the rest are merely counted as unsupported
+        content = _canonical([event.event_type, event.aggregate_type, event.aggregate_id, event.occurred_at, event.payload])
+        content_by_id.setdefault((_event_workspace(event), event.event_id), set()).add(hashlib.sha256(content.encode()).hexdigest())
     event_id_content_conflicts = sum(1 for digests in content_by_id.values() if len(digests) > 1)
 
     # Deterministic order regardless of how the caller sorted or repeated events.
     for event in (item[0] for item in sorted(hashed, key=lambda item: (item[0].occurred_at, item[0].event_id, item[1]))):
-        if event.event_id in seen_ids:
+        scope = _event_workspace(event)
+        identity = (scope, event.event_id)
+        if identity in seen_ids:
             duplicate_event_ids += 1
             continue
-        seen_ids.add(event.event_id)
+        seen_ids.add(identity)
 
         is_shopify = event.event_type == SHOPIFY_ORDER_EVENT
         is_ledger = event.event_type in LEDGER_METRIC
@@ -317,7 +347,6 @@ def adapt_events_to_performance_report_payload(
             unsupported[event.event_type] += 1
             continue
 
-        scope = _event_workspace(event)
         if not scope:
             excluded["workspace_unattributed"] += 1
             continue
@@ -331,15 +360,10 @@ def adapt_events_to_performance_report_payload(
             if key is None:
                 excluded["order_id_missing"] += 1
                 continue
-            previous = shopify_latest.get(key)
-            if previous is not None:
-                shopify_dropped += 1
-                if _signature(previous) != _signature(event):
-                    shopify_conflicts += 1
-            shopify_latest[key] = event  # sorted ascending, so the newest observation wins
+            shopify_observations.setdefault(key, []).append(event)
             continue
 
-        fingerprint = hashlib.sha256(_canonical([event.event_type, scope, event.payload]).encode()).hexdigest()
+        fingerprint = hashlib.sha256(_canonical([event.event_type, scope, event.aggregate_id, event.occurred_at, event.payload]).encode()).hexdigest()
         if fingerprint in ledger_seen:
             ledger_duplicates += 1
             continue
@@ -349,8 +373,19 @@ def adapt_events_to_performance_report_payload(
             lines.append(line)
             source_refs.append(_source_ref(event, line["metric"]))
 
-    for event in shopify_latest.values():
-        line = _shopify_line(event, currency, excluded, notes)
+    # Re-imports: identical observations of one order count once; observations that differ cannot be
+    # ordered by time (the import time is a pseudo-time), so that order is excluded, not guessed.
+    shopify_dropped = 0
+    shopify_conflicts = 0
+    for key in sorted(shopify_observations):
+        observed = shopify_observations[key]
+        shopify_dropped += len(observed) - 1
+        if len({_signature(item) for item in observed}) > 1:
+            shopify_conflicts += 1
+            excluded["order_observation_conflict"] += 1
+            continue
+        event = observed[0]
+        line = _shopify_line(event, currency, excluded)
         if line is not None:
             lines.append(line)
             source_refs.append(_source_ref(event, "revenue"))
@@ -362,6 +397,10 @@ def adapt_events_to_performance_report_payload(
             excluded["currency_mismatch"] += 1
             continue
         kept.append(line)
+
+    # Counted only for lines that survive the currency filter, so a note never describes an excluded order.
+    unmapped_refunds = sum(1 for line in kept if "order_has_refund_status_refund_amount_not_mapped" in line["evidence_ref"]["warnings"])
+    notes = {"revenue_orders_with_unmapped_refunds": unmapped_refunds} if unmapped_refunds else {}
 
     kept.sort(key=lambda item: (item["occurred_on"], item["metric"], item["evidence_ref"]["evidence_id"]))
     kept_ids = {line["evidence_ref"]["evidence_id"] for line in kept}
@@ -384,7 +423,7 @@ def adapt_events_to_performance_report_payload(
         "lines_emitted": len(kept),
         "lines_in_period": in_period,
         "period_filtering": "delegated_to_report",
-        "date_policy": "calendar date as written in the source timestamp; no timezone shifting",
+        "date_policy": "shopify: calendar date as written in created_at; ledger: UTC date of the event time; no timezone shifting",
         "metrics_with_lines": metrics_present,
         "metrics_without_lines": sorted(
             {"revenue", "refunds", "product_cost", "shipping_cost", "fees", "ad_spend"} - set(metrics_present)
@@ -394,15 +433,18 @@ def adapt_events_to_performance_report_payload(
         "unsupported_event_types": dict(sorted(unsupported.items())),
         "intentionally_not_mapped": {name: reason for name, reason in sorted(NOT_MAPPED_REASONS.items()) if name in unsupported},
         "shopify_orders": {
-            "distinct_orders": len(shopify_latest),
-            "older_duplicate_observations_dropped": shopify_dropped,
+            "distinct_orders": len(shopify_observations),
+            "duplicate_observations_dropped": shopify_dropped,
             "conflicting_duplicate_observations": shopify_conflicts,
         },
         "ledger_duplicates_ignored": ledger_duplicates,
-        "notes": dict(sorted(notes.items())),
+        "notes": notes,
         "source_refs": source_refs,
-        # True only when every supported event that belonged to this workspace became a line.
-        "all_supported_events_used": not excluded,
+        # True only when every supported event that belongs to this workspace was used: nothing excluded
+        # (other tenants' events do not count against it) and no conflicting duplicate was set aside.
+        "all_supported_events_used": not any(count for reason, count in excluded.items() if reason != "other_workspace")
+        and shopify_conflicts == 0
+        and event_id_content_conflicts == 0,
         "claims": {
             "campaign_lift": False,
             "causal_attribution": False,
@@ -436,7 +478,7 @@ def _source_ref(event: Event, metric: str) -> dict[str, str]:
     }
 
 
-def _shopify_line(event: Event, currency: str, excluded: Counter[str], notes: Counter[str]) -> dict[str, Any] | None:
+def _shopify_line(event: Event, currency: str, excluded: Counter[str]) -> dict[str, Any] | None:
     mode = event.metadata.get("import_mode")
     evidence_class = SHOPIFY_IMPORT_MODE_CLASS.get(mode) if isinstance(mode, str) else None
     if evidence_class is None:
@@ -470,8 +512,7 @@ def _shopify_line(event: Event, currency: str, excluded: Counter[str], notes: Co
     written = payload.get("created_at").strip()  # parsed above, so a non-empty string
     warnings = ["amount_is_subtotal_excluding_tax_and_shipping", f"order_created_at={written if _SAFE_TIMESTAMP.fullmatch(written) else created.isoformat()}"]
     if status in SHOPIFY_REFUND_STATUSES:
-        warnings.append("order_has_refund_status_refund_amount_not_in_event")
-        notes["revenue_orders_with_unquantified_refunds"] += 1
+        warnings.append("order_has_refund_status_refund_amount_not_mapped")
     return {
         "metric": "revenue",
         "evidence_class": evidence_class,
@@ -480,7 +521,7 @@ def _shopify_line(event: Event, currency: str, excluded: Counter[str], notes: Co
         "currency": order_currency,
         "source": SHOPIFY_ORDER_EVENT,
         "provenance": f"canonical_event:{_safe_label(event.source)}:{mode}",
-        "evidence_ref": _evidence_ref(event, state=_CLASS_STATE[evidence_class], extra_warnings=warnings),
+        "evidence_ref": _evidence_ref(event, state=_CLASS_STATE[evidence_class], extra_warnings=warnings, event_time_is_observation=False),
         "campaign_id": None,
     }
 
