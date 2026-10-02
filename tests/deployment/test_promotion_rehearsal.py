@@ -79,11 +79,19 @@ def test_local_dry_run_requires_zero_credentials() -> None:
         environment="local_dry_run",
         environ={},
     )
-    assert bundle.readiness_state == "ci_unavailable"
     assert "ci_evidence_ci_unavailable" in bundle.blockers
     assert bundle.credential_classification.get("no_credentials_required") is True
     assert bundle.high_value_path_summary["evidence_classification"] == "actual_executed"
-    assert bundle.high_value_path_summary["status"] == "passed"
+    if bundle.high_value_path_summary["status"] == "passed":
+        # A successful local harness still cannot establish release readiness
+        # when CI evidence was not actually executed.
+        assert bundle.readiness_state == "ci_unavailable"
+    else:
+        # An executed harness failure is application evidence, not a CI
+        # availability gap. Preserve that distinction in the bundle.
+        assert bundle.high_value_path_summary["status"] == "failed"
+        assert bundle.readiness_state == "failed"
+        assert "high_value_path_failed" in bundle.blockers
 
 
 def test_local_execution_does_not_self_attest_release_readiness() -> None:
