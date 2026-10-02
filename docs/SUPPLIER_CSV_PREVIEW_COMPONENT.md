@@ -97,7 +97,7 @@ export interface SupplierCsvRowPreview {
 
 | Canonical Target | Recognized Aliases |
 | :--- | :--- |
-| `candidate_id` | `candidate_id`, `supplier_product_id`, `product_id`, `item_id`, `pid`, `productid` *(Never product titles)* |
+| `candidate_id` | `candidate_id`, `supplier_product_id`, `product_id`, `item_id`, `id`, `pid`, `productid` *(Never product titles)* |
 | `supplier_title` | `supplier_title`, `title`, `product_title`, `product`, `name`, `nameen`, `productnameen` |
 | `unit_cost` | `unit_cost`, `sellprice`, `regular_price`, `unitcost`, `supplier_cost`, `cost`, `price` |
 | `shipping_cost` | `shipping_cost`, `shipping` |

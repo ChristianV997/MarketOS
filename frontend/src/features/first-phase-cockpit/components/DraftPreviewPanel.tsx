@@ -188,7 +188,7 @@ export function DraftPreviewPanel({
                     <span className="text-[10px] text-zinc-500 block">Estimated Landed</span>
                     <span className="text-zinc-100">
                       {matchedCsvRow.estimatedLandedCost !== null
-                        ? `$${matchedCsvRow.estimatedLandedCost.toFixed(2)} ${matchedCsvRow.currency}`
+                        ? `${matchedCsvRow.estimatedLandedCost.toFixed(2)} ${matchedCsvRow.currency}`
                         : "missing (costs unverified)"}
                     </span>
                   </div>

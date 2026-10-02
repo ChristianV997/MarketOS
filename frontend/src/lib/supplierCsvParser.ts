@@ -27,6 +27,7 @@ export const RECOGNIZED_HEADER_ALIASES: Readonly<Record<string, string>> = Objec
   supplier_product_id: "candidate_id",
   product_id: "candidate_id",
   item_id: "candidate_id",
+  id: "candidate_id",
   pid: "candidate_id",
   productid: "candidate_id",
 
@@ -201,7 +202,7 @@ export function parseNumericCost(rawValue: string | null | undefined): ParsedCos
   }
 
   const num = Number(cleaned);
-  if (Number.isNaN(num)) {
+  if (Number.isNaN(num) || num < 0) {
     return { value: null, isExplicitZero: false, isMissing: false, isInvalid: true, rawText };
   }
 
@@ -214,10 +215,11 @@ export function parseNumericCost(rawValue: string | null | undefined): ParsedCos
 
 /**
  * Formats a parsed cost for tabular display.
+ * Does not expose raw cell text to prevent leaking sensitive values in error displays.
  */
 export function formatCostDisplay(cost: ParsedCost, currency = "USD"): string {
   if (cost.isMissing) return "missing";
-  if (cost.isInvalid) return `invalid (${cost.rawText})`;
+  if (cost.isInvalid) return "invalid cost";
   if (cost.value !== null) {
     return `${cost.value.toFixed(2)} ${currency}`;
   }
@@ -338,9 +340,16 @@ export function parseSupplierCsvText(csvText: string, fileName?: string): Suppli
     }
   }
 
+  const MAX_PREVIEW_ROWS = 1000;
+  const isTruncated = rawRows.length > MAX_PREVIEW_ROWS + 1;
+  const rowsToProcess = isTruncated ? rawRows.slice(0, MAX_PREVIEW_ROWS + 1) : rawRows;
+
   const fileLevelIssues: string[] = [];
   if (!hasCandidateIdHeader) {
     fileLevelIssues.push("missing_candidate_id_column");
+  }
+  if (isTruncated) {
+    fileLevelIssues.push("preview_rows_truncated");
   }
 
   const seenCandidateIds = new Set<string>();
@@ -348,10 +357,10 @@ export function parseSupplierCsvText(csvText: string, fileName?: string): Suppli
   let validRowCount = 0;
   let invalidRowCount = 0;
 
-  for (let rowIndex = 1; rowIndex < rawRows.length; rowIndex++) {
-    const rawCols = rawRows[rowIndex];
+  for (let rowIndex = 1; rowIndex < rowsToProcess.length; rowIndex++) {
+    const rawCols = rowsToProcess[rowIndex];
     const issues: string[] = [];
-    const record: Record<string, string> = {};
+    const record: Record<string, string> = Object.create(null);
 
     if (rawCols.length !== rawHeaders.length) {
       issues.push("malformed_column_count");
@@ -368,6 +377,22 @@ export function parseSupplierCsvText(csvText: string, fileName?: string): Suppli
         if (!record[mapping.canonical] || record[mapping.canonical] === "") {
           record[mapping.canonical] = colVal;
         }
+      }
+    }
+
+    // Sensitive pattern or script injection detection across all columns (fail-closed, no leak)
+    for (const val of Object.values(record)) {
+      if (!val) continue;
+      if (
+        /^(?:sk[-_]|ghp_|gho_|xox[baprs]-|AKIA[0-9A-Z]{16})/i.test(val) ||
+        /^bearer\s+[a-z0-9._~+/-]+=*/i.test(val) ||
+        /<script\b/i.test(val) ||
+        /javascript:/i.test(val)
+      ) {
+        if (!issues.includes("sensitive_or_malformed_cell_content")) {
+          issues.push("sensitive_or_malformed_cell_content");
+        }
+        break;
       }
     }
 

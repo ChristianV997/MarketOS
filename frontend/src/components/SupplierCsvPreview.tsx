@@ -310,52 +310,88 @@ export function SupplierCsvPreview({
             </div>
           )}
 
-          {/* Rows Preview Table */}
-          <div className="overflow-x-auto rounded border border-gray-800">
-            <table
-              className="w-full text-left text-xs"
-              aria-label="Supplier Catalog CSV Preview"
+          {/* Large CSV Truncated Warning */}
+          {preview.fileLevelIssues.includes("preview_rows_truncated") && (
+            <div
+              role="status"
+              className="flex items-start gap-2 rounded border border-amber-800/70 bg-amber-950/40 p-3 text-amber-200 text-xs"
+              data-testid="preview-rows-truncated-notice"
             >
-              <thead className="border-b border-gray-800 bg-gray-950 font-medium text-gray-400">
-                <tr>
-                  <th scope="col" className="px-3 py-2 w-12 text-center">#</th>
-                  <th scope="col" className="px-3 py-2 w-16">Status</th>
-                  <th scope="col" className="px-3 py-2">Candidate ID</th>
-                  <th scope="col" className="px-3 py-2">Product Name</th>
-                  <th scope="col" className="px-3 py-2 w-20">Supplier</th>
-                  <th scope="col" className="px-3 py-2 text-right">Unit Cost</th>
-                  <th scope="col" className="px-3 py-2 text-right">Shipping</th>
-                  <th scope="col" className="px-3 py-2 text-right">Landed Cost</th>
-                  <th scope="col" className="px-3 py-2">Issues</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800/60 font-mono">
-                {preview.rows.map((row) => {
-                  const isSelected = Boolean(
-                    selectedCandidateId && row.candidateId && row.candidateId === selectedCandidateId
-                  );
-                  const isSelectable = Boolean(row.candidateId && row.isValid && onSelectCandidateId);
-                  return (
-                    <tr
-                      key={row.rowIndex}
-                      onClick={() => {
-                        if (row.candidateId && row.isValid) {
-                          onSelectCandidateId?.(row.candidateId);
+              <AlertCircle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" aria-hidden="true" />
+              <div>
+                <span className="font-semibold text-amber-300">Large CSV file: </span>
+                Showing first 1,000 rows for preview performance.
+              </div>
+            </div>
+          )}
+
+          {/* Rows Preview Table or Empty Notice */}
+          {preview.totalRows === 0 ? (
+            <div
+              role="status"
+              className="flex items-center justify-center gap-2 rounded border border-gray-800 bg-gray-950/60 p-6 text-sm text-gray-400"
+              data-testid="empty-csv-notice"
+            >
+              <Info className="h-4 w-4 text-gray-500" aria-hidden="true" />
+              <span>No data rows found in CSV. Ensure the file contains headers and at least one data row.</span>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded border border-gray-800">
+              <table
+                className="w-full text-left text-xs"
+                aria-label="Supplier Catalog CSV Preview"
+              >
+                <thead className="border-b border-gray-800 bg-gray-950 font-medium text-gray-400">
+                  <tr>
+                    <th scope="col" className="px-3 py-2 w-12 text-center">#</th>
+                    <th scope="col" className="px-3 py-2 w-16">Status</th>
+                    <th scope="col" className="px-3 py-2">Candidate ID</th>
+                    <th scope="col" className="px-3 py-2">Product Name</th>
+                    <th scope="col" className="px-3 py-2 w-20">Supplier</th>
+                    <th scope="col" className="px-3 py-2 text-right">Unit Cost</th>
+                    <th scope="col" className="px-3 py-2 text-right">Shipping</th>
+                    <th scope="col" className="px-3 py-2 text-right">Landed Cost</th>
+                    <th scope="col" className="px-3 py-2">Issues</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/60 font-mono">
+                  {preview.rows.map((row) => {
+                    const isSelected = Boolean(
+                      selectedCandidateId && row.candidateId && row.candidateId === selectedCandidateId
+                    );
+                    const isSelectable = Boolean(row.candidateId && row.isValid && onSelectCandidateId);
+                    return (
+                      <tr
+                        key={row.rowIndex}
+                        role={isSelectable ? "button" : undefined}
+                        tabIndex={isSelectable ? 0 : undefined}
+                        aria-selected={isSelected}
+                        onClick={() => {
+                          if (row.candidateId && row.isValid) {
+                            onSelectCandidateId?.(row.candidateId);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (isSelectable && (e.key === "Enter" || e.key === " ")) {
+                            e.preventDefault();
+                            if (row.candidateId && row.isValid) {
+                              onSelectCandidateId?.(row.candidateId);
+                            }
+                          }
+                        }}
+                        className={`hover:bg-gray-800/40 focus:outline-none ${
+                          !row.isValid ? "bg-red-950/10" : ""
+                        } ${
+                          isSelected ? "bg-indigo-950/50 ring-1 ring-inset ring-indigo-500/50" : ""
+                        } ${
+                          isSelectable ? "cursor-pointer focus:ring-2 focus:ring-inset focus:ring-indigo-400" : ""
+                        }`}
+                        title={
+                          isSelectable
+                            ? `Select candidate "${row.candidateId}" in cockpit (Press Enter or Space)`
+                            : undefined
                         }
-                      }}
-                      className={`hover:bg-gray-800/40 ${
-                        !row.isValid ? "bg-red-950/10" : ""
-                      } ${
-                        isSelected ? "bg-indigo-950/50 ring-1 ring-inset ring-indigo-500/50" : ""
-                      } ${
-                        isSelectable ? "cursor-pointer" : ""
-                      }`}
-                      title={
-                        isSelectable
-                          ? `Select candidate "${row.candidateId}" in cockpit`
-                          : undefined
-                      }
-                    >
+                      >
                       <td className="px-3 py-2 text-center text-gray-500 font-sans">
                         {row.rowIndex}
                       </td>
@@ -455,8 +491,9 @@ export function SupplierCsvPreview({
             </tbody>
             </table>
           </div>
-        </div>
-      )}
-    </div>
-  );
+        )}
+      </div>
+    )}
+  </div>
+);
 }

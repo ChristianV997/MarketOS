@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   parseSupplierCsvText,
   parseNumericCost,
+  formatCostDisplay,
   parseRawCsvLines,
   RECOGNIZED_HEADER_ALIASES,
   RECOGNIZED_SUPPLIERS,
@@ -249,6 +250,11 @@ test("react component contract: exports, accessibility attributes, and unverifie
   assert.match(componentSrc, /<thead/);
   assert.match(componentSrc, /<th scope="col"/);
   assert.match(componentSrc, /<tbody/);
+  assert.match(componentSrc, /tabIndex=\{isSelectable \? 0 : undefined\}/, "Selectable rows must have tabIndex=0 for keyboard accessibility");
+  assert.match(componentSrc, /role=\{isSelectable \? "button" : undefined\}/, "Selectable rows must declare role='button'");
+  assert.match(componentSrc, /aria-selected=\{isSelected\}/, "Rows must declare aria-selected");
+  assert.match(componentSrc, /onKeyDown/, "Selectable rows must support onKeyDown for Enter/Space selection");
+  assert.match(componentSrc, /empty-csv-notice/, "Component must display empty notice when CSV contains 0 rows");
 
   // Local-only / no transmission guarantee
   assert.match(componentSrc, /Local browser preview only/);
@@ -256,4 +262,64 @@ test("react component contract: exports, accessibility attributes, and unverifie
   assert.doesNotMatch(componentSrc, /axios/, "Must not use axios");
   assert.doesNotMatch(componentSrc, /XMLHttpRequest/, "Must not use XMLHttpRequest");
   assert.doesNotMatch(componentSrc, /WebSocket/, "Must not use WebSocket");
+});
+
+test("formatCostDisplay does not leak sensitive strings or raw text when cost is invalid", () => {
+  const secretString = "sk_live_very_secret_api_key_123456789";
+  const parsed = parseNumericCost(secretString);
+  assert.equal(parsed.isInvalid, true);
+
+  const display = formatCostDisplay(parsed, "USD");
+  assert.equal(display, "invalid cost");
+  assert.doesNotMatch(display, /sk_live/);
+  assert.doesNotMatch(display, /secret/);
+});
+
+test("parseNumericCost disallows negative costs", () => {
+  const negativeCost = parseNumericCost("-15.00");
+  assert.equal(negativeCost.isInvalid, true);
+  assert.equal(negativeCost.value, null);
+  assert.equal(negativeCost.isMissing, false);
+
+  const negativeZero = parseNumericCost("-0.00");
+  assert.equal(negativeZero.value, 0);
+  assert.equal(negativeZero.isExplicitZero, true);
+});
+
+test("supplier CSV parser flags sensitive cell contents and script injection without leaking values", () => {
+  const csvWithSecret = `candidate_id,supplier_title,unit_cost,shipping_cost
+cand-sec,Product with Secret,sk-live-mock-api-key-test,2.00`;
+  const resultSecret = parseSupplierCsvText(csvWithSecret);
+  assert.equal(resultSecret.totalRows, 1);
+  const row = resultSecret.rows[0];
+  assert.equal(row.isValid, false);
+  assert.ok(row.validationIssues.includes("sensitive_or_malformed_cell_content"));
+  assert.ok(row.validationIssues.includes("malformed_unit_cost"));
+  assert.equal(row.unitCostDisplay, "invalid cost");
+
+  const csvWithScript = `candidate_id,supplier_title,unit_cost,shipping_cost
+cand-xss,<script>alert('xss')</script>,5.00,2.00`;
+  const resultScript = parseSupplierCsvText(csvWithScript);
+  assert.equal(resultScript.totalRows, 1);
+  assert.equal(resultScript.rows[0].isValid, false);
+  assert.ok(resultScript.rows[0].validationIssues.includes("sensitive_or_malformed_cell_content"));
+});
+
+test("supplier CSV parser recognizes 'id' as candidate_id alias", () => {
+  const csv = `id,supplier_title,unit_cost,shipping_cost
+cand-id-col,Widget From ID,10.00,2.00`;
+  const result = parseSupplierCsvText(csv);
+  assert.equal(result.totalRows, 1);
+  assert.equal(result.missingCandidateIdColumn, false);
+  assert.equal(result.rows[0].candidateId, "cand-id-col");
+});
+
+test("supplier CSV parser bounds large files to MAX_PREVIEW_ROWS with preview_rows_truncated warning", () => {
+  const lines = ["candidate_id,supplier_title,unit_cost,shipping_cost"];
+  for (let i = 1; i <= 1010; i++) {
+    lines.push(`item-${i},Product ${i},5.00,1.00`);
+  }
+  const result = parseSupplierCsvText(lines.join("\n"));
+  assert.equal(result.totalRows, 1000);
+  assert.ok(result.fileLevelIssues.includes("preview_rows_truncated"));
 });
