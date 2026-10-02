@@ -5,6 +5,7 @@ import pytest
 
 from backend.commerce.owner_brand_planning_gate import (
     MINIMUM_ELIGIBLE_PRODUCTS,
+    OwnerBrandPlanningGateError,
     evaluate_owner_brand_planning_gate,
 )
 
@@ -38,10 +39,13 @@ def test_threshold(count):
 def test_three_distinct_eligible_ids_unlock_planning():
     items = [_item("c"), _item("a"), _item("b")]
     gate = evaluate_owner_brand_planning_gate(items)
+    payload = gate.to_dict()
     assert gate.eligible is True
     assert gate.eligible_product_ids == ("a", "b", "c")
-    assert gate.to_dict()["creates_brand"] is False
-    assert gate.to_dict()["publishes"] is False
+    assert payload["creates_brand"] is False
+    assert payload["publishes"] is False
+    assert payload["launches_ads"] is False
+    assert payload["planning_only"] is True
 
 
 def test_exact_duplicates_count_once():
@@ -62,6 +66,47 @@ def test_conflicting_duplicates_do_not_satisfy_threshold():
     assert gate.eligible is False
     assert gate.eligible_product_ids == ("b", "c")
     assert "duplicate_conflict:a" in gate.discarded
+
+
+def test_eligible_flag_conflict_does_not_count():
+    items = [
+        _item("a"),
+        _item("a", eligible=False),
+        _item("b"),
+        _item("c"),
+    ]
+    gate = evaluate_owner_brand_planning_gate(items)
+    assert gate.eligible is False
+    assert gate.eligible_product_ids == ("b", "c")
+    assert "duplicate_conflict:a" in gate.discarded
+
+
+def test_only_exact_true_eligibility_counts():
+    items = [
+        _item("string-true", eligible="true"),
+        _item("one", eligible=1),
+        _item("ok-1"),
+        _item("ok-2"),
+        _item("ok-3"),
+    ]
+    gate = evaluate_owner_brand_planning_gate(items)
+    assert gate.eligible_product_ids == ("ok-1", "ok-2", "ok-3")
+    assert "ineligible:string-true" in gate.discarded
+    assert "ineligible:one" in gate.discarded
+
+
+def test_status_must_be_exactly_live():
+    items = [
+        _item("case", status="Live"),
+        _item("padded", status=" live"),
+        _item("ok-1"),
+        _item("ok-2"),
+        _item("ok-3"),
+    ]
+    gate = evaluate_owner_brand_planning_gate(items)
+    assert gate.eligible_product_ids == ("ok-1", "ok-2", "ok-3")
+    assert "status_not_active:case" in gate.discarded
+    assert "status_not_active:padded" in gate.discarded
 
 
 def test_missing_and_unknown_status_do_not_count():
@@ -95,6 +140,12 @@ def test_malformed_ids_and_types_are_discarded():
     assert gate.eligible_product_ids == ("ok-1", "ok-2", "ok-3")
     assert any(item.startswith("malformed_id:") for item in gate.discarded)
     assert "malformed_row:4" in gate.discarded
+
+
+def test_non_sequence_inventory_is_rejected():
+    with pytest.raises(OwnerBrandPlanningGateError) as caught:
+        evaluate_owner_brand_planning_gate({"product_id": "a"})
+    assert caught.value.code == "inventory_must_be_sequence"
 
 
 def test_candidate_id_alias_requires_live_status():
