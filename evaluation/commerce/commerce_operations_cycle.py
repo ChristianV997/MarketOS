@@ -8,6 +8,7 @@ draft, and workspace-isolation surfaces into one deterministic readiness cycle.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Callable, Mapping
 
 from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis
@@ -101,6 +102,10 @@ RAW_KEYS = frozenset(
         "internal_prompt",
     }
 )
+# `sk-` is an OpenAI-style credential prefix, not a substring of hyphenated ids
+# such as desk-clamp-lamp. Require a non-alphanumeric boundary.
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
+_OTHER_SECRET_MARKERS = ("ghp_", "xoxb-", "aiza")
 LIVE_MODES = frozenset({"live_readonly", "public_live", "authenticated_live"})
 GOVERNOR_ACTIONS = (
     ("screen_product_opportunities", "intelligence", "intelligence", "report_generation_quota"),
@@ -182,10 +187,16 @@ def _secret_like(value: Any) -> bool:
         lowered = value.lower()
         if "<html" in lowered or "<!doctype html" in lowered:
             return True
-        return "-----begin " in lowered or "bearer " in lowered or any(
-            marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "aiza")
-        )
+        return _secret_marker_in_text(lowered)
     return False
+
+
+def _secret_marker_in_text(lowered: str) -> bool:
+    if "-----begin " in lowered or "bearer " in lowered:
+        return True
+    if _SK_PREFIX.search(lowered):
+        return True
+    return any(marker in lowered for marker in _OTHER_SECRET_MARKERS)
 
 
 def reject_unsafe_input(value: Any, *, label: str = "input") -> None:

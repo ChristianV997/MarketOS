@@ -244,6 +244,30 @@ def test_secret_like_and_raw_payloads_are_rejected_and_not_leaked(name, needle):
         assert needle  # requested field remains a rejection trigger, not an echo requirement
 
 
+def test_hyphenated_candidate_id_is_not_a_secret_marker():
+    """`desk-clamp-lamp` contains `sk-` only as a word fragment, not a credential."""
+    payload = {
+        "top_candidate_id": "desk-clamp-lamp",
+        "candidates": [{"candidate_id": "desk-clamp-lamp", "query": "desk lamp"}],
+    }
+    reject_unsafe_input(payload, label="marketplace report")
+    report = build_commerce_operations_cycle(payload, None, None)
+    assert report.to_dict()["live_validated"] is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "sk-proj-synthetic-secret-value",
+        "prefix sk-live-token-must-not-pass",
+        "Bearer synthetic-token-must-not-be-imported",
+    ],
+)
+def test_boundary_secret_markers_still_fail_closed(value: str):
+    with pytest.raises(ValueError, match="secret-like or raw payload"):
+        reject_unsafe_input({"note": value}, label="fixture")
+
+
 def test_live_flag_fail_closes_as_blocked():
     report = cycle(live_requested=True).to_dict()
     assert report["overall_status"] == "blocked"
