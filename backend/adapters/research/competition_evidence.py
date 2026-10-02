@@ -38,6 +38,7 @@ import os
 import re
 import socket
 import time
+import unicodedata
 from dataclasses import dataclass, field as dataclass_field
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
@@ -348,9 +349,19 @@ _OBFUSCATED_EMAIL = re.compile(
     r"(?i)(?<![\w])[a-z0-9._%+\-]{1,64}\s*(?:\(\s*at\s*\)|\[\s*at\s*\]|\{\s*at\s*\})\s*"
     r"[a-z0-9][a-z0-9.\-]{0,80}\.[a-z]{2,24}(?![\w])"
 )
+_OBFUSCATED_DOT_EMAIL = re.compile(
+    r"(?i)(?<![\w])[a-z0-9._%+\-]{1,64}\s*"
+    r"(?:\(\s*at\s*\)|\[\s*at\s*\]|\{\s*at\s*\}|\bat\b)\s*"
+    r"[a-z0-9][a-z0-9\-]{0,62}\s*"
+    r"(?:\(\s*dot\s*\)|\[\s*dot\s*\]|\{\s*dot\s*\}|\bdot\b)\s*"
+    r"[a-z]{2,24}(?![\w])"
+)
 _NANP = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]\d{3}[-.\s]\d{4}(?!\d)")
 _INTL_PHONE = re.compile(r"(?<!\w)\+\d{1,3}(?:[-.\s()]+\d{2,4}){2,5}(?!\d)")
+_E164 = re.compile(r"(?<!\w)\+\d{8,15}(?!\d)")
 _CONTACT_SCHEME = re.compile(r"(?i)(?:mailto|tel)\s*:")
+_INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200c\u200d\ufeff\u2060\u180e"), None)
+_DASHES = str.maketrans({"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-"})
 _MAPPED_HEADERS = {
     "listing id": "listing_id", "external listing id": "listing_id", "listing_id": "listing_id",
     "title": "title", "price": "price", "currency": "currency", "availability": "availability",
@@ -366,14 +377,26 @@ def _csv_header(value: str) -> str:
     return text
 
 
+def _contact_surface(value: str) -> str:
+    text = unicodedata.normalize("NFKC", value).translate(_INVISIBLE).translate(_DASHES)
+    text = re.sub(r"(?i)&#x0*40;", "@", text)
+    text = text.replace("&" + "amp;#64;", "@").replace("&#64;", "@")
+    return text.replace("%2540", "@").replace("%40", "@")
+
+
 def _contact_like(value: str) -> bool:
     """High-confidence email or phone only. Ordinary product text, including '@' and SKUs, stays."""
     if not value:
         return False
-    text = value
-    for token in ("&" + "amp;#64;", "&#64;", "%2540", "%40"):
-        text = text.replace(token, "@")
-    if _CONTACT_SCHEME.search(text) or _EMAIL.search(text) or _OBFUSCATED_EMAIL.search(text) or _NANP.search(text):
+    text = _contact_surface(value)
+    if (
+        _CONTACT_SCHEME.search(text)
+        or _EMAIL.search(text)
+        or _OBFUSCATED_EMAIL.search(text)
+        or _OBFUSCATED_DOT_EMAIL.search(text)
+        or _NANP.search(text)
+        or _E164.search(text)
+    ):
         return True
     match = _INTL_PHONE.search(text)
     return match is not None and len(re.sub(r"\D", "", match.group(0))) >= 8
@@ -496,8 +519,12 @@ def import_manual_competitor_csv(
         source_url_raw = mapped.get("source_url", "").strip()
         source_raw = mapped.get("source", "").strip()
         image_raw = mapped.get("image", "").strip()
+        price_raw = mapped.get("price", "")
+        shipping_raw = mapped.get("shipping_cost", "")
+        rating_raw = mapped.get("rating", "")
         if any(_contact_like(value) for value in (
             title, seller, brand, listing_id, availability, source_url_raw, source_raw, image_raw,
+            price_raw, shipping_raw, rating_raw,
         )):
             rejections.append(_manual_rejection(row_number, "contact_data_rejected"))
             conflicts.add(listing_id)

@@ -240,3 +240,70 @@ def test_cli_exception_and_streams_do_not_echo_canaries(capsys, monkeypatch, tmp
     assert canary not in blocked_id.stdout
     assert canary not in blocked_id.stderr
     assert blocked_id.returncode == 1
+
+
+def test_obfuscated_and_encoded_contact_is_not_returned():
+    canaries = (
+        "canary.ada [at] secret [dot] test",
+        "canary.ada(at)secret(dot)test",
+        "canary.ada AT secret DOT test",
+        "canary.ada&#x40;secret.test",
+        "canary.ada" + "\u200b" + "@secret.test",
+        "canary.ada\uff20secret.test",
+        "415\u2011555\u20110199",
+        "(415)\u00a0555-0199",
+        "\uff14\uff11\uff15-\uff15\uff15\uff15-\uff10\uff11\uff19\uff19",
+        "+442079460958",
+    )
+    normalized = ("canary.ada@secret.test", "415-555-0199", "442079460958")
+    fields = ("title", "seller", "brand", "availability")
+    for field in fields:
+        for canary in canaries:
+            row = {
+                "listing_id": "bad1",
+                "title": "Copper Bottle",
+                "seller": "ACME Supply",
+                "brand": "Northwind",
+                "availability": "in stock",
+                "price": "10",
+                "currency": "USD",
+            }
+            row[field] = canary
+            columns = list(row)
+            text = ",".join(columns) + "\n" + ",".join(row[column] for column in columns) + "\n"
+            result = import_manual_competitor_csv(text, candidate_id="cand-1")
+            blob = json.dumps(result)
+            assert canary not in blob, (field, canary)
+            for visible in normalized:
+                assert visible not in blob, (field, canary, visible)
+            assert result["offer_count"] == 0
+    priced = import_manual_competitor_csv(
+        "listing_id,title,price,currency\na1,Copper Bottle,+442079460958,USD\n",
+        candidate_id="cand-1",
+    )
+    assert "442079460958" not in json.dumps(priced)
+    assert priced["offer_count"] == 0
+    preserved = import_manual_competitor_csv(
+        "listing_id,title,price,shipping_cost,currency\n"
+        "a1,gain +20 pack,,0,USD\n"
+        "a2,Copper Bottle 500ml 2 @ pack,0,,USD\n",
+        candidate_id="cand-1",
+    )
+    by_id = {offer["external_listing_id"]: offer for offer in preserved["offers"]}
+    assert preserved["status"] == "accepted"
+    assert by_id["a1"]["title"] == "gain +20 pack"
+    assert by_id["a1"]["price"] is None
+    assert by_id["a1"]["shipping_cost"] == 0.0
+    assert by_id["a2"]["price"] == 0.0
+    assert by_id["a2"]["shipping_cost"] is None
+    header = "415\u2011555\u20110199"
+    hidden = import_manual_competitor_csv(
+        f"listing_id,title,{header},price,currency\na1,Copper Bottle,hidden-canary-cell,10,USD\n",
+        candidate_id="cand-1",
+    )
+    hidden_blob = json.dumps(hidden)
+    assert header not in hidden_blob
+    assert "415-555-0199" not in hidden_blob
+    assert "hidden-canary-cell" not in hidden_blob
+    assert hidden["status"] == "accepted"
+    assert hidden["offers"][0]["title"] == "Copper Bottle"
