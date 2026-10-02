@@ -10,6 +10,8 @@ import {
   YAxis,
 } from "recharts";
 import type { OwnerPerformanceReport } from "../contracts/ownerPerformanceReport.ts";
+import { OwnerActivityPanel } from "./OwnerActivityPanel.tsx";
+import { OWNER_ACTIVITY_UNAVAILABLE } from "../lib/ownerActivity.ts";
 import { DEMO_OBSERVED_REPORT } from "../fixtures/demoReport.ts";
 import { useOwnerPerformance } from "../hooks/useOwnerPerformance.ts";
 import {
@@ -133,6 +135,8 @@ export function OwnerPerformanceDashboardView({
           Amounts are shown only when the owner-performance-report-v1 contract provides them. This view does not calculate profit, claim campaign lift, or connect a platform.
         </p>
       </header>
+
+      <OwnerActivityPanel activity={OWNER_ACTIVITY_UNAVAILABLE} />
 
       {phase === "loading" && <StatusNote tone="loading">Loading the performance report.</StatusNote>}
       {phase === "auth" && (
