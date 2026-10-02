@@ -15,6 +15,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFile } from "node:fs/promises";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -435,6 +436,7 @@ test("no token provider (the mounted routes): labelled fictional, not observed, 
   const html = render({});
   assert.match(html, /data-mode="demo"/);
   assert.match(text(html), /Demo mode\. Nothing is saved or sent\./);
+  assert.match(text(html), /Use fictional information only\. Do not enter real client information in this demo\./);
   assert.match(text(html), /signed-in connection to the profile service, which this page does not have yet/);
   assert.match(text(html), /sample data is fictional\. Nothing here is observed or saved, it is not connected to any account/);
   assert.match(text(html), /Fill with fictional sample data/);
@@ -443,6 +445,17 @@ test("no token provider (the mounted routes): labelled fictional, not observed, 
   assert.match(text(review), /Demo only: not saved/);
   assert.match(text(review), /Confirm review \(demo, not saved\)/);
   assert.doesNotMatch(text(review), /Profile saved|Confirm and save profile/);
+});
+
+test("mounted client-profile routes do not inject an unverified token provider", async () => {
+  const mainSource = await readFile(new URL("../../src/main.tsx", import.meta.url), "utf8");
+  for (const route of ["/client/profile", "/client/onboarding", "/crm"]) {
+    assert.match(mainSource, new RegExp(`path:\\s*["']${route.replaceAll("/", "\\/")}["'],\\s*element:\\s*<ClientProfileOnboardingPage\\s*\\/>`));
+  }
+  assert.doesNotMatch(mainSource, /getAccessToken|useAuth|Authorization|Bearer/);
+  const mounted = render({});
+  assert.match(mounted, /data-mode="demo"/);
+  assert.match(text(mounted), /Nothing is saved or sent/);
 });
 
 test("the mode is chosen by the mounting code, not by the URL: the page reads no URL or storage state", () => {

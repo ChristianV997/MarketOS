@@ -564,8 +564,9 @@ test("guard (AST): no identity or connection concepts in identifiers; no passwor
   const TOKEN_SEAM_NAMES = /^(getAccessToken|AccessTokenProvider)$/;
   for (const { file, source } of await featureSources()) {
     const { identifiers, jsxAttributes } = scan(file, source);
+    const relativeFile = file.replaceAll("\\", "/").replace(/^.*client-crm-profile\//, "");
     for (const name of identifiers) {
-      if (TOKEN_SEAM_FILES.has(file.replace(/^.*client-crm-profile\//, "")) && TOKEN_SEAM_NAMES.test(name)) continue;
+      if (TOKEN_SEAM_FILES.has(relativeFile) && TOKEN_SEAM_NAMES.test(name)) continue;
       assert.doesNotMatch(name, banned, `${file}: ${name}`);
     }
     for (const attribute of jsxAttributes) {

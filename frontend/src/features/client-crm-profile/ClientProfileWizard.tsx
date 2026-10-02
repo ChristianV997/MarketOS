@@ -91,6 +91,7 @@ export default function ClientProfileWizard({ onSave, initialState, focusOnMount
       ) : (
         <div role="note" data-mode="demo" className="space-y-2 rounded-lg border border-violet-400/60 bg-violet-500/10 p-3 text-sm text-violet-100">
           <p className="font-semibold">Demo mode. Nothing is saved or sent.</p>
+          <p data-demo-input-warning className="font-medium">Use fictional information only. Do not enter real client information in this demo.</p>
           <p>The sample data is fictional. Nothing here is observed or saved, it is not connected to any account, and what you type stays in this tab.</p>
           <p>
             No real client information is loaded, and anything you type stays in this browser tab until you leave the page. Saving needs a
