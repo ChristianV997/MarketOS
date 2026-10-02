@@ -33,6 +33,17 @@ _WORKFLOW_LEVEL_WARNING_PREFIXES = (
 )
 
 
+# Workflow-level warnings persist across runs; stage warnings are
+# re-aggregated from stages in _sync_run_state so retried stages
+# do not carry stale warnings.
+
+_WORKFLOW_LEVEL_WARNING_PREFIXES = (
+    "resumed_from_checkpoint:",
+    "resume_checkpoint_ignored:",
+    "recovery_from_stage:",
+)
+
+
 
 def _id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
@@ -379,6 +390,7 @@ def replay_workflow_stage(workflow_id: str, stage_name: str, reason: str = "manu
     # Tag copies: earlier timeline events and checkpoints share the original ref dicts.
     stage.produced_object_ids = [{**ref, "relation": "replay_of"} for ref in stage.produced_object_ids]
     _sync_run_state(replayed)
+    replayed.final_output = build_workflow_summary(replayed)
     replayed.final_output = build_workflow_summary(replayed)
     _event(replayed, stage_name, "replay_completed", "Workflow stage replay completed", refs=stage.produced_object_ids)
     result = replayed.to_dict()
