@@ -3,6 +3,7 @@
  */
 export const OWNER_PERFORMANCE_SCHEMA = "owner-performance-report-v1" as const;
 export const CONTRACT_HEAD = "17f0c6caa769ea13a3635b28dbb70313802da2fa";
+export const OWNER_PERFORMANCE_API_PATH = "/api/owner/performance" as const;
 
 export const MEASURE_KEYS = [
   "revenue",
@@ -43,6 +44,8 @@ export interface MoneyView {
   exchange_rate_timestamp?: string;
   uncertainty?: string;
   tax_inclusion_state?: string;
+  evidence_classes?: string[];
+  evidence_ref?: unknown;
 }
 
 export interface CampaignRow {
@@ -51,6 +54,7 @@ export interface CampaignRow {
   attributed_revenue: MoneyView;
   lift: MoneyView;
   causal_attribution: boolean;
+  ads_ran_proven?: boolean;
 }
 
 export interface OwnerPerformanceReport {
