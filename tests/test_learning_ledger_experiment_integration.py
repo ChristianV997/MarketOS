@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -251,3 +252,208 @@ def test_campaign_report_remains_backward_compatible_without_ledger_input():
     result = evaluate_campaign(campaign, observations).to_dict()
 
     assert "learning_advisory" not in result
+
+
+def test_end_to_end_source_event_tracing_into_readiness_advisory():
+    """Trace a source experiment event through ledger recommendations into the readiness advisory.
+
+    Verifies:
+    - Event identity & provenance is retained (source_event_id).
+    - Recommendation matches the source event.
+    - Advisory is strictly 'advisory_only' with decision effect 'none'.
+    - Campaign decision (scores, reasons, launchability) is untouched.
+    """
+    candidate_id = "custom-test-product"
+    event_id = "exp-event-source-42"
+    custom_events = [
+        {
+            "learning_event_id": event_id,
+            "event_type": "ad_experiment",
+            "outcome": "loss",
+            "candidate_id": candidate_id,
+            "action_taken": "launch_ad_experiment",
+            "failure_reasons": ["low_click_through", "poor_creative_angle"],
+            "hypothesis": "Testing alternative hook angle.",
+            "metrics": [{"name": "click_through_rate", "value": 0.005, "target": 0.02, "sample_size": 500, "unit": "ratio"}],
+            "confidence": 0.85,
+            "workspace_id": WORKSPACE_ID,
+        }
+    ]
+    report = build_learning_ledger_report(context={"workspace_id": WORKSPACE_ID, "events": custom_events})
+    influence = derive_governor_influence(
+        report,
+        action_type="launch_ad_experiment",
+        candidate_id=candidate_id,
+        workspace_id=WORKSPACE_ID,
+        allow_action_type_fallback=False,
+    )
+
+    campaign, observations = _campaign_result(candidate_id)
+    baseline = evaluate_campaign(campaign, observations)
+    advised = evaluate_campaign(campaign, observations, learning_influence=influence)
+
+    # Invariance check: advisory cannot alter scores, reasons, or launchability
+    assert advised.launchable == baseline.launchable
+    assert advised.reasons == baseline.reasons
+    assert advised.experiment == baseline.experiment
+
+    # Advisory metadata check
+    advisory = advised.to_dict()["learning_advisory"]
+    assert advisory["authority"] == "advisory_only"
+    assert advisory["decision_effect"] == "none"
+
+    # Lineage & provenance check
+    inf_dict = advisory["influence"]
+    assert inf_dict["candidate_id"] == candidate_id
+    assert inf_dict["provenance"] == [event_id]
+    assert inf_dict["iteration_recommendation_source_event_id"] == event_id
+    assert inf_dict["iteration_action_type"] == "generate_creative_batch"
+    assert "hook or audience" in inf_dict["iteration_recommendation"]
+    assert inf_dict["do_not_repeat_blocked"] is True
+
+
+def test_unlaunchable_campaign_cannot_be_authorized_by_winning_learning_influence():
+    """Prove an unlaunchable campaign is NOT authorized by a winning ledger advisory."""
+    campaign, _ = _campaign_result("mini-thermal-printer")
+    report = _learning_report("ad_experiment_winner_fixture.json")
+    influence = _influence(report, campaign.product_id)
+
+    # Unlaunchable campaign with zero observations -> missing_observations
+    baseline = evaluate_campaign(campaign, observations=[])
+    assert baseline.launchable is False
+    assert "missing_observations" in baseline.reasons
+
+    advised = evaluate_campaign(campaign, observations=[], learning_influence=influence)
+    assert advised.launchable is False
+    assert advised.reasons == baseline.reasons
+    assert advised.experiment is None
+    assert advised.learning_advisory is not None
+    assert advised.to_dict()["learning_advisory"]["decision_effect"] == "none"
+
+
+def test_campaign_advisory_rejects_candidate_mismatch():
+    campaign, observations = _campaign_result("portable-espresso-maker")
+    report = _learning_report("ad_experiment_winner_fixture.json")
+    influence = _influence(report, "mini-thermal-printer")
+
+    with pytest.raises(ValueError, match="learning_influence candidate does not match campaign product"):
+        evaluate_campaign(campaign, observations, learning_influence=influence)
+
+
+def test_campaign_advisory_rejects_action_type_mismatch():
+    campaign, observations = _campaign_result("portable-espresso-maker")
+    report = _learning_report("ad_experiment_loser_fixture.json")
+    influence = _influence(report, campaign.product_id)
+    mismatched_influence = replace(influence, action_type="deep_validate_product")
+
+    with pytest.raises(ValueError, match="learning_influence action does not match campaign experiment"):
+        evaluate_campaign(campaign, observations, learning_influence=mismatched_influence)
+
+
+def test_campaign_advisory_rejects_non_governor_influence_type():
+    campaign, observations = _campaign_result("portable-espresso-maker")
+
+    class FakeInfluence:
+        action_type = "launch_ad_experiment"
+        candidate_id = "portable-espresso-maker"
+        recency_label = "direct_candidate_match"
+        workspace_id = WORKSPACE_ID
+        provenance = ("fixture-fake",)
+        iteration_recommendation_source_event_id = "fixture-fake"
+        def to_dict(self): return {}
+
+    with pytest.raises(TypeError, match="learning_influence must be a LearningGovernorInfluence"):
+        evaluate_campaign(campaign, observations, learning_influence=FakeInfluence())  # type: ignore[arg-type]
+
+
+def test_campaign_advisory_rejects_tampered_provenance():
+    campaign, observations = _campaign_result("portable-espresso-maker")
+    report = _learning_report("ad_experiment_loser_fixture.json")
+    influence = _influence(report, campaign.product_id)
+    tampered = replace(influence, iteration_recommendation_source_event_id="spoofed-event-id")
+
+    with pytest.raises(ValueError, match="learning recommendation source must appear in influence provenance"):
+        evaluate_campaign(campaign, observations, learning_influence=tampered)
+
+
+def test_campaign_product_id_empty_falls_back_to_campaign_id():
+    campaign_id = "campaign-direct-id"
+    campaign = CampaignCandidate(
+        campaign_id,
+        "",  # empty product_id
+        quality=DataQuality(
+            provenance="fixture",
+            attribution="attributed",
+            observed_at=OBSERVED_AT,
+            source_ref="fixture://campaign",
+        ),
+    )
+    observations = [
+        CampaignObservation(
+            "obs-1",
+            campaign_id,
+            spend=10,
+            revenue=20,
+            conversions=2,
+            quality=DataQuality(
+                provenance="simulated",
+                attribution="attributed",
+                observed_at=OBSERVED_AT,
+                source_ref="fixture://obs",
+            ),
+        )
+    ]
+    report = build_learning_ledger_report(context={
+        "events": [{
+            "learning_event_id": "event-for-campaign-id",
+            "event_type": "ad_experiment",
+            "outcome": "win",
+            "candidate_id": campaign_id,
+            "action_taken": "launch_ad_experiment",
+            "workspace_id": WORKSPACE_ID,
+        }]
+    })
+    influence = derive_governor_influence(
+        report,
+        action_type="launch_ad_experiment",
+        candidate_id=campaign_id,
+        workspace_id=WORKSPACE_ID,
+        allow_action_type_fallback=False,
+    )
+
+    advised = evaluate_campaign(campaign, observations, learning_influence=influence)
+    advisory = advised.to_dict()["learning_advisory"]
+    assert advisory["influence"]["candidate_id"] == campaign_id
+    assert advisory["influence"]["provenance"] == ["event-for-campaign-id"]
+
+
+def test_deterministic_replay_under_event_shuffling():
+    events = [
+        {
+            "learning_event_id": f"evt-{i}",
+            "event_type": "ad_experiment",
+            "outcome": "win" if i % 2 == 0 else "loss",
+            "candidate_id": "shuffle-candidate",
+            "action_taken": "launch_ad_experiment",
+            "failure_reasons": ["poor_offer"] if i % 2 != 0 else [],
+            "workspace_id": WORKSPACE_ID,
+        }
+        for i in range(6)
+    ]
+    perm1 = events
+    perm2 = list(reversed(events))
+
+    report1 = build_learning_ledger_report(context={"workspace_id": WORKSPACE_ID, "events": perm1})
+    report2 = build_learning_ledger_report(context={"workspace_id": WORKSPACE_ID, "events": perm2})
+
+    inf1 = derive_governor_influence(report1, action_type="launch_ad_experiment", candidate_id="shuffle-candidate", workspace_id=WORKSPACE_ID, allow_action_type_fallback=False)
+    inf2 = derive_governor_influence(report2, action_type="launch_ad_experiment", candidate_id="shuffle-candidate", workspace_id=WORKSPACE_ID, allow_action_type_fallback=False)
+
+    assert inf1.fingerprint == inf2.fingerprint
+    assert inf1.to_dict() == inf2.to_dict()
+
+    campaign, observations = _campaign_result("shuffle-candidate")
+    advised1 = evaluate_campaign(campaign, observations, learning_influence=inf1)
+    advised2 = evaluate_campaign(campaign, observations, learning_influence=inf2)
+
+    assert advised1.to_dict() == advised2.to_dict()
