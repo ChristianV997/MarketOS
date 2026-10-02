@@ -286,7 +286,9 @@ export function OwnerPerformanceDashboardView({
 }
 
 function LiveOwnerPerformanceDashboard(props: OwnerPerformanceDashboardProps) {
-  const query = useOwnerPerformance({ enabled: true });
+  // Keep the dashboard unavailable until the canonical backend route is
+  // mounted. The hook supports an explicit opt-in for that future seam.
+  const query = useOwnerPerformance();
   return (
     <OwnerPerformanceDashboardView
       {...props}

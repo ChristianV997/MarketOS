@@ -1,6 +1,6 @@
 # Owner performance dashboard (frontend slice)
 
-Status: implemented, contract-tested, adapter-tested, fail-closed live client attached, **endpoint unmounted in backend**.
+Status: implemented, contract-tested, adapter-tested, unavailable by default, **endpoint unmounted in backend**.
 
 Pinned contract: PR #368 `owner-performance-report-v1` at `17f0c6caa769ea13a3635b28dbb70313802da2fa`.
 Canonical endpoint: `GET /api/owner/performance` (consumed through `fetchOwnerPerformanceReport` and `useOwnerPerformance` without workspace selector).
@@ -31,7 +31,7 @@ Canonical endpoint: `GET /api/owner/performance` (consumed through `fetchOwnerPe
   - Mobile responsive down to 375px with single-column metric card grid and horizontal scroll container for table.
 
 ## Backend dependency
-`GET /api/owner/performance` is not yet mounted in the backend. When called in production, the hook fails closed into the `unavailable` phase, referencing the exact backend contract from PR #368. No fake or mock backend route is invented in production code.
+`GET /api/owner/performance` is not yet mounted in the backend. The dashboard does not probe this absent route by default and remains in the `unavailable` phase. The reusable hook and adapter retain an explicit opt-in for the future mounted route, where they fail closed on 404/503, authentication errors, network failures, and contract violations. No fake or mock backend route is invented in production code.
 
 ## Integration boundaries
 Do not edit `frontend/src/main.tsx`, `frontend/src/components/layout/Shell.tsx`, or `Sidebar` in this lane (owned by PR #370 / shell lanes). The dashboard exports `<OwnerPerformanceDashboard />` ready for mounting inside any view.

@@ -30,7 +30,9 @@ export function useOwnerPerformance(
   const query = useQuery<OwnerPerformanceReport, Error>({
     queryKey: ["owner-performance-report"],
     queryFn: () => fetchOwnerPerformanceReport(),
-    enabled: options.enabled ?? true,
+    // The canonical backend route is not mounted on this branch. Live reads
+    // remain an explicit integration opt-in instead of probing a phantom URL.
+    enabled: options.enabled ?? false,
     retry: false,
     refetchOnWindowFocus: false,
     staleTime: 30_000,

@@ -46,3 +46,14 @@ test("dashboard source does not invent a route or recompute profit", async () =>
   assert.doesNotMatch(source, /react-router/);
   assert.doesNotMatch(source, /contribution\.amount\s*-/);
 });
+
+test("unmounted backend route is not probed by the default dashboard path", async () => {
+  const [componentSource, hookSource] = await Promise.all([
+    readFile(new URL("../src/features/owner-performance/components/OwnerPerformanceDashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/owner-performance/hooks/useOwnerPerformance.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(componentSource, /useOwnerPerformance\(\)/);
+  assert.doesNotMatch(componentSource, /useOwnerPerformance\(\{\s*enabled:\s*true/);
+  assert.match(hookSource, /enabled: options\.enabled \?\? false/);
+});
