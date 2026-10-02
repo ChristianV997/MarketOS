@@ -8,6 +8,9 @@
  * - Evidence truthfulness: marks all imported rows as manual/unverified evidence.
  */
 
+export const MAX_SUPPLIER_CSV_BYTES = 256 * 1024; // 262,144 bytes (256 KB)
+export const MAX_SUPPLIER_CSV_ROWS = 100; // 100 records (canonical backend supplier-import bound)
+
 export const RECOGNIZED_SUPPLIERS = Object.freeze([
   "cj",
   "alibaba",
@@ -231,7 +234,7 @@ export function formatCostDisplay(cost: ParsedCost, currency = "USD"): string {
  */
 export function parseRawCsvLines(csvText: string): string[][] {
   const clean = csvText.replace(/^\uFEFF/, "");
-  if (!clean.trim()) return [];
+  if (!clean.replace(/[\0\s]/g, "")) return [];
 
   const rows: string[][] = [];
   let currentRow: string[] = [];
@@ -300,6 +303,26 @@ export function parseRawCsvLines(csvText: string): string[][] {
  * - Fail-closed manual/unverified evidence labeling.
  */
 export function parseSupplierCsvText(csvText: string, fileName?: string): SupplierCsvPreviewResult {
+  // Early byte bound check before expensive full parsing
+  const byteLength = new TextEncoder().encode(csvText).length;
+  if (byteLength > MAX_SUPPLIER_CSV_BYTES) {
+    return {
+      fileName,
+      totalRows: 0,
+      validRowCount: 0,
+      invalidRowCount: 0,
+      rawHeaders: [],
+      recognizedHeaders: [],
+      unrecognizedHeaders: [],
+      missingCandidateIdColumn: true,
+      evidenceMode: "manual_import",
+      evidenceLabel: "Manual / Unverified Evidence",
+      rows: [],
+      fileLevelIssues: ["file_size_exceeds_limit"],
+    };
+  }
+
+  const hasMalformedEncoding = csvText.includes("\0") || csvText.includes("\uFFFD");
   const rawRows = parseRawCsvLines(csvText);
 
   if (rawRows.length === 0) {
@@ -315,7 +338,9 @@ export function parseSupplierCsvText(csvText: string, fileName?: string): Suppli
       evidenceMode: "manual_import",
       evidenceLabel: "Manual / Unverified Evidence",
       rows: [],
-      fileLevelIssues: ["empty_csv_file"],
+      fileLevelIssues: hasMalformedEncoding
+        ? ["empty_csv_file", "malformed_encoding"]
+        : ["empty_csv_file"],
     };
   }
 
@@ -340,15 +365,18 @@ export function parseSupplierCsvText(csvText: string, fileName?: string): Suppli
     }
   }
 
-  const MAX_PREVIEW_ROWS = 1000;
-  const isTruncated = rawRows.length > MAX_PREVIEW_ROWS + 1;
-  const rowsToProcess = isTruncated ? rawRows.slice(0, MAX_PREVIEW_ROWS + 1) : rawRows;
+  const isOverRowCount = rawRows.length > MAX_SUPPLIER_CSV_ROWS + 1;
+  const rowsToProcess = isOverRowCount ? rawRows.slice(0, MAX_SUPPLIER_CSV_ROWS + 1) : rawRows;
 
   const fileLevelIssues: string[] = [];
+  if (hasMalformedEncoding) {
+    fileLevelIssues.push("malformed_encoding");
+  }
   if (!hasCandidateIdHeader) {
     fileLevelIssues.push("missing_candidate_id_column");
   }
-  if (isTruncated) {
+  if (isOverRowCount) {
+    fileLevelIssues.push("row_count_exceeds_limit");
     fileLevelIssues.push("preview_rows_truncated");
   }
 
@@ -384,6 +412,7 @@ export function parseSupplierCsvText(csvText: string, fileName?: string): Suppli
     for (const val of Object.values(record)) {
       if (!val) continue;
       if (
+        /[\0\uFFFD]/.test(val) ||
         /^(?:sk[-_]|ghp_|gho_|xox[baprs]-|AKIA[0-9A-Z]{16})/i.test(val) ||
         /^bearer\s+[a-z0-9._~+/-]+=*/i.test(val) ||
         /<script\b/i.test(val) ||

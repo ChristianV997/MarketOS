@@ -7,6 +7,8 @@ import {
   parseNumericCost,
   formatCostDisplay,
   parseRawCsvLines,
+  MAX_SUPPLIER_CSV_BYTES,
+  MAX_SUPPLIER_CSV_ROWS,
   RECOGNIZED_HEADER_ALIASES,
   RECOGNIZED_SUPPLIERS,
 } from "../src/lib/supplierCsvParser.ts";
@@ -262,6 +264,12 @@ test("react component contract: exports, accessibility attributes, and unverifie
   assert.doesNotMatch(componentSrc, /axios/, "Must not use axios");
   assert.doesNotMatch(componentSrc, /XMLHttpRequest/, "Must not use XMLHttpRequest");
   assert.doesNotMatch(componentSrc, /WebSocket/, "Must not use WebSocket");
+
+  // Explicit bounds and error alert contracts
+  assert.match(componentSrc, /MAX_SUPPLIER_CSV_BYTES/, "Component must reference MAX_SUPPLIER_CSV_BYTES");
+  assert.match(componentSrc, /file-size-exceeded-alert/, "Component must render file-size-exceeded-alert");
+  assert.match(componentSrc, /malformed-encoding-alert/, "Component must render malformed-encoding-alert");
+  assert.match(componentSrc, /preview-rows-truncated-notice/, "Component must render preview-rows-truncated-notice");
 });
 
 test("formatCostDisplay does not leak sensitive strings or raw text when cost is invalid", () => {
@@ -314,12 +322,230 @@ cand-id-col,Widget From ID,10.00,2.00`;
   assert.equal(result.rows[0].candidateId, "cand-id-col");
 });
 
-test("supplier CSV parser bounds large files to MAX_PREVIEW_ROWS with preview_rows_truncated warning", () => {
-  const lines = ["candidate_id,supplier_title,unit_cost,shipping_cost"];
-  for (let i = 1; i <= 1010; i++) {
-    lines.push(`item-${i},Product ${i},5.00,1.00`);
+test("supplier CSV parser: byte size boundary tests (just-under, at limit, and over limit)", () => {
+  // Helper to construct exact byte length CSV
+  function makeByteCsv(targetBytes) {
+    const base = "candidate_id,supplier_title,supplier,unit_cost,shipping_cost,currency\n" +
+      "item-1,Item One,manual,10.00,2.00,USD\n";
+    const baseBytes = new TextEncoder().encode(base).length;
+    assert.ok(targetBytes >= baseBytes, "Target bytes must be at least base size");
+    const pad = " ".repeat(targetBytes - baseBytes);
+    const full = base + pad;
+    assert.equal(new TextEncoder().encode(full).length, targetBytes);
+    return full;
   }
-  const result = parseSupplierCsvText(lines.join("\n"));
-  assert.equal(result.totalRows, 1000);
-  assert.ok(result.fileLevelIssues.includes("preview_rows_truncated"));
+
+  // 1. Just-under byte limit (256 KB - 100 bytes = 262,044 bytes)
+  const justUnderBytes = MAX_SUPPLIER_CSV_BYTES - 100;
+  const justUnderCsv = makeByteCsv(justUnderBytes);
+  const justUnderRes = parseSupplierCsvText(justUnderCsv, "just-under.csv");
+  assert.equal(justUnderRes.fileLevelIssues.includes("file_size_exceeds_limit"), false, "Just-under byte limit must not trigger file_size_exceeds_limit");
+  assert.equal(justUnderRes.totalRows, 1);
+  assert.equal(justUnderRes.validRowCount, 1);
+
+  // 2. Exactly at byte limit (256 KB = 262,144 bytes)
+  const atLimitCsv = makeByteCsv(MAX_SUPPLIER_CSV_BYTES);
+  const atLimitRes = parseSupplierCsvText(atLimitCsv, "at-limit.csv");
+  assert.equal(atLimitRes.fileLevelIssues.includes("file_size_exceeds_limit"), false, "At byte limit must not trigger file_size_exceeds_limit");
+  assert.equal(atLimitRes.totalRows, 1);
+  assert.equal(atLimitRes.validRowCount, 1);
+
+  // 3. Over byte limit by 1 byte (256 KB + 1 byte = 262,145 bytes)
+  const overLimitCsv = makeByteCsv(MAX_SUPPLIER_CSV_BYTES + 1);
+  const overLimitRes = parseSupplierCsvText(overLimitCsv, "over-limit.csv");
+  assert.equal(overLimitRes.fileLevelIssues.includes("file_size_exceeds_limit"), true, "Over byte limit must trigger file_size_exceeds_limit");
+  assert.equal(overLimitRes.totalRows, 0, "Oversized CSV must fail-closed with 0 parsed rows");
+  assert.equal(overLimitRes.validRowCount, 0);
+  assert.equal(overLimitRes.invalidRowCount, 0);
+  assert.equal(overLimitRes.rows.length, 0);
+});
+
+test("supplier CSV parser: row count boundary tests (just-under 99 rows, at limit 100 rows, and over limit 101 rows)", () => {
+  function makeRowCsv(count) {
+    const lines = ["candidate_id,supplier_title,supplier,unit_cost,shipping_cost,currency"];
+    for (let i = 1; i <= count; i++) {
+      lines.push(`item-${i},Product ${i},manual,10.00,2.00,USD`);
+    }
+    return lines.join("\n");
+  }
+
+  // 1. Just-under row limit (99 data rows)
+  const underCsv = makeRowCsv(MAX_SUPPLIER_CSV_ROWS - 1);
+  const underRes = parseSupplierCsvText(underCsv);
+  assert.equal(underRes.totalRows, 99);
+  assert.equal(underRes.validRowCount, 99);
+  assert.equal(underRes.fileLevelIssues.includes("row_count_exceeds_limit"), false);
+  assert.equal(underRes.fileLevelIssues.includes("preview_rows_truncated"), false);
+
+  // 2. Exactly at row limit (100 data rows)
+  const atLimitCsv = makeRowCsv(MAX_SUPPLIER_CSV_ROWS);
+  const atLimitRes = parseSupplierCsvText(atLimitCsv);
+  assert.equal(atLimitRes.totalRows, 100);
+  assert.equal(atLimitRes.validRowCount, 100);
+  assert.equal(atLimitRes.fileLevelIssues.includes("row_count_exceeds_limit"), false);
+  assert.equal(atLimitRes.fileLevelIssues.includes("preview_rows_truncated"), false);
+
+  // 3. Over row limit (101 data rows)
+  const overLimitCsv = makeRowCsv(MAX_SUPPLIER_CSV_ROWS + 1);
+  const overLimitRes = parseSupplierCsvText(overLimitCsv);
+  assert.equal(overLimitRes.totalRows, 100, "Must bound parsed preview rows to MAX_SUPPLIER_CSV_ROWS (100)");
+  assert.equal(overLimitRes.validRowCount, 100);
+  assert.equal(overLimitRes.fileLevelIssues.includes("row_count_exceeds_limit"), true, "Must flag row_count_exceeds_limit when rows > 100");
+  assert.equal(overLimitRes.fileLevelIssues.includes("preview_rows_truncated"), true, "Must flag preview_rows_truncated when rows > 100");
+
+  // 4. Far over row limit (150 data rows)
+  const farOverCsv = makeRowCsv(150);
+  const farOverRes = parseSupplierCsvText(farOverCsv);
+  assert.equal(farOverRes.totalRows, 100);
+  assert.equal(farOverRes.fileLevelIssues.includes("row_count_exceeds_limit"), true);
+  assert.equal(farOverRes.fileLevelIssues.includes("preview_rows_truncated"), true);
+});
+
+test("supplier CSV parser: detects malformed encoding (null bytes and replacement characters)", () => {
+  // 1. Null byte \0 in CSV content
+  const nullByteCsv = "candidate_id,supplier_title,unit_cost,shipping_cost\n" +
+    "item-null,Product\0Corrupt,10.00,2.00";
+  const nullRes = parseSupplierCsvText(nullByteCsv);
+  assert.equal(nullRes.totalRows, 1);
+  assert.ok(nullRes.fileLevelIssues.includes("malformed_encoding"), "Must flag malformed_encoding on null byte");
+  assert.ok(nullRes.rows[0].validationIssues.includes("sensitive_or_malformed_cell_content"));
+  assert.equal(nullRes.rows[0].isValid, false);
+
+  // 2. Unicode replacement character \uFFFD in CSV content
+  const replacementCharCsv = "candidate_id,supplier_title,unit_cost,shipping_cost\n" +
+    "item-replace,Product\uFFFDGarbled,15.00,3.00";
+  const repRes = parseSupplierCsvText(replacementCharCsv);
+  assert.equal(repRes.totalRows, 1);
+  assert.ok(repRes.fileLevelIssues.includes("malformed_encoding"), "Must flag malformed_encoding on replacement character");
+  assert.ok(repRes.rows[0].validationIssues.includes("sensitive_or_malformed_cell_content"));
+  assert.equal(repRes.rows[0].isValid, false);
+
+  // 3. Empty CSV with null byte still reports both empty and malformed encoding
+  const emptyNullCsv = "\0";
+  const emptyNullRes = parseSupplierCsvText(emptyNullCsv);
+  assert.ok(emptyNullRes.fileLevelIssues.includes("malformed_encoding"));
+  assert.ok(emptyNullRes.fileLevelIssues.includes("empty_csv_file"));
+});
+
+test("supplier CSV parser: missing versus explicit zero cost combinations and derivation boundaries", () => {
+  const csv = `candidate_id,supplier_title,unit_cost,shipping_cost
+both-zero,Both Explicit Zero,0,0
+both-zero-formatted,Both Formatted Zero,0.00,$0.00
+unit-zero-ship-missing,Unit Zero Ship Missing,0.00,
+unit-missing-ship-zero,Unit Missing Ship Zero,,0.00
+unit-zero-ship-val,Unit Zero Ship Val,0,4.50
+unit-val-ship-zero,Unit Val Ship Zero,12.00,0
+unit-missing-ship-val,Unit Missing Ship Val,,4.50
+unit-val-ship-missing,Unit Val Ship Missing,12.00,
+neg-unit,Negative Unit Cost,-5.00,2.00
+neg-ship,Negative Shipping Cost,10.00,-2.00`;
+
+  const result = parseSupplierCsvText(csv);
+  assert.equal(result.totalRows, 10);
+
+  // Row 0: Both explicit 0
+  const r0 = result.rows[0];
+  assert.equal(r0.unitCost, 0);
+  assert.equal(r0.isUnitCostExplicitZero, true);
+  assert.equal(r0.shippingCost, 0);
+  assert.equal(r0.isShippingCostExplicitZero, true);
+  assert.equal(r0.estimatedLandedCost, 0);
+
+  // Row 1: Both formatted 0 ($0.00, 0.00)
+  const r1 = result.rows[1];
+  assert.equal(r1.unitCost, 0);
+  assert.equal(r1.isUnitCostExplicitZero, true);
+  assert.equal(r1.shippingCost, 0);
+  assert.equal(r1.isShippingCostExplicitZero, true);
+  assert.equal(r1.estimatedLandedCost, 0);
+
+  // Row 2: Unit zero, shipping missing -> landed cost must be null
+  const r2 = result.rows[2];
+  assert.equal(r2.unitCost, 0);
+  assert.equal(r2.isUnitCostExplicitZero, true);
+  assert.equal(r2.shippingCost, null);
+  assert.equal(r2.isShippingCostMissing, true);
+  assert.equal(r2.estimatedLandedCost, null, "Landed cost must remain null if shipping is missing");
+
+  // Row 3: Unit missing, shipping zero -> landed cost must be null
+  const r3 = result.rows[3];
+  assert.equal(r3.unitCost, null);
+  assert.equal(r3.isUnitCostMissing, true);
+  assert.equal(r3.shippingCost, 0);
+  assert.equal(r3.isShippingCostExplicitZero, true);
+  assert.equal(r3.estimatedLandedCost, null, "Landed cost must remain null if unit cost is missing");
+
+  // Row 4: Unit zero, shipping 4.50 -> landed cost 4.50
+  const r4 = result.rows[4];
+  assert.equal(r4.unitCost, 0);
+  assert.equal(r4.isUnitCostExplicitZero, true);
+  assert.equal(r4.shippingCost, 4.5);
+  assert.equal(r4.estimatedLandedCost, 4.5);
+
+  // Row 5: Unit 12.00, shipping zero -> landed cost 12.00
+  const r5 = result.rows[5];
+  assert.equal(r5.unitCost, 12);
+  assert.equal(r5.shippingCost, 0);
+  assert.equal(r5.isShippingCostExplicitZero, true);
+  assert.equal(r5.estimatedLandedCost, 12);
+
+  // Row 6: Unit missing, shipping 4.50 -> landed cost null
+  const r6 = result.rows[6];
+  assert.equal(r6.unitCost, null);
+  assert.equal(r6.estimatedLandedCost, null);
+
+  // Row 7: Unit 12.00, shipping missing -> landed cost null
+  const r7 = result.rows[7];
+  assert.equal(r7.shippingCost, null);
+  assert.equal(r7.estimatedLandedCost, null);
+
+  // Row 8: Negative unit cost -> invalid
+  const r8 = result.rows[8];
+  assert.equal(r8.unitCost, null);
+  assert.ok(r8.validationIssues.includes("malformed_unit_cost"));
+  assert.equal(r8.estimatedLandedCost, null);
+
+  // Row 9: Negative shipping cost -> invalid
+  const r9 = result.rows[9];
+  assert.equal(r9.shippingCost, null);
+  assert.ok(r9.validationIssues.includes("malformed_shipping_cost"));
+  assert.equal(r9.estimatedLandedCost, null);
+});
+
+test("supplier CSV parser: sanitizes errors and never echoes raw cell content in issues or formatted displays", () => {
+  const sensitiveToken = "sk-live-supersecretapikey-1234567890";
+  const scriptInjection = "<script>window.location='https://attacker.com'</script>";
+  const bearerToken = "bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.xyz";
+
+  const csv = `candidate_id,supplier_title,unit_cost,shipping_cost
+cand-1,Normal Item,${sensitiveToken},2.00
+cand-2,${scriptInjection},10.00,2.00
+cand-3,Normal Item,10.00,${bearerToken}`;
+
+  const result = parseSupplierCsvText(csv);
+  assert.equal(result.totalRows, 3);
+
+  for (const row of result.rows) {
+    // 1. unitCostDisplay and shippingCostDisplay must never contain raw tokens
+    assert.doesNotMatch(row.unitCostDisplay, /supersecret/);
+    assert.doesNotMatch(row.unitCostDisplay, /<script/);
+    assert.doesNotMatch(row.unitCostDisplay, /bearer/);
+    assert.doesNotMatch(row.shippingCostDisplay, /supersecret/);
+    assert.doesNotMatch(row.shippingCostDisplay, /<script/);
+    assert.doesNotMatch(row.shippingCostDisplay, /bearer/);
+
+    // 2. validationIssues must only contain sanitized issue codes
+    for (const issue of row.validationIssues) {
+      assert.doesNotMatch(issue, /supersecret/);
+      assert.doesNotMatch(issue, /<script/);
+      assert.doesNotMatch(issue, /bearer/);
+      assert.match(issue, /^[a-z0-9_]+$/, `Issue code "${issue}" must be a sanitized alphanumeric identifier`);
+    }
+  }
+
+  // 3. fileLevelIssues must only contain sanitized issue codes
+  for (const fileIssue of result.fileLevelIssues) {
+    assert.doesNotMatch(fileIssue, /supersecret/);
+    assert.match(fileIssue, /^[a-z0-9_]+$/, `File issue "${fileIssue}" must be a sanitized identifier`);
+  }
 });

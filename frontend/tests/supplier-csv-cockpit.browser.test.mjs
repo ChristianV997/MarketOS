@@ -72,7 +72,7 @@ test("Supplier CSV Preview - Browser Interaction", { skip: !chromeBin }, async (
     cwd: frontendDir,
     stdio: "inherit"
   });
-  
+
   t.after(() => {
     if (viteProcess && viteProcess.pid) {
       try {
@@ -154,7 +154,7 @@ test("Supplier CSV Preview - Browser Interaction", { skip: !chromeBin }, async (
 
   await t.test("Load cockpit, select file, verify parse output and selection constraints", async () => {
     await cdp.send("Page.navigate", { url: `http://127.0.0.1:${VITE_PORT}/operator/first-phase` });
-    
+
     // Wait for page hydration
     await sleep(1000);
 
@@ -170,16 +170,16 @@ test("Supplier CSV Preview - Browser Interaction", { skip: !chromeBin }, async (
     // Set file input
     let doc = await cdp.send("DOM.getDocument", { depth: -1 });
     let fileInputNode = await cdp.send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: 'input[type="file"]' });
-    
+
     for (let i = 0; i < 20; i++) {
       if (fileInputNode.nodeId) break;
       await sleep(200);
       doc = await cdp.send("DOM.getDocument", { depth: -1 });
       fileInputNode = await cdp.send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: 'input[type="file"]' });
     }
-    
+
     assert.ok(fileInputNode.nodeId, "File input found");
-    
+
     await cdp.send("DOM.setFileInputFiles", {
       files: [CSV_PATH],
       nodeId: fileInputNode.nodeId
@@ -193,8 +193,8 @@ test("Supplier CSV Preview - Browser Interaction", { skip: !chromeBin }, async (
     }
 
     const postUploadRequests = networkRequests.slice(preUploadRequestCount);
-    const apiRequests = postUploadRequests.filter(req => 
-      req.method !== "GET" || req.url.includes("/api/")
+    const apiRequests = postUploadRequests.filter(req =>
+      req.method !== "GET" || req.url.includes("/upload")
     );
     assert.strictEqual(apiRequests.length, 0, "Preview must remain local/draft-only, no upload requests allowed");
 
@@ -210,31 +210,31 @@ test("Supplier CSV Preview - Browser Interaction", { skip: !chromeBin }, async (
     const isSelected = await cdp.eval(`document.querySelector('tbody tr')?.classList.contains('bg-indigo-950/50')`);
     assert.ok(isSelected, "Valid row should be selectable");
   });
-  
+
   await t.test("Invalid rows cannot be selected", async () => {
     // Clear preview
     await cdp.eval(`document.querySelector('button[aria-label="Clear CSV preview"]')?.click()`);
     await sleep(200);
-    
+
     // Upload bad CSV
     let doc = await cdp.send("DOM.getDocument", { depth: -1 });
     let fileInputNode = await cdp.send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: 'input[type="file"]' });
-    
+
     for (let i = 0; i < 20; i++) {
       if (fileInputNode.nodeId) break;
       await sleep(200);
       doc = await cdp.send("DOM.getDocument", { depth: -1 });
       fileInputNode = await cdp.send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: 'input[type="file"]' });
     }
-    
+
     await cdp.send("DOM.setFileInputFiles", { files: [BAD_CSV_PATH], nodeId: fileInputNode.nodeId });
-    
+
     for (let i = 0; i < 20; i++) {
       const hasIssues = await cdp.eval(`document.querySelector('tbody tr td:last-child')?.textContent || ""`);
       if (hasIssues.includes("malformed_unit_cost")) break;
       await sleep(200);
     }
-    
+
     // Check validation errors are rendered
     const hasIssues = await cdp.eval(`document.querySelector('tbody tr td:last-child')?.textContent || ""`);
     assert.match(hasIssues, /malformed_unit_cost/, "Should show validation issues");

@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import {
   parseSupplierCsvText,
+  MAX_SUPPLIER_CSV_BYTES,
+  MAX_SUPPLIER_CSV_ROWS,
   type SupplierCsvPreviewResult,
   type SupplierCsvRowPreview,
 } from "../lib/supplierCsvParser";
@@ -74,6 +76,11 @@ export function SupplierCsvPreview({
     if (file) {
       setParseError(null);
       setFileName(file.name);
+      if (file.size > MAX_SUPPLIER_CSV_BYTES) {
+        setCsvText("");
+        setParseError("File exceeds maximum size of 256 KB.");
+        return;
+      }
       file.text().then((text) => {
         setCsvText(text);
       }).catch(() => {
@@ -83,14 +90,12 @@ export function SupplierCsvPreview({
     }
   }, [file]);
 
-  const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
-
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (!selected) return;
     setParseError(null);
-    if (selected.size > MAX_FILE_SIZE_BYTES) {
-      setParseError(`File too large. Maximum size is 5MB.`);
+    if (selected.size > MAX_SUPPLIER_CSV_BYTES) {
+      setParseError("File exceeds maximum size of 256 KB.");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -113,8 +118,8 @@ export function SupplierCsvPreview({
       setParseError("Only .csv files are supported.");
       return;
     }
-    if (droppedFile.size > MAX_FILE_SIZE_BYTES) {
-      setParseError(`File too large. Maximum size is 5MB.`);
+    if (droppedFile.size > MAX_SUPPLIER_CSV_BYTES) {
+      setParseError("File exceeds maximum size of 256 KB.");
       return;
     }
     setFileName(droppedFile.name);
@@ -310,7 +315,37 @@ export function SupplierCsvPreview({
             </div>
           )}
 
-          {/* Large CSV Truncated Warning */}
+          {/* File Size Exceeded Alert */}
+          {preview.fileLevelIssues.includes("file_size_exceeds_limit") && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded border border-red-800/70 bg-red-950/40 p-3 text-red-200 text-xs"
+              data-testid="file-size-exceeded-alert"
+            >
+              <AlertTriangle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" aria-hidden="true" />
+              <div>
+                <span className="font-semibold text-red-300">File size limit exceeded: </span>
+                File exceeds maximum supported size of 256 KB.
+              </div>
+            </div>
+          )}
+
+          {/* Malformed Encoding Alert */}
+          {preview.fileLevelIssues.includes("malformed_encoding") && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded border border-amber-800/70 bg-amber-950/40 p-3 text-amber-200 text-xs"
+              data-testid="malformed-encoding-alert"
+            >
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" aria-hidden="true" />
+              <div>
+                <span className="font-semibold text-amber-300">Encoding warning: </span>
+                File contains null bytes or replacement characters indicating malformed encoding.
+              </div>
+            </div>
+          )}
+
+          {/* Row Limit Truncated Warning */}
           {preview.fileLevelIssues.includes("preview_rows_truncated") && (
             <div
               role="status"
@@ -319,8 +354,8 @@ export function SupplierCsvPreview({
             >
               <AlertCircle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" aria-hidden="true" />
               <div>
-                <span className="font-semibold text-amber-300">Large CSV file: </span>
-                Showing first 1,000 rows for preview performance.
+                <span className="font-semibold text-amber-300">Row limit reached: </span>
+                Showing first 100 rows for preview inspection (limit: 100 rows).
               </div>
             </div>
           )}
