@@ -11,6 +11,7 @@ import {
   Wrench,
   ListChecks,
   ClipboardList,
+  ListOrdered,
   Telescope,
   UserCheck,
 } from "lucide-react";
@@ -29,7 +30,7 @@ const NAV = [
   { to: "/operator/events", icon: ListChecks, label: "Operator Events" },
   { to: "/operator/services", icon: ClipboardList, label: "Service Workbench" },
   { to: "/operator/first-phase", icon: Telescope, label: "First-phase cockpit" },
-  { to: "/operator/research", icon: Telescope, label: "Research Portfolio" },
+  { to: "/operator/research", icon: ListOrdered, label: "Research Portfolio" },
   { to: "/client/profile", icon: UserCheck, label: "Client CRM" },
 ];
 

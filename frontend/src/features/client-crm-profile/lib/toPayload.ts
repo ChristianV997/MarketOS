@@ -31,12 +31,12 @@ export function buildPayload(draft: ProfileDraft): ClientProfileDraftPayload | n
     offerings: draft.offerings.map((offering) => {
       const base = { name: normalizeText(offering.name), description: normalizeText(offering.description) || null };
       if (!tracksInventory) {
-        return { ...base, delivery: offering.delivery as ServiceDelivery };
+        return offering.delivery === "" ? base : { ...base, delivery: offering.delivery as ServiceDelivery };
       }
       const quantity = offering.quantity.trim();
       return {
         ...base,
-        availability: offering.availability as ProductAvailability,
+        ...(offering.availability === "" ? {} : { availability: offering.availability as ProductAvailability }),
         sku: offering.sku.trim() || null,
         quantity: quantity === "" ? null : Number(quantity),
       };

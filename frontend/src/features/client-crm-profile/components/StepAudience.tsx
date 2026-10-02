@@ -21,7 +21,6 @@ export function StepAudience({ state, dispatch, errorFor }: StepProps) {
         label="Categories"
         singular="category"
         plural="categories"
-        required
         hint={meta?.categoriesHint ?? "For example \"coffee equipment\" or \"bookkeeping\"."}
         values={draft.categories}
         text={state.pending.categories}

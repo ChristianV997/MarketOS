@@ -1,5 +1,5 @@
 import { ProfileSaveError, type ClientProfileDraftPayload, type SaveClientProfile } from "../contracts/clientProfileDraft.ts";
-import { payloadKey } from "./toPayload.ts";
+import { storedKey } from "./toServerBody.ts";
 import type { WizardAction } from "./wizardState.ts";
 
 /**
@@ -20,5 +20,5 @@ export async function runSave(
     dispatch({ type: "saveFailed", code: error instanceof ProfileSaveError ? error.code : "unknown" });
     return;
   }
-  dispatch({ type: "saveSucceeded", key: payloadKey(payload) ?? "" });
+  dispatch({ type: "saveSucceeded", key: storedKey(payload) ?? "" });
 }

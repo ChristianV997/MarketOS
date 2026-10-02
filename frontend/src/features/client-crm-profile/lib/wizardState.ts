@@ -11,7 +11,9 @@ import {
   type StepId,
 } from "../contracts/clientProfileDraft.ts";
 import { buildSampleDraft } from "../fixtures/sampleProfile.ts";
+import { SAVE_ERROR_TEXT } from "./errorCopy.ts";
 import { buildPayload, payloadKey } from "./toPayload.ts";
+import { storedKey } from "./toServerBody.ts";
 import { validateProfile, type FieldError, type ProfileValidation } from "./validateProfile.ts";
 
 export type TagField = "categories" | "segments" | "targetMarkets";
@@ -37,7 +39,7 @@ export interface WizardState {
   /** Field paths the person has left; their errors show even before "Next". */
   touched: string[];
   save: SaveState;
-  /** payloadKey of the last successful save; "saved" only holds while the form still matches it. */
+  /** storedKey of the last successful save; "saved" only holds while the form still matches it. */
   savedKey: string | null;
   /** payloadKey the person confirmed in demo mode (nothing is persisted). */
   demoReviewedKey: string | null;
@@ -319,7 +321,7 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
     case "saveSucceeded":
       return { ...state, save: { status: "saved" }, savedKey: action.key, announcement: "Profile saved." };
     case "saveFailed":
-      return { ...state, save: { status: "error", code: action.code }, announcement: "Saving failed. Your entries are still here." };
+      return { ...state, save: { status: "error", code: action.code }, announcement: `${SAVE_ERROR_TEXT[action.code]} Your entries are still here.` };
     case "demoReviewed":
       return { ...state, demoReviewedKey: action.key, announcement: "Reviewed in demo mode. Nothing was saved or sent." };
   }
@@ -348,7 +350,7 @@ export function saveView(state: WizardState, persistenceAvailable: boolean): Sav
   if (!persistenceAvailable) return "demo";
   if (state.save.status === "saving") return "saving";
   if (state.save.status === "error") return "error";
-  const current = payloadKey(buildPayload(state.draft));
+  const current = storedKey(buildPayload(state.draft));
   if (state.savedKey !== null) return current === state.savedKey ? "saved" : "changed_since_saved";
   return "unsaved";
 }

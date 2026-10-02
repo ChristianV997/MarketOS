@@ -94,6 +94,7 @@ export function ChipInput({
           onChange={(event) => {
             onText(event.target.value);
             if (localError) setLocalError(null);
+            if (note) setNote(null);
           }}
           onKeyDown={onKeyDown}
           onBlur={onBlur}
@@ -103,7 +104,7 @@ export function ChipInput({
         </button>
       </div>
       {shownError ? (
-        <p id={`${id}-error`} role="alert" data-field-error={path} className={`text-sm text-red-300 ${WRAP}`}>
+        <p id={`${id}-error`} role={localError ? "alert" : undefined} data-field-error={path} className={`text-sm text-red-300 ${WRAP}`}>
           <span className="font-semibold">Error: </span>
           {shownError}
         </p>
@@ -120,6 +121,7 @@ export function ChipInput({
               className="ml-1 inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-r text-zinc-300 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
               onClick={() => {
                 onRemove(index);
+                setNote(null);
                 inputRef.current?.focus();
               }}
             >

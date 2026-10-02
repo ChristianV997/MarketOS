@@ -14,6 +14,8 @@ const { looksLikeSecret } = await importFeature("lib/secretShape.ts");
 const { prepareTags } = await importFeature("lib/tags.ts");
 const { buildPayload, payloadKey } = await importFeature("lib/toPayload.ts");
 const { runSave } = await importFeature("lib/runSave.ts");
+const { storedKey } = await importFeature("lib/toServerBody.ts");
+const textLib = await importFeature("lib/text.ts");
 const { EMPTY_DRAFT, initialWizardState, wizardReducer, wizardValidation, pendingErrors, isBlank, saveView, stepStatus, demoReviewedNow } = await importFeature("lib/wizardState.ts");
 const { buildSampleDraft } = await importFeature("fixtures/sampleProfile.ts");
 
@@ -48,11 +50,11 @@ test("an empty draft reports every required item, grouped by step, and is not co
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.errors.map((error) => error.path),
-    ["companyName", "businessType", "categories", "segments", "targetMarkets", "offerings"],
+    ["companyName", "businessType", "segments", "targetMarkets", "offerings"],
   );
   assert.ok(result.errors.every((error) => error.code === "required"));
   assert.deepEqual(result.byStep.company.map((e) => e.path), ["companyName", "businessType"]);
-  assert.deepEqual(result.byStep.audience.map((e) => e.path), ["categories", "segments", "targetMarkets"]);
+  assert.deepEqual(result.byStep.audience.map((e) => e.path), ["segments", "targetMarkets"], "categories are not stored by the service, so they are optional");
   assert.deepEqual(result.byStep.offerings.map((e) => e.path), ["offerings"]);
   assert.deepEqual(result.byStep.social, [], "social accounts are optional");
   assert.deepEqual(result.byStep.review, []);
@@ -66,7 +68,7 @@ test("complete product and service profiles validate; social accounts stay optio
 test("error messages are specific and tell the person what to do", () => {
   assert.equal(messageFor(EMPTY_DRAFT, "companyName"), "Enter your company name.");
   assert.equal(messageFor(EMPTY_DRAFT, "businessType"), "Choose the business type that fits best.");
-  assert.equal(messageFor(EMPTY_DRAFT, "categories"), "Add at least one category.");
+  assert.equal(messageFor(EMPTY_DRAFT, "categories"), undefined, "categories are optional");
   assert.equal(messageFor(EMPTY_DRAFT, "offerings"), "Add at least one product or service.");
   assert.equal(messageFor(productDraft({ offerings: [] }), "offerings"), "Add at least one product.");
   assert.equal(messageFor(serviceDraft("service_b2c", { offerings: [] }), "offerings"), "Add at least one service.");
@@ -95,15 +97,16 @@ test("company name: length, control characters and credential shapes are rejecte
 
 // ------------------------------------------------------------ business type behaviour
 
-test("service types require delivery and ignore inventory fields", () => {
+test("service types do not require delivery and ignore inventory fields", () => {
   const draft = serviceDraft("service_b2b", { offerings: [offering({ name: "Audit", quantity: "abc", sku: "!!bad!!" })] });
-  assert.deepEqual(paths(draft), ["offerings.0.delivery"], "quantity/SKU are not evaluated for services");
-  assert.equal(messageFor(draft, "offerings.0.delivery"), "Choose how service 1 is delivered.");
+  assert.deepEqual(paths(draft), [], "delivery is not stored by the service, so it is optional; quantity/SKU are not evaluated for services");
+  assert.equal(buildPayload(draft).offerings[0].delivery, undefined, "an unchosen delivery is left out, never sent as an empty string");
 });
 
-test("product type requires availability and validates the optional inventory fields", () => {
-  const base = productDraft({ offerings: [offering({ name: "Kettle" })] });
-  assert.equal(messageFor(base, "offerings.0.availability"), 'Choose the availability of product 1. Pick "Not sure" if unknown.');
+test("product type validates the optional availability and inventory fields", () => {
+  const base = productDraft({ offerings: [offering({ name: "Kettle", availability: "" })] });
+  assert.equal(messageFor(base, "offerings.0.availability"), undefined, "availability is not stored by the service, so it is optional");
+  assert.equal(buildPayload(base).offerings[0].availability, undefined);
   const withBad = (patch) => productDraft({ offerings: [offering({ name: "Kettle", availability: "in_stock", ...patch })] });
   assert.equal(messageFor(withBad({ quantity: "12" }), "offerings.0.quantity"), undefined);
   assert.equal(messageFor(withBad({ quantity: "" }), "offerings.0.quantity"), undefined, "empty quantity is allowed: not reported");
@@ -126,6 +129,22 @@ test("offering names are required per row and reported by row number", () => {
   assert.equal(messageFor(draft, "offerings.0.name"), undefined);
 });
 
+test("two offerings with the same name are refused (the service rejects them), case-insensitively", () => {
+  const draft = productDraft({ offerings: [offering({ name: "Kettle" }), offering({ key: "o2", name: " kettle " })] });
+  assert.equal(messageFor(draft, "offerings.1.name"), "This is the same name as product 1. Use a different name or remove one.");
+  assert.equal(validateProfile(draft).complete, false);
+  assert.equal(messageFor(draft, "offerings.0.name"), undefined);
+});
+
+test("the form offers every business type and social platform the service accepts, and no more offerings than it allows", () => {
+  assert.deepEqual([...contracts.BUSINESS_TYPES], ["service_b2c", "service_b2b", "product", "other"]);
+  assert.deepEqual([...contracts.SOCIAL_PLATFORMS].sort(), ["facebook", "instagram", "linkedin", "other", "pinterest", "threads", "tiktok", "x", "youtube"]);
+  assert.equal(contracts.LIMITS.maxOfferings, 25);
+  assert.ok(contracts.LIMITS.maxSegments <= 25 && contracts.LIMITS.maxTargetMarkets <= 25 && contracts.LIMITS.maxSocialAccounts <= 25);
+  const many = productDraft({ offerings: Array.from({ length: 26 }, (_, i) => offering({ key: `o${i}`, name: `Item ${i}` })) });
+  assert.ok(paths(many).includes("offerings"), "26 offerings exceed the service limit");
+});
+
 test("switching business type keeps what was typed; only the fields that apply are validated and sent", () => {
   const typed = offering({ name: "Kettle", availability: "in_stock", sku: "K-1", quantity: "5", delivery: "" });
   const asProduct = productDraft({ offerings: [typed] });
@@ -134,7 +153,7 @@ test("switching business type keeps what was typed; only the fields that apply a
   const state = wizardReducer(initialWizardState({ draft: asProduct }), { type: "setBusinessType", value: "service_b2b" });
   assert.equal(state.draft.offerings[0].sku, "K-1", "inventory entries are retained");
   assert.equal(state.draft.offerings[0].availability, "in_stock");
-  assert.deepEqual(paths(state.draft), ["offerings.0.delivery"], "a service now needs a delivery mode");
+  assert.deepEqual(paths(state.draft), [], "a service no longer needs a delivery mode to be complete");
   assert.match(state.announcement, /Your offerings are kept/);
 
   const back = wizardReducer(state, { type: "setBusinessType", value: "product" });
@@ -147,7 +166,9 @@ test("segments label follows the business type (B2C, B2B, product)", () => {
   assert.equal(meta.service_b2c.segmentsLabel, "Customer segments");
   assert.equal(meta.service_b2b.segmentsLabel, "Buyer segments");
   assert.equal(meta.product.segmentsLabel, "Customer segments");
-  assert.deepEqual(Object.values(meta).map((m) => m.tracksInventory), [false, false, true]);
+  assert.deepEqual(Object.keys(meta), ["service_b2c", "service_b2b", "other", "product"]);
+  assert.deepEqual(Object.keys(meta).filter((k) => meta[k].tracksInventory), ["product"]);
+  assert.deepEqual([...contracts.BUSINESS_TYPES].sort(), Object.keys(meta).sort(), "every type the service accepts has form copy");
 });
 
 // ------------------------------------------------------------ tags
@@ -209,7 +230,8 @@ test("social accounts are optional, but each account needs a platform and a hand
 
 test("handles: a leading @ is normalized; spaces and odd characters are rejected", () => {
   assert.equal(normalizeHandle("  @Shop_Name "), "Shop_Name");
-  assert.equal(messageFor(productDraft({ socialAccounts: [account({ handle: "@ok.handle-1" })] }), "socialAccounts.0.handle"), undefined);
+  assert.equal(messageFor(productDraft({ socialAccounts: [account({ handle: "@ok.handle_1" })] }), "socialAccounts.0.handle"), undefined);
+  assert.match(messageFor(productDraft({ socialAccounts: [account({ handle: "no-dash" })] }), "socialAccounts.0.handle"), /dots and underscores/, "the service rejects a dash");
   assert.match(messageFor(productDraft({ socialAccounts: [account({ handle: "has space" })] }), "socialAccounts.0.handle"), /no spaces/);
   assert.match(messageFor(productDraft({ socialAccounts: [account({ handle: "bad/handle" })] }), "socialAccounts.0.handle"), /letters, numbers/);
 });
@@ -409,7 +431,7 @@ test("confirm attempt on an incomplete profile focuses the missing-information s
   const blocked = run(initialWizardState({ step: "review" }), { type: "confirmAttempt" });
   assert.deepEqual(blocked.attempted, ["review"]);
   assert.equal(blocked.focus.target, "summary");
-  assert.match(blocked.announcement, /Cannot confirm yet: 6 items need attention/);
+  assert.match(blocked.announcement, /Cannot confirm yet: 5 items need attention/);
   const complete = initialWizardState({ draft: productDraft(), step: "review" });
   assert.equal(run(complete, { type: "confirmAttempt" }), complete);
 });
@@ -458,12 +480,14 @@ test("with persistence, 'saved' holds only while the form still equals what was 
   assert.equal(saveView(state, true), "unsaved");
   state = run(state, { type: "saveStarted" });
   assert.equal(saveView(state, true), "saving");
-  state = run(state, { type: "saveSucceeded", key: payloadKey(buildPayload(state.draft)) });
+  state = run(state, { type: "saveSucceeded", key: storedKey(buildPayload(state.draft)) });
   assert.equal(saveView(state, true), "saved");
   state = run(state, { type: "setCompanyName", value: "Renamed Demo Co" });
   assert.equal(saveView(state, true), "changed_since_saved");
   state = run(state, { type: "setCompanyName", value: "Example Demo Co" });
   assert.equal(saveView(state, true), "saved", "reverting the edit matches the saved profile again");
+  state = run(state, { type: "addTags", field: "categories", tags: ["Tea"] });
+  assert.equal(saveView(state, true), "saved", "a tab-only field the service does not store never reads as unsaved");
   state = run(state, { type: "saveFailed", code: "unavailable" });
   assert.equal(saveView(state, true), "error");
   assert.match(state.announcement, /Your entries are still here/);
@@ -477,7 +501,7 @@ test("runSave: saved only after the promise resolves, with the payload key", asy
   const calls = [];
   await runSave(async (received) => { calls.push(received); }, payload, (action) => seen.push(action));
   assert.deepEqual(seen.map((a) => a.type), ["saveStarted", "saveSucceeded"]);
-  assert.equal(seen[1].key, payloadKey(payload));
+  assert.equal(seen[1].key, storedKey(payload));
   assert.deepEqual(calls, [payload]);
 });
 
@@ -493,4 +517,16 @@ test("runSave: typed failures become codes; raw error text is never surfaced", a
   await runSave(async () => { throw new Error("SQL error near 'Example Demo Co' token=abc123"); }, payload, (a) => seen.push(a));
   assert.equal(seen[1].code, "unknown");
   assert.doesNotMatch(JSON.stringify(seen), /SQL|abc123|Example Demo/);
+});
+
+test("duplicate detection is locale-independent, like the service's Python lower()", () => {
+  const { dedupeCaseInsensitive } = textLib;
+  const original = String.prototype.toLocaleLowerCase;
+  // A Turkish-locale environment lowercases "I" to a dotless i; the service never does.
+  String.prototype.toLocaleLowerCase = function () { return this.replace(/I/g, "\u0131").toLowerCase(); };
+  try {
+    assert.deepEqual(dedupeCaseInsensitive(["INDEX", "index"]), ["INDEX"]);
+  } finally {
+    String.prototype.toLocaleLowerCase = original;
+  }
 });

@@ -1,21 +1,23 @@
 /**
- * Client CRM profile: draft contract.
+ * Client CRM profile: the form's draft and the local "payload" it hands to a
+ * persistence function.
  *
- * STATUS: frontend-proposed, NOT backed by any API. Verified on main: there is no
- * client-profile endpoint, no authenticated identity and no tenant enforcement
- * (api/onboarding.py is an in-memory, unauthenticated store-setup wizard keyed by
- * a client-supplied session id; ClientWorkspace has no profile fields and derives
- * workspace_id from its name). The backend owns the final schema; nothing here
- * should be treated as canonical.
+ * This is the FORM model, not the wire contract. The server's contract is
+ * `api/routes/client_profile.py` (`/api/organization/client-profile`): it stores
+ * only company name, business type, segments, target markets, offering NAMES and
+ * social handles (always reported `not_connected`). `lib/serverProfile.ts` and
+ * `lib/toServerBody.ts` map between the two; everything else in this file
+ * (categories, offering details, social links and notes) is kept in the browser
+ * tab only and is never sent. Nothing here is verified or connected.
  *
  * Identity: this contract deliberately has NO workspace/tenant/client id field.
- * Who the profile belongs to must come from the authenticated session on the
- * server, never from a value the user can type or select.
+ * Who the profile belongs to is decided by the server from the verified bearer
+ * token, never from a value the user can type or select.
  */
 
 export const CLIENT_PROFILE_DRAFT_SCHEMA_VERSION = "client-profile-draft-v0";
 
-export const BUSINESS_TYPES = ["service_b2c", "service_b2b", "product"] as const;
+export const BUSINESS_TYPES = ["service_b2c", "service_b2b", "product", "other"] as const;
 export type BusinessType = (typeof BUSINESS_TYPES)[number];
 
 export const SERVICE_DELIVERY_MODES = ["remote", "on_site", "hybrid"] as const;
@@ -24,7 +26,7 @@ export type ServiceDelivery = (typeof SERVICE_DELIVERY_MODES)[number];
 export const PRODUCT_AVAILABILITY = ["in_stock", "made_to_order", "dropship", "preorder", "unknown"] as const;
 export type ProductAvailability = (typeof PRODUCT_AVAILABILITY)[number];
 
-export const SOCIAL_PLATFORMS = ["instagram", "tiktok", "facebook", "x", "linkedin", "youtube", "pinterest", "other"] as const;
+export const SOCIAL_PLATFORMS = ["instagram", "tiktok", "facebook", "x", "linkedin", "youtube", "pinterest", "threads", "other"] as const;
 export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number];
 
 export const LIMITS = {
@@ -35,12 +37,15 @@ export const LIMITS = {
   maxCategories: 10,
   maxSegments: 10,
   maxTargetMarkets: 20,
-  maxOfferings: 50,
+  /** The server accepts at most 25 entries per list. */
+  maxOfferings: 25,
   offeringNameMax: 120,
   offeringDescriptionMax: 300,
   skuMax: 64,
   quantityMax: 1_000_000,
   maxSocialAccounts: 20,
+  /** What the service itself accepts per list; the form limits above are stricter for segments, markets and social accounts. */
+  serverListMax: 25,
   handleMax: 64,
   urlMax: 300,
   notesMax: 200,
@@ -75,6 +80,15 @@ export const BUSINESS_TYPE_META: Record<BusinessType, BusinessTypeMeta> = {
     segmentsLabel: "Buyer segments",
     segmentsHint: "Kinds of companies or teams you serve, for example \"mid-market SaaS\" or \"regional retailers\".",
     categoriesHint: "What kind of service business this is, for example \"bookkeeping\".",
+    tracksInventory: false,
+  },
+  other: {
+    label: "Other business model",
+    description: "None of the above fits. You can still describe what you offer.",
+    offeringNoun: "service",
+    segmentsLabel: "Customer segments",
+    segmentsHint: "Groups of people or companies you serve.",
+    categoriesHint: "What kind of business this is.",
     tracksInventory: false,
   },
   product: {
@@ -138,9 +152,9 @@ export interface ClientProfileDraftPayload {
   offerings: Array<{
     name: string;
     description: string | null;
-    /** Present for service businesses only. */
+    /** Service businesses only, and only when chosen. Never sent to the profile service. */
     delivery?: ServiceDelivery;
-    /** Present for product businesses only. */
+    /** Product businesses only, and only when chosen. Never sent to the profile service. */
     availability?: ProductAvailability;
     sku?: string | null;
     /** Self-reported and unverified; null when not reported. */
@@ -176,6 +190,7 @@ export const PROFILE_ERROR_CODES = [
   "malformed_response",
   "network",
   "validation",
+  "content_rejected",
   "unknown",
 ] as const;
 export type ProfileErrorCode = (typeof PROFILE_ERROR_CODES)[number];

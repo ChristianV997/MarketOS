@@ -349,6 +349,9 @@ test("ranking: missing values stay null and never become zero", () => {
   assert.equal(formatReportedScore(undefined), NOT_REPORTED);
   assert.equal(formatReportedScore(Number.NaN), NOT_REPORTED);
   assert.equal(formatReportedScore(0), "0%", "an explicit reported zero is still shown as zero");
+  assert.equal(formatReportedScore(0.004), "<1%", "rounding never turns a small reported value into an apparent zero");
+  assert.equal(formatReportedScore(0.996), ">99%", "rounding never turns a near-1 value into a perfect score");
+  assert.equal(formatReportedScore(1), "100%");
   assert.equal(formatReportedScore(0.615), "62%");
   assert.match(formatReportedScore(72), /outside 0-1/);
 });

@@ -21,10 +21,11 @@ import ts from "typescript";
 import { FEATURE_ROOT, importFeature } from "./load.mjs";
 
 const Page = (await importFeature("ClientProfileWizard.tsx")).default;
-const { initialWizardState, EMPTY_DRAFT } = await importFeature("lib/wizardState.ts");
+const { initialWizardState, wizardReducer, EMPTY_DRAFT } = await importFeature("lib/wizardState.ts");
 const { validateProfile } = await importFeature("lib/validateProfile.ts");
 const { focusId } = await importFeature("lib/focusTargets.ts");
 const { buildPayload, payloadKey } = await importFeature("lib/toPayload.ts");
+const { storedKey } = await importFeature("lib/toServerBody.ts");
 const featureIndex = await importFeature("index.ts");
 
 // ------------------------------------------------------------ helpers
@@ -106,13 +107,14 @@ test("company step: every visible label points at a real control; business type 
 
   assert.match(html, /<legend[^>]*>\s*Business type/);
   const radios = tagsOf(html, "input", (t) => attr(t, "type") === "radio");
-  assert.equal(radios.length, 3);
-  assert.deepEqual(radios.map((t) => attr(t, "value")), ["service_b2c", "service_b2b", "product"]);
+  assert.equal(radios.length, 4);
+  assert.deepEqual(radios.map((t) => attr(t, "value")), ["service_b2c", "service_b2b", "product", "other"], "every business type the service accepts");
   assert.ok(radios.every((t) => attr(t, "name") === "businessType"));
   assert.ok(radios.every((t) => !has(t, "checked")), "nothing is preselected");
   assert.match(text(html), /Service for consumers \(B2C\)/);
   assert.match(text(html), /Service for businesses \(B2B\)/);
   assert.match(text(html), /Product business/);
+  assert.match(text(html), /Other business model/);
 });
 
 test("no field can hold a secret: no password inputs, autocomplete off, plain text inputs", () => {
@@ -215,7 +217,7 @@ test("offerings step for a service: delivery is asked; inventory fields are abse
 
 test("offerings step for a product: availability, SKU and self-reported units are asked; delivery is absent", () => {
   const html = asStep("offerings", productDraft());
-  assert.match(text(html), /Availability \(required\)/);
+  assert.match(text(html), /Availability \(optional\)/);
   assert.match(html, /<option value="unknown">Not sure<\/option>/);
   assert.match(text(html), /SKU \(optional\)/);
   assert.match(text(html), /Units on hand \(optional\)/);
@@ -295,12 +297,14 @@ test("text left in a tag box is shown in the box and reported when Next is attem
   assert.match(text(html), /There is text in the category box that has not been added\. Choose Add category, or clear the box\./);
   assert.match(html, /href="#cp-categories"/);
   const errorTag = tagsOf(html, "p", (t) => attr(t, "id") === "cp-categories-error")[0];
-  assert.equal(attr(errorTag, "role"), "alert", "chip errors are announced because focus stays in the box");
+  assert.ok(!attr(errorTag, "role"), "a validation error is announced by the error summary that takes focus; only errors raised while typing in the box are alerts");
+  assert.equal(attr(tagsOf(html, "input", (t) => attr(t, "name") === "categories")[0], "aria-invalid"), "true");
+  assert.match(attr(tagsOf(html, "input", (t) => attr(t, "name") === "categories")[0], "aria-describedby"), /cp-categories-error/);
 });
 
 test("offerings step reminds which detail each entry needs for the chosen type", () => {
-  assert.match(text(asStep("offerings", productDraft())), /Business type: Product business\. Each product needs its availability\. Details typed for another type are kept but not saved\./);
-  assert.match(text(asStep("offerings", serviceDraft("service_b2c"))), /Each service needs its delivery\./);
+  assert.match(text(asStep("offerings", productDraft())), /Business type: Product business\. Availability is optional\. Details typed for another type are kept but not saved\./);
+  assert.match(text(asStep("offerings", serviceDraft("service_b2c"))), /Delivery is optional\./);
   assert.doesNotMatch(text(asStep("offerings", productDraft({ offerings: [] }))), /Business type: /);
 });
 
@@ -326,9 +330,9 @@ test("social step: optional and skippable when empty; platform options are the s
 
 test("review with missing information lists each item with a link and keeps Confirm reachable", () => {
   const html = asStep("review", { ...EMPTY_DRAFT, companyName: "Example Demo Co" });
-  assert.match(text(html), /Missing or invalid information \(5\)/);
-  assert.match(html, /data-missing-info="5"/);
-  for (const message of ["Choose the business type that fits best.", "Add at least one category.", "Add at least one product or service."]) {
+  assert.match(text(html), /Missing or invalid information \(4\)/);
+  assert.match(html, /data-missing-info="4"/);
+  for (const message of ["Choose the business type that fits best.", "Add at least one entry for segments.", "Add at least one target market.", "Add at least one product or service."]) {
     assert.match(text(html), new RegExp(message.replace(/[.]/g, "\\.")));
   }
   assert.match(html, /href="#cp-businessType"/);
@@ -345,7 +349,7 @@ test("review of a complete profile in demo mode: not saved, nothing connected, d
   assert.match(text(html), /All required information is present/);
   assert.match(html, /data-panel="saved-profile"[^>]*data-save-view="demo"/);
   assert.match(text(html), /Demo only: not saved/);
-  assert.match(text(html), /Saving needs a secure, signed-in storage service/);
+  assert.match(text(html), /Saving needs a signed-in connection to the profile service/);
   assert.doesNotMatch(text(html), /tenant/i, "no engineering jargon in client-facing copy");
   assert.match(text(html), /Connected external accounts Nothing connected by this page/);
   assert.match(text(html), /This page cannot connect an account/);
@@ -387,7 +391,7 @@ test("with a save function the demo banner is replaced and Confirm says it saves
 test("saved / changed / saving / failed states each use their own wording and never over-claim", () => {
   const props = { onSave: async () => {} };
   const draft = productDraft();
-  const key = payloadKey(buildPayload(draft));
+  const key = storedKey(buildPayload(draft));
   const saved = asStep("review", draft, { savedKey: key, save: { status: "saved" } }, props);
   assert.match(html2(saved, "saved"), /Profile saved/);
   const changed = asStep("review", productDraft({ companyName: "Renamed Demo Co" }), { savedKey: key, save: { status: "saved" } }, props);
@@ -402,6 +406,7 @@ test("saved / changed / saving / failed states each use their own wording and ne
   const seen = new Set();
   for (const [code, message] of [
     ["unauthenticated", /not signed in/],
+    ["content_rejected", /content screen rejected a value/],
     ["forbidden", /not allowed to save/],
     ["not_found", /service could not be found/],
     ["conflict", /changed elsewhere/],
@@ -419,7 +424,16 @@ test("saved / changed / saving / failed states each use their own wording and ne
     assert.doesNotMatch(text(failed), /Profile saved/, code);
     seen.add(text(failed.match(/data-panel="saved-profile".*?<\/section>/s)[0]));
   }
-  assert.equal(seen.size, 9, "every failure code reads differently");
+  assert.equal(seen.size, 10, "every failure code reads differently");
+});
+
+test("a failed save is also shown right above Confirm, so it is seen where the button was pressed", () => {
+  const html = asStep("review", productDraft(), { save: { status: "error", code: "unavailable" } }, { onSave: async () => {} });
+  const at = html.indexOf("data-save-error=");
+  assert.ok(at > 0 && at < html.indexOf("data-confirm"), "the message precedes the Confirm button");
+  assert.match(text(html.slice(at, html.indexOf("data-confirm"))), /unavailable right now.*Your entries are still here/);
+  assert.doesNotMatch(html.slice(at - 80, at + 40), /role="alert"/, "the live region announces it; no second alert");
+  assert.doesNotMatch(asStep("review", productDraft(), {}, { onSave: async () => {} }), /data-save-error/);
 });
 const html2 = (html, view) => {
   assert.match(html, new RegExp(`data-save-view="${view}"`));
@@ -442,6 +456,7 @@ test("the word 'connected' only ever appears in negated or panel-title forms, on
     /cannot connect/gi,
     /is not connected yet/gi,
     /not connected to this page/gi,
+    /signed-in connection to the profile service/gi,
   ];
   const renders = [];
   for (const props of [{}, { onSave: async () => {} }]) {
@@ -543,9 +558,16 @@ test("guard (AST): no network, storage, cookies, analytics, logging, HTML inject
 
 test("guard (AST): no identity or connection concepts in identifiers; no password inputs in JSX", async () => {
   const banned = /workspace|tenant|clientId|client_id|ownerId|userId|oauth|accessToken|apiKey|connectAccount|authorize|isConnected|verified/i;
+  // The bearer-token SEAM is the one legitimate use: a host-supplied provider threaded to the API client.
+  // No form, step or wizard file may name it, and nothing may hold a token value in state.
+  const TOKEN_SEAM_FILES = new Set(["lib/clientProfileApi.ts", "hooks/useProfileSession.ts", "ClientProfileOnboardingPage.tsx", "lib/profileSession.ts"]);
+  const TOKEN_SEAM_NAMES = /^(getAccessToken|AccessTokenProvider)$/;
   for (const { file, source } of await featureSources()) {
     const { identifiers, jsxAttributes } = scan(file, source);
-    for (const name of identifiers) assert.doesNotMatch(name, banned, `${file}: ${name}`);
+    for (const name of identifiers) {
+      if (TOKEN_SEAM_FILES.has(file.replace(/^.*client-crm-profile\//, "")) && TOKEN_SEAM_NAMES.test(name)) continue;
+      assert.doesNotMatch(name, banned, `${file}: ${name}`);
+    }
     for (const attribute of jsxAttributes) {
       assert.ok(!(attribute.name === "type" && /password/i.test(attribute.value)), `${file} has a password input`);
     }
@@ -572,4 +594,48 @@ test("public index exposes the page, the save seam and the draft schema version 
 test("the initial state helper exposes no persisted or identity fields", () => {
   const keys = Object.keys(initialWizardState()).sort();
   assert.deepEqual(keys, ["announcement", "attempted", "demoReviewedKey", "draft", "focus", "keyCounter", "pending", "save", "savedKey", "step", "touched"]);
+});
+
+// ------------------------------------------------------------ review-driven regressions (a11y + truthfulness)
+
+test("live mode says per step which fields the server keeps; demo mode shows no such note", () => {
+  const live = { onSave: async () => {} };
+  for (const [step, pattern] of [["audience", /Categories stay in this tab only/], ["offerings", /Only the offering names are saved/], ["social", /Only the platform and handle are saved/]]) {
+    const html = asStep(step, productDraft(), {}, live);
+    assert.match(html, /data-tab-only-note/, step);
+    assert.match(text(html), pattern, step);
+    assert.doesNotMatch(asStep(step, productDraft()), /data-tab-only-note/, `demo ${step}`);
+  }
+  assert.doesNotMatch(asStep("company", productDraft(), {}, live), /data-tab-only-note/);
+});
+
+test("review: social notes are shown (and marked tab-only when live); success is stated next to Confirm", () => {
+  const draft = productDraft({ socialAccounts: [{ key: "s1", platform: "instagram", handle: "example_demo", url: "", notes: "Main shop account" }] });
+  assert.match(text(asStep("review", draft, {}, { onSave: async () => {} })), /Notes: Main shop account \(this tab only\)/);
+  assert.match(text(asStep("review", draft)), /Notes: Main shop account(?! \(this tab only\))/);
+  const key = storedKey(buildPayload(draft));
+  const saved = asStep("review", draft, { savedKey: key, save: { status: "saved" } }, { onSave: async () => {} });
+  const at = saved.indexOf("data-save-status");
+  assert.ok(at > 0 && at < saved.indexOf("data-confirm"), "the success line precedes the Confirm button");
+  assert.match(text(saved.slice(at, saved.indexOf("data-confirm"))), /Profile saved\. The details under "Stays in this tab only" were not sent\./);
+  const changed = asStep("review", { ...draft, companyName: "Renamed Demo Co" }, { savedKey: key, save: { status: "saved" } }, { onSave: async () => {} });
+  assert.doesNotMatch(changed, /data-save-status/, "no success line once the form differs from what was saved");
+});
+
+test("a failed save's visible duplicate is hidden from assistive technology; the announcement carries the reason", () => {
+  const html = asStep("review", productDraft(), { save: { status: "error", code: "conflict" } }, { onSave: async () => {} });
+  assert.match(html, /data-save-error="conflict"[^>]*aria-hidden="true"/);
+  const state = wizardReducer(initialWizardState({ draft: productDraft(), step: "review" }), { type: "saveFailed", code: "conflict" });
+  assert.match(state.announcement, /changed elsewhere.*Your entries are still here/);
+});
+
+test("accessibility details: focusable page heading, 3:1 control borders, required radios, no notes overflowing the gutter", async () => {
+  assert.match(asStep("company", EMPTY_DRAFT), /<h1[^>]*id="cp-page-heading"[^>]*tabindex="-1"/);
+  const radios = tagsOf(asStep("company", EMPTY_DRAFT), "input", (t) => attr(t, "type") === "radio");
+  assert.ok(radios.every((t) => has(t, "required")), "business type is exposed as required to assistive technology");
+  const fields = await readFile(new URL("../../src/features/client-crm-profile/components/Fields.tsx", import.meta.url), "utf8");
+  assert.match(fields, /INPUT_CLASS =\s*"[^"]*border-zinc-500/);
+  assert.doesNotMatch(fields, /INPUT_CLASS =\s*"[^"]*border-zinc-700/);
+  const panels = await readFile(new URL("../../src/features/client-crm-profile/components/LoadPanels.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(panels, /sm:mx-6/, "a note must not combine w-full with a side margin");
 });

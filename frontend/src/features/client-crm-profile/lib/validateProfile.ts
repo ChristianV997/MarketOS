@@ -34,10 +34,12 @@ export function fieldId(path: string): string {
   return `cp-${path.replace(/\./g, "-")}`;
 }
 
-const HANDLE = /^[A-Za-z0-9._-]{1,64}$/;
+/** Same character set the profile service accepts for a handle (no dash). */
+const HANDLE = /^[A-Za-z0-9._]{1,64}$/;
 const SKU = /^[A-Za-z0-9._\-/ ]{1,64}$/;
 
 const PLATFORM_HOSTS: Record<Exclude<SocialPlatform, "other">, readonly string[]> = {
+  threads: ["threads.net", "threads.com"],
   instagram: ["instagram.com"],
   tiktok: ["tiktok.com"],
   facebook: ["facebook.com", "fb.com"],
@@ -55,6 +57,7 @@ export const PLATFORM_LABEL: Record<SocialPlatform, string> = {
   linkedin: "LinkedIn",
   youtube: "YouTube",
   pinterest: "Pinterest",
+  threads: "Threads",
   other: "Other",
 };
 
@@ -115,12 +118,12 @@ export function validateProfileUrl(raw: string, platform: SocialPlatform | ""): 
 function tagListErrors(
   path: "categories" | "segments" | "targetMarkets",
   values: readonly string[],
-  requiredMessage: string,
+  requiredMessage: string | null,
   max: number,
   label: string,
 ): FieldError[] {
   const step = stepOfPath(path);
-  if (values.length === 0) return [{ path, step, code: "required", message: requiredMessage }];
+  if (values.length === 0) return requiredMessage === null ? [] : [{ path, step, code: "required", message: requiredMessage }];
   const errors: FieldError[] = [];
   if (values.length > max) {
     errors.push({ path, step, code: "too_many", message: `Keep ${label} to ${max} entries or fewer.` });
@@ -157,11 +160,8 @@ function offeringErrors(offering: OfferingDraft, index: number, type: BusinessTy
     add("description", "secret", SECRET_MESSAGE);
   }
 
-  if (type && !BUSINESS_TYPE_META[type].tracksInventory) {
-    if (!offering.delivery) add("delivery", "required", `Choose how ${noun} ${n} is delivered.`);
-  }
+  // Delivery and availability are not stored by the profile service, so they are optional.
   if (type && BUSINESS_TYPE_META[type].tracksInventory) {
-    if (!offering.availability) add("availability", "required", `Choose the availability of ${noun} ${n}. Pick "Not sure" if unknown.`);
     const sku = offering.sku.trim();
     if (sku && !SKU.test(sku)) add("sku", "invalid", `The SKU can use letters, numbers and . _ - / up to ${LIMITS.skuMax} characters.`);
     else if (sku && looksLikeSecret(sku)) add("sku", "secret", SECRET_MESSAGE);
@@ -190,7 +190,7 @@ function socialErrors(account: SocialAccountDraft, index: number, all: readonly 
   }
   if (handle) {
     if (looksLikeSecret(handle)) add("handle", "secret", SECRET_MESSAGE);
-    else if (!HANDLE.test(handle)) add("handle", "invalid", "A handle can use letters, numbers, dots, dashes and underscores, with no spaces.");
+    else if (!HANDLE.test(handle)) add("handle", "invalid", "A handle can use letters, numbers, dots and underscores, with no spaces.");
   }
   if (url) {
     const problem = validateProfileUrl(url, account.platform);
@@ -228,8 +228,9 @@ export function validateProfile(draft: ProfileDraft): ProfileValidation {
   }
 
   const segmentsLabel = draft.businessType ? BUSINESS_TYPE_META[draft.businessType].segmentsLabel.toLowerCase() : "segments";
+  // Categories are not stored by the profile service, so they are optional.
   errors.push(
-    ...tagListErrors("categories", draft.categories, "Add at least one category.", LIMITS.maxCategories, "Category"),
+    ...tagListErrors("categories", draft.categories, null, LIMITS.maxCategories, "Category"),
     ...tagListErrors("segments", draft.segments, `Add at least one entry for ${segmentsLabel}.`, LIMITS.maxSegments, "Segment"),
     ...tagListErrors("targetMarkets", draft.targetMarkets, "Add at least one target market.", LIMITS.maxTargetMarkets, "Market"),
   );
@@ -240,7 +241,15 @@ export function validateProfile(draft: ProfileDraft): ProfileValidation {
   } else if (draft.offerings.length > LIMITS.maxOfferings) {
     errors.push({ path: "offerings", step: "offerings", code: "too_many", message: `Keep the list to ${LIMITS.maxOfferings} entries or fewer.` });
   }
-  draft.offerings.forEach((offering, index) => errors.push(...offeringErrors(offering, index, draft.businessType)));
+  draft.offerings.forEach((offering, index) => {
+    errors.push(...offeringErrors(offering, index, draft.businessType));
+    // The profile service rejects two offerings with the same name.
+    const name = normalizeText(offering.name).toLowerCase();
+    const first = name ? draft.offerings.findIndex((other) => normalizeText(other.name).toLowerCase() === name) : -1;
+    if (first >= 0 && first < index) {
+      errors.push({ path: `offerings.${index}.name`, step: "offerings", code: "duplicate", message: `This is the same name as ${noun} ${first + 1}. Use a different name or remove one.` });
+    }
+  });
 
   if (draft.socialAccounts.length > LIMITS.maxSocialAccounts) {
     errors.push({ path: "socialAccounts", step: "social", code: "too_many", message: `Keep the list to ${LIMITS.maxSocialAccounts} accounts or fewer.` });

@@ -8,6 +8,7 @@ import { DetailsOnlyBadge } from "./StepSocial.tsx";
 import { ERROR_SUMMARY_ID, StepHeading, type StepProps } from "./StepChrome.tsx";
 import { SAVE_ERROR_TEXT } from "../lib/errorCopy.ts";
 import { NOT_PROVIDED } from "../lib/text.ts";
+import { NOT_STORED_BY_SERVER } from "../lib/toServerBody.ts";
 
 const AVAILABILITY_TEXT = { in_stock: "In stock", made_to_order: "Made to order", dropship: "Dropshipped", preorder: "Pre-order", unknown: "Not sure" } as const;
 const DELIVERY_TEXT = { remote: "Remote", on_site: "On site", hybrid: "Remote and on site" } as const;
@@ -36,10 +37,10 @@ function Row({ term, children }: { term: string; children: ReactNode }) {
 const list = (values: readonly string[]) => (values.length > 0 ? values.join(", ") : NOT_PROVIDED);
 
 const SAVE_COPY: Record<SaveView, { title: string; body: string }> = {
-  demo: { title: "Demo only: not saved", body: "Nothing you entered is stored or sent anywhere. Saving needs a secure, signed-in storage service that is not connected to this page." },
-  unsaved: { title: "Not saved yet", body: "Confirm below to save this profile." },
+  demo: { title: "Demo only: not saved", body: "Nothing you entered is stored or sent anywhere. Saving needs a signed-in connection to the profile service, which this page does not have." },
+  unsaved: { title: "Not saved yet", body: "Confirm below to save the fields the server stores." },
   saving: { title: "Saving", body: "Please wait. Your entries are kept." },
-  saved: { title: "Profile saved", body: "The server accepted the save, and the saved profile matches what you see here." },
+  saved: { title: "Profile saved", body: "The server accepted the save of the fields it stores. The details listed under \"Stays in this tab only\" were not sent." },
   changed_since_saved: { title: "Changed since last save", body: "The saved profile is older than what you see here. Confirm again to save the changes." },
   error: { title: "Saving failed", body: "Your entries are still here." },
 };
@@ -102,6 +103,16 @@ export function StepReview({
           <p className="font-medium text-zinc-50">{copy.title}</p>
           <p className="text-zinc-300">{view === "error" && state.save.status === "error" ? `${SAVE_ERROR_TEXT[state.save.code]} Your entries are still here.` : copy.body}</p>
           {reviewedInDemo ? <p data-demo-reviewed className="text-violet-200">Reviewed in demo mode. Nothing was saved or sent.</p> : null}
+          {persistenceAvailable ? (
+            <div data-not-stored className="space-y-1 pt-1">
+              <p className="font-medium text-zinc-50">Stays in this tab only</p>
+              <ul className="list-disc space-y-0.5 pl-5 text-zinc-300">
+                {NOT_STORED_BY_SERVER.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </section>
         <section aria-labelledby="cp-connected-heading" data-panel="connected-accounts" className="min-w-0 space-y-1 rounded-lg border border-zinc-700 bg-zinc-900/60 p-3 text-sm">
           <h3 id="cp-connected-heading" className="text-xs font-semibold uppercase tracking-wide text-zinc-300">Connected external accounts</h3>
@@ -160,12 +171,27 @@ export function StepReview({
                   <DetailsOnlyBadge />
                 </p>
                 <p className="text-zinc-300">Handle: {account.handle.trim() || NOT_PROVIDED}</p>
-                <p className="text-zinc-300">Link: {account.url.trim() || NOT_PROVIDED}</p>
+                <p className="text-zinc-300">Link: {account.url.trim() || NOT_PROVIDED}{persistenceAvailable && account.url.trim() ? " (this tab only)" : ""}</p>
+                {account.notes.trim() ? <p className="text-zinc-300">Notes: {account.notes.trim()}{persistenceAvailable ? " (this tab only)" : ""}</p> : null}
               </li>
             ))}
           </ul>
         )}
       </Section>
+
+      {state.save.status === "saved" && view === "saved" ? (
+        // Visible next to the button that was pressed; the polite live region already announces it.
+        <p data-save-status className="rounded border border-emerald-500/50 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+          Profile saved. The details under "Stays in this tab only" were not sent.
+        </p>
+      ) : null}
+      {state.save.status === "error" ? (
+        // Visible next to the button that was pressed. The live region announces the same sentence and the Saved profile panel
+        // repeats it, so this copy is hidden from assistive technology to avoid reading it three times.
+        <p data-save-error={state.save.code} aria-hidden="true" className="rounded border border-red-500/60 bg-red-500/10 p-3 text-sm text-red-100">
+          {SAVE_ERROR_TEXT[state.save.code]} Your entries are still here.
+        </p>
+      ) : null}
 
       <div className="flex flex-col gap-2 border-t border-zinc-800 pt-4 sm:flex-row sm:justify-between">
         <button type="button" className={BUTTON_SECONDARY} onClick={() => dispatch({ type: "back" })}>Back</button>

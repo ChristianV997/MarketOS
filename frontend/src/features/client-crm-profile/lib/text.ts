@@ -25,7 +25,7 @@ export function dedupeCaseInsensitive(values: readonly string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const value of values) {
-    const key = value.toLocaleLowerCase();
+    const key = value.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(value);
@@ -34,8 +34,8 @@ export function dedupeCaseInsensitive(values: readonly string[]): string[] {
 }
 
 export function containsIgnoreCase(list: readonly string[], value: string): boolean {
-  const key = value.toLocaleLowerCase();
-  return list.some((item) => item.toLocaleLowerCase() === key);
+  const key = value.toLowerCase();
+  return list.some((item) => item.toLowerCase() === key);
 }
 
 /** Shown wherever a value was not provided, so a blank is never mistaken for a real value. */

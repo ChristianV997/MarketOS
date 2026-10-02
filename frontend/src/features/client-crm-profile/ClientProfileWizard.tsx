@@ -7,6 +7,7 @@ import { StepOfferings } from "./components/StepOfferings.tsx";
 import { StepReview } from "./components/StepReview.tsx";
 import { StepSocial } from "./components/StepSocial.tsx";
 import { BUTTON_SECONDARY } from "./components/Fields.tsx";
+import { TabOnlyNote } from "./components/TabOnlyNote.tsx";
 import { useProfileWizard } from "./hooks/useProfileWizard.ts";
 import { isBlank, type WizardState } from "./lib/wizardState.ts";
 
@@ -20,6 +21,8 @@ export interface ClientProfileWizardProps {
   onSave?: SaveClientProfile;
   /** Test/preview seam: start from a given wizard state. */
   initialState?: Partial<WizardState>;
+  /** Move focus to the page heading on mount. The live container sets it so a finished load does not leave focus on <body>. */
+  focusOnMount?: boolean;
 }
 
 type ReplaceTarget = "sample" | "clear";
@@ -30,7 +33,7 @@ type ReplaceTarget = "sample" | "clear";
  * the function it is given. Client-facing and separate from the owner dashboard.
  * The host layout must provide the page's <main> landmark.
  */
-export default function ClientProfileWizard({ onSave, initialState }: ClientProfileWizardProps) {
+export default function ClientProfileWizard({ onSave, initialState, focusOnMount }: ClientProfileWizardProps) {
   const { state, dispatch, validation, errorFor, confirm, persistenceAvailable } = useProfileWizard(onSave, initialState);
   const stepProps = { state, validation, dispatch, errorFor };
   const stepErrors = state.attempted.includes(state.step) ? validation.byStep[state.step] : [];
@@ -38,10 +41,16 @@ export default function ClientProfileWizard({ onSave, initialState }: ClientProf
   // Replacing typed work needs an explicit yes; an untouched form is replaced straight away.
   const [replace, setReplace] = useState<ReplaceTarget | null>(null);
   const keepButton = useRef<HTMLButtonElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const opener = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     if (replace) keepButton.current?.focus();
   }, [replace]);
-  function requestReplace(target: ReplaceTarget) {
+  useEffect(() => {
+    if (focusOnMount) heading.current?.focus();
+  }, [focusOnMount]);
+  function requestReplace(target: ReplaceTarget, button: HTMLButtonElement) {
+    opener.current = button;
     if (isBlank(state)) dispatch({ type: target === "sample" ? "loadSample" : "clear" });
     else setReplace(target);
   }
@@ -68,7 +77,7 @@ export default function ClientProfileWizard({ onSave, initialState }: ClientProf
 
       <header className="space-y-2">
         <p className="inline-flex rounded border border-zinc-600 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-200">Client view</p>
-        <h1 id="cp-page-heading" className="text-xl font-semibold text-zinc-50">Company profile</h1>
+        <h1 ref={heading} id="cp-page-heading" tabIndex={-1} className="text-xl font-semibold text-zinc-50 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400">Company profile</h1>
         <p className="text-sm text-zinc-300">
           Set up your own company profile. This page does not load information about any other company and has no owner controls.
         </p>
@@ -76,21 +85,26 @@ export default function ClientProfileWizard({ onSave, initialState }: ClientProf
 
       {persistenceAvailable ? (
         <div role="note" data-mode="persistent" className="rounded-lg border border-zinc-600 bg-zinc-900/60 p-3 text-sm text-zinc-200">
-          Your profile is saved to the server only when you confirm on the last step and the server accepts it.
+          Your profile is saved to the server only when you confirm on the last step and the server accepts it. The server stores your company
+          name, business type, segments, target markets, offering names and social handles. Everything else you type stays in this tab.
         </div>
       ) : (
         <div role="note" data-mode="demo" className="space-y-2 rounded-lg border border-violet-400/60 bg-violet-500/10 p-3 text-sm text-violet-100">
           <p className="font-semibold">Demo mode. Nothing is saved or sent.</p>
-          <p>Everything here is fictional demo data: it is not observed, not saved and not connected to any account.</p>
+          <p>The sample data is fictional. Nothing here is observed or saved, it is not connected to any account, and what you type stays in this tab.</p>
           <p>
             No real client information is loaded, and anything you type stays in this browser tab until you leave the page. Saving needs a
-            secure, signed-in storage service, which is not connected yet.
+            signed-in connection to the profile service, which this page does not have yet.
           </p>
           {replace ? (
             <div role="group" aria-label="Replace what you typed?" data-replace-confirm className="space-y-2 rounded border border-violet-300/60 p-2">
               <p>{replace === "sample" ? "Filling in sample data replaces what you typed." : "Clearing the form removes what you typed."}</p>
               <div className="flex flex-wrap gap-2">
-                <button type="button" ref={keepButton} className={BUTTON_SECONDARY} onClick={() => setReplace(null)}>
+                <button type="button" ref={keepButton} className={BUTTON_SECONDARY} onClick={() => {
+                    setReplace(null);
+                    // The confirm group unmounts with the focused button; hand focus back to the control that opened it.
+                    setTimeout(() => opener.current?.focus(), 0);
+                  }}>
                   Keep what I typed
                 </button>
                 <button
@@ -107,10 +121,10 @@ export default function ClientProfileWizard({ onSave, initialState }: ClientProf
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
-              <button type="button" className={BUTTON_SECONDARY} onClick={() => requestReplace("sample")}>
+              <button type="button" className={BUTTON_SECONDARY} onClick={(event) => requestReplace("sample", event.currentTarget)}>
                 Fill with fictional sample data
               </button>
-              <button type="button" className={BUTTON_SECONDARY} onClick={() => requestReplace("clear")}>
+              <button type="button" className={BUTTON_SECONDARY} onClick={(event) => requestReplace("clear", event.currentTarget)}>
                 Clear the form
               </button>
             </div>
@@ -130,6 +144,7 @@ export default function ClientProfileWizard({ onSave, initialState }: ClientProf
           <ErrorSummary step={state.step} errors={stepErrors} dispatch={dispatch} />
           {state.step === "company" ? <StepCompany {...stepProps} /> : null}
           {state.step === "audience" ? <StepAudience {...stepProps} /> : null}
+          {persistenceAvailable ? <TabOnlyNote step={state.step} /> : null}
           {state.step === "offerings" ? <StepOfferings {...stepProps} /> : null}
           {state.step === "social" ? <StepSocial {...stepProps} /> : null}
           {state.step === "review" ? <StepReview {...stepProps} persistenceAvailable={persistenceAvailable} /> : null}

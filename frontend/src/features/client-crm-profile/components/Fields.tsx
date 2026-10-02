@@ -2,7 +2,7 @@ import type { ChangeEvent, ReactNode } from "react";
 import { fieldId } from "../lib/validateProfile.ts";
 
 export const INPUT_CLASS =
-  "block w-full min-h-[44px] rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-400 aria-[invalid=true]:border-red-400";
+  "block w-full min-h-[44px] rounded border border-zinc-500 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-400 aria-[invalid=true]:border-red-400";
 export const BUTTON_PRIMARY =
   "inline-flex min-h-[44px] items-center justify-center rounded bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300 disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-60";
 export const BUTTON_SECONDARY =

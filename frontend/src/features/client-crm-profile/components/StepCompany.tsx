@@ -51,6 +51,7 @@ export function StepCompany({ state, dispatch, errorFor }: StepProps) {
                 name="businessType"
                 value={type}
                 checked={checked}
+                required
                 className="mt-1 h-4 w-4 shrink-0 accent-sky-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
                 onChange={() => dispatch({ type: "setBusinessType", value: type })}
                 onBlur={() => dispatch({ type: "blur", path: "businessType" })}

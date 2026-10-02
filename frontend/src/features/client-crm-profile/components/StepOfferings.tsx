@@ -29,17 +29,17 @@ export function StepOfferings({ state, dispatch, errorFor }: StepProps) {
         {meta?.tracksInventory
           ? "List what you sell. Stock details are optional and are your own unverified figures."
           : meta
-            ? "List the services you provide and how each is delivered."
+            ? "List the services you provide. How each is delivered is optional."
             : "List what you sell or provide."}
       </StepHeading>
       {meta === null ? (
         <p role="note" className="rounded border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-100">
-          Choose a business type in step 1 so the right questions appear. Delivery or availability will be asked once it is chosen.
+          Choose a business type in step 1 so the right questions appear. Delivery and availability are optional questions that appear once it is chosen.
         </p>
       ) : null}
       {meta && draft.offerings.length > 0 ? (
         <p role="note" data-type-note className="text-xs text-zinc-300">
-          Business type: {meta.label}. {meta.tracksInventory ? "Each product needs its availability." : "Each service needs its delivery."} Details typed for another type are kept but not saved.
+          Business type: {meta.label}. {meta.tracksInventory ? "Availability is optional." : "Delivery is optional."} Details typed for another type are kept but not saved.
         </p>
       ) : null}
       {listError ? (
@@ -83,7 +83,6 @@ export function StepOfferings({ state, dispatch, errorFor }: StepProps) {
                   <SelectField
                     path={`${base}.delivery`}
                     label="How is it delivered?"
-                    required
                     value={offering.delivery}
                     options={DELIVERY_OPTIONS}
                     error={errorFor(`${base}.delivery`)}
@@ -96,7 +95,6 @@ export function StepOfferings({ state, dispatch, errorFor }: StepProps) {
                     <SelectField
                       path={`${base}.availability`}
                       label="Availability"
-                      required
                       value={offering.availability}
                       options={AVAILABILITY_OPTIONS}
                       error={errorFor(`${base}.availability`)}

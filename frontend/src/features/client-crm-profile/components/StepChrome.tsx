@@ -51,7 +51,7 @@ export function StepNav({ state, validation, dispatch }: Omit<StepProps, "errorF
                 aria-label={`Step ${index + 1} of ${STEP_IDS.length}: ${STEP_META[id].short}. ${statusText}.`}
                 onClick={() => dispatch({ type: "goto", step: id })}
                 className={`flex min-h-[44px] w-full items-center gap-2 rounded border px-3 py-2 text-left text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 ${
-                  current ? "border-sky-400 bg-sky-500/10 text-zinc-50" : "border-zinc-700 bg-zinc-900/60 text-zinc-200 hover:border-zinc-500"
+                  current ? "border-sky-400 bg-sky-500/10 font-semibold text-zinc-50" : "border-zinc-700 bg-zinc-900/60 text-zinc-200 hover:border-zinc-500"
                 }`}
               >
                 <span aria-hidden="true" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-zinc-500 text-xs">

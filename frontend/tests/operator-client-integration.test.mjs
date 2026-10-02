@@ -27,7 +27,7 @@ test("integration: sidebar exposes accessible navigation for operator dashboard,
   const sidebarSource = await readFile(path.join(srcRoot, "components/layout/Sidebar.tsx"), "utf8");
 
   assert.match(sidebarSource, /to:\s*["']\/["'],\s*icon:\s*LayoutDashboard,\s*label:\s*["']Dashboard["']/);
-  assert.match(sidebarSource, /to:\s*["']\/operator\/research["'],\s*icon:\s*Telescope,\s*label:\s*["']Research Portfolio["']/);
+  assert.match(sidebarSource, /to:\s*["']\/operator\/research["'],\s*icon:\s*ListOrdered,\s*label:\s*["']Research Portfolio["']/);
   assert.match(sidebarSource, /to:\s*["']\/operator\/services["'],\s*icon:\s*ClipboardList,\s*label:\s*["']Service Workbench["']/);
   assert.match(sidebarSource, /to:\s*["']\/client\/profile["'],\s*icon:\s*UserCheck,\s*label:\s*["']Client CRM["']/);
 });
@@ -57,4 +57,38 @@ test("truthful UI: owner research and client CRM do not share selectors or fallb
 
   assert.doesNotMatch(ownerIndex, /client-crm-profile/);
   assert.doesNotMatch(clientIndex, /owner-research-portfolio/);
+});
+
+test("ClientShell makes no isolation claim, keeps a 44px operator link, and announces route changes", async () => {
+  const shell = await readFile(path.join(srcRoot, "components/layout/ClientShell.tsx"), "utf8");
+  const code = shell.replace(/\/\*[\s\S]*?\*\//g, "");
+
+  // The server enforces isolation; a layout label must not claim it.
+  assert.doesNotMatch(code, /Isolated|isolated/);
+  assert.doesNotMatch(code, /Shield/);
+
+  // No fixed-height header that overflows at 320px; the operator link is a 44px target.
+  assert.doesNotMatch(code, /<header[^>]*(?<![\w-])h-12(?![\w-])/);
+  assert.match(code, /<header[^>]*\bflex-wrap\b/);
+  assert.match(code, /min-h-\[44px\][^"]*min-w-\[44px\]|min-w-\[44px\][^"]*min-h-\[44px\]/);
+
+  // One landmark that can take programmatic focus, no extra padding around the page's own.
+  assert.equal((code.match(/<main\b/g) ?? []).length, 1);
+  assert.match(code, /<main[^>]*tabIndex=\{-1\}/);
+  assert.doesNotMatch(code, /<main[^>]*\bp-[0-9]/);
+
+  // Route change: focus moves to main after the first render, and the title is client-specific and restored.
+  assert.match(code, /useLocation\(\)/);
+  assert.match(code, /firstRender/);
+  assert.match(code, /main\.current\?\.focus\(\)/);
+  assert.match(code, /document\.title = CLIENT_TITLE/);
+  assert.match(code, /document\.title = previous/);
+});
+
+test("owner research and client CRM entries use different sidebar icons", async () => {
+  const sidebarSource = await readFile(path.join(srcRoot, "components/layout/Sidebar.tsx"), "utf8");
+  const icons = [...sidebarSource.matchAll(/to:\s*"([^"]+)",\s*icon:\s*(\w+)/g)].map((m) => [m[1], m[2]]);
+  const research = icons.find(([to]) => to === "/operator/research")[1];
+  const cockpit = icons.find(([to]) => to === "/operator/first-phase")[1];
+  assert.notEqual(research, cockpit);
 });

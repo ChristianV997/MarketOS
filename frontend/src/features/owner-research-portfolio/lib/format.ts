@@ -13,7 +13,13 @@ export function finiteOrNull(value: unknown): number | null {
  */
 export function formatReportedScore(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return NOT_REPORTED;
-  if (value >= 0 && value <= 1) return `${Math.round(value * 100)}%`;
+  if (value >= 0 && value <= 1) {
+    const percent = Math.round(value * 100);
+    // Never let rounding turn a reported value into an apparent zero or a perfect score.
+    if (percent === 0 && value > 0) return "<1%";
+    if (percent === 100 && value < 1) return ">99%";
+    return `${percent}%`;
+  }
   return `${value} (outside 0-1)`;
 }
 
