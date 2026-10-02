@@ -22,6 +22,17 @@ from .workflow_summary import build_workflow_summary
 # new attempt and must be recorded.
 _IDEMPOTENT_EVENTS = frozenset({"workflow_created", "workflow_completed", "workflow_partial"})
 
+# Workflow-level warnings persist across runs; stage warnings are
+# re-aggregated from stages in _sync_run_state so retried stages
+# do not carry stale warnings.
+
+_WORKFLOW_LEVEL_WARNING_PREFIXES = (
+    "resumed_from_checkpoint:",
+    "resume_checkpoint_ignored:",
+    "recovery_from_stage:",
+)
+
+
 
 def _id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
@@ -101,9 +112,12 @@ def _sync_run_state(run: WorkflowRun) -> None:
                 aggregated_refs.append(ref)
     run.produced_object_ids = aggregated_refs
 
+    # Workflow-level markers (resume/recovery notes) survive; stage-derived
+    # warnings are re-aggregated from stages only, so a retried stage that
+    # succeeds no longer carries its previous attempt's warnings.
     active_warnings: list[str] = []
     for w in run.warnings:
-        if w not in active_warnings:
+        if w.startswith(_WORKFLOW_LEVEL_WARNING_PREFIXES) and w not in active_warnings:
             active_warnings.append(w)
     for s in run.stages:
         for w in s.warnings:
@@ -120,7 +134,6 @@ def _sync_run_state(run: WorkflowRun) -> None:
     if run.status in {"blocked", "failed"} and not active_errors:
         active_errors = list(dict.fromkeys(run.errors))
     run.errors = active_errors
-
 
 def _context_from_run(run: WorkflowRun) -> dict[str, Any]:
     """Return a conservative context for recovery.
@@ -366,6 +379,7 @@ def replay_workflow_stage(workflow_id: str, stage_name: str, reason: str = "manu
     # Tag copies: earlier timeline events and checkpoints share the original ref dicts.
     stage.produced_object_ids = [{**ref, "relation": "replay_of"} for ref in stage.produced_object_ids]
     _sync_run_state(replayed)
+    replayed.final_output = build_workflow_summary(replayed)
     _event(replayed, stage_name, "replay_completed", "Workflow stage replay completed", refs=stage.produced_object_ids)
     result = replayed.to_dict()
     result["obsidian"] = _sync_workflow_notes(replayed)
