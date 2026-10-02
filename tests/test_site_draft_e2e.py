@@ -101,18 +101,13 @@ class TestEvidenceProvenance:
 # ---------------------------------------------------------------------------
 
 class TestMissingVsExplicitZero:
-    def test_supplier_present_flag_true_when_supplier_feasibility_loaded(self, pack):
-        # When supplier_feasibility IS supplied (default path), the readiness
-        # check for supplier_proof_ready must reflect that evidence exists
-        # (even if it is fixture_demo, not live). The flag comes from the
-        # readiness checks, which honour the supplied supplier data.
+    def test_supplier_proof_readiness_is_reported_by_the_readiness_check_not_market_access(self, pack):
+        # Supplier presence is carried by the deployment-readiness check (driven by the
+        # launch checklist); fixture_demo evidence keeps it blocked. It is not a
+        # market_access field.
         checks = pack["deployment_readiness"]["checks"]
         assert "supplier_proof_ready" in checks
-        # supplier_feasibility report IS supplied in the default path, so the
-        # readiness check should NOT say "supplier proof remains a launch gate"
-        # in the sense of being completely absent — but fixture_demo still
-        # blocks it. The key distinction: supplier_present is derived from
-        # whether supplier_feasibility was supplied at all.
+        assert "supplier_present" not in pack["market_access"]
         supplier_blocker_detail = checks["supplier_proof_ready"]["detail"]
         assert "supplier proof" in supplier_blocker_detail.lower()
 
@@ -381,33 +376,33 @@ class TestBuildSiteDraftPackDoesNotMutateCallerInputs:
         )
         assert "supplier_present" not in launch["market_access"]
 
-    def test_the_returned_pack_still_carries_the_correct_supplier_present_flag(self):
+    def test_the_returned_pack_market_access_is_contract_identical_with_and_without_supplier(self):
+        # Supplier presence belongs to the deployment-readiness/approval-blocker
+        # authority, not to the shared market_access compliance projection that
+        # downstream consumers compare byte-for-byte.
         fixtures = self._load_real_fixtures()
         launch = fixtures["launch_draft_pack"]
         launch["market_access"] = {"jurisdictions": []}
 
-        pack_with_supplier = build_site_draft_pack(
-            launch_draft_pack=launch,
-            opportunity_synthesis=fixtures["opportunity_synthesis"],
-            marketplace_trends=fixtures["marketplace_trends"],
-            supplier_feasibility=fixtures["supplier_feasibility"],
-            consumer_attention=fixtures["consumer_attention"],
-            client_context=fixtures["client_context"],
-        ).to_dict()
-        assert pack_with_supplier["market_access"]["supplier_present"] is True
+        def build(supplier):
+            return build_site_draft_pack(
+                launch_draft_pack=launch,
+                opportunity_synthesis=fixtures["opportunity_synthesis"],
+                marketplace_trends=fixtures["marketplace_trends"],
+                supplier_feasibility=supplier,
+                consumer_attention=fixtures["consumer_attention"],
+                client_context=fixtures["client_context"],
+            ).to_dict()
 
-        # Same launch dict, reused for a second build with no supplier evidence --
-        # must reflect the second call's own input, not a leftover from the first.
-        pack_without_supplier = build_site_draft_pack(
-            launch_draft_pack=launch,
-            opportunity_synthesis=fixtures["opportunity_synthesis"],
-            marketplace_trends=fixtures["marketplace_trends"],
-            supplier_feasibility=None,
-            consumer_attention=fixtures["consumer_attention"],
-            client_context=fixtures["client_context"],
-        ).to_dict()
-        assert pack_without_supplier["market_access"]["supplier_present"] is False
-        assert "supplier_present" not in launch["market_access"]
+        pack_with_supplier = build(fixtures["supplier_feasibility"])
+        pack_without_supplier = build(None)
+        for pack in (pack_with_supplier, pack_without_supplier):
+            assert pack["market_access"] == {"jurisdictions": []}
+            assert "supplier_present" not in pack["market_access"]
+        # The readiness blocker is still reported from the launch checklist in both builds.
+        for pack in (pack_with_supplier, pack_without_supplier):
+            assert "supplier_proof_ready" in pack["deployment_readiness"]["blockers"]
+        assert launch["market_access"] == {"jurisdictions": []}
 
 
 class TestCandidateIdentityIsNeverSplicedAcrossReports:

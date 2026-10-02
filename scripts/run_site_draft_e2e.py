@@ -120,7 +120,6 @@ def assert_blockers(pack_dict: dict) -> None:
     blockers = pack_dict["deployment_readiness"]["blockers"]
     approval_blockers = pack_dict["approval_checklist"]["blockers"]
     publishing_authorized = pack_dict["approval_checklist"]["publishing_authorized"]
-    supplier_present = pack_dict["market_access"]["supplier_present"]
     evidence_mode = pack_dict["evidence_mode"]
 
     # 5. Assert review blockers surface.
@@ -132,10 +131,10 @@ def assert_blockers(pack_dict: dict) -> None:
         f"publishing_authorized must be False; got {publishing_authorized}"
     )
 
-    # supplier_present must reflect that supplier_feasibility_report WAS supplied.
-    assert supplier_present is True, (
-        f"supplier_present must be True when supplier_feasibility_report is supplied; "
-        f"got {supplier_present}"
+    # Supplier presence is not a market_access field; it is carried by the readiness
+    # check and the launch approval blockers asserted above and below.
+    assert pack_dict["deployment_readiness"]["checks"]["supplier_proof_ready"]["status"] == "blocked", (
+        "fixture evidence must not mark supplier proof ready"
     )
 
     # evidence_mode must be threaded through from the fixture.
@@ -229,7 +228,7 @@ def main() -> int:
             f"candidate:{pack_dict['candidate_id']} "
             f"site_type:{pack_dict['site_type']} "
             f"evidence_mode:{pack_dict['evidence_mode']} "
-            f"supplier_present:{pack_dict['market_access']['supplier_present']} "
+            f"supplier_proof_ready:{pack_dict['deployment_readiness']['checks']['supplier_proof_ready']['status']} "
             f"publishing_authorized:{pack_dict['approval_checklist']['publishing_authorized']} "
             f"blockers:{','.join(pack_dict['deployment_readiness']['blockers'])} "
             f"files:{len(written_files)}"

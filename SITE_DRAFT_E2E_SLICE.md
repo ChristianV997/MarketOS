@@ -31,7 +31,8 @@ A single end-to-end fixture runner that:
    candidate/workspace identity — no synthesized defaults).
 2. Feeds them through `build_site_draft_pack` with explicit provenance on every input.
 3. Writes a sanitized export set (JSON + markdown) to a temp dir, preserving
-   missing-vs-explicit-zero distinctions (supplier_present flag, evidence_mode, blockers).
+   missing-vs-explicit-zero distinctions (evidence_mode and readiness blockers; supplier presence is
+   carried by the readiness check, never by the shared `market_access` projection).
 4. Asserts review blockers surface (supplier_proof_ready, publishing_authorized=False).
 5. Prints a one-line SHA-validated manifest.
 

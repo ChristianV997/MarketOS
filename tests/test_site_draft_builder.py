@@ -345,3 +345,63 @@ class TestMatchedCustomerLanguage:
         for blocked in ["guaranteed", "cure", "clinically proven", "risk-free", "miracle"]:
             assert blocked not in body.lower()
         assert "evidence-led" in body
+
+
+class TestMarketAccessContractAndSupplierReadiness:
+    """market_access is a shared compliance projection; supplier presence must not leak into it."""
+
+    _MARKET_ACCESS = {
+        "overall_status": "needs_evidence",
+        "offering_kind": "goods",
+        "jurisdictions": [{"jurisdiction": "mexico", "assessment_state": "needs_evidence"}],
+    }
+
+    def _launch(self, **extra):
+        launch = {"candidate_id": "mx-1", "market_access": json.loads(json.dumps(self._MARKET_ACCESS))}
+        launch.update(extra)
+        return launch
+
+    def test_market_access_is_contract_identical_whether_or_not_supplier_evidence_is_supplied(self):
+        synthesis = {"top_candidate_id": "mx-1", "top_candidate_title": "Mx Widget"}
+        supplier = {"evidence_mode": "sanitized_report", "candidates": [{"candidate_id": "mx-1"}]}
+        with_supplier = build_site_draft_pack(launch_draft_pack=self._launch(), opportunity_synthesis=synthesis, supplier_feasibility=supplier).to_dict()
+        without_supplier = build_site_draft_pack(launch_draft_pack=self._launch(), opportunity_synthesis=synthesis).to_dict()
+        assert with_supplier["market_access"] == self._MARKET_ACCESS
+        assert without_supplier["market_access"] == self._MARKET_ACCESS
+        assert "supplier_present" not in with_supplier["market_access"]
+
+    def test_market_access_from_synthesis_is_passed_through_unchanged(self):
+        synthesis = {"top_candidate_id": "mx-1", "top_candidate_title": "Mx Widget", "market_access": json.loads(json.dumps(self._MARKET_ACCESS))}
+        pack = build_site_draft_pack(opportunity_synthesis=synthesis, supplier_feasibility={"candidates": []}).to_dict()
+        assert pack["market_access"] == self._MARKET_ACCESS
+
+    def test_caller_owned_market_access_is_not_mutated_and_top_level_is_not_shared(self):
+        # The copy is intentionally shallow (pre-existing behavior): top-level isolation only.
+        launch = self._launch()
+        synthesis = {"top_candidate_id": "mx-1", "top_candidate_title": "Mx Widget", "market_access": json.loads(json.dumps(self._MARKET_ACCESS))}
+        snapshot = json.loads(json.dumps([launch, synthesis]))
+        pack = build_site_draft_pack(launch_draft_pack=launch, opportunity_synthesis=synthesis, supplier_feasibility={"candidates": []})
+        assert [launch, synthesis] == snapshot
+        assert pack.market_access is not launch["market_access"]
+        pack.market_access["injected"] = True  # a consumer writing to the pack cannot reach the caller's mapping
+        assert "injected" not in launch["market_access"]
+
+    @pytest.mark.parametrize(
+        ("launch_extra", "expected_status", "supplier_blocked"),
+        [
+            ({"evidence_mode": "fixture_demo", "approval_checklist": {"blockers": ["supplier proof is not live-observed"]}}, "blocked", True),
+            ({"evidence_mode": "live_readonly", "approval_checklist": {"blockers": ["supplier proof is not live-observed"]}}, "blocked", True),
+            ({"evidence_mode": "live_readonly", "approval_checklist": {"blockers": ["human approval is required"]}}, "ready", False),
+        ],
+    )
+    def test_supplier_readiness_blocker_follows_the_launch_checklist_not_market_access(self, launch_extra, expected_status, supplier_blocked):
+        pack = build_site_draft_pack(
+            launch_draft_pack=self._launch(**launch_extra),
+            opportunity_synthesis={"top_candidate_id": "mx-1", "top_candidate_title": "Mx Widget"},
+            supplier_feasibility={"candidates": [{"candidate_id": "mx-1"}]},
+        ).to_dict()
+        readiness = pack["deployment_readiness"]
+        assert readiness["checks"]["supplier_proof_ready"]["status"] == expected_status
+        assert ("supplier_proof_ready" in readiness["blockers"]) is supplier_blocked
+        assert pack["market_access"] == self._MARKET_ACCESS
+        assert pack["approval_checklist"]["publishing_authorized"] is False
