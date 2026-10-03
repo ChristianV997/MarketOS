@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +43,45 @@ PLACEHOLDER_SHAS = {
     "src-gstack": "1a8b9c0d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b",
     "src-hermes-ecc": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
 }
+# The annotated tag object for src-scrapy 2.12.0 (peels to b1f9e56693cd2000ddcea922306f726f3e9339af).
+ANNOTATED_TAG_SHA = "8c85937adef8279f12e35e0ee9a20c52ff6d1648"
+SCRAPY_COMMIT_SHA = "b1f9e56693cd2000ddcea922306f726f3e9339af"
+
+
+def _registry_row(source_id: str, sha: str) -> dict:
+    return {"source_id": source_id, "repository_url": f"https://github.com/example/{source_id}", "revision": sha, "commit_sha": sha}
+
+
+def _defective_registry() -> list[dict]:
+    """The committed registry with one row per defect class the validator must keep detecting.
+
+    Starting from the committed rows keeps every intake ``registry_ref`` resolvable, so the intake
+    itself stays valid and only the registry defects change.
+    """
+    rows = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    bad_pins = {**PLACEHOLDER_SHAS, "src-scrapy": ANNOTATED_TAG_SHA}
+    for row in rows:
+        if row.get("source_id") in bad_pins:
+            row["revision"] = row["commit_sha"] = bad_pins[row["source_id"]]
+    return [
+        *rows,
+        _registry_row("src-zero", ZERO_SHA),
+        _registry_row("src-clean", REAL_SHA),
+        _registry_row("src-other-annotated", ANNOTATED_TAG_SHA),  # the annotated-tag rule is specific to src-scrapy
+        "not a row",
+        {"source_id": "src-no-pins"},
+    ]
+
+
+EXPECTED_DEFECTS = sorted(
+    [
+        (source_id, field, "patterned_placeholder_sha", sha)
+        for source_id, sha in PLACEHOLDER_SHAS.items()
+        for field in ("revision", "commit_sha")
+    ]
+    + [("src-scrapy", field, "annotated_tag_object_sha", ANNOTATED_TAG_SHA) for field in ("revision", "commit_sha")]
+    + [("src-zero", field, "all_zero_sha", ZERO_SHA) for field in ("revision", "commit_sha")]
+)
 
 
 def _catalog(rows: list[dict]) -> dict:
@@ -179,32 +219,61 @@ def test_real_intake_file_validates() -> None:
     assert all(count <= 5 for count in counts.values())
 
 
-def test_registry_and_capability_defects_are_reported_without_failing() -> None:
-    report, status = validate_paths(INTAKE_PATH, REGISTRY_PATH, CAPABILITY_PATH)
+def _defect_tuples(defects: list[dict]) -> list[tuple]:
+    return sorted((item["record_id"], item["field"], item["defect"], item["value"]) for item in defects)
+
+
+def test_registry_defect_collector_reports_every_defect_class_and_only_those() -> None:
+    defects = collect_registry_defects(_defective_registry())
+    assert _defect_tuples(defects) == EXPECTED_DEFECTS
+    assert all(item["record_kind"] == "source_adaptation_registry" for item in defects)
+    assert defects == sorted(defects, key=lambda item: (item["record_id"], item["field"], item["defect"]))
+    assert collect_registry_defects([_registry_row("src-clean", REAL_SHA)]) == []
+    assert collect_registry_defects({"not": "a list"}) == [] and collect_registry_defects(None) == []
+
+
+def test_registry_and_capability_defects_are_reported_without_failing(tmp_path: Path) -> None:
+    """Defects in the registry or capability catalog are reported, never turned into a failing exit status."""
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(json.dumps(_defective_registry()), encoding="utf-8")
+    report, status = validate_paths(INTAKE_PATH, registry_path, CAPABILITY_PATH)
     assert status == 0 and report["valid"] is True
-    registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
-    capabilities = json.loads(CAPABILITY_PATH.read_text(encoding="utf-8"))
-    assert report["registry_defects"] == collect_registry_defects(registry)
-    assert report["capability_catalog_defects"] == collect_capability_defects(capabilities)
+    assert _defect_tuples(report["registry_defects"]) == EXPECTED_DEFECTS
+    assert report["registry_defects"] == collect_registry_defects(json.loads(registry_path.read_text(encoding="utf-8")))
     found = {(item["record_id"], item["field"], item["value"]) for item in report["registry_defects"]}
     for source_id, sha in PLACEHOLDER_SHAS.items():
         assert (source_id, "revision", sha) in found
         assert (source_id, "commit_sha", sha) in found
-    zero_ids = {
-        row["capability_id"]
-        for row in capabilities
-        if row.get("commit_sha") == ZERO_SHA
-    }
+    markdown = render_markdown(report)
+    assert "src-scrapy" in markdown and "annotated_tag_object_sha" in markdown
+
+
+def test_committed_registry_pins_are_real_commits_and_the_report_says_so() -> None:
+    """The canonical registry was repaired (placeholder and annotated-tag pins replaced); keep it that way."""
+    report, status = validate_paths(INTAKE_PATH, REGISTRY_PATH, CAPABILITY_PATH)
+    assert status == 0 and report["valid"] is True
+    registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    assert report["registry_defects"] == collect_registry_defects(registry) == []
+    by_id = {row["source_id"]: row for row in registry if isinstance(row, dict)}
+    for source_id, placeholder in PLACEHOLDER_SHAS.items():
+        row = by_id[source_id]
+        for field in ("revision", "commit_sha"):
+            assert re.fullmatch(r"[0-9a-f]{40}", row[field]), (source_id, field)
+            assert row[field] != placeholder and not is_patterned_placeholder_sha(row[field])
+    assert by_id["src-scrapy"]["revision"] == by_id["src-scrapy"]["commit_sha"] == SCRAPY_COMMIT_SHA
+    assert ANNOTATED_TAG_SHA not in json.dumps(registry)
+
+
+def test_capability_catalog_zero_sha_defects_are_reported() -> None:
+    report, _ = validate_paths(INTAKE_PATH, REGISTRY_PATH, CAPABILITY_PATH)
+    capabilities = json.loads(CAPABILITY_PATH.read_text(encoding="utf-8"))
+    assert report["capability_catalog_defects"] == collect_capability_defects(capabilities)
+    zero_ids = {row["capability_id"] for row in capabilities if row.get("commit_sha") == ZERO_SHA}
     reported_ids = {item["capability_id"] for item in report["capability_catalog_defects"]}
     assert zero_ids == reported_ids
     assert "meta_ad_library" in reported_ids
     assert "tiktok_creative_center" in reported_ids
     assert len(reported_ids) == 15
-    scrapy_defects = [item for item in report["registry_defects"] if item["record_id"] == "src-scrapy"]
-    assert {(item["field"], item["defect"], item["value"]) for item in scrapy_defects} == {
-        ("revision", "annotated_tag_object_sha", "8c85937adef8279f12e35e0ee9a20c52ff6d1648"),
-        ("commit_sha", "annotated_tag_object_sha", "8c85937adef8279f12e35e0ee9a20c52ff6d1648"),
-    }
 
 
 def test_report_is_deterministic() -> None:
@@ -481,8 +550,18 @@ def test_cli_json_exit_codes(tmp_path: Path) -> None:
     assert good.returncode == 0
     payload = json.loads(good.stdout)
     assert payload["valid"] is True
-    assert payload["registry_defects"]
+    assert payload["registry_defects"] == [], "the committed registry carries no placeholder or annotated-tag pins"
     assert payload["capability_catalog_defects"]
+    defective = tmp_path / "defective_registry.json"
+    defective.write_text(json.dumps(_defective_registry()), encoding="utf-8")
+    reported = subprocess.run(
+        [sys.executable, str(VALIDATOR_PATH), "--json", "--intake", str(INTAKE_PATH), "--registry", str(defective)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert reported.returncode == 0, "registry defects are reported, not an exit failure"
+    assert _defect_tuples(json.loads(reported.stdout)["registry_defects"]) == EXPECTED_DEFECTS
     missing = subprocess.run(
         [sys.executable, str(VALIDATOR_PATH), "--json", "--intake", str(tmp_path / "missing.json")],
         check=False,
