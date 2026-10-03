@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Mapping
@@ -27,6 +29,18 @@ ALLOWED_METRICS = frozenset(
     {"revenue", "refunds", "product_cost", "shipping_cost", "fees", "ad_spend"}
 )
 PERIOD_BOUND = date.fromisoformat
+_CALENDAR_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _calendar_date(value: str, code: str) -> date:
+    """Accept only a calendar date. ``fromisoformat`` echoes its input, so arbitrary text never reaches it."""
+    if not _CALENDAR_DATE.fullmatch(value):
+        raise OwnerPerformanceReportError(code)
+    try:
+        return PERIOD_BOUND(value)
+    except ValueError:
+        raise OwnerPerformanceReportError(code) from None
+
 
 MAX_REPORT_BYTES = 64 * 1024
 
@@ -50,11 +64,8 @@ def _period(payload: Mapping[str, Any]) -> tuple[date, date]:
     end = payload.get("period_end")
     if not isinstance(start, str) or not isinstance(end, str):
         raise OwnerPerformanceReportError("invalid_period")
-    try:
-        start_date = PERIOD_BOUND(start)
-        end_date = PERIOD_BOUND(end)
-    except ValueError as exc:
-        raise OwnerPerformanceReportError("invalid_period") from exc
+    start_date = _calendar_date(start, "invalid_period")
+    end_date = _calendar_date(end, "invalid_period")
     if end_date < start_date:
         raise OwnerPerformanceReportError("period_end_before_start")
     return start_date, end_date
@@ -146,10 +157,20 @@ def _parse_line(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
         raise OwnerPerformanceReportError("invalid_evidence_class")
     if not isinstance(occurred_on, str):
         raise OwnerPerformanceReportError("invalid_line_date")
-    try:
-        PERIOD_BOUND(occurred_on)
-    except ValueError as exc:
-        raise OwnerPerformanceReportError("invalid_line_date") from exc
+    occurred_on = _calendar_date(occurred_on, "invalid_line_date").isoformat()
+    source = raw.get("source", evidence_class)
+    provenance = raw.get("provenance", evidence_class)
+    if not isinstance(source, str) or not isinstance(provenance, str):
+        raise OwnerPerformanceReportError("invalid_line")
+    campaign_id = raw.get("campaign_id")
+    if campaign_id in (None, ""):
+        campaign_id = None
+    elif (
+        not isinstance(campaign_id, str)
+        or len(campaign_id) > 128
+        or any(unicodedata.category(char) == "Cc" for char in campaign_id)
+    ):
+        raise OwnerPerformanceReportError("invalid_campaign")
     amount = raw.get("amount")
     currency = raw.get("currency")
     if amount is None or currency is None:
@@ -158,8 +179,8 @@ def _parse_line(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
         money = Money(
             amount,
             currency,
-            source=str(raw.get("source", evidence_class)),
-            provenance=str(raw.get("provenance", evidence_class)),
+            source=source,
+            provenance=provenance,
             evidence_state=_evidence_state(raw.get("evidence_state"), evidence_class),
             evidence_ref=_evidence(raw.get("evidence_ref"), str(evidence_class)),
         )
@@ -170,7 +191,7 @@ def _parse_line(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
         "metric": metric,
         "evidence_class": evidence_class,
         "occurred_on": occurred_on,
-        "campaign_id": raw.get("campaign_id"),
+        "campaign_id": campaign_id,
         "money": money,
     }
 
@@ -189,6 +210,16 @@ def _sum_metric(lines: list[dict[str, Any]], metric: str, currency: str) -> tupl
         total = money if total is None else total + money
     if total is None:
         return None, [f"{metric}_absent"], "unavailable", set()
+    if len(matched) > 1:
+        # A kernel sum keeps the left line's evidence_ref. That ref does not cover the total.
+        total = Money(
+            total.amount,
+            total.currency,
+            source=total.source,
+            provenance=total.provenance,
+            evidence_state=total.evidence_state,
+            evidence_ref=None,
+        )
     return total, [], _rollup_status(classes), classes
 
 

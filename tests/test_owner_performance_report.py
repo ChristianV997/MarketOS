@@ -254,3 +254,75 @@ def test_derived_and_non_observed_refs_do_not_stay_observed():
     with pytest.raises(OwnerPerformanceReportError) as exc:
         build_owner_performance_report(_base(lines=[fixture]))
     assert exc.value.code == "invalid_evidence"
+
+
+def test_multi_line_rollup_does_not_keep_one_lines_evidence_ref():
+    first = _line("revenue", "40.00")
+    second = _line("revenue", "60.00")
+    first["evidence_ref"] = {"evidence_id": "ev-first", "evidence_state": "observed"}
+    second["evidence_ref"] = {"evidence_id": "ev-second", "evidence_state": "observed"}
+    spend_a = _line("ad_spend", "5.00", campaign_id="camp-a")
+    spend_b = _line("ad_spend", "5.00", campaign_id="camp-a")
+    spend_a["evidence_ref"] = {"evidence_id": "ev-ad-1", "evidence_state": "observed"}
+    spend_b["evidence_ref"] = {"evidence_id": "ev-ad-2", "evidence_state": "observed"}
+    report = build_owner_performance_report(
+        _base(lines=[second, first, spend_b, spend_a])
+    ).to_dict()
+    blob = str(report["revenue"].get("evidence_ref")) + str(report["campaigns"][0]["ad_spend"].get("evidence_ref"))
+    assert report["revenue"]["amount"] == "100.00"
+    assert report["revenue"]["status"] == "observed"
+    assert report["revenue"]["evidence_state"] == "observed"
+    assert report["revenue"]["evidence_ref"] is None
+    assert report["campaigns"][0]["ad_spend"]["amount"] == "10.00"
+    assert report["campaigns"][0]["ad_spend"]["evidence_ref"] is None
+    assert "ev-first" not in blob
+    assert "ev-second" not in blob
+    assert "ev-ad-1" not in blob
+    assert "ev-ad-2" not in blob
+    assert report["campaigns"][0]["causal_attribution"] is False
+    assert report["campaigns"][0]["ads_ran_proven"] is False
+    single = _line("fees", "3.00")
+    single["evidence_ref"] = {"evidence_id": "ev-fee", "evidence_state": "observed"}
+    kept = build_owner_performance_report(_base(lines=[single])).to_dict()
+    assert kept["fees"]["evidence_ref"]["evidence_id"] == "ev-fee"
+    assert kept["fees"]["amount"] == "3.00"
+    zero = _line("revenue", "0.00")
+    hundred = _line("revenue", "100.00")
+    zero["evidence_ref"] = {"evidence_id": "ev-zero", "evidence_state": "observed"}
+    hundred["evidence_ref"] = {"evidence_id": "ev-hundred", "evidence_state": "observed"}
+    summed = build_owner_performance_report(_base(lines=[hundred, zero])).to_dict()
+    assert summed["revenue"]["amount"] == "100.00"
+    assert summed["revenue"]["evidence_ref"] is None
+    assert "ev-zero" not in str(summed["revenue"])
+    assert summed["explicit_zeros"] == []
+
+
+def test_invalid_dates_and_structured_labels_do_not_echo_values():
+    canary = "ada@example.com"
+    period = _base(period_start=canary)
+    with pytest.raises(OwnerPerformanceReportError) as exc:
+        build_owner_performance_report(period)
+    assert exc.value.code == "invalid_period"
+    assert exc.value.__cause__ is None
+    assert exc.value.__context__ is None
+    assert canary not in str(exc.value)
+    dated = _line("revenue", "1.00", occurred_on=canary)
+    with pytest.raises(OwnerPerformanceReportError) as line_exc:
+        build_owner_performance_report(_base(lines=[dated]))
+    assert line_exc.value.code == "invalid_line_date"
+    assert line_exc.value.__cause__ is None
+    assert canary not in str(line_exc.value)
+    secret = _line("revenue", "1.00")
+    secret["source"] = {"api_key": "sk_live_DICT", "email": canary}
+    secret["provenance"] = {"provider_body": "card=4242424242424242"}
+    with pytest.raises(OwnerPerformanceReportError) as label_exc:
+        build_owner_performance_report(_base(lines=[secret]))
+    assert label_exc.value.code == "invalid_line"
+    assert canary not in str(label_exc.value)
+    assert label_exc.value.__cause__ is None
+    campaign = _line("ad_spend", "1.00", campaign_id=("camp", "sk_live_SECRET", canary))
+    with pytest.raises(OwnerPerformanceReportError) as campaign_exc:
+        build_owner_performance_report(_base(lines=[campaign]))
+    assert campaign_exc.value.code == "invalid_campaign"
+    assert canary not in str(campaign_exc.value)
+    assert "sk_live_SECRET" not in str(campaign_exc.value)
