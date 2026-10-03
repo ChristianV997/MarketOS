@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarketOS Owner Research Journey Harness (fixture-only)</title>
+    <style>
+      :root {
+        --bg: #09090b;
+        --fg: #f4f4f5;
+        --muted: #a1a1aa;
+        --line: #3f3f46;
+        --accent: #818cf8;
+        --accent-hover: #6366f1;
+        --warn: #fbbf24;
+        --bad: #f87171;
+        --good: #34d399;
+        --card-bg: #18181b;
+      }
+      * { box-sizing: border-box; }
+      @media (prefers-reduced-motion: reduce) {
+        * { animation: none !important; transition: none !important; }
+      }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        line-height: 1.5;
+      }
+      .sr-only:not(:focus):not(:focus-visible) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      a.skip:focus {
+        position: fixed;
+        left: 0.75rem;
+        top: 0.75rem;
+        z-index: 50;
+        background: var(--accent);
+        color: #111;
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.25rem;
+        font-weight: 600;
+        text-decoration: none;
+      }
+      header, main, footer {
+        padding: 1rem 1.5rem;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      h1 { font-size: 1.35rem; margin: 0 0 0.25rem; font-weight: 700; }
+      h2 { font-size: 1.1rem; margin: 0 0 0.5rem; font-weight: 600; }
+      h3 { font-size: 0.95rem; margin: 0 0 0.4rem; font-weight: 600; }
+      .muted { color: var(--muted); font-size: 0.85rem; }
+      .banner {
+        border: 1px solid var(--line);
+        border-radius: 0.5rem;
+        padding: 0.75rem 1rem;
+        margin: 0.75rem 0;
+        background: rgba(24, 24, 27, 0.6);
+      }
+      .banner[data-tone="warn"] { border-color: #854d0e; color: var(--warn); }
+      .banner[data-tone="bad"] { border-color: #7f1d1d; color: var(--bad); }
+      .banner[data-tone="good"] { border-color: #065f46; color: var(--good); }
+      .banner[data-tone="neutral"] { border-color: var(--line); color: var(--fg); }
+      
+      .controls-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+        background: var(--card-bg);
+        border: 1px solid var(--line);
+        border-radius: 0.5rem;
+        padding: 0.75rem 1rem;
+        margin-bottom: 1rem;
+      }
+      .control-group {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      label { font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+      select, button, input {
+        background: #27272a;
+        color: var(--fg);
+        border: 1px solid var(--line);
+        border-radius: 0.35rem;
+        padding: 0.35rem 0.65rem;
+        font-size: 0.85rem;
+      }
+      select:focus-visible, button:focus-visible, input:focus-visible, a:focus-visible, [tabindex]:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      button:hover:not(:disabled) {
+        background: #3f3f46;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      
+      .layout-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1.25rem;
+      }
+      @media (min-width: 1024px) {
+        .layout-grid {
+          grid-template-columns: 360px 1fr 340px;
+        }
+      }
+      
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--line);
+        border-radius: 0.5rem;
+        padding: 1rem;
+      }
+      
+      /* Listbox styles */
+      [role="listbox"] {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        max-height: 520px;
+        overflow-y: auto;
+      }
+      [role="option"] {
+        padding: 0.6rem 0.75rem;
+        border: 1px solid var(--line);
+        border-radius: 0.35rem;
+        background: #27272a;
+        cursor: pointer;
+        user-select: none;
+      }
+      [role="option"][aria-selected="true"] {
+        border-color: var(--accent);
+        background: #312e81;
+      }
+      [role="option"]:focus {
+        outline: 2px solid var(--accent);
+      }
+      .option-header {
+        display: flex;
+        justify-content: space-between;
+        font-weight: 600;
+        font-size: 0.9rem;
+      }
+      .option-desc {
+        font-size: 0.75rem;
+        color: var(--muted);
+        margin-top: 0.2rem;
+      }
+      .chip {
+        display: inline-block;
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.25rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        background: #3f3f46;
+        color: #e4e4e7;
+      }
+      .chip[data-mode="fixture_only"], .chip[data-mode="simulated"] { background: #713f12; color: #fef08a; }
+      .chip[data-mode="manual"] { background: #1e3a8a; color: #bfdbfe; }
+      .chip[data-mode="live_readonly"] { background: #064e3b; color: #a7f3d0; }
+      
+      /* Reflowing pillars */
+      .pillars-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin: 0.75rem 0;
+      }
+      .pillar-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.4rem 0.6rem;
+        background: #27272a;
+        border-radius: 0.35rem;
+        border: 1px solid var(--line);
+        font-size: 0.85rem;
+      }
+      .pillar-score {
+        font-weight: 600;
+        font-family: ui-monospace, Consolas, monospace;
+      }
+      
+      /* Progress and Gate */
+      .progress-bar-container {
+        margin: 0.75rem 0;
+      }
+      progress {
+        width: 100%;
+        height: 0.65rem;
+        border-radius: 0.25rem;
+        overflow: hidden;
+      }
+      progress::-webkit-progress-bar { background-color: #27272a; }
+      progress::-webkit-progress-value { background-color: var(--accent); }
+      
+      .draft-actions-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        margin-top: 0.75rem;
+      }
+      .draft-actions-group button {
+        text-align: left;
+        padding: 0.5rem 0.75rem;
+        width: 100%;
+      }
+      
+      .reason-list {
+        font-size: 0.75rem;
+        color: var(--warn);
+        margin: 0.5rem 0;
+        padding-left: 1.25rem;
+      }
+      
+      #network-log {
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 0.75rem;
+        background: #111;
+        border: 1px solid var(--line);
+        border-radius: 0.35rem;
+        padding: 0.5rem;
+        max-height: 8rem;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+      
+      .jump-link {
+        display: inline-block;
+        font-size: 0.8rem;
+        color: var(--accent);
+        margin: 0.35rem 0;
+        text-decoration: underline;
+      }
+      @media (min-width: 1024px) {
+        .jump-link { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip sr-only" id="skip-link" href="#main-content">Skip to main content</a>
+    <header>
+      <h1 id="page-title">Owner Research Workspace</h1>
+      <p class="muted" id="page-subtitle">
+        Opportunity review and curated portfolio acceptance harness. Read-only advisory surface. No publishing, spend, or mutations.
+      </p>
+      
+      <!-- Tenant and Scenario Controls -->
+      <div class="controls-bar" role="toolbar" aria-label="Harness configuration">
+        <div class="control-group">
+          <label for="workspace-select">Workspace (Tenant):</label>
+          <select id="workspace-select" aria-label="Tenant workspace selector">
+            <option value="ws-owner-alpha" selected>ws-owner-alpha (Authorized Owner)</option>
+            <option value="ws-foreign">ws-foreign (Mismatch Scenario)</option>
+            <option value="">None (Unauthenticated / Unselected)</option>
+          </select>
+        </div>
+        
+        <div class="control-group">
+          <label for="scenario-select">Scenario:</label>
+          <select id="scenario-select" aria-label="Scenario selector">
+            <option value="ok-fixture-2-of-3" selected>01: 2/3 Candidates (Fixture, Blocked Draft)</option>
+            <option value="ready-3-of-3-manual">02: 3/3 Candidates (Manual, Eligible, Allowed Draft)</option>
+            <option value="ready-3-of-3-live">03: 3/3 Candidates (Live Read-Only, Allowed Draft)</option>
+            <option value="ready-5-of-3">04: 5/3 Candidates (>3 Distinct IDs, Display 5/3)</option>
+            <option value="empty-0-of-3">05: 0/3 Candidates (Loaded Empty, Real 0/3)</option>
+            <option value="duplicates-and-archived">06: Duplicates & Archived (Deduplicated to 3/3)</option>
+            <option value="conflict-eligible-below-3">07: Conflict (Eligible True with 2 Active IDs)</option>
+            <option value="blocked-stale">08: Stale Evidence (Draft Blocked)</option>
+            <option value="blocked-partial">09: Partial/Malformed IDs (Draft Blocked)</option>
+            <option value="blocked-not-eligible">10: Backend Eligible=False (Draft Blocked)</option>
+            <option value="unavailable-404">11: Outage 404 Route (Unavailable, Not 0/3)</option>
+            <option value="unavailable-501">12: Outage 501 Not Implemented (Unavailable)</option>
+            <option value="error-500">13: Server Error 500 (Error State)</option>
+            <option value="error-429">14: Rate Limited 429 (Error State)</option>
+            <option value="error-malformed">15: Malformed JSON (Error State)</option>
+            <option value="loading">16: Loading State (Progress —/3)</option>
+          </select>
+        </div>
+        
+        <div class="control-group">
+          <label for="handler-connected">Draft Handler:</label>
+          <input type="checkbox" id="handler-connected" checked aria-label="Connect draft research handler" />
+        </div>
+        
+        <button type="button" id="refresh-btn">Refetch Data</button>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <!-- Live Region for screen readers -->
+      <div id="live-region" class="sr-only" role="status" aria-live="polite">
+        Initializing owner research harness…
+      </div>
+
+      <!-- Surface State Banner -->
+      <div id="status-banner" class="banner" role="status" data-tone="neutral" data-surface="owner-research">
+        Loading owner research surface…
+      </div>
+
+      <!-- Qualifiers Container -->
+      <div id="qualifiers-container"></div>
+
+      <div class="layout-grid">
+        <!-- 1. Ranked Candidates Listbox Column -->
+        <section id="panel-ranking" class="card" aria-labelledby="ranking-heading">
+          <h2 id="ranking-heading">Ranked Opportunities</h2>
+          <p class="muted" id="ranking-subtitle">Backend order preserved. Missing values read "Not reported".</p>
+          
+          <div id="ranking-dropped-notice" class="muted" style="display: none; margin-bottom: 0.5rem;"></div>
+          
+          <a class="jump-link" href="#opportunity-detail">Jump to selected candidate details</a>
+          
+          <div id="ranked-candidates-listbox" role="listbox" aria-label="Ranked product opportunities" tabindex="0">
+            <!-- Populated dynamically -->
+          </div>
+          
+          <a class="jump-link" href="#opportunity-detail" style="margin-top: 0.5rem;">Jump to selected candidate details</a>
+        </section>
+
+        <!-- 2. Opportunity Detail Column -->
+        <section id="opportunity-detail" class="card" aria-labelledby="detail-heading">
+          <h2 id="detail-heading">Candidate Review</h2>
+          <div id="detail-body">
+            <!-- Selected candidate details rendered here -->
+          </div>
+        </section>
+
+        <!-- 3. Curated Portfolio & Draft Actions Column -->
+        <aside id="panel-portfolio" class="card" aria-labelledby="portfolio-heading">
+          <h2 id="portfolio-heading">Curated Portfolio</h2>
+          
+          <div id="portfolio-progress-container">
+            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+              <span>Distinct Active:</span>
+              <strong style="font-size: 1.1rem;"><span id="portfolio-count">—</span> / <span id="portfolio-required">3</span></strong>
+            </div>
+            
+            <div class="progress-bar-container">
+              <progress id="portfolio-progress-bar" max="3" value="0" aria-label="Portfolio progress towards 3 distinct active candidates"></progress>
+            </div>
+            
+            <div id="portfolio-ignored-summary" class="muted" style="font-size: 0.75rem; margin-top: 0.35rem;"></div>
+          </div>
+          
+          <hr style="border: 0; border-top: 1px solid var(--line); margin: 1rem 0;" />
+          
+          <!-- Draft Research Actions -->
+          <div id="draft-research-section">
+            <h3 id="draft-actions-title">Draft Research Advisory Actions</h3>
+            <p class="muted" style="font-size: 0.75rem;">
+              On-demand blueprints. Requires &ge;3 distinct active candidates and backend eligibility.
+            </p>
+            
+            <div id="draft-gate-reasons" class="reason-list" style="display: none;"></div>
+            
+            <div class="draft-actions-group" role="group" aria-labelledby="draft-actions-title">
+              <button type="button" id="btn-draft-target_markets" data-action="target_markets" disabled>
+                Target markets
+              </button>
+              <button type="button" id="btn-draft-personas" data-action="personas" disabled>
+                Customer personas
+              </button>
+              <button type="button" id="btn-draft-brand_ad_strategy" data-action="brand_ad_strategy" disabled>
+                Brand, marketing and ad strategy
+              </button>
+              <button type="button" id="btn-draft-social_channels" data-action="social_channels" disabled>
+                Social channel and account suggestions
+              </button>
+              <button type="button" id="btn-draft-storefront_landing" data-action="storefront_landing" disabled>
+                Ecommerce and landing-page options
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <footer>
+      <section class="card" style="margin-top: 1rem;">
+        <h3>Network & Verification Telemetry</h3>
+        <p class="muted" style="font-size: 0.75rem;">
+          Asserts: 0 external provider calls, 0 publishes, 0 ad spends, 0 orders, 0 payments, 0 customer messages, strictly GET requests.
+        </p>
+        <pre id="network-log" aria-label="Network request log"></pre>
+        <div id="draft-emissions-log" class="muted" style="font-size: 0.8rem; margin-top: 0.5rem;"></div>
+      </section>
+    </footer>
+
+    <script>
+      (function () {
+        // --- Fetch Interceptor and Telemetry ---
+        window.__mosRequests = [];
+        window.__mosEmittedDrafts = [];
+        window.__mosFetchPatched = true;
+
+        const origFetch = window.fetch.bind(window);
+        window.fetch = async function (input, init) {
+          const method = String((init && init.method) || "GET").toUpperCase();
+          const url = String(input);
+          window.__mosRequests.push({ method, url, timestamp: Date.now() });
+          updateNetworkLog();
+          return origFetch(input, init);
+        };
+
+        function updateNetworkLog() {
+          const logElem = document.getElementById("network-log");
+          if (!logElem) return;
+          logElem.textContent = window.__mosRequests
+            .map((r, i) => `[${i + 1}] ${r.method} ${r.url}`)
+            .join("\n");
+        }
+
+        // --- Data Fixtures and Models ---
+        const CANONICAL_RANKED_ROWS = [
+          {
+            candidateId: "c-hydroponics",
+            title: "Hydroponics starter kit",
+            rankIndex: 1,
+            position: 1,
+            evidenceCompleteness: 0.88,
+            confidence: 0.91,
+            riskLevel: "low",
+            commercialDecision: "hold_for_manual_review",
+            promotionState: "candidate_review",
+            nextBestAction: "request_supplier_sample",
+            evidenceMode: "manual",
+            evidenceClass: "manual",
+            pillars: [
+              { id: "demand", label: "Market Demand", status: "available", score: 88, detail: "High seasonal surge", evidenceClass: "manual" },
+              { id: "supplier_feasibility", label: "Supplier Feasibility", status: "available", score: 92, detail: "Tier 1 supplier verified", evidenceClass: "manual" },
+              { id: "economics", label: "Unit Economics", status: "available", score: 78, detail: "Healthy 42% margin", evidenceClass: "manual" },
+              { id: "consumer_attention", label: "Consumer Attention", status: "partial", score: null, detail: "Advisory hooks only", evidenceClass: "unknown" },
+              { id: "compliance", label: "Regulatory Compliance", status: "available", score: 95, detail: "Compliant with safety rules", evidenceClass: "manual" },
+            ],
+            gaps: ["consumer_attention_evidence_gap"],
+            hardGates: [],
+            conflicts: [],
+            assumptions: ["Assumes 14-day sea freight window"],
+            provenance: {
+              sourceFamily: "supplier_catalog",
+              evidenceMode: "manual",
+              evidenceClass: "manual",
+              replayIdentity: "replay-hyd-001",
+              evidenceReferences: ["doc-supp-102", "doc-dem-044"],
+            },
+            freshness: { status: "fresh", label: "Fresh evidence (generated 1h ago)", expiresAt: "2026-09-30T12:00:00Z" },
+          },
+          {
+            candidateId: "c-smart-feeder",
+            title: "Smart pet feeder",
+            rankIndex: 2,
+            position: 2,
+            evidenceCompleteness: 0.75,
+            confidence: 0.82,
+            riskLevel: "medium",
+            commercialDecision: "hold_for_manual_review",
+            promotionState: "candidate_review",
+            nextBestAction: "evaluate_warranty_risk",
+            evidenceMode: "simulated",
+            evidenceClass: "simulated",
+            pillars: [
+              { id: "demand", label: "Market Demand", status: "available", score: 82, detail: "Steady search volume", evidenceClass: "simulated" },
+              { id: "supplier_feasibility", label: "Supplier Feasibility", status: "available", score: 80, detail: "Standard factory contract", evidenceClass: "simulated" },
+              { id: "economics", label: "Unit Economics", status: "available", score: 71, detail: "Estimated margin 36%", evidenceClass: "simulated" },
+              { id: "consumer_attention", label: "Consumer Attention", status: "available", score: 84, detail: "High social engagement", evidenceClass: "simulated" },
+              { id: "compliance", label: "Regulatory Compliance", status: "partial", score: null, detail: "FCC certification pending", evidenceClass: "unknown" },
+            ],
+            gaps: ["fcc_compliance_certification_missing"],
+            hardGates: [],
+            conflicts: [],
+            assumptions: ["Assumes standard returns rate"],
+            provenance: {
+              sourceFamily: "market_simulation",
+              evidenceMode: "simulated",
+              evidenceClass: "simulated",
+              replayIdentity: "replay-pet-002",
+              evidenceReferences: ["sim-run-881"],
+            },
+            freshness: { status: "fresh", label: "Simulated freshness", expiresAt: "2026-09-30T12:00:00Z" },
+          },
+          {
+            candidateId: "c-solar-camera",
+            title: "Solar 4G security camera",
+            rankIndex: 3,
+            position: 3,
+            evidenceCompleteness: 0.60,
+            confidence: 0.70,
+            riskLevel: "high",
+            commercialDecision: "blocked_compliance",
+            promotionState: "blocked",
+            nextBestAction: "remediate_sim_carrier_lock",
+            evidenceMode: "fixture_only",
+            evidenceClass: "fixture",
+            pillars: [
+              { id: "demand", label: "Market Demand", status: "available", score: 74, detail: "Growing niche", evidenceClass: "fixture" },
+              { id: "supplier_feasibility", label: "Supplier Feasibility", status: "partial", score: null, detail: "SIM lock compatibility unverified", evidenceClass: "unknown" },
+              { id: "economics", label: "Unit Economics", status: "available", score: 65, detail: "High shipping weight", evidenceClass: "fixture" },
+              { id: "consumer_attention", label: "Consumer Attention", status: "available", score: 70, detail: "Moderate interest", evidenceClass: "fixture" },
+              { id: "compliance", label: "Regulatory Compliance", status: "blocked", score: 0, detail: "Cellular radio license required", evidenceClass: "fixture" },
+            ],
+            gaps: ["carrier_sim_matrix", "radio_compliance_doc"],
+            hardGates: ["blocked_telecom_certification"],
+            conflicts: ["supplier_claims_unlocked_vs_carrier_evidence"],
+            assumptions: ["Requires LTE Band 4 & 13"],
+            provenance: {
+              sourceFamily: "test_fixture",
+              evidenceMode: "fixture_only",
+              evidenceClass: "fixture",
+              replayIdentity: "replay-cam-003",
+              evidenceReferences: ["fix-cam-01"],
+            },
+            freshness: { status: "fresh", label: "Fixture timestamp", expiresAt: "2026-09-30T12:00:00Z" },
+          },
+          {
+            candidateId: "c-commodity-earbuds",
+            title: "Commodity wireless earbuds",
+            rankIndex: 4,
+            position: 4,
+            evidenceCompleteness: 0.95,
+            confidence: 0.95,
+            riskLevel: "high",
+            commercialDecision: "reject_retailer_dominance",
+            promotionState: "rejected",
+            nextBestAction: "archive_candidate",
+            evidenceMode: "manual",
+            evidenceClass: "manual",
+            pillars: [
+              { id: "demand", label: "Market Demand", status: "available", score: 95, detail: "Huge volume", evidenceClass: "manual" },
+              { id: "supplier_feasibility", label: "Supplier Feasibility", status: "available", score: 90, detail: "Abundant suppliers", evidenceClass: "manual" },
+              { id: "economics", label: "Unit Economics", status: "available", score: 0, detail: "0% margin after ad acquisition cost", evidenceClass: "manual" },
+              { id: "consumer_attention", label: "Consumer Attention", status: "available", score: 90, detail: "Dominated by major brands", evidenceClass: "manual" },
+              { id: "compliance", label: "Regulatory Compliance", status: "available", score: 90, detail: "Standard CE/FCC", evidenceClass: "manual" },
+            ],
+            gaps: [],
+            hardGates: ["retailer_price_war_barrier"],
+            conflicts: [],
+            assumptions: [],
+            provenance: {
+              sourceFamily: "manual_audit",
+              evidenceMode: "manual",
+              evidenceClass: "manual",
+              replayIdentity: "replay-ear-004",
+              evidenceReferences: ["man-aud-09"],
+            },
+            freshness: { status: "fresh", label: "Manual audit fresh", expiresAt: "2026-09-30T12:00:00Z" },
+          },
+        ];
+
+        // --- State Management ---
+        let selectedIndex = 0;
+        let currentScenario = "ok-fixture-2-of-3";
+        let currentWorkspace = "ws-owner-alpha";
+        let isHandlerConnected = true;
+
+        // --- Core Render Routine ---
+        async function runPipeline() {
+          const workspaceSelect = document.getElementById("workspace-select");
+          const scenarioSelect = document.getElementById("scenario-select");
+          const handlerCheck = document.getElementById("handler-connected");
+          
+          currentWorkspace = workspaceSelect ? workspaceSelect.value : "ws-owner-alpha";
+          currentScenario = scenarioSelect ? scenarioSelect.value : "ok-fixture-2-of-3";
+          isHandlerConnected = handlerCheck ? handlerCheck.checked : true;
+
+          const statusBanner = document.getElementById("status-banner");
+          const liveRegion = document.getElementById("live-region");
+          const qualifiersContainer = document.getElementById("qualifiers-container");
+          qualifiersContainer.innerHTML = "";
+
+          // Fetch mock portfolio via loopback endpoint
+          let fetchUrl = `/__mock_api/portfolio?workspace_id=${encodeURIComponent(currentWorkspace)}&scenario=${encodeURIComponent(currentScenario)}`;
+          let portfolioResponse = null;
+          let portfolioPayload = null;
+          let fetchStatus = 200;
+
+          try {
+            const res = await window.fetch(fetchUrl);
+            fetchStatus = res.status;
+            if (res.ok) {
+              portfolioPayload = await res.json();
+            } else {
+              try {
+                portfolioPayload = await res.json();
+              } catch (e) {
+                portfolioPayload = null;
+              }
+            }
+          } catch (err) {
+            fetchStatus = 0;
+          }
+
+          // Evaluate state according to owner research contract rules
+          let surfacePhase = "ready";
+          let portfolioPhase = "ready";
+          let portfolioActiveCount = null;
+          let portfolioActiveIds = [];
+          let ignoredCounts = { invalidId: 0, unknownStatus: 0, malformedEntries: 0, notActive: 0, duplicateActiveRows: 0 };
+          let qualifiers = [];
+          let gateReasons = [];
+          let gateEnabled = false;
+
+          // 1. Check workspace auth scoping
+          if (!currentWorkspace || !currentWorkspace.trim()) {
+            surfacePhase = "unavailable";
+            portfolioPhase = "unavailable";
+            statusBanner.setAttribute("data-tone", "warn");
+            statusBanner.textContent = "Workspace not selected. Select an authorized tenant workspace to review research.";
+            qualifiersContainer.innerHTML = `<div class="banner" data-tone="warn"><strong>Unavailable:</strong> workspace_not_selected</div>`;
+            liveRegion.textContent = "Owner research unavailable: workspace not selected.";
+            renderRankingList([], null);
+            renderProgress(null, 3, ignoredCounts);
+            updateDraftGate(false, ["Workspace not selected."]);
+            exportAcceptanceState("unavailable", null, [], false, ["workspace_not_selected"]);
+            return;
+          }
+
+          // 2. Handle HTTP outage / failure states
+          if (fetchStatus === 404 || fetchStatus === 501 || currentScenario.startsWith("unavailable-")) {
+            portfolioPhase = "unavailable";
+            statusBanner.setAttribute("data-tone", "warn");
+            const reasonCode = fetchStatus === 501 ? "endpoint_not_implemented" : "endpoint_not_available";
+            statusBanner.textContent = `Portfolio read model unavailable (${reasonCode}). Truthful reporting: missing endpoints are not treated as 0/3.`;
+            qualifiersContainer.innerHTML = `<div class="banner" data-tone="warn"><strong>Portfolio Unavailable:</strong> ${reasonCode}</div>`;
+            liveRegion.textContent = `Portfolio unavailable: ${reasonCode}. Ranking ready: 4 candidates.`;
+            renderRankingList(CANONICAL_RANKED_ROWS, CANONICAL_RANKED_ROWS[selectedIndex]);
+            renderProgress(null, 3, ignoredCounts);
+            updateDraftGate(false, ["The portfolio read model is unavailable."]);
+            exportAcceptanceState("ready", null, [], false, [reasonCode]);
+            return;
+          }
+
+          if (fetchStatus >= 400 || !portfolioPayload || currentScenario.startsWith("error-")) {
+            portfolioPhase = "error";
+            const errReason = portfolioPayload && portfolioPayload.error ? portfolioPayload.error : (fetchStatus === 429 ? "rate_limited" : (currentScenario === "error-malformed" ? "malformed_payload" : "server_error"));
+            statusBanner.setAttribute("data-tone", "bad");
+            statusBanner.setAttribute("role", "alert");
+            statusBanner.textContent = `Portfolio read failure: ${errReason}.`;
+            qualifiersContainer.innerHTML = `<div class="banner" data-tone="bad"><strong>Error:</strong> ${errReason}</div>`;
+            liveRegion.textContent = `Portfolio error: ${errReason}.`;
+            renderRankingList(CANONICAL_RANKED_ROWS, CANONICAL_RANKED_ROWS[selectedIndex]);
+            renderProgress(null, 3, ignoredCounts);
+            updateDraftGate(false, ["The portfolio could not be loaded."]);
+            exportAcceptanceState("ready", null, [], false, [errReason]);
+            return;
+          }
+
+          if (currentScenario === "loading") {
+            portfolioPhase = "loading";
+            statusBanner.setAttribute("data-tone", "neutral");
+            statusBanner.textContent = "Loading portfolio items…";
+            liveRegion.textContent = "Loading portfolio items…";
+            renderRankingList(CANONICAL_RANKED_ROWS, CANONICAL_RANKED_ROWS[selectedIndex]);
+            renderProgress(null, 3, ignoredCounts);
+            updateDraftGate(false, ["The portfolio is still loading."]);
+            exportAcceptanceState("ready", null, [], false, ["loading"]);
+            return;
+          }
+
+          // 3. Check Workspace Mismatch
+          if (portfolioPayload.workspace_id !== currentWorkspace) {
+            portfolioPhase = "error";
+            statusBanner.setAttribute("data-tone", "bad");
+            statusBanner.setAttribute("role", "alert");
+            statusBanner.textContent = `Tenant safety error: payload workspace_id (${portfolioPayload.workspace_id}) does not match requested workspace (${currentWorkspace}).`;
+            qualifiersContainer.innerHTML = `<div class="banner" data-tone="bad"><strong>Error:</strong> workspace_mismatch</div>`;
+            liveRegion.textContent = "Error: workspace mismatch.";
+            renderRankingList(CANONICAL_RANKED_ROWS, CANONICAL_RANKED_ROWS[selectedIndex]);
+            renderProgress(null, 3, ignoredCounts);
+            updateDraftGate(false, ["Tenant mismatch."]);
+            exportAcceptanceState("ready", null, [], false, ["workspace_mismatch"]);
+            return;
+          }
+
+          // 4. Adapt Portfolio Payload Items (Deduplication, Inactive, Malformed)
+          const items = Array.isArray(portfolioPayload.items) ? portfolioPayload.items : [];
+          const seenActive = new Set();
+          
+          for (const item of items) {
+            if (!item || typeof item !== "object") {
+              ignoredCounts.malformedEntries++;
+              continue;
+            }
+            const id = item.candidate_id;
+            if (!id || typeof id !== "string" || id.trim().length === 0 || id.length > 128) {
+              ignoredCounts.invalidId++;
+              continue;
+            }
+            if (!["active", "inactive", "removed", "archived"].includes(item.status)) {
+              ignoredCounts.unknownStatus++;
+              continue;
+            }
+            if (item.status !== "active") {
+              ignoredCounts.notActive++;
+              continue;
+            }
+            if (seenActive.has(id)) {
+              ignoredCounts.duplicateActiveRows++;
+              continue;
+            }
+            seenActive.add(id);
+            portfolioActiveIds.push(id);
+          }
+
+          portfolioActiveCount = portfolioActiveIds.length;
+          const evidenceMode = portfolioPayload.evidence_mode || "fixture_only";
+          const isStale = currentScenario === "blocked-stale";
+          const hasPartial = ignoredCounts.invalidId > 0 || ignoredCounts.unknownStatus > 0 || ignoredCounts.malformedEntries > 0;
+
+          if (evidenceMode === "fixture_only" || evidenceMode === "simulated") qualifiers.push("fixture");
+          if (isStale) qualifiers.push("stale");
+          if (hasPartial) qualifiers.push("partial");
+
+          // 5. Evaluate Draft Research Gate
+          if (qualifiers.includes("fixture")) {
+            gateReasons.push("Fixture / simulation data cannot enable draft research.");
+          }
+          if (qualifiers.includes("stale")) {
+            gateReasons.push("Portfolio evidence is stale.");
+          }
+          if (qualifiers.includes("partial")) {
+            gateReasons.push("Some portfolio entries were ignored as invalid, so the portfolio cannot be trusted for drafting.");
+          }
+          if (evidenceMode === "unknown") {
+            gateReasons.push("Portfolio provenance is not reported.");
+          }
+
+          const backendDraft = portfolioPayload.draft_research;
+          const isReported = backendDraft && typeof backendDraft.eligible === "boolean";
+          const isEligible = isReported && backendDraft.eligible === true;
+
+          if (!isReported) {
+            gateReasons.push("The backend has not reported draft-research eligibility.");
+          } else if (!isEligible) {
+            gateReasons.push("The backend reports this portfolio is not eligible for draft research.");
+            if (Array.isArray(backendDraft.reasons)) gateReasons.push(...backendDraft.reasons);
+          } else if (isEligible && portfolioActiveCount < 3) {
+            gateReasons.push(`Backend eligibility conflicts with the distinct active candidate count (${portfolioActiveCount}/3).`);
+          }
+
+          if (!isHandlerConnected) {
+            gateReasons.push("No draft-research service is connected to this page yet.");
+          }
+
+          gateEnabled = gateReasons.length === 0 && portfolioActiveCount >= 3;
+
+          // Render Qualifiers
+          qualifiersContainer.innerHTML = qualifiers
+            .map(q => `<div class="banner" data-tone="warn"><strong>Notice:</strong> Qualifier active: ${q} (Applies to portfolio)</div>`)
+            .join("");
+
+          statusBanner.setAttribute("data-tone", gateEnabled ? "good" : "neutral");
+          statusBanner.textContent = `Owner research active for ${currentWorkspace}. Evidence mode: ${evidenceMode}. Distinct active candidates: ${portfolioActiveCount}/3.`;
+
+          liveRegion.textContent = `Ranking ready: 4 candidates in backend order. Portfolio: ${portfolioActiveCount} of 3 distinct active candidates. Notices: ${qualifiers.join(", ") || "none"}.`;
+
+          renderRankingList(CANONICAL_RANKED_ROWS, CANONICAL_RANKED_ROWS[selectedIndex], portfolioActiveIds);
+          renderProgress(portfolioActiveCount, 3, ignoredCounts);
+          updateDraftGate(gateEnabled, gateReasons, portfolioActiveIds);
+          exportAcceptanceState("ready", portfolioActiveCount, portfolioActiveIds, gateEnabled, gateReasons);
+        }
+
+        // --- Render Helpers ---
+        function renderRankingList(rows, selectedRow, inPortfolioIds = []) {
+          const listbox = document.getElementById("ranked-candidates-listbox");
+          if (!listbox) return;
+          listbox.innerHTML = "";
+
+          if (rows.length === 0) {
+            listbox.innerHTML = `<p class="muted">No candidates available.</p>`;
+            return;
+          }
+
+          rows.forEach((row, idx) => {
+            const opt = document.createElement("div");
+            opt.setAttribute("role", "option");
+            opt.setAttribute("id", `opt-candidate-${row.candidateId}`);
+            opt.setAttribute("tabindex", idx === selectedIndex ? "0" : "-1");
+            opt.setAttribute("aria-selected", idx === selectedIndex ? "true" : "false");
+            
+            const isPortfolioMember = inPortfolioIds.includes(row.candidateId);
+            const scoreText = row.pillars[0].score !== null ? `${row.pillars[0].score}%` : "Not reported";
+            
+            opt.innerHTML = `
+              <div class="option-header">
+                <span>#${row.rankIndex || (idx + 1)} ${escapeHtml(row.title)}</span>
+                <span class="chip" data-mode="${row.evidenceMode}">${row.evidenceClass}</span>
+              </div>
+              <div class="option-desc">
+                ID: <code>${escapeHtml(row.candidateId)}</code> | Decision: ${escapeHtml(row.commercialDecision || "none")} ${isPortfolioMember ? "| <strong>In Portfolio</strong>" : ""}
+              </div>
+            `;
+
+            opt.addEventListener("click", () => {
+              selectedIndex = idx;
+              document.querySelectorAll('[role="option"]').forEach((el, i) => {
+                el.setAttribute("aria-selected", i === idx ? "true" : "false");
+                el.setAttribute("tabindex", i === idx ? "0" : "-1");
+              });
+              opt.focus();
+              renderDetail(row);
+            });
+
+            opt.addEventListener("keydown", (e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                if (selectedIndex < rows.length - 1) {
+                  selectedIndex++;
+                  updateSelection(rows);
+                }
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                if (selectedIndex > 0) {
+                  selectedIndex--;
+                  updateSelection(rows);
+                }
+              } else if (e.key === "Home") {
+                e.preventDefault();
+                selectedIndex = 0;
+                updateSelection(rows);
+              } else if (e.key === "End") {
+                e.preventDefault();
+                selectedIndex = rows.length - 1;
+                updateSelection(rows);
+              } else if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                const detailHeading = document.getElementById("detail-heading");
+                if (detailHeading) detailHeading.focus();
+              }
+            });
+
+            listbox.appendChild(opt);
+          });
+
+          if (selectedRow) renderDetail(selectedRow);
+        }
+
+        function updateSelection(rows) {
+          const options = document.querySelectorAll('[role="option"]');
+          options.forEach((el, i) => {
+            const isSel = i === selectedIndex;
+            el.setAttribute("aria-selected", isSel ? "true" : "false");
+            el.setAttribute("tabindex", isSel ? "0" : "-1");
+            if (isSel) {
+              el.focus();
+              renderDetail(rows[selectedIndex]);
+            }
+          });
+        }
+
+        function renderDetail(row) {
+          const body = document.getElementById("detail-body");
+          if (!body || !row) return;
+
+          const pillarsHtml = row.pillars
+            .map(p => `
+              <div class="pillar-row">
+                <span><strong>${escapeHtml(p.label)}:</strong> ${escapeHtml(p.detail || "")}</span>
+                <span class="pillar-score">${p.score !== null ? `${p.score}%` : "Not reported"}</span>
+              </div>
+            `)
+            .join("");
+
+          const gapsHtml = row.gaps.length > 0
+            ? row.gaps.map(g => `<li>${escapeHtml(g)}</li>`).join("")
+            : "<li>None reported</li>";
+
+          body.innerHTML = `
+            <h3>#${row.rankIndex || 1}: ${escapeHtml(row.title)}</h3>
+            <p class="muted" style="font-size: 0.8rem; margin: 0 0 0.5rem;">
+              Candidate ID: <code>${escapeHtml(row.candidateId)}</code> | Decision: <code>${escapeHtml(row.commercialDecision || "none")}</code> | Risk: <code>${escapeHtml(row.riskLevel || "unspecified")}</code>
+            </p>
+            
+            <div style="font-size: 0.8rem; margin-bottom: 0.5rem;">
+              <strong>Provenance:</strong> Mode: <code>${escapeHtml(row.provenance.evidenceMode)}</code> | Replay: <code>${escapeHtml(row.provenance.replayIdentity || "none")}</code>
+            </div>
+
+            <h4>Evidence Pillars (Reflowing List)</h4>
+            <div class="pillars-list">
+              ${pillarsHtml}
+            </div>
+
+            <h4>Evidence Gaps</h4>
+            <ul style="font-size: 0.8rem; margin: 0; padding-left: 1.25rem;">
+              ${gapsHtml}
+            </ul>
+          `;
+        }
+
+        function renderProgress(activeCount, required, ignored) {
+          const countSpan = document.getElementById("portfolio-count");
+          const progressBar = document.getElementById("portfolio-progress-bar");
+          const ignoredSummary = document.getElementById("portfolio-ignored-summary");
+
+          if (activeCount === null) {
+            countSpan.textContent = "—";
+            progressBar.value = 0;
+            ignoredSummary.textContent = "Portfolio count unknown.";
+          } else {
+            countSpan.textContent = String(activeCount);
+            progressBar.value = Math.min(activeCount, required);
+            
+            const ignoredParts = [];
+            if (ignored.duplicateActiveRows > 0) ignoredParts.push(`${ignored.duplicateActiveRows} duplicate IDs`);
+            if (ignored.notActive > 0) ignoredParts.push(`${ignored.notActive} archived/inactive`);
+            if (ignored.invalidId > 0) ignoredParts.push(`${ignored.invalidId} invalid IDs`);
+            if (ignored.unknownStatus > 0) ignoredParts.push(`${ignored.unknownStatus} unknown statuses`);
+            
+            ignoredSummary.textContent = ignoredParts.length > 0
+              ? `Ignored entries: ${ignoredParts.join(", ")}.`
+              : "All entries valid and unique.";
+          }
+        }
+
+        function updateDraftGate(enabled, reasons, activeCandidateIds = []) {
+          const reasonsElem = document.getElementById("draft-gate-reasons");
+          const buttons = document.querySelectorAll(".draft-actions-group button");
+          const emissionsLog = document.getElementById("draft-emissions-log");
+
+          if (enabled) {
+            reasonsElem.style.display = "none";
+            reasonsElem.innerHTML = "";
+            buttons.forEach(btn => {
+              btn.disabled = false;
+              btn.onclick = () => {
+                const actionId = btn.getAttribute("data-action");
+                const emission = {
+                  actionId: actionId,
+                  activeCandidateIds: [...activeCandidateIds],
+                  emittedAt: new Date().toISOString(),
+                };
+                window.__mosEmittedDrafts.push(emission);
+                emissionsLog.textContent = `Last emitted draft advisory: ${actionId} for [${activeCandidateIds.join(", ")}] (0 side-effects).`;
+                // Emit custom DOM event
+                window.dispatchEvent(new CustomEvent("draft_research_requested", { detail: emission }));
+              };
+            });
+          } else {
+            reasonsElem.style.display = "block";
+            reasonsElem.innerHTML = reasons.map(r => `<li>${escapeHtml(r)}</li>`).join("");
+            buttons.forEach(btn => {
+              btn.disabled = true;
+              btn.onclick = null;
+            });
+          }
+        }
+
+        function exportAcceptanceState(phase, activeCount, activeCandidateIds, gateEnabled, gateReasons) {
+          window.__mosAcceptance = {
+            phase,
+            workspace: currentWorkspace,
+            scenario: currentScenario,
+            activeCount,
+            activeCandidateIds: [...activeCandidateIds],
+            gateEnabled,
+            gateReasons: [...gateReasons],
+            emittedDraftsCount: window.__mosEmittedDrafts.length,
+            requestsCount: window.__mosRequests.length,
+            noMutations: !window.__mosRequests.some(r => ["POST", "PUT", "PATCH", "DELETE"].includes(r.method)),
+          };
+        }
+
+        function escapeHtml(str) {
+          if (!str) return "";
+          return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+        }
+
+        // Attach change listeners
+        document.getElementById("workspace-select").addEventListener("change", runPipeline);
+        document.getElementById("scenario-select").addEventListener("change", runPipeline);
+        document.getElementById("handler-connected").addEventListener("change", runPipeline);
+        document.getElementById("refresh-btn").addEventListener("click", runPipeline);
+
+        // Initial run
+        runPipeline();
+      })();
+    </script>
+  </body>
+</html>
