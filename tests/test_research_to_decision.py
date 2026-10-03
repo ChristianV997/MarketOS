@@ -356,9 +356,10 @@ def test_secret_html_duplicate_and_traversal_inputs_fail_closed(tmp_path: Path) 
     with pytest.raises(ResearchToDecisionError, match="duplicate"):
         build_research_to_decision(manifest, base_dir=tmp_path)
 
-    manifest["supplier_inputs"] = [{"path": "..\\outside.json"}]
-    with pytest.raises(ResearchToDecisionError, match="relative"):
-        build_research_to_decision(manifest, base_dir=tmp_path)
+    for traversal_path in ("..\\outside.json", "../outside.json", "/outside.json", "C:\\outside.json", "sub/../../outside.json"):
+        manifest["supplier_inputs"] = [{"path": traversal_path}]
+        with pytest.raises(ResearchToDecisionError, match="relative"):
+            build_research_to_decision(manifest, base_dir=tmp_path)
 
 
 def test_currency_and_destination_mismatch_fail_closed(tmp_path: Path) -> None:
@@ -1477,3 +1478,40 @@ def test_win32_open_dispatches_from_the_shared_entry_point_on_windows(monkeypatc
 
     monkeypatch.setattr(rtd, "_open_verified_evidence_file_windows", fake_windows_open)
     assert rtd._open_verified_evidence_file(Path("irrelevant"), label="x") is sentinel
+
+
+def test_reviewed_url_with_unsafe_components_fails_closed(tmp_path: Path) -> None:
+    observation = tmp_path / "review.json"
+    manifest = {
+        "captured_at": "2026-09-16T09:00:00-06:00",
+        "lane": dict(LANE),
+        "candidates": [{"candidate_id": "x"}],
+        "observation_inputs": [{"path": "review.json", "kind": "reviewed_url"}],
+    }
+    for bad_url in (
+        "https://example.test/item/../forbidden",
+        "https://example.test/item<script>",
+        "javascript:alert(1)",
+        "https://user:abc@example.test/item",
+    ):
+        observation.write_text(json.dumps({"candidate_id": "x", "url": bad_url}), encoding="utf-8")
+        with pytest.raises(ResearchToDecisionError, match="safe reference|http"):
+            build_research_to_decision(manifest, base_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    "source_reference",
+    [
+        "..\\private.json",
+        "/private.json",
+        "C:/private.json",
+        "https://example.test/quote?q=param",
+        "https://example.test/quote/../forbidden",
+        "https://example.test/quote<script>",
+    ],
+)
+def test_cross_platform_source_references_reject_traversal_and_escapes(source_reference: str) -> None:
+    manifest = load_fixture("hydroponics_promising.json")
+    manifest["supplier_inputs"][0]["source_reference"] = source_reference
+    with pytest.raises(ResearchToDecisionError, match="safe reference|query or fragment"):
+        build_research_to_decision(manifest, base_dir=FIXTURES)

@@ -227,19 +227,7 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
     reference = _text(value, field, required=required)
     if not reference:
         return reference
-    parsed = urlparse(reference)
-    if parsed.scheme in {"http", "https"}:
-        if not parsed.netloc or parsed.username or parsed.password:
-            raise ResearchToDecisionError(f"{field} must be a safe reference")
-        if (parsed.query or parsed.fragment) and not allow_url_query:
-            raise ResearchToDecisionError(f"{field} must not contain a query or fragment")
-        if allow_url_query:
-            reference = parsed._replace(query="", fragment="").geturl()
-    elif parsed.scheme:
-        if "://" in reference or parsed.scheme not in {"fixture", "file", "manual"}:
-            raise ResearchToDecisionError(f"{field} must be a safe reference")
-    path = Path(parsed.path or reference)
-    if path.is_absolute() or ".." in path.parts or any(char in reference for char in "<>\r\n\x00"):
+    if "\x00" in reference:
         # \x00 specifically: Path.resolve() raises an unhandled ValueError
         # ("embedded null byte") deep inside posixpath's realpath, not a
         # ResearchToDecisionError -- reproduced via
@@ -248,6 +236,27 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
         # unhandled exception is not the fail-closed contract every other
         # rejection in this module honors; reject it here instead, before
         # any of this reference's later checks or filesystem calls run.
+        raise ResearchToDecisionError(f"{field} must be a safe reference")
+    parsed = urlparse(reference)
+    if parsed.scheme in {"http", "https"}:
+        if not parsed.netloc or parsed.username or parsed.password:
+            raise ResearchToDecisionError(f"{field} must be a safe reference")
+        if (parsed.query or parsed.fragment) and not allow_url_query:
+            raise ResearchToDecisionError(f"{field} must not contain a query or fragment")
+        if allow_url_query:
+            reference = parsed._replace(query="", fragment="").geturl()
+        url_path = parsed.path.replace("\\", "/")
+        if ".." in url_path.split("/") or any(char in reference for char in "<>\r\n"):
+            raise ResearchToDecisionError(f"{field} must be a safe reference")
+        return reference
+    elif parsed.scheme:
+        if "://" in reference or parsed.scheme not in {"fixture", "file", "manual"}:
+            raise ResearchToDecisionError(f"{field} must be a safe reference")
+    ref_path = parsed.path or reference
+    norm_path = ref_path.replace("\\", "/")
+    path = Path(norm_path)
+    is_abs = path.is_absolute() or norm_path.startswith("/") or bool(re.match(r"^[a-zA-Z]:", ref_path))
+    if is_abs or ".." in path.parts or ".." in norm_path.split("/") or any(char in reference for char in "<>\r\n"):
         raise ResearchToDecisionError(f"{field} must be a safe reference")
     return reference
 
@@ -600,12 +609,13 @@ def _supplier_document_evidence_bindings(
         if key in bindings:
             raise ResearchToDecisionError(f"duplicate supplier document evidence binding for offer {offer_id}/{exact_sku}")
         relative_path = urlparse(reference).path or reference
+        norm_rel = relative_path.replace("\\", "/")
         # Checked on the *unresolved* path, walking every component: once
         # _resolve() calls Path.resolve() it follows symlinks and returns
         # the real target, which is never itself a symlink -- so a symlink
         # check after resolving would be a no-op. This must run first.
         walked = root
-        for part in Path(relative_path).parts:
+        for part in Path(norm_rel).parts:
             walked = walked / part
             if walked.is_symlink():
                 raise ResearchToDecisionError("document_evidence.reference must not be a symlink")
@@ -698,8 +708,10 @@ def _resolve(base_dir: Path, value: Any, *, label: str) -> Path:
         # (nothing is ever read before this point), but an unhandled
         # exception is not this module's fail-closed contract.
         raise ResearchToDecisionError(f"{label} must not contain a NUL byte")
-    candidate = Path(raw)
-    if candidate.is_absolute() or ".." in candidate.parts:
+    norm_raw = raw.replace("\\", "/")
+    candidate = Path(norm_raw)
+    is_abs = candidate.is_absolute() or norm_raw.startswith("/") or bool(re.match(r"^[a-zA-Z]:", raw))
+    if is_abs or ".." in candidate.parts or ".." in norm_raw.split("/"):
         raise ResearchToDecisionError(f"{label} must remain relative to the manifest")
     resolved = (base_dir / candidate).resolve()
     if base_dir.resolve() not in resolved.parents:
