@@ -739,6 +739,58 @@ def test_cleanup_terminates_child_process_tree(tmp_path: Path):
     assert stack.port_in_use(cfg.api_host, cfg.api_port) is False
 
 
+def test_cleanup_terminates_child_when_launcher_exits_first(tmp_path: Path):
+    """An exited launcher must not leave a child-owned port behind."""
+    repo = _write_repo(tmp_path)
+    child = tmp_path / "child_server.py"
+    child.write_text(_dummy_server_script(), encoding="utf-8")
+    parent = tmp_path / "parent.py"
+    parent.write_text(
+        textwrap.dedent(
+            """
+            import subprocess
+            import sys
+            import time
+            import socket
+
+            host, port = sys.argv[2], int(sys.argv[3])
+            subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2], sys.argv[3]])
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                try:
+                    with socket.create_connection((host, port), timeout=0.2):
+                        break
+                except OSError:
+                    time.sleep(0.05)
+            """
+        ),
+        encoding="utf-8",
+    )
+    cfg = _config(repo, start_frontend=False, startup_timeout_s=5.0)
+    report = stack.run_rehearsal(
+        cfg,
+        backend_argv_override=[sys.executable, str(parent), str(child), cfg.api_host, str(cfg.api_port)],
+    )
+
+    assert report["cleanup"]["backend"] == "already_exited"
+    assert report["port_cleanup"]["api_port_free"] is True
+    assert stack.port_in_use(cfg.api_host, cfg.api_port) is False
+
+
+def test_wait_port_free_rejects_bound_non_listening_port():
+    """A bind conflict is occupied even when connect-based probing fails."""
+    port = _free_port()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", port))
+    try:
+        assert stack.port_in_use("127.0.0.1", port) is False
+        assert stack.wait_port_free("127.0.0.1", port, timeout_s=0.1) is False
+    finally:
+        sock.close()
+
+    assert stack.wait_port_free("127.0.0.1", port, timeout_s=0.1) is True
+
+
 def test_early_process_exit_during_hold(tmp_path: Path):
     repo = _write_repo(tmp_path)
     exit_soon_script = tmp_path / "exit_soon.py"
