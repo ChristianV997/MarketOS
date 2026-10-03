@@ -16,7 +16,7 @@ import re
 import stat as stat_module
 import sys
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 
@@ -223,6 +223,26 @@ def _reject_html(raw: str) -> None:
         raise ResearchToDecisionError("HTML or raw page content is not accepted")
 
 
+_PATH_SEPARATORS = re.compile(r"[\\/]")
+
+
+def _is_unsafe_relative_path(text: str) -> bool:
+    """True for a rooted, absolute, drive-qualified, UNC or ``..``-traversing path.
+
+    Judged under POSIX *and* Windows rules on every platform: a manifest authored
+    on one OS must be accepted or rejected identically on the other. Using the
+    host ``Path`` alone let ``..\\outside.json`` through on POSIX (where ``\\`` is an
+    ordinary character) while rejecting it on Windows.
+    """
+    if ".." in _PATH_SEPARATORS.split(text):
+        return True
+    for flavour in (PurePosixPath, PureWindowsPath):
+        candidate = flavour(text)
+        if candidate.is_absolute() or candidate.drive or candidate.root:
+            return True
+    return False
+
+
 def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_query: bool = False) -> str:
     reference = _text(value, field, required=required)
     if not reference:
@@ -238,8 +258,15 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
     elif parsed.scheme:
         if "://" in reference or parsed.scheme not in {"fixture", "file", "manual"}:
             raise ResearchToDecisionError(f"{field} must be a safe reference")
-    path = Path(parsed.path or reference)
-    if path.is_absolute() or ".." in path.parts or any(char in reference for char in "<>\r\n\x00"):
+    path_text = parsed.path or reference
+    if parsed.scheme in {"http", "https"}:
+        # A URL path is not a filesystem path: its leading "/" is the URL root, not an
+        # absolute local path (host-OS ``Path.is_absolute`` disagreed across platforms).
+        # Traversal segments are still rejected.
+        unsafe_path = ".." in _PATH_SEPARATORS.split(path_text)
+    else:
+        unsafe_path = _is_unsafe_relative_path(path_text)
+    if unsafe_path or any(char in reference for char in "<>\r\n\x00"):
         # \x00 specifically: Path.resolve() raises an unhandled ValueError
         # ("embedded null byte") deep inside posixpath's realpath, not a
         # ResearchToDecisionError -- reproduced via
@@ -698,9 +725,9 @@ def _resolve(base_dir: Path, value: Any, *, label: str) -> Path:
         # (nothing is ever read before this point), but an unhandled
         # exception is not this module's fail-closed contract.
         raise ResearchToDecisionError(f"{label} must not contain a NUL byte")
-    candidate = Path(raw)
-    if candidate.is_absolute() or ".." in candidate.parts:
+    if _is_unsafe_relative_path(raw):
         raise ResearchToDecisionError(f"{label} must remain relative to the manifest")
+    candidate = Path(raw)
     resolved = (base_dir / candidate).resolve()
     if base_dir.resolve() not in resolved.parents:
         raise ResearchToDecisionError(f"{label} escapes the manifest directory")

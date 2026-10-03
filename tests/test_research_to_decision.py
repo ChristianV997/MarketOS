@@ -1477,3 +1477,27 @@ def test_win32_open_dispatches_from_the_shared_entry_point_on_windows(monkeypatc
 
     monkeypatch.setattr(rtd, "_open_verified_evidence_file_windows", fake_windows_open)
     assert rtd._open_verified_evidence_file(Path("irrelevant"), label="x") is sentinel
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["..\\outside.json", "sub\\..\\outside.json", "../outside.json", "sub/../outside.json", "/abs.json", "\\rooted.json", "C:\\x\\y.json", "C:rel.json", "\\\\server\\share\\x.json"],
+)
+def test_manifest_paths_are_judged_identically_under_posix_and_windows_rules(tmp_path: Path, raw: str) -> None:
+    (tmp_path / "ok.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(ResearchToDecisionError, match="relative to the manifest"):
+        rtd._resolve(tmp_path, raw, label="supplier_inputs.path")
+    assert rtd._resolve(tmp_path, "ok.json", label="supplier_inputs.path") == (tmp_path / "ok.json").resolve()
+
+
+def test_web_url_paths_are_not_mistaken_for_absolute_local_paths() -> None:
+    assert rtd._reference_text("https://example.test/item", "f") == "https://example.test/item"
+    assert rtd._reference_text("https://example.test/a/b.json", "f") == "https://example.test/a/b.json"
+    assert rtd._reference_text("https://example.test/item?x=1", "f", allow_url_query=True) == "https://example.test/item"
+    for unsafe in ("https://example.test/a/../b", "https://example.test/a\\..\\b", "https://example.test/a\x00b"):
+        with pytest.raises(ResearchToDecisionError, match="safe reference"):
+            rtd._reference_text(unsafe, "f")
+    for local in ("/etc/passwd", "C:\\x\\y.json", "\\\\server\\share", "../x.json", "file:///etc/passwd", "fixture:../x"):
+        with pytest.raises(ResearchToDecisionError, match="safe reference"):
+            rtd._reference_text(local, "f")
+    assert rtd._reference_text("fixture:evidence/quote.json", "f") == "fixture:evidence/quote.json"
