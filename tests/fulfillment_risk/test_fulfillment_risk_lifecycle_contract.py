@@ -714,3 +714,22 @@ class TestPermutationInvarianceAndFingerprintContract:
 
         # Permutation invariant
         assert reconciled_1 == reconciled_2
+
+    def test_evidence_reconciliation_compares_timezone_offsets_by_instant(self):
+        """Latest captured_at means latest UTC instant, not greatest timestamp string."""
+        earlier = _make_evidence(
+            "ev:shared:timezone",
+            state="observed",
+            captured_at="2026-01-01T00:45:00+00:00",
+        )
+        later = _make_evidence(
+            "ev:shared:timezone",
+            state="verified",
+            captured_at="2025-12-31T20:00:00-05:00",
+        )
+
+        forward = reconcile_evidence_refs((earlier, later))
+        reverse = reconcile_evidence_refs((later, earlier))
+
+        assert forward == (later,)
+        assert reverse == forward

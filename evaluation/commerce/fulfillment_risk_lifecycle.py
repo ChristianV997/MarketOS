@@ -190,11 +190,24 @@ def _evidence_state(refs: Sequence[EvidenceRef], explicit: str) -> str:
 def reconcile_evidence_refs(refs: Sequence[EvidenceRef]) -> tuple[EvidenceRef, ...]:
     """Deterministically deduplicate and reconcile evidence references by evidence_id.
 
-    When multiple references share an evidence_id, the reference with the latest
-    captured_at timestamp takes precedence. Equal or empty timestamps are
-    tie-broken deterministically by canonical serialization.
-    Results are returned in canonical order sorted by evidence_id.
+    ISO 8601 timestamps are compared by UTC instant (naive timestamps are
+    interpreted as UTC). Empty or unparseable values retain deterministic
+    lexical ordering below parseable timestamps. Equal instants are tie-broken
+    by canonical serialization. Results are sorted by evidence_id.
     """
+    from datetime import datetime, timezone
+
+    def captured_at_key(value: str) -> tuple[int, datetime | str]:
+        if not value:
+            return (0, "")
+        try:
+            captured_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return (0, value)
+        if captured_at.tzinfo is None:
+            captured_at = captured_at.replace(tzinfo=timezone.utc)
+        return (1, captured_at.astimezone(timezone.utc))
+
     by_id: dict[str, EvidenceRef] = {}
     for ref in refs:
         if not isinstance(ref, EvidenceRef):
@@ -203,8 +216,8 @@ def reconcile_evidence_refs(refs: Sequence[EvidenceRef]) -> tuple[EvidenceRef, .
         if existing is None:
             by_id[ref.evidence_id] = ref
             continue
-        ref_captured = ref.captured_at or ""
-        existing_captured = existing.captured_at or ""
+        ref_captured = captured_at_key(ref.captured_at)
+        existing_captured = captured_at_key(existing.captured_at)
         if ref_captured > existing_captured:
             by_id[ref.evidence_id] = ref
         elif ref_captured == existing_captured:
