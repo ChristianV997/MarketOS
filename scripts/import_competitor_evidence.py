@@ -24,18 +24,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     source = Path(args.csv_path)
     try:
-        size = source.stat().st_size
+        with source.open("rb") as handle:
+            raw = handle.read(MAX_RESPONSE_BYTES + 1)
     except OSError:
         report = {"status": "rejected", "rejections": [{"code": "file_unavailable"}], "evidence_class": "manual", "network_calls": False}
         print(json.dumps(report, sort_keys=True))
         return 1
-    if size > MAX_RESPONSE_BYTES:
+    if len(raw) > MAX_RESPONSE_BYTES:
         report = import_manual_competitor_csv("", candidate_id=args.candidate_id)
         report = {"status": "rejected", "candidate_id": report["candidate_id"], "rejections": [{"code": "file_too_large"}], "evidence_class": "manual", "evidence_state": "manual_import", "live_validated": False, "network_calls": False, "provider_calls": False}
         print(json.dumps(report, sort_keys=True))
         return 1
     try:
-        text = source.read_text(encoding="utf-8-sig")
+        text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         report = {"status": "rejected", "rejections": [{"code": "undecodable"}], "evidence_class": "manual", "network_calls": False}
         print(json.dumps(report, sort_keys=True))

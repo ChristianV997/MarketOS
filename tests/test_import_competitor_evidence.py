@@ -93,6 +93,61 @@ def test_bounds_and_cli_do_not_touch_the_network(monkeypatch, tmp_path: Path):
     assert "x" * 20 not in blocked.stdout
 
 
+def test_cli_bounds_file_read_even_if_file_grows_after_size_check(monkeypatch, capsys, tmp_path: Path):
+    import importlib.util
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location(
+        "import_competitor_evidence_bounded_cli",
+        ROOT / "scripts" / "import_competitor_evidence.py",
+    )
+    assert spec is not None and spec.loader is not None
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    path = tmp_path / "growing.csv"
+    path.write_bytes(b"x" * (MAX_RESPONSE_BYTES + 2))
+    original_stat = Path.stat
+    original_open = Path.open
+    read_sizes: list[int] = []
+
+    def undersized_stat(self: Path, *args, **kwargs):
+        if self == path:
+            return SimpleNamespace(st_size=1)
+        return original_stat(self, *args, **kwargs)
+
+    class TrackedReader:
+        def __init__(self, reader):
+            self.reader = reader
+
+        def __enter__(self):
+            self.reader.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.reader.__exit__(*args)
+
+        def read(self, size=-1):
+            read_sizes.append(size)
+            return self.reader.read(size)
+
+    def tracked_open(self: Path, *args, **kwargs):
+        reader = original_open(self, *args, **kwargs)
+        if self == path:
+            return TrackedReader(reader)
+        return reader
+
+    monkeypatch.setattr(Path, "stat", undersized_stat)
+    monkeypatch.setattr(Path, "open", tracked_open)
+    code = cli.main(["--csv", str(path), "--candidate-id", "cand-1"])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert read_sizes == [MAX_RESPONSE_BYTES + 1]
+    assert json.loads(captured.out)["rejections"][0]["code"] == "file_too_large"
+    assert captured.err == ""
+
+
 def test_ordinary_product_text_is_not_treated_as_contact():
     text = (
         "listing_id,title,seller,brand,availability,price,currency,shipping_cost\n"
