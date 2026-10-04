@@ -14,6 +14,7 @@ shadow-then-flip pattern as capital_policy.allocate_with_shadow.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from typing import Any, Mapping, Sequence
 
@@ -26,21 +27,36 @@ def _live() -> bool:
     return os.getenv("INVENTORY_SYNC_LIVE", "false").lower() == "true"
 
 
-def _get_landed_cost(quote: Any) -> float:
+def _quote_fetch_live() -> bool:
+    return os.getenv("INVENTORY_SYNC_QUOTES_LIVE", "false").lower() == "true"
+
+
+_NO_OBSERVATION = object()
+
+
+def _finite_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _get_landed_cost(quote: Any) -> float | None:
     """Extract landed cost from SupplierQuote, SupplierOffer, or mapping."""
-    if hasattr(quote, "landed_cost"):
-        return float(quote.landed_cost)
-    if hasattr(quote, "unit_cost") and hasattr(quote, "shipping_cost"):
-        return round(float(quote.unit_cost) + float(quote.shipping_cost), 2)
-    if hasattr(quote, "cost") and hasattr(quote, "shipping"):
-        return round(float(quote.cost) + float(quote.shipping), 2)
-    if isinstance(quote, dict):
-        if "landed_cost" in quote:
-            return float(quote["landed_cost"])
-        unit = float(quote.get("unit_cost", quote.get("cost", 0.0)) or 0.0)
-        shipping = float(quote.get("shipping_cost", quote.get("shipping", 0.0)) or 0.0)
-        return round(unit + shipping, 2)
-    return 0.0
+    landed_cost = _quote_value(quote, "landed_cost")
+    if landed_cost is not _MISSING and landed_cost is not None:
+        return _finite_number(landed_cost)
+
+    unit_cost = _quote_value(quote, "unit_cost", "cost")
+    shipping_cost = _quote_value(quote, "shipping_cost", "shipping")
+    if unit_cost is _MISSING and shipping_cost is _MISSING:
+        return 0.0
+    unit = 0.0 if unit_cost is _MISSING or unit_cost is None else _finite_number(unit_cost)
+    shipping = 0.0 if shipping_cost is _MISSING or shipping_cost is None else _finite_number(shipping_cost)
+    if unit is None or shipping is None:
+        return None
+    return _finite_number(round(unit + shipping, 2))
 
 
 def _is_out_of_stock(quote: Any) -> tuple[bool, str]:
@@ -54,29 +70,25 @@ def _is_out_of_stock(quote: Any) -> tuple[bool, str]:
         return True, "no_supplier_quote"
 
     # Explicit stock_ok flag
-    stock_ok = getattr(quote, "stock_ok", None)
+    stock_ok = _quote_value(quote, "stock_ok")
     if stock_ok is False:
-        return True, "supplier_out_of_stock"
-    if isinstance(quote, dict) and quote.get("stock_ok") is False:
         return True, "supplier_out_of_stock"
 
     # Explicit in_stock flag
-    in_stock = getattr(quote, "in_stock", None)
+    in_stock = _quote_value(quote, "in_stock")
     if in_stock is False:
-        return True, "supplier_out_of_stock"
-    if isinstance(quote, dict) and quote.get("in_stock") is False:
         return True, "supplier_out_of_stock"
 
     # Preserving unknown-versus-zero: None is unknown (in stock), <= 0 is zero (out of stock)
-    units = getattr(quote, "inventory_units", None)
-    if units is None and isinstance(quote, dict):
-        units = quote.get("inventory_units")
+    units = _quote_value(quote, "inventory_units")
+    if units is _MISSING:
+        units = None
     if units is not None:
         try:
             int_units = int(units)
             if int_units <= 0:
                 return True, "zero_inventory_units"
-        except (ValueError, TypeError):
+        except (OverflowError, ValueError, TypeError):
             pass
 
     return False, ""
@@ -84,16 +96,39 @@ def _is_out_of_stock(quote: Any) -> tuple[bool, str]:
 
 def _is_stale_observation(quote: Any, *, max_age_hours: float = 48.0) -> bool:
     """Check if *quote* carries data quality metadata indicating stale data."""
-    quality = getattr(quote, "quality", None)
-    if quality is None and isinstance(quote, dict):
-        quality = quote.get("quality")
-    if quality is None:
+    quality = _quote_value(quote, "quality")
+    if quality is _MISSING or quality is None:
         return False
 
     from evaluation.quality import quality_reasons
-    if isinstance(quality, dict):
+    from datetime import datetime, timezone
+    if isinstance(quality, Mapping):
         from backend.commerce.contracts import _quality_from_dict
-        quality = _quality_from_dict(quality)
+        quality_data = dict(quality)
+        observed_at = quality_data.get("observed_at")
+        if isinstance(observed_at, str):
+            try:
+                parsed_at = datetime.fromisoformat(observed_at)
+            except ValueError:
+                parsed_at = None
+        else:
+            parsed_at = observed_at if isinstance(observed_at, datetime) else None
+        if observed_at is not None and parsed_at is None:
+            return True
+        if parsed_at is not None and parsed_at.tzinfo is None:
+            quality_data["observed_at"] = parsed_at.replace(tzinfo=timezone.utc).isoformat()
+        quality = _quality_from_dict(quality_data)
+    else:
+        from dataclasses import replace
+        from evaluation.contracts import DataQuality
+        if isinstance(quality, DataQuality):
+            if not isinstance(quality.observed_at, datetime):
+                return True
+            if quality.observed_at.tzinfo is None:
+                quality = replace(
+                    quality,
+                    observed_at=quality.observed_at.replace(tzinfo=timezone.utc),
+                )
     reasons = quality_reasons(quality, max_age_hours=max_age_hours)
     return "stale_data" in reasons
 
@@ -107,14 +142,21 @@ def _quote_value(quote: Any, *names: str) -> Any:
         if isinstance(quote, Mapping):
             if name in quote:
                 return quote[name]
-        elif hasattr(quote, name):
-            return getattr(quote, name)
+        else:
+            try:
+                return getattr(quote, name)
+            except Exception:
+                continue
     return _MISSING
 
 
 def _quote_identity(quote: Any) -> tuple[str, str]:
-    supplier = _quote_value(quote, "supplier", "supplier_id")
-    product_id = _quote_value(quote, "product_id", "supplier_product_id")
+    supplier = _quote_value(quote, "supplier")
+    if supplier is _MISSING or not supplier:
+        supplier = _quote_value(quote, "supplier_id")
+    product_id = _quote_value(quote, "product_id")
+    if product_id is _MISSING or not product_id:
+        product_id = _quote_value(quote, "supplier_product_id")
     return (
         "" if supplier is _MISSING or supplier is None else str(supplier),
         "" if product_id is _MISSING or product_id is None else str(product_id),
@@ -128,23 +170,27 @@ def _inventory_signature(quote: Any) -> tuple[str, Any]:
         return ("unknown", None)
     try:
         return ("quantity", int(units))
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return ("invalid", str(units))
+
+
+def _has_invalid_inventory(quote: Any) -> bool:
+    return _inventory_signature(quote)[0] == "invalid"
 
 
 def _numeric_field_signature(value: Any) -> tuple[str, Any]:
     if value is _MISSING or value is None:
         return ("missing", None)
-    try:
-        return ("number", round(float(value), 8))
-    except (TypeError, ValueError):
-        return ("invalid", str(value))
+    number = _finite_number(value)
+    if number is not None:
+        return ("number", round(number, 8))
+    return ("invalid", str(value))
 
 
-def _landed_cost_signature(quote: Any) -> tuple[str, Any]:
+def _landed_cost_signature(quote: Any) -> tuple[Any, ...]:
     """Keep missing cost evidence distinct from an explicit numeric zero."""
     landed = _quote_value(quote, "landed_cost")
-    if landed is not _MISSING:
+    if landed is not _MISSING and landed is not None:
         return ("landed", _numeric_field_signature(landed))
 
     unit_cost = _quote_value(quote, "unit_cost", "cost")
@@ -155,6 +201,15 @@ def _landed_cost_signature(quote: Any) -> tuple[str, Any]:
         "components",
         _numeric_field_signature(unit_cost),
         _numeric_field_signature(shipping),
+    )
+
+
+def _has_invalid_landed_cost(quote: Any) -> bool:
+    signature = _landed_cost_signature(quote)
+    if signature[0] == "landed":
+        return signature[1][0] == "invalid"
+    return signature[0] == "components" and any(
+        component[0] == "invalid" for component in signature[1:]
     )
 
 
@@ -220,24 +275,63 @@ def _select_consistent_observation(quotes: Sequence[Any]) -> Any | None:
 
 def _extract_provenance(entry: Any, quote: Any | None) -> dict[str, Any]:
     """Extract supplier and quality provenance for auditability."""
+    if quote:
+        supplier = _quote_value(quote, "supplier")
+        if supplier is _MISSING or not supplier:
+            supplier = _quote_value(quote, "supplier_id")
+        supplier_product_id = _quote_value(quote, "product_id")
+        if supplier_product_id is _MISSING or not supplier_product_id:
+            supplier_product_id = _quote_value(quote, "supplier_product_id")
+        if supplier is _MISSING or supplier is None:
+            supplier = ""
+        if supplier_product_id is _MISSING or supplier_product_id is None:
+            supplier_product_id = ""
+    else:
+        supplier = entry.supplier
+        supplier_product_id = entry.supplier_product_id
+
     prov: dict[str, Any] = {
-        "supplier": getattr(quote, "supplier", "") or getattr(quote, "supplier_id", "") if quote else entry.supplier,
-        "supplier_product_id": getattr(quote, "product_id", "") or getattr(quote, "supplier_product_id", "") if quote else entry.supplier_product_id,
+        "supplier": supplier,
+        "supplier_product_id": supplier_product_id,
     }
     if quote is not None:
-        quality = getattr(quote, "quality", None)
-        if quality is None and isinstance(quote, dict):
-            quality = quote.get("quality")
-        if quality is not None:
+        quality = _quote_value(quote, "quality")
+        if quality is not _MISSING and quality is not None:
             if hasattr(quality, "provenance"):
                 prov["provenance"] = quality.provenance
                 if getattr(quality, "source_ref", ""):
                     prov["source_ref"] = quality.source_ref
-            elif isinstance(quality, dict):
+            elif isinstance(quality, Mapping):
                 prov["provenance"] = quality.get("provenance", "unknown")
                 if quality.get("source_ref"):
                     prov["source_ref"] = quality["source_ref"]
     return {k: v for k, v in prov.items() if v}
+
+
+def _offer_matches_entry(
+    entry: Any,
+    quote: Any,
+    *,
+    mapping_key_is_authoritative: bool = False,
+) -> bool:
+    product_id = _quote_value(quote, "product_id")
+    if product_id is _MISSING or not product_id:
+        product_id = _quote_value(quote, "supplier_product_id")
+    product_name = _quote_value(quote, "product_name")
+    title = _quote_value(quote, "title")
+    has_product_name = any(
+        value is not _MISSING and bool(value)
+        for value in (product_name, title)
+    )
+    if mapping_key_is_authoritative and not has_product_name:
+        return True
+    return (
+        (product_id is not _MISSING and bool(product_id)
+         and product_id in (entry.product_id, entry.supplier_product_id))
+        or (product_name is not _MISSING and bool(product_name)
+            and product_name == entry.title)
+        or (title is not _MISSING and bool(title) and title == entry.title)
+    )
 
 
 def _requote(
@@ -248,8 +342,14 @@ def _requote(
 
     If *offers* is provided (e.g. offline supplier offers or observations),
     reconciles directly against them. Otherwise queries quote_all(entry.title).
+    Live provider fetching requires INVENTORY_SYNC_QUOTES_LIVE=true.
     Prioritizes matching both supplier identity and supplier_product_id.
     """
+    if offers is None and not _quote_fetch_live():
+        return _NO_OBSERVATION
+    if offers is not None and not offers:
+        return _NO_OBSERVATION
+
     quotes: list[Any] = []
     if offers is not None:
         if isinstance(offers, Mapping):
@@ -261,18 +361,17 @@ def _requote(
                         candidates.extend(val)
                     else:
                         candidates.append(val)
+            candidates = [
+                quote for quote in candidates
+                if _offer_matches_entry(entry, quote, mapping_key_is_authoritative=True)
+            ]
             if not candidates and "" in offers:
-                candidates = list(offers.values())
+                fallback = offers[""]
+                candidates = list(fallback) if isinstance(fallback, (list, tuple)) else [fallback]
+                candidates = [quote for quote in candidates if _offer_matches_entry(entry, quote)]
             quotes = candidates
         elif isinstance(offers, (list, tuple)):
-            quotes = [
-                o for o in offers
-                if getattr(o, "product_id", None) in (entry.product_id, entry.supplier_product_id)
-                or getattr(o, "product_name", None) == entry.title
-                or getattr(o, "title", None) == entry.title
-                or (isinstance(o, dict) and o.get("product_id") in (entry.product_id, entry.supplier_product_id))
-                or (isinstance(o, dict) and o.get("title") == entry.title)
-            ]
+            quotes = [quote for quote in offers if _offer_matches_entry(entry, quote)]
     else:
         from backend.validation.suppliers import quote_all
         quotes = quote_all(entry.title)
@@ -310,7 +409,7 @@ def _reprice_action(entry: Any, quote: Any) -> dict[str, Any] | None:
     if entry.landed_cost <= 0:
         return None
     quote_landed_cost = _get_landed_cost(quote)
-    if quote_landed_cost <= 0:
+    if quote_landed_cost is None or quote_landed_cost <= 0:
         return None
     drift_pct = abs(quote_landed_cost - entry.landed_cost) / entry.landed_cost * 100
     if drift_pct < _REPRICE_THRESHOLD_PCT:
@@ -368,6 +467,17 @@ def reconcile_brand(
             _log.debug("inventory_requote_failed product=%s error=%s", entry.product_id, exc)
             quote = None
 
+        if quote is _NO_OBSERVATION:
+            actions.append({
+                "action": "skip_unavailable",
+                "product_id": entry.product_id,
+                "reason": (
+                    "supplier_quote_fetch_disabled"
+                    if offers is None else "no_supplier_observation"
+                ),
+            })
+            continue
+
         if quote is not None and _is_stale_observation(quote):
             _log.warning("inventory_sync_stale_observation product=%s brand=%s", entry.product_id, brand.brand_id)
             actions.append({
@@ -391,6 +501,24 @@ def reconcile_brand(
             actions.append(action)
             continue
 
+        if _has_invalid_inventory(quote):
+            actions.append({
+                "action": "skip_invalid",
+                "product_id": entry.product_id,
+                "reason": "invalid_inventory_units",
+                "provenance": _extract_provenance(entry, quote),
+            })
+            continue
+
+        if _has_invalid_landed_cost(quote):
+            actions.append({
+                "action": "skip_invalid",
+                "product_id": entry.product_id,
+                "reason": "invalid_landed_cost",
+                "provenance": _extract_provenance(entry, quote),
+            })
+            continue
+
         reprice = _reprice_action(entry, quote)
         if reprice:
             actions.append(reprice)
@@ -398,7 +526,7 @@ def reconcile_brand(
     if live:
         storefront = get_storefront(brand)
         for action in actions:
-            if action.get("action") == "skip_stale":
+            if action.get("action") in {"skip_stale", "skip_invalid", "skip_unavailable"}:
                 action["applied"] = False
                 continue
             # Each action applies independently so one storefront failure
@@ -450,7 +578,12 @@ def reconcile_all_brands(
     for brand in brand_registry.all():
         if not brand.active:
             continue
-        brand_offers = offers_by_brand.get(brand.brand_id) if offers_by_brand else None
+        if offers_by_brand is None:
+            brand_offers = None
+        else:
+            brand_offers = offers_by_brand.get(brand.brand_id, ())
+            if brand_offers is None:
+                brand_offers = ()
         result = reconcile_brand(brand, offers=brand_offers)
         total_checked += result["checked"]
         total_actions += len(result["actions"])
