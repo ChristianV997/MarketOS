@@ -14,25 +14,36 @@ on:
       max_candidates:
         type: string
         default: "1"
+
 permissions:
   contents: read
+
 jobs:
   readonly-validation:
     runs-on: ubuntu-latest
-    env:
-      MARKETOS_SUPPLIER_PROVIDER: cj
-      MARKETOS_SUPPLIER_AUTH_READONLY: "1"
-      CJ_EMAIL: ${{ secrets.CJ_EMAIL }}
-      CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
-        with: {python-version: "3.12"}
+        with:
+          python-version: "3.12"
       - run: python -m pip install -r requirements.txt
       - run: python scripts/check_readonly_deployment_readiness.py --json
       - if: ${{ inputs.run_supplier_preflight }}
+        env:
+          MARKETOS_SUPPLIER_PROVIDER: cj
+          MARKETOS_SUPPLIER_AUTH_READONLY: "1"
+          CJ_EMAIL: ${{ secrets.CJ_EMAIL }}
+          CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
         run: python scripts/check_phase1_supplier_readonly_access.py --provider cj --json
       # Network access is explicit twice: manual dispatch plus this input. The
       # validation pack owns provider allowlists, sanitization, and bounded reads.
       - if: ${{ inputs.run_validation_pack }}
-        run: python scripts/run_phase1_cj_readonly_validation_pack.py --provider cj --query "${{ inputs.candidate_query }}" --allow-network --markdown
+        env:
+          MARKETOS_SUPPLIER_PROVIDER: cj
+          MARKETOS_SUPPLIER_AUTH_READONLY: "1"
+          CJ_EMAIL: ${{ secrets.CJ_EMAIL }}
+          CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
+          CANDIDATE_QUERY: ${{ inputs.candidate_query }}
+        run: python scripts/run_phase1_cj_readonly_validation_pack.py --provider cj --query "$CANDIDATE_QUERY" --allow-network --markdown
