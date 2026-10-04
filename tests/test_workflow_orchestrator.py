@@ -193,6 +193,38 @@ def test_new_workflow_blocks_checkpoint_from_another_workspace_without_running_s
     mock_exec.assert_not_called()
 
 
+def test_new_workflow_blocks_recoverable_checkpoint_from_another_workflow_type_without_running_stages():
+    registry = get_workflow_registry()
+    workspace_id = "checkpoint-owner-cross-type-workspace"
+    with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
+        mock_exec.return_value = {"status": "completed", "output": {}, "produced_object_ids": []}
+        owner = run_workflow(
+            workspace_id=workspace_id,
+            workflow_type="full_market_cycle",
+            payload={},
+            stop_after_stage="market_discovery",
+        )
+    checkpoint = registry.latest_checkpoint(owner["workflow_id"], "market_discovery")
+    assert checkpoint is not None and checkpoint.recoverable is True
+    assert registry.get_workflow(owner["workflow_id"]).workflow_type == "full_market_cycle"
+
+    with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
+        result = run_workflow(
+            workspace_id=workspace_id,
+            workflow_type="import_discovery_cycle",
+            payload={},
+            resume_from_checkpoint_id=checkpoint.checkpoint_id,
+        )
+
+    assert result["status"] == "blocked"
+    assert result["errors"] == ["resume_checkpoint_rejected:checkpoint_workflow_type_mismatch"]
+    mock_exec.assert_not_called()
+    assert not any(
+        event.event_type == "stage_started"
+        for event in registry.list_timeline(result["workflow_id"])
+    )
+
+
 def test_new_workflow_blocks_orphan_checkpoint_without_running_stages():
     registry = get_workflow_registry()
     checkpoint = WorkflowCheckpoint(

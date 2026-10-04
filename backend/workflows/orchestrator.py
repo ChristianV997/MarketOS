@@ -118,6 +118,7 @@ def _checkpoint_owner_error(
     *,
     workspace_id: str,
     workflow_id: str | None = None,
+    workflow_type: str | None = None,
 ) -> str | None:
     """Reject checkpoints whose persisted owner is outside the requested scope."""
     if workflow_id is not None and checkpoint.workflow_id != workflow_id:
@@ -133,6 +134,8 @@ def _checkpoint_owner_error(
         for item in owner.checkpoints
     ):
         return "checkpoint_owner_mismatch"
+    if workflow_type is not None and owner.workflow_type != workflow_type:
+        return "checkpoint_workflow_type_mismatch"
     return None
 
 
@@ -345,6 +348,7 @@ def run_workflow(
                 registry,
                 checkpoint,
                 workspace_id=run.workspace_id,
+                workflow_type=run.workflow_type,
             )
             if owner_error is not None:
                 run.status = "blocked"
