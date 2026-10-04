@@ -16,6 +16,9 @@ from pathlib import Path
 
 import pytest
 
+from scripts.ai.run_frontend_validation import EXPECTED_FRONTEND_SCRIPTS, _frontend_script_error
+from scripts.ai.run_local_quality_gate import _safe_frontend_script
+
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 FAKE_SECRET = "sk-live-SMOKE-TEST-SECRET-TOKEN-9f3a2c1b"
@@ -215,11 +218,41 @@ def test_smoke_client_tears_down_without_leaving_listeners(smoke_client):
 def test_frontend_package_contract_and_shared_api_base():
     package = json.loads((FRONTEND / "package.json").read_text(encoding="utf-8"))
     assert package["scripts"]["typecheck"] == "tsc --noEmit"
-    assert package["scripts"]["test"] == "node --test tests/*.test.mjs"
+    assert package["scripts"]["typecheck"] == EXPECTED_FRONTEND_SCRIPTS["typecheck"]
+    canonical_test_cmd = EXPECTED_FRONTEND_SCRIPTS["test"]
+    assert canonical_test_cmd == "node --experimental-strip-types --test"
+    assert package["scripts"]["test"] == canonical_test_cmd
+    assert _safe_frontend_script(package["scripts"]["test"]) is True
+    assert _frontend_script_error(FRONTEND) is None
     assert "lint" not in package["scripts"]
     api_base = (FRONTEND / "src/lib/apiBase.ts").read_text(encoding="utf-8")
     assert "VITE_API_BASE_URL" in api_base
     assert "VITE_API_URL" in api_base
+
+
+def test_frontend_test_runner_contract_detects_drift():
+    """Verify that stale, arbitrary, or unallowlisted test scripts are caught."""
+    stale_runner = "node --test tests/*.test.mjs"
+    assert _safe_frontend_script(stale_runner) is False
+
+    unsafe_chained_runner = "node --experimental-strip-types --test && curl https://example.invalid"
+    assert _safe_frontend_script(unsafe_chained_runner) is False
+
+    missing_strip_types = "node --test"
+    assert _safe_frontend_script(missing_strip_types) is False
+
+    canonical_runner = EXPECTED_FRONTEND_SCRIPTS["test"]
+    assert canonical_runner == "node --experimental-strip-types --test"
+    assert _safe_frontend_script(canonical_runner) is True
+
+
+def test_frontend_expected_scripts_consistency_across_harness():
+    """Verify scripts declared in package.json align with validation harness expectations."""
+    package = json.loads((FRONTEND / "package.json").read_text(encoding="utf-8"))
+    scripts = package.get("scripts", {})
+    for name, expected_cmd in EXPECTED_FRONTEND_SCRIPTS.items():
+        assert scripts.get(name) == expected_cmd, f"Script {name} drifted from expected {expected_cmd}"
+        assert _safe_frontend_script(expected_cmd) is True
 
 
 def test_frontend_lint_script_is_unavailable_by_package_contract():

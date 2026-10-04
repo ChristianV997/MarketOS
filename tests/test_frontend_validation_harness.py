@@ -24,12 +24,22 @@ def test_frontend_selector_runs_validation_harness():
 
 def test_node_test_script_is_allowlisted():
     assert gate._safe_frontend_script("node --experimental-strip-types --test") is True
+    assert gate._safe_frontend_script("node --test tests/*.test.mjs") is False
+    assert gate._safe_frontend_script("node --test") is False
     assert gate._safe_frontend_script("node -e \"require('https').get('https://example.invalid')\"") is False
     assert gate._safe_frontend_script("node ./scripts/arbitrary.mjs") is False
     assert gate._safe_frontend_script(
         "node --experimental-strip-types --test && node -e \"process.env\""
     ) is False
     assert gate._safe_frontend_script("python -c \"print('vitest')\"") is False
+
+
+def test_safe_npm_scripts_match_canonical_manifest_and_harness():
+    assert SAFE_NPM_SCRIPTS == run_frontend_validation.EXPECTED_FRONTEND_SCRIPTS
+    manifest_path = run_frontend_validation.REPOSITORY_ROOT / "frontend" / "package.json"
+    package = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for script_name, expected_command in SAFE_NPM_SCRIPTS.items():
+        assert package["scripts"].get(script_name) == expected_command
 
 
 def test_test_runner_module_not_found_is_configuration():
