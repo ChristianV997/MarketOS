@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,11 @@ def _output(value: str) -> Path:
     return (raw if raw.is_absolute() else ROOT / raw).resolve()
 
 
+# "sk-" is a credential prefix only when it starts a token; it is also the tail of words such as
+# desk-clamp-lamp or risk-review-pack, so it must not follow a letter or digit.
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
+
+
 def _secret_like(value: Any) -> bool:
     if isinstance(value, dict):
         return any(str(key).lower().replace("-", "_") in SECRET_KEYS or _secret_like(item) for key, item in value.items())
@@ -42,7 +48,7 @@ def _secret_like(value: Any) -> bool:
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza"))
+        return "-----begin " in lowered or "bearer " in lowered or _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in ("ghp_", "xoxb-", "AIza"))
     return False
 
 

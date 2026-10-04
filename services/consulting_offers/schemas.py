@@ -25,8 +25,11 @@ EVIDENCE_CLASSES = frozenset({
 EVIDENCE_STATES = frozenset({"available", "missing", "stale", "conflicting", "blocked", "unavailable"})
 PROPOSAL_STATUSES = frozenset({"draft_ready", "needs_evidence", "blocked"})
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+# "sk-" is a credential prefix only when it starts a token; it is also the tail of words such as
+# desk-clamp-lamp or risk-review-pack, so it must not follow a letter or digit.
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
 _SECRET_MARKERS = (
-    "sk-", "ghp_", "github_pat_", "bearer ", "-----begin", "api_key", "access_token",
+    "ghp_", "github_pat_", "bearer ", "-----begin", "api_key", "access_token",
     "private_key", "password", "client_secret", "cookie=", "raw_payload", "source_code",
     "internal_prompt", "formula", ".env",
 )
@@ -44,7 +47,7 @@ def _safe_text(value: Any, field_name: str, *, required: bool = True, max_length
     if any(unicodedata.category(char).startswith("C") for char in value):
         raise SchemaValidationError(f"invalid {field_name}")
     lowered = value.casefold()
-    if any(marker in lowered for marker in _SECRET_MARKERS):
+    if _SK_PREFIX.search(lowered) or any(marker in lowered for marker in _SECRET_MARKERS):
         raise SchemaValidationError(f"unsafe {field_name}")
     return value.strip()
 

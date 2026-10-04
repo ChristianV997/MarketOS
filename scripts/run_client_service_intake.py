@@ -59,6 +59,7 @@ import csv
 import json
 import sys
 import tempfile
+import re
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
@@ -89,7 +90,10 @@ CLASSIFICATIONS = frozenset({"eligible", "data_inadequate", "blocked", "malforme
 # module-private) so this script's secret-shape guard behaves consistently
 # with the underlying authority's, without depending on its private
 # implementation detail.
-_SECRET_SHAPE_MARKERS = ("sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "-----begin", "bearer ")
+_SECRET_SHAPE_MARKERS = ("ghp_", "gho_", "ghu_", "ghs_", "ghr_", "-----begin", "bearer ")
+# "sk-" is a credential prefix only when it starts a token; it is also the tail of words such as
+# desk-clamp-lamp or risk-review-pack, so it must not follow a letter or digit.
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
 
 
 class IntakeError(ValueError):
@@ -99,7 +103,7 @@ class IntakeError(ValueError):
 def _reject_secret_shaped_recursive(value: Any, *, field_name: str) -> None:
     if isinstance(value, str):
         lowered = value.lower()
-        if any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
+        if _SK_PREFIX.search(lowered) or any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
             raise IntakeError(f"secret-shaped value rejected in {field_name}")
     elif isinstance(value, Mapping):
         for key, item in value.items():

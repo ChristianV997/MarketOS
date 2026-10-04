@@ -6,6 +6,7 @@ exploit payloads, HTML, or vulnerable source code.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, asdict, is_dataclass
 from typing import Any, Mapping, Sequence
 
@@ -25,6 +26,11 @@ REDACTION_OUTCOMES = ("redacted", "rejected", "safe_summary_only", "allowed_meta
 SECRET_KEYS = {"actual_secret_value", "api_key", "raw_api_key", "oauth_token", "raw_oauth_token", "access_token", "refresh_token", "password", "private_key", "private_key_material", "cookie", "cookies", "jwt", "token", "authorization", "database_url", "webhook_secret", "client_secret", "raw_payload", "raw_html", "exploit_payload", "vulnerable_code"}
 
 
+# "sk-" is a credential prefix only when it starts a token; it is also the tail of words such as
+# desk-clamp-lamp or risk-review-pack, so it must not follow a letter or digit.
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
+
+
 def _secret_like(value: Any) -> bool:
     if isinstance(value, Mapping):
         return any(str(key).lower().replace("-", "_") in SECRET_KEYS or _secret_like(item) for key, item in value.items())
@@ -32,7 +38,7 @@ def _secret_like(value: Any) -> bool:
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or "<html" in lowered or "<script" in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza", "eyjhb", "jdbc:", "mysql://", "postgres://"))
+        return "-----begin " in lowered or "bearer " in lowered or "<html" in lowered or "<script" in lowered or _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in ("ghp_", "xoxb-", "AIza", "eyjhb", "jdbc:", "mysql://", "postgres://"))
     return False
 
 

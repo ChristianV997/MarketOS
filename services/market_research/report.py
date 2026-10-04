@@ -65,8 +65,11 @@ _UNSAFE_KEYS = frozenset({
     "raw_payload", "provider_payload", "provider_response", "raw_response", "internal_prompt", "formula", "source_code",
     "filesystem_path",
 })
+# "sk-" is a credential prefix only when it starts a token; it is also the tail of words such as
+# desk-clamp-lamp or risk-review-pack, so it must not follow a letter or digit.
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
 _UNSAFE_VALUE_MARKERS = (
-    "<html", "<script", "-----begin", "sk-", "ghp_", "github_pat_", "bearer ",
+    "<html", "<script", "-----begin", "ghp_", "github_pat_", "bearer ",
     "api_key", "access_token", "raw_payload", "provider_payload", "internal_prompt",
     "provider_response", "raw_response", "source_code", "pricing formula", "internal pricing",
     "formula", "heuristic", "strategy", "other_client", "cross_client", ".env",
@@ -105,7 +108,8 @@ def _validate_safe_inputs(value: Any, *, depth: int = 0, nodes: list[int] | None
             raise ValueError("evidence_input_bounds_exceeded")
         lowered = value.casefold()
         if (
-            any(marker in lowered for marker in _UNSAFE_VALUE_MARKERS)
+            _SK_PREFIX.search(lowered)
+            or any(marker in lowered for marker in _UNSAFE_VALUE_MARKERS)
             or _UNSAFE_HTML_TAG.search(value)
             or any(pattern.search(value) for pattern in _UNSAFE_SECRET_PATTERNS)
             or _ABSOLUTE_PATH.match(value)

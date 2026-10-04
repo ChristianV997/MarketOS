@@ -22,6 +22,7 @@ import ipaddress
 import json
 import os
 import platform
+import re
 import socket
 import sys
 from dataclasses import asdict, dataclass, field
@@ -77,12 +78,15 @@ FORBIDDEN_WORKSPACE_LEAK_KEYS = frozenset({
 FORBIDDEN_VALUE_MARKERS = (
     "bearer sk-",
     "bearer ghp_",
-    "sk-live-",
-    "sk-proj-",
     "ghp_",
     "-----begin private key-----",
     "-----begin rsa private key-----",
 )
+
+
+# sk-live-/sk-proj- are credential prefixes only at the start of a token; they are also the tail of words
+# such as desk-live-demo or risk-proj-alpha, so they must not follow a letter or digit.
+_SK_LIVE_OR_PROJECT_PREFIX = re.compile(r"(?<![a-z0-9])sk-(?:live|proj)-")
 
 
 class _NoRedirectHandler(urllib_request.HTTPRedirectHandler):
@@ -161,10 +165,8 @@ def check_projection_workspace_isolation(payload: Any) -> list[str]:
                 _inspect_node(item, f"{current_path}[{idx}]")
         elif isinstance(node, str):
             v_lower = node.lower()
-            for marker in FORBIDDEN_VALUE_MARKERS:
-                if marker in v_lower:
-                    findings.append(f"forbidden_value_marker:{current_path or 'root'}")
-                    break
+            if _SK_LIVE_OR_PROJECT_PREFIX.search(v_lower) or any(marker in v_lower for marker in FORBIDDEN_VALUE_MARKERS):
+                findings.append(f"forbidden_value_marker:{current_path or 'root'}")
 
     _inspect_node(payload)
     return sorted(set(findings))

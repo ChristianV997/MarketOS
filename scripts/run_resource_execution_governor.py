@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,26 @@ from evaluation.companyos.resource_execution_governor import (  # noqa: E402
 )
 
 
+# "sk-" is a credential prefix only when it starts a token; it is also the tail of words such as
+# desk-clamp-lamp or risk-review-pack, so it must not follow a letter or digit.
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
+
+
+def _contains_sk_prefix(value: Any) -> bool:
+    """Apply the boundary to the decoded strings (keys and values), not to the JSON text.
+
+    ``json.dumps`` escapes newlines and non-ASCII characters (``\\n``, ``\\u00e9``), which would put a
+    letter or digit in front of a real ``sk-`` token and hide it from the lookbehind.
+    """
+    if isinstance(value, str):
+        return _SK_PREFIX.search(value.lower()) is not None
+    if isinstance(value, dict):
+        return any(_contains_sk_prefix(key) or _contains_sk_prefix(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_sk_prefix(item) for item in value)
+    return False
+
+
 def _load_json(path_text: str) -> dict[str, Any]:
     path = Path(path_text).resolve()
     if not path.is_file() or ROOT not in path.parents:
@@ -29,7 +50,7 @@ def _load_json(path_text: str) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"invalid governor input: {exc}") from exc
     rendered = json.dumps(payload).lower()
-    if any(marker in rendered for marker in ("actual_secret_value", "api_key", "password", "sk-", "begin private key", "oauth_token")):
+    if _contains_sk_prefix(payload) or any(marker in rendered for marker in ("actual_secret_value", "api_key", "password", "begin private key", "oauth_token")):
         raise SystemExit("secret-like governor input rejected")
     if not isinstance(payload, dict):
         raise SystemExit("governor input must be a JSON object")
