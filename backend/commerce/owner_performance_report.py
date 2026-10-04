@@ -121,6 +121,7 @@ def _money_view(
     status: str,
     classes: set[str] | None = None,
     missing_reason: str | None = None,
+    aggregated: bool = False,
 ) -> dict[str, Any]:
     evidence_classes = sorted(classes or ())
     if money is None:
@@ -136,10 +137,10 @@ def _money_view(
     payload = money.to_dict()
     payload["status"] = status
     payload["evidence_classes"] = evidence_classes
-    published_state = "derived" if status == "derived" else _public_evidence_state(set(evidence_classes))
+    published_state = "derived" if status == "derived" or aggregated else _public_evidence_state(set(evidence_classes))
     payload["evidence_state"] = published_state
     ref = payload.get("evidence_ref")
-    if status == "derived" or not isinstance(ref, dict) or ref.get("evidence_state") != published_state:
+    if status == "derived" or aggregated or not isinstance(ref, dict) or ref.get("evidence_state") != published_state:
         payload["evidence_ref"] = None
     payload["missing_reason"] = None
     return payload
@@ -221,6 +222,15 @@ def _sum_metric(lines: list[dict[str, Any]], metric: str, currency: str) -> tupl
             evidence_ref=None,
         )
     return total, [], _rollup_status(classes), classes
+
+
+def _aggregated(lines: list[dict[str, Any]], metric: str) -> bool:
+    return sum(line["metric"] == metric for line in lines) > 1
+
+
+def _recorded_zero(lines: list[dict[str, Any]], metric: str) -> bool:
+    matched = [line for line in lines if line["metric"] == metric]
+    return bool(matched) and all(line["money"].amount == 0 for line in matched)
 
 
 def _contribution(
@@ -332,12 +342,14 @@ def build_owner_performance_report(payload: Mapping[str, Any]) -> "OwnerPerforma
                     status=status,
                     classes=spend_row_classes,
                     missing_reason=None if spend else "ad_spend_absent",
+                    aggregated=_aggregated(group, "ad_spend"),
                 ),
                 "attributed_revenue": _money_view(
                     attributed_revenue,
                     status=rev_status,
                     classes=revenue_row_classes,
                     missing_reason=None if attributed_revenue else "revenue_absent",
+                    aggregated=_aggregated(group, "revenue"),
                 ),
                 "lift": _money_view(None, status="unavailable", missing_reason="causal_lift_unsupported"),
                 "causal_attribution": False,
@@ -364,12 +376,12 @@ def build_owner_performance_report(payload: Mapping[str, Any]) -> "OwnerPerforma
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
         "currency": currency,
-        "revenue": _money_view(revenue, status=revenue_status, classes=revenue_classes, missing_reason=None if revenue else "revenue_absent"),
-        "refunds": _money_view(refunds, status=refunds_status, classes=refund_classes, missing_reason=None if refunds else "refunds_absent"),
-        "product_cost": _money_view(product_cost, status=product_status, classes=product_classes, missing_reason=None if product_cost else "product_cost_absent"),
-        "shipping_cost": _money_view(shipping, status=shipping_status, classes=shipping_classes, missing_reason=None if shipping else "shipping_cost_absent"),
-        "fees": _money_view(fees, status=fees_status, classes=fee_classes, missing_reason=None if fees else "fees_absent"),
-        "ad_spend": _money_view(ad_spend, status=spend_status, classes=spend_classes, missing_reason=None if ad_spend else "ad_spend_absent"),
+        "revenue": _money_view(revenue, status=revenue_status, classes=revenue_classes, missing_reason=None if revenue else "revenue_absent", aggregated=_aggregated(parsed, "revenue")),
+        "refunds": _money_view(refunds, status=refunds_status, classes=refund_classes, missing_reason=None if refunds else "refunds_absent", aggregated=_aggregated(parsed, "refunds")),
+        "product_cost": _money_view(product_cost, status=product_status, classes=product_classes, missing_reason=None if product_cost else "product_cost_absent", aggregated=_aggregated(parsed, "product_cost")),
+        "shipping_cost": _money_view(shipping, status=shipping_status, classes=shipping_classes, missing_reason=None if shipping else "shipping_cost_absent", aggregated=_aggregated(parsed, "shipping_cost")),
+        "fees": _money_view(fees, status=fees_status, classes=fee_classes, missing_reason=None if fees else "fees_absent", aggregated=_aggregated(parsed, "fees")),
+        "ad_spend": _money_view(ad_spend, status=spend_status, classes=spend_classes, missing_reason=None if ad_spend else "ad_spend_absent", aggregated=_aggregated(parsed, "ad_spend")),
         "contribution": _money_view(
             contribution,
             status=contribution_status,
@@ -386,15 +398,8 @@ def build_owner_performance_report(payload: Mapping[str, Any]) -> "OwnerPerforma
         "missing_inputs": sorted(set(missing)),
         "explicit_zeros": sorted(
             name
-            for name, value in (
-                ("revenue", revenue),
-                ("refunds", refunds),
-                ("product_cost", product_cost),
-                ("shipping_cost", shipping),
-                ("fees", fees),
-                ("ad_spend", ad_spend),
-            )
-            if value is not None and value.amount == 0
+            for name in ("revenue", "refunds", "product_cost", "shipping_cost", "fees", "ad_spend")
+            if _recorded_zero(parsed, name)
         ),
         "evidence_quality": quality,
         "authorities": {
