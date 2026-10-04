@@ -112,6 +112,30 @@ def _persist(run: WorkflowRun) -> None:
     get_workflow_registry().update_workflow(run)
 
 
+def _checkpoint_owner_error(
+    registry: Any,
+    checkpoint: WorkflowCheckpoint,
+    *,
+    workspace_id: str,
+    workflow_id: str | None = None,
+) -> str | None:
+    """Reject checkpoints whose persisted owner is outside the requested scope."""
+    if workflow_id is not None and checkpoint.workflow_id != workflow_id:
+        return "checkpoint_workflow_mismatch"
+    owner = registry.get_workflow(checkpoint.workflow_id)
+    if owner is None:
+        return "checkpoint_owner_not_found"
+    if owner.workspace_id != workspace_id:
+        return "checkpoint_workspace_mismatch"
+    if not any(
+        item.checkpoint_id == checkpoint.checkpoint_id
+        and item.workflow_id == owner.workflow_id
+        for item in owner.checkpoints
+    ):
+        return "checkpoint_owner_mismatch"
+    return None
+
+
 def _sync_run_state(run: WorkflowRun) -> None:
     seen_refs: set[tuple[Any, ...]] = set()
     aggregated_refs: list[dict[str, Any]] = []
@@ -316,9 +340,22 @@ def run_workflow(
             checkpoint = next((item for item in run.checkpoints if item.checkpoint_id == resume_from_checkpoint_id), None)
         if checkpoint is None:
             run.warnings.append("resume_checkpoint_ignored: checkpoint not found")
-        elif not checkpoint.recoverable:
-            run.warnings.append("resume_checkpoint_ignored: checkpoint not recoverable")
         else:
+            owner_error = _checkpoint_owner_error(
+                registry,
+                checkpoint,
+                workspace_id=run.workspace_id,
+            )
+            if owner_error is not None:
+                run.status = "blocked"
+                run.errors.append(f"resume_checkpoint_rejected:{owner_error}")
+                run.final_output = build_workflow_summary(run)
+                _event(run, "", "workflow_failed", "Checkpoint ownership validation failed", "critical")
+                _persist(run)
+                return run.to_dict()
+        if checkpoint is not None and not checkpoint.recoverable:
+            run.warnings.append("resume_checkpoint_ignored: checkpoint not recoverable")
+        elif checkpoint is not None:
             matching_index = next((idx for idx, s in enumerate(run.stages) if s.stage_name == checkpoint.stage_name), None)
             if matching_index is not None:
                 start_index = matching_index
@@ -348,6 +385,19 @@ def resume_workflow(
             checkpoint = registry.checkpoints.get(checkpoint_id)
         if checkpoint is None:
             return {"status": "not_found", "workflow_id": workflow_id, "checkpoint_id": checkpoint_id}
+        owner_error = _checkpoint_owner_error(
+            registry,
+            checkpoint,
+            workspace_id=run.workspace_id,
+            workflow_id=workflow_id,
+        )
+        if owner_error is not None:
+            return {
+                "status": "blocked",
+                "workflow_id": workflow_id,
+                "checkpoint_id": checkpoint_id,
+                "blocked_reasons": [owner_error],
+            }
         if not checkpoint.recoverable:
             return {"status": "blocked", "workflow_id": workflow_id, "blocked_reasons": ["checkpoint_not_recoverable"]}
         stage_name = checkpoint.stage_name

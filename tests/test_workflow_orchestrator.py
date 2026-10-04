@@ -1,6 +1,7 @@
 from unittest.mock import patch
 from backend.workflows.orchestrator import replay_workflow_stage, resume_workflow, run_workflow
 from backend.workflows.workflow_registry import get_workflow_registry
+from backend.workflows.workflow_models import WorkflowCheckpoint
 
 
 def test_workflow_runs_safe_stage_plan_and_persists_checkpoints():
@@ -129,13 +130,91 @@ def test_run_workflow_with_resume_from_checkpoint_id():
     with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
         mock_exec.return_value = {"status": "completed", "output": {}, "produced_object_ids": []}
         second = run_workflow(
-            workspace_id="test-seeded",
+            workspace_id="test-seed",
             workflow_type="import_discovery_cycle",
             payload={},
             resume_from_checkpoint_id=cp.checkpoint_id,
         )
     assert second["status"] == "completed"
     assert any("resumed_from_checkpoint" in w for w in second["warnings"])
+
+
+def test_resume_blocks_checkpoint_owned_by_another_workflow_without_running_stages():
+    registry = get_workflow_registry()
+    with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
+        mock_exec.return_value = {"status": "completed", "output": {}, "produced_object_ids": []}
+        owner = run_workflow(
+            workspace_id="checkpoint-owner-same-workspace",
+            workflow_type="import_discovery_cycle",
+            payload={},
+            stop_after_stage="import_evidence",
+        )
+        target = run_workflow(
+            workspace_id="checkpoint-owner-same-workspace",
+            workflow_type="import_discovery_cycle",
+            payload={},
+            stop_after_stage="import_evidence",
+        )
+    checkpoint = registry.latest_checkpoint(owner["workflow_id"], "import_evidence")
+    assert checkpoint is not None
+    assert owner["workflow_id"] != target["workflow_id"]
+
+    with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
+        result = resume_workflow(target["workflow_id"], checkpoint_id=checkpoint.checkpoint_id)
+
+    assert result["status"] == "blocked"
+    assert result["blocked_reasons"] == ["checkpoint_workflow_mismatch"]
+    mock_exec.assert_not_called()
+
+
+def test_new_workflow_blocks_checkpoint_from_another_workspace_without_running_stages():
+    registry = get_workflow_registry()
+    with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
+        mock_exec.return_value = {"status": "completed", "output": {}, "produced_object_ids": []}
+        owner = run_workflow(
+            workspace_id="checkpoint-owner-workspace-a",
+            workflow_type="import_discovery_cycle",
+            payload={},
+            stop_after_stage="import_evidence",
+        )
+    checkpoint = registry.latest_checkpoint(owner["workflow_id"], "import_evidence")
+    assert checkpoint is not None
+
+    with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
+        result = run_workflow(
+            workspace_id="checkpoint-owner-workspace-b",
+            workflow_type="import_discovery_cycle",
+            payload={},
+            resume_from_checkpoint_id=checkpoint.checkpoint_id,
+        )
+
+    assert result["status"] == "blocked"
+    assert result["errors"] == ["resume_checkpoint_rejected:checkpoint_workspace_mismatch"]
+    mock_exec.assert_not_called()
+
+
+def test_new_workflow_blocks_orphan_checkpoint_without_running_stages():
+    registry = get_workflow_registry()
+    checkpoint = WorkflowCheckpoint(
+        checkpoint_id="orphan-checkpoint-for-owner-validation-test",
+        workflow_id="missing-workflow-owner-for-checkpoint-test",
+        stage_name="import_evidence",
+        stage_status="completed",
+        checkpoint_type="after_stage",
+    )
+    registry.register_checkpoint(checkpoint)
+
+    with patch("backend.workflows.orchestrator.execute_workflow_stage") as mock_exec:
+        result = run_workflow(
+            workspace_id="checkpoint-orphan-workspace",
+            workflow_type="import_discovery_cycle",
+            payload={},
+            resume_from_checkpoint_id=checkpoint.checkpoint_id,
+        )
+
+    assert result["status"] == "blocked"
+    assert result["errors"] == ["resume_checkpoint_rejected:checkpoint_owner_not_found"]
+    mock_exec.assert_not_called()
 
 
 def _event_types(workflow_id, stage_name=None, event_type=None):
