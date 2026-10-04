@@ -365,3 +365,43 @@ def test_cancellation_is_not_an_explicit_zero_and_a_sum_is_not_one_observation()
     assert kept["fees"]["provenance"] == "batch-a"
     assert kept["fees"]["source"] == "shopify_a"
     assert "fees" not in kept["explicit_zeros"]
+
+
+def test_mixed_aggregate_stays_unknown_and_formula_outputs_drop_source_refs():
+    manual = _line("revenue", "40.00", evidence_class="manual")
+    fixture = _line("revenue", "10.00", evidence_class="fixture")
+    manual["evidence_ref"] = {"evidence_id": "ev-manual", "evidence_state": "unknown", "source_url": "manual://a"}
+    fixture["evidence_ref"] = {"evidence_id": "ev-fixture", "evidence_state": "fixture", "source_url": "manual://b"}
+    report = build_owner_performance_report(_base(lines=[manual, fixture])).to_dict()
+    assert report["revenue"]["status"] == "mixed"
+    assert report["revenue"]["amount"] == "50.00"
+    assert report["revenue"]["evidence_state"] == "unknown"
+    assert report["revenue"]["evidence_ref"] is None
+    assert report["revenue"]["evidence_classes"] == ["fixture", "manual"]
+    assert "ev-manual" not in str(report["revenue"])
+    assert "manual://a" not in str(report["revenue"])
+    observed = [
+        _line(metric, amount, evidence_class="observed")
+        for metric, amount in (
+            ("revenue", "100.00"),
+            ("refunds", "0"),
+            ("product_cost", "40.00"),
+            ("shipping_cost", "5.00"),
+            ("fees", "3.00"),
+            ("ad_spend", "12.00"),
+        )
+    ]
+    for row in observed:
+        row["evidence_ref"] = {
+            "evidence_id": f"ev-{row['metric']}",
+            "evidence_state": "observed",
+            "source_url": "https://user:secret@shop.example/order",
+        }
+    full = build_owner_performance_report(_base(lines=observed)).to_dict()
+    assert full["contribution"]["evidence_state"] == "derived"
+    assert full["contribution"]["evidence_ref"] is None
+    assert full["realized_profit"]["evidence_ref"] is None
+    assert "user:secret" not in str(full["contribution"])
+    assert "user:secret" not in str(full["realized_profit"])
+    assert full["safety"]["ads_launched"] is False
+    assert full["evidence_quality"]["claims"]["causal_attribution"] is False

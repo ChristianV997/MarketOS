@@ -137,7 +137,10 @@ def _money_view(
     payload = money.to_dict()
     payload["status"] = status
     payload["evidence_classes"] = evidence_classes
-    published_state = "derived" if status == "derived" or aggregated else _public_evidence_state(set(evidence_classes))
+    class_state = _public_evidence_state(set(evidence_classes))
+    # A sum of observed lines is not itself one observation. Mixed and non-observed
+    # classes keep their class state; contribution formulas still pass status "derived".
+    published_state = "derived" if status == "derived" or (aggregated and class_state == "observed") else class_state
     payload["evidence_state"] = published_state
     ref = payload.get("evidence_ref")
     if status == "derived" or aggregated or not isinstance(ref, dict) or ref.get("evidence_state") != published_state:
