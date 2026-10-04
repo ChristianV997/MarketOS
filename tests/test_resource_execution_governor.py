@@ -1191,6 +1191,80 @@ def test_reusing_a_reservation_state_is_idempotent_and_serializable():
     assert replay.decisions[0].budget_checks[0].available_amount == first.decisions[0].budget_checks[0].available_amount
 
 
+def test_failed_reservation_can_be_released_before_a_competing_request():
+    def frontier(request_id: str, amount: float = 60, **kwargs) -> ExecutionDecisionRequest:
+        return base(
+            "run_frontier_llm_synthesis",
+            request_id=request_id,
+            requested_amount=amount,
+            resource_type="frontier_llm_budget",
+            model_tier="frontier_llm",
+            evidence_score=.9,
+            approval_state="approved",
+            **kwargs,
+        )
+
+    first = build_resource_execution_governor_report(requests=(frontier("failed-reservation"),))
+    failed = build_resource_execution_governor_report(
+        requests=(frontier("failed-reservation", trustos_decision="hard_block"),),
+        reservation_state=first.reservation_state,
+    )
+    assert failed.decisions[0].outcome == "hard_block"
+    assert failed.reservation_state.budget_reservations
+
+    replacement = build_resource_execution_governor_report(
+        requests=(frontier("replacement", amount=50),),
+        reservation_state=failed.reservation_state,
+        release_request_ids=("failed-reservation",),
+    )
+
+    assert replacement.decisions[0].budget_checks[0].status == "available"
+    assert replacement.decisions[0].budget_checks[0].available_amount == 100.0
+    assert replacement.reservation_state.budget_reservations == (
+        ("replacement", "frontier_llm_budget", 50, "run_frontier_llm_synthesis"),
+    )
+
+
+def test_reservation_release_is_ordered_and_idempotent():
+    requests = tuple(
+        base(
+            "run_cheap_llm_task",
+            request_id=f"release-{suffix}",
+            requested_amount=5,
+            resource_type="cheap_llm_budget",
+            model_tier="cheap_llm",
+        )
+        for suffix in ("b", "a")
+    )
+    state = build_resource_execution_governor_report(requests=requests).reservation_state
+
+    released = state.release(("release-b", "release-a"))
+    repeated = released.release(("release-a", "already-released"))
+
+    assert released == ExecutionReservationState()
+    assert repeated == released
+    assert state.release(("release-a",)).budget_reservations == (
+        ("release-b", "cheap_llm_budget", 5, "run_cheap_llm_task"),
+    )
+
+
+def test_reservation_release_rejects_non_string_ids():
+    state = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_cheap_llm_task",
+                request_id="typed-release",
+                requested_amount=5,
+                resource_type="cheap_llm_budget",
+                model_tier="cheap_llm",
+            ),
+        )
+    ).reservation_state
+
+    with pytest.raises(ValueError, match="release request_ids must be strings"):
+        state.release((1,))
+
+
 def test_conflicting_request_reuse_fails_closed():
     first = build_resource_execution_governor_report(
         requests=(base("run_cheap_llm_task", request_id="conflict-reservation", requested_amount=5, resource_type="cheap_llm_budget", model_tier="cheap_llm"),)

@@ -223,6 +223,30 @@ class ExecutionReservationState:
                 raise ValueError("invalid quota reservation state")
         return cls(tuple(budget_rows), tuple(quota_rows))
 
+    def release(self, request_ids: Sequence[str] | None = None) -> "ExecutionReservationState":
+        """Release carried reservations without changing the canonical state shape.
+
+        Releases are idempotent so retrying a completed or failed lifecycle step
+        cannot create capacity or quota. Unknown IDs are ignored; no capacity is
+        released unless a matching reservation exists.
+        """
+        if request_ids is None:
+            return self
+        if isinstance(request_ids, (str, bytes)) or not isinstance(request_ids, Sequence):
+            raise ValueError("release request_ids must be a sequence")
+        if any(not isinstance(request_id, str) for request_id in request_ids):
+            raise ValueError("release request_ids must be strings")
+        normalized = tuple(request_id.strip() for request_id in request_ids)
+        if any(not request_id for request_id in normalized):
+            raise ValueError("release request_ids must be non-empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("duplicate release request_id")
+        released = set(normalized)
+        return ExecutionReservationState(
+            tuple(row for row in self.budget_reservations if row[0] not in released),
+            tuple(row for row in self.quota_reservations if row[0] not in released),
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return _clean(self)
 
@@ -673,12 +697,14 @@ def _default_requests() -> tuple[ExecutionDecisionRequest, ...]:
     return (ExecutionDecisionRequest("decision-screen", "screen_product_opportunities", "intelligence", "intelligence", "internal-companyos", 0, "report_generation_quota"), ExecutionDecisionRequest("decision-website", "create_new_website", "website_store_funnel", "launch", "internal-companyos", 1, "website_build_capacity", existing_brand_fit=True), ExecutionDecisionRequest("decision-ad", "launch_ad_experiment", "ads_content", "consumer_attention", "internal-companyos", 25, "ad_spend"), ExecutionDecisionRequest("decision-frontier", "run_frontier_llm_synthesis", "model", "management", "internal-companyos", 5, "frontier_llm_budget", "frontier_llm", evidence_score=.40), ExecutionDecisionRequest("decision-provider", "run_provider_data_pull", "provider", "intelligence", "internal-companyos", 10, "data_provider_budget", provider_id="dataforseo", terms_privacy_complete=False, approval_state="not_requested"), ExecutionDecisionRequest("decision-runaway", "spawn_agent_workflow", "management", "operations", "internal-companyos", 0, "workflow_runtime", spawned_agents=5), ExecutionDecisionRequest("decision-kill", "kill_ad_experiment", "ads_content", "consumer_attention", "internal-companyos", 0, "ad_spend", metric_value=.01, kill_threshold=.02, sample_size=120, sample_size_target=100), ExecutionDecisionRequest("decision-scale", "scale_ad_budget", "ads_content", "finance", "internal-companyos", 20, "ad_spend", metric_value=.06, scale_threshold=.05, max_scale_increment=.20, approval_state="approved"))
 
 
-def build_resource_execution_governor_report(*, generated_at: str = "offline-deterministic", requests: Sequence[ExecutionDecisionRequest] | None = None, context: Mapping[str, Any] | None = None, budgets: Sequence[ResourceBudget] | None = None, portfolio: PortfolioPolicy | None = None, runaway: RunawayGuardPolicy | None = None, provider_policy: ProviderSpendPolicy | None = None, reservation_state: ExecutionReservationState | Mapping[str, Any] | None = None) -> ResourceExecutionGovernorReport:
+def build_resource_execution_governor_report(*, generated_at: str = "offline-deterministic", requests: Sequence[ExecutionDecisionRequest] | None = None, context: Mapping[str, Any] | None = None, budgets: Sequence[ResourceBudget] | None = None, portfolio: PortfolioPolicy | None = None, runaway: RunawayGuardPolicy | None = None, provider_policy: ProviderSpendPolicy | None = None, reservation_state: ExecutionReservationState | Mapping[str, Any] | None = None, release_request_ids: Sequence[str] | None = None) -> ResourceExecutionGovernorReport:
     """Evaluate a plan and carry accepted reservations safely across chunks.
 
     Pass the returned ``reservation_state`` to the next call. Existing budget
     and quota inputs remain the external starting state; the returned state is
-    the canonical record of reservations made by this governor.
+    the canonical record of reservations made by this governor. Explicit
+    ``release_request_ids`` releases completed or failed reservations before
+    the next bounded plan is evaluated.
     """
     context = context or {}
     if budgets is None and "budgets" in context: budgets = context["budgets"]
@@ -691,7 +717,9 @@ def build_resource_execution_governor_report(*, generated_at: str = "offline-det
     provider_policy = provider_policy or _provider_policy()
     if reservation_state is None:
         reservation_state = context.get("reservation_state")
-    state = ExecutionReservationState.from_mapping(reservation_state)
+    if release_request_ids is None:
+        release_request_ids = context.get("release_request_ids")
+    state = ExecutionReservationState.from_mapping(reservation_state).release(release_request_ids)
     requests = tuple(_default_requests() if requests is None else requests)
     requests = tuple(
         replace(item, request_id=item.request_id.strip())
