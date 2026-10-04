@@ -906,3 +906,83 @@ test("filter persistence round-trips URL state without re-ranking", async () => 
   const validateSource = await readFile(new URL("lib/validateEvidencePacket.ts", featureRoot), "utf8");
   assert.match(validateSource, /!rankedCandidates\.accepted\) state = "unavailable"/);
 });
+
+test("draft preview panel enforces input provenance, blueprint drafts, and governance safety gates", async () => {
+  const panel = await readFile(new URL("components/DraftPreviewPanel.tsx", featureRoot), "utf8");
+
+  // Accessibility & Identification
+  assert.match(panel, /id="draft-preview-panel"/);
+  assert.match(panel, /aria-label="Draft preview and operator governance panel"/);
+  assert.match(panel, /Draft output preview & governance gate/);
+
+  // Input Provenance: Fixture/Manual vs Live-Observed
+  assert.match(panel, /Input provenance & observation mode/);
+  assert.match(panel, /Screening Input \(Fixture \/ Manual\)/);
+  assert.match(panel, /Live-Observed \(Read-Only API\)/);
+  assert.match(panel, /Simulated Input \(Projection Only\)/);
+  assert.match(panel, /never live commercial validation/);
+  assert.match(panel, /never supplier proof/);
+  assert.match(panel, /never order verification/);
+  assert.match(panel, /LIVE_PROOF_EVIDENCE_CLASSES/);
+
+  // Candidate Identity, Assumptions & Hard Gates
+  assert.match(panel, /Identity & Replay/);
+  assert.match(panel, /Active Assumptions/);
+  assert.match(panel, /Hard Gates & Blockers/);
+  assert.match(panel, /Assumptions require empirical verification before promotion/);
+
+  // Launch & Site Draft Blueprints
+  assert.match(panel, /Launch Draft Pack Blueprint/);
+  assert.match(panel, /draft_only_pending_human_approval/);
+  assert.match(panel, /Offer Stack/);
+  assert.match(panel, /Product Listing Copy \(Draft\)/);
+  assert.match(panel, /Landing Page Hero \(Draft\)/);
+  assert.match(panel, /Shopify Draft:.*status: "draft"/);
+  assert.match(panel, /Medusa Draft:.*status: "draft"/);
+  assert.match(panel, /Site Draft Pack Blueprint/);
+  assert.match(panel, /draft_blueprint_only/);
+  assert.match(panel, /Route Manifest/);
+  assert.match(panel, /Shopify Theme:.*status: "draft"/);
+  assert.match(panel, /Medusa Storefront:.*status: "draft"/);
+  assert.match(panel, /Launch Draft Pack \/ Higgsfield creative assets: deferred/);
+
+  // Sanitized Client-Safe Export
+  assert.match(panel, /first-phase-cockpit-client-safe-v1/);
+  assert.match(panel, /zero internal prompts, zero scoring formulas/);
+  assert.match(panel, /Download Client-Safe Report/);
+
+  // Governance Safety Gate: Blocked or Draft is NEVER Authorization
+  assert.match(panel, /Governance Safety Gate/);
+  assert.match(panel, /Blocked or Draft is NEVER Authorization to Publish or Transact/);
+  assert.match(panel, /publishing_authorized/);
+  assert.match(panel, /ads_launched \/ spend/);
+  assert.match(panel, /orders_created/);
+  assert.match(panel, /payments_created/);
+  assert.match(panel, /customer_messages_sent/);
+  assert.match(panel, /live_mutations/);
+  assert.match(panel, /false \(offline\)/);
+
+  // Offline Supplier CSV Preview Integration
+  assert.match(panel, /Offline Manual Supplier CSV Evidence \(Preview\)/);
+  assert.match(panel, /evidence_mode=manual_import · unverified/);
+  assert.match(panel, /Notice: Manual CSV preview evidence is unverified screening data only/);
+});
+
+test("cockpit page mounts draft preview panel and offline supplier CSV preview without mutating server order", async () => {
+  const page = await readFile(new URL("../src/pages/FirstPhaseEvidenceCockpit.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /import { DraftPreviewPanel }/);
+  assert.match(page, /import { SupplierCsvPreview }/);
+  assert.match(page, /<DraftPreviewPanel/);
+  assert.match(page, /candidate=\{selectedCandidate\}/);
+  assert.match(page, /fingerprint=\{packet\.fingerprint\}/);
+  assert.match(page, /onExport=\{handleExport\}/);
+  assert.match(page, /supplierCsvPreview=\{supplierCsvPreview\}/);
+  assert.match(page, /<SupplierCsvPreview/);
+  assert.match(page, /onPreviewChange=\{setSupplierCsvPreview\}/);
+  assert.match(page, /selectedCandidateId=\{selectedId\}/);
+  assert.match(page, /onSelectCandidateId=\{\(id\) => setSelectedId\(id\)\}/);
+  assert.match(page, /id="supplier-csv-preview-section"/);
+  assert.match(page, /Supplier catalog CSV preview \(offline inspection\)/);
+  assert.match(page, /Offline manual evidence/);
+});
