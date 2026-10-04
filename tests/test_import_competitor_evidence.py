@@ -362,3 +362,16 @@ def test_obfuscated_and_encoded_contact_is_not_returned():
     assert "hidden-canary-cell" not in hidden_blob
     assert hidden["status"] == "accepted"
     assert hidden["offers"][0]["title"] == "Copper Bottle"
+
+
+def test_parenthesized_phone_without_separator_is_not_echoed():
+    secret = "(415)555-0199"
+    text = f"listing_id,title,seller,price,currency\nL1,Widget,{secret},10.00,USD\n"
+    result = import_manual_competitor_csv(text, candidate_id="cand-1")
+    blob = json.dumps(result)
+    assert secret not in blob
+    assert "4155550199" not in blob
+    assert result["status"] == "rejected"
+    assert result["offer_count"] == 0
+    assert result["rejections"][0]["code"] == "contact_data_rejected"
+    assert result["evidence_state"] == "manual_import"

@@ -356,7 +356,7 @@ _OBFUSCATED_DOT_EMAIL = re.compile(
     r"(?:\(\s*dot\s*\)|\[\s*dot\s*\]|\{\s*dot\s*\}|\bdot\b)\s*"
     r"[a-z]{2,24}(?![\w])"
 )
-_NANP = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]\d{3}[-.\s]\d{4}(?!\d)")
+_NANP = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)[-.\s]?|\d{3}[-.\s])\d{3}[-.\s]\d{4}(?!\d)")
 _INTL_PHONE = re.compile(r"(?<!\w)\+\d{1,3}(?:[-.\s()]+\d{2,4}){2,5}(?!\d)")
 _E164 = re.compile(r"(?<!\w)\+\d{8,15}(?!\d)")
 _CONTACT_SCHEME = re.compile(r"(?i)(?:mailto|tel)\s*:")
