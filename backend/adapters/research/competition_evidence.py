@@ -28,13 +28,19 @@ expose.
 """
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import ipaddress
+import json
 import logging
 import os
+import re
 import socket
 import time
+import unicodedata
 from dataclasses import dataclass, field as dataclass_field
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 from urllib import robotparser
 from urllib.parse import urlparse
@@ -328,6 +334,355 @@ def score_offers(offers: list[CompetitorOffer], query: str) -> list[dict[str, An
     return sorted(scored, key=lambda item: item["composite_score"], reverse=True)
 
 
+_CANDIDATE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
+_CURRENCY = re.compile(r"^[A-Z]{3}$")
+_LISTING_ID = _CANDIDATE_ID
+_PII_HEADERS = {
+    "email", "phone", "name", "customer", "customer name", "address", "notes", "note",
+    "billing name", "billing address", "shipping name", "shipping address",
+}
+_PII_HEADER_TOKENS = {"email", "e-mail", "phone", "mobile", "tel", "telephone", "fax", "whatsapp"}
+_EMAIL = re.compile(
+    r"(?i)(?<![\w])[a-z0-9._%+\-]{1,64}\s*@\s*[a-z0-9][a-z0-9.\-]{0,80}\.[a-z]{2,24}(?![\w])"
+)
+_OBFUSCATED_EMAIL = re.compile(
+    r"(?i)(?<![\w])[a-z0-9._%+\-]{1,64}\s*(?:\(\s*at\s*\)|\[\s*at\s*\]|\{\s*at\s*\})\s*"
+    r"[a-z0-9][a-z0-9.\-]{0,80}\.[a-z]{2,24}(?![\w])"
+)
+_OBFUSCATED_DOT_EMAIL = re.compile(
+    r"(?i)(?<![\w])[a-z0-9._%+\-]{1,64}\s*"
+    r"(?:\(\s*at\s*\)|\[\s*at\s*\]|\{\s*at\s*\}|\bat\b)\s*"
+    r"[a-z0-9][a-z0-9\-]{0,62}\s*"
+    r"(?:\(\s*dot\s*\)|\[\s*dot\s*\]|\{\s*dot\s*\}|\bdot\b)\s*"
+    r"[a-z]{2,24}(?![\w])"
+)
+_NANP = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)[-.\s]?|\d{3}[-.\s])\d{3}[-.\s]\d{4}(?!\d)")
+_INTL_PHONE = re.compile(r"(?<!\w)\+\d{1,3}(?:[-.\s()]+\d{2,4}){2,5}(?!\d)")
+_E164 = re.compile(r"(?<!\w)\+\d{8,15}(?!\d)")
+_CONTACT_SCHEME = re.compile(r"(?i)(?:mailto|tel)\s*:")
+_INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200c\u200d\ufeff\u2060\u180e"), None)
+_DASHES = str.maketrans({"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-"})
+_MAPPED_HEADERS = {
+    "listing id": "listing_id", "external listing id": "listing_id", "listing_id": "listing_id",
+    "title": "title", "price": "price", "currency": "currency", "availability": "availability",
+    "shipping cost": "shipping_cost", "shipping_cost": "shipping_cost", "brand": "brand",
+    "seller": "seller", "rating": "rating", "review count": "review_count",
+    "variant count": "variant_count", "source url": "source_url", "source": "source",
+    "candidate id": "candidate_id", "image": "image",
+}
+
+
+def _csv_header(value: str) -> str:
+    text = " ".join(value.strip().lower().replace("_", " ").split())
+    return text
+
+
+def _contact_surface(value: str) -> str:
+    text = unicodedata.normalize("NFKC", value).translate(_INVISIBLE).translate(_DASHES)
+    text = re.sub(r"(?i)&#x0*40;", "@", text)
+    text = text.replace("&" + "amp;#64;", "@").replace("&#64;", "@")
+    return text.replace("%2540", "@").replace("%40", "@")
+
+
+def _contact_like(value: str) -> bool:
+    """High-confidence email or phone only. Ordinary product text, including '@' and SKUs, stays."""
+    if not value:
+        return False
+    text = _contact_surface(value)
+    if (
+        _CONTACT_SCHEME.search(text)
+        or _EMAIL.search(text)
+        or _OBFUSCATED_EMAIL.search(text)
+        or _OBFUSCATED_DOT_EMAIL.search(text)
+        or _NANP.search(text)
+        or _E164.search(text)
+    ):
+        return True
+    match = _INTL_PHONE.search(text)
+    return match is not None and len(re.sub(r"\D", "", match.group(0))) >= 8
+
+
+def _header_is_sensitive(header: str) -> bool:
+    if _contact_like(header):
+        return True
+    digits = re.sub(r"\D", "", header)
+    return not re.search(r"[a-z]", header) and 10 <= len(digits) <= 15
+
+
+def _public_header(header: str) -> str:
+    if _header_is_sensitive(header) or not re.fullmatch(r"[a-z0-9 ]{1,48}", header):
+        return "redacted"
+    return header
+
+
+def _manual_rejection(row_number: int | None, code: str, field_name: str = "") -> dict[str, Any]:
+    item: dict[str, Any] = {"code": code}
+    if row_number is not None:
+        item["row_number"] = row_number
+    if field_name:
+        item["field"] = field_name
+    return item
+
+
+def _manual_amount(raw: str) -> tuple[float | None, str | None]:
+    text = raw.strip()
+    if text == "":
+        return None, None
+    negative = text.startswith("(") and text.endswith(")")
+    cleaned = text.strip("()").replace("$", "").replace(",", "").strip()
+    if cleaned.startswith("-"):
+        negative = True
+        cleaned = cleaned[1:].strip()
+    try:
+        value = Decimal(cleaned)
+    except Exception:
+        return None, "malformed_amount"
+    if not value.is_finite() or abs(value) > Decimal("1000000000000"):
+        return None, "malformed_amount"
+    quantized = float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    return (-quantized if negative else quantized), None
+
+
+def _classify_manual_header(header: str) -> str:
+    tokens = set(header.split())
+    if (
+        _header_is_sensitive(header)
+        or header in _PII_HEADERS
+        or bool(tokens & _PII_HEADER_TOKENS)
+        or header.startswith("billing ")
+        or header.startswith("shipping address")
+    ):
+        return "pii"
+    if header in _MAPPED_HEADERS:
+        return "mapped"
+    return "unsupported"
+
+
+def import_manual_competitor_csv(
+    text: str,
+    *,
+    candidate_id: str,
+    max_bytes: int = MAX_RESPONSE_BYTES,
+    max_rows: int = 10_000,
+) -> dict[str, Any]:
+    """Parse an operator CSV into competitor offers. Does not fetch or resolve hosts.
+
+    ``candidate_id`` must be supplied explicitly. Titles and seller names are never
+    used as that id. Blank amounts stay missing; explicit zero stays zero.
+    """
+    if not isinstance(candidate_id, str) or not _CANDIDATE_ID.fullmatch(candidate_id) or _contact_like(candidate_id):
+        return _manual_result(None, (_manual_rejection(None, "invalid_candidate_id"),))
+    if len(text.encode("utf-8")) > max_bytes:
+        return _manual_result(candidate_id, (_manual_rejection(None, "file_too_large"),))
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        fieldnames = list(reader.fieldnames or [])
+        raw_rows = list(enumerate(reader, start=2))
+    except csv.Error:
+        return _manual_result(candidate_id, (_manual_rejection(None, "invalid_csv"),))
+    if not fieldnames:
+        return _manual_result(candidate_id, (_manual_rejection(None, "empty_csv"),))
+    headers = [_csv_header(name) for name in fieldnames if name and name.strip()]
+    if any(not name or not name.strip() for name in fieldnames) or len(headers) != len(set(headers)):
+        return _manual_result(candidate_id, (_manual_rejection(None, "invalid_header"),))
+    unsupported = [header for header in headers if _classify_manual_header(header) == "unsupported"]
+    if unsupported:
+        return _manual_result(candidate_id, tuple(
+            _manual_rejection(None, "unsupported_column", _public_header(header)) for header in sorted(set(unsupported))
+        ))
+    pii_headers = sorted(header for header in headers if _classify_manual_header(header) == "pii")
+    rejections: list[dict[str, Any]] = []
+    offers: dict[str, dict[str, Any]] = {}
+    conflicts: set[str] = set()
+    row_count = 0
+    for row_number, raw in raw_rows:
+        row_count += 1
+        if row_count > max_rows:
+            return _manual_result(candidate_id, (_manual_rejection(None, "row_limit_exceeded"),))
+        if raw is None or any(key is None for key in raw):
+            return _manual_result(candidate_id, (_manual_rejection(row_number, "unsupported_column", "extra"),))
+        cells = {_csv_header(key): (value or "") for key, value in raw.items() if key}
+        mapped = {_MAPPED_HEADERS[header]: value for header, value in cells.items() if header in _MAPPED_HEADERS}
+        row_candidate = mapped.get("candidate_id", "").strip()
+        if row_candidate and row_candidate != candidate_id:
+            rejections.append(_manual_rejection(row_number, "conflicting_candidate"))
+            conflicts.add("__file__")
+            continue
+        listing_id = mapped.get("listing_id", "").strip()
+        if not _LISTING_ID.fullmatch(listing_id):
+            rejections.append(_manual_rejection(row_number, "malformed_identity", "listing id"))
+            continue
+        title = " ".join(mapped.get("title", "").split()).strip()
+        seller = " ".join(mapped.get("seller", "").split()).strip()
+        brand = " ".join(mapped.get("brand", "").split()).strip()
+        availability = " ".join(mapped.get("availability", "").split()).strip()
+        source_url_raw = mapped.get("source_url", "").strip()
+        source_raw = mapped.get("source", "").strip()
+        image_raw = mapped.get("image", "").strip()
+        price_raw = mapped.get("price", "")
+        shipping_raw = mapped.get("shipping_cost", "")
+        rating_raw = mapped.get("rating", "")
+        if any(_contact_like(value) for value in (
+            title, seller, brand, listing_id, availability, source_url_raw, source_raw, image_raw,
+            price_raw, shipping_raw, rating_raw,
+        )):
+            rejections.append(_manual_rejection(row_number, "contact_data_rejected"))
+            conflicts.add(listing_id)
+            continue
+        price, price_error = _manual_amount(mapped.get("price", ""))
+        shipping, shipping_error = _manual_amount(mapped.get("shipping_cost", ""))
+        rating, rating_error = _manual_amount(mapped.get("rating", ""))
+        if price_error or shipping_error or rating_error:
+            rejections.append(_manual_rejection(row_number, price_error or shipping_error or rating_error or "malformed_amount", "price"))
+            conflicts.add(listing_id)
+            continue
+        currency_raw = mapped.get("currency", "").strip().upper()
+        if currency_raw and not _CURRENCY.fullmatch(currency_raw):
+            rejections.append(_manual_rejection(row_number, "malformed_currency", "currency"))
+            conflicts.add(listing_id)
+            continue
+        review_raw = mapped.get("review_count", "").strip()
+        variant_raw = mapped.get("variant_count", "").strip()
+        review_count = variant_count = None
+        if review_raw:
+            if not re.fullmatch(r"\d{1,9}", review_raw):
+                rejections.append(_manual_rejection(row_number, "malformed_amount", "review count"))
+                conflicts.add(listing_id)
+                continue
+            review_count = int(review_raw)
+        if variant_raw:
+            if not re.fullmatch(r"\d{1,9}", variant_raw):
+                rejections.append(_manual_rejection(row_number, "malformed_amount", "variant count"))
+                conflicts.add(listing_id)
+                continue
+            variant_count = int(variant_raw)
+        source_url = mapped.get("source_url", "").strip()
+        if source_url:
+            parsed = urlparse(source_url)
+            if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or _contact_like(source_url):
+                rejections.append(_manual_rejection(row_number, "malformed_identity", "source url"))
+                conflicts.add(listing_id)
+                continue
+        source = mapped.get("source", "").strip().lower().replace(" ", "_")
+        if source and not re.fullmatch(r"[a-z0-9_]{1,40}", source):
+            rejections.append(_manual_rejection(row_number, "malformed_identity", "source"))
+            conflicts.add(listing_id)
+            continue
+        incoming = {
+            "listing_id": listing_id,
+            "title": title[:160],
+            "price": price,
+            "currency": currency_raw,
+            "shipping_cost": shipping,
+            "availability": " ".join(mapped.get("availability", "").split())[:40],
+            "brand": brand[:80],
+            "seller": seller[:80],
+            "rating": rating,
+            "review_count": review_count,
+            "variant_count": variant_count,
+            "source_url": source_url[:300],
+            "source": source or "manual_competitor_csv",
+            "image": "",
+        }
+        image = mapped.get("image", "").strip()
+        if image and not _contact_like(image) and image.startswith("https://"):
+            incoming["image"] = image[:300]
+        current = offers.get(listing_id)
+        if current is None:
+            offers[listing_id] = incoming
+            continue
+        if current != incoming:
+            rejections.append(_manual_rejection(row_number, "conflicting_listing", "listing id"))
+            conflicts.add(listing_id)
+    if "__file__" in conflicts:
+        return _manual_result(candidate_id, tuple(rejections))
+    for listing_id in conflicts:
+        offers.pop(listing_id, None)
+    if not offers:
+        if not rejections:
+            rejections.append(_manual_rejection(None, "no_data_rows"))
+        return _manual_result(candidate_id, tuple(rejections))
+    built = tuple(_manual_offer(item) for _, item in sorted(offers.items()))
+    warnings = ["manual_evidence: operator CSV, not a live competitor fetch"]
+    if pii_headers:
+        safe = [_public_header(header) for header in pii_headers]
+        warnings.append("pii_columns_dropped:" + ",".join(sorted(set(safe))))
+    return _manual_result(candidate_id, tuple(rejections), offers=built, warnings=tuple(warnings))
+
+
+def _manual_offer(item: dict[str, Any]) -> CompetitorOffer:
+    field_status = {name: "missing" for name in _EVIDENCE_FIELDS}
+    if item["title"]:
+        field_status["title"] = "observed"
+    if item["price"] is not None:
+        field_status["price"] = "observed"
+    if item["currency"]:
+        field_status["currency"] = "observed"
+    if item["availability"]:
+        field_status["availability"] = "observed"
+    if item["shipping_cost"] is not None:
+        field_status["shipping_cost"] = "observed"
+    if item["brand"]:
+        field_status["brand"] = "observed"
+    if item["seller"]:
+        field_status["seller"] = "observed"
+    if item["rating"] is not None:
+        field_status["rating"] = "observed"
+    if item["review_count"] is not None:
+        field_status["review_count"] = "observed"
+    if item["variant_count"] is not None:
+        field_status["variant_count"] = "observed"
+    if item["image"]:
+        field_status["image"] = "observed"
+    observed = sum(status == "observed" for status in field_status.values())
+    return CompetitorOffer(
+        source=item["source"],
+        source_url=item["source_url"],
+        crawl_timestamp=0.0,
+        external_listing_id=item["listing_id"],
+        title=item["title"],
+        field_status=field_status,
+        price=item["price"],
+        currency=item["currency"],
+        availability=item["availability"],
+        shipping_cost=item["shipping_cost"],
+        brand=item["brand"],
+        seller=item["seller"],
+        rating=item["rating"],
+        review_count=item["review_count"],
+        variant_count=item["variant_count"],
+        image=item["image"],
+        extraction_method="manual_csv",
+        confidence=round(observed / len(field_status), 3),
+        warnings=("manual_import",),
+    )
+
+
+def _manual_result(
+    candidate_id: str | None,
+    rejections: tuple[dict[str, Any], ...],
+    *,
+    offers: tuple[CompetitorOffer, ...] = (),
+    warnings: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    body = {
+        "candidate_id": candidate_id,
+        "evidence_class": "manual",
+        "evidence_state": "manual_import",
+        "live_validated": False,
+        "network_calls": False,
+        "provider_calls": False,
+        "offer_count": len(offers),
+        "offers": [offer.to_dict() for offer in offers],
+        "rejections": [dict(item) for item in rejections],
+        "warnings": list(warnings),
+        "status": "accepted" if offers else "rejected",
+    }
+    encoded = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    body["fingerprint"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return body
+
+
 def health() -> AdapterHealth:
     return AdapterHealth(
         SOURCE_PREFIX, configured=True, reachable=False,
@@ -338,5 +693,5 @@ def health() -> AdapterHealth:
 
 __all__ = [
     "CompetitorOffer", "FIELD_STATUSES", "KNOWN_SOURCE_LABELS", "SOURCE_PREFIX",
-    "fetch_competitor_offer", "health", "score_offers",
+    "fetch_competitor_offer", "health", "import_manual_competitor_csv", "score_offers",
 ]
