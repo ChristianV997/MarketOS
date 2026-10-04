@@ -247,6 +247,10 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
     reference = _text(value, field, required=required)
     if not reference:
         return reference
+    # Reject NUL before URL query/fragment stripping so hidden unsafe bytes
+    # cannot be silently normalized out of an operator-supplied reference.
+    if "\x00" in reference:
+        raise ResearchToDecisionError(f"{field} must be a safe reference")
     parsed = urlparse(reference)
     if parsed.scheme in {"http", "https"}:
         if not parsed.netloc or parsed.username or parsed.password:

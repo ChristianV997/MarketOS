@@ -1501,3 +1501,15 @@ def test_web_url_paths_are_not_mistaken_for_absolute_local_paths() -> None:
         with pytest.raises(ResearchToDecisionError, match="safe reference"):
             rtd._reference_text(local, "f")
     assert rtd._reference_text("fixture:evidence/quote.json", "f") == "fixture:evidence/quote.json"
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "https://example.test/item?x=\x00",
+        "https://example.test/item#\x00",
+    ],
+)
+def test_web_url_query_and_fragment_reject_nul_before_stripping(reference: str) -> None:
+    with pytest.raises(ResearchToDecisionError, match="safe reference"):
+        rtd._reference_text(reference, "f", allow_url_query=True)
