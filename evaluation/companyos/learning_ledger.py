@@ -17,6 +17,7 @@ follow-up for a lane that owns both modules.
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass
 from typing import Any, ClassVar, Mapping, Sequence
 
@@ -59,8 +60,13 @@ class LearningMetric:
     value: float | None
     target: float | None
     unit: str
-    sample_size: int
+    sample_size: int | None
     source: str
+    def __post_init__(self) -> None:
+        if not self.metric_id or not self.name: raise ValueError("learning metric identity and name are required")
+        if any(value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)) for value in (self.value, self.target)): raise ValueError("learning metric values must be finite numbers")
+        if self.sample_size is not None and (isinstance(self.sample_size, bool) or not isinstance(self.sample_size, int) or self.sample_size < 0): raise ValueError("learning metric sample size must be a non-negative integer")
+        if self.name in {"evidence_value", "schema_quality"} and any(value is not None and not 0 <= value <= 1 for value in (self.value, self.target)): raise ValueError(f"learning metric {self.name} must be between zero and one")
     def to_dict(self) -> dict[str, Any]: return _clean(self)
 
 
@@ -158,11 +164,11 @@ class LearningProviderImpact:
     provider_id: str
     request_kind: str
     cost_estimate: float
-    evidence_value: float
-    schema_quality: float
+    evidence_value: float | None
+    schema_quality: float | None
     blocked_reason: str
-    terms_privacy_blocker: bool
-    output_contract_blocker: bool
+    terms_privacy_blocker: bool | None
+    output_contract_blocker: bool | None
     recommended_next_provider_action: str
     def to_dict(self) -> dict[str, Any]: return _clean(self)
 
@@ -188,6 +194,7 @@ class LearningDecisionInfluence:
     missing_learning_blockers: tuple[str, ...]
     recommended_decision_modifier: str
     recommended_next_action: str
+    source_event_id: str = ""
     def to_dict(self) -> dict[str, Any]: return _clean(self)
 
 
@@ -195,11 +202,10 @@ class LearningDecisionInfluence:
 class LearningGovernorInfluence:
     """Self-contained handoff record for `derive_governor_influence`.
 
-    This is deliberately a second, narrower contract than
-    `LearningDecisionInfluence` (which is fixed sample data, independent of
-    `events`): every field here is derived from the actual events and
-    do-not-repeat rules in the report that was passed in. It carries plain
-    strings/floats/tuples only, so the Resource & Execution Governor can
+    This is deliberately a second, narrower contract than `LearningDecisionInfluence`.
+    Every field here is derived from the actual events and do-not-repeat rules in
+    the report passed in. It carries plain strings/floats/tuples only, so the
+    Resource & Execution Governor can
     consume it (via `to_governor_context()`) without this module importing
     Governor types, and without the Governor importing this module's
     types.
@@ -251,6 +257,8 @@ class LearningGovernorInfluence:
     low_confidence_evidence: bool = False
     fixture_only_evidence: bool = False
     advisory_rule_ids: tuple[str, ...] = ()
+    iteration_action_type: str = ""
+    iteration_recommendation_source_event_id: str = ""
     def __post_init__(self) -> None:
         if self.evidence_mode not in GOVERNOR_EVIDENCE_MODES: raise ValueError("invalid governor evidence mode")
     def to_dict(self) -> dict[str, Any]: return _clean(self)
@@ -296,7 +304,8 @@ class LearningEvent:
         if self.event_type not in EVENT_TYPES or self.outcome not in OUTCOMES or self.client_visibility not in VISIBILITY: raise ValueError("invalid learning event vocabulary")
         if any(reason not in FAILURE_REASONS for reason in self.failure_reasons): raise ValueError("invalid failure reason")
         if any(reason not in SUCCESS_REASONS for reason in self.success_reasons): raise ValueError("invalid success reason")
-        if self.cost_estimate < 0: raise ValueError("learning cost cannot be negative")
+        if isinstance(self.cost_estimate, bool) or not math.isfinite(self.cost_estimate) or self.cost_estimate < 0: raise ValueError("learning cost must be a finite non-negative number")
+        if isinstance(self.confidence, bool) or not math.isfinite(self.confidence) or not 0 <= self.confidence <= 1: raise ValueError("learning confidence must be between zero and one")
     def to_dict(self) -> dict[str, Any]: return _clean(self)
 
 
@@ -306,7 +315,7 @@ class LearningExperiment:
     hypothesis: LearningHypothesis
     action_type: str
     budget_cap: float
-    sample_size_target: int
+    sample_size_target: int | None
     success_metric: str
     kill_threshold: float | None
     scale_threshold: float | None
@@ -316,6 +325,7 @@ class LearningExperiment:
     approval_required: bool
     event_refs: tuple[str, ...]
     status: str
+    observed_sample_size: int | None = None
     def to_dict(self) -> dict[str, Any]: return _clean(self)
 
 
@@ -379,7 +389,7 @@ class LearningLedgerReport:
     def to_markdown(self) -> str:
         data = self.to_dict(); lines = ["# Learning Ledger", "", "## Executive Summary", "", f"- Events: **{data['learning_event_count']}**", f"- Wins: **{data['win_count']}**", f"- Losses: **{data['loss_count']}**", f"- Killed: **{data['kill_count']}**", f"- Scaled: **{data['scale_count']}**", f"- Do-not-repeat rules: **{data['do_not_repeat_rule_count']}**", "- Mode: **offline deterministic fixture aggregation**", "", "## Learning Events", "", "| Event | Type | Outcome | Confidence |", "|---|---|---|---|"]
         lines.extend(f"| {item.learning_event_id} | {item.event_type} | **{item.outcome}** | {item.confidence:.2f} |" for item in self.events)
-        lines += ["", "## Experiments", "", *[f"- `{item.experiment_id}`: {item.status}; metric `{item.success_metric}`; budget cap ${item.budget_cap:.2f}." for item in self.experiments], "", "## Wins and Losses", "", f"Success reasons: {', '.join(self.summary.top_success_reasons) or 'none'}.", f"Failure reasons: {', '.join(self.summary.top_failure_reasons) or 'none'}.", "", "## Kill / Scale Decisions", "", *[f"- {item.learning_event_id}: {item.outcome}; {item.resource_governor_influence}." for item in self.events if item.outcome in {"killed", "scaled"}], "", "## Do-Not-Repeat Rules", "", *[f"- **{item.severity} / {item.recommended_block_behavior}**: {item.condition}" for item in self.do_not_repeat_rules], "", "## Iteration Recommendations", "", *[f"- `{item.action_type}`: {item.recommendation}" for item in self.iteration_recommendations], "", "## Portfolio Learning", "", *[f"- `{item.portfolio_area}`: focus on {item.recommended_focus_area}; allocation: {item.recommended_allocation_change}." for item in self.portfolio_impacts], "", "## Model-Routing Learning", "", *[f"- `{item.task_type}` -> `{item.recommended_model_tier_next_time}`: {item.cost_savings_note}" for item in self.model_routing_impacts], "", "## Provider Learning", "", *[f"- `{item.provider_id}` / `{item.request_kind}`: evidence value {item.evidence_value:.2f}; {item.recommended_next_provider_action}." for item in self.provider_impacts], "", "## TrustOS / Security Learning", "", *[f"- `{item.blocker}` occurred {item.occurrences} time(s); next evidence: {', '.join(item.recommended_next_evidence)}." for item in self.trustos_impacts], "", "## Resource Governor Feedback", "", *[f"- `{item.action_type}`: modifier `{item.recommended_decision_modifier}`; {item.recommended_next_action}." for item in self.decision_influences], "", "## Safety Boundaries", "", "No database writes, model/provider calls, ads, publishing, orders, payments, messaging, auth, tenants, real client data, raw prompts, real metrics, or artifacts by default.", "", "## Next Best Action", "", self.next_best_action, ""]
+        lines += ["", "## Experiments", "", *[f"- `{item.experiment_id}`: {item.status}; metric `{item.success_metric}`; budget cap ${item.budget_cap:.2f}." for item in self.experiments], "", "## Wins and Losses", "", f"Success reasons: {', '.join(self.summary.top_success_reasons) or 'none'}.", f"Failure reasons: {', '.join(self.summary.top_failure_reasons) or 'none'}.", "", "## Kill / Scale Decisions", "", *[f"- {item.learning_event_id}: {item.outcome}; {item.resource_governor_influence}." for item in self.events if item.outcome in {"killed", "scaled"}], "", "## Do-Not-Repeat Rules", "", *[f"- **{item.severity} / {item.recommended_block_behavior}**: {item.condition}" for item in self.do_not_repeat_rules], "", "## Iteration Recommendations", "", *[f"- `{item.action_type}`: {item.recommendation}" for item in self.iteration_recommendations], "", "## Portfolio Learning", "", *[f"- `{item.portfolio_area}`: focus on {item.recommended_focus_area}; allocation: {item.recommended_allocation_change}." for item in self.portfolio_impacts], "", "## Model-Routing Learning", "", *[f"- `{item.task_type}` -> `{item.recommended_model_tier_next_time}`: {item.cost_savings_note}" for item in self.model_routing_impacts], "", "## Provider Learning", "", *[f"- `{item.provider_id}` / `{item.request_kind}`: evidence value {'not recorded' if item.evidence_value is None else f'{item.evidence_value:.2f}'}; {item.recommended_next_provider_action}." for item in self.provider_impacts], "", "## TrustOS / Security Learning", "", *[f"- `{item.blocker}` occurred {item.occurrences} time(s); next evidence: {', '.join(item.recommended_next_evidence)}." for item in self.trustos_impacts], "", "## Resource Governor Feedback", "", *[f"- `{item.action_type}`: modifier `{item.recommended_decision_modifier}`; {item.recommended_next_action}." for item in self.decision_influences], "", "## Safety Boundaries", "", "No database writes, model/provider calls, ads, publishing, orders, payments, messaging, auth, tenants, real client data, raw prompts, real metrics, or artifacts by default.", "", "## Next Best Action", "", self.next_best_action, ""]
         return "\n".join(lines)
 
 
@@ -406,8 +416,12 @@ def _default_events() -> tuple[LearningEvent, ...]:
         _event("event-landing-page", "landing_page_test", "inconclusive", candidate="mini-thermal-printer", action="generate_site_draft", failures=("landing_page_mismatch", "insufficient_sample"), influence="Iterate page/offer before more traffic."),
         _event("event-model-waste", "model_routing_decision", "loss", action="run_frontier_llm_synthesis", cost=12, failures=("model_cost_too_high",), influence="Route similar low-evidence work to algorithmic or cheap tiers."),
         _event("event-model-cheap", "model_routing_decision", "win", action="run_cheap_llm_task", cost=0.12, successes=("budget_efficient",), influence="Prefer cheap tier for routine structured drafting."),
+        _event("event-model-algorithmic", "model_routing_decision", "win", action="run_algorithmic_scoring", cost=0, successes=("budget_efficient",), influence="Retain deterministic scoring for repeatable rules."),
+        _event("event-model-human-review", "model_routing_decision", "needs_more_evidence", action="run_human_review", failures=("insufficient_sample",), influence="Obtain the missing evidence before a professional conclusion."),
         _event("event-provider-blocked", "provider_run", "blocked", action="run_provider_data_pull", provider="dataforseo", cost=5, failures=("provider_blocker",), influence="Complete terms/privacy and output-contract evidence before live consideration."),
-        _event("event-provider-dry-run", "provider_run", "win", action="run_provider_data_pull", provider="dataforseo", cost=0, successes=("provider_ready",), influence="Keep DataForSEO in fixture/dry-run mode until activation gates pass."),
+        _event("event-provider-dry-run", "provider_run", "win", action="run_provider_data_pull", provider="dataforseo", cost=0, metrics=(LearningMetric("metric-dataforseo-evidence", "evidence_value", .72, None, "ratio", None, "sanitized_fixture"), LearningMetric("metric-dataforseo-schema", "schema_quality", .85, None, "ratio", None, "sanitized_fixture")), successes=("provider_ready",), influence="Keep DataForSEO in fixture/dry-run mode until activation gates pass."),
+        _event("event-provider-apify-blocked", "provider_run", "blocked", action="plan_public_extraction", provider="apify", metrics=(LearningMetric("metric-apify-evidence", "evidence_value", .35, None, "ratio", None, "sanitized_fixture"), LearningMetric("metric-apify-schema", "schema_quality", .5, None, "ratio", None, "sanitized_fixture")), failures=("provider_blocker",), influence="Keep this provider plan-only until its blocker is resolved."),
+        _event("event-provider-manual-screen", "provider_run", "win", action="consume_manual_import", provider="manual_import", metrics=(LearningMetric("metric-manual-evidence", "evidence_value", .55, None, "ratio", None, "sanitized_fixture"), LearningMetric("metric-manual-schema", "schema_quality", .9, None, "ratio", None, "sanitized_fixture")), successes=("provider_ready",), influence="Use sanitized manual imports for early screening only."),
         _event("event-trustos-recurrence", "trustos_review", "blocked", action="generate_client_export", failures=("trust_blocker",), influence="Complete isolation and redaction evidence before export."),
         _event("event-security-scan", "security_scan", "needs_more_evidence", action="run_security_scan", failures=("insufficient_sample",), influence="Obtain sanitized scanner evidence before public launch decisions."),
         _event("event-runaway", "runaway_guard_event", "killed", action="spawn_agent_workflow", failures=("runaway_guard_triggered",), influence="Keep workflow and retry caps enforced."),
@@ -449,6 +463,10 @@ def _rule(event: LearningEvent, index: int) -> LearningDoNotRepeatRule | None:
     return LearningDoNotRepeatRule(f"rule-{index}-{reason}", event.learning_event_id, actions, (event.owner_department,), condition, "high" if behavior == "hard_block" else "medium", behavior, "review after new evidence or 30 days", event.client_visibility in {"client_visible_summary", "aggregated_safe_summary"})
 
 
+def _has_observed_metric_value(event: LearningEvent) -> bool:
+    return any(metric.value is not None for metric in event.metrics)
+
+
 def _recommendation(event: LearningEvent, index: int) -> LearningIterationRecommendation:
     """Iteration-recommendation action/text/expected-signal, per
     `event.failure_reasons[0]`. `poor_offer`, `poor_margin`, `trust_blocker`,
@@ -458,37 +476,244 @@ def _recommendation(event: LearningEvent, index: int) -> LearningIterationRecomm
     had neither) -- covering this mission's required "offer", "economics",
     and "TrustOS evidence" iteration-recommendation categories."""
     mapping = {"low_click_through": ("generate_creative_batch", "change the hook or audience while preserving the validated problem", "attention signal"), "landing_page_mismatch": ("generate_site_draft", "test a clearer offer/page structure before more traffic", "page conversion fit"), "weak_supplier_feasibility": ("request_supplier_proof", "obtain supplier, shipping, and landed-cost evidence", "supplier feasibility"), "model_cost_too_high": ("run_cheap_llm_task", "route routine work to algorithmic/local/cheap tiers", "quality at lower cost"), "provider_blocker": ("run_provider_data_pull", "complete terms/privacy and output-contract review in dry-run mode", "provider readiness"), "missing_learning_capture": ("run_companyos_review", "record the prior lesson before another experiment", "learning completeness"), "insufficient_sample": (event.action_taken, "collect a bounded sample without changing external execution mode", "evidence strength"), "poor_offer": ("iterate_offer_draft", "test a clearer value proposition, price, or bundle before more traffic", "offer market fit"), "poor_margin": ("run_unit_economics_review", "revisit landed cost, price, or fee assumptions before promoting", "economics viability"), "trust_blocker": ("run_trustos_control_plane", "attach TrustOS evidence and isolation review before the export", "TrustOS readiness"), "invalid_test_design": ("run_companyos_review", "define a hypothesis, kill rule, and sample-size target before relaunching", "experiment design quality")}
-    reason = event.failure_reasons[0] if event.failure_reasons else "success"
+    if not event.failure_reasons:
+        action = "run_companyos_review"
+        if event.outcome in {"loss", "blocked", "killed"}:
+            recommendation = "record the failure reason and supporting evidence before selecting an iteration"
+            expected = "failure cause and next-step evidence"
+            rationale = f"Prior event `{event.learning_event_id}` recorded `{event.outcome}` without a failure reason; the cause is unknown."
+        elif _has_observed_metric_value(event):
+            recommendation = "review the recorded outcome metrics and supporting evidence before selecting an iteration"
+            expected = "interpretation of recorded outcome metrics and next-step evidence"
+            rationale = f"Prior event `{event.learning_event_id}` recorded `{event.outcome}` without a failure reason; outcome metrics were recorded and need interpretation."
+        else:
+            recommendation = "record the missing outcome metrics and supporting evidence before selecting an iteration"
+            expected = "outcome metric and next-step evidence"
+            rationale = f"Prior event `{event.learning_event_id}` recorded `{event.outcome}` without a failure reason or outcome metric."
+        return LearningIterationRecommendation(f"iteration-{index}-{event.learning_event_id}", event.learning_event_id, action, recommendation, rationale, expected, "high", event.client_visibility in {"client_visible_summary", "aggregated_safe_summary"})
+    reason = event.failure_reasons[0]
     action, recommendation, expected = mapping.get(reason, (event.action_taken, "repeat only with changed evidence and the prior lesson attached", "decision quality"))
-    return LearningIterationRecommendation(f"iteration-{index}-{event.learning_event_id}", event.learning_event_id, action, recommendation, f"Prior event `{event.learning_event_id}` recorded `{reason}`.", expected, "high" if event.outcome in {"loss", "blocked", "killed"} else "medium", event.client_visibility in {"client_visible_summary", "aggregated_safe_summary"})
+    return LearningIterationRecommendation(f"iteration-{index}-{event.learning_event_id}", event.learning_event_id, action, recommendation, f"Prior event `{event.learning_event_id}` recorded failure reason `{reason}`.", expected, "high" if event.outcome in {"loss", "blocked", "killed"} else "medium", event.client_visibility in {"client_visible_summary", "aggregated_safe_summary"})
 
 
 def _portfolio_impacts(events: Sequence[LearningEvent]) -> tuple[LearningPortfolioImpact, ...]:
-    return (LearningPortfolioImpact("product-category", ("mini-thermal-printer has strong demand and margin signals",), ("portable-espresso-maker has weak economics and demand",), "allocate the next bounded validation slot to validated high-fit candidates", "deprioritize categories with repeated margin/supplier failures", "validated products with supplier proof and strong portfolio fit", .8), LearningPortfolioImpact("creative-hooks", ("strong hook produced efficient conversion",), ("generic angle produced weak click-through",), "allocate creative iteration to pain-point hooks", "avoid repeating the losing angle without changed evidence", "pain-point and demonstrated-use hooks", .78), LearningPortfolioImpact("landing-pages", ("no stable winner yet",), ("page/offer fit remains inconclusive",), "reserve capacity for one structured page iteration", "avoid increasing traffic before page evidence improves", "offer clarity and proof structure", .65))
+    areas = {
+        "product_validation": "product-category",
+        "portfolio_decision": "product-category",
+        "supplier_validation": "supplier-feasibility",
+        "creative_test": "creative-hooks",
+        "ad_experiment": "creative-hooks",
+        "consumer_attention_test": "consumer-attention",
+        "landing_page_test": "landing-pages",
+        "site_funnel_test": "landing-pages",
+        "sales_outreach_test": "sales-outreach",
+    }
+    grouped: dict[str, list[LearningEvent]] = {}
+    for event in events:
+        area = areas.get(event.event_type)
+        if area:
+            grouped.setdefault(area, []).append(event)
+
+    impacts = []
+    for area, records in sorted(grouped.items()):
+        positive = [
+            f"{event.candidate_id} ({event.learning_event_id}): {reason.replace('_', ' ')}"
+            for event in records
+            for reason in event.success_reasons
+        ]
+        negative = [
+            f"{event.candidate_id} ({event.learning_event_id}): {reason.replace('_', ' ')}"
+            for event in records
+            for reason in event.failure_reasons
+        ]
+        if not positive:
+            positive = [
+                f"{event.candidate_id} ({event.learning_event_id}): recorded {event.outcome}"
+                for event in records
+                if event.outcome in {"win", "scaled"}
+            ]
+        if not negative:
+            negative = [
+                f"{event.candidate_id} ({event.learning_event_id}): recorded outcome {event.outcome}"
+                for event in records
+                if event.outcome in {"loss", "blocked", "killed"}
+            ]
+        if positive and negative:
+            allocation = "Reconcile the recorded positive and negative signals before the next allocation review."
+        elif positive:
+            allocation = "Carry the recorded signals into a bounded planning review; no scale authority is implied."
+        elif negative:
+            allocation = "Address the recorded blockers before repeating; no spend or launch authority is implied."
+        else:
+            allocation = "No directional outcome is recorded; collect evidence before allocation."
+        focus = sorted({reason.replace("_", " ") for event in records for reason in (*event.success_reasons, *event.failure_reasons)})
+        if not focus:
+            focus = sorted({event.event_type.replace("_", " ") for event in records})
+        impacts.append(LearningPortfolioImpact(
+            area,
+            tuple(sorted(set(positive))),
+            tuple(sorted(set(negative))),
+            allocation,
+            "Review only candidates linked to recorded failures before repeating." if negative else "No recorded failure supports deprioritization.",
+            ", ".join(focus),
+            round(sum(event.confidence for event in records) / len(records), 4),
+        ))
+    return tuple(impacts)
 
 
 def _model_impacts(events: Sequence[LearningEvent]) -> tuple[LearningModelRoutingImpact, ...]:
-    return (LearningModelRoutingImpact("frontier-reasoning", "low-evidence synthesis", "loss", "algorithmic_or_cheap_llm", "Avoid repeated frontier spend; expected savings versus fixture waste.", "Quality may require human review for high-stakes synthesis.", .9), LearningModelRoutingImpact("cheap-api", "routine structured drafting", "win", "cheap_llm", "Keep routine drafting on the cheaper route.", "Verify schema and groundedness before reuse.", .85), LearningModelRoutingImpact("algorithmic", "deterministic scoring", "win", "algorithmic", "No token cost for repeatable scoring.", "Escalate only when evidence synthesis is genuinely needed.", .9), LearningModelRoutingImpact("human-review", "legal/tax/security final decisions", "needs_more_evidence", "human_review", "Human review is required rather than model substitution.", "No professional conclusion is generated by this ledger.", .9))
+    route_ids = {"run_frontier_llm_synthesis": "frontier-reasoning", "run_cheap_llm_task": "cheap-api", "run_algorithmic_scoring": "algorithmic", "run_human_review": "human-review"}
+    grouped: dict[str, list[LearningEvent]] = {}
+    for event in events:
+        if event.event_type == "model_routing_decision":
+            grouped.setdefault(route_ids.get(event.action_taken, event.action_taken), []).append(event)
+
+    impacts = []
+    for route_id, records in sorted(grouped.items()):
+        outcomes = sorted({event.outcome for event in records})
+        failures = sorted({reason for event in records for reason in event.failure_reasons})
+        successes = sorted({reason for event in records for reason in event.success_reasons})
+        if len(outcomes) > 1:
+            next_tier = "review_conflicting_outcomes"
+            cost_note = f"Conflicting outcomes were recorded for {route_id} ({', '.join(event.learning_event_id for event in records)}); reconcile them before choosing a route."
+        elif "model_cost_too_high" in failures:
+            next_tier = "algorithmic_or_cheap_llm"
+            cost_note = f"Recorded model-cost failure in {', '.join(event.learning_event_id for event in records if 'model_cost_too_high' in event.failure_reasons)}; consider a cheaper planning route before repeating."
+        elif "budget_efficient" in successes and "win" in outcomes:
+            next_tier = "cheap_llm" if route_id == "cheap-api" else "algorithmic" if route_id == "algorithmic" else "retain_recorded_route"
+            cost_note = f"Recorded budget-efficient outcome in {', '.join(event.learning_event_id for event in records if 'budget_efficient' in event.success_reasons)}; keep as planning evidence only."
+        elif route_id == "human-review" and "needs_more_evidence" in outcomes:
+            next_tier = "human_review"
+            cost_note = "Human review was recorded, but the outcome still needs more evidence; no professional conclusion is implied."
+        else:
+            next_tier = "review_before_repeating"
+            cost_note = "No cost-specific model evidence was recorded."
+        risk_note = f"Recorded failure reasons: {', '.join(failures)}." if failures else "No model-quality risk reason was recorded."
+        impacts.append(LearningModelRoutingImpact(
+            route_id,
+            ", ".join(sorted({event.event_type for event in records})),
+            outcomes[0] if len(outcomes) == 1 else "mixed",
+            next_tier,
+            cost_note,
+            risk_note,
+            round(sum(event.confidence for event in records) / len(records), 4),
+        ))
+    return tuple(impacts)
 
 
 def _provider_impacts(events: Sequence[LearningEvent]) -> tuple[LearningProviderImpact, ...]:
-    return (LearningProviderImpact("dataforseo", "serp_snapshot", 0.0, .72, .85, "", False, False, "Keep fixture/dry-run coverage; activate only after approval, credential, terms/privacy, and output tests."), LearningProviderImpact("apify", "public_extraction_plan", 0.0, .35, .5, "live mode not enabled", True, True, "Keep plan-only and use manual imports for early screens."), LearningProviderImpact("manual_import", "early_screen", 0.0, .55, .9, "", False, False, "Use sanitized manual imports while live providers remain blocked."))
+    grouped: dict[str, list[LearningEvent]] = {}
+    for event in events:
+        provider_id = event.provider_id.strip()
+        if event.event_type == "provider_run" and provider_id:
+            grouped.setdefault(provider_id, []).append(event)
+
+    def observed_metric(records: Sequence[LearningEvent], name: str) -> float | None:
+        values = [metric.value for event in records for metric in event.metrics if metric.name == name and metric.value is not None]
+        return round(sum(values) / len(values), 4) if values else None
+
+    impacts = []
+    for provider_id, records in sorted(grouped.items()):
+        blockers = sorted({reason for event in records for reason in event.failure_reasons})
+        if provider_id == "apify" and blockers:
+            action = f"Keep this provider plan-only until recorded blocker(s) ({', '.join(blockers)}) are resolved; no live call is authorized."
+        elif provider_id == "manual_import" and any(event.outcome == "win" for event in records):
+            action = "Use the sanitized manual-import fixture for early screening only; do not infer live-provider readiness."
+        elif blockers:
+            action = f"Resolve recorded blocker(s) ({', '.join(blockers)}) in offline evidence before any provider activation; no live call is authorized."
+        elif any(event.outcome == "win" for event in records):
+            action = "Retain as a fixture-backed provider lesson only; no live readiness is implied."
+        else:
+            action = "Capture a provider outcome and supporting evidence before recommending another route."
+        request_kinds = sorted({event.action_taken or event.event_type for event in records})
+        blocked_reason = "; ".join(blockers)
+        if not blocked_reason and any(event.outcome in {"loss", "blocked", "killed"} for event in records):
+            blocked_reason = "negative outcome recorded without a specific blocker"
+        impacts.append(LearningProviderImpact(
+            provider_id,
+            ", ".join(request_kinds),
+            max((event.cost_estimate for event in records), default=0.0),
+            observed_metric(records, "evidence_value"),
+            observed_metric(records, "schema_quality"),
+            blocked_reason,
+            None,
+            None,
+            action,
+        ))
+    return tuple(impacts)
 
 
 def _trustos_impacts(events: Sequence[LearningEvent]) -> tuple[LearningTrustOSImpact, ...]:
-    counts: dict[str, int] = {}
+    grouped: dict[str, list[LearningEvent]] = {}
+    reason_to_blocker = {"trust_blocker": "missing client isolation", "provider_blocker": "terms/privacy or provider activation", "missing_learning_capture": "missing learning capture"}
     for event in events:
-        for reason in event.failure_reasons:
-            if reason == "trust_blocker": counts["missing client isolation"] = counts.get("missing client isolation", 0) + 1
-            if reason == "provider_blocker": counts["terms/privacy or provider activation"] = counts.get("terms/privacy or provider activation", 0) + 1
-            if reason == "missing_learning_capture": counts["missing learning capture"] = counts.get("missing learning capture", 0) + 1
-    return tuple(LearningTrustOSImpact(blocker, count, ("attach the relevant TrustOS evidence requirement to the next decision",), ("reviewed control evidence", "Approval Ledger state"), .8) for blocker, count in sorted(counts.items()))
+        blockers = {reason_to_blocker[reason] for reason in event.failure_reasons if reason in reason_to_blocker}
+        for blocker in blockers:
+            grouped.setdefault(blocker, []).append(event)
+    return tuple(LearningTrustOSImpact(blocker, len(records), ("attach the relevant TrustOS evidence requirement to the next decision",), ("reviewed control evidence", "Approval Ledger state"), round(sum(event.confidence for event in records) / len(records), 4)) for blocker, records in sorted(grouped.items()))
 
 
-def _influences(events: Sequence[LearningEvent], rules: Sequence[LearningDoNotRepeatRule]) -> tuple[LearningDecisionInfluence, ...]:
-    def build(action: str, candidate: str, positive: float, negative: float, blockers: Sequence[str], missing: Sequence[str], modifier: str, next_action: str) -> LearningDecisionInfluence:
-        return LearningDecisionInfluence(action, candidate, "internal-companyos", positive, negative, tuple(blockers), tuple(missing), modifier, next_action)
-    return (build("launch_ad_experiment", "portable-espresso-maker", 0.1, .9, ("previous poor creative angle and weak click-through",), ("previous learning capture",), "soft_block_until_learning_captured", "record a changed hypothesis and creative lesson"), build("generate_creative_batch", "portable-espresso-maker", .1, .85, ("missing learning capture",), ("prior iteration lesson",), "requires_learning_capture", "capture the losing angle and do-not-repeat rule"), build("run_frontier_llm_synthesis", "candidate-placeholder", .1, .9, ("frontier model waste on low-evidence work",), ("evidence threshold",), "hard_block_or_route_cheaper", "use algorithmic/local/cheap route unless evidence improves"), build("create_new_website", "portable-espresso-maker", .2, .7, ("prior landing-page fit is inconclusive",), ("page learning",), "soft_block_until_page_learning", "run one bounded page/offer iteration"), build("request_supplier_proof", "portable-espresso-maker", .75, .1, (), (), "prioritize_supplier_validation", "obtain supplier and shipping evidence"), build("scale_ad_budget", "mini-thermal-printer", .9, .1, (), (), "allow_controlled_scale", "scale within the approved increment and keep measuring"), build("generate_client_export", "candidate-placeholder", .4, .6, ("client isolation and redaction evidence required",), ("workspace review",), "requires_workspace_review", "complete leakage check and TrustOS approval"))
+def _influences(events: Sequence[LearningEvent], rules: Sequence[LearningDoNotRepeatRule], recommendations: Sequence[LearningIterationRecommendation]) -> tuple[LearningDecisionInfluence, ...]:
+    rules_by_event: dict[str, list[LearningDoNotRepeatRule]] = {}
+    for rule in rules:
+        rules_by_event.setdefault(rule.source_event_id, []).append(rule)
+    recommendations_by_event = {item.source_event_id: item for item in recommendations}
+
+    influences = []
+    for event in events:
+        event_rules = rules_by_event.get(event.learning_event_id, [])
+        event_recommendation = recommendations_by_event.get(event.learning_event_id)
+        positive = event.confidence if event.outcome in {"win", "scaled"} else 0.0
+        negative = event.confidence if event.outcome in {"loss", "blocked", "killed"} or event.failure_reasons else 0.0
+        blockers = tuple(rule.condition for rule in event_rules)
+        missing = []
+        if event.outcome in {"loss", "blocked", "killed"} and not event.failure_reasons:
+            missing.append("failure cause was not recorded")
+        if "missing_learning_capture" in event.failure_reasons:
+            missing.append("previous iteration lesson was not captured")
+        if event.outcome in {"inconclusive", "needs_more_evidence", "invalid_test"} and not _has_observed_metric_value(event):
+            missing.append("outcome metrics were not recorded")
+
+        if "model_cost_too_high" in event.failure_reasons:
+            modifier = "route_to_cheaper_tier_before_repeat"
+        elif "missing_learning_capture" in event.failure_reasons or {"poor_creative_angle", "low_click_through"} & set(event.failure_reasons):
+            modifier = "soft_block_until_learning_is_captured"
+        elif any(rule.recommended_block_behavior in {"hard_block", "requires_approval"} for rule in event_rules):
+            modifier = "hard_block_recorded_pattern"
+        elif event_rules:
+            modifier = "soft_block_recorded_pattern"
+        elif positive and negative:
+            modifier = "conflicting_recorded_signals_require_review"
+        elif event.outcome == "scaled":
+            modifier = "recorded_scale_outcome_only_existing_gates_apply"
+        elif positive:
+            modifier = "recorded_positive_signal_only"
+        elif negative:
+            modifier = "review_recorded_failure_before_repeat"
+        else:
+            modifier = "collect_more_evidence_before_change"
+
+        if event_recommendation:
+            next_action = event_recommendation.recommendation
+        elif event.outcome == "scaled":
+            next_action = "Review the recorded scale outcome under existing Resource Governor gates before another increment."
+        elif positive:
+            next_action = "Carry the recorded success reasons into a bounded hypothesis; no execution authorization is implied."
+        else:
+            next_action = "Capture missing outcome evidence before selecting another iteration."
+        influences.append(LearningDecisionInfluence(
+            event.action_taken,
+            event.candidate_id,
+            event.workspace_id,
+            positive,
+            negative,
+            blockers,
+            tuple(missing),
+            modifier,
+            next_action,
+            event.learning_event_id,
+        ))
+    return tuple(influences)
 
 
 _MAX_MATCHING_EVENTS = 25
@@ -506,19 +731,20 @@ def _governor_influence_fingerprint(*parts: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
-def derive_governor_influence(report: "LearningLedgerReport", *, action_type: str, candidate_id: str = "candidate-placeholder", workspace_id: str = "internal-companyos", proposed_hypothesis: str = "", stale_event_ids: Sequence[str] = ()) -> LearningGovernorInfluence:
+def derive_governor_influence(report: "LearningLedgerReport", *, action_type: str, candidate_id: str = "candidate-placeholder", workspace_id: str = "internal-companyos", proposed_hypothesis: str = "", stale_event_ids: Sequence[str] = (), allow_action_type_fallback: bool = True) -> LearningGovernorInfluence:
     """Derive a `LearningGovernorInfluence` for one action/candidate pair
-    from a real, already-built `LearningLedgerReport` -- the events and
-    do-not-repeat rules the report actually contains, not the fixed sample
-    scenarios in `_influences()`/`_model_impacts()`/`_provider_impacts()`.
+    from a real, already-built `LearningLedgerReport` -- the events and do-not-repeat rules the report actually contains. Its portfolio, model, provider, and decision summaries are likewise derived from those records.
 
     Every match (events, do-not-repeat rules) is scoped to `workspace_id`
     first, always -- a lesson recorded under one workspace can never
     influence a decision in another, even when action_type and
-    candidate_id happen to coincide. Matching then prefers events for this
-    exact `candidate_id`; if none exist, it falls back to every event
-    sharing `action_type` *within the same workspace* (a general,
-    not-candidate-specific lesson) and records that in `recency_label`.
+    candidate_id happen to coincide. An explicit `candidate_id` matches
+    only that candidate when `allow_action_type_fallback=False`; the default
+    preserves the legacy action-wide fallback and records it in
+    `recency_label`. The placeholder sentinel always retains action-wide
+    aggregation. Recommendations and rules are restricted to the selected
+    source events, so candidate-scoped callers can disable fallback to
+    prevent another candidate's lesson from leaking into the influence.
     No matching event at all yields `evidence_mode="not_run"` and every
     boolean signal `False` -- a caller with nothing on record gets no
     influence, by construction.
@@ -541,7 +767,12 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     """
     workspace_events = tuple(event for event in report.events if event.workspace_id == workspace_id)
     candidate_events = tuple(event for event in workspace_events if event.action_taken == action_type and event.candidate_id == candidate_id)
-    same_workspace_match = candidate_events or tuple(event for event in workspace_events if event.action_taken == action_type)
+    if candidate_events:
+        same_workspace_match = candidate_events
+    elif candidate_id == PLACEHOLDER_CANDIDATE_ID or allow_action_type_fallback:
+        same_workspace_match = tuple(event for event in workspace_events if event.action_taken == action_type)
+    else:
+        same_workspace_match = ()
     excluded_stale_event_ids = tuple(event.learning_event_id for event in same_workspace_match if event.learning_event_id in stale_event_ids)
     matching_events = tuple(event for event in same_workspace_match if event.learning_event_id not in stale_event_ids)[-_MAX_MATCHING_EVENTS:]
     if not matching_events:
@@ -556,8 +787,11 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     provenance = tuple(event.learning_event_id for event in matching_events)
     recency_label = "current_fixture_cycle" if candidate_events else "action_type_only_match"
 
-    events_by_id = {event.learning_event_id: event for event in workspace_events}
-    matching_rules = tuple(rule for rule in report.do_not_repeat_rules if action_type in rule.applies_to_action_types and rule.source_event_id in events_by_id)
+    matching_event_ids = {event.learning_event_id for event in matching_events}
+    matching_rules = tuple(sorted(
+        (rule for rule in report.do_not_repeat_rules if action_type in rule.applies_to_action_types and rule.source_event_id in matching_event_ids),
+        key=lambda rule: rule.rule_id,
+    ))
     # Severity-aware, matching this contract's own BLOCK_BEHAVIORS ladder
     # (warn < soft_block/hard_block/requires_approval): a "warn"-severity
     # rule is recorded and surfaced, but -- unlike the others -- never
@@ -586,13 +820,33 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     elif action_type == "run_cheap_llm_task" and wins and not losses:
         recommended_model_tier = "cheap_llm"
 
-    avoid_provider_ids = tuple(sorted({event.provider_id for event in matching_events if event.provider_id and "provider_blocker" in event.failure_reasons}))
-    ready_provider_ids = tuple(sorted({event.provider_id for event in matching_events if event.provider_id and event.outcome == "win"} - set(avoid_provider_ids)))
+    avoid_provider_ids = tuple(sorted({event.provider_id.strip() for event in matching_events if event.event_type == "provider_run" and event.provider_id.strip() and "provider_blocker" in event.failure_reasons}))
+    ready_provider_ids = tuple(sorted({event.provider_id.strip() for event in matching_events if event.event_type == "provider_run" and event.provider_id.strip() and event.outcome == "win"} - set(avoid_provider_ids)))
     recommended_provider_id = ready_provider_ids[0] if ready_provider_ids else ""
     if avoid_provider_ids: deprioritize = True
 
-    matching_recommendations = tuple(rec for rec in report.iteration_recommendations if rec.action_type == action_type and rec.source_event_id in events_by_id)
-    iteration_recommendation = matching_recommendations[0].recommendation if matching_recommendations else ""
+    matching_recommendations = tuple(sorted(
+        (rec for rec in report.iteration_recommendations if rec.source_event_id in matching_event_ids),
+        key=lambda rec: (rec.source_event_id, rec.action_type, rec.recommendation),
+    ))
+    matching_decision_influences = tuple(sorted(
+        (item for item in report.decision_influences if item.source_event_id in matching_event_ids),
+        key=lambda item: item.source_event_id,
+    ))
+    if matching_recommendations:
+        selected_recommendation = matching_recommendations[0]
+        iteration_recommendation = selected_recommendation.recommendation
+        iteration_action_type = selected_recommendation.action_type
+        iteration_recommendation_source_event_id = selected_recommendation.source_event_id
+    elif matching_decision_influences:
+        selected_influence = matching_decision_influences[0]
+        iteration_recommendation = selected_influence.recommended_next_action
+        iteration_action_type = ""
+        iteration_recommendation_source_event_id = selected_influence.source_event_id
+    else:
+        iteration_recommendation = ""
+        iteration_action_type = ""
+        iteration_recommendation_source_event_id = ""
 
     rationale: list[str] = []
     if do_not_repeat_blocked: rationale.append(f"{len(blocking_rules)} do-not-repeat rule(s) apply to {action_type} and no new hypothesis was supplied")
@@ -612,18 +866,144 @@ def derive_governor_influence(report: "LearningLedgerReport", *, action_type: st
     if not rationale: rationale.append("no actionable learning signal beyond the matched evidence")
 
     advisory_rule_ids = tuple(rule.rule_id for rule in advisory_rules)
-    fingerprint = _governor_influence_fingerprint(action_type, candidate_id, workspace_id, evidence_mode, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in blocking_rules), advisory_rule_ids, trustos_recurrence_blocked, kill_blocks_resumption, conflicting_evidence, low_confidence_evidence, fixture_only_evidence, recommended_model_tier, recommended_provider_id, avoid_provider_ids, excluded_stale_event_ids)
-    return LearningGovernorInfluence(action_type, candidate_id, workspace_id, evidence_mode, confidence, recency_label, provenance, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in blocking_rules), bool(trustos_recurrence_blocked), recommended_model_tier, deprioritize, tuple(rationale), kill_blocks_resumption=kill_blocks_resumption, conflicting_evidence=conflicting_evidence, recommended_provider_id=recommended_provider_id, avoid_provider_ids=avoid_provider_ids, iteration_recommendation=iteration_recommendation, excluded_stale_event_ids=excluded_stale_event_ids, fingerprint=fingerprint, low_confidence_evidence=low_confidence_evidence, fixture_only_evidence=fixture_only_evidence, advisory_rule_ids=advisory_rule_ids)
+    fingerprint = _governor_influence_fingerprint(action_type, candidate_id, workspace_id, evidence_mode, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in blocking_rules), advisory_rule_ids, trustos_recurrence_blocked, kill_blocks_resumption, conflicting_evidence, low_confidence_evidence, fixture_only_evidence, recommended_model_tier, recommended_provider_id, avoid_provider_ids, iteration_action_type, iteration_recommendation, iteration_recommendation_source_event_id, excluded_stale_event_ids)
+    return LearningGovernorInfluence(action_type, candidate_id, workspace_id, evidence_mode, confidence, recency_label, provenance, wins, losses, supports_scale, hold_or_avoid, do_not_repeat_blocked, do_not_repeat_overridden, tuple(rule.rule_id for rule in blocking_rules), bool(trustos_recurrence_blocked), recommended_model_tier, deprioritize, tuple(rationale), kill_blocks_resumption=kill_blocks_resumption, conflicting_evidence=conflicting_evidence, recommended_provider_id=recommended_provider_id, avoid_provider_ids=avoid_provider_ids, iteration_recommendation=iteration_recommendation, excluded_stale_event_ids=excluded_stale_event_ids, fingerprint=fingerprint, low_confidence_evidence=low_confidence_evidence, fixture_only_evidence=fixture_only_evidence, advisory_rule_ids=advisory_rule_ids, iteration_action_type=iteration_action_type, iteration_recommendation_source_event_id=iteration_recommendation_source_event_id)
+
+
+def _optional_metric_float(metric: Mapping[str, Any], field: str) -> float | None:
+    value = metric.get(field)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"learning metric {field} must be numeric")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"learning metric {field} must be numeric") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"learning metric {field} must be finite")
+    return parsed
+
+
+def _optional_metric_sample_size(metric: Mapping[str, Any]) -> int | None:
+    value = metric.get("sample_size")
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("learning metric sample_size must be an integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("learning metric sample_size must be an integer") from exc
+    if str(value).strip() not in {str(parsed), f"{parsed}.0"} or parsed < 0:
+        raise ValueError("learning metric sample_size must be a non-negative integer")
+    return parsed
+
+
+def _mapping_metrics(item: Mapping[str, Any], event_id: str) -> tuple[LearningMetric, ...]:
+    raw_metrics = item.get("metrics", ())
+    if raw_metrics is None:
+        return ()
+    if not isinstance(raw_metrics, Sequence) or isinstance(raw_metrics, (str, bytes)):
+        raise ValueError("learning event metrics must be a sequence")
+    metrics: list[LearningMetric] = []
+    for index, raw_metric in enumerate(raw_metrics, 1):
+        if isinstance(raw_metric, LearningMetric):
+            metrics.append(raw_metric)
+            continue
+        if not isinstance(raw_metric, Mapping):
+            raise ValueError("learning event metrics must contain mappings")
+        name = str(raw_metric.get("name", "")).strip()
+        if not name:
+            raise ValueError("learning metric name is required")
+        raw_metric_id = raw_metric.get("metric_id")
+        metric_id = f"metric-{event_id}-{index}-{name}" if raw_metric_id is None or not str(raw_metric_id).strip() else str(raw_metric_id).strip()
+        metric_value = _optional_metric_float(raw_metric, "value")
+        metric_target = _optional_metric_float(raw_metric, "target")
+        if name in {"evidence_value", "schema_quality"} and any(value is not None and not 0 <= value <= 1 for value in (metric_value, metric_target)):
+            raise ValueError(f"learning metric {name} must be between zero and one")
+        raw_unit = raw_metric.get("unit")
+        unit = "unknown" if raw_unit is None or not str(raw_unit).strip() else str(raw_unit).strip()
+        raw_source = raw_metric.get("source")
+        source = "fixture" if raw_source is None or not str(raw_source).strip() else str(raw_source).strip()
+        metrics.append(LearningMetric(
+            metric_id,
+            name,
+            metric_value,
+            metric_target,
+            unit,
+            _optional_metric_sample_size(raw_metric),
+            source,
+        ))
+    return tuple(metrics)
+
+
+def _event_float(item: Mapping[str, Any], field: str, default: float) -> float:
+    value = item.get(field, default)
+    if isinstance(value, bool):
+        raise ValueError(f"learning event {field} must be numeric")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"learning event {field} must be numeric") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"learning event {field} must be finite")
+    return parsed
 
 
 def _from_mapping(item: Mapping[str, Any], index: int) -> LearningEvent:
-    event_type = str(item.get("event_type", "companyos_review")); outcome = str(item.get("outcome", "inconclusive")); failures = tuple(str(x) for x in item.get("failure_reasons", ())); successes = tuple(str(x) for x in item.get("success_reasons", ()))
-    return _event(str(item.get("learning_event_id", f"fixture-event-{index}")), event_type, outcome, candidate=str(item.get("candidate_id", "candidate-placeholder")), failures=failures, successes=successes, action=str(item.get("action_taken", event_type)), cost=float(item.get("cost_estimate", 0.0)), confidence=float(item.get("confidence", .7)), visibility=str(item.get("client_visibility", "internal_only")), department=str(item.get("owner_department", "management")), provider=str(item.get("provider_id", "")), workspace_id=str(item.get("workspace_id", "internal-companyos")), statement=str(item.get("hypothesis", "Sanitized fixture hypothesis.")), influence=str(item.get("resource_governor_influence", "Record the result before the next decision.")))
+    if "learning_event_id" in item:
+        raw_event_id = item["learning_event_id"]
+        event_id = str(raw_event_id)
+        if raw_event_id is None or not event_id.strip():
+            raise ValueError("learning event identity must be a non-empty string")
+    else:
+        event_id = f"fixture-event-{index}"
+    raw_event_type = item.get("event_type")
+    event_type = "companyos_review" if raw_event_type is None or not str(raw_event_type).strip() else str(raw_event_type).strip()
+    raw_outcome = item.get("outcome")
+    outcome = "inconclusive" if raw_outcome is None or not str(raw_outcome).strip() else str(raw_outcome).strip()
+    raw_failures = item.get("failure_reasons")
+    failures = tuple(str(x) for x in raw_failures) if raw_failures is not None else ()
+    raw_successes = item.get("success_reasons")
+    successes = tuple(str(x) for x in raw_successes) if raw_successes is not None else ()
+    raw_candidate = item.get("candidate_id")
+    candidate = "candidate-placeholder" if raw_candidate is None or not str(raw_candidate).strip() else str(raw_candidate).strip()
+    raw_action = item.get("action_taken")
+    action = event_type if raw_action is None or not str(raw_action).strip() else str(raw_action).strip()
+    raw_provider = item.get("provider_id")
+    provider = "" if raw_provider is None else str(raw_provider).strip()
+    raw_visibility = item.get("client_visibility")
+    visibility = "internal_only" if raw_visibility is None or not str(raw_visibility).strip() else str(raw_visibility).strip()
+    raw_department = item.get("owner_department")
+    department = "management" if raw_department is None or not str(raw_department).strip() else str(raw_department).strip()
+    raw_workspace = item.get("workspace_id")
+    workspace_id = "internal-companyos" if raw_workspace is None or not str(raw_workspace).strip() else str(raw_workspace).strip()
+    raw_statement = item.get("hypothesis")
+    statement = "Sanitized fixture hypothesis." if raw_statement is None or not str(raw_statement).strip() else str(raw_statement).strip()
+    raw_influence = item.get("resource_governor_influence")
+    influence = "Record the result before the next decision." if raw_influence is None or not str(raw_influence).strip() else str(raw_influence).strip()
+    return _event(event_id, event_type, outcome, candidate=candidate, failures=failures, successes=successes, action=action, cost=_event_float(item, "cost_estimate", 0.0), confidence=_event_float(item, "confidence", .7), metrics=_mapping_metrics(item, event_id), visibility=visibility, department=department, provider=provider, workspace_id=workspace_id, statement=statement, influence=influence)
 
 
 def _load_events(context: Mapping[str, Any] | None) -> tuple[LearningEvent, ...]:
-    if not context or not context.get("events"): return _default_events()
-    return tuple(_from_mapping(item, index) for index, item in enumerate(context.get("events", ()), 1) if isinstance(item, Mapping))
+    if context is None or "events" not in context: return _default_events()
+    items = context["events"]
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes)): raise ValueError("learning events must be a sequence")
+    if any(not isinstance(item, Mapping) for item in items): raise ValueError("learning events must contain mappings")
+    return tuple(_from_mapping(item, index) for index, item in enumerate(items, 1))
+
+
+def _canonical_events(events: Sequence[LearningEvent]) -> tuple[LearningEvent, ...]:
+    by_id: dict[str, LearningEvent] = {}
+    for event in events:
+        event_id = event.learning_event_id
+        if not isinstance(event_id, str) or not event_id.strip(): raise ValueError("learning event identity must be a non-empty string")
+        previous = by_id.get(event_id)
+        if previous is not None and previous != event:
+            raise ValueError(f"conflicting learning event identity: {event_id}")
+        by_id[event_id] = event
+    return tuple(by_id[event_id] for event_id in sorted(by_id))
 
 
 def build_learning_ledger_report(*, generated_at: str = "offline-deterministic", context: Mapping[str, Any] | None = None, events: Sequence[LearningEvent] | None = None, event_type: str | None = None, event_types: Sequence[str] | None = None) -> LearningLedgerReport:
@@ -633,7 +1013,7 @@ def build_learning_ledger_report(*, generated_at: str = "offline-deterministic",
     consistent with the events actually reported. A caller that filtered
     events *after* building a full report would leave every aggregate
     describing events the report no longer shows."""
-    context = context or {}; raw = tuple(events or _load_events(context))
+    context = context or {}; raw = _canonical_events(tuple(_load_events(context) if events is None else events))
     if event_type:
         if event_type not in EVENT_TYPES: raise ValueError("unsupported learning event type")
         raw = tuple(item for item in raw if item.event_type == event_type)
@@ -645,11 +1025,11 @@ def build_learning_ledger_report(*, generated_at: str = "offline-deterministic",
     rules = tuple(rule for index, event in enumerate(raw, 1) if (rule := _rule(event, index)) is not None)
     recommendations = tuple(_recommendation(event, index) for index, event in enumerate(raw, 1) if event.outcome in {"loss", "blocked", "inconclusive", "killed", "iterated", "needs_more_evidence"})
     results = tuple(LearningResult(f"result-{item.learning_event_id}", item.outcome, f"{item.event_type} recorded as {item.outcome}.", item.metrics, item.confidence) for item in raw)
-    experiments = tuple(LearningExperiment(f"experiment-{item.learning_event_id}", item.hypothesis, item.action_taken, item.cost_estimate, max((metric.sample_size for metric in item.metrics), default=0), item.metrics[0].name if item.metrics else "primary_metric", item.metrics[0].target if item.metrics else None, item.metrics[0].target if item.metrics else None, "capture learning before iteration", 3, True, item.action_taken in {"launch_ad_experiment", "scale_ad_budget", "run_provider_data_pull", "generate_client_export"}, (item.learning_event_id,), item.outcome) for item in raw if item.event_type in {"ad_experiment", "creative_test", "landing_page_test", "site_funnel_test", "product_validation", "provider_run"})
+    experiments = tuple(LearningExperiment(f"experiment-{item.learning_event_id}", item.hypothesis, item.action_taken, item.cost_estimate, None, item.metrics[0].name if item.metrics else "primary_metric", item.metrics[0].target if item.metrics else None, item.metrics[0].target if item.metrics else None, "capture learning before iteration", 3, True, item.action_taken in {"launch_ad_experiment", "scale_ad_budget", "run_provider_data_pull", "generate_client_export"}, (item.learning_event_id,), item.outcome, max((metric.sample_size for metric in item.metrics if metric.sample_size is not None), default=None)) for item in raw if item.event_type in {"ad_experiment", "creative_test", "landing_page_test", "site_funnel_test", "product_validation", "provider_run"})
     successes = [reason for item in raw for reason in item.success_reasons]; failures = [reason for item in raw for reason in item.failure_reasons]
     top_success = tuple(dict.fromkeys(successes))[:8]; top_failure = tuple(dict.fromkeys(failures))[:8]
     summary = LearningLedgerSummary(top_success, top_failure, tuple(item.condition for item in rules)[:8], tuple(item.recommendation for item in recommendations)[:8], tuple(item.blocker for item in _trustos_impacts(raw)), tuple(item.hypothesis.statement for item in raw if item.outcome == "win")[:5], tuple(item.condition for item in rules)[:5])
-    return LearningLedgerReport("learning-ledger-v1", generated_at, raw, experiments, results, tuple(LearningLesson(f"lesson-{item.learning_event_id}", f"{item.event_type} lesson", "success" if item.outcome == "win" else "failure" if item.outcome in {"loss", "blocked", "killed"} else "iteration", item.resource_governor_influence, item.input_evidence_refs, item.confidence, item.client_visibility) for item in raw), rules, recommendations, _portfolio_impacts(raw), _model_impacts(raw), _provider_impacts(raw), _trustos_impacts(raw), _influences(raw, rules), summary, LearningLedgerSafetySummary(), "Attach captured lessons to the next Resource Governor decision; do not repeat blocked patterns without new evidence.")
+    return LearningLedgerReport("learning-ledger-v1", generated_at, raw, experiments, results, tuple(LearningLesson(f"lesson-{item.learning_event_id}", f"{item.event_type} lesson", "success" if item.outcome == "win" else "failure" if item.outcome in {"loss", "blocked", "killed"} else "iteration", item.resource_governor_influence, item.input_evidence_refs, item.confidence, item.client_visibility) for item in raw), rules, recommendations, _portfolio_impacts(raw), _model_impacts(raw), _provider_impacts(raw), _trustos_impacts(raw), _influences(raw, rules, recommendations), summary, LearningLedgerSafetySummary(), "No learning events were recorded; provide an offline fixture batch before drawing conclusions." if not raw else "Use only the recorded iteration recommendations and do-not-repeat rules in the next Resource Governor review; execution still requires existing gates." if recommendations or rules else "Retain the recorded evidence; no new action is supported by this batch.")
 
 
 __all__ = ["EVENT_TYPES", "OUTCOMES", "VISIBILITY", "FAILURE_REASONS", "SUCCESS_REASONS", "BLOCK_BEHAVIORS", "GOVERNOR_EVIDENCE_MODES", "MIN_SCALE_CONFIDENCE", "PLACEHOLDER_CANDIDATE_ID", "LearningLedgerReport", "LearningEvent", "LearningExperiment", "LearningHypothesis", "LearningMetric", "LearningResult", "LearningOutcome", "LearningAttribution", "LearningLesson", "LearningDoNotRepeatRule", "LearningIterationRecommendation", "LearningPortfolioImpact", "LearningModelRoutingImpact", "LearningProviderImpact", "LearningTrustOSImpact", "LearningDecisionInfluence", "LearningGovernorInfluence", "derive_governor_influence", "LearningLedgerSummary", "LearningLedgerSafetySummary", "build_learning_ledger_report"]
