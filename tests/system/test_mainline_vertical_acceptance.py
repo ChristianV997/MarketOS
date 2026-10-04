@@ -257,7 +257,7 @@ def test_compliance_without_authoritative_evidence_is_not_assessed(report: dict)
         assert item["summary"]["evidence_classes"]["compliance"] == "unavailable"
 
 
-def test_service_economics_adapter_is_available_but_service_delivery_route_is_not(report: dict):
+def test_service_economics_adapter_and_service_delivery_authorities_are_available(report: dict):
     service = report["replay"]["service_economics_adapter"]
     assert service["status"] == "passed"
     assert service["checks"] == {
@@ -266,9 +266,9 @@ def test_service_economics_adapter_is_available_but_service_delivery_route_is_no
         "thin_service_economics_is_none": True,
     }
     upstream = report["service_delivery_upstream"]
-    assert upstream["status"] == "unavailable"
-    assert upstream["source_prs"] == [271, 275]
-    assert "service_delivery_projection.py" in " ".join(upstream["missing_paths"])
+    assert upstream["status"] == "passed"
+    assert upstream["source_prs"] == []
+    assert upstream["missing_paths"] == []
 
 
 def test_trustos_dogfood_export_is_bound_and_requires_review(report: dict):

@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 # Hardening notes (sources adapted, not vendored):
 # - Docker docs: USER + HEALTHCHECK + non-root runtime
