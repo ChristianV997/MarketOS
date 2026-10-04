@@ -26,8 +26,9 @@ EVIDENCE_STATES = frozenset({"available", "missing", "stale", "conflicting", "bl
 PROPOSAL_STATUSES = frozenset({"draft_ready", "needs_evidence", "blocked"})
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 # "sk-" is a credential prefix only when it starts a token; it is also the tail of words such as
-# desk-clamp-lamp or risk-review-pack, so it must not follow a letter or digit.
-_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
+# desk-clamp-lamp or risk-review-pack, so it must not follow a letter or digit. A URL-escape (%3d) or a
+# literal backslash escape (\\n) before it still counts as a boundary.
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 _SECRET_MARKERS = (
     "ghp_", "github_pat_", "bearer ", "-----begin", "api_key", "access_token",
     "private_key", "password", "client_secret", "cookie=", "raw_payload", "source_code",

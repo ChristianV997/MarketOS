@@ -183,3 +183,26 @@ def test_governor_checks_decoded_strings_not_escaped_json_text():
     assert _governor("line one\nsk-SYNTHETICEXAMPLEKEY000000") is True
     assert _governor("caf\u00e9 sk-SYNTHETICEXAMPLEKEY000000") is True
     assert _governor("\u00e9sk-SYNTHETICEXAMPLEKEY000000") is True
+
+
+@pytest.mark.parametrize("prefix", ["api%3D", "x%3a", "q%3Dkey%26v%3D", "line\\n", "tab\\t", "cr\\r"], ids=lambda p: repr(p))
+def test_sk_prefix_after_a_url_escape_or_a_literal_backslash_escape_is_rejected_everywhere(prefix):
+    """``%3D`` (=) and a backslash-n are separators in encoded text; the letter before sk- is not part of a word."""
+    value = prefix + "sk-SYNTHETICEXAMPLEKEY000000"
+    missed = [name for name, rejects, _, _ in SITES if not rejects(value)]
+    assert missed == []
+
+
+@pytest.mark.parametrize("value", ["abcsk-SYNTHETICEXAMPLEKEY000000", "key1sk-SYNTHETICEXAMPLEKEY000000", "Zm9vsk-SYNTHETICEXAMPLEKEY000000"])
+def test_residual_a_prefix_glued_to_letters_or_digits_is_a_deliberate_non_match(value):
+    """Documented trade-off, pinned so a change is a conscious decision.
+
+    Treating "sk-" as a credential prefix when it follows a letter or digit is exactly what rejects
+    desk-clamp-lamp, risk-review-pack and task-queue-board. A real key glued to preceding letters (no
+    separator at all) is therefore not matched by the "sk-" rule; the other markers (bearer, ghp_, PEM,
+    key/value names) and the callers' own key-name checks still apply.
+    """
+    for name, rejects, _, _ in SITES:
+        if name.startswith("client_workspace_isolation.check_workspace_leakage"):
+            continue  # that boundary also hard-blocks on unrelated vocabulary; the value check below covers it
+        assert rejects(value) is False, name

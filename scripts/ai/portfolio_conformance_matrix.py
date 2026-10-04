@@ -33,7 +33,7 @@ SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 SAFE_PATH_RE = re.compile(r"^[^\x00\r\n]+$")
 SECRET_RE = re.compile(
     r"(?is)(-----begin .*?private key-----|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
-    r"(?<![A-Za-z0-9])sk-(?:live|test)?-?[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|bearer\s+[A-Za-z0-9._-]{10,}|"
+    r"(?:(?<![A-Za-z0-9])|(?<=%[0-9A-Fa-f]{2})|(?<=\\[nrt]))sk-(?:live|test)?-?[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|bearer\s+[A-Za-z0-9._-]{10,}|"
     r"(?:https?|postgres(?:ql)?|redis)://[^:]+:[^@]+@)"
 )
 SENSITIVE_KEY_RE = re.compile(r"(?i)(password|secret|token|api[_-]?key|private[_-]?key|authorization|credential)")

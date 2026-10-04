@@ -86,7 +86,7 @@ FORBIDDEN_VALUE_MARKERS = (
 
 # sk-live-/sk-proj- are credential prefixes only at the start of a token; they are also the tail of words
 # such as desk-live-demo or risk-proj-alpha, so they must not follow a letter or digit.
-_SK_LIVE_OR_PROJECT_PREFIX = re.compile(r"(?<![a-z0-9])sk-(?:live|proj)-")
+_SK_LIVE_OR_PROJECT_PREFIX = re.compile(r"(?:(?<![a-z0-9])|(?<=%[0-9a-f]{2})|(?<=\\[nrt]))sk-(?:live|proj)-")
 
 
 class _NoRedirectHandler(urllib_request.HTTPRedirectHandler):

@@ -27,8 +27,9 @@ INTERNAL_KEYS = {"internal_prompt", "internal_scoring_formula", "internal_heuris
 SECRET_KEYS = {"api_key", "private_key", "password", "raw_payload", "raw_html", "credentials", "credential", "access_token", "refresh_token", "authorization", "cookie", "cookies", "jwt", "token", "tokens", "client_secret", "webhook_secret", "raw_provider_payload", "provider_payload", "raw_provider_response", "provider_response"}
 _FORBIDDEN_KEY_MARKERS = ("prompt", "formula", "heuristic", "strategy", "pricing", "upsell", "agent_instruction", "source_code", "cross_client", "other_client", "private_tenant", "client_private_data", "provider_payload", "raw_payload", "provider_response", "raw_response", "credential", "secret", "password", "api_key", "access_token", "refresh_token", "authorization", "cookie", "token")
 # "sk-" is a credential prefix only when it starts a token; it is also the tail of words such as
-# desk-clamp-lamp or risk-review-pack, so it must not follow a letter or digit.
-_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
+# desk-clamp-lamp or risk-review-pack, so it must not follow a letter or digit. A URL-escape (%3d) or a
+# literal backslash escape (\\n) before it still counts as a boundary.
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 _FORBIDDEN_VALUE_MARKERS = ("ghp_", "github_pat_", "-----begin", "bearer ", "cookie=", "session=", "<html", "other_client", "cross_client", "prompt", "formula", "heuristic", "strategy", "credential", "token", "cookie", "source code", "provider response", "raw payload")
 _SOURCE_CODE_VALUE = re.compile(r"(?im)^\s*(?:def|class|import|from)\s+\w+")
 _FILESYSTEM_PATH_VALUE = re.compile(r"(?i)(?:^|[\s=(\[{,:])(?:file://|[a-z]:[\\/]|\\\\|/(?!/)|[^\\/\s]+\\[^\\/\s]+)")
