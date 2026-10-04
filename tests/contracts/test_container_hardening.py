@@ -1,15 +1,29 @@
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+_FROM_PYTHON = re.compile(
+    r"^\s*FROM\s+(?:--platform=\S+\s+)?python:(\d+)\.(\d+)(?:\.\d+)?(?:[-\s@]|$)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _major_minor(version: str) -> tuple[int, int]:
+    major, minor, *_ = version.strip().split(".")
+    return int(major), int(minor)
+
+
+def _dockerfile_python_versions(text: str) -> list[tuple[int, int]]:
+    return [(int(major), int(minor)) for major, minor in _FROM_PYTHON.findall(text)]
 
 
 def test_dockerfile_matches_supported_python_and_runs_non_root():
     text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    python_version = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
-    assert python_version.startswith("3.12")
-    assert "FROM python:3.12-slim" in text
-    assert "FROM python:3.14" not in text
+    declared = _major_minor((ROOT / ".python-version").read_text(encoding="utf-8"))
+    found = _dockerfile_python_versions(text)
+    assert found, "Dockerfile declares no Python base image"
+    assert set(found) == {declared}
     assert "USER marketos" in text
     assert "HEALTHCHECK" in text
     assert "--reload" not in text

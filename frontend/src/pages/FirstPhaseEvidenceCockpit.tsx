@@ -3,9 +3,12 @@ import { CandidateDetailPanel } from "@/features/first-phase-cockpit/components/
 import { CockpitStatusBanner } from "@/features/first-phase-cockpit/components/CockpitStatusBanner";
 import { CockpitToolbar } from "@/features/first-phase-cockpit/components/CockpitToolbar";
 import { ControlPlanePanel } from "@/features/first-phase-cockpit/components/ControlPlanePanel";
+import { DraftPreviewPanel } from "@/features/first-phase-cockpit/components/DraftPreviewPanel";
 import { EvidencePillarsPanel } from "@/features/first-phase-cockpit/components/EvidencePillarsPanel";
 import { RankedCandidatesPanel } from "@/features/first-phase-cockpit/components/RankedCandidatesPanel";
 import { RunMetadataPanel } from "@/features/first-phase-cockpit/components/RunMetadataPanel";
+import { SupplierCsvPreview } from "@/components/SupplierCsvPreview";
+import type { SupplierCsvPreviewResult } from "@/lib/supplierCsvParser";
 import { useFirstPhaseEvidenceCockpit } from "@/features/first-phase-cockpit/hooks/useFirstPhaseEvidenceCockpit";
 import type { CandidateFilterState } from "@/features/first-phase-cockpit/contracts/firstPhaseEvidencePacket";
 import { filterCandidates } from "@/features/first-phase-cockpit/lib/filterCandidates";
@@ -33,6 +36,7 @@ export default function FirstPhaseEvidenceCockpitPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [windowStart, setWindowStart] = useState(0);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [supplierCsvPreview, setSupplierCsvPreview] = useState<SupplierCsvPreviewResult | null>(null);
   const [, startFilterTransition] = useTransition();
   const deferredFilter = useDeferredValue(filter);
 
@@ -162,6 +166,39 @@ export default function FirstPhaseEvidenceCockpitPage() {
         onWindowStartChange={setWindowStart}
       />
       <CandidateDetailPanel candidate={selectedCandidate} onClear={() => setSelectedId(null)} />
+      <DraftPreviewPanel
+        candidate={selectedCandidate}
+        fingerprint={packet.fingerprint}
+        onExport={handleExport}
+        exportDisabled={
+          packet.state === "loading"
+          || packet.rankedCandidates.length === 0
+          || packet.state === "unavailable"
+        }
+        supplierCsvPreview={supplierCsvPreview}
+      />
+      <section
+        id="supplier-csv-preview-section"
+        className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/30 p-4"
+        aria-label="Supplier catalog CSV offline preview section"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">Supplier catalog CSV preview (offline inspection)</h3>
+            <p className="mt-0.5 text-xs text-zinc-400">
+              Inspect supplier catalog CSV evidence locally before import. Parsing is 100% client-side; no network calls, uploads, or mutations.
+            </p>
+          </div>
+          <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-300">
+            Offline manual evidence
+          </span>
+        </div>
+        <SupplierCsvPreview
+          onPreviewChange={setSupplierCsvPreview}
+          selectedCandidateId={selectedId}
+          onSelectCandidateId={(id) => setSelectedId(id)}
+        />
+      </section>
       <EvidencePillarsPanel pillars={packet.pillars} />
       <ControlPlanePanel slots={packet.controlPlanes} />
       <RunMetadataPanel
