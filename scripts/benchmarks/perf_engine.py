@@ -287,6 +287,119 @@ def dump_suite(suite: Mapping[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, allow_nan=False, indent=2)
 
 
+def _mean(samples: Sequence[float]) -> float:
+    return sum(samples) / len(samples)
+
+
+def _benchmark_rows(suite: Mapping[str, Any], label: str) -> dict[str, dict[str, Any]]:
+    if not isinstance(suite, Mapping):
+        raise PerfEngineError(f"{label} suite must be an object")
+    if suite.get("version") != JSON_VERSION:
+        raise PerfEngineError(f"{label} suite version must be 1.0")
+    benchmarks = suite.get("benchmarks")
+    if not isinstance(benchmarks, list):
+        raise PerfEngineError(f"{label} benchmarks must be a list")
+    rows: dict[str, dict[str, Any]] = {}
+    for bench in benchmarks:
+        if not isinstance(bench, Mapping):
+            raise PerfEngineError("benchmark must be an object")
+        metadata = bench.get("metadata")
+        if not isinstance(metadata, Mapping):
+            raise PerfEngineError("benchmark metadata must be an object")
+        name = metadata.get("name")
+        unit = metadata.get("unit")
+        if not isinstance(name, str) or not name.strip():
+            raise PerfEngineError("benchmark name is required")
+        if name in rows:
+            raise PerfEngineError("duplicate benchmark name")
+        if unit not in _SUPPORTED_UNITS:
+            raise PerfEngineError("benchmark unit is not supported")
+        runs = bench.get("runs")
+        if not isinstance(runs, list) or not runs:
+            raise PerfEngineError("benchmark runs must be a non-empty list")
+        samples: list[float] = []
+        for run in runs:
+            if not isinstance(run, Mapping):
+                raise PerfEngineError("benchmark run must be an object")
+            values = run.get("values")
+            if isinstance(values, (str, bytes, bytearray)) or not isinstance(values, Sequence) or not values:
+                raise PerfEngineError("benchmark values must be a non-empty sequence")
+            samples.extend(_finite_positive(item, "value") for item in values)
+        rows[name] = {"unit": unit, "mean": _mean(samples)}
+    return rows
+
+
+def compare_suites(
+    baseline: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    *,
+    threshold: float = 1.05,
+) -> dict[str, Any]:
+    """Compare two supplied suites. Smaller means are better. No timing or host probe runs.
+
+    A candidate mean strictly above ``threshold`` times the baseline is a regression.
+    A mean strictly below the baseline divided by ``threshold`` is an improvement.
+    Names or units that do not match are unavailable, not a pass. Warmups are ignored.
+    """
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+        raise PerfEngineError("threshold must be a finite number > 1")
+    limit = float(threshold)
+    if not math.isfinite(limit) or limit <= 1.0:
+        raise PerfEngineError("threshold must be a finite number > 1")
+    base_rows = _benchmark_rows(baseline, "baseline")
+    candidate_rows = _benchmark_rows(candidate, "candidate")
+    names = sorted(set(base_rows) | set(candidate_rows))
+    compared: list[dict[str, Any]] = []
+    for name in names:
+        left = base_rows.get(name)
+        right = candidate_rows.get(name)
+        if left is None or right is None or left["unit"] != right["unit"]:
+            reason = "unit_mismatch" if left is not None and right is not None else (
+                "baseline_only" if right is None else "candidate_only"
+            )
+            compared.append({"name": name, "status": "unavailable", "reason": reason})
+            continue
+        ratio = right["mean"] / left["mean"]
+        if ratio > limit:
+            status = "regression"
+        elif ratio < (1.0 / limit):
+            status = "improvement"
+        else:
+            status = "pass"
+        compared.append(
+            {
+                "name": name,
+                "unit": left["unit"],
+                "baseline_mean": left["mean"],
+                "candidate_mean": right["mean"],
+                "ratio": ratio,
+                "status": status,
+            }
+        )
+    statuses = {row["status"] for row in compared}
+    if not compared:
+        overall = "unavailable"
+    elif "regression" in statuses:
+        overall = "regression"
+    elif "unavailable" in statuses:
+        overall = "unavailable"
+    elif "improvement" in statuses:
+        overall = "improvement"
+    else:
+        overall = "pass"
+    body = {
+        "schema": "pyperf-suite-compare-v1",
+        "threshold": limit,
+        "network_calls": False,
+        "collect_host_metadata": False,
+        "status": overall,
+        "rows": compared,
+    }
+    encoded = json.dumps(body, sort_keys=True, allow_nan=False, separators=(",", ":"))
+    body["fingerprint"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return body
+
+
 __all__ = [
     "JSON_VERSION",
     "PerfEngineError",
@@ -297,6 +410,7 @@ __all__ = [
     "UPSTREAM_LICENSE_EVIDENCE",
     "UPSTREAM_REPOSITORY",
     "UPSTREAM_TAG",
+    "compare_suites",
     "dump_suite",
     "run_benchmark",
 ]

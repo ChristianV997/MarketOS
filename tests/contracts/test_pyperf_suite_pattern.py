@@ -21,6 +21,7 @@ from scripts.benchmarks.perf_engine import (
     UPSTREAM_LICENSE_EVIDENCE,
     UPSTREAM_REPOSITORY,
     UPSTREAM_TAG,
+    compare_suites,
     dump_suite,
     run_benchmark,
 )
@@ -237,3 +238,85 @@ def test_production_roots_do_not_import_perf_engine() -> None:
             if needle in text or "benchmarks.perf_engine" in text:
                 violations.append(str(path.relative_to(_REPO_ROOT)))
     assert violations == []
+
+
+def test_compare_suites_classifies_regression_improvement_and_noise() -> None:
+    baseline = run_benchmark("parse-row", (2.0, 2.0), unit="second")
+    same = run_benchmark("parse-row", (2.0, 2.0), unit="second")
+    slower = run_benchmark("parse-row", (6.0, 6.0), unit="second")
+    faster = run_benchmark("parse-row", (0.5, 0.5), unit="second")
+    within = run_benchmark("parse-row", (4.0, 4.0), unit="second")
+    assert compare_suites(baseline, same, threshold=2.0)["status"] == "pass"
+    assert compare_suites(baseline, slower, threshold=2.0)["status"] == "regression"
+    assert compare_suites(baseline, faster, threshold=2.0)["status"] == "improvement"
+    # ratio == threshold is not yet a regression
+    assert compare_suites(baseline, within, threshold=2.0)["status"] == "pass"
+
+
+def test_compare_suites_is_deterministic_and_ignores_benchmark_order() -> None:
+    first = {
+        "version": "1.0",
+        "metadata": {"hostname": "must-not-leak"},
+        "benchmarks": [
+            {"metadata": {"name": "b", "unit": "second"}, "runs": [{"values": [2.0]}]},
+            {"metadata": {"name": "a", "unit": "second"}, "runs": [{"values": [4.0], "warmups": [[1, 9.0]]}]},
+        ],
+    }
+    second = {
+        "version": "1.0",
+        "benchmarks": [
+            {"metadata": {"name": "a", "unit": "second"}, "runs": [{"values": [4.0]}]},
+            {"metadata": {"name": "b", "unit": "second"}, "runs": [{"values": [2.0]}]},
+        ],
+    }
+    left = compare_suites(first, second, threshold=1.5)
+    right = compare_suites(second, first, threshold=1.5)
+    assert left["fingerprint"] == right["fingerprint"]
+    assert [row["name"] for row in left["rows"]] == ["a", "b"]
+    assert left["status"] == "pass"
+    assert left["network_calls"] is False
+    assert "hostname" not in json.dumps(left)
+    assert "must-not-leak" not in json.dumps(left)
+    # warmups do not change the sample mean
+    with_warmup = compare_suites(first, first, threshold=1.5)
+    assert with_warmup["rows"][0]["baseline_mean"] == 4.0
+
+
+def test_compare_suites_marks_missing_and_unit_conflicts_unavailable() -> None:
+    baseline = run_benchmark("kept", (1.0,), unit="second")
+    baseline["benchmarks"].append(
+        {"metadata": {"name": "dropped", "unit": "second"}, "runs": [{"values": [1.0]}]}
+    )
+    candidate = run_benchmark("kept", (1.0,), unit="byte")
+    candidate["benchmarks"].append(
+        {"metadata": {"name": "added", "unit": "second"}, "runs": [{"values": [1.0]}]}
+    )
+    report = compare_suites(baseline, candidate, threshold=1.5)
+    reasons = {row["name"]: row["reason"] for row in report["rows"]}
+    assert reasons == {"added": "candidate_only", "dropped": "baseline_only", "kept": "unit_mismatch"}
+    assert report["status"] == "unavailable"
+    assert all(row["status"] == "unavailable" for row in report["rows"])
+
+
+def test_compare_suites_rejects_duplicate_names_and_bad_thresholds_without_echoing_samples() -> None:
+    suite = run_benchmark("kept", (1.0,))
+    suite["benchmarks"].append(suite["benchmarks"][0])
+    with pytest.raises(PerfEngineError) as duplicate:
+        compare_suites(suite, run_benchmark("kept", (1.0,)))
+    assert "duplicate benchmark name" in str(duplicate.value)
+    with pytest.raises(PerfEngineError):
+        compare_suites(run_benchmark("kept", (1.0,)), run_benchmark("kept", (1.0,)), threshold=1)
+    with pytest.raises(PerfEngineError):
+        compare_suites(run_benchmark("kept", (1.0,)), run_benchmark("kept", (1.0,)), threshold=True)
+    broken = run_benchmark("kept", (1.0,))
+    broken["benchmarks"][0]["runs"][0]["values"] = [math.nan]
+    with pytest.raises(PerfEngineError) as bad_value:
+        compare_suites(broken, broken)
+    assert "nan" not in str(bad_value.value).casefold()
+
+
+def test_empty_suites_are_unavailable_not_a_pass() -> None:
+    empty = {"version": "1.0", "benchmarks": []}
+    report = compare_suites(empty, empty)
+    assert report["status"] == "unavailable"
+    assert report["rows"] == []

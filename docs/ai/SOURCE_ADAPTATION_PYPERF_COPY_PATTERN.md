@@ -1,7 +1,8 @@
 # src-pyperf copy-pattern (draft)
 
-Updated: 2026-09-28
-Base: `origin/main` `e697f1c0365115cba2e96ff857a953377d5d261d`
+Updated: 2026-10-04
+Compared with live `origin/main` `16edd793f32173a6554d86c1a8fb01bbf9b7f871` (branch not rebased; no merge or force-push).
+Recorded base at first commit: `e697f1c0365115cba2e96ff857a953377d5d261d`
 Branch: `grok/source-adaptation-pyperf-copy-pattern-v1`
 Mode: `copy_pattern` only. No current in-tree consumer; defer integration/merge until an existing canonical benchmark path can consume this adapter.
 
@@ -18,9 +19,9 @@ Highest-priority compatible work order with a vacant isolated boundary:
 
 ## Consumer status and recommendation
 
-No Python import or call of `perf_engine.run_benchmark` / `dump_suite` exists outside this adapter's contract test and source-governance records. Existing paths such as `evaluation/perf/regression_benchmark.py` and `scripts/benchmarks/benchmark_lineage_replay.py` retain their own timing/reporting flow; the production-root contract also keeps this isolated module out of production imports. No canonical consumer exists within this PR's allowed paths.
+No production root imports this adapter. `compare_suites` classifies two already-encoded suites (pass, regression, improvement, or unavailable) from their sample means. It does not time a workload, replace `evaluation.perf.regression_benchmark`, or become a second commerce-cycle budget. Warmups are ignored. A missing name or a unit mismatch is unavailable, not a pass.
 
-Recommendation: keep the PR narrowly scoped as an offline format adapter and defer adoption/merge. Do not add a new runner, consumer, performance claim, or extra abstraction here. Revisit only when an existing canonical benchmark entry point has an approved in-scope integration seam.
+`THIRD_PARTY_NOTICES.md` already contains this branch's pyperf row. PR #342 also edits that file, so this update does not touch it. Integrate the two notice rows serially after #342 lands.
 
 ## Authoritative pin (verified 2026-09-28)
 
@@ -38,9 +39,9 @@ Registry-recorded SHA `c0e9eb8a78fd148f0746ba2b9cb030206dfd8478` does not match 
 
 ## What shipped
 
-- `scripts/benchmarks/perf_engine.py` — offline JSON 1.0 suite encoder from operator-supplied samples
+- `scripts/benchmarks/perf_engine.py` — offline JSON 1.0 suite encoder and deterministic suite comparison from operator-supplied samples
 - `tests/contracts/test_pyperf_suite_pattern.py`
-- attribution rows in `THIRD_PARTY_NOTICES.md` and `docs/oss/LICENSE_MANIFEST.yml`
+- attribution rows in `docs/oss/LICENSE_MANIFEST.yml`; the `THIRD_PARTY_NOTICES.md` row is already on this branch and is not edited while #342 owns that file
 
 Runtime guarantees: no pyperf import, sockets, process execution, host probing, credential reads, or live timing. The encoder rejects recognized host/secret field names and runtime-only pyperf metadata. It cannot identify a secret or hostname hidden in arbitrary caller-supplied free text; callers must not place such values under otherwise allowed metadata keys.
 
