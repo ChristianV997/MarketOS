@@ -173,6 +173,12 @@ def port_bind_conflict(host: str, port: int) -> bool:
     """True when the local bind would fail (occupied or not yet reusable)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
+        # A just-closed POSIX listener can remain in TIME_WAIT even though a
+        # replacement server may safely bind the port. Windows does not use
+        # this probe option because SO_REUSEADDR has different, less safe
+        # sharing semantics there.
+        if os.name != "nt":
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((host, port))
     except OSError:
         return True
