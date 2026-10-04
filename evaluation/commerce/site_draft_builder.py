@@ -26,6 +26,33 @@ SITE_TYPES = frozenset(
     }
 )
 PROVENANCE = frozenset({"observed", "derived", "assumed", "unavailable", "fixture", "manual_import"})
+SAFE_CLAIM_WORDS = frozenset({"guaranteed", "cure", "treat", "diagnose", "prevent", "FDA", "clinically proven", "risk-free"})
+
+
+def _string_identity(value: Any) -> str:
+    """Return value only if it is genuinely a string identifier, else ''."""
+    return value if isinstance(value, str) else ""
+
+
+def _safe_copy(value: str, prohibited: list[str]) -> str:
+    result = _text(value)
+    blocked = [*SAFE_CLAIM_WORDS, *prohibited]
+    for word in blocked:
+        if word and re.search(re.escape(word), result, re.IGNORECASE):
+            result = re.sub(re.escape(word), "evidence-led", result, flags=re.IGNORECASE)
+    return result
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    if value is None:
+        return {}
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        return value.to_dict()
+    if is_dataclass(value):
+        return {item.name: getattr(value, item.name) for item in fields(value)}
+    if isinstance(value, Mapping):
+        return value
+    return {}
 
 
 def _safe(value: Any) -> Any:
@@ -83,17 +110,157 @@ def _context(context: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def _candidate(source: Mapping[str, Any] | None, launch: Mapping[str, Any] | None) -> tuple[str, str, str, list[str], list[str], list[str]]:
-    source = dict(source or {})
-    launch = dict(launch or {})
-    candidate_id = _text(source.get("top_candidate_id") or launch.get("candidate_id") or "candidate", 100)
-    title = _text(source.get("top_candidate_title") or launch.get("candidate_title") or "Product or service candidate", 140)
+    source = dict(_mapping(source))
+    launch = dict(_mapping(launch))
+    # candidate_id and title must come from the SAME upstream report. Resolving
+    # each field independently (source.get(...) or launch.get(...) per field)
+    # can pair one report's candidate_id with a different report's title/query
+    # for an unrelated candidate whenever the two reports don't both supply
+    # both fields -- a real cross-candidate evidence splice, not a style issue.
+    source_id = _text(source.get("top_candidate_id") or "", 100)
+    launch_id = _text(launch.get("candidate_id") or "", 100)
+    if source_id:
+        candidate_id = source_id
+        title = _text(source.get("top_candidate_title") or "Product or service candidate", 140)
+    elif launch_id:
+        candidate_id = launch_id
+        title = _text(launch.get("candidate_title") or "Product or service candidate", 140)
+    else:
+        candidate_id = "candidate"
+        title = "Product or service candidate"
     synthesis = source.get("candidates") or []
     candidate = next((item for item in synthesis if isinstance(item, Mapping) and item.get("candidate_id") == candidate_id), {})
     query = _text(candidate.get("query") or title, 160)
-    hooks = _list(source.get("top_hooks") or launch.get("ad_creatives", {}).get("hooks"), 10)
+    # launch.get("ad_creatives", {}) only substitutes the default when the key
+    # is ABSENT; an explicit ad_creatives=None (a plausible shape when upstream
+    # ad-creative generation failed or was skipped) crashed .get("hooks") with
+    # an AttributeError instead of degrading to an empty list.
+    ad_creatives = launch.get("ad_creatives")
+    ad_creatives = ad_creatives if isinstance(ad_creatives, Mapping) else {}
+    # "top_hooks"/"top_ad_angles" explicitly present as an empty list means the
+    # synthesis report found none -- that must not be conflated with "not
+    # supplied" and silently backfilled from launch's own ad_creatives.
+    hooks_raw = source["top_hooks"] if "top_hooks" in source else ad_creatives.get("hooks")
+    angles_raw = source["top_ad_angles"] if "top_ad_angles" in source else ad_creatives.get("angles")
+    hooks = _list(hooks_raw, 10)
     pains = _list(source.get("top_pain_points"), 6)
-    angles = _list(source.get("top_ad_angles") or launch.get("ad_creatives", {}).get("angles"), 8)
+    angles = _list(angles_raw, 8)
     return candidate_id, title, query, hooks, pains, angles
+
+
+def _extract_matched_customer_language(
+    *,
+    launch: Mapping[str, Any] | None,
+    candidate_id: str,
+    source_id: str,
+    prohibited_claims: list[str],
+    consumer_attention: Mapping[str, Any] | None = None,
+) -> str:
+    """Extract safe customer language only when candidate identity matches.
+
+    Candidate identity must be a real identifier, never empty or the
+    display placeholder 'candidate', and never a non-string value.
+    If both synthesis and launch supply candidate identities, they must
+    agree. If launch is supplied, its candidate_id must match candidate_id.
+    Claims, proof signals, specs, reviews, and supplier evidence stay out;
+    only safe landing hint and desired-outcome fields are read.
+    """
+    norm_candidate = candidate_id.strip().casefold()
+    if not norm_candidate or norm_candidate == "candidate":
+        return ""
+
+    launch_map = _mapping(launch)
+    launch_id = _string_identity(launch_map.get("candidate_id")).strip()
+    norm_launch = launch_id.casefold()
+
+    norm_source = source_id.strip().casefold()
+    if norm_source and norm_launch and norm_source != norm_launch:
+        return ""
+
+    if launch_map:
+        if not norm_launch or norm_launch == "candidate" or norm_launch != norm_candidate:
+            return ""
+
+    raw_text = ""
+
+    # 1. Direct safe customer language fields from launch
+    if launch_map:
+        direct_fields = ("customer_language", "landing_hint", "desired_outcome")
+        for field in direct_fields:
+            val = launch_map.get(field)
+            if isinstance(val, str) and val.strip():
+                raw_text = val.strip()
+                break
+
+        if not raw_text:
+            list_fields = ("landing_page_copy_hints", "desired_outcomes")
+            for field in list_fields:
+                val = launch_map.get(field)
+                if isinstance(val, (list, tuple)):
+                    non_empty = [item for item in val if isinstance(item, str) and item.strip()]
+                    if non_empty:
+                        raw_text = non_empty[0].strip()
+                        break
+
+        # 2. Hero section in launch landing_page
+        if not raw_text:
+            landing_page = launch_map.get("landing_page") or getattr(launch, "landing_page", None)
+            landing_map = _mapping(landing_page)
+            sections = landing_map.get("sections")
+            if isinstance(sections, Mapping):
+                hero = _mapping(sections.get("hero"))
+                hero_body = str(hero.get("body_copy") or "").strip()
+                hero_evidence = str(hero.get("evidence_source_note") or "").strip()
+                marker = "Use this only as draft customer language; do not publish it as a result promise."
+                if marker.casefold() in hero_body.casefold() or "matching consumer-attention" in hero_evidence.casefold():
+                    cleaned = re.sub(re.escape(marker), "", hero_body, flags=re.IGNORECASE).strip()
+                    if cleaned:
+                        raw_text = cleaned
+
+        # 3. Product listing short description in launch
+        if not raw_text:
+            listing = launch_map.get("product_listing") or getattr(launch, "product_listing", None)
+            listing_map = _mapping(listing)
+            short_desc = str(listing_map.get("short_description") or "").strip()
+            marker = "Draft copy from matching customer evidence, not a verified product promise."
+            if marker.casefold() in short_desc.casefold():
+                cleaned = re.sub(re.escape(marker), "", short_desc, flags=re.IGNORECASE).strip()
+                if cleaned:
+                    raw_text = cleaned
+
+    # 4. If launch matched (or was not conflicting) and consumer_attention is supplied,
+    # extract safe landing hint or desired outcome from matching candidate row.
+    if not raw_text and consumer_attention:
+        attention_map = _mapping(consumer_attention)
+        candidates = attention_map.get("candidates") or []
+        matched_att = next(
+            (
+                c for c in candidates
+                if isinstance(c, Mapping)
+                and _string_identity(c.get("candidate_id")).strip().casefold() == norm_candidate
+            ),
+            None,
+        )
+        if matched_att:
+            score = _mapping(matched_att.get("score"))
+            hints = score.get("landing_page_copy_hints")
+            if isinstance(hints, (list, tuple)):
+                non_empty = [item for item in hints if isinstance(item, str) and item.strip()]
+                if non_empty:
+                    raw_text = non_empty[0].strip()
+            if not raw_text:
+                voice = _mapping(score.get("voice_of_customer"))
+                outcomes = voice.get("desired_outcomes")
+                if isinstance(outcomes, (list, tuple)):
+                    non_empty = [item for item in outcomes if isinstance(item, str) and item.strip()]
+                    if non_empty:
+                        raw_text = non_empty[0].strip()
+
+    if not raw_text:
+        return ""
+
+    return _safe_copy(raw_text, prohibited_claims)
+
 
 
 @dataclass(frozen=True)
@@ -490,19 +657,37 @@ def _section_types(page_type: str, site_type: str) -> tuple[str, ...]:
     return ("hero", "benefits", "final_cta")
 
 
-def _section(section_type: str, title: str, hooks: list[str], pains: list[str], site_type: str) -> PageSectionDraft:
+def _section(section_type: str, title: str, hooks: list[str], pains: list[str], site_type: str, customer_language: str = "") -> PageSectionDraft:
     headlines = {"hero": title, "problem": "The customer task is worth making clearer", "solution": "A focused path from need to next step", "benefits": "What the draft should make easy to understand", "how_it_works": "Show the workflow", "product_grid": "Explore the catalog", "collection_grid": "Browse the collection", "comparison": "Compare the important trade-offs", "social_proof_placeholder": "Approved proof goes here", "demo_section": "Let the product or service demonstrate", "offer_section": "Review the offer", "faq": "Questions customers may ask", "lead_capture": "Get the next useful detail", "final_cta": "Review the next step", "contact": "Start a conversation", "trust_policies": "Clear policies build trust"}
-    body = {"problem": pains[0] if pains else "Use the supplied customer language without exaggeration.", "hero": hooks[0] if hooks else f"Draft positioning for {title}", "lead_capture": "Collect only the information needed for the stated follow-up.", "contact": "Contact details remain TBD until the client supplies approved information."}.get(section_type, "Use verified evidence, clear provenance, and a human approval step.")
+    evidence_source_note = "Existing evidence reports and client context only."
+    if section_type == "hero":
+        if customer_language:
+            disclaimer = "Use this only as draft customer language; do not publish it as a result promise."
+            if disclaimer.casefold() in customer_language.casefold():
+                body = customer_language
+            else:
+                body = f"{customer_language} {disclaimer}"
+            evidence_source_note = "Matching consumer-attention landing hint or desired outcome"
+        else:
+            body = hooks[0] if hooks else f"Draft positioning for {title}"
+    elif section_type == "problem":
+        body = pains[0] if pains else "Use the supplied customer language without exaggeration."
+    elif section_type == "lead_capture":
+        body = "Collect only the information needed for the stated follow-up."
+    elif section_type == "contact":
+        body = "Contact details remain TBD until the client supplies approved information."
+    else:
+        body = "Use verified evidence, clear provenance, and a human approval step."
     block_type = {"hero": "hero", "benefits": "benefits_grid", "collection_grid": "collection_grid", "product_grid": "product_grid", "comparison": "comparison_table", "faq": "faq", "lead_capture": "lead_form", "offer_section": "pricing_offer", "social_proof_placeholder": "social_proof_placeholder", "demo_section": "demo", "final_cta": "final_cta", "contact": "contact", "trust_policies": "trust_policies", "problem": "problem_solution"}.get(section_type, "rich_text")
     block = SectionBlockDraft(block_type, {"headline": headlines.get(section_type, section_type), "body": body}, {"visibility": "draft", "alignment": "TBD"}, "TBD — approved asset required.", CMSBinding("Page", "section_content", "derived"), "Built from supplied synthesis/launch evidence; not a live proof claim.")
     unknowns = ("Approved assets are missing.", "Policy and platform details remain TBD.")
     if section_type in {"social_proof_placeholder", "comparison"}:
         unknowns = (*unknowns, "No testimonials, reviews, logos, or unsupported competitor claims are supplied.")
-    return PageSectionDraft(section_type, section_type, headlines.get(section_type, section_type), body, "Review draft", (block,), "TBD — approved asset required.", "Existing evidence reports and client context only.", "Do not publish unsupported claims or proof.", unknowns)
+    return PageSectionDraft(section_type, section_type, headlines.get(section_type, section_type), body, "Review draft", (block,), "TBD — approved asset required.", evidence_source_note, "Do not publish unsupported claims or proof.", unknowns)
 
 
-def _page(spec: Mapping[str, Any], title: str, context: Mapping[str, Any], hooks: list[str], pains: list[str], site_type: str) -> PageDraft:
-    sections = tuple(_section(item, title, hooks, pains, site_type) for item in _section_types(str(spec["page_type"]), site_type))
+def _page(spec: Mapping[str, Any], title: str, context: Mapping[str, Any], hooks: list[str], pains: list[str], site_type: str, customer_language: str = "") -> PageDraft:
+    sections = tuple(_section(item, title, hooks, pains, site_type, customer_language) for item in _section_types(str(spec["page_type"]), site_type))
     return PageDraft(str(spec["page_id"]), str(spec["page_type"]), str(spec["route"]), str(spec["purpose"]), context["target_customer"], sections, _text(f"{spec['title']} | {context['brand_name']}", 70), _text(f"Draft page for {spec['purpose']}. Confirm claims, policies, and assets before publishing.", 155), _text(title, 70), tuple(dict.fromkeys([_text(title, 70), _text(context["industry"], 70), _text(context["target_customer"], 70)])), str(spec["conversion_goal"]), ("Approved hero asset", "Approved logo/brand asset", "Policy or proof asset where applicable"), ("Evidence is fixture/manual unless supplied otherwise.", "Unknowns remain visibly marked TBD."), ("Human approval required for copy, claims, assets, SEO, and publishing." ,))
 
 
@@ -599,15 +784,23 @@ def _risks(context: Mapping[str, Any], readiness: DeploymentReadinessChecklist) 
 
 def build_site_draft_pack(*, launch_draft_pack: Mapping[str, Any] | None = None, opportunity_synthesis: Mapping[str, Any] | None = None, product_validation: Mapping[str, Any] | None = None, marketplace_trends: Mapping[str, Any] | None = None, supplier_feasibility: Mapping[str, Any] | None = None, consumer_attention: Mapping[str, Any] | None = None, client_context: Mapping[str, Any] | None = None, site_type: str | None = None) -> SiteDraftPack:
     context = _context(client_context)
-    synthesis = dict(opportunity_synthesis or {})
-    launch = dict(launch_draft_pack or {})
+    synthesis = dict(_mapping(opportunity_synthesis))
+    launch = dict(_mapping(launch_draft_pack))
     selected_type = _text(site_type or context.get("site_type") or "ecommerce_store", 80)
     if selected_type not in SITE_TYPES:
         raise ValueError(f"unsupported site type: {selected_type}")
     candidate_id, title, query, hooks, pains, angles = _candidate(synthesis, launch)
+    source_id = _string_identity(synthesis.get("top_candidate_id") or synthesis.get("candidate_id")).strip()
+    customer_language = _extract_matched_customer_language(
+        launch=launch,
+        candidate_id=candidate_id,
+        source_id=source_id,
+        prohibited_claims=context["prohibited_claims"],
+        consumer_attention=consumer_attention,
+    )
     specs = _route_specs(selected_type, title)
     route_manifest = RouteManifest(tuple(specs))
-    pages = tuple(_page(spec, title, context, hooks, pains, selected_type) for spec in specs)
+    pages = tuple(_page(spec, title, context, hooks, pains, selected_type, customer_language) for spec in specs)
     primary = tuple({"label": spec["title"], "route": spec["route"]} for spec in specs[:5])
     footer = ({"label": "Privacy", "route": "/privacy"}, {"label": "Terms", "route": "/terms"}, {"label": "Contact", "route": "/contact"})
     navigation = NavigationDraft(primary, footer, ({"label": "Review draft", "route": specs[0]["route"]},))
@@ -626,7 +819,12 @@ def build_site_draft_pack(*, launch_draft_pack: Mapping[str, Any] | None = None,
     evidence_mode = _text(synthesis.get("evidence_mode") or launch.get("evidence_mode") or "fixture_demo", 50)
     summary = f"{title} has a {selected_type} blueprint for {context['business_name']} based on {evidence_mode} evidence. It is implementation-ready planning material, not a published site or launch authorization."
     notes = ("No network calls were made.", "No route, domain, hosting, analytics, or platform mutation occurred.", "Replace every TBD field and complete approval blockers before implementation.")
-    market_access = launch.get("market_access") or synthesis.get("market_access") or {}
+    # market_access is the shared compliance projection that every downstream
+    # consumer compares byte-for-byte; this builder passes it through unchanged.
+    # Supplier presence is not part of that contract: it lives in the deployment
+    # readiness checks and approval blockers. The shallow copy keeps the caller's
+    # own nested launch_draft_pack/opportunity_synthesis mapping from being shared.
+    market_access = dict(launch.get("market_access") or synthesis.get("market_access") or {})
     return SiteDraftPack(VERSION, "deterministic", candidate_id, title, context["business_type"], selected_type, evidence_mode, "launch_draft_pack" if launch else "not_supplied", "opportunity_synthesis" if synthesis else "not_supplied", strategy, route_manifest, site_map, navigation, pages, _section_library(), catalog, _cms_models(), lead, seo, analytics, conversion, payloads, readiness, approval, _risks(context, readiness), notes, summary, market_access=market_access)
 
 
