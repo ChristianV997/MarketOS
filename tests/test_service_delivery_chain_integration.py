@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -392,7 +393,26 @@ def test_real_route_loads_chain_projection_when_route_is_available(tmp_path, mon
     path.write_text(json.dumps(projection), encoding="utf-8")
     monkeypatch.setattr(route_mod, "ARTIFACTS", artifacts.resolve())
     monkeypatch.setenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", str(path))
-    res = route_mod.workbench()
+
+    def request_for(workspace_id: str):
+        return SimpleNamespace(
+            client=SimpleNamespace(host="chain-integration-test"),
+            state=SimpleNamespace(marketos_authenticated_workspace_id=workspace_id),
+        )
+
+    # Without an authenticated workspace the live endpoint stays unavailable and serves nothing.
+    unauthenticated = route_mod.workbench()
+    assert unauthenticated["live_endpoint_status"] == "unavailable"
+    assert unauthenticated["diagnostics"] == ["service_delivery_workspace_identity_unavailable"]
+    assert unauthenticated["engagements"] == []
+    # A different authenticated workspace cannot read this projection.
+    other = route_mod.workbench(request_for("another-workspace"))
+    assert other["live_endpoint_status"] == "unavailable"
+    assert other["diagnostics"] == ["service_delivery_workspace_identity_mismatch"]
+    assert other["engagements"] == []
+    # The matching authenticated workspace loads the chain projection read-only.
+    res = route_mod.workbench(request_for(projection["workspace_id"]))
     assert res["live_endpoint_status"] == "available_read_only"
+    assert res["read_only"] is True and res["mutated"] is False and res["network_calls"] is False
     assert len(res["engagements"]) == 1
     assert res["engagements"][0]["package_id"] == "product-validation-sprint"

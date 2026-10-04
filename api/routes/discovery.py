@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
+from backend.identity.http import resolve_workspace_access
+from backend.identity.workspaces import WorkspaceAccess
 from backend.discovery.discovery_registry import get_discovery_registry
 from backend.discovery.acquisition_plan import build_acquisition_plan_from_recommendation
 from backend.discovery.acquisition_registry import get_acquisition_registry
@@ -16,7 +19,7 @@ from backend.discovery.import_registry import get_import_registry
 from backend.discovery.market_discovery_runner import run_market_discovery
 from backend.discovery.refinement_registry import get_refinement_registry
 from backend.discovery.refinement_runner import run_import_refine_compare, run_refinement_cycle
-from backend.obsidian.sync import sync_acquisition_plan_note, sync_connector_stub_note
+from backend.obsidian.sync import sync_connector_stub_note
 from backend.obsidian.sync import sync_evidence_import_note
 from backend.discovery.opportunity_registry import get_opportunity_registry
 from backend.discovery.opportunity_pipeline_builder import refresh_opportunity_pipeline
@@ -26,6 +29,58 @@ from backend.discovery.validation_sprint_registry import get_validation_sprint_r
 from backend.discovery.validation_sprint_runner import run_validation_sprint
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
+
+_WORKSPACE_SELECTOR_KEYS = frozenset(
+    {
+        "workspace_id", "workspace", "workspace_name", "tenant", "tenant_id",
+        "org_id", "organization_id", "user_id", "subject", "issuer",
+    }
+)
+
+
+def _contains_workspace_selector(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return any(
+            str(key).strip().lower().replace("-", "_").replace(" ", "_") in _WORKSPACE_SELECTOR_KEYS
+            or _contains_workspace_selector(child)
+            for key, child in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_workspace_selector(item) for item in value)
+    return False
+
+
+def _reject_workspace_selector(request: Request, payload: Mapping[str, Any]) -> None:
+    query_keys = {key.strip().lower().replace("-", "_").replace(" ", "_") for key in request.query_params}
+    if query_keys & _WORKSPACE_SELECTOR_KEYS or _contains_workspace_selector(payload):
+        raise HTTPException(status_code=422, detail={"code": "workspace_selector_rejected"})
+
+
+@router.post("/opportunity-discovery")
+def opportunity_discovery(
+    request: Request,
+    mode: str = Query("evaluate"),
+    payload: dict[str, Any] = Body(default_factory=dict),
+    workspace: WorkspaceAccess = Depends(resolve_workspace_access),
+) -> dict[str, Any]:
+    """Run offline discovery for a verified internal workspace only.
+
+    ``X-MarketOS-Workspace`` is only a selector among memberships returned by
+    the server-side resolver. Body and query selectors are rejected; they never
+    establish identity or workspace authority.
+    """
+    _reject_workspace_selector(request, payload)
+    if workspace.workspace_type != "internal":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "workspace_type_mismatch"},
+        )
+    from services.opportunity_discovery import OpportunityDiscoveryError, run_discovery
+
+    try:
+        return run_discovery(mode, payload, workspace=workspace).to_dict()
+    except OpportunityDiscoveryError as exc:
+        return {"status": "malformed", "error": exc.code}
 
 
 @router.post("/source-calibration")
