@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { adjacentCandidateIndex, shouldHandoffDetailFocus } from "../src/features/first-phase-cockpit/lib/keyboardNav.ts";
 
 const featureRoot = new URL("../src/features/first-phase-cockpit/", import.meta.url);
 
@@ -635,18 +636,27 @@ test("accessibility and focus contracts are present", async () => {
   assert.match(table, /aria-rowcount=\{candidates\.length \+ 1\}/);
   assert.match(table, /id="ranked-candidates-table"/);
   assert.match(table, /tabIndex=\{tabIndex\}/);
+  assert.match(table, /ArrowDown/);
+  assert.match(table, /ArrowUp/);
   assert.match(table, /Home/);
   assert.match(table, /End/);
   assert.match(table, /md:hidden/);
   assert.match(table, /overflow-x-auto/);
   assert.match(table, /focus-visible:ring-1/);
   assert.match(detail, /id="candidate-detail-panel"/);
+  assert.match(detail, /Escape/);
+  assert.match(detail, /returnFocusToTable/);
+  assert.match(detail, /Clear selection/);
   assert.match(detail, /Exact SKU/);
   assert.match(detail, /Market lane/);
   assert.match(detail, /Promotion state/);
   assert.match(detail, /Next best action/);
   assert.match(table, /adjacentCandidateIndex/);
   assert.match(table, /shouldHandoffDetailFocus/);
+  assert.match(table, /ref=\{mobileListRef\}/);
+  assert.match(table, /mobileButton\?\.focus\(\)/);
+  assert.match(table, /focusRow\(nextIndex\)/);
+  assert.match(detail, /onKeyDown=\{\(event\) => \{/);
   assert.match(banner, /partial/);
   assert.match(banner, /aria-live="polite"/);
   assert.match(banner, /Fixture evidence is screening-only/);
@@ -704,21 +714,30 @@ test("demo fixture packet is not live-sales-validated", async () => {
 });
 
 test("keyboard navigation preserves order and handoff keys", () => {
-  function adjacentCandidateIndex(length, currentIndex, key) {
-    if (length <= 0) return -1;
-    const current = Math.min(Math.max(0, currentIndex), length - 1);
-    if (key === "Home") return 0;
-    if (key === "End") return length - 1;
-    if (key === "ArrowDown") return Math.min(current + 1, length - 1);
-    if (key === "ArrowUp") return Math.max(current - 1, 0);
-    return current;
-  }
   const ids = ["a", "b", "c"];
   assert.equal(ids[adjacentCandidateIndex(3, 0, "ArrowDown")], "b");
   assert.equal(ids[adjacentCandidateIndex(3, 1, "ArrowUp")], "a");
   assert.equal(ids[adjacentCandidateIndex(3, 1, "Home")], "a");
   assert.equal(ids[adjacentCandidateIndex(3, 0, "End")], "c");
   assert.equal(adjacentCandidateIndex(3, 2, "ArrowDown"), 2);
+  assert.equal(adjacentCandidateIndex(3, 0, "ArrowUp"), 0);
+  assert.equal(adjacentCandidateIndex(0, 0, "ArrowDown"), -1);
+  assert.equal(adjacentCandidateIndex(-1, 0, "ArrowDown"), -1);
+  assert.equal(adjacentCandidateIndex(3, -5, "ArrowDown"), 1);
+  assert.equal(adjacentCandidateIndex(3, 10, "ArrowUp"), 1);
+  assert.equal(adjacentCandidateIndex(3, 1, "UnrecognizedKey"), 1);
+  assert.equal(shouldHandoffDetailFocus("Enter"), true);
+  assert.equal(shouldHandoffDetailFocus(" "), true);
+  assert.equal(shouldHandoffDetailFocus("Tab"), false);
+  assert.equal(shouldHandoffDetailFocus("Escape"), false);
+  assert.equal(shouldHandoffDetailFocus("ArrowDown"), false);
+});
+
+test("detail focus return targets active roving tabIndex candidate row", () => {
+  const returnSelector =
+    '#ranked-candidates-table tr[tabindex="0"], #ranked-candidates-table [role="option"][tabindex="0"], #ranked-candidates-table';
+  assert.match(returnSelector, /tabindex="0"/);
+  assert.match(returnSelector, /ranked-candidates-table/);
 });
 
 test("research-to-decision overlay fills identity without re-ranking", () => {

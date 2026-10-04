@@ -28,6 +28,14 @@ def test_keyboard_and_detail_focus_contracts():
     assert "ArrowDown" in table
     assert "Home" in table
     assert 'id="candidate-detail-panel"' in detail
+    assert "ArrowUp" in table
+    assert "End" in table
+    assert "shouldHandoffDetailFocus" in table
+    assert "Escape" in detail
+    assert "returnFocusToTable" in detail
+    assert 'role="grid"' in table
+    assert "aria-selected" in table
+    assert 'role="listbox"' in table
 
 
 def test_partial_and_stale_states_exist():

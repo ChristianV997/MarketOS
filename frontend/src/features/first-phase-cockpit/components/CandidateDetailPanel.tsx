@@ -8,6 +8,20 @@ export function CandidateDetailPanel({
   candidate: RankedCandidateRow | null;
   onClear: () => void;
 }) {
+  function returnFocusToTable() {
+    queueMicrotask(() => {
+      const returnTarget = document.querySelector<HTMLElement>(
+        '#ranked-candidates-table tr[tabindex="0"], #ranked-candidates-table [role="option"][tabindex="0"], #ranked-candidates-table'
+      );
+      returnTarget?.focus();
+    });
+  }
+
+  function handleClear() {
+    onClear();
+    returnFocusToTable();
+  }
+
   if (!candidate) {
     return (
       <section
@@ -23,6 +37,12 @@ export function CandidateDetailPanel({
     <section
       id="candidate-detail-panel"
       tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          returnFocusToTable();
+        }
+      }}
       className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-4 outline-none focus-visible:ring-1 focus-visible:ring-indigo-400"
       aria-label={`Candidate detail ${candidate.title}`}
     >
@@ -37,7 +57,7 @@ export function CandidateDetailPanel({
         </div>
         <button
           type="button"
-          onClick={onClear}
+          onClick={handleClear}
           className="min-h-8 rounded border border-zinc-700 px-3 py-2 text-[11px] text-zinc-300 hover:border-zinc-500 focus-visible:ring-2 focus-visible:ring-indigo-400"
         >
           Clear selection

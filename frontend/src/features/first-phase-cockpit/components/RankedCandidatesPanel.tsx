@@ -42,6 +42,7 @@ export function RankedCandidatesPanel({
   onWindowStartChange: (start: number) => void;
 }) {
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  const mobileListRef = useRef<HTMLUListElement>(null);
   const detailFocusRequested = useRef(false);
 
   const alignedStart = useMemo(
@@ -84,26 +85,36 @@ export function RankedCandidatesPanel({
   function focusRow(absoluteIndex: number) {
     const relative = absoluteIndex - windowed.windowStart;
     const row = tbodyRef.current?.children[relative] as HTMLElement | undefined;
-    row?.focus();
+    if (row) {
+      row.focus();
+      return;
+    }
+    const mobileButton = mobileListRef.current?.children[relative]?.querySelector<HTMLElement>("button");
+    mobileButton?.focus();
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>, absoluteIndex: number) {
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>, absoluteIndex: number) {
     if (shouldHandoffDetailFocus(event.key)) {
       event.preventDefault();
       detailFocusRequested.current = true;
       onSelect(candidates[absoluteIndex].candidateId);
+      if (selectedId === candidates[absoluteIndex].candidateId) {
+        detailFocusRequested.current = false;
+        document.getElementById("candidate-detail-panel")?.focus();
+      }
       return;
     }
     const nextIndex = adjacentCandidateIndex(candidates.length, absoluteIndex, event.key);
     if (nextIndex === absoluteIndex || nextIndex < 0) return;
     event.preventDefault();
     onSelect(candidates[nextIndex].candidateId);
-    if (event.key === "Home") onWindowStartChange(0);
-    else if (event.key === "End") {
+    if (event.key === "Home") {
+      onWindowStartChange(0);
+    } else if (event.key === "End") {
       onWindowStartChange(Math.max(0, nextIndex - CANDIDATE_WINDOW_SIZE + 1));
-    } else if (nextIndex >= windowed.windowStart + windowed.windowSize) {
+    } else if (event.key === "ArrowDown" && nextIndex >= windowed.windowStart + windowed.windowSize) {
       onWindowStartChange(nextWindowStart(windowed, "forward"));
-    } else if (nextIndex < windowed.windowStart) {
+    } else if (event.key === "ArrowUp" && nextIndex < windowed.windowStart) {
       onWindowStartChange(nextWindowStart(windowed, "back"));
     }
     queueMicrotask(() => focusRow(nextIndex));
@@ -150,6 +161,7 @@ export function RankedCandidatesPanel({
 
       {/* Mobile card list */}
       <ul
+        ref={mobileListRef}
         className="mt-3 space-y-2 md:hidden"
         role="listbox"
         aria-labelledby="ranked-candidates-heading"
@@ -159,16 +171,23 @@ export function RankedCandidatesPanel({
           const absoluteIndex = windowed.windowStart + relativeIndex;
           const selected = candidate.candidateId === selectedId;
           const { market, supplier } = pillarLookup(candidate);
+          const tabIndex = candidate.candidateId === activeId ? 0 : -1;
           return (
             <li key={candidate.candidateId}>
               <button
                 type="button"
                 role="option"
+                tabIndex={tabIndex}
                 aria-selected={selected}
                 onClick={() => {
                   detailFocusRequested.current = true;
                   onSelect(candidate.candidateId);
+                  if (selectedId === candidate.candidateId) {
+                    detailFocusRequested.current = false;
+                    document.getElementById("candidate-detail-panel")?.focus();
+                  }
                 }}
+                onKeyDown={(event) => handleKeyDown(event, absoluteIndex)}
                 className={`w-full rounded border p-3 text-left text-xs outline-none focus-visible:ring-1 focus-visible:ring-indigo-400 ${
                   selected
                     ? "border-indigo-500/40 bg-indigo-500/10"
@@ -253,6 +272,10 @@ export function RankedCandidatesPanel({
                   onClick={() => {
                     detailFocusRequested.current = true;
                     onSelect(candidate.candidateId);
+                    if (selectedId === candidate.candidateId) {
+                      detailFocusRequested.current = false;
+                      document.getElementById("candidate-detail-panel")?.focus();
+                    }
                   }}
                   onKeyDown={(event) => handleKeyDown(event, absoluteIndex)}
                   className={`cursor-pointer border-t border-zinc-800 text-zinc-300 outline-none focus-visible:bg-indigo-500/10 focus-visible:ring-1 focus-visible:ring-indigo-400 ${
