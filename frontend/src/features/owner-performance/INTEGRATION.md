@@ -2,7 +2,7 @@
 
 Status: implemented, contract-tested, adapter-tested, unavailable by default. The performance-report endpoint remains unmounted, and canonical events are not requested in the owner view until workspace access is server-bound.
 
-Pinned contract: PR #368 `owner-performance-report-v1` at `17f0c6caa769ea13a3635b28dbb70313802da2fa`.
+Pinned contract: PR #368 `owner-performance-report-v1` at `339f58e95f94b1f64d4afa7a978592196a221592`.
 Canonical endpoint: `GET /api/owner/performance` (consumed through `fetchOwnerPerformanceReport` and `useOwnerPerformance` without workspace selector).
 
 ## What the UI shows

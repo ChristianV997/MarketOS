@@ -29,8 +29,27 @@ import {
 
 test("contract head and canonical API path constants are pinned", () => {
   assert.equal(OWNER_PERFORMANCE_SCHEMA, "owner-performance-report-v1");
-  assert.equal(CONTRACT_HEAD, "17f0c6caa769ea13a3635b28dbb70313802da2fa");
+  assert.equal(CONTRACT_HEAD, "339f58e95f94b1f64d4afa7a978592196a221592");
   assert.equal(OWNER_PERFORMANCE_API_PATH, "/api/owner/performance");
+});
+
+test("contract compatibility: accepts latest #368 report schema properties", () => {
+  const latestReportPayload = {
+    ...DEMO_OBSERVED_REPORT,
+    revenue: {
+      ...DEMO_OBSERVED_REPORT.revenue,
+      evidence_classes: ["observed"],
+    },
+    campaigns: [
+      {
+        ...DEMO_OBSERVED_REPORT.campaigns[0],
+        ads_ran_proven: false,
+      },
+    ],
+  };
+  const verified = assertReportContract(latestReportPayload);
+  assert.equal(verified.schema, "owner-performance-report-v1");
+  assert.equal(verified.campaigns[0].ads_ran_proven, false);
 });
 
 test("fetch client calls GET /api/owner/performance without workspace selector", async () => {

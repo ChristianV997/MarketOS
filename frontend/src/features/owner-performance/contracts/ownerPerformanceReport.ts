@@ -1,8 +1,8 @@
-/** Contract pinned to MarketOS PR #368 head 17f0c6caa769ea13a3635b28dbb70313802da2fa.
+/** Contract pinned to MarketOS PR #368 head 339f58e95f94b1f64d4afa7a978592196a221592.
  * Schema owner-performance-report-v1. There is no time-series field.
  */
 export const OWNER_PERFORMANCE_SCHEMA = "owner-performance-report-v1" as const;
-export const CONTRACT_HEAD = "17f0c6caa769ea13a3635b28dbb70313802da2fa";
+export const CONTRACT_HEAD = "339f58e95f94b1f64d4afa7a978592196a221592";
 export const OWNER_PERFORMANCE_API_PATH = "/api/owner/performance" as const;
 
 export const MEASURE_KEYS = [
