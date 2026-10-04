@@ -164,3 +164,27 @@ def test_output_is_stable_across_permutations():
     second = evaluate_owner_brand_planning_gate(list(reversed(items))).to_dict()
     assert first["eligible_product_ids"] == second["eligible_product_ids"] == ["a", "m", "z"]
     assert first["discarded"] == second["discarded"]
+
+
+def test_empty_status_is_missing_not_live():
+    items = [
+        _item("ok-1"),
+        _item("ok-2"),
+        {"product_id": "blank", "eligible": True, "status": ""},
+        _item("ok-3"),
+    ]
+    gate = evaluate_owner_brand_planning_gate(items)
+    assert gate.eligible_product_ids == ("ok-1", "ok-2", "ok-3")
+    assert "status_missing:blank" in gate.discarded
+
+
+def test_conflict_discard_order_is_independent_of_input_order():
+    left = [_item("a"), _item("a", status="paused"), _item("b"), _item("c")]
+    right = [_item("c"), _item("b"), _item("a", status="paused"), _item("a")]
+    first = evaluate_owner_brand_planning_gate(left).to_dict()
+    second = evaluate_owner_brand_planning_gate(right).to_dict()
+    assert first["eligible_product_ids"] == second["eligible_product_ids"] == ["b", "c"]
+    assert first["discarded"] == second["discarded"]
+    assert first["creates_brand"] is False
+    assert first["publishes"] is False
+    assert first["launches_ads"] is False
