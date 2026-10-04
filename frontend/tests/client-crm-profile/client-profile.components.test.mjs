@@ -491,6 +491,16 @@ test("touch targets and wrapping are built into the shared control classes", asy
   assert.match(page, /lg:grid-cols-\[14rem_minmax\(0,1fr\)\]/, "steps stack below lg and sit beside the form at lg");
 });
 
+test("demo action buttons wrap cleanly on narrow viewports without shrinking touch targets", async () => {
+  const page = await readFile(new URL("ClientProfileWizard.tsx", FEATURE_ROOT), "utf8");
+  assert.match(page, /flex-col gap-2 sm:flex-row sm:flex-wrap/, "demo buttons container stacks vertically on mobile and wraps horizontally on larger screens");
+  assert.match(page, /w-full sm:w-auto text-center/, "demo action buttons expand to full width on mobile viewports");
+
+  const demo = render();
+  assert.match(demo, /<button[^>]*class="[^"]*min-h-\[44px\][^"]*w-full\s+sm:w-auto[^"]*"[^>]*>\s*Fill with fictional sample data\s*<\/button>/);
+  assert.match(demo, /<button[^>]*class="[^"]*min-h-\[44px\][^"]*w-full\s+sm:w-auto[^"]*"[^>]*>\s*Clear the form\s*<\/button>/);
+});
+
 // ------------------------------------------------------------ AST guards: isolation, no network, no storage, no secrets
 
 async function featureSources() {

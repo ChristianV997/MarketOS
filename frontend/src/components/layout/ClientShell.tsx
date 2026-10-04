@@ -39,6 +39,15 @@ export default function ClientShell() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0b] text-zinc-100 flex flex-col">
+      <a
+        href="#client-main"
+        onClick={() => {
+          main.current?.focus();
+        }}
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 sm:focus:left-5 focus:top-2 focus:z-50 focus:rounded focus:border focus:border-zinc-700 focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-xs sm:focus:text-sm focus:font-medium focus:text-zinc-100 focus:shadow-lg focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
+      >
+        Skip to main content
+      </a>
       <header className="shrink-0 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-3 sm:px-5 py-1 min-h-12 border-b border-white/[0.06] bg-[#0d0d0f]">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <nav aria-label="Switch view">

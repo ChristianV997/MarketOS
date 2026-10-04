@@ -100,17 +100,22 @@ export default function ClientProfileWizard({ onSave, initialState, focusOnMount
           {replace ? (
             <div role="group" aria-label="Replace what you typed?" data-replace-confirm className="space-y-2 rounded border border-violet-300/60 p-2">
               <p>{replace === "sample" ? "Filling in sample data replaces what you typed." : "Clearing the form removes what you typed."}</p>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" ref={keepButton} className={BUTTON_SECONDARY} onClick={() => {
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                <button
+                  type="button"
+                  ref={keepButton}
+                  className={`${BUTTON_SECONDARY} w-full sm:w-auto text-center`}
+                  onClick={() => {
                     setReplace(null);
                     // The confirm group unmounts with the focused button; hand focus back to the control that opened it.
                     setTimeout(() => opener.current?.focus(), 0);
-                  }}>
+                  }}
+                >
                   Keep what I typed
                 </button>
                 <button
                   type="button"
-                  className={BUTTON_SECONDARY}
+                  className={`${BUTTON_SECONDARY} w-full sm:w-auto text-center`}
                   onClick={() => {
                     dispatch({ type: replace === "sample" ? "loadSample" : "clear" });
                     setReplace(null);
@@ -121,11 +126,19 @@ export default function ClientProfileWizard({ onSave, initialState, focusOnMount
               </div>
             </div>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className={BUTTON_SECONDARY} onClick={(event) => requestReplace("sample", event.currentTarget)}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <button
+                type="button"
+                className={`${BUTTON_SECONDARY} w-full sm:w-auto text-center`}
+                onClick={(event) => requestReplace("sample", event.currentTarget)}
+              >
                 Fill with fictional sample data
               </button>
-              <button type="button" className={BUTTON_SECONDARY} onClick={(event) => requestReplace("clear", event.currentTarget)}>
+              <button
+                type="button"
+                className={`${BUTTON_SECONDARY} w-full sm:w-auto text-center`}
+                onClick={(event) => requestReplace("clear", event.currentTarget)}
+              >
                 Clear the form
               </button>
             </div>

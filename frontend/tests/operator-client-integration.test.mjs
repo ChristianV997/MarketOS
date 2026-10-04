@@ -85,6 +85,27 @@ test("ClientShell makes no isolation claim, keeps a 44px operator link, and anno
   assert.match(code, /document\.title = previous/);
 });
 
+test("ClientShell provides an initial keyboard-visible skip link targeting client main without duplicate landmarks", async () => {
+  const shell = await readFile(path.join(srcRoot, "components/layout/ClientShell.tsx"), "utf8");
+  const code = shell.replace(/\/\*[\s\S]*?\*\//g, "");
+
+  // Skip link must exist, precede <header>, target #client-main, and have standard accessible text
+  assert.match(code, /<a\b[^>]*href="#client-main"[^>]*>[\s\S]*?Skip to main content[\s\S]*?<\/a>\s*<header\b/);
+
+  // Remains keyboard-visible via sr-only + focus:not-sr-only + focus:absolute
+  assert.match(code, /sr-only\b/);
+  assert.match(code, /focus:not-sr-only\b/);
+  assert.match(code, /focus:absolute\b/);
+
+  // Focus target is <main id="client-main" tabIndex={-1}>
+  assert.match(code, /<main[^>]*id="client-main"[^>]*tabIndex=\{-1\}/);
+
+  // No duplicate landmarks (skip link is not wrapped in <nav>, and only 1 main and 1 header exist)
+  assert.equal((code.match(/<main\b/g) ?? []).length, 1, "exactly one main landmark");
+  assert.equal((code.match(/<header\b/g) ?? []).length, 1, "exactly one header landmark");
+  assert.equal((code.match(/<nav\b/g) ?? []).length, 1, "only the view switch nav landmark in shell chrome");
+});
+
 test("owner research and client CRM entries use different sidebar icons", async () => {
   const sidebarSource = await readFile(path.join(srcRoot, "components/layout/Sidebar.tsx"), "utf8");
   const icons = [...sidebarSource.matchAll(/to:\s*"([^"]+)",\s*icon:\s*(\w+)/g)].map((m) => [m[1], m[2]]);
