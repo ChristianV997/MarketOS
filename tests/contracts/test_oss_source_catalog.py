@@ -43,9 +43,8 @@ PLACEHOLDER_SHAS = {
     "src-gstack": "1a8b9c0d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b",
     "src-hermes-ecc": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
 }
-# The annotated tag object for src-scrapy 2.12.0 (peels to b1f9e56693cd2000ddcea922306f726f3e9339af).
+# The annotated tag object for src-scrapy 2.12.0 (it peels to commit b1f9e56693cd2000ddcea922306f726f3e9339af).
 ANNOTATED_TAG_SHA = "8c85937adef8279f12e35e0ee9a20c52ff6d1648"
-SCRAPY_COMMIT_SHA = "b1f9e56693cd2000ddcea922306f726f3e9339af"
 
 
 def _registry_row(source_id: str, sha: str) -> dict:
@@ -60,6 +59,8 @@ def _defective_registry() -> list[dict]:
     """
     rows = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
     bad_pins = {**PLACEHOLDER_SHAS, "src-scrapy": ANNOTATED_TAG_SHA}
+    present = {row.get("source_id") for row in rows if isinstance(row, dict)}
+    assert set(bad_pins) <= present, f"registry rows this test injects defects into are missing: {sorted(set(bad_pins) - present)}"
     for row in rows:
         if row.get("source_id") in bad_pins:
             row["revision"] = row["commit_sha"] = bad_pins[row["source_id"]]
@@ -249,19 +250,24 @@ def test_registry_and_capability_defects_are_reported_without_failing(tmp_path: 
 
 
 def test_committed_registry_pins_are_real_commits_and_the_report_says_so() -> None:
-    """The canonical registry was repaired (placeholder and annotated-tag pins replaced); keep it that way."""
+    """The canonical registry was repaired (placeholder and annotated-tag pins replaced); keep it that way.
+
+    Any real re-pin stays valid: only placeholder shapes, the scrapy tag-object SHA and non-40-hex pins fail.
+    """
     report, status = validate_paths(INTAKE_PATH, REGISTRY_PATH, CAPABILITY_PATH)
     assert status == 0 and report["valid"] is True
     registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
     assert report["registry_defects"] == collect_registry_defects(registry) == []
     by_id = {row["source_id"]: row for row in registry if isinstance(row, dict)}
     for source_id, placeholder in PLACEHOLDER_SHAS.items():
-        row = by_id[source_id]
+        row = by_id.get(source_id)
+        assert row is not None, f"{source_id} is no longer in the registry; update PLACEHOLDER_SHAS if it was renamed or removed"
         for field in ("revision", "commit_sha"):
             assert re.fullmatch(r"[0-9a-f]{40}", row[field]), (source_id, field)
             assert row[field] != placeholder and not is_patterned_placeholder_sha(row[field])
-    assert by_id["src-scrapy"]["revision"] == by_id["src-scrapy"]["commit_sha"] == SCRAPY_COMMIT_SHA
-    assert ANNOTATED_TAG_SHA not in json.dumps(registry)
+    for row in registry:
+        if isinstance(row, dict):
+            assert ANNOTATED_TAG_SHA not in (row.get("revision"), row.get("commit_sha")), row.get("source_id")
 
 
 def test_capability_catalog_zero_sha_defects_are_reported() -> None:
@@ -287,6 +293,13 @@ def test_report_is_deterministic() -> None:
     assert "Canonical registry defects (reported, not fixed)" in render_markdown(first)
     encoded = json.dumps(first, indent=2, sort_keys=True)
     assert encoded == json.dumps(second, indent=2, sort_keys=True)
+    # The committed registry is clean, so also cover the rendered defect lines with injected defects.
+    defective = _defective_registry()
+    with_defects = build_report(intake, defective, capabilities)
+    again = build_report(intake, defective, capabilities)
+    assert with_defects == again and render_markdown(with_defects) == render_markdown(again)
+    assert _defect_tuples(with_defects["registry_defects"]) == EXPECTED_DEFECTS
+    assert f"- src-scrapy revision: annotated_tag_object_sha `{ANNOTATED_TAG_SHA}`" in render_markdown(with_defects)
 
 
 @pytest.mark.parametrize(
