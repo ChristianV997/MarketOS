@@ -512,6 +512,24 @@ neg-ship,Negative Shipping Cost,10.00,-2.00`;
   assert.equal(r9.estimatedLandedCost, null);
 });
 
+test("parseNumericCost rejects non-finite numeric values", () => {
+  for (const value of ["Infinity", "-Infinity", "1e309"]) {
+    const parsed = parseNumericCost(value);
+    assert.equal(parsed.isInvalid, true, `${value} must be rejected`);
+    assert.equal(parsed.value, null);
+    assert.equal(parsed.isMissing, false);
+  }
+});
+
+test("supplier CSV parser rejects quotes embedded in unquoted fields without reinterpreting rows", () => {
+  const result = parseSupplierCsvText(
+    `candidate_id,supplier_title,unit_cost,shipping_cost\nitem-1,Product with "quote,10.00,2.00`,
+  );
+  assert.equal(result.totalRows, 0);
+  assert.deepEqual(result.rows, []);
+  assert.ok(result.fileLevelIssues.includes("malformed_csv_quoting"));
+});
+
 test("supplier CSV parser: sanitizes errors and never echoes raw cell content in issues or formatted displays", () => {
   const sensitiveToken = "sk-live-supersecretapikey-1234567890";
   const scriptInjection = "<script>window.location='https://attacker.com'</script>";

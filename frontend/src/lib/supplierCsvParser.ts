@@ -205,7 +205,7 @@ export function parseNumericCost(rawValue: string | null | undefined): ParsedCos
   }
 
   const num = Number(cleaned);
-  if (Number.isNaN(num) || num < 0) {
+  if (!Number.isFinite(num) || num < 0) {
     return { value: null, isExplicitZero: false, isMissing: false, isInvalid: true, rawText };
   }
 
@@ -227,6 +227,57 @@ export function formatCostDisplay(cost: ParsedCost, currency = "USD"): string {
     return `${cost.value.toFixed(2)} ${currency}`;
   }
   return "missing";
+}
+
+/**
+ * Returns true when a quote appears outside a quoted field, after a closing
+ * quote before a delimiter, or when a quoted field is left unterminated.
+ */
+function hasMalformedCsvQuoting(csvText: string): boolean {
+  const clean = csvText.replace(/^\uFEFF/, "");
+  let inQuotes = false;
+  let afterQuote = false;
+  let atFieldStart = true;
+
+  for (let i = 0; i < clean.length; i++) {
+    const char = clean[i];
+    const nextChar = clean[i + 1];
+    const isRecordDelimiter = char.charCodeAt(0) === 10 || char.charCodeAt(0) === 13;
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (nextChar === '"') {
+          i++;
+        } else {
+          inQuotes = false;
+          afterQuote = true;
+        }
+      }
+      continue;
+    }
+
+    if (afterQuote) {
+      if (char === "," || isRecordDelimiter) {
+        afterQuote = false;
+        atFieldStart = true;
+      } else {
+        return true;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      if (!atFieldStart) return true;
+      inQuotes = true;
+      atFieldStart = false;
+    } else if (char === "," || isRecordDelimiter) {
+      atFieldStart = true;
+    } else {
+      atFieldStart = false;
+    }
+  }
+
+  return inQuotes;
 }
 
 /**
@@ -323,6 +374,23 @@ export function parseSupplierCsvText(csvText: string, fileName?: string): Suppli
   }
 
   const hasMalformedEncoding = csvText.includes("\0") || csvText.includes("\uFFFD");
+  if (hasMalformedCsvQuoting(csvText)) {
+    return {
+      fileName,
+      totalRows: 0,
+      validRowCount: 0,
+      invalidRowCount: 0,
+      rawHeaders: [],
+      recognizedHeaders: [],
+      unrecognizedHeaders: [],
+      missingCandidateIdColumn: true,
+      evidenceMode: "manual_import",
+      evidenceLabel: "Manual / Unverified Evidence",
+      rows: [],
+      fileLevelIssues: ["malformed_csv_quoting"],
+    };
+  }
+
   const rawRows = parseRawCsvLines(csvText);
 
   if (rawRows.length === 0) {
