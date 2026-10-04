@@ -136,6 +136,30 @@ class TestBundledSnapshot:
         default = default_taxonomy()
         assert set(explicit.by_code) == set(default.by_code)
 
+    def test_bundled_snapshot_provenance_is_offline_and_includes_its_curated_artifact_digest(self):
+        source = default_taxonomy().source_provenance
+        assert source["evidence_mode"] == "bundled_offline_snapshot"
+        assert source["live_validation"] is False
+        assert source["snapshot_sha256"] == "e2c0193602e5a21afadf5ffc940cec4975eeec2e698fe33d9cb1437d106dedb2"
+
+    def test_custom_snapshot_path_is_not_attributed_to_the_pinned_shopify_release(self, tmp_path):
+        path = tmp_path / "fixture-taxonomy.txt"
+        path.write_text(VALID_TEXT, encoding="utf-8")
+        source = load_taxonomy(path).source_provenance
+        assert source["evidence_mode"] == "unverified_local_file"
+        assert source["live_validation"] is False
+        assert "repository_url" not in source
+        assert "commit_sha" not in source
+
+    def test_bundled_snapshot_digest_mismatch_fails_closed(self, tmp_path, monkeypatch):
+        from services.category_mapping import taxonomy_loader
+
+        tampered_snapshot = tmp_path / "categories.v2026-08.partial.txt"
+        tampered_snapshot.write_text(VALID_TEXT, encoding="utf-8")
+        monkeypatch.setattr(taxonomy_loader, "_DEFAULT_SNAPSHOT_PATH", tampered_snapshot)
+        with pytest.raises(CategoryTaxonomyError, match="snapshot checksum mismatch"):
+            taxonomy_loader.load_taxonomy()
+
     def test_curated_sub_level_three_categories_resolve_with_valid_parents(self):
         index = default_taxonomy()
         # Level 4 curated categories

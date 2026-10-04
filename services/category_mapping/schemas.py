@@ -70,6 +70,8 @@ class CategoryMappingCandidate:
 
 
 TAXONOMY_SOURCE_PROVENANCE: Mapping[str, Any] = MappingProxyType({
+    "evidence_mode": "bundled_offline_snapshot",
+    "live_validation": False,
     "repository_url": "https://github.com/Shopify/product-taxonomy",
     "version_tag": "v2026-08",
     "commit_sha": "2e9aa2e9b882383952c63d212add13eb80f46cf9",
@@ -78,6 +80,12 @@ TAXONOMY_SOURCE_PROVENANCE: Mapping[str, Any] = MappingProxyType({
     "license_evidence_url": "https://github.com/Shopify/product-taxonomy/blob/v2026-08/LICENSE",
     "snapshot_levels_included": (1, 2, 3, 4, 5),
     "snapshot_path": "data/shopify_product_taxonomy/categories.v2026-08.partial.txt",
+    "snapshot_sha256": "e2c0193602e5a21afadf5ffc940cec4975eeec2e698fe33d9cb1437d106dedb2",
+})
+
+IN_MEMORY_FIXTURE_PROVENANCE: Mapping[str, Any] = MappingProxyType({
+    "evidence_mode": "in_memory_fixture",
+    "live_validation": False,
 })
 
 
@@ -91,7 +99,7 @@ class CategoryMappingEvidence:
     status: str  # "mapped" | "ambiguous" | "weak_candidate" | "unmapped"
     candidates: tuple[CategoryMappingCandidate, ...] = ()
     taxonomy_source: Mapping[str, Any] = field(
-        default_factory=lambda: MappingProxyType(dict(TAXONOMY_SOURCE_PROVENANCE))
+        default_factory=lambda: MappingProxyType(dict(IN_MEMORY_FIXTURE_PROVENANCE))
     )
     human_review_required: bool = True
     decision_authority: str = "none"

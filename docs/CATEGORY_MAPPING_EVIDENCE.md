@@ -17,6 +17,12 @@ when no candidates are found. An exact name match takes precedence over
 weaker token-overlap alternatives; multiple exact matches remain
 `"ambiguous"`.
 
+The serialized `taxonomy_source` identifies the evidence mode explicitly:
+`bundled_offline_snapshot` for the pinned local artifact, `in_memory_fixture`
+for parsed test/in-memory text, and `unverified_local_file` for an alternate
+local path. Every mode sets `live_validation` to `false`; fixture or manually
+supplied taxonomy content never inherits Shopify's repository pin.
+
 ## What this is not
 
 - **Not a ranker.** Candidates are not scored against each other's commercial
@@ -37,6 +43,10 @@ weaker token-overlap alternatives; multiple exact matches remain
   MarketOS candidate fixtures (1,875 of the upstream's 14,606 categories).
   A category string with no match in that partial snapshot is reported
   `"unmapped"`, never guessed at or silently widened.
+- **Not a live provider result.** The bundled artifact's local SHA-256 is
+  checked when loaded. A digest mismatch fails closed; on the optional audit
+  path this leaves category-mapping evidence unavailable rather than claiming
+  an unmapped category.
 
 ## How it composes with existing MarketOS authorities
 
@@ -50,6 +60,9 @@ weaker token-overlap alternatives; multiple exact matches remain
   path of its own; wherever a `ProductAuditResult` (including its
   `category_mapping_evidence` field) is exported to a client, it goes through
   whatever boundary already governs that export, unmodified by this change.
+- The product-audit Markdown report renders a dedicated supplemental evidence
+  section. It labels the evidence offline and non-authoritative; if generation
+  fails, it reports `unavailable` rather than mislabeling the result `unmapped`.
 - **No second category, catalog, scoring, or evidence-register authority is
   introduced.** `services/category_mapping/` is a self-contained leaf
   package under `services/`, matching the existing sibling convention
@@ -58,7 +71,7 @@ weaker token-overlap alternatives; multiple exact matches remain
 ## Data provenance
 
 See `data/shopify_product_taxonomy/README.md` for the exact pinned tag,
-commit SHA, license, and regeneration steps. In summary: tag `v2026-08`,
+commit SHA, curated artifact digest, license, and regeneration steps. In summary: tag `v2026-08`,
 commit `2e9aa2e9b882383952c63d212add13eb80f46cf9`, license MIT, verified
 during developer-time dataset curation against the public open-source Git
 repository metadata at that exact commit SHA (an offline public source
@@ -68,6 +81,10 @@ taken from a cached or AI-summarized page render — an unrelated tag,
 `v2026-08-patch`, was found during verification to resolve to a different
 commit whose `VERSION` file read `2026-11-unstable`, and was deliberately
 **not** used for exactly that reason).
+
+`taxonomy_source.snapshot_sha256` identifies the exact normalized UTF-8 bytes
+of this curated partial file; it is an integrity check for the local artifact,
+not a claim that the partial file is the full upstream taxonomy.
 
 ## Safety
 

@@ -93,13 +93,23 @@ class TestEvidenceIsNotAnAuthority:
         assert evidence.status == "mapped"
         assert [candidate.code for candidate in evidence.candidates] == ["ap-2"]
 
-    def test_evidence_carries_taxonomy_source_provenance(self):
+    def test_injected_fixture_taxonomy_is_not_misattributed_to_the_pinned_shopify_source(self):
         evidence = build_category_mapping_evidence("Bird Supplies", taxonomy=_fixture_taxonomy())
+        source = evidence.taxonomy_source
+        assert source["evidence_mode"] == "in_memory_fixture"
+        assert source["live_validation"] is False
+        assert "repository_url" not in source
+        assert "commit_sha" not in source
+
+    def test_bundled_taxonomy_provenance_is_pinned_and_explicitly_offline(self):
+        evidence = build_category_mapping_evidence("Bird Supplies")
         source = evidence.taxonomy_source
         assert source["repository_url"] == "https://github.com/Shopify/product-taxonomy"
         assert source["version_tag"] == "v2026-08"
         assert source["license"] == "MIT"
         assert source["snapshot_levels_included"] == (1, 2, 3, 4, 5)
+        assert source["evidence_mode"] == "bundled_offline_snapshot"
+        assert source["live_validation"] is False
 
     def test_to_dict_round_trips_every_field(self):
         evidence = build_category_mapping_evidence("Bird Supplies", taxonomy=_fixture_taxonomy())

@@ -101,6 +101,7 @@ def build_category_mapping_evidence(
             normalized_input=normalized_input,
             status="unmapped",
             candidates=(),
+            taxonomy_source=taxonomy.source_provenance,
         )
 
     # Only a single exact name match is "mapped". A lone token-overlap
@@ -117,4 +118,5 @@ def build_category_mapping_evidence(
         normalized_input=normalized_input,
         status=status,
         candidates=candidates,
+        taxonomy_source=taxonomy.source_provenance,
     )

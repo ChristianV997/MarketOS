@@ -14,6 +14,9 @@
   repository root and `../source_adaptation_registry.json` entry `src-shopify-product-taxonomy`.
 - **Source file:** `dist/en/categories.txt` at the pinned commit (a flat, plain-text
   export; 14,606 categories, one per line).
+- **Curated partial artifact SHA-256:** `e2c0193602e5a21afadf5ffc940cec4975eeec2e698fe33d9cb1437d106dedb2`
+  over normalized UTF-8 bytes. This identifies the bundled partial file, not
+  the full upstream taxonomy; the runtime loader verifies it before use.
 
 Do not confuse the `v2026-08-patch` tag with this pin: at inspection time its
 annotated-tag object peeled to a different commit whose `VERSION` file read

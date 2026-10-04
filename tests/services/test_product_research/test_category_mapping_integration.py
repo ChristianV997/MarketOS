@@ -30,6 +30,8 @@ class TestCategoryMappingEvidenceComposition:
         assert evidence["status"] == "mapped"
         assert evidence["human_review_required"] is True
         assert evidence["decision_authority"] == "none"
+        assert evidence["taxonomy_source"]["evidence_mode"] == "bundled_offline_snapshot"
+        assert evidence["taxonomy_source"]["live_validation"] is False
 
     def test_an_unrecognizable_category_produces_unmapped_evidence_not_an_error(self):
         result, _ = run_product_audit("Widget", category="Completely Unrecognizable Made Up Thing")
@@ -53,6 +55,23 @@ class TestCategoryMappingEvidenceComposition:
         result, envelope = run_product_audit("Widget", category="Bird Supplies")
         assert result.category_mapping_evidence is None
         assert envelope.status == "completed"
+
+        from services.product_research.report import render_product_audit_markdown
+        markdown = render_product_audit_markdown(result)
+        assert "category mapping evidence was not generated" in markdown
+        assert "status**: unavailable" in markdown
+        assert "status**: unmapped" not in markdown
+
+    def test_markdown_exposes_taxonomy_evidence_as_offline_and_non_authoritative(self):
+        from services.product_research.report import render_product_audit_markdown
+
+        result, _ = run_product_audit("Widget", category="Coffee Grinders")
+        markdown = render_product_audit_markdown(result)
+        assert "Supplemental Category-Mapping Evidence" in markdown
+        assert "not live validation" in markdown.lower()
+        assert "bundled_offline_snapshot" in markdown
+        assert "human_review_required" in markdown
+        assert "decision_authority" in markdown
 
     def test_result_to_dict_includes_the_category_mapping_evidence_key(self):
         result, _ = run_product_audit("Widget", category="Bird Supplies")

@@ -8,14 +8,20 @@ or structurally inconsistent row rather than silently dropping it.
 """
 from __future__ import annotations
 
+import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
-from typing import Mapping
+from typing import Any, Mapping
 
-from .schemas import CategoryTaxonomyError, TaxonomyCategory
+from .schemas import (
+    CategoryTaxonomyError,
+    IN_MEMORY_FIXTURE_PROVENANCE,
+    TAXONOMY_SOURCE_PROVENANCE,
+    TaxonomyCategory,
+)
 
 _DEFAULT_SNAPSHOT_PATH = (
     Path(__file__).resolve().parents[2] / "data" / "shopify_product_taxonomy" / "categories.v2026-08.partial.txt"
@@ -29,10 +35,19 @@ class TaxonomyIndex:
     """An immutable, validated index over the loaded taxonomy snapshot."""
 
     by_code: Mapping[str, TaxonomyCategory]
+    source_provenance: Mapping[str, Any] = field(
+        default_factory=lambda: MappingProxyType(dict(IN_MEMORY_FIXTURE_PROVENANCE))
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.by_code, MappingProxyType):
             object.__setattr__(self, "by_code", MappingProxyType(dict(self.by_code)))
+        if not isinstance(self.source_provenance, MappingProxyType):
+            object.__setattr__(
+                self,
+                "source_provenance",
+                MappingProxyType(dict(self.source_provenance)),
+            )
 
     def get(self, code: str) -> TaxonomyCategory | None:
         return self.by_code.get(code)
@@ -60,7 +75,11 @@ def _parse_line(line: str, line_number: int) -> tuple[str, str, str] | None:
     return code, gid, full_path
 
 
-def parse_taxonomy_text(text: str) -> TaxonomyIndex:
+def parse_taxonomy_text(
+    text: str,
+    *,
+    source_provenance: Mapping[str, Any] | None = None,
+) -> TaxonomyIndex:
     """Parse the pinned snapshot format into a validated :class:`TaxonomyIndex`.
 
     Fails closed (raises :class:`CategoryTaxonomyError`) on:
@@ -124,15 +143,34 @@ def parse_taxonomy_text(text: str) -> TaxonomyIndex:
     if not by_code:
         raise CategoryTaxonomyError("taxonomy snapshot contained zero valid category rows")
 
-    return TaxonomyIndex(by_code=by_code)
+    return TaxonomyIndex(
+        by_code=by_code,
+        source_provenance=(
+            source_provenance
+            if source_provenance is not None
+            else IN_MEMORY_FIXTURE_PROVENANCE
+        ),
+    )
 
 
 def load_taxonomy(path: Path | None = None) -> TaxonomyIndex:
     """Load and validate the taxonomy snapshot from disk. Deterministic: the
     same file always produces the same :class:`TaxonomyIndex` contents."""
-    snapshot_path = path or _DEFAULT_SNAPSHOT_PATH
+    snapshot_path = Path(path) if path is not None else _DEFAULT_SNAPSHOT_PATH
     text = snapshot_path.read_text(encoding="utf-8")
-    return parse_taxonomy_text(text)
+    if snapshot_path.resolve() == _DEFAULT_SNAPSHOT_PATH.resolve():
+        actual_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        expected_digest = TAXONOMY_SOURCE_PROVENANCE["snapshot_sha256"]
+        if actual_digest != expected_digest:
+            raise CategoryTaxonomyError("bundled taxonomy snapshot checksum mismatch")
+        source_provenance = TAXONOMY_SOURCE_PROVENANCE
+    else:
+        source_provenance = MappingProxyType({
+            "evidence_mode": "unverified_local_file",
+            "live_validation": False,
+            "snapshot_name": snapshot_path.name,
+        })
+    return parse_taxonomy_text(text, source_provenance=source_provenance)
 
 
 @lru_cache(maxsize=1)
