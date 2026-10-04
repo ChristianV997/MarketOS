@@ -11,7 +11,9 @@ import {
   Wrench,
   ListChecks,
   ClipboardList,
+  ListOrdered,
   Telescope,
+  UserCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +30,8 @@ const NAV = [
   { to: "/operator/events", icon: ListChecks, label: "Operator Events" },
   { to: "/operator/services", icon: ClipboardList, label: "Service Workbench" },
   { to: "/operator/first-phase", icon: Telescope, label: "First-phase cockpit" },
+  { to: "/operator/research", icon: ListOrdered, label: "Research Portfolio" },
+  { to: "/client/profile", icon: UserCheck, label: "Client CRM" },
 ];
 
 export default function Sidebar() {

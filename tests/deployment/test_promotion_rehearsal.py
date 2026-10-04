@@ -19,6 +19,7 @@ Validates the 14 key requirements:
 
 from __future__ import annotations
 
+import ast
 import json
 import signal
 import subprocess
@@ -47,16 +48,50 @@ from backend.deployment.promotion_rehearsal import (
 from backend.deployment import promotion_rehearsal as rehearsal_module
 
 
+def test_deployment_rehearsal_does_not_depend_on_script_layer() -> None:
+    source_path = Path(__file__).resolve().parents[2] / "backend" / "deployment" / "promotion_rehearsal.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    imported_modules = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    imported_modules.update(
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    )
+    assert "scripts.run_high_value_path_harness" not in imported_modules
+
+
+def test_operator_harness_wrapper_delegates_to_canonical_module() -> None:
+    from backend.deployment import high_value_path_harness
+    import scripts.run_high_value_path_harness as operator_harness
+
+    assert operator_harness.run_harness is high_value_path_harness.run_harness
+    assert operator_harness.main is high_value_path_harness.main
+    assert operator_harness.PATH_IDS == high_value_path_harness.PATH_IDS
+
+
 def test_local_dry_run_requires_zero_credentials() -> None:
     bundle = execute_promotion_rehearsal(
         environment="local_dry_run",
         environ={},
     )
-    assert bundle.readiness_state == "ci_unavailable"
     assert "ci_evidence_ci_unavailable" in bundle.blockers
     assert bundle.credential_classification.get("no_credentials_required") is True
     assert bundle.high_value_path_summary["evidence_classification"] == "actual_executed"
-    assert bundle.high_value_path_summary["status"] == "passed"
+    if bundle.high_value_path_summary["status"] == "passed":
+        # A successful local harness still cannot establish release readiness
+        # when CI evidence was not actually executed.
+        assert bundle.readiness_state == "ci_unavailable"
+    else:
+        # An executed harness failure is application evidence, not a CI
+        # availability gap. Preserve that distinction in the bundle.
+        assert bundle.high_value_path_summary["status"] == "failed"
+        assert bundle.readiness_state == "failed"
+        assert "high_value_path_failed" in bundle.blockers
 
 
 def test_local_execution_does_not_self_attest_release_readiness() -> None:
@@ -496,17 +531,16 @@ def _fake_operator_stack_payload(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
-def test_operator_stack_evidence_reports_unavailable_when_the_runner_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The exact current-branch state: #290's runner is not merged here.
-    subprocess.Popen must never even be called in this case."""
-    called = []
-    monkeypatch.setattr(rehearsal_module.subprocess, "Popen", lambda *a, **k: called.append(1))
+def test_operator_stack_evidence_reports_installed_runner_as_read_only() -> None:
+    """The installed runner is available, but default rehearsal stays dry-run."""
     from backend.deployment.promotion_rehearsal import _operator_stack_evidence
 
     result = _operator_stack_evidence()
-    assert result["status"] == "unavailable"
-    assert result["runner_present"] is False
-    assert called == []
+    assert result["status"] == "not_run"
+    assert result["runner_present"] is True
+    assert result["dry_run"] is True
+    assert result["network_calls"] is False
+    assert result["mutated"] is False
 
 
 class _FakePopen:

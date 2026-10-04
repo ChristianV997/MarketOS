@@ -91,6 +91,8 @@ def test_unavailable_freight_is_a_gap_not_zero_cost() -> None:
 
     assert decision.recommendation == "needs_evidence"
     assert "shipping" in decision.evidence_gaps
+    assert "## Evidence Gaps" in render_markdown(report)
+    assert "- `desk-lamp`: shipping" in render_markdown(report)
     assert decision.scenarios["base"]["status"] == "unavailable"
 
 
@@ -524,10 +526,30 @@ def test_path_escape_source_reference_is_rejected(source_ref: str) -> None:
     {"decisions": ["not-a-decision"]},
     {"decisions": [{"candidate_id": "../escape", "blockers": []}]},
     {"decisions": [{"candidate_id": "candidate-1", "blockers": [{"unsafe": True}]}]},
+    {"decisions": [{"candidate_id": "candidate-1", "evidence_gaps": "shipping"}]},
 ])
 def test_markdown_rejects_malformed_decision_shape(report: dict) -> None:
     with pytest.raises(OpportunityDiscoveryError):
         render_markdown(report)
+
+
+def test_markdown_escapes_untrusted_evidence_gap_markup() -> None:
+    report = {
+        "decisions": [
+            {
+                "candidate_id": "candidate-1",
+                "blockers": [],
+                "evidence_gaps": ["shipping|Injected\n# heading"],
+            }
+        ]
+    }
+
+    rendered = render_markdown(report)
+
+    assert "- `candidate-1`: shipping\\|Injected \\# heading" in rendered
+    assert "\n# heading" not in rendered
+    legacy = render_markdown({"decisions": [{"candidate_id": "candidate-1", "blockers": []}]})
+    assert "## Evidence Gaps" not in legacy
 
 
 def test_live_claim_is_downgraded_and_does_not_upgrade_evidence() -> None:
@@ -575,6 +597,46 @@ def test_cli_smoke_is_json_and_does_not_claim_live_validation(tmp_path: Path) ->
     output = json.loads(result.stdout)
     assert output["execution_classification"] == "actual_executed"
     assert output["safety"]["launch_authorized"] is False
+
+
+def _cli_json(tmp_path: Path, payload: dict) -> dict:
+    input_path = tmp_path / "input.json"
+    input_path.write_text(json.dumps(payload), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "scripts/run_opportunity_discovery.py", "--mode", "evaluate", "--input", str(input_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    return json.loads(result.stdout)
+
+
+def test_json_report_exposes_evidence_gaps_in_deterministic_order(tmp_path: Path) -> None:
+    payload = product()
+    payload["candidates"][0]["economics"]["assumptions"].pop("supplier_shipping")
+
+    output = _cli_json(tmp_path, payload)
+    report = run_discovery("evaluate", payload)
+    gaps = output["decisions"][0]["evidence_gaps"]
+
+    assert "shipping" in gaps
+    assert gaps == sorted(set(gaps))
+    assert gaps == list(report.decisions[0].evidence_gaps)
+    assert output["decisions"][0]["recommendation"] == "needs_evidence"
+    markdown = render_markdown(report).replace("\\", "")
+    for gap in gaps:
+        assert gap in markdown
+
+
+def test_json_report_evidence_gaps_is_an_empty_list_when_complete(tmp_path: Path) -> None:
+    output = _cli_json(tmp_path, ready_product())
+    decision = output["decisions"][0]
+
+    assert decision["evidence_gaps"] == []
+    assert decision["readiness"] == "ready"
+    assert "## Evidence Gaps" not in render_markdown(run_discovery("evaluate", ready_product()))
 
 
 @pytest.mark.parametrize("mode", ["discover", "evaluate", "compare", "validate", "review-results"])
