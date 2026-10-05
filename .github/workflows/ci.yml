@@ -123,6 +123,9 @@ jobs:
         # available cores. Not forced on for local `pytest -q` runs (pytest.ini
         # is unchanged) since output-interleaving makes ad-hoc debugging
         # harder — pass -n auto yourself locally when you want the speedup.
+        env:
+          # Keep test selection disabled; Mergify is advisory-only below.
+          MERGIFY_TEST_SELECTION_ENABLE: "false"
         run: pytest tests/ -v -n auto
 
       - name: Enforce dry-run commerce-cycle p95 budget
@@ -175,6 +178,10 @@ jobs:
       - name: pytest --cov (advisory)
         # Floor set slightly below the measured baseline (67.6% on 2026-07-29)
         # so normal variance doesn't trip it while still catching real drops.
+        env:
+          # Keep Mergify retries/quarantine out of the blocking test job.
+          MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+          MERGIFY_TEST_SELECTION_ENABLE: "false"
         run: pytest tests/ --cov=. --cov-report=term-missing --cov-fail-under=65 || true
 
   container-smoke:
