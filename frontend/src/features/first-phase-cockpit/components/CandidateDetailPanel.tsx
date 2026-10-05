@@ -8,18 +8,27 @@ export function CandidateDetailPanel({
   candidate: RankedCandidateRow | null;
   onClear: () => void;
 }) {
-  function returnFocusToTable() {
+  function returnFocusToTable(preferredCandidateId?: string) {
     queueMicrotask(() => {
-      const returnTarget = document.querySelector<HTMLElement>(
-        '#ranked-candidates-table tr[tabindex="0"], #ranked-candidates-table [role="option"][tabindex="0"], #ranked-candidates-table'
-      );
+      let returnTarget: HTMLElement | null = null;
+      if (preferredCandidateId) {
+        returnTarget = document.querySelector<HTMLElement>(
+          `#ranked-candidates-table tr[data-candidate-id="${preferredCandidateId}"], #ranked-candidates-table [role="option"][data-candidate-id="${preferredCandidateId}"]`
+        );
+      }
+      if (!returnTarget) {
+        returnTarget = document.querySelector<HTMLElement>(
+          '#ranked-candidates-table tr[tabindex="0"], #ranked-candidates-table [role="option"][tabindex="0"], #ranked-candidates-table'
+        );
+      }
       returnTarget?.focus();
     });
   }
 
   function handleClear() {
+    const idToReturn = candidate?.candidateId;
     onClear();
-    returnFocusToTable();
+    returnFocusToTable(idToReturn);
   }
 
   if (!candidate) {
@@ -40,7 +49,7 @@ export function CandidateDetailPanel({
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
-          returnFocusToTable();
+          returnFocusToTable(candidate.candidateId);
         }
       }}
       className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-4 outline-none focus-visible:ring-1 focus-visible:ring-indigo-400"

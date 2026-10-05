@@ -44,6 +44,7 @@ export function RankedCandidatesPanel({
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
   const mobileListRef = useRef<HTMLUListElement>(null);
   const detailFocusRequested = useRef(false);
+  const pendingFocusCandidateId = useRef<string | null>(null);
 
   const alignedStart = useMemo(
     () => ensureSelectionInWindow(candidates, selectedId, windowStart, CANDIDATE_WINDOW_SIZE),
@@ -62,9 +63,28 @@ export function RankedCandidatesPanel({
   useEffect(() => {
     if (!selectedId || !detailFocusRequested.current) return;
     detailFocusRequested.current = false;
-    const detail = document.getElementById("candidate-detail-panel");
-    detail?.focus();
+    queueMicrotask(() => {
+      const detail = document.getElementById("candidate-detail-panel");
+      detail?.focus();
+    });
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!pendingFocusCandidateId.current) return;
+    const targetId = pendingFocusCandidateId.current;
+    const row = tbodyRef.current?.querySelector<HTMLElement>(`tr[data-candidate-id="${targetId}"]`);
+    if (row) {
+      pendingFocusCandidateId.current = null;
+      row.focus();
+      return;
+    }
+    const mobileButton = mobileListRef.current?.querySelector<HTMLElement>(`button[data-candidate-id="${targetId}"]`);
+    if (mobileButton) {
+      pendingFocusCandidateId.current = null;
+      mobileButton.focus();
+      return;
+    }
+  });
 
   if (!candidates.length) {
     return (
@@ -83,14 +103,20 @@ export function RankedCandidatesPanel({
   }
 
   function focusRow(absoluteIndex: number) {
-    const relative = absoluteIndex - windowed.windowStart;
-    const row = tbodyRef.current?.children[relative] as HTMLElement | undefined;
+    const candidate = candidates[absoluteIndex];
+    if (!candidate) return;
+    const row = tbodyRef.current?.querySelector<HTMLElement>(`tr[data-candidate-id="${candidate.candidateId}"]`);
     if (row) {
+      pendingFocusCandidateId.current = null;
       row.focus();
       return;
     }
-    const mobileButton = mobileListRef.current?.children[relative]?.querySelector<HTMLElement>("button");
-    mobileButton?.focus();
+    const mobileButton = mobileListRef.current?.querySelector<HTMLElement>(`button[data-candidate-id="${candidate.candidateId}"]`);
+    if (mobileButton) {
+      pendingFocusCandidateId.current = null;
+      mobileButton.focus();
+      return;
+    }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>, absoluteIndex: number) {
@@ -100,13 +126,19 @@ export function RankedCandidatesPanel({
       onSelect(candidates[absoluteIndex].candidateId);
       if (selectedId === candidates[absoluteIndex].candidateId) {
         detailFocusRequested.current = false;
-        document.getElementById("candidate-detail-panel")?.focus();
+        queueMicrotask(() => {
+          document.getElementById("candidate-detail-panel")?.focus();
+        });
       }
       return;
     }
     const nextIndex = adjacentCandidateIndex(candidates.length, absoluteIndex, event.key);
     if (nextIndex === absoluteIndex || nextIndex < 0) return;
     event.preventDefault();
+    const nextCandidate = candidates[nextIndex];
+    if (nextCandidate) {
+      pendingFocusCandidateId.current = nextCandidate.candidateId;
+    }
     onSelect(candidates[nextIndex].candidateId);
     if (event.key === "Home") {
       onWindowStartChange(0);
@@ -173,18 +205,23 @@ export function RankedCandidatesPanel({
           const { market, supplier } = pillarLookup(candidate);
           const tabIndex = candidate.candidateId === activeId ? 0 : -1;
           return (
-            <li key={candidate.candidateId}>
+            <li key={candidate.candidateId} role="presentation">
               <button
                 type="button"
+                data-candidate-id={candidate.candidateId}
                 role="option"
                 tabIndex={tabIndex}
                 aria-selected={selected}
+                aria-posinset={absoluteIndex + 1}
+                aria-setsize={candidates.length}
                 onClick={() => {
                   detailFocusRequested.current = true;
                   onSelect(candidate.candidateId);
                   if (selectedId === candidate.candidateId) {
                     detailFocusRequested.current = false;
-                    document.getElementById("candidate-detail-panel")?.focus();
+                    queueMicrotask(() => {
+                      document.getElementById("candidate-detail-panel")?.focus();
+                    });
                   }
                 }}
                 onKeyDown={(event) => handleKeyDown(event, absoluteIndex)}
@@ -265,6 +302,7 @@ export function RankedCandidatesPanel({
               return (
                 <tr
                   key={candidate.candidateId}
+                  data-candidate-id={candidate.candidateId}
                   role="row"
                   tabIndex={tabIndex}
                   aria-selected={selected}
@@ -274,7 +312,9 @@ export function RankedCandidatesPanel({
                     onSelect(candidate.candidateId);
                     if (selectedId === candidate.candidateId) {
                       detailFocusRequested.current = false;
-                      document.getElementById("candidate-detail-panel")?.focus();
+                      queueMicrotask(() => {
+                        document.getElementById("candidate-detail-panel")?.focus();
+                      });
                     }
                   }}
                   onKeyDown={(event) => handleKeyDown(event, absoluteIndex)}

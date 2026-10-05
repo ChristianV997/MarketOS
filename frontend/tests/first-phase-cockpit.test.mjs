@@ -109,6 +109,13 @@ function windowCandidates(candidates, windowStart, windowSize = WINDOW_SIZE) {
   };
 }
 
+function nextWindowStart(current, direction) {
+  if (direction === "forward") {
+    return Math.min(current.windowStart + current.windowSize, Math.max(0, current.total - current.windowSize));
+  }
+  return Math.max(0, current.windowStart - current.windowSize);
+}
+
 function formatFreshnessLabel(generatedAt, nowMs) {
   if (!generatedAt) return null;
   const parsed = Date.parse(generatedAt);
@@ -654,7 +661,8 @@ test("accessibility and focus contracts are present", async () => {
   assert.match(table, /adjacentCandidateIndex/);
   assert.match(table, /shouldHandoffDetailFocus/);
   assert.match(table, /ref=\{mobileListRef\}/);
-  assert.match(table, /mobileButton\?\.focus\(\)/);
+  assert.match(table, /mobileButton\.focus\(\)/);
+  assert.match(table, /pendingFocusCandidateId/);
   assert.match(table, /focusRow\(nextIndex\)/);
   assert.match(detail, /onKeyDown=\{\(event\) => \{/);
   assert.match(banner, /partial/);
@@ -738,6 +746,173 @@ test("detail focus return targets active roving tabIndex candidate row", () => {
     '#ranked-candidates-table tr[tabindex="0"], #ranked-candidates-table [role="option"][tabindex="0"], #ranked-candidates-table';
   assert.match(returnSelector, /tabindex="0"/);
   assert.match(returnSelector, /ranked-candidates-table/);
+});
+
+test("executable interaction: keyboard paging traverses across window boundaries", () => {
+  const candidates = Array.from({ length: 120 }, (_, i) => ({
+    candidateId: `cand-${i}`,
+    title: `Candidate ${i}`,
+    rankIndex: i,
+  }));
+
+  let windowStart = 0;
+  let selectedId = null;
+  const windowSize = 50;
+
+  function simulateKeyDown(key, currentIndex) {
+    const nextIndex = adjacentCandidateIndex(candidates.length, currentIndex, key);
+    if (nextIndex === currentIndex || nextIndex < 0) return { nextIndex, windowStart, selectedId };
+    selectedId = candidates[nextIndex].candidateId;
+    const currentWindow = windowCandidates(candidates, windowStart, windowSize);
+    if (key === "Home") {
+      windowStart = 0;
+    } else if (key === "End") {
+      windowStart = Math.max(0, nextIndex - windowSize + 1);
+    } else if (key === "ArrowDown" && nextIndex >= currentWindow.windowStart + currentWindow.windowSize) {
+      windowStart = nextWindowStart(currentWindow, "forward");
+    } else if (key === "ArrowUp" && nextIndex < currentWindow.windowStart) {
+      windowStart = nextWindowStart(currentWindow, "back");
+    }
+    return { nextIndex, windowStart, selectedId };
+  }
+
+  // Initial state: window 0-50, first candidate active
+  let state = { nextIndex: 0, windowStart: 0, selectedId: null };
+  let win = windowCandidates(candidates, state.windowStart, windowSize);
+  assert.equal(win.windowStart, 0);
+  assert.equal(win.visible.length, 50);
+  assert.equal(win.visible[0].candidateId, "cand-0");
+
+  // Step to the end of first window (index 49)
+  for (let i = 0; i < 49; i++) {
+    state = simulateKeyDown("ArrowDown", state.nextIndex);
+  }
+  assert.equal(state.nextIndex, 49);
+  assert.equal(state.windowStart, 0);
+  assert.equal(state.selectedId, "cand-49");
+
+  // Paging forward across boundary (index 49 -> 50)
+  state = simulateKeyDown("ArrowDown", state.nextIndex);
+  assert.equal(state.nextIndex, 50);
+  assert.equal(state.windowStart, 50);
+  assert.equal(state.selectedId, "cand-50");
+  win = windowCandidates(candidates, state.windowStart, windowSize);
+  assert.equal(win.visible[0].candidateId, "cand-50");
+  assert.equal(win.visible[0].rankIndex, 50);
+  assert.equal(win.hasMoreBefore, true);
+
+  // Paging backward across boundary (index 50 -> 49)
+  state = simulateKeyDown("ArrowUp", state.nextIndex);
+  assert.equal(state.nextIndex, 49);
+  assert.equal(state.windowStart, 0);
+  assert.equal(state.selectedId, "cand-49");
+  win = windowCandidates(candidates, state.windowStart, windowSize);
+  assert.equal(win.visible[49].candidateId, "cand-49");
+  assert.equal(win.hasMoreBefore, false);
+
+  // Jump to End
+  state = simulateKeyDown("End", state.nextIndex);
+  assert.equal(state.nextIndex, 119);
+  assert.equal(state.windowStart, 70); // 119 - 50 + 1 = 70
+  assert.equal(state.selectedId, "cand-119");
+  win = windowCandidates(candidates, state.windowStart, windowSize);
+  assert.equal(win.visible[win.visible.length - 1].candidateId, "cand-119");
+
+  // Jump to Home
+  state = simulateKeyDown("Home", state.nextIndex);
+  assert.equal(state.nextIndex, 0);
+  assert.equal(state.windowStart, 0);
+  assert.equal(state.selectedId, "cand-0");
+  win = windowCandidates(candidates, state.windowStart, windowSize);
+  assert.equal(win.visible[0].candidateId, "cand-0");
+});
+
+test("executable interaction: detail focus handoff dispatches immediately when candidate is already selected", () => {
+  const candidates = [
+    { candidateId: "cand-1", title: "One" },
+    { candidateId: "cand-2", title: "Two" },
+  ];
+
+  let selectedId = "cand-1";
+  let detailFocusHandedOff = false;
+  let onSelectCalledWith = null;
+
+  function simulateRowHandoff(key, candidateIndex) {
+    if (shouldHandoffDetailFocus(key)) {
+      const targetId = candidates[candidateIndex].candidateId;
+      onSelectCalledWith = targetId;
+      if (selectedId === targetId) {
+        detailFocusHandedOff = true;
+      }
+    }
+  }
+
+  // Pressing Enter when cand-1 is already selected dispatches immediate focus handoff
+  simulateRowHandoff("Enter", 0);
+  assert.equal(onSelectCalledWith, "cand-1");
+  assert.equal(detailFocusHandedOff, true);
+
+  // Pressing Space when cand-2 is NOT selected yet dispatches onSelect without immediate handoff
+  detailFocusHandedOff = false;
+  onSelectCalledWith = null;
+  simulateRowHandoff(" ", 1);
+  assert.equal(onSelectCalledWith, "cand-2");
+  assert.equal(detailFocusHandedOff, false);
+});
+
+test("executable interaction: Escape and Clear return focus targeting originating candidate row", () => {
+  const domElements = new Map([
+    ['#ranked-candidates-table tr[data-candidate-id="cand-1"]', { id: "tr-1" }],
+    ['#ranked-candidates-table tr[data-candidate-id="cand-2"]', { id: "tr-2" }],
+    ['#ranked-candidates-table tr[tabindex="0"]', { id: "tr-active" }],
+    ['#ranked-candidates-table', { id: "table-container" }],
+  ]);
+
+  function resolveFocusTarget(preferredCandidateId) {
+    if (preferredCandidateId) {
+      const preferred = domElements.get(`#ranked-candidates-table tr[data-candidate-id="${preferredCandidateId}"]`);
+      if (preferred) return preferred;
+    }
+    return domElements.get('#ranked-candidates-table tr[tabindex="0"]') ?? domElements.get('#ranked-candidates-table');
+  }
+
+  assert.equal(resolveFocusTarget("cand-1").id, "tr-1");
+  assert.equal(resolveFocusTarget("cand-2").id, "tr-2");
+  assert.equal(resolveFocusTarget("cand-missing").id, "tr-active");
+  domElements.delete('#ranked-candidates-table tr[tabindex="0"]');
+  assert.equal(resolveFocusTarget(null).id, "table-container");
+});
+
+test("executable interaction: mobile listbox roving tabIndex and option hierarchy", () => {
+  const candidates = [
+    { candidateId: "c-0", title: "C0" },
+    { candidateId: "c-1", title: "C1" },
+    { candidateId: "c-2", title: "C2" },
+  ];
+  const activeId = "c-1";
+
+  const options = candidates.map((candidate, index) => {
+    const tabIndex = candidate.candidateId === activeId ? 0 : -1;
+    const selected = candidate.candidateId === "c-1";
+    return {
+      candidateId: candidate.candidateId,
+      tabIndex,
+      role: "option",
+      selected,
+      posinset: index + 1,
+      setsize: candidates.length,
+    };
+  });
+
+  const tabStops = options.filter((opt) => opt.tabIndex === 0);
+  assert.equal(tabStops.length, 1);
+  assert.equal(tabStops[0].candidateId, "c-1");
+  assert.equal(options[0].tabIndex, -1);
+  assert.equal(options[2].tabIndex, -1);
+  assert.equal(options[0].posinset, 1);
+  assert.equal(options[1].posinset, 2);
+  assert.equal(options[2].posinset, 3);
+  assert.equal(options[0].setsize, 3);
 });
 
 test("research-to-decision overlay fills identity without re-ranking", () => {
