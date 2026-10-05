@@ -66,7 +66,7 @@ _UNSAFE_KEYS = frozenset({
     "filesystem_path",
 })
 _UNSAFE_VALUE_MARKERS = (
-    "<html", "<script", "-----begin", "sk-", "ghp_", "github_pat_", "bearer ",
+    "<html", "<script", "-----begin", "ghp_", "github_pat_", "bearer ",
     "api_key", "access_token", "raw_payload", "provider_payload", "internal_prompt",
     "provider_response", "raw_response", "source_code", "pricing formula", "internal pricing",
     "formula", "heuristic", "strategy", "other_client", "cross_client", ".env",
@@ -79,6 +79,7 @@ _UNSAFE_SECRET_PATTERNS = (
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b"),
 )
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 
 
 def _validate_safe_inputs(value: Any, *, depth: int = 0, nodes: list[int] | None = None) -> None:
@@ -105,7 +106,8 @@ def _validate_safe_inputs(value: Any, *, depth: int = 0, nodes: list[int] | None
             raise ValueError("evidence_input_bounds_exceeded")
         lowered = value.casefold()
         if (
-            any(marker in lowered for marker in _UNSAFE_VALUE_MARKERS)
+            _SK_PREFIX.search(lowered) is not None
+            or any(marker in lowered for marker in _UNSAFE_VALUE_MARKERS)
             or _UNSAFE_HTML_TAG.search(value)
             or any(pattern.search(value) for pattern in _UNSAFE_SECRET_PATTERNS)
             or _ABSOLUTE_PATH.match(value)

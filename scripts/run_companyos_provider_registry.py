@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ if str(ROOT) not in sys.path:
 from evaluation.companyos.provider_credential_report import build_provider_credential_report
 
 SECRET_KEYS = {"actual_secret_value", "raw_api_key", "raw_oauth_token", "password", "private_key_material", "api_key", "access_token", "refresh_token", "client_secret"}
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 
 
 def _path(value: str | None) -> Path | None:
@@ -42,7 +44,7 @@ def _secret_like(value: Any) -> bool:
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza"))
+        return "-----begin " in lowered or "bearer " in lowered or _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza"))
     return False
 
 

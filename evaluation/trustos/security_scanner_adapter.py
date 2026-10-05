@@ -6,7 +6,8 @@ exploit payloads, HTML, or vulnerable source code.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict, is_dataclass
+import re
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from .control_plane import TrustEvidenceRecord, TrustException, TrustGateResult, TrustRiskItem, _clean, build_trust_controls
@@ -23,6 +24,7 @@ INTEGRATION_MODES = ("normalize_fixture_now", "normalize_uploaded_output_later",
 GATE_ACTIONS = ("public_beta_launch", "customer_facing_launch", "activate_provider", "use_credentials", "enable_public_signup", "enable_live_model_calls", "run_provider_readonly_call", "process_uploaded_file", "client_workspace_export")
 REDACTION_OUTCOMES = ("redacted", "rejected", "safe_summary_only", "allowed_metadata")
 SECRET_KEYS = {"actual_secret_value", "api_key", "raw_api_key", "oauth_token", "raw_oauth_token", "access_token", "refresh_token", "password", "private_key", "private_key_material", "cookie", "cookies", "jwt", "token", "authorization", "database_url", "webhook_secret", "client_secret", "raw_payload", "raw_html", "exploit_payload", "vulnerable_code"}
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 
 
 def _secret_like(value: Any) -> bool:
@@ -32,7 +34,7 @@ def _secret_like(value: Any) -> bool:
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or "<html" in lowered or "<script" in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza", "eyjhb", "jdbc:", "mysql://", "postgres://"))
+        return "-----begin " in lowered or "bearer " in lowered or "<html" in lowered or "<script" in lowered or _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza", "eyjhb", "jdbc:", "mysql://", "postgres://"))
     return False
 
 
@@ -426,7 +428,7 @@ def parse_security_fixture(payload: Mapping[str, Any], *, scanner_id: str, sourc
         impacts.extend(_impacts(finding))
     counts = {severity: sum(item.severity == severity for item in findings) for severity in SEVERITIES}
     summary = SecurityScanSummary(scanner_id, "parsed" if rows or payload.get("fixture_mode") else "empty", len(findings), counts["critical"], counts["high"], counts["medium"], counts["low"], counts["info"], 0, 0, ("Synthetic fixture; not proof of a live scan.",))
-    fixture = SecurityScannerFixture(str(payload.get("fixture_id", f"{scanner_id}-fixture")), scanner_id, source_file, True, len(rows), "valid", False)
+    _ = SecurityScannerFixture(str(payload.get("fixture_id", f"{scanner_id}-fixture")), scanner_id, source_file, True, len(rows), "valid", False)
     merged_impacts = tuple(_merge_impacts(impacts))
     gate_results = tuple(TrustGateResult(f"gate-result-{item.action}-{scanner_id}", item.action, "needs_professional_review" if item.decision == "needs_security_owner" else item.decision, (item.reason,), (), (), ("security_owner",) if item.decision in {"hard_block", "soft_block", "needs_security_owner"} else (), "Assign security-owner review before proceeding.", "offline-deterministic", True) for item in merged_impacts)
     exceptions = tuple(TrustException(f"exception-{item.action}-{scanner_id}", "control-public_launch_readiness-security_evidence", item.action, "requires_security_owner" if item.decision == "needs_security_owner" else "requested", "security-scanner-adapter", "security_owner", item.reason, "TBD", item.finding_ids) for item in merged_impacts if item.decision in {"hard_block", "soft_block", "needs_security_owner"})

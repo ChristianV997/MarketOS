@@ -25,10 +25,11 @@ ALLOWED_DELIVERABLES = frozenset({
     "profit_stack_advisor", "service_engagement", "service_delivery", "client_safe_export",
 })
 SECRET_MARKERS = (
-    "sk-", "ghp_", "github_pat_", "bearer ", "-----begin", "api_key", "access_token",
+    "ghp_", "github_pat_", "bearer ", "-----begin", "api_key", "access_token",
     "private_key", "password", "client_secret", "cookie=", "raw_payload",
 )
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 
 
 class SchemaValidationError(ValueError):
@@ -43,7 +44,7 @@ def _safe_text(value: Any, field_name: str, *, required: bool = True, max_length
     if any(unicodedata.category(char).startswith("C") for char in value):
         raise SchemaValidationError(f"invalid {field_name}")
     lowered = value.casefold()
-    if any(marker in lowered for marker in SECRET_MARKERS):
+    if _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in SECRET_MARKERS):
         raise SchemaValidationError(f"unsafe {field_name}")
     return value.strip()
 

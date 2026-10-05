@@ -34,6 +34,7 @@ no conversion path of its own.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Mapping
@@ -412,12 +413,13 @@ class ClientEngagement:
         }
 
 
-_SECRET_SHAPE_MARKERS = ("sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "-----begin", "bearer ")
+_SECRET_SHAPE_MARKERS = ("ghp_", "gho_", "ghu_", "ghs_", "ghr_", "-----begin", "bearer ")
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 
 
 def _reject_secret_shaped(value: str, *, field_name: str) -> None:
     lowered = value.lower()
-    if any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
+    if _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
         raise ValueError(f"secret-shaped value rejected in {field_name}")
 
 
@@ -705,7 +707,7 @@ CLIENT_DELIVERABLE_PACKAGE_TYPES: dict[str, str] = {
     "managed-acquisition-cro": "client_managed_acquisition_diagnostic",
 }
 
-_LEAK_MARKERS = ("sk-", "-----begin", "<html", "other_client", "cross_client")
+_LEAK_MARKERS = ("-----begin", "<html", "other_client", "cross_client")
 _FORBIDDEN_KEYS = {"internal_notes", "prompt", "source_code", "formula", "credentials", "raw_payload", "filesystem_path", "model_trace", "api_key", "private_key", "password"}
 
 
@@ -721,7 +723,9 @@ def _redact_client_unsafe_values(value: Any) -> Any:
         return {key: "[redacted: internal-only field removed]" if str(key).lower() in _FORBIDDEN_KEYS else _redact_client_unsafe_values(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_redact_client_unsafe_values(item) for item in value]
-    if isinstance(value, str) and any(marker in value.lower() for marker in _LEAK_MARKERS):
+    if isinstance(value, str) and (
+        _SK_PREFIX.search(value.lower()) is not None or any(marker in value.lower() for marker in _LEAK_MARKERS)
+    ):
         return "[redacted: client-unsafe value removed]"
     return value
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ if str(ROOT) not in sys.path:
 from evaluation.companyos.approval_ledger import build_approval_ledger, simulate_action
 
 SECRET_KEYS = {"password", "secret", "token", "api_key", "apikey", "private_key", "access_token", "refresh_token", "client_secret", "authorization", "cookie"}
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 
 
 def _path(value: str | None) -> Path | None:
@@ -49,7 +51,7 @@ def _secret_like(value: Any) -> bool:
         return any(_secret_like(item) for item in value)
     elif isinstance(value, str):
         lowered = value.lower()
-        return any(marker in lowered for marker in ("bearer ", "-----begin ", "sk-", "ghp_"))
+        return _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in ("bearer ", "-----begin ", "ghp_"))
     return False
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ SECRET_KEYS = {
     "authorization", "cookie", "cookies", "raw_payload", "raw_html", "html", "body",
     "response_body", "javascript", "browser_trace",
 }
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 
 
 def _path(value: str, *, must_exist: bool = True, allow_external: bool = False) -> Path:
@@ -47,7 +49,7 @@ def _secret_like(value: Any) -> bool:
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza"))
+        return "-----begin " in lowered or "bearer " in lowered or _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza"))
     return False
 
 
