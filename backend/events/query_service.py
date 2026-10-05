@@ -1,11 +1,17 @@
 """Deterministic, read-only canonical event queries for JSONL and adapters."""
 from __future__ import annotations
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Sequence
 from backend.contracts.events import Event
 from .query_models import CommerceRunSummary, CompetitionSummary, EventQuery, EventRecordView, EventTimeline, OpportunityRankingSummary, ResearchPortfolioSummary, ShopifyImportSummary
+
+# JSONL rows end at CR, LF or CRLF only. str.splitlines() also cuts at U+2028, U+2029 and U+0085,
+# which a JSON string may hold raw (Event.canonical_json uses ensure_ascii=False), so it would split
+# one valid row into two malformed ones and lose the event.
+_JSONL_LINE_BREAK = re.compile(r"\r\n|\r|\n")
 
 def load_events_from_jsonl(
     path: str | Path,
@@ -13,15 +19,21 @@ def load_events_from_jsonl(
     max_bytes: int | None = None,
     oversized_warning: str = "jsonl_file_oversized",
 ) -> tuple[list[Event], list[str]]:
+    # A negative cap would make read() unbounded, so it must never be accepted as a bound.
+    if max_bytes is not None and (isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0):
+        raise ValueError("max_bytes must be a non-negative integer or None")
     events: list[Event] = []; warnings: list[str] = []
     try:
         with Path(path).open("rb") as source:
             raw = source.read() if max_bytes is None else source.read(max_bytes)
             if max_bytes is not None and source.read(1):
                 return events, [oversized_warning]
-        lines = raw.decode("utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
+        text = raw.decode("utf-8")
+    except (OSError, ValueError, OverflowError):
         return events, ["jsonl_file_unavailable"]
+    lines = _JSONL_LINE_BREAK.split(text)
+    if lines and lines[-1] == "":
+        lines.pop()
     for index, line in enumerate(lines, 1):
         try: events.append(Event.from_dict(json.loads(line)))
         except Exception: warnings.append(f"malformed_jsonl_row:{index}")

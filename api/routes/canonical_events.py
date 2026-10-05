@@ -37,7 +37,12 @@ def _jsonl_report(query: EventQuery) -> dict:
         return _empty_jsonl_report("jsonl_read_path_unconfigured")
     if path != ARTIFACTS and ARTIFACTS not in path.parents:
         raise HTTPException(403, "configured JSONL read path must remain under artifacts/")
-    if not path.is_file():
+    try:
+        is_file = path.is_file()
+    except (OSError, ValueError):
+        # e.g. ENAMETOOLONG: Path.is_file() only swallows ENOENT/ENOTDIR/EBADF/ELOOP.
+        is_file = False
+    if not is_file:
         return _empty_jsonl_report("jsonl_read_path_unconfigured")
     events, warnings = load_events_from_jsonl(
         path,

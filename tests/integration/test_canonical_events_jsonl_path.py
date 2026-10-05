@@ -1,6 +1,10 @@
 """Regression tests for GET /api/events JSONL path fail-closed behavior."""
 from __future__ import annotations
 
+import os
+import threading
+
+import pytest
 from fastapi import HTTPException
 
 from api.routes import canonical_events
@@ -270,3 +274,172 @@ def test_jsonl_byte_cap_applies_to_stream_consumed_bytes(monkeypatch):
     assert events == []
     assert warnings == ["oversized"]
     assert stream.read_calls == [50, 1]
+
+
+def _jail(monkeypatch, tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    monkeypatch.setattr(canonical_events, "ARTIFACTS", artifacts.resolve())
+    return artifacts
+
+
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\u0085"], ids=["U+2028", "U+2029", "U+0085"])
+def test_valid_row_with_raw_unicode_line_separator_round_trips(monkeypatch, tmp_path, separator):
+    """json.dumps(ensure_ascii=False) keeps these raw; str.splitlines() would cut the row in two."""
+    from backend.contracts.events import Event
+
+    event = Event("sep-1", "w", "agg", "a1", "t", 1, 1.0, source="s", payload={"note": f"line one{separator}line two"})
+    neighbour = Event("sep-2", "w", "agg", "a1", "t", 1, 2.0, source="s")
+    artifacts = _jail(monkeypatch, tmp_path)
+    path = artifacts / "events.jsonl"
+    path.write_bytes((event.canonical_json() + "\n" + neighbour.canonical_json() + "\n").encode("utf-8"))
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(path))
+
+    loaded, warnings = query_service.load_events_from_jsonl(path)
+    assert warnings == []
+    assert [item.replay_hash() for item in loaded] == [event.replay_hash(), neighbour.replay_hash()]
+
+    report = canonical_events._jsonl_report(_query())
+    assert report["timeline"]["warnings"] == []
+    assert sorted(item["event_id"] for item in report["timeline"]["events"]) == ["sep-1", "sep-2"]
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"], ids=["LF", "CRLF", "CR"])
+def test_supported_line_endings_still_split_rows(tmp_path, ending):
+    line = _valid_event_line().rstrip(b"\n").decode("utf-8")
+    path = tmp_path / "events.jsonl"
+    path.write_bytes((line + ending + line + ending).encode("utf-8"))
+    loaded, warnings = query_service.load_events_from_jsonl(path)
+    assert warnings == [] and len(loaded) == 2
+
+
+def test_blank_line_between_rows_is_still_one_malformed_row(tmp_path):
+    line = _valid_event_line().rstrip(b"\n")
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(line + b"\n\n" + line + b"\n")
+    loaded, warnings = query_service.load_events_from_jsonl(path)
+    assert len(loaded) == 2 and warnings == ["malformed_jsonl_row:2"]
+
+
+@pytest.mark.parametrize("cap", [-1, -5, 1.5, "5", True, False], ids=repr)
+def test_invalid_byte_cap_is_rejected_and_never_disables_the_bound(tmp_path, cap):
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(_valid_event_line() * 50)
+    with pytest.raises(ValueError, match="max_bytes"):
+        query_service.load_events_from_jsonl(path, max_bytes=cap)
+
+
+def test_zero_byte_cap_rejects_any_non_empty_file_as_oversized(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(_valid_event_line())
+    assert query_service.load_events_from_jsonl(path, max_bytes=0, oversized_warning="big") == ([], ["big"])
+
+
+def test_loader_fails_closed_on_nul_path_and_overflowing_cap(tmp_path):
+    assert query_service.load_events_from_jsonl("events\x00.jsonl") == ([], ["jsonl_file_unavailable"])
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(_valid_event_line())
+    assert query_service.load_events_from_jsonl(path, max_bytes=10**30) == ([], ["jsonl_file_unavailable"])
+
+
+def test_overlong_path_component_returns_empty_report_instead_of_raising(monkeypatch, tmp_path):
+    artifacts = _jail(monkeypatch, tmp_path)
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(artifacts / ("a" * 300 + ".jsonl")))
+
+    report = canonical_events._jsonl_report(_query())
+
+    assert report["timeline"]["warnings"] == ["jsonl_read_path_unconfigured"]
+    assert report["timeline"]["events"] == []
+    assert report["read_only"] is True and report["mutated"] is False and report["network_calls"] is False
+
+
+def test_real_symlink_loop_inside_artifacts_returns_empty_report(monkeypatch, tmp_path):
+    artifacts = _jail(monkeypatch, tmp_path)
+    first, second = artifacts / "loop-a.jsonl", artifacts / "loop-b.jsonl"
+    try:
+        first.symlink_to(second)
+        second.symlink_to(first)
+    except OSError:
+        pytest.skip("symlinks are not available on this platform")
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(first))
+
+    report = canonical_events._jsonl_report(_query())
+
+    assert report["timeline"]["warnings"] == ["jsonl_read_path_unconfigured"]
+    assert report["timeline"]["events"] == []
+
+
+def test_symlink_inside_artifacts_pointing_outside_is_forbidden(monkeypatch, tmp_path):
+    artifacts = _jail(monkeypatch, tmp_path)
+    outsider = tmp_path / "outside.jsonl"
+    outsider.write_bytes(_valid_event_line())
+    link = artifacts / "link.jsonl"
+    try:
+        link.symlink_to(outsider)
+    except OSError:
+        pytest.skip("symlinks are not available on this platform")
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(link))
+
+    with pytest.raises(HTTPException) as excinfo:
+        canonical_events._jsonl_report(_query())
+    assert excinfo.value.status_code == 403
+
+
+def test_operator_jsonl_cap_is_exactly_one_mib():
+    assert canonical_events.MAX_JSONL_BYTES == 1_048_576
+
+
+def test_sibling_directory_sharing_the_artifacts_prefix_is_forbidden(monkeypatch, tmp_path):
+    artifacts = _jail(monkeypatch, tmp_path)
+    sibling = tmp_path / (artifacts.name + "_evil")
+    sibling.mkdir()
+    target = sibling / "events.jsonl"
+    target.write_bytes(_valid_event_line())
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(target))
+
+    with pytest.raises(HTTPException) as excinfo:
+        canonical_events._jsonl_report(_query())
+    assert excinfo.value.status_code == 403
+
+
+@pytest.mark.parametrize("error", [OSError("synthetic"), ValueError("synthetic")], ids=["OSError", "ValueError"])
+def test_resolution_oserror_and_valueerror_return_empty_report(monkeypatch, error):
+    class RaisingPath:
+        def __init__(self, _: str):
+            pass
+
+        def resolve(self):
+            raise error
+
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", "synthetic")
+    monkeypatch.setattr(canonical_events, "Path", RaisingPath)
+
+    report = canonical_events._jsonl_report(_query())
+
+    assert report["timeline"]["warnings"] == ["jsonl_read_path_unconfigured"]
+    assert report["read_only"] is True and report["mutated"] is False
+
+
+def test_loader_returns_unavailable_when_the_path_cannot_be_opened(tmp_path):
+    assert query_service.load_events_from_jsonl(tmp_path) == ([], ["jsonl_file_unavailable"])
+    assert query_service.load_events_from_jsonl(tmp_path / "missing.jsonl") == ([], ["jsonl_file_unavailable"])
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are not available on this platform")
+def test_fifo_under_artifacts_is_not_a_file_and_does_not_block(monkeypatch, tmp_path):
+    artifacts = _jail(monkeypatch, tmp_path)
+    fifo = artifacts / "events.jsonl"
+    os.mkfifo(fifo)
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(fifo))
+    outcome: list[dict] = []
+    worker = threading.Thread(target=lambda: outcome.append(canonical_events._jsonl_report(_query())), daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+    if worker.is_alive():  # a regression would block in open(); release it before failing
+        release = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        os.close(release)
+        worker.join(timeout=5)
+        pytest.fail("a FIFO must be rejected as a non-file instead of blocking the read")
+
+    assert outcome[0]["timeline"]["warnings"] == ["jsonl_read_path_unconfigured"]
+    assert outcome[0]["timeline"]["events"] == []
