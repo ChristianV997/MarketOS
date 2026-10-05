@@ -1481,7 +1481,18 @@ def test_win32_open_dispatches_from_the_shared_entry_point_on_windows(monkeypatc
 
 @pytest.mark.parametrize(
     "raw",
-    ["..\\outside.json", "sub\\..\\outside.json", "../outside.json", "sub/../outside.json", "/abs.json", "\\rooted.json", "C:\\x\\y.json", "C:rel.json", "\\\\server\\share\\x.json"],
+    [
+        "..\\outside.json",
+        "sub\\..\\outside.json",
+        "../outside.json",
+        "sub/../outside.json",
+        "sub/../../outside.json",
+        "/abs.json",
+        r"\rooted.json",
+        "C:\\x\\y.json",
+        "C:rel.json",
+        "\\\\server\\share\\x.json",
+    ],
 )
 def test_manifest_paths_are_judged_identically_under_posix_and_windows_rules(tmp_path: Path, raw: str) -> None:
     (tmp_path / "ok.json").write_text("[]", encoding="utf-8")
@@ -1490,11 +1501,33 @@ def test_manifest_paths_are_judged_identically_under_posix_and_windows_rules(tmp
     assert rtd._resolve(tmp_path, "ok.json", label="supplier_inputs.path") == (tmp_path / "ok.json").resolve()
 
 
+def test_posix_literal_backslash_filename_not_normalized_into_separator(tmp_path: Path) -> None:
+    assert not rtd._is_unsafe_relative_path("safe\\name.json")
+    if os.name == "posix":
+        target = tmp_path / "safe\\name.json"
+        target.write_text("[]", encoding="utf-8")
+        assert rtd._resolve(tmp_path, "safe\\name.json", label="supplier_inputs.path") == target.resolve()
+
+
 def test_web_url_paths_are_not_mistaken_for_absolute_local_paths() -> None:
     assert rtd._reference_text("https://example.test/item", "f") == "https://example.test/item"
     assert rtd._reference_text("https://example.test/a/b.json", "f") == "https://example.test/a/b.json"
     assert rtd._reference_text("https://example.test/item?x=1", "f", allow_url_query=True) == "https://example.test/item"
-    for unsafe in ("https://example.test/a/../b", "https://example.test/a\\..\\b", "https://example.test/a\x00b"):
+    for unsafe in (
+        "https://example.test/a/../b",
+        "https://example.test/a\\..\\b",
+        "https://example.test/a\x00b",
+        "http://../x",
+        "https://../x",
+        "http://..",
+        "https://..",
+        "http://./x",
+        "http://:80/x",
+        "http://..:80/x",
+        "https://example.test/item<script>",
+        "javascript:alert(1)",
+        "https://user:abc@example.test/item",
+    ):
         with pytest.raises(ResearchToDecisionError, match="safe reference"):
             rtd._reference_text(unsafe, "f")
     for local in ("/etc/passwd", "C:\\x\\y.json", "\\\\server\\share", "../x.json", "file:///etc/passwd", "fixture:../x"):
@@ -1513,3 +1546,42 @@ def test_web_url_paths_are_not_mistaken_for_absolute_local_paths() -> None:
 def test_web_url_query_and_fragment_reject_nul_before_stripping(reference: str) -> None:
     with pytest.raises(ResearchToDecisionError, match="safe reference"):
         rtd._reference_text(reference, "f", allow_url_query=True)
+
+
+def test_reviewed_url_with_unsafe_components_fails_closed(tmp_path: Path) -> None:
+    observation = tmp_path / "review.json"
+    manifest = {
+        "captured_at": "2026-09-16T09:00:00-06:00",
+        "lane": dict(LANE),
+        "candidates": [{"candidate_id": "x"}],
+        "observation_inputs": [{"path": "review.json", "kind": "reviewed_url"}],
+    }
+    for bad_url in (
+        "https://example.test/item/../forbidden",
+        "http://../x",
+        "https://example.test/item<script>",
+        "javascript:alert(1)",
+        "https://user:abc@example.test/item",
+    ):
+        observation.write_text(json.dumps([{"candidate_id": "x", "url": bad_url}]), encoding="utf-8")
+        with pytest.raises(ResearchToDecisionError, match="safe reference|reviewed_url requires"):
+            build_research_to_decision(manifest, base_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    "source_reference",
+    [
+        "..\\private.json",
+        "/private.json",
+        "C:/private.json",
+        "https://example.test/quote?q=param",
+        "https://example.test/quote/../forbidden",
+        "http://../x",
+        "https://example.test/quote<script>",
+    ],
+)
+def test_cross_platform_source_references_reject_traversal_and_escapes(source_reference: str) -> None:
+    manifest = load_fixture("hydroponics_promising.json")
+    manifest["supplier_inputs"][0]["source_reference"] = source_reference
+    with pytest.raises(ResearchToDecisionError, match="safe reference|query or fragment"):
+        build_research_to_decision(manifest, base_dir=FIXTURES)

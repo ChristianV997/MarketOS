@@ -253,7 +253,7 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
         raise ResearchToDecisionError(f"{field} must be a safe reference")
     parsed = urlparse(reference)
     if parsed.scheme in {"http", "https"}:
-        if not parsed.netloc or parsed.username or parsed.password:
+        if not parsed.netloc or not parsed.hostname or parsed.username or parsed.password:
             raise ResearchToDecisionError(f"{field} must be a safe reference")
         if (parsed.query or parsed.fragment) and not allow_url_query:
             raise ResearchToDecisionError(f"{field} must not contain a query or fragment")
@@ -266,8 +266,13 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
     if parsed.scheme in {"http", "https"}:
         # A URL path is not a filesystem path: its leading "/" is the URL root, not an
         # absolute local path (host-OS ``Path.is_absolute`` disagreed across platforms).
-        # Traversal segments are still rejected.
-        unsafe_path = ".." in _PATH_SEPARATORS.split(path_text)
+        # Traversal segments are still rejected, and hostnames like '..' or '.' are rejected.
+        unsafe_path = (
+            ".." in _PATH_SEPARATORS.split(path_text)
+            or parsed.hostname in {".", ".."}
+            or ".." in _PATH_SEPARATORS.split(parsed.netloc)
+            or any(part in {".", ".."} for part in parsed.netloc.split(":"))
+        )
     else:
         unsafe_path = _is_unsafe_relative_path(path_text)
     if unsafe_path or any(char in reference for char in "<>\r\n\x00"):
