@@ -356,9 +356,9 @@ _OBFUSCATED_DOT_EMAIL = re.compile(
     r"(?:\(\s*dot\s*\)|\[\s*dot\s*\]|\{\s*dot\s*\}|\bdot\b)\s*"
     r"[a-z]{2,24}(?![\w])"
 )
-_NANP = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)[-.\s]?|\d{3}[-.\s])\d{3}[-.\s]\d{4}(?!\d)")
-_INTL_PHONE = re.compile(r"(?<!\w)\+\d{1,3}(?:[-.\s()]+\d{2,4}){2,5}(?!\d)")
-_E164 = re.compile(r"(?<!\w)\+\d{8,15}(?!\d)")
+_NANP = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?(?:\([2-9]\d{2}\)[-.\s]?|[2-9]\d{2}[-.\s]?)[2-9]\d{2}[-.\s]?\d{4}(?!\d)")
+_INTL_PHONE = re.compile(r"(?<!\w)(?:\+|00|011)\d{1,3}(?:[-.\s()]+\d{2,4}){2,5}(?!\d)")
+_E164 = re.compile(r"(?<!\w)(?:\+|00|011)\d{8,15}(?!\d)")
 _CONTACT_SCHEME = re.compile(r"(?i)(?:mailto|tel)\s*:")
 _INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200c\u200d\ufeff\u2060\u180e"), None)
 _DASHES = str.maketrans({"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-"})
@@ -399,7 +399,10 @@ def _contact_like(value: str) -> bool:
     ):
         return True
     match = _INTL_PHONE.search(text)
-    return match is not None and len(re.sub(r"\D", "", match.group(0))) >= 8
+    if match is not None and len(re.sub(r"\D", "", match.group(0))) >= 8:
+        return True
+    digits = re.sub(r"\D", "", text)
+    return not re.search(r"[a-zA-Z]", text) and 10 <= len(digits) <= 15
 
 
 def _header_is_sensitive(header: str) -> bool:
