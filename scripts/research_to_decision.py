@@ -240,6 +240,26 @@ def _is_unsafe_relative_path(text: str) -> bool:
     return False
 
 
+def _parse_url(value: str, error: str):
+    """``urlparse`` that fails closed: a malformed (e.g. unterminated IPv6) URL raises the module error."""
+    try:
+        return urlparse(value)
+    except ValueError:
+        raise ResearchToDecisionError(error) from None
+
+
+def _is_well_formed_http_host(hostname: str | None) -> bool:
+    """Reject empty, dot-only/dot-leading, ``..``-containing or non-printable host names.
+
+    Whitespace, control characters, a backslash or a percent sign never belong in a
+    host here (``http://a b/x``, ``http://%2e%2e/x``, ``http://e.test\\x``), and a
+    host such as ``..`` or ``a..b`` is malformed rather than a harmless name.
+    """
+    if not hostname or hostname.startswith(".") or ".." in hostname:
+        return False
+    return not any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 or ch in "\\%" for ch in hostname)
+
+
 def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_query: bool = False) -> str:
     reference = _text(value, field, required=required)
     if not reference:
@@ -248,9 +268,17 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
     # cannot be silently normalized out of an operator-supplied reference.
     if "\x00" in reference:
         raise ResearchToDecisionError(f"{field} must be a safe reference")
-    parsed = urlparse(reference)
+    try:
+        parsed = urlparse(reference)
+        # ``port`` raises ValueError for a non-numeric or out-of-range port, and
+        # ``urlparse`` for a malformed bracketed (IPv6) host; both must fail closed
+        # as a ResearchToDecisionError, never escape as a bare ValueError.
+        if parsed.scheme in {"http", "https"}:
+            parsed.port
+    except ValueError:
+        raise ResearchToDecisionError(f"{field} must be a safe reference") from None
     if parsed.scheme in {"http", "https"}:
-        if not parsed.netloc or not parsed.hostname or parsed.username or parsed.password:
+        if not parsed.netloc or not _is_well_formed_http_host(parsed.hostname) or parsed.username or parsed.password:
             raise ResearchToDecisionError(f"{field} must be a safe reference")
         if (parsed.query or parsed.fragment) and not allow_url_query:
             raise ResearchToDecisionError(f"{field} must not contain a query or fragment")
@@ -907,7 +935,7 @@ def _check_lane(records: list[Any], lane: Mapping[str, Any], *, label: str) -> l
             warnings.append(f"destination_missing:{label}")
         source_url = str(getattr(record, "source_url", "") or "")
         if source_url:
-            parsed = urlparse(source_url)
+            parsed = _parse_url(source_url, f"unsafe source_url in {label}")
             if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
                 raise ResearchToDecisionError(f"unsafe source_url in {label}")
     return sorted(set(warnings))
@@ -1213,8 +1241,10 @@ def _load_observation(path: Path, entry: Mapping[str, Any], *, lane: Mapping[str
     candidate_evidence_refs: dict[str, list[str]] = {}
     for row in rows:
         url = row.get("url") or row.get("source_url")
-        if kind == "reviewed_url" and (not isinstance(url, str) or urlparse(url).scheme not in {"http", "https"} or not urlparse(url).netloc):
-            raise ResearchToDecisionError(f"reviewed_url requires an http(s) URL: {label}")
+        if kind == "reviewed_url":
+            reviewed = _parse_url(url, f"reviewed_url requires an http(s) URL: {label}") if isinstance(url, str) else None
+            if reviewed is None or reviewed.scheme not in {"http", "https"} or not reviewed.netloc:
+                raise ResearchToDecisionError(f"reviewed_url requires an http(s) URL: {label}")
         reference_value = row.get("source_reference") or row.get("document_reference") or (url if kind == "reviewed_url" else row.get("source")) or entry.get("source_reference") or label
         reference_id = _evidence_reference(reference_value, f"{kind}.source_reference", allow_url_query=kind == "reviewed_url")
         method = _text(row.get("extraction_method") or entry.get("extraction_method") or ("operator_reviewed_url" if kind == "reviewed_url" else "manual_document_review"), f"{kind}.extraction_method", required=True)

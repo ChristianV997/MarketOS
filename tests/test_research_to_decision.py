@@ -1585,3 +1585,57 @@ def test_cross_platform_source_references_reject_traversal_and_escapes(source_re
     manifest["supplier_inputs"][0]["source_reference"] = source_reference
     with pytest.raises(ResearchToDecisionError, match="safe reference|query or fragment"):
         build_research_to_decision(manifest, base_dir=FIXTURES)
+
+
+_MALFORMED_HTTP_HOSTS = [
+    "http://[::1",  # unterminated bracketed host: urlparse itself raises ValueError
+    "https://e.test.%2e%2e%2e[::1]h",
+    "http://a b/x",
+    "http://\t//x",
+    "http://.../x",
+    "http://a..b/x",
+    "http://.example.test/x",
+    "http://%2e%2e/x",
+    "http://e.test\\x",
+    "http://e.test:abc/x",
+    "http://e.test:99999/x",
+]
+
+
+@pytest.mark.parametrize("url", _MALFORMED_HTTP_HOSTS)
+def test_malformed_http_hosts_and_ports_fail_closed_with_the_module_error(url: str) -> None:
+    for allow in (False, True):
+        with pytest.raises(ResearchToDecisionError, match="safe reference"):  # never a bare ValueError
+            rtd._reference_text(url, "f", allow_url_query=allow)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://[::1]/x", "http://[::1]:8080/x", "https://e.test:8443/a", "https://example.test./x", "https://bücher.example/x"],
+)
+def test_well_formed_http_hosts_ipv6_ports_and_idn_are_still_accepted(url: str) -> None:
+    assert rtd._reference_text(url, "f") == url
+
+
+def test_reviewed_url_with_a_malformed_host_fails_closed_end_to_end(tmp_path: Path) -> None:
+    observation = tmp_path / "review.json"
+    manifest = {
+        "captured_at": "2026-09-16T09:00:00-06:00",
+        "lane": dict(LANE),
+        "candidates": [{"candidate_id": "x"}],
+        "observation_inputs": [{"path": "review.json", "kind": "reviewed_url"}],
+    }
+    for bad_url, expected in (
+        ("http://[::1", "requires an http"),
+        ("http://a b/x", "safe reference"),
+        ("http://e.test:abc/x", "safe reference"),
+    ):
+        observation.write_text(json.dumps({"candidate_id": "x", "url": bad_url}), encoding="utf-8")
+        with pytest.raises(ResearchToDecisionError, match=expected):
+            build_research_to_decision(manifest, base_dir=tmp_path)
+
+
+def test_record_source_url_with_a_malformed_host_fails_closed() -> None:
+    record = types.SimpleNamespace(source_url="http://[::1")
+    with pytest.raises(ResearchToDecisionError, match="unsafe source_url"):
+        rtd._check_lane([record], dict(LANE), label="supplier_inputs")
