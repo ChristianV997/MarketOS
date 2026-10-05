@@ -187,6 +187,503 @@ def _evidence_state(refs: Sequence[EvidenceRef], explicit: str) -> str:
     return "observed"
 
 
+def reconcile_evidence_refs(refs: Sequence[EvidenceRef]) -> tuple[EvidenceRef, ...]:
+    """Deterministically deduplicate and reconcile evidence references by evidence_id.
+
+    ISO 8601 timestamps are compared by UTC instant (naive timestamps are
+    interpreted as UTC). Empty or unparseable values retain deterministic
+    lexical ordering below parseable timestamps. Equal instants are tie-broken
+    by canonical serialization. Results are sorted by evidence_id.
+    """
+    from datetime import datetime, timezone
+
+    def captured_at_key(value: str) -> tuple[int, datetime | str]:
+        if not value:
+            return (0, "")
+        try:
+            captured_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return (0, value)
+        if captured_at.tzinfo is None:
+            captured_at = captured_at.replace(tzinfo=timezone.utc)
+        return (1, captured_at.astimezone(timezone.utc))
+
+    by_id: dict[str, EvidenceRef] = {}
+    for ref in refs:
+        if not isinstance(ref, EvidenceRef):
+            raise ValueError("invalid evidence_ref")
+        existing = by_id.get(ref.evidence_id)
+        if existing is None:
+            by_id[ref.evidence_id] = ref
+            continue
+        ref_captured = captured_at_key(ref.captured_at)
+        existing_captured = captured_at_key(existing.captured_at)
+        if ref_captured > existing_captured:
+            by_id[ref.evidence_id] = ref
+        elif ref_captured == existing_captured:
+            if canonical_json(ref.to_dict()) > canonical_json(existing.to_dict()):
+                by_id[ref.evidence_id] = ref
+    return tuple(sorted(by_id.values(), key=lambda item: item.evidence_id))
+
+
+# ---------------------------------------------------------------------------
+# Multi-Location Inventory & Reservation Contracts
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LocationStock:
+    """Offline snapshot of inventory availability at one fulfillment location."""
+
+    location_id: str
+    available_units: int
+    priority: int = 0
+    warehouse_name: str = ""
+    evidence_ref: EvidenceRef | None = None
+    evidence_state: str = "unknown"
+
+    def __post_init__(self) -> None:
+        _text(self.location_id, "location_id")
+        _text(self.warehouse_name, "warehouse_name", allow_empty=True)
+        if not isinstance(self.available_units, int) or isinstance(self.available_units, bool) or self.available_units < 0:
+            raise ValueError("available_units must be a non-negative integer")
+        if not isinstance(self.priority, int) or isinstance(self.priority, bool):
+            raise ValueError("priority must be an integer")
+        if self.evidence_state not in EVIDENCE_STATES:
+            raise ValueError("invalid evidence_state")
+        if self.evidence_ref is not None and not isinstance(self.evidence_ref, EvidenceRef):
+            raise ValueError("invalid evidence_ref")
+        _assert_safe_serialized(self.to_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "location_id": self.location_id,
+            "available_units": self.available_units,
+            "priority": self.priority,
+            "warehouse_name": self.warehouse_name,
+            "evidence_ref": self.evidence_ref.to_dict() if self.evidence_ref else None,
+            "evidence_state": self.evidence_state,
+        }
+
+
+@dataclass(frozen=True)
+class LocationAllocation:
+    """Deterministic allocation of units to a specific fulfillment location."""
+
+    location_id: str
+    allocated_units: int
+    warehouse_name: str = ""
+    evidence_ref: EvidenceRef | None = None
+
+    def __post_init__(self) -> None:
+        _text(self.location_id, "location_id")
+        _text(self.warehouse_name, "warehouse_name", allow_empty=True)
+        if not isinstance(self.allocated_units, int) or isinstance(self.allocated_units, bool) or self.allocated_units <= 0:
+            raise ValueError("allocated_units must be a positive integer")
+        if self.evidence_ref is not None and not isinstance(self.evidence_ref, EvidenceRef):
+            raise ValueError("invalid evidence_ref")
+        _assert_safe_serialized(self.to_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "location_id": self.location_id,
+            "allocated_units": self.allocated_units,
+            "warehouse_name": self.warehouse_name,
+            "evidence_ref": self.evidence_ref.to_dict() if self.evidence_ref else None,
+        }
+
+
+@dataclass(frozen=True)
+class CompensatingRelease:
+    """Audit record of a compensating release undoing an inventory reservation."""
+
+    release_id: str
+    reservation_id: str
+    order_id: str
+    released_units: int
+    released_allocations: tuple[LocationAllocation, ...]
+    reason: str = "lifecycle_compensation"
+    idempotent: bool = False
+    status: str = "completed"
+    occurred_at: float = 0.0
+
+    def __post_init__(self) -> None:
+        _text(self.release_id, "release_id")
+        _text(self.reservation_id, "reservation_id")
+        _text(self.order_id, "order_id")
+        _text(self.reason, "reason")
+        if not isinstance(self.released_units, int) or isinstance(self.released_units, bool) or self.released_units < 0:
+            raise ValueError("released_units must be a non-negative integer")
+        if self.status not in {"completed", "noop", "failed", "blocked"}:
+            raise ValueError("invalid release status")
+        if not isinstance(self.released_allocations, tuple) or any(not isinstance(a, LocationAllocation) for a in self.released_allocations):
+            raise ValueError("invalid released_allocations")
+        if self.released_units != sum(a.allocated_units for a in self.released_allocations):
+            raise ValueError("released_units must equal sum of released_allocations (quantity conservation)")
+        _assert_safe_serialized(self.to_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "release_id": self.release_id,
+            "reservation_id": self.reservation_id,
+            "order_id": self.order_id,
+            "released_units": self.released_units,
+            "released_allocations": [a.to_dict() for a in self.released_allocations],
+            "reason": self.reason,
+            "idempotent": self.idempotent,
+            "status": self.status,
+            "occurred_at": self.occurred_at,
+        }
+
+
+@dataclass(frozen=True)
+class InventoryReservation:
+    """Deterministic multi-location inventory reservation for a simulated order."""
+
+    reservation_id: str
+    order_id: str
+    sku: str
+    requested_units: int
+    allocated_units: int
+    allocations: tuple[LocationAllocation, ...]
+    status: str = "reserved"
+    released_units: int = 0
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+    evidence_state: str = "unknown"
+    blockers: tuple[str, ...] = ()
+    created_at: float = 0.0
+    updated_at: float = 0.0
+
+    def __post_init__(self) -> None:
+        _text(self.reservation_id, "reservation_id")
+        _text(self.order_id, "order_id")
+        _text(self.sku, "sku")
+        if not isinstance(self.requested_units, int) or isinstance(self.requested_units, bool) or self.requested_units <= 0:
+            raise ValueError("requested_units must be a positive integer")
+        if not isinstance(self.allocated_units, int) or isinstance(self.allocated_units, bool) or self.allocated_units < 0:
+            raise ValueError("allocated_units must be a non-negative integer")
+        if not isinstance(self.released_units, int) or isinstance(self.released_units, bool) or self.released_units < 0:
+            raise ValueError("released_units must be a non-negative integer")
+        if self.released_units > self.allocated_units:
+            raise ValueError("released_units cannot exceed allocated_units")
+        if self.status not in {"reserved", "partially_reserved", "released", "partially_released", "failed", "blocked"}:
+            raise ValueError("invalid reservation status")
+        if not isinstance(self.allocations, tuple) or any(not isinstance(a, LocationAllocation) for a in self.allocations):
+            raise ValueError("invalid allocations")
+        if self.allocated_units != sum(a.allocated_units for a in self.allocations):
+            raise ValueError("allocated_units must equal sum of allocations (quantity conservation)")
+        if self.evidence_state not in EVIDENCE_STATES:
+            raise ValueError("invalid evidence_state")
+        if not isinstance(self.evidence_refs, tuple) or any(not isinstance(r, EvidenceRef) for r in self.evidence_refs):
+            raise ValueError("invalid evidence_refs")
+        if len(self.evidence_refs) > MAX_EVIDENCE_REFS:
+            raise ValueError("too many evidence_refs")
+        _assert_safe_serialized(self.to_dict())
+
+    @property
+    def is_fully_allocated(self) -> bool:
+        return self.allocated_units == self.requested_units and self.status in {"reserved", "released", "partially_released"}
+
+    @property
+    def is_released(self) -> bool:
+        return self.status == "released" or (self.allocated_units > 0 and self.released_units == self.allocated_units)
+
+    @property
+    def remaining_reserved_units(self) -> int:
+        return max(0, self.allocated_units - self.released_units)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "reservation_id": self.reservation_id,
+            "order_id": self.order_id,
+            "sku": self.sku,
+            "requested_units": self.requested_units,
+            "allocated_units": self.allocated_units,
+            "allocations": [a.to_dict() for a in self.allocations],
+            "status": self.status,
+            "released_units": self.released_units,
+            "remaining_reserved_units": self.remaining_reserved_units,
+            "evidence_refs": [r.to_dict() for r in self.evidence_refs],
+            "evidence_state": self.evidence_state,
+            "blockers": list(self.blockers),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @property
+    def fingerprint(self) -> str:
+        return hashlib.sha256(canonical_json(self.to_dict()).encode("utf-8")).hexdigest()
+
+
+def allocate_multi_location_inventory(
+    order_id: str,
+    sku: str,
+    requested_units: int,
+    locations: Sequence[LocationStock],
+    *,
+    reservation_id: str = "",
+    allow_partial: bool = False,
+    require_verified_evidence: bool = False,
+    occurred_at: float = 0.0,
+) -> InventoryReservation:
+    """Deterministically allocate requested units across multiple inventory locations.
+
+    Enforces:
+    - Deterministic ordering: sorted by location priority (ascending), then location_id (ascending).
+    - Quantity conservation: total allocated units equals sum of individual location allocations.
+    - Fail-closed behavior:
+      - If evidence is missing/rejected/incomplete when required, allocation is blocked.
+      - If requested_units cannot be met and allow_partial is False, allocation is blocked.
+      - If any location has negative or invalid stock, fail-closed.
+    - Auditability: aggregates and reconciles evidence references from all contributing locations.
+    """
+    _text(order_id, "order_id")
+    _text(sku, "sku")
+    if not isinstance(requested_units, int) or isinstance(requested_units, bool) or requested_units <= 0:
+        raise ValueError("requested_units must be a positive integer")
+    if not isinstance(occurred_at, (int, float)) or occurred_at < 0:
+        raise ValueError("occurred_at must be a non-negative epoch")
+
+    res_id = reservation_id or f"res:{order_id}:{sku}"
+    _text(res_id, "reservation_id")
+
+    for loc in locations:
+        if not isinstance(loc, LocationStock):
+            raise ValueError("locations must contain LocationStock instances")
+
+    loc_by_id: dict[str, LocationStock] = {}
+    for loc in locations:
+        if loc.location_id in loc_by_id:
+            existing = loc_by_id[loc.location_id]
+            if (loc.priority, -loc.available_units) < (existing.priority, -existing.available_units):
+                loc_by_id[loc.location_id] = loc
+        else:
+            loc_by_id[loc.location_id] = loc
+
+    sorted_locs = sorted(loc_by_id.values(), key=lambda l: (l.priority, l.location_id))
+
+    blockers: list[str] = []
+    loc_refs: list[EvidenceRef] = []
+    for loc in sorted_locs:
+        if loc.evidence_ref:
+            loc_refs.append(loc.evidence_ref)
+        if loc.evidence_state in {"missing", "rejected"}:
+            blockers.append(f"location_evidence_{loc.evidence_state}:{loc.location_id}")
+        elif require_verified_evidence and loc.evidence_state != "verified":
+            blockers.append(f"location_evidence_unverified:{loc.location_id}")
+
+    reconciled_refs = reconcile_evidence_refs(loc_refs)
+    evidence_state = _evidence_state(reconciled_refs, "observed" if reconciled_refs else "unknown")
+
+    if blockers:
+        return InventoryReservation(
+            reservation_id=res_id,
+            order_id=order_id,
+            sku=sku,
+            requested_units=requested_units,
+            allocated_units=0,
+            allocations=(),
+            status="blocked",
+            released_units=0,
+            evidence_refs=reconciled_refs,
+            evidence_state=evidence_state,
+            blockers=tuple(sorted(blockers)),
+            created_at=occurred_at,
+            updated_at=occurred_at,
+        )
+
+    allocations: list[LocationAllocation] = []
+    remaining = requested_units
+
+    for loc in sorted_locs:
+        if remaining <= 0:
+            break
+        if loc.available_units <= 0:
+            continue
+        take = min(remaining, loc.available_units)
+        allocations.append(
+            LocationAllocation(
+                location_id=loc.location_id,
+                allocated_units=take,
+                warehouse_name=loc.warehouse_name,
+                evidence_ref=loc.evidence_ref,
+            )
+        )
+        remaining -= take
+
+    total_allocated = sum(a.allocated_units for a in allocations)
+
+    if remaining > 0 and not allow_partial:
+        return InventoryReservation(
+            reservation_id=res_id,
+            order_id=order_id,
+            sku=sku,
+            requested_units=requested_units,
+            allocated_units=0,
+            allocations=(),
+            status="blocked",
+            released_units=0,
+            evidence_refs=reconciled_refs,
+            evidence_state=evidence_state,
+            blockers=("insufficient_multi_location_stock",),
+            created_at=occurred_at,
+            updated_at=occurred_at,
+        )
+
+    status = "reserved" if total_allocated == requested_units else ("partially_reserved" if total_allocated > 0 else "blocked")
+    res_blockers = () if status != "blocked" else ("zero_stock_available",)
+
+    return InventoryReservation(
+        reservation_id=res_id,
+        order_id=order_id,
+        sku=sku,
+        requested_units=requested_units,
+        allocated_units=total_allocated,
+        allocations=tuple(allocations),
+        status=status,
+        released_units=0,
+        evidence_refs=reconciled_refs,
+        evidence_state=evidence_state,
+        blockers=res_blockers,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
+
+
+def compensate_reservation(
+    reservation: InventoryReservation,
+    *,
+    release_id: str = "",
+    reason: str = "lifecycle_compensation",
+    units_to_release: int | None = None,
+    occurred_at: float = 0.0,
+) -> tuple[InventoryReservation, CompensatingRelease]:
+    """Idempotently release allocated multi-location inventory back to available stock.
+
+    Enforces:
+    - Idempotency: Calling compensate on an already released or unallocated reservation is a safe no-op.
+    - Quantity conservation: Total released units across locations exactly equals the reduction in reserved units.
+    - Fail-closed validation: Reject negative or oversized release requests.
+    - Auditability: Produces a CompensatingRelease record capturing all released location allocations.
+    """
+    if not isinstance(reservation, InventoryReservation):
+        raise ValueError("invalid reservation")
+    _text(reason, "reason")
+    if not isinstance(occurred_at, (int, float)) or occurred_at < 0:
+        raise ValueError("occurred_at must be a non-negative epoch")
+
+    rel_id = release_id or f"rel:{reservation.reservation_id}:{int(occurred_at * 1000)}"
+    _text(rel_id, "release_id")
+
+    remaining = reservation.remaining_reserved_units
+
+    if remaining == 0 or reservation.status in {"released", "blocked", "failed"} or reservation.allocated_units == 0:
+        noop_release = CompensatingRelease(
+            release_id=rel_id,
+            reservation_id=reservation.reservation_id,
+            order_id=reservation.order_id,
+            released_units=0,
+            released_allocations=(),
+            reason=reason,
+            idempotent=True,
+            status="noop",
+            occurred_at=occurred_at,
+        )
+        return reservation, noop_release
+
+    if units_to_release is not None:
+        if not isinstance(units_to_release, int) or isinstance(units_to_release, bool) or units_to_release <= 0:
+            raise ValueError("units_to_release must be a positive integer")
+        if units_to_release > remaining:
+            raise ValueError(f"cannot release {units_to_release} units; only {remaining} remaining reserved")
+        release_target = units_to_release
+    else:
+        release_target = remaining
+
+    # Compute unreleased allocation amounts (FIFO order of remaining allocations)
+    unreleased_allocs: list[LocationAllocation] = []
+    rem_active = remaining
+    for alloc in reservation.allocations:
+        if rem_active <= 0:
+            break
+        avail = min(rem_active, alloc.allocated_units)
+        if avail > 0:
+            unreleased_allocs.append(
+                LocationAllocation(
+                    location_id=alloc.location_id,
+                    allocated_units=avail,
+                    warehouse_name=alloc.warehouse_name,
+                    evidence_ref=alloc.evidence_ref,
+                )
+            )
+            rem_active -= avail
+
+    # Release target units in LIFO order from unreleased allocations
+    need_release = release_target
+    released_list: list[LocationAllocation] = []
+
+    for alloc in reversed(unreleased_allocs):
+        if need_release <= 0:
+            break
+        rel_take = min(need_release, alloc.allocated_units)
+        if rel_take > 0:
+            released_list.append(
+                LocationAllocation(
+                    location_id=alloc.location_id,
+                    allocated_units=rel_take,
+                    warehouse_name=alloc.warehouse_name,
+                    evidence_ref=alloc.evidence_ref,
+                )
+            )
+            need_release -= rel_take
+
+    released_tuple = tuple(sorted(released_list, key=lambda a: a.location_id))
+    new_released_total = reservation.released_units + release_target
+    new_status = "released" if new_released_total == reservation.allocated_units else "partially_released"
+
+    updated_res = replace(
+        reservation,
+        status=new_status,
+        released_units=new_released_total,
+        updated_at=occurred_at,
+    )
+    release_record = CompensatingRelease(
+        release_id=rel_id,
+        reservation_id=reservation.reservation_id,
+        order_id=reservation.order_id,
+        released_units=release_target,
+        released_allocations=released_tuple,
+        reason=reason,
+        idempotent=False,
+        status="completed",
+        occurred_at=occurred_at,
+    )
+    return updated_res, release_record
+
+
+def release_inventory_reservation(
+    reservation: InventoryReservation,
+    *,
+    release_id: str = "",
+    reason: str = "lifecycle_compensation",
+    units_to_release: int | None = None,
+    occurred_at: float = 0.0,
+) -> tuple[InventoryReservation, CompensatingRelease]:
+    """Alias for compensate_reservation."""
+    return compensate_reservation(
+        reservation,
+        release_id=release_id,
+        reason=reason,
+        units_to_release=units_to_release,
+        occurred_at=occurred_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Responsibility & Scenario Models
+# ---------------------------------------------------------------------------
+
+
 @dataclass(frozen=True)
 class FulfillmentResponsibilityMap:
     """Accountability and route contract for one simulated order."""
@@ -264,6 +761,9 @@ class FulfillmentRiskScenario:
     flags: tuple[str, ...] = ()
     evidence_refs: tuple[EvidenceRef, ...] = ()
     evidence_state: str = "unknown"
+    locations: tuple[LocationStock, ...] = ()
+    requested_units: int = 1
+    reservation: InventoryReservation | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("scenario_id", "order_id", "candidate_id", "workspace_id"):
@@ -292,6 +792,12 @@ class FulfillmentRiskScenario:
             raise ValueError("invalid evidence_refs")
         if len(self.evidence_refs) > MAX_EVIDENCE_REFS:
             raise ValueError("too many evidence_refs")
+        if not isinstance(self.locations, tuple) or any(not isinstance(loc, LocationStock) for loc in self.locations):
+            raise ValueError("invalid locations")
+        if not isinstance(self.requested_units, int) or isinstance(self.requested_units, bool) or self.requested_units <= 0:
+            raise ValueError("requested_units must be a positive integer")
+        if self.reservation is not None and not isinstance(self.reservation, InventoryReservation):
+            raise ValueError("invalid reservation")
         _assert_safe_serialized(self.to_dict())
 
     @property
@@ -313,6 +819,9 @@ class FulfillmentRiskScenario:
             "flags": list(self.flags),
             "evidence_state": self.evidence_state,
             "evidence_refs": [item.to_dict() for item in self.evidence_refs],
+            "locations": [item.to_dict() for item in self.locations],
+            "requested_units": self.requested_units,
+            "reservation": self.reservation.to_dict() if self.reservation else None,
         }
 
 
@@ -433,6 +942,8 @@ class FulfillmentRiskReport:
     economics: UnitEconomicsResult
     port_observations: tuple[PortObservation, ...]
     events: tuple[Event, ...] = ()
+    reservation: InventoryReservation | None = None
+    compensating_release: CompensatingRelease | None = None
     dry_run: bool = True
     live_action_allowed: bool = False
     provider_calls: bool = False
@@ -483,6 +994,10 @@ class FulfillmentRiskReport:
             "external_mutations": self.external_mutations,
             "database_writes": self.database_writes,
         }
+        if self.reservation is not None:
+            result["reservation"] = self.reservation.to_dict()
+        if self.compensating_release is not None:
+            result["compensating_release"] = self.compensating_release.to_dict()
         serialized = canonical_json(result)
         _assert_safe_serialized(result)
         if len(serialized.encode("utf-8")) > MAX_REPORT_BYTES:
@@ -618,6 +1133,27 @@ def project_fulfillment_events(report: FulfillmentRiskReport, *, occurred_at: fl
         )
     ]
     for index, state in enumerate(report.state_path, start=1):
+        state_payload: dict[str, Any] = {
+            "state": state,
+            "legacy_stage": LEGACY_STAGE_MAP[state],
+            "state_index": index,
+            "risk_flags": list(report.risk_flags),
+        }
+        state_metadata: dict[str, Any] = {
+            **_NO_AUTHORITY_METADATA,
+            "idempotency_key": f"{report.scenario_id}:{index:03d}:{state}",
+            "evidence_ids": [item.evidence_id for item in report.evidence_refs],
+        }
+        if state == "stock_confirmed" and report.reservation is not None:
+            state_payload["reservation_id"] = report.reservation.reservation_id
+            state_payload["allocated_units"] = report.reservation.allocated_units
+            state_payload["reservation_status"] = report.reservation.status
+            state_metadata["reservation_id"] = report.reservation.reservation_id
+        if state in {"cancelled", "failed_delivery"} and report.compensating_release is not None:
+            state_payload["compensating_release_id"] = report.compensating_release.release_id
+            state_payload["released_units"] = report.compensating_release.released_units
+            state_metadata["compensating_release_id"] = report.compensating_release.release_id
+
         events.append(
             Event(
                 f"{report.scenario_id}:{index:03d}:{state}",
@@ -630,19 +1166,29 @@ def project_fulfillment_events(report: FulfillmentRiskReport, *, occurred_at: fl
                 causation_id=events[-1].event_id,
                 correlation_id=report.scenario_id,
                 source="evaluation.commerce.fulfillment_risk_lifecycle",
-                payload={
-                    "state": state,
-                    "legacy_stage": LEGACY_STAGE_MAP[state],
-                    "state_index": index,
-                    "risk_flags": list(report.risk_flags),
-                },
-                metadata={
-                    **_NO_AUTHORITY_METADATA,
-                    "idempotency_key": f"{report.scenario_id}:{index:03d}:{state}",
-                    "evidence_ids": [item.evidence_id for item in report.evidence_refs],
-                },
+                payload=state_payload,
+                metadata=state_metadata,
             )
         )
+    completed_payload: dict[str, Any] = {
+        "current_state": report.current_state,
+        "status": report.status,
+        "blockers": list(report.blockers),
+        "next_human_action": report.next_human_action,
+    }
+    completed_metadata: dict[str, Any] = {
+        **_NO_AUTHORITY_METADATA,
+        "evidence_ids": [item.evidence_id for item in report.evidence_refs],
+    }
+    if report.reservation is not None:
+        completed_payload["reservation_id"] = report.reservation.reservation_id
+        completed_payload["reservation_status"] = report.reservation.status
+        completed_metadata["reservation_id"] = report.reservation.reservation_id
+    if report.compensating_release is not None:
+        completed_payload["compensating_release_id"] = report.compensating_release.release_id
+        completed_payload["released_units"] = report.compensating_release.released_units
+        completed_metadata["compensating_release_id"] = report.compensating_release.release_id
+
     events.append(
         Event(
             f"{report.scenario_id}:completed",
@@ -655,13 +1201,8 @@ def project_fulfillment_events(report: FulfillmentRiskReport, *, occurred_at: fl
             causation_id=events[-1].event_id,
             correlation_id=report.scenario_id,
             source="evaluation.commerce.fulfillment_risk_lifecycle",
-            payload={
-                "current_state": report.current_state,
-                "status": report.status,
-                "blockers": list(report.blockers),
-                "next_human_action": report.next_human_action,
-            },
-            metadata={**_NO_AUTHORITY_METADATA, "evidence_ids": [item.evidence_id for item in report.evidence_refs]},
+            payload=completed_payload,
+            metadata=completed_metadata,
         )
     )
     return tuple(events)
@@ -683,7 +1224,41 @@ def run_fulfillment_risk_dry_run(
         lane=scenario.lane,
         assumptions=scenario.assumptions,
     )
-    all_refs = tuple(dict.fromkeys((*scenario.evidence_refs, *scenario.responsibilities.evidence_refs, *economics.evidence_refs)))
+
+    reservation: InventoryReservation | None = None
+    compensating_release: CompensatingRelease | None = None
+
+    if scenario.locations:
+        sku = (
+            scenario.supplier_offer.supplier_sku
+            if scenario.supplier_offer and scenario.supplier_offer.supplier_sku
+            else (scenario.catalog_item_id or scenario.candidate_id)
+        )
+        reservation = allocate_multi_location_inventory(
+            order_id=scenario.order_id,
+            sku=sku,
+            requested_units=scenario.requested_units,
+            locations=scenario.locations,
+            reservation_id=f"res:{scenario.order_id}",
+            occurred_at=occurred_at,
+        )
+    elif scenario.reservation is not None:
+        reservation = scenario.reservation
+
+    extra_refs: list[EvidenceRef] = []
+    if scenario.locations:
+        for loc in scenario.locations:
+            if loc.evidence_ref:
+                extra_refs.append(loc.evidence_ref)
+    if reservation and reservation.evidence_refs:
+        extra_refs.extend(reservation.evidence_refs)
+
+    all_refs = reconcile_evidence_refs((
+        *scenario.evidence_refs,
+        *scenario.responsibilities.evidence_refs,
+        *economics.evidence_refs,
+        *extra_refs,
+    ))
     evidence_state = _evidence_state(all_refs, scenario.evidence_state)
     observations = _observe_ports(scenario, adapter)
     blockers = set(scenario.responsibilities.blockers)
@@ -696,7 +1271,26 @@ def run_fulfillment_risk_dry_run(
             blockers.add(f"blocked_{observation.capability}")
         elif observation.status == "unavailable":
             blockers.add(f"unavailable_{observation.capability}")
-    risk_flags = _risk_flags(scenario, scenario.current_state, observations)
+
+    risk_flags = set(_risk_flags(scenario, scenario.current_state, observations))
+
+    if reservation is not None:
+        if reservation.blockers:
+            blockers.update(reservation.blockers)
+            risk_flags.add("inventory_reservation_blocked")
+        elif reservation.status == "reserved":
+            risk_flags.add("inventory_reserved")
+        elif reservation.status == "partially_reserved":
+            risk_flags.add("inventory_partially_reserved")
+
+        if set(scenario.state_path) & {"cancelled", "failed_delivery"} and reservation.remaining_reserved_units > 0:
+            reservation, compensating_release = compensate_reservation(
+                reservation,
+                reason=f"lifecycle_compensation:{scenario.current_state}",
+                occurred_at=occurred_at + (len(scenario.state_path) / 1000),
+            )
+            risk_flags.add("inventory_compensated")
+
     warnings = set(risk_flags) - blockers
     status = "blocked" if blockers else "simulated"
     if not blockers and any(item.status != "simulated" for item in observations):
@@ -711,15 +1305,18 @@ def run_fulfillment_risk_dry_run(
         status,
         tuple(sorted(blockers)),
         tuple(sorted(warnings)),
-        _next_action(status, scenario.current_state, sorted(blockers), risk_flags),
+        _next_action(status, scenario.current_state, sorted(blockers), sorted(risk_flags)),
         scenario.responsibilities,
         evidence_state,
         all_refs,
         _sla_risks(scenario, scenario.current_state, observations),
         _reserve_classifications(economics, scenario.state_path, scenario.flags),
-        risk_flags,
+        tuple(sorted(risk_flags)),
         economics,
         observations,
+        events=(),
+        reservation=reservation,
+        compensating_release=compensating_release,
     )
     return replace(report, events=project_fulfillment_events(report, occurred_at=occurred_at))
 
@@ -841,4 +1438,7 @@ __all__ = [
     "FulfillmentPortBundle",
     "FixtureFulfillmentAdapter", "FulfillmentRiskReport", "canonical_json", "project_fulfillment_events",
     "run_fulfillment_risk_dry_run", "append_report_events", "build_named_scenario", "build_named_adapter",
+    "reconcile_evidence_refs",
+    "LocationStock", "LocationAllocation", "InventoryReservation", "CompensatingRelease",
+    "allocate_multi_location_inventory", "compensate_reservation", "release_inventory_reservation",
 ]
