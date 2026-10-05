@@ -22,3 +22,5 @@ Canonical reference for CI artifact handling and failure exporter governance in 
 
 5. **Action Version Governance**:
    - All GitHub Actions references must specify valid, verified action major versions or pinned SHA hashes.
+
+6. **No replacement failure exporter**: deleting the ghost exporter leaves no diagnostic upload. A replacement is not added until an approved producer writes a sanitized, size-capped, allowlisted file. Existing benchmark globs are outside this change and are not a failure-log exporter.

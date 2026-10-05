@@ -122,3 +122,47 @@ def test_ci_workflows_have_bounded_permissions_or_safe_mode():
         assert has_top_permissions or has_job_permissions, (
             f"{wf_path.name} must declare explicit top-level or job-level 'permissions:' block"
         )
+
+
+def _path_is_allowlisted(path_val: str) -> bool:
+    """A diagnostic upload path must be an explicit relative file, not a glob or log/trace/secret capture."""
+    text = path_val.strip()
+    if not text or text in {".", "./"} or "\n" in text or "*" in text or "?" in text or text.endswith("/"):
+        return False
+    lowered = text.lower()
+    banned = ("secret", "trace", "playwright", ".log", "payload", "credential", ".env")
+    if any(token in lowered for token in banned):
+        return False
+    return "/" not in text or text.startswith("artifacts/")
+
+
+def test_synthetic_failure_exports_reject_unrestricted_paths():
+    rejected = [
+        ".",
+        "../secrets",
+        "artifacts/*.log",
+        "*-benchmark.json",
+        "playwright-traces/",
+        "raw-provider-payload.json",
+        ".env",
+        "browser/trace.zip",
+    ]
+    accepted = ["artifacts/semgrep-results.json", "drift_report.json"]
+    assert all(not _path_is_allowlisted(item) for item in rejected)
+    assert all(_path_is_allowlisted(item) for item in accepted)
+
+
+def test_live_uploads_do_not_name_secrets_traces_or_logs():
+    for wf_path in _get_workflow_files():
+        data = _parse_workflow(wf_path)
+        for job in (data.get("jobs") or {}).values():
+            if not isinstance(job, dict):
+                continue
+            for step in job.get("steps") or []:
+                if "upload-artifact" not in str(step.get("uses", "")):
+                    continue
+                path_val = str((step.get("with") or {}).get("path", "")).lower()
+                assert "secret" not in path_val
+                assert "trace" not in path_val
+                assert ".log" not in path_val
+                assert "payload" not in path_val
