@@ -123,9 +123,6 @@ jobs:
         # available cores. Not forced on for local `pytest -q` runs (pytest.ini
         # is unchanged) since output-interleaving makes ad-hoc debugging
         # harder — pass -n auto yourself locally when you want the speedup.
-        env:
-          # Keep test selection disabled; Mergify is advisory-only below.
-          MERGIFY_TEST_SELECTION_ENABLE: "false"
         run: pytest tests/ -v -n auto
 
       - name: Enforce dry-run commerce-cycle p95 budget

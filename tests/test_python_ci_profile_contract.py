@@ -68,9 +68,13 @@ def test_mergify_reporting_is_advisory_only_and_required_tests_remain_blocking()
     test_step = _step(required_test_job, "Run tests")
     advisory_test_step = _step(jobs["quality-advisory"], "pytest --cov (advisory)")
 
-    assert "MERGIFY_TOKEN" not in test_step.get("env", {})
+    required_envs = [required_test_job.get("env", {})] + [
+        step.get("env", {}) for step in required_test_job["steps"]
+    ]
+    assert not any(
+        key.startswith("MERGIFY_") for env in required_envs for key in env
+    )
     assert advisory_test_step["env"]["MERGIFY_TOKEN"] == "${{ secrets.MERGIFY_TOKEN }}"
-    assert test_step["env"]["MERGIFY_TEST_SELECTION_ENABLE"] == "false"
     assert advisory_test_step["env"]["MERGIFY_TEST_SELECTION_ENABLE"] == "false"
     assert test_step["run"] == "pytest tests/ -v -n auto"
     assert test_step.get("continue-on-error") is not True

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from api.routes import service_delivery_workbench as module
 try:
@@ -53,6 +53,12 @@ def _app_with_workspace(workspace_id: str = "workspace-test") -> FastAPI:
 
     app.include_router(module.router)
     return app
+
+
+async def _http_request(app: FastAPI, method: str, path: str):
+    """Issue an in-process HTTP request without Starlette's optional httpx2 client."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        return await client.request(method, path)
 
 
 def _make_row(package_id: str, target_state: str, client_id: str, *, currency: str = "USD", registry_path: str, workspace_name: str | None = None) -> dict:
@@ -159,7 +165,8 @@ def test_workbench_rejects_internal_fields(monkeypatch, tmp_path):
     assert "internal_prompt" not in str(report)
 
 
-def test_workbench_route_is_registered(monkeypatch):
+@pytest.mark.anyio
+async def test_workbench_route_is_registered(monkeypatch):
     from pathlib import Path
 
     monkeypatch.delenv("MARKETOS_SERVICE_DELIVERY_PROJECTION", raising=False)
@@ -168,17 +175,17 @@ def test_workbench_route_is_registered(monkeypatch):
     assert "api.routes.service_delivery_workbench" in text
     assert "include_router(_service_delivery_workbench_router)" in text
     app = _app_with_workspace()
-    client = TestClient(app)
-    response = client.get("/api/service-delivery/workbench")
+    response = await _http_request(app, "GET", "/api/service-delivery/workbench")
     assert response.status_code == 200
     assert response.json()["live_endpoint"] == "/api/service-delivery/workbench"
     assert response.json()["live_endpoint_status"] == "unavailable"
-    denied = client.post("/api/service-delivery/workbench")
+    denied = await _http_request(app, "POST", "/api/service-delivery/workbench")
     assert denied.status_code == 405
 
 
 @pytest.mark.skipif(not _HAS_PRODUCER, reason="evaluation.companyos.service_delivery_projection not available on this branch")
-def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, tmp_path):
+@pytest.mark.anyio
+async def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, tmp_path):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     path = artifacts / "projection.json"
@@ -219,11 +226,10 @@ def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, t
     assert direct_report["mutated"] is False
     assert len(direct_report["engagements"]) == 11
 
-    # Test via FastAPI TestClient (same canonical workspace_id as above, not
+    # Test over HTTPX's async ASGI client (same canonical workspace_id as above, not
     # the raw "service-delivery-fixture" name)
     app = _app_with_workspace(real_workspace_id)
-    client = TestClient(app)
-    response = client.get("/api/service-delivery/workbench")
+    response = await _http_request(app, "GET", "/api/service-delivery/workbench")
     assert response.status_code == 200
     http_payload = response.json()
     assert http_payload["live_endpoint_status"] == "available_read_only"
@@ -245,14 +251,14 @@ def test_workbench_end_to_end_real_producer_all_priority_packages(monkeypatch, t
     assert http_payload["engagements"][4]["economics"]["contribution"] is None
 
 
-def test_workbench_enforces_rate_limiting_429(monkeypatch):
+@pytest.mark.anyio
+async def test_workbench_enforces_rate_limiting_429(monkeypatch):
     class Denied:
         allowed = False
 
     monkeypatch.setattr(module, "check_rate_limit", lambda policy, key: Denied())
     app = _app_with_workspace()
-    client = TestClient(app)
-    response = client.get("/api/service-delivery/workbench")
+    response = await _http_request(app, "GET", "/api/service-delivery/workbench")
     assert response.status_code == 429
     data = response.json()
     assert data["status"] == "rate_limited"
@@ -473,12 +479,13 @@ def _safe_envelope(rows: list, *, availability: str = "manual_import", version: 
     "intake", "data_inadequate", "eligible", "draft_ready", "client_review",
     "approved", "delivered", "cancelled", "rejected",
 ])
-def test_workbench_serves_supported_lifecycle_states_without_recalculating(monkeypatch, tmp_path, lifecycle):
+@pytest.mark.anyio
+async def test_workbench_serves_supported_lifecycle_states_without_recalculating(monkeypatch, tmp_path, lifecycle):
     contribution = lifecycle not in {"intake", "data_inadequate", "cancelled", "rejected"}
     row = _handcrafted_row(f"eng-{lifecycle}", lifecycle, contribution=contribution, stale=(lifecycle == "intake"))
     _write_projection(monkeypatch, tmp_path, _safe_envelope([row], availability="partial" if lifecycle == "intake" else "manual_import"))
     app = _app_with_workspace()
-    payload = TestClient(app).get("/api/service-delivery/workbench").json()
+    payload = (await _http_request(app, "GET", "/api/service-delivery/workbench")).json()
     assert payload["live_endpoint_status"] == "available_read_only"
     served = payload["engagements"][0]
     assert served["lifecycle_state"] == lifecycle
@@ -493,20 +500,22 @@ def test_workbench_serves_supported_lifecycle_states_without_recalculating(monke
 
 
 @pytest.mark.parametrize("currency", ["USD", "CAD", "MXN"])
-def test_workbench_preserves_currency_labels_without_conversion(monkeypatch, tmp_path, currency):
+@pytest.mark.anyio
+async def test_workbench_preserves_currency_labels_without_conversion(monkeypatch, tmp_path, currency):
     row = _handcrafted_row(f"eng-{currency}", "draft_ready", currency=currency)
     _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
     app = _app_with_workspace()
-    served = TestClient(app).get("/api/service-delivery/workbench").json()["engagements"][0]
+    served = (await _http_request(app, "GET", "/api/service-delivery/workbench")).json()["engagements"][0]
     assert served["economics"]["fee"]["currency"] == currency
     assert served["economics"]["contribution"]["currency"] == currency
 
 
-def test_workbench_keeps_missing_contribution_missing(monkeypatch, tmp_path):
+@pytest.mark.anyio
+async def test_workbench_keeps_missing_contribution_missing(monkeypatch, tmp_path):
     row = _handcrafted_row("eng-missing", "draft_ready", contribution=False)
     _write_projection(monkeypatch, tmp_path, _safe_envelope([row]))
     app = _app_with_workspace()
-    served = TestClient(app).get("/api/service-delivery/workbench").json()["engagements"][0]
+    served = (await _http_request(app, "GET", "/api/service-delivery/workbench")).json()["engagements"][0]
     assert served["economics"]["fee"]["currency"] == "USD"
     assert served["economics"]["contribution"] is None
     assert served["economics"]["frontend_calculates"] is False
@@ -601,7 +610,8 @@ def test_workbench_rejects_row_workspace_mismatch(monkeypatch, tmp_path):
     assert report["diagnostics"] == ["service_delivery_workspace_identity_mismatch"]
 
 
-def test_workbench_source_order_is_preserved_across_clients(monkeypatch, tmp_path):
+@pytest.mark.anyio
+async def test_workbench_source_order_is_preserved_across_clients(monkeypatch, tmp_path):
     rows = [
         _handcrafted_row("eng-z", "delivered", client_id="client-z"),
         _handcrafted_row("eng-a", "intake", contribution=False, client_id="client-a"),
@@ -609,7 +619,7 @@ def test_workbench_source_order_is_preserved_across_clients(monkeypatch, tmp_pat
     ]
     _write_projection(monkeypatch, tmp_path, _safe_envelope(rows))
     app = _app_with_workspace()
-    payload = TestClient(app).get("/api/service-delivery/workbench").json()
+    payload = (await _http_request(app, "GET", "/api/service-delivery/workbench")).json()
     assert [item["engagement_id"] for item in payload["engagements"]] == ["eng-z", "eng-a", "eng-m"]
     assert payload["engagements"][2]["economics"]["fee"]["currency"] == "MXN"
 

@@ -1,6 +1,6 @@
 # ── development / CI tooling ──────────────────────────────────────────────────
-# Not required for production; the canonical test profile includes this file
-# for tests, CI Insights, lint/coverage, and local development.
+# Not required for production; requirements-test.txt includes this file for CI
+# tooling, lint/coverage, and local development.
 ruff==0.16.9
 pytest-cov>=7.1.0
 pytest-mergify==2026.9.24.1
