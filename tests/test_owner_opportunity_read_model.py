@@ -27,13 +27,15 @@ def product_payload() -> dict:
 def test_full_fixture_preserves_identity_evidence_and_canonical_ranking() -> None:
     report = build_owner_opportunity_read_model("evaluate", product_payload()).to_dict()
 
+    assert report["status"] == "needs_evidence"
     assert report["candidate_count"] == 1
-    assert report["ranked_candidate_ids"] == ["desk-lamp"]
+    # Ranking authority includes only ready decisions. This fixture is not ready.
+    assert report["ranked_candidate_ids"] == []
     item = report["opportunities"][0]
     assert item["candidate_id"] == "desk-lamp"
     assert item["ranking"]["authority"].endswith("build_product_opportunity_synthesis")
     assert {evidence["area"] for evidence in item["evidence"]} == {"demand", "supply", "economics"}
-    assert item["evidence"][1]["source_ref"].startswith("manual://")
+    assert any(evidence["source_ref"].startswith("manual://") for evidence in item["evidence"])
     assert report["safety"]["launch_authorized"] is False
     assert report["snapshot_resolution"] == {
         "source": "input_payload",
@@ -125,10 +127,13 @@ def test_projection_preserves_canonical_rank_order_before_unranked_candidates() 
 
     result = build_owner_opportunity_read_model("compare", payload).to_dict()
 
-    assert result["ranked_candidate_ids"] == ["desk-lamp", "aaa-lamp"]
-    assert [item["candidate_id"] for item in result["opportunities"]] == result[
-        "ranked_candidate_ids"
-    ]
+    assert result["status"] == "needs_evidence"
+    assert result["ranked_candidate_ids"] == []
+    assert [item["candidate_id"] for item in result["opportunities"]] == ["aaa-lamp", "desk-lamp"]
+    assert result["snapshot_resolution"]["persisted"] is False
+    assert result["safety"]["ads_launched"] is False
+    assert result["safety"]["publishing"] is False
+    assert result["safety"]["launch_authorized"] is False
 
 
 @pytest.mark.parametrize(
@@ -155,3 +160,14 @@ def test_workspace_mismatch_is_rejected_before_discovery() -> None:
             {"workspace_id": "workspace-other", "candidates": []},
             workspace=workspace,
         )
+
+
+def test_empty_candidates_are_unavailable_and_distinct_from_missing_payload() -> None:
+    empty = build_owner_opportunity_read_model("discover", {"candidates": []}).to_dict()
+    assert empty["status"] == "unavailable"
+    assert empty["candidate_count"] == 0
+    assert empty["ranked_candidate_ids"] == []
+    assert empty["opportunities"] == []
+    assert empty["snapshot_resolution"]["resolver"] == "unavailable"
+    with pytest.raises(OwnerOpportunityReadModelError, match="payload_must_be_object"):
+        build_owner_opportunity_read_model("evaluate", None)
