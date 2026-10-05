@@ -4,6 +4,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import Shell from "./components/layout/Shell";
+import ClientShell from "./components/layout/ClientShell";
 import Dashboard from "./pages/Dashboard";
 import Campaigns from "./pages/Campaigns";
 import Products from "./pages/Products";
@@ -16,6 +17,8 @@ import Services from "./pages/Services";
 import OperatorEventDashboard from "./pages/OperatorEventDashboard";
 import ServiceDeliveryWorkbench from "./pages/ServiceDeliveryWorkbench";
 import FirstPhaseEvidenceCockpitPage from "./pages/FirstPhaseEvidenceCockpit";
+import OwnerResearchPortfolioPage from "./features/owner-research-portfolio/OwnerResearchPortfolioPage";
+import ClientProfileOnboardingPage from "./features/client-crm-profile/ClientProfileOnboardingPage";
 import { initPosthog } from "./lib/posthog";
 
 initPosthog(); // no-op unless VITE_POSTHOG_KEY is set — see lib/posthog.ts
@@ -38,6 +41,16 @@ const router = createBrowserRouter([
       { path: "/operator/events", element: <OperatorEventDashboard /> },
       { path: "/operator/services", element: <ServiceDeliveryWorkbench /> },
       { path: "/operator/first-phase", element: <FirstPhaseEvidenceCockpitPage /> },
+      { path: "/operator/research", element: <OwnerResearchPortfolioPage /> },
+      { path: "/research", element: <OwnerResearchPortfolioPage /> },
+    ],
+  },
+  {
+    element: <ClientShell />,
+    children: [
+      { path: "/client/profile", element: <ClientProfileOnboardingPage /> },
+      { path: "/client/onboarding", element: <ClientProfileOnboardingPage /> },
+      { path: "/crm", element: <ClientProfileOnboardingPage /> },
     ],
   },
 ]);
