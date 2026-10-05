@@ -71,9 +71,8 @@ def test_mergify_reporting_is_advisory_only_and_required_tests_remain_blocking()
     required_envs = [required_test_job.get("env", {})] + [
         step.get("env", {}) for step in required_test_job["steps"]
     ]
-    assert not any(
-        key.startswith("MERGIFY_") for env in required_envs for key in env
-    )
+    assert required_test_job["env"]["MERGIFY_TEST_SELECTION_ENABLE"] == "false"
+    assert not any("MERGIFY_TOKEN" in env for env in required_envs)
     assert advisory_test_step["env"]["MERGIFY_TOKEN"] == "${{ secrets.MERGIFY_TOKEN }}"
     assert advisory_test_step["env"]["MERGIFY_TEST_SELECTION_ENABLE"] == "false"
     assert test_step["run"] == "pytest tests/ -v -n auto"

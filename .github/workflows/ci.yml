@@ -50,6 +50,9 @@ jobs:
     timeout-minutes: 20
     env:
       PYTHONPATH: ${{ github.workspace }}
+      # The Mergify plugin is installed by the shared test profile for
+      # reporting, but test selection must stay disabled in the blocking job.
+      MERGIFY_TEST_SELECTION_ENABLE: "false"
 
     steps:
       - uses: actions/checkout@v7
