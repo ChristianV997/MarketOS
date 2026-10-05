@@ -103,8 +103,10 @@ RAW_KEYS = frozenset(
     }
 )
 # `sk-` is an OpenAI-style credential prefix, not a substring of hyphenated ids
-# such as desk-clamp-lamp. Require a non-alphanumeric boundary.
-_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
+# such as desk-clamp-lamp. Require a non-alphanumeric boundary. A URL escape
+# (%3D) or a literal backslash escape (\\n) ends in a letter or digit but is a
+# separator, so a token after one still starts the credential and is rejected.
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 _OTHER_SECRET_MARKERS = ("ghp_", "xoxb-", "aiza")
 LIVE_MODES = frozenset({"live_readonly", "public_live", "authenticated_live"})
 GOVERNOR_ACTIONS = (
