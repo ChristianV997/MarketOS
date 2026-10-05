@@ -43,58 +43,58 @@ def test_manual_validation_workflow_least_privilege_permissions():
             assert job["permissions"].get(perm_scope) != "write"
 
 
-def test_manual_validation_workflow_secrets_scoped_to_steps_only():
-    """Verify CJ secrets are not exposed job-wide and only injected into steps that execute supplier logic."""
+def test_manual_validation_workflow_does_not_inject_secrets_or_enable_live_calls():
+    """Supplier steps stay offline: no credentials, no live flag, no network opt-in."""
     data = _load_workflow()
+    raw_text = WORKFLOW_PATH.read_text(encoding="utf-8")
     job = data["jobs"]["readonly-validation"]
 
-    # Job-level env must not expose secrets or broad env
-    job_env = job.get("env", {})
-    assert "CJ_EMAIL" not in job_env, "CJ_EMAIL must not be exposed in job-wide env"
-    assert "CJ_API_KEY" not in job_env, "CJ_API_KEY must not be exposed in job-wide env"
-    assert not any("secrets." in str(v) for v in job_env.values()), "No secret references in job-wide env"
+    assert job.get("env", {}) == {}
+    assert "secrets." not in raw_text
+    assert "CJ_EMAIL" not in raw_text
+    assert "CJ_API_KEY" not in raw_text
+    assert "MARKETOS_SUPPLIER_AUTH_READONLY" not in raw_text
+    assert "--allow-network" not in raw_text
+    assert "upload-artifact" not in raw_text
+    assert "actions/upload-artifact" not in raw_text
 
-    # Steps inspection
-    steps = job.get("steps", [])
-    assert len(steps) >= 5, "Workflow should contain setup, dependency, preflight, and validation steps"
-
-    # Check non-supplier steps have no secrets
-    preflight_step = None
-    validation_step = None
-    for step in steps:
-        run_cmd = step.get("run", "")
-        uses_cmd = step.get("uses", "")
+    for step in job.get("steps", []):
         step_env = step.get("env", {})
+        assert "CJ_EMAIL" not in step_env
+        assert "CJ_API_KEY" not in step_env
+        assert not any("secrets." in str(value) for value in step_env.values())
+        assert "--allow-network" not in step.get("run", "")
 
-        if "check_phase1_supplier_readonly_access.py" in run_cmd:
-            preflight_step = step
-        elif "run_phase1_cj_readonly_validation_pack.py" in run_cmd:
-            validation_step = step
-        else:
-            # Setup/checkout/readiness steps must not have CJ secrets
-            assert "CJ_EMAIL" not in step_env, f"Step '{run_cmd or uses_cmd}' must not receive CJ_EMAIL"
-            assert "CJ_API_KEY" not in step_env, f"Step '{run_cmd or uses_cmd}' must not receive CJ_API_KEY"
 
-    # Verify supplier preflight step env
-    assert preflight_step is not None, "Preflight step not found"
-    preflight_env = preflight_step.get("env", {})
-    assert preflight_env.get("CJ_EMAIL") == "${{ secrets.CJ_EMAIL }}"
-    assert preflight_env.get("CJ_API_KEY") == "${{ secrets.CJ_API_KEY }}"
-    assert preflight_env.get("MARKETOS_SUPPLIER_PROVIDER") == "cj"
-    assert preflight_env.get("MARKETOS_SUPPLIER_AUTH_READONLY") == "1"
+def test_manual_validation_workflow_rejects_unbounded_inputs_without_echoing_them():
+    """The advertised candidate cap is the pack's hard cap, and bad input fails closed."""
+    data = _load_workflow()
+    raw_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    triggers = data.get(True) or data.get("on") or {}
+    assert "workflow_dispatch" in triggers
+    assert "pull_request" not in raw_text
+    assert "schedule:" not in raw_text
+    assert "\n  push:" not in raw_text and "\non:\n  push:" not in raw_text
 
-    # Verify validation pack step env
-    assert validation_step is not None, "Validation pack step not found"
-    validation_env = validation_step.get("env", {})
-    assert validation_env.get("CJ_EMAIL") == "${{ secrets.CJ_EMAIL }}"
-    assert validation_env.get("CJ_API_KEY") == "${{ secrets.CJ_API_KEY }}"
-    assert validation_env.get("MARKETOS_SUPPLIER_PROVIDER") == "cj"
-    assert validation_env.get("MARKETOS_SUPPLIER_AUTH_READONLY") == "1"
+    guard = next(step for step in data["jobs"]["readonly-validation"]["steps"] if "invalid_dispatch_input" in step.get("run", ""))
+    assert guard["env"]["MAX_CANDIDATES"] == "${{ inputs.max_candidates }}"
+    assert guard["env"]["CANDIDATE_QUERY"] == "${{ inputs.candidate_query }}"
+    assert 'limit != "1"' in guard["run"]
+    assert "invalid_dispatch_input" in guard["run"]
+    assert "os.environ" in guard["run"]
+    assert "${{ inputs.candidate_query }}" not in guard["run"]
+    assert job_timeout(data) == 15
+    checkout = next(step for step in data["jobs"]["readonly-validation"]["steps"] if str(step.get("uses", "")).startswith("actions/checkout@"))
+    assert checkout["with"]["persist-credentials"] is False
+
+
+def job_timeout(data: dict[str, Any]) -> int:
+    return data["jobs"]["readonly-validation"]["timeout-minutes"]
+
 
 
 def test_manual_validation_workflow_safe_input_handling_no_shell_interpolation():
     """Verify dispatch inputs are passed through environment variables and never interpolated into shell text."""
-    raw_text = WORKFLOW_PATH.read_text(encoding="utf-8")
     data = _load_workflow()
     job = data["jobs"]["readonly-validation"]
 
