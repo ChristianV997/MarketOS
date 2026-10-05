@@ -26,7 +26,8 @@ DEFAULT_ACCESS.update({"client_private_data": "workspace_only", "client_safe_sum
 INTERNAL_KEYS = {"internal_prompt", "internal_scoring_formula", "internal_heuristic", "internal_strategy_note", "internal_pricing_note", "internal_upsell_note", "internal_agent_instruction", "source_code", "cross_client_learning"}
 SECRET_KEYS = {"api_key", "private_key", "password", "raw_payload", "raw_html", "credentials", "credential", "access_token", "refresh_token", "authorization", "cookie", "cookies", "jwt", "token", "tokens", "client_secret", "webhook_secret", "raw_provider_payload", "provider_payload", "raw_provider_response", "provider_response"}
 _FORBIDDEN_KEY_MARKERS = ("prompt", "formula", "heuristic", "strategy", "pricing", "upsell", "agent_instruction", "source_code", "cross_client", "other_client", "private_tenant", "client_private_data", "provider_payload", "raw_payload", "provider_response", "raw_response", "credential", "secret", "password", "api_key", "access_token", "refresh_token", "authorization", "cookie", "token")
-_FORBIDDEN_VALUE_MARKERS = ("sk-", "ghp_", "github_pat_", "-----begin", "bearer ", "cookie=", "session=", "<html", "other_client", "cross_client", "prompt", "formula", "heuristic", "strategy", "credential", "token", "cookie", "source code", "provider response", "raw payload")
+_FORBIDDEN_VALUE_MARKERS = ("ghp_", "github_pat_", "-----begin", "bearer ", "cookie=", "session=", "<html", "other_client", "cross_client", "prompt", "formula", "heuristic", "strategy", "credential", "token", "cookie", "source code", "provider response", "raw payload")
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 _SOURCE_CODE_VALUE = re.compile(r"(?im)^\s*(?:def|class|import|from)\s+\w+")
 _FILESYSTEM_PATH_VALUE = re.compile(r"(?i)(?:^|[\s=(\[{,:])(?:file://|[a-z]:[\\/]|\\\\|/(?!/)|[^\\/\s]+\\[^\\/\s]+)")
 _NON_AUTHORITATIVE_CLAIM_MARKERS = ("actual", "live", "live_validated", "verified_live", "production")
@@ -359,7 +360,7 @@ def check_workspace_leakage(payload: Mapping[str, Any], *, client_safe: bool = T
 
 def _contains_forbidden_value(value: str) -> bool:
     lowered = value.lower()
-    return any(marker in lowered for marker in _FORBIDDEN_VALUE_MARKERS) or _SOURCE_CODE_VALUE.search(value) is not None
+    return _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in _FORBIDDEN_VALUE_MARKERS) or _SOURCE_CODE_VALUE.search(value) is not None
 
 
 def _contains_filesystem_path(value: str) -> bool:

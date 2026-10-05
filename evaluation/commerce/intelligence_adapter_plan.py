@@ -6,12 +6,13 @@ plans, normalized evidence contracts, and deterministic dry-run results.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from evaluation.companyos.approval_ledger import REQUEST_TYPES
 from evaluation.companyos.credential_registry import build_credential_registry
-from evaluation.companyos.provider_registry import build_provider_registry
+
 
 ADAPTER_MODES = (
     "fixture_only",
@@ -74,6 +75,9 @@ def _tuple(value: Any) -> tuple[str, ...]:
     return tuple(str(item) for item in value)
 
 
+_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
+
+
 def _secret_like(value: Any) -> bool:
     if isinstance(value, Mapping):
         for key, item in value.items():
@@ -85,7 +89,7 @@ def _secret_like(value: Any) -> bool:
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza"))
+        return "-----begin " in lowered or "bearer " in lowered or _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza"))
     return False
 
 

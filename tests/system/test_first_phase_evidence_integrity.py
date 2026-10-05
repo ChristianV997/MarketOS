@@ -376,6 +376,8 @@ def test_cycle_when_present_stays_plan_only_and_delegates_scores():
     expected = build_product_opportunity_synthesis(market, supplier, consumer).to_dict()
     report = cycle.build_commerce_operations_cycle(market, supplier, consumer).to_dict()
     assert report["synthesis"]["combined_opportunity_score"] == expected["combined_opportunity_score"]
+    assert report["synthesis"]["top_candidate_id"] == "desk-clamp-lamp"
+    assert "top_candidate_id" not in report["client_workspace"]["blocking_reasons"]
     assert report["live_validated"] is False
     assert report["governor"].get("live_go") is not True
     assert report["approval_ledger"].get("live_approval_granted") is not True
