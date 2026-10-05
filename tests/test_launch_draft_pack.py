@@ -83,24 +83,41 @@ def test_missing_context_uses_conservative_defaults(pack):
     assert "TBD" in pack["product_listing"]["shipping_note"]
 
 
-@pytest.mark.parametrize(("target_sell_price", "expected_payload_price"), [(None, "TBD"), (0, 0.0)])
-def test_missing_and_explicit_zero_price_remain_distinct_in_draft_payloads(reports, target_sell_price, expected_payload_price):
-    synthesis, _market, _supplier, _consumer = reports
+def _pack_with_unit_economics(synthesis, unit_economics):
     candidate_id = synthesis["top_candidate_id"]
     candidates = []
+    matched = False
     for item in synthesis["candidates"]:
         candidate = dict(item)
         if candidate.get("candidate_id") == candidate_id:
-            candidate["unit_economics_summary"] = {"target_sell_price": target_sell_price}
+            candidate["unit_economics_summary"] = dict(unit_economics)
+            matched = True
         candidates.append(candidate)
-    variant_synthesis = {**synthesis, "candidates": candidates}
+    assert matched
+    variant_synthesis = {**synthesis, "unit_economics_summary": {}, "candidates": candidates}
+    return build_launch_draft_pack(synthesis=variant_synthesis).to_dict()
 
-    pack = build_launch_draft_pack(synthesis=variant_synthesis).to_dict()
 
-    expected_offer_price = None if target_sell_price is None else float(target_sell_price)
+@pytest.mark.parametrize(
+    ("unit_economics", "expected_payload_price"),
+    [({}, "TBD"), ({"target_sell_price": 0.0}, 0.0)],
+)
+def test_missing_zero_and_positive_prices_remain_distinct_in_draft_payloads(reports, unit_economics, expected_payload_price):
+    synthesis, _market, _supplier, _consumer = reports
+    pack = _pack_with_unit_economics(synthesis, unit_economics)
+
+    expected_offer_price = unit_economics.get("target_sell_price")
     assert pack["offer_stack"]["pricing_suggestion"]["target_price"] == expected_offer_price
     assert pack["shopify_draft_payload"]["variants"][0]["price"] == expected_payload_price
     assert pack["medusa_draft_payload"]["variants"][0]["price"] == expected_payload_price
+    if not unit_economics:
+        missing_explicitly = _pack_with_unit_economics(synthesis, {"target_sell_price": None})
+        positive = _pack_with_unit_economics(synthesis, {"target_sell_price": 24.95})
+        assert missing_explicitly["shopify_draft_payload"]["variants"][0]["price"] == "TBD"
+        assert missing_explicitly["medusa_draft_payload"]["variants"][0]["price"] == "TBD"
+        assert positive["offer_stack"]["pricing_suggestion"]["target_price"] == 24.95
+        assert positive["shopify_draft_payload"]["variants"][0]["price"] == 24.95
+        assert positive["medusa_draft_payload"]["variants"][0]["price"] == 24.95
 
 
 def test_creative_counts_meet_pack_contract(pack):

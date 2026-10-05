@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -25,13 +24,43 @@ def test_cli_markdown_has_client_sections(capsys):
 
 
 def test_cli_writes_only_sanitized_pack_files(tmp_path, capsys):
-    main(["--output", str(tmp_path), "--json"])
-    capsys.readouterr()
     expected = {"launch_draft_pack.json", "launch_draft_pack.md", "shopify_draft_payload.json", "medusa_draft_payload.json", "creative_test_matrix.json", "ugc_briefs.md", "approval_checklist.md", "operator_risk_review.json"}
-    assert {path.name for path in tmp_path.iterdir()} == expected
-    raw = (tmp_path / "launch_draft_pack.json").read_text(encoding="utf8")
-    assert "CJ_API_KEY" not in raw
-    assert "Authorization:" not in raw
+    candidate_id = "launch-draft-price-contract"
+    synthesis = {
+        "top_candidate_id": candidate_id,
+        "top_candidate_title": "Draft price contract item",
+        "candidates": [{"candidate_id": candidate_id, "title": "Draft price contract item", "unit_economics_summary": {}}],
+        "unit_economics_summary": {},
+    }
+    cases = [({}, "TBD"), ({"target_sell_price": 0.0}, 0.0), ({"target_sell_price": 24.95}, 24.95)]
+
+    for index, (unit_economics, expected_price) in enumerate(cases):
+        candidate = {**synthesis["candidates"][0], "unit_economics_summary": unit_economics}
+        input_path = tmp_path / f"synthesis_{index}.json"
+        input_path.write_text(
+            json.dumps({**synthesis, "candidates": [candidate]}),
+            encoding="utf8",
+        )
+        output_dir = tmp_path / f"output_{index}"
+        main(["--opportunity-synthesis-report", str(input_path), "--output", str(output_dir), "--json"])
+        capsys.readouterr()
+
+        assert {path.name for path in output_dir.iterdir()} == expected
+        pack_raw = (output_dir / "launch_draft_pack.json").read_text(encoding="utf8")
+        assert "CJ_API_KEY" not in pack_raw
+        assert "Authorization:" not in pack_raw
+        pack = json.loads(pack_raw)
+        for platform, payload_file, authority_key in (
+            ("shopify_draft_payload", "shopify_draft_payload.json", "metafields"),
+            ("medusa_draft_payload", "medusa_draft_payload.json", "metadata"),
+        ):
+            artifact = json.loads((output_dir / payload_file).read_text(encoding="utf8"))
+            assert pack[platform]["variants"][0]["price"] == expected_price
+            assert artifact["variants"][0]["price"] == expected_price
+            assert artifact["status"] == "draft"
+            assert artifact[authority_key]["marketos_launch_authorized"] is False
+        assert pack["published"] is False
+        assert pack["approval_checklist"]["launch_authorized"] is False
 
 
 def test_cli_rejects_windows_traversal(capsys):
