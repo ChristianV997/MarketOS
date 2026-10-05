@@ -441,7 +441,8 @@ def _faq(objections: list[str], context: Mapping[str, Any]) -> FAQAndObjectionDr
 
 def _payloads(title: str, offer: OfferStack, context: Mapping[str, Any]) -> tuple[ShopifyDraftPayload, MedusaDraftPayload]:
     tags = tuple(dict.fromkeys(["marketos-draft", "human-review-required", _text(title, 40).lower().replace(" ", "-")]))
-    variant = {"title": "Default", "sku": "TBD", "price": offer.pricing_suggestion.get("target_price") or "TBD", "inventory_quantity": "TBD", "weight": "TBD", "option_values": {}}
+    target_price = offer.pricing_suggestion.get("target_price")
+    variant = {"title": "Default", "sku": "TBD", "price": target_price if target_price is not None else "TBD", "inventory_quantity": "TBD", "weight": "TBD", "option_values": {}}
     images = ({"role": "hero", "src": "TBD — add approved image reference."}, {"role": "demo", "src": "TBD — add approved demo asset."})
     body = f"{offer.primary_promise}\n\nDraft only. Confirm supplier facts, policies, and claims before publishing."
     shopify = ShopifyDraftPayload(title=title, body_html_or_markdown=body, vendor=context["brand_name"], product_type="TBD", tags=tags, status="draft", variants=(variant,), options=(), images_placeholder=images, seo_title=_text(title, 70), seo_description=_text(offer.primary_promise, 155), metafields={"marketos_evidence_mode": "draft_only", "marketos_launch_authorized": False})

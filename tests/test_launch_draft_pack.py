@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -82,6 +81,26 @@ def test_context_is_applied_and_sanitized(reports):
 def test_missing_context_uses_conservative_defaults(pack):
     assert pack["shopify_draft_payload"]["vendor"] == "MarketOS Draft"
     assert "TBD" in pack["product_listing"]["shipping_note"]
+
+
+@pytest.mark.parametrize(("target_sell_price", "expected_payload_price"), [(None, "TBD"), (0, 0.0)])
+def test_missing_and_explicit_zero_price_remain_distinct_in_draft_payloads(reports, target_sell_price, expected_payload_price):
+    synthesis, _market, _supplier, _consumer = reports
+    candidate_id = synthesis["top_candidate_id"]
+    candidates = []
+    for item in synthesis["candidates"]:
+        candidate = dict(item)
+        if candidate.get("candidate_id") == candidate_id:
+            candidate["unit_economics_summary"] = {"target_sell_price": target_sell_price}
+        candidates.append(candidate)
+    variant_synthesis = {**synthesis, "candidates": candidates}
+
+    pack = build_launch_draft_pack(synthesis=variant_synthesis).to_dict()
+
+    expected_offer_price = None if target_sell_price is None else float(target_sell_price)
+    assert pack["offer_stack"]["pricing_suggestion"]["target_price"] == expected_offer_price
+    assert pack["shopify_draft_payload"]["variants"][0]["price"] == expected_payload_price
+    assert pack["medusa_draft_payload"]["variants"][0]["price"] == expected_payload_price
 
 
 def test_creative_counts_meet_pack_contract(pack):
