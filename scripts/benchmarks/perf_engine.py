@@ -31,6 +31,7 @@ import hashlib
 import json
 import math
 import unicodedata
+from fractions import Fraction
 from typing import Any, Mapping, Sequence
 
 UPSTREAM_REPOSITORY = "https://github.com/psf/pyperf"
@@ -133,10 +134,22 @@ _UNSUPPORTED_RUNTIME_METADATA_KEYS = frozenset(
     }
 )
 _SUPPORTED_UNITS = frozenset({"byte", "integer", "second"})
+# Bounds keep a comparison report small however large or hostile the supplied suites are.
+MAX_BENCHMARKS = 512
+MAX_NAME_LENGTH = 128
+# Control, format (zero-width, bidi), surrogate, and line/paragraph separator characters.
+_INVALID_NAME_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 
 
 class PerfEngineError(ValueError):
     """Raised when a copied pyperf suite cannot be represented safely."""
+
+
+def _check_name(name: str) -> None:
+    if len(name) > MAX_NAME_LENGTH:
+        raise PerfEngineError("benchmark name is too long")
+    if any(unicodedata.category(character) in _INVALID_NAME_CATEGORIES for character in name):
+        raise PerfEngineError("benchmark name is invalid")
 
 
 def _finite_positive(value: Any, name: str) -> float:
@@ -221,6 +234,7 @@ def run_benchmark(
     label = " ".join(name.split())
     if not label:
         raise PerfEngineError("benchmark name is required")
+    _check_name(label)
     if not isinstance(unit, str) or unit not in _SUPPORTED_UNITS:
         raise PerfEngineError(f"unit must be one of {', '.join(sorted(_SUPPORTED_UNITS))}")
     if isinstance(values, (str, bytes, bytearray)):
@@ -289,7 +303,11 @@ def dump_suite(suite: Mapping[str, Any]) -> str:
 
 
 def _mean(samples: Sequence[float]) -> float:
-    return sum(samples) / len(samples)
+    """Exactly rounded, order-independent mean; finite for any finite samples."""
+    try:
+        return math.fsum(samples) / len(samples)
+    except OverflowError:  # the exact sum exceeds the float range, the mean cannot
+        return float(sum(map(Fraction, samples), Fraction(0)) / len(samples))
 
 
 def _benchmark_rows(suite: Mapping[str, Any], label: str) -> dict[str, dict[str, Any]]:
@@ -300,6 +318,8 @@ def _benchmark_rows(suite: Mapping[str, Any], label: str) -> dict[str, dict[str,
     benchmarks = suite.get("benchmarks")
     if not isinstance(benchmarks, list):
         raise PerfEngineError(f"{label} benchmarks must be a list")
+    if len(benchmarks) > MAX_BENCHMARKS:
+        raise PerfEngineError(f"{label} suite has too many benchmarks")
     rows: dict[str, dict[str, Any]] = {}
     for bench in benchmarks:
         if not isinstance(bench, Mapping):
@@ -311,11 +331,10 @@ def _benchmark_rows(suite: Mapping[str, Any], label: str) -> dict[str, dict[str,
         unit = metadata.get("unit")
         if not isinstance(name, str) or not name.strip():
             raise PerfEngineError("benchmark name is required")
-        if any(unicodedata.category(character) == "Cc" for character in name):
-            raise PerfEngineError("benchmark name is invalid")
+        _check_name(name)
         if name in rows:
             raise PerfEngineError("duplicate benchmark name")
-        if unit not in _SUPPORTED_UNITS:
+        if not isinstance(unit, str) or unit not in _SUPPORTED_UNITS:
             raise PerfEngineError("benchmark unit is not supported")
         runs = bench.get("runs")
         if not isinstance(runs, list) or not runs:
@@ -342,16 +361,23 @@ def compare_suites(
 
     A candidate mean strictly above ``threshold`` times the baseline is a regression.
     A mean strictly below the baseline divided by ``threshold`` is an improvement.
-    A missing suite, a malformed sample, or an invalid name raises. A missing
-    benchmark name or a unit mismatch is unavailable, and any unavailable row
-    makes the suite unavailable so a partial comparison cannot pass or regress.
+    The comparison is exact on the two sample means (``math.fsum``, with an exact fallback
+    when the sum overflows), so it does not depend on sample order or run partition.
+    A missing suite, a malformed sample or unit, an invalid or over-long name, more than
+    ``MAX_BENCHMARKS`` benchmarks, or a threshold or ratio outside the float range raises
+    ``PerfEngineError``. A missing benchmark name or a unit mismatch is unavailable, and any
+    unavailable row makes the suite unavailable so a partial comparison cannot pass or regress.
     Warmups are ignored. Host metadata is neither collected nor copied.
     """
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
         raise PerfEngineError("threshold must be a finite number > 1")
-    limit = float(threshold)
+    try:
+        limit = float(threshold)
+    except OverflowError as exc:
+        raise PerfEngineError("threshold must be a finite number > 1") from exc
     if not math.isfinite(limit) or limit <= 1.0:
         raise PerfEngineError("threshold must be a finite number > 1")
+    exact_limit = Fraction(limit)
     base_rows = _benchmark_rows(baseline, "baseline")
     candidate_rows = _benchmark_rows(candidate, "candidate")
     names = sorted(set(base_rows) | set(candidate_rows))
@@ -365,13 +391,18 @@ def compare_suites(
             )
             compared.append({"name": name, "status": "unavailable", "reason": reason})
             continue
-        ratio = right["mean"] / left["mean"]
-        if ratio > limit:
+        # Exact rational comparison of the two means: no division rounding, so equality with the
+        # threshold is never a regression and swapping the suites swaps regression/improvement.
+        base_mean, candidate_mean = Fraction(left["mean"]), Fraction(right["mean"])
+        if candidate_mean > exact_limit * base_mean:
             status = "regression"
-        elif ratio < (1.0 / limit):
+        elif candidate_mean * exact_limit < base_mean:
             status = "improvement"
         else:
             status = "pass"
+        ratio = right["mean"] / left["mean"]
+        if not math.isfinite(ratio):
+            raise PerfEngineError("sample ratio is out of range")
         compared.append(
             {
                 "name": name,
@@ -399,13 +430,18 @@ def compare_suites(
         "status": overall,
         "rows": compared,
     }
-    encoded = json.dumps(body, sort_keys=True, allow_nan=False, separators=(",", ":"))
+    try:
+        encoded = json.dumps(body, sort_keys=True, allow_nan=False, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise PerfEngineError("comparison must be finite JSON") from exc
     body["fingerprint"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
     return body
 
 
 __all__ = [
     "JSON_VERSION",
+    "MAX_BENCHMARKS",
+    "MAX_NAME_LENGTH",
     "PerfEngineError",
     "REGISTRY_RECORDED_SHA",
     "SOURCE_ID",

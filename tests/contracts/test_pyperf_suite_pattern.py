@@ -7,12 +7,16 @@ from __future__ import annotations
 import ast
 import json
 import math
+import random
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
 
 from scripts.benchmarks.perf_engine import (
     JSON_VERSION,
+    MAX_BENCHMARKS,
+    MAX_NAME_LENGTH,
     PerfEngineError,
     REGISTRY_RECORDED_SHA,
     SOURCE_ID,
@@ -360,3 +364,229 @@ def test_empty_suites_are_unavailable_not_a_pass() -> None:
     report = compare_suites(empty, empty)
     assert report["status"] == "unavailable"
     assert report["rows"] == []
+
+
+# --- Property-style and adversarial coverage (seeded stdlib RNG, synthetic samples only) ---
+
+
+def _raw_suite(rows: list[tuple[str, str, list[float]]]) -> dict:
+    return {
+        "version": "1.0",
+        "benchmarks": [
+            {"metadata": {"name": name, "unit": unit}, "runs": [{"values": list(values)}]} for name, unit, values in rows
+        ],
+    }
+
+
+def _one(base: float, candidate: float, *, threshold: float = 1.05) -> dict:
+    return compare_suites(
+        _raw_suite([("b", "second", [base])]), _raw_suite([("b", "second", [candidate])]), threshold=threshold
+    )
+
+
+def test_sample_order_and_run_partition_never_change_the_mean_or_classification() -> None:
+    rng = random.Random(344)
+    for _ in range(300):
+        samples = [rng.choice([0.1, 0.2, 0.3, 1e-9, 1e9, 3.3, 7.7]) * rng.randint(1, 50) for _ in range(rng.randint(2, 12))]
+        shuffled = samples[:]
+        rng.shuffle(shuffled)
+        cut = rng.randint(1, len(shuffled) - 1)
+        base = _raw_suite([("b", "second", samples)])
+        split = {
+            "version": "1.0",
+            "benchmarks": [{"metadata": {"name": "b", "unit": "second"}, "runs": [{"values": shuffled[:cut]}, {"values": shuffled[cut:]}]}],
+        }
+        report = compare_suites(base, split, threshold=1.0000001)
+        row = report["rows"][0]
+        assert row["baseline_mean"] == row["candidate_mean"]
+        assert row["ratio"] == 1.0 and report["status"] == "pass"
+        assert compare_suites(split, base, threshold=1.0000001)["fingerprint"] == report["fingerprint"]
+
+
+def test_swapping_baseline_and_candidate_swaps_regression_and_improvement_exactly() -> None:
+    rng = random.Random(3440)
+    for _ in range(4000):
+        base = rng.uniform(0.5, 5.0)
+        limit = rng.choice([1.05, 1.2, 1.5, 2.0])
+        candidate = base * rng.choice([1.0, limit, 1 / limit, 1.0499999999, 1.0500000001, 0.95, 1.2, 0.8])
+        forward = _one(base, candidate, threshold=limit)["status"]
+        backward = _one(candidate, base, threshold=limit)["status"]
+        assert (forward, backward) in {("pass", "pass"), ("regression", "improvement"), ("improvement", "regression")}
+
+
+@pytest.mark.parametrize("limit", [1.05, 1.25, 1.5, 2.0, 3.0])
+def test_candidate_equal_to_threshold_times_baseline_is_a_pass_and_one_ulp_beyond_is_not(limit: float) -> None:
+    base = 4.0
+    exactly = float(Fraction(limit) * Fraction(base))
+    assert Fraction(exactly) == Fraction(limit) * Fraction(base)  # exactly representable
+    assert _one(base, exactly, threshold=limit)["status"] == "pass"
+    assert _one(base, math.nextafter(exactly, math.inf), threshold=limit)["status"] == "regression"
+    # mirror: candidate * limit == baseline is a pass, one ulp below is an improvement
+    assert _one(exactly, base, threshold=limit)["status"] == "pass"
+    assert _one(exactly, math.nextafter(base, 0.0), threshold=limit)["status"] == "improvement"
+
+
+def test_sample_sum_overflow_uses_the_exact_mean_instead_of_failing() -> None:
+    huge = 1.7e308  # two of these overflow a float sum; their mean does not
+    report = compare_suites(_raw_suite([("b", "second", [huge, huge])]), _raw_suite([("b", "second", [huge])]))
+    assert report["status"] == "pass"
+    assert report["rows"][0]["baseline_mean"] == huge
+    assert math.isfinite(report["rows"][0]["ratio"])
+
+
+def test_out_of_range_ratio_and_threshold_raise_a_safe_error() -> None:
+    with pytest.raises(PerfEngineError, match="ratio is out of range"):
+        _one(5e-324, 1e300)
+    good = _raw_suite([("b", "second", [1.0])])
+    for threshold in (10**1000, -(10**1000)):
+        with pytest.raises(PerfEngineError, match="threshold"):
+            compare_suites(good, good, threshold=threshold)
+    # the opposite extreme is representable and a clear improvement
+    assert _one(1e300, 5e-324)["status"] == "improvement"
+
+
+@pytest.mark.parametrize("unit", [["second"], {"u": 1}, 1, None, ("second",)], ids=["list", "dict", "int", "none", "tuple"])
+def test_non_string_units_are_a_safe_error_not_a_type_error(unit: object) -> None:
+    broken = {"version": "1.0", "benchmarks": [{"metadata": {"name": "b", "unit": unit}, "runs": [{"values": [1.0]}]}]}
+    with pytest.raises(PerfEngineError, match="unit is not supported"):
+        compare_suites(broken, _raw_suite([("b", "second", [1.0])]))
+
+
+_BAD_NAMES = {
+    "line-separator": "a\u2028b",
+    "paragraph-separator": "a\u2029b",
+    "bidi-override": "a\u202eb",
+    "zero-width-space": "a\u200bb",
+    "soft-hyphen": "a\u00adb",
+    "nul": "a\x00b",
+    "lone-surrogate": "a\ud800b",
+}
+
+
+_WHITESPACE_SEPARATORS = {"line-separator", "paragraph-separator"}  # the encoder folds these into a single space
+
+
+@pytest.mark.parametrize("name", list(_BAD_NAMES.values()), ids=list(_BAD_NAMES))
+def test_control_and_format_characters_in_names_are_rejected_by_the_comparator(name: str) -> None:
+    suite = _raw_suite([(name, "second", [1.0])])
+    with pytest.raises(PerfEngineError) as compared:
+        compare_suites(suite, suite)
+    assert str(compared.value) == "benchmark name is invalid"  # exact message: the name is never echoed
+
+
+@pytest.mark.parametrize(
+    "name", [value for key, value in _BAD_NAMES.items() if key not in _WHITESPACE_SEPARATORS],
+    ids=[key for key in _BAD_NAMES if key not in _WHITESPACE_SEPARATORS],
+)
+def test_encoder_rejects_the_names_its_own_comparator_rejects(name: str) -> None:
+    with pytest.raises(PerfEngineError) as built:
+        run_benchmark(name, (1.0,))
+    assert str(built.value) == "benchmark name is invalid"
+
+
+@pytest.mark.parametrize("name", [_BAD_NAMES["line-separator"], _BAD_NAMES["paragraph-separator"]], ids=["U+2028", "U+2029"])
+def test_encoder_folds_line_separators_into_a_space_that_compares(name: str) -> None:
+    suite = run_benchmark(name, (1.0,))
+    assert suite["benchmarks"][0]["metadata"]["name"] == "a b"
+    assert compare_suites(suite, suite)["rows"][0]["name"] == "a b"
+
+
+def test_name_length_is_bounded_and_the_encoder_output_always_compares() -> None:
+    longest = "n" * MAX_NAME_LENGTH
+    suite = run_benchmark(longest, (1.0,))
+    assert compare_suites(suite, suite)["status"] == "pass"
+    for build in (
+        lambda: run_benchmark(longest + "n", (1.0,)),
+        lambda: compare_suites(_raw_suite([(longest + "n", "second", [1.0])]), suite),
+    ):
+        with pytest.raises(PerfEngineError, match="benchmark name is too long"):
+            build()
+    for name in ("plain", "with space", "unicode-é-名前", "dots.and-dashes_ok"):
+        built = run_benchmark(name, (1.0,))
+        assert compare_suites(built, built)["rows"][0]["name"] == " ".join(name.split())
+
+
+def test_benchmark_count_is_bounded_and_the_report_stays_small() -> None:
+    def many(prefix: str, count: int) -> dict:
+        return _raw_suite([((f"{prefix}{index}_").ljust(MAX_NAME_LENGTH, "x"), "second", [1.5, 2.5]) for index in range(count)])
+
+    left, right = many("a", MAX_BENCHMARKS), many("b", MAX_BENCHMARKS)
+    report = compare_suites(left, right)
+    assert report["status"] == "unavailable" and len(report["rows"]) == 2 * MAX_BENCHMARKS
+    assert len(json.dumps(report)) < 2 * MAX_BENCHMARKS * (MAX_NAME_LENGTH + 320)
+    for oversize, side in ((many("a", MAX_BENCHMARKS + 1), "baseline"), (many("b", MAX_BENCHMARKS + 1), "candidate")):
+        args = (oversize, right) if side == "baseline" else (left, oversize)
+        with pytest.raises(PerfEngineError, match=f"{side} suite has too many benchmarks"):
+            compare_suites(*args)
+
+
+def test_hostile_structures_only_ever_raise_the_safe_error() -> None:
+    rng = random.Random(34400)
+    junk = [None, True, False, 0, -1, 1.5, math.nan, math.inf, -math.inf, 10**400, "", "x", "second", [], {}, [[]], {"a": 1}, (1, 2), b"1", object()]
+    template = {
+        "version": "1.0",
+        "metadata": {"hostname": "must-not-leak"},
+        "benchmarks": [
+            {"metadata": {"name": "a", "unit": "second"}, "runs": [{"values": [1.0, 2.0], "warmups": [[1, 0.5]]}]},
+            {"metadata": {"name": "b", "unit": "byte"}, "runs": [{"values": [3.0]}]},
+        ],
+    }
+
+    def mutate(node: object, depth: int = 0) -> object:
+        if isinstance(node, dict):
+            node = dict(node)
+            for key in list(node):
+                if rng.random() < 0.18:
+                    node[key] = rng.choice(junk) if rng.random() < 0.7 else mutate(node[key], depth + 1)
+                elif rng.random() < 0.05:
+                    del node[key]
+                else:
+                    node[key] = mutate(node[key], depth + 1)
+            return node
+        if isinstance(node, list):
+            node = [mutate(item, depth + 1) for item in node]
+            if node and rng.random() < 0.1:
+                node[rng.randrange(len(node))] = rng.choice(junk)
+            return node
+        return node
+
+    clean = compare_suites(template, template)
+    assert clean["status"] == "pass"
+    accepted = rejected = 0
+    for _ in range(3000):
+        left, right = mutate(template), mutate(template)
+        try:
+            report = compare_suites(left, right, threshold=rng.choice([1.05, 2, 1e308, 1.0000001]))
+        except PerfEngineError as error:
+            rejected += 1
+            assert "must-not-leak" not in str(error)
+            continue
+        accepted += 1
+        assert report["status"] in {"pass", "regression", "improvement", "unavailable"}
+        assert "must-not-leak" not in json.dumps(report)
+        assert len(json.dumps(report)) < 400_000
+    assert accepted and rejected
+
+
+def test_hostile_encoder_arguments_only_ever_raise_the_safe_error() -> None:
+    rng = random.Random(344000)
+    junk = [None, True, 0, -1, 1.5, math.nan, math.inf, 10**400, "", "x", [], {}, [[]], (1, 2), b"1", object(), "a\x00b", "n" * 500]
+    for _ in range(1500):
+        args = [rng.choice(junk) for _ in range(3)]
+        try:
+            run_benchmark(args[0], args[1], unit=args[2], warmups=rng.choice([None, args[1], ((1, 2.0),)]), metadata=rng.choice([None, args[2], {"k": args[0]}]))
+        except PerfEngineError:
+            pass
+
+
+def test_incomparable_unit_and_name_mismatches_never_rank_and_report_stable_reasons() -> None:
+    left = _raw_suite([("only-left", "second", [1.0]), ("both", "second", [1.0]), ("both-unit", "second", [1.0])])
+    right = _raw_suite([("only-right", "second", [1.0]), ("both", "second", [9.0]), ("both-unit", "byte", [1.0])])
+    report = compare_suites(left, right, threshold=1.5)
+    rows = {row["name"]: row for row in report["rows"]}
+    assert report["status"] == "unavailable"
+    assert rows["both"]["status"] == "regression"
+    assert {key: rows[key]["reason"] for key in ("only-left", "only-right", "both-unit")} == {
+        "only-left": "baseline_only", "only-right": "candidate_only", "both-unit": "unit_mismatch",
+    }
+    assert all("ratio" not in rows[key] for key in ("only-left", "only-right", "both-unit"))
