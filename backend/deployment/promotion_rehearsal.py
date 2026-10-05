@@ -4,7 +4,7 @@ engine for MarketOS local-to-private-staging readiness.
 Composes existing authorities without duplicating or replacing them:
 - Environment Contract (backend.deployment.environment_contract)
 - Failure Diagnostics (backend.deployment.diagnostics)
-- High-Value-Path Harness (scripts.run_high_value_path_harness)
+- High-Value-Path Harness (backend.deployment.high_value_path_harness)
 - Container Hardening static checks (Dockerfile & docker-compose)
 - CoderOS status and CI evidence classification
 
@@ -393,7 +393,7 @@ def _harness_status(summary: Mapping[str, Any]) -> str:
 def _run_high_value_path_harness() -> dict[str, Any]:
     """Execute the bounded offline harness; never synthesize a green result."""
     try:
-        from scripts.run_high_value_path_harness import run_harness
+        from backend.deployment.high_value_path_harness import run_harness
     except ModuleNotFoundError:
         return {
             "status": "unavailable",

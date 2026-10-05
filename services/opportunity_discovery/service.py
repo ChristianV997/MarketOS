@@ -1036,6 +1036,12 @@ def run_discovery(mode: str, payload: Mapping[str, Any], *, workspace: Any = Non
     return DiscoveryRun(base.run_version, base.mode, base.status, base.execution_classification, base.candidates, base.decisions, base.ranked_candidate_ids, base.blockers, base.next_best_action, base.safety, _fingerprint(base.to_dict(include_fingerprint=False)))
 
 
+def _markdown_escape(value: str) -> str:
+    text = " ".join(value.split())
+    punctuation = "\\`*_{}[]()#+-.!|><~"
+    return "".join(f"\\{character}" if character in punctuation else character for character in text)
+
+
 def render_markdown(report: DiscoveryRun | Mapping[str, Any]) -> str:
     data = report.to_dict() if isinstance(report, DiscoveryRun) else _json_safe(dict(report))
     if not isinstance(data, Mapping):
@@ -1052,9 +1058,18 @@ def render_markdown(report: DiscoveryRun | Mapping[str, Any]) -> str:
         blockers = item.get("blockers", [])
         if not isinstance(blockers, list) or any(not isinstance(blocker, str) for blocker in blockers):
             raise OpportunityDiscoveryError("invalid_markdown_blockers")
+        evidence_gaps = item.get("evidence_gaps", [])
+        if not isinstance(evidence_gaps, list) or any(not isinstance(gap, str) for gap in evidence_gaps):
+            raise OpportunityDiscoveryError("invalid_markdown_evidence_gaps")
     lines = ["# Opportunity Discovery", "", f"- Mode: **{data.get('mode', 'unknown')}**", f"- Status: **{data.get('status', 'unknown')}**", f"- Execution: **{data.get('execution_classification', 'unknown')}**", f"- Fingerprint: `{data.get('fingerprint', 'unavailable')}`", "", "## Decisions", "", "| Candidate | Recommendation | Readiness | Blockers |", "|---|---|---|---|"]
     for item in sorted(decisions, key=lambda value: str(value.get("candidate_id", ""))):
         lines.append(f"| {item.get('candidate_id', '')} | **{item.get('recommendation', '')}** | {item.get('readiness', '')} | {', '.join(item.get('blockers', [])) or 'none recorded'} |")
+    gap_decisions = [item for item in decisions if item.get("evidence_gaps", [])]
+    if gap_decisions:
+        lines.extend(["", "## Evidence Gaps", ""])
+        for item in sorted(gap_decisions, key=lambda value: str(value.get("candidate_id", ""))):
+            gaps = ", ".join(_markdown_escape(gap) for gap in item.get("evidence_gaps", []))
+            lines.append(f"- `{item.get('candidate_id', '')}`: {gaps}")
     lines.extend(["", "## Safety", "", "No ads, spend, publishing, outreach, orders, payments, inventory, provider activation, or launch authority is created by this report.", "", "## Next Action", "", str(data.get("next_best_action", "review evidence")), ""])
     rendered = "\n".join(lines)
     if len(rendered.encode("utf-8")) > MAX_OUTPUT_BYTES:
