@@ -251,8 +251,14 @@ def test_hyphenated_candidate_id_is_not_a_secret_marker():
         "candidates": [{"candidate_id": "desk-clamp-lamp", "query": "desk lamp"}],
     }
     reject_unsafe_input(payload, label="marketplace report")
-    report = build_commerce_operations_cycle(payload, None, None)
-    assert report.to_dict()["live_validated"] is False
+    report = build_commerce_operations_cycle(payload, None, None).to_dict()
+    assert report["overall_status"] == "plan_only"
+    assert report["cycle_mode"] == "dry_run"
+    assert report["live_validated"] is False
+    assert report["read_only"] is True
+    assert report["network_calls"] is False
+    assert report["mutated"] is False
+    assert report["artifacts_written"] is False
 
 
 @pytest.mark.parametrize(
@@ -260,12 +266,16 @@ def test_hyphenated_candidate_id_is_not_a_secret_marker():
     [
         "sk-proj-synthetic-secret-value",
         "prefix sk-live-token-must-not-pass",
+        "prefix sk-live-example",
         "Bearer synthetic-token-must-not-be-imported",
     ],
 )
 def test_boundary_secret_markers_still_fail_closed(value: str):
+    payload = {"note": value}
     with pytest.raises(ValueError, match="secret-like or raw payload"):
-        reject_unsafe_input({"note": value}, label="fixture")
+        reject_unsafe_input(payload, label="fixture")
+    with pytest.raises(ValueError, match="secret-like or raw payload"):
+        build_commerce_operations_cycle(payload, None, None)
 
 
 def test_live_flag_fail_closes_as_blocked():
