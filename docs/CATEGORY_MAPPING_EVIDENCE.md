@@ -44,9 +44,13 @@ supplied taxonomy content never inherits Shopify's repository pin.
   A category string with no match in that partial snapshot is reported
   `"unmapped"`, never guessed at or silently widened.
 - **Not a live provider result.** The bundled artifact's local SHA-256 is
-  checked when loaded. A digest mismatch fails closed; on the optional audit
-  path this leaves category-mapping evidence unavailable rather than claiming
-  an unmapped category.
+  checked over the file's **raw bytes** when loaded, so any modification (even a
+  line-ending rewrite that parses identically) is a mismatch. A digest mismatch,
+  or a missing, unreadable or non-UTF-8 bundled file, fails closed with
+  `CategoryTaxonomyError`; on the optional audit path this leaves
+  category-mapping evidence unavailable rather than claiming an unmapped
+  category. A byte-identical copy at another path is still reported as
+  `unverified_local_file`, never as the bundled snapshot.
 
 ## How it composes with existing MarketOS authorities
 
@@ -82,8 +86,8 @@ taken from a cached or AI-summarized page render — an unrelated tag,
 commit whose `VERSION` file read `2026-11-unstable`, and was deliberately
 **not** used for exactly that reason).
 
-`taxonomy_source.snapshot_sha256` identifies the exact normalized UTF-8 bytes
-of this curated partial file; it is an integrity check for the local artifact,
+`taxonomy_source.snapshot_sha256` identifies the exact raw bytes (LF line endings,
+UTF-8) of this curated partial file; it is an integrity check for the local artifact,
 not a claim that the partial file is the full upstream taxonomy.
 
 ## Safety

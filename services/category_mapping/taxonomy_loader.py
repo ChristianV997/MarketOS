@@ -155,11 +155,21 @@ def parse_taxonomy_text(
 
 def load_taxonomy(path: Path | None = None) -> TaxonomyIndex:
     """Load and validate the taxonomy snapshot from disk. Deterministic: the
-    same file always produces the same :class:`TaxonomyIndex` contents."""
+    same file always produces the same :class:`TaxonomyIndex` contents.
+
+    The bundled snapshot is verified against its pinned digest over the **raw
+    bytes** (never over decoded or newline-normalised text, which would let a
+    CRLF- or CR-rewritten copy pass as the bundled artifact). A missing,
+    unreadable or non-UTF-8 snapshot raises :class:`CategoryTaxonomyError`, so
+    callers see "evidence unavailable" rather than a raw OS/decoding error or,
+    worse, an empty mapping."""
     snapshot_path = Path(path) if path is not None else _DEFAULT_SNAPSHOT_PATH
-    text = snapshot_path.read_text(encoding="utf-8")
+    try:
+        raw = snapshot_path.read_bytes()
+    except OSError as exc:
+        raise CategoryTaxonomyError(f"taxonomy snapshot unreadable: {snapshot_path.name}") from exc
     if snapshot_path.resolve() == _DEFAULT_SNAPSHOT_PATH.resolve():
-        actual_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        actual_digest = hashlib.sha256(raw).hexdigest()
         expected_digest = TAXONOMY_SOURCE_PROVENANCE["snapshot_sha256"]
         if actual_digest != expected_digest:
             raise CategoryTaxonomyError("bundled taxonomy snapshot checksum mismatch")
@@ -170,6 +180,10 @@ def load_taxonomy(path: Path | None = None) -> TaxonomyIndex:
             "live_validation": False,
             "snapshot_name": snapshot_path.name,
         })
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CategoryTaxonomyError(f"taxonomy snapshot is not valid UTF-8: {snapshot_path.name}") from exc
     return parse_taxonomy_text(text, source_provenance=source_provenance)
 
 

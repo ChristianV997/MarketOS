@@ -160,6 +160,56 @@ class TestBundledSnapshot:
         with pytest.raises(CategoryTaxonomyError, match="snapshot checksum mismatch"):
             taxonomy_loader.load_taxonomy()
 
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            pytest.param(lambda raw: raw.replace(b"\n", b"\r\n"), id="crlf_line_endings"),
+            pytest.param(lambda raw: raw.replace(b"\n", b"\r"), id="lone_cr_line_endings"),
+            pytest.param(lambda raw: raw + b"\n", id="extra_trailing_newline"),
+            pytest.param(lambda raw: raw.replace(b"\n", b"  \n", 1), id="trailing_whitespace"),
+            pytest.param(lambda raw: raw.replace(b"Apparel", b"Apparal", 1), id="one_byte_edit"),
+            pytest.param(lambda raw: raw[: len(raw) // 2], id="truncated"),
+            pytest.param(lambda raw: b"", id="empty"),
+            pytest.param(lambda raw: raw + b"\xff", id="invalid_utf8_appended"),
+        ],
+    )
+    def test_any_byte_level_modification_of_the_bundled_artifact_fails_closed(self, tmp_path, monkeypatch, mutate):
+        # The digest covers raw bytes: a copy that parses identically (CRLF/CR rewrites) is
+        # still a modified artifact and must not be attributed to the bundled snapshot.
+        from services.category_mapping import taxonomy_loader
+
+        raw = taxonomy_loader._DEFAULT_SNAPSHOT_PATH.read_bytes()
+        modified = tmp_path / "categories.v2026-08.partial.txt"
+        modified.write_bytes(mutate(raw))
+        monkeypatch.setattr(taxonomy_loader, "_DEFAULT_SNAPSHOT_PATH", modified)
+        with pytest.raises(CategoryTaxonomyError, match="snapshot checksum mismatch"):
+            taxonomy_loader.load_taxonomy()
+
+    def test_missing_bundled_artifact_raises_the_module_error_not_an_os_error(self, tmp_path, monkeypatch):
+        from services.category_mapping import taxonomy_loader
+
+        monkeypatch.setattr(taxonomy_loader, "_DEFAULT_SNAPSHOT_PATH", tmp_path / "absent.txt")
+        with pytest.raises(CategoryTaxonomyError, match="snapshot unreadable"):
+            taxonomy_loader.load_taxonomy()
+
+    def test_missing_or_non_utf8_alternate_snapshot_raises_the_module_error(self, tmp_path):
+        with pytest.raises(CategoryTaxonomyError, match="snapshot unreadable"):
+            load_taxonomy(tmp_path / "absent.txt")
+        bad = tmp_path / "bad.txt"
+        bad.write_bytes(b"gid://shopify/TaxonomyCategory/ap : Animals \xff")
+        with pytest.raises(CategoryTaxonomyError, match="not valid UTF-8"):
+            load_taxonomy(bad)
+
+    def test_byte_identical_copy_elsewhere_is_unverified_not_bundled_evidence(self, tmp_path):
+        from services.category_mapping import taxonomy_loader
+
+        copy = tmp_path / "copy.txt"
+        copy.write_bytes(taxonomy_loader._DEFAULT_SNAPSHOT_PATH.read_bytes())
+        source = load_taxonomy(copy).source_provenance
+        assert source["evidence_mode"] == "unverified_local_file"
+        assert source["live_validation"] is False
+        assert "snapshot_sha256" not in source and "commit_sha" not in source
+
     def test_curated_sub_level_three_categories_resolve_with_valid_parents(self):
         index = default_taxonomy()
         # Level 4 curated categories

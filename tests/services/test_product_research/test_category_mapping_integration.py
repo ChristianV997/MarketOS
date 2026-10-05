@@ -62,6 +62,32 @@ class TestCategoryMappingEvidenceComposition:
         assert "status**: unavailable" in markdown
         assert "status**: unmapped" not in markdown
 
+    @pytest.mark.parametrize("failure", ["modified_artifact", "missing_artifact"])
+    def test_a_bad_bundled_artifact_makes_evidence_unavailable_never_unmapped(self, failure, monkeypatch, tmp_path):
+        # Exercises the real loader (not a patched builder): the failure must surface as
+        # "unavailable" evidence, and the audit itself must still complete.
+        from services.category_mapping import taxonomy_loader
+        from services.product_research.report import render_product_audit_markdown
+
+        raw = taxonomy_loader._DEFAULT_SNAPSHOT_PATH.read_bytes()
+        target = tmp_path / "categories.v2026-08.partial.txt"
+        if failure == "modified_artifact":
+            target.write_bytes(raw.replace(b"\n", b"\r\n"))  # parses identically, bytes differ
+        monkeypatch.setattr(taxonomy_loader, "_DEFAULT_SNAPSHOT_PATH", target)
+        taxonomy_loader._cached_default_taxonomy.cache_clear()
+        try:
+            result, envelope = run_product_audit("Widget", category="Bird Supplies")
+        finally:
+            monkeypatch.undo()
+            taxonomy_loader._cached_default_taxonomy.cache_clear()
+        assert envelope.status == "completed"
+        assert result.category_mapping_evidence is None
+        assert result.to_dict()["category_mapping_evidence"] is None
+        markdown = render_product_audit_markdown(result)
+        assert "status**: unavailable" in markdown
+        assert "status**: unmapped" not in markdown
+        assert "bundled_offline_snapshot" not in markdown
+
     def test_markdown_exposes_taxonomy_evidence_as_offline_and_non_authoritative(self):
         from services.product_research.report import render_product_audit_markdown
 
