@@ -223,9 +223,6 @@ def _reject_html(raw: str) -> None:
         raise ResearchToDecisionError("HTML or raw page content is not accepted")
 
 
-_PATH_SEPARATORS = re.compile(r"[\\/]")
-
-
 def _is_unsafe_relative_path(text: str) -> bool:
     """True for a rooted, absolute, drive-qualified, UNC or ``..``-traversing path.
 
@@ -234,7 +231,7 @@ def _is_unsafe_relative_path(text: str) -> bool:
     host ``Path`` alone let ``..\\outside.json`` through on POSIX (where ``\\`` is an
     ordinary character) while rejecting it on Windows.
     """
-    if ".." in _PATH_SEPARATORS.split(text):
+    if ".." in text.replace("\\", "/").split("/"):
         return True
     for flavour in (PurePosixPath, PureWindowsPath):
         candidate = flavour(text)
@@ -268,9 +265,9 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
         # absolute local path (host-OS ``Path.is_absolute`` disagreed across platforms).
         # Traversal segments are still rejected, and hostnames like '..' or '.' are rejected.
         unsafe_path = (
-            ".." in _PATH_SEPARATORS.split(path_text)
+            ".." in path_text.replace("\\", "/").split("/")
             or parsed.hostname in {".", ".."}
-            or ".." in _PATH_SEPARATORS.split(parsed.netloc)
+            or ".." in parsed.netloc.replace("\\", "/").split("/")
             or any(part in {".", ".."} for part in parsed.netloc.split(":"))
         )
     else:
