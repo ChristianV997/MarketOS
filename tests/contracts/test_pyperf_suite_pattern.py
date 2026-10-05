@@ -315,6 +315,46 @@ def test_compare_suites_rejects_duplicate_names_and_bad_thresholds_without_echoi
     assert "nan" not in str(bad_value.value).casefold()
 
 
+def test_incomplete_comparison_fails_closed_even_if_another_row_regresses() -> None:
+    baseline = {
+        "version": "1.0",
+        "benchmarks": [
+            {"metadata": {"name": "slow", "unit": "second"}, "runs": [{"values": [2.0]}]},
+            {"metadata": {"name": "width", "unit": "second"}, "runs": [{"values": [1.0]}]},
+        ],
+    }
+    candidate = {
+        "version": "1.0",
+        "benchmarks": [
+            {"metadata": {"name": "slow", "unit": "second"}, "runs": [{"values": [6.0]}]},
+            {"metadata": {"name": "width", "unit": "byte"}, "runs": [{"values": [1.0]}]},
+        ],
+    }
+    report = compare_suites(baseline, candidate, threshold=2.0)
+    assert report["status"] == "unavailable"
+    assert {row["name"]: row["status"] for row in report["rows"]} == {"slow": "regression", "width": "unavailable"}
+    again = compare_suites(baseline, candidate, threshold=2.0)
+    assert report["fingerprint"] == again["fingerprint"]
+
+
+def test_missing_suites_and_malformed_samples_fail_closed_without_echo() -> None:
+    good = run_benchmark("kept", (1.0,))
+    with pytest.raises(PerfEngineError, match="baseline suite must be an object"):
+        compare_suites(None, good)  # type: ignore[arg-type]
+    with pytest.raises(PerfEngineError, match="candidate benchmarks must be a list"):
+        compare_suites(good, {"version": "1.0"})
+    broken = run_benchmark("kept", (1.0,))
+    broken["benchmarks"][0]["runs"][0]["values"] = ["1.0"]
+    with pytest.raises(PerfEngineError) as malformed:
+        compare_suites(good, broken)
+    assert "1.0" not in str(malformed.value)
+    named = {"version": "1.0", "benchmarks": [{"metadata": {"name": "kept\nsecret", "unit": "second"}, "runs": [{"values": [1.0]}]}]}
+    with pytest.raises(PerfEngineError) as invalid_name:
+        compare_suites(named, named)
+    assert str(invalid_name.value) == "benchmark name is invalid"
+    assert "secret" not in str(invalid_name.value)
+
+
 def test_empty_suites_are_unavailable_not_a_pass() -> None:
     empty = {"version": "1.0", "benchmarks": []}
     report = compare_suites(empty, empty)

@@ -19,7 +19,7 @@ Highest-priority compatible work order with a vacant isolated boundary:
 
 ## Consumer status and recommendation
 
-No production root imports this adapter. `compare_suites` classifies two already-encoded suites (pass, regression, improvement, or unavailable) from their sample means. It does not time a workload, replace `evaluation.perf.regression_benchmark`, or become a second commerce-cycle budget. Warmups are ignored. A missing name or a unit mismatch is unavailable, not a pass.
+No production root imports this adapter. `compare_suites` classifies two already-encoded suites from their sample means. A faster or slower mean is `improvement` or `regression` only when every named benchmark matches unit and is well formed. A missing name, a unit mismatch, or an empty suite is `unavailable` for the whole result. A missing suite object, a malformed sample, or a control character in a benchmark name raises and does not echo the value. It does not time a workload, read host metadata, replace `evaluation.perf.regression_benchmark`, or become a second commerce-cycle budget.
 
 `THIRD_PARTY_NOTICES.md` already contains this branch's pyperf row. PR #342 also edits that file, so this update does not touch it. Integrate the two notice rows serially after #342 lands.
 

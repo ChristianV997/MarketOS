@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import unicodedata
 from typing import Any, Mapping, Sequence
 
 UPSTREAM_REPOSITORY = "https://github.com/psf/pyperf"
@@ -310,6 +311,8 @@ def _benchmark_rows(suite: Mapping[str, Any], label: str) -> dict[str, dict[str,
         unit = metadata.get("unit")
         if not isinstance(name, str) or not name.strip():
             raise PerfEngineError("benchmark name is required")
+        if any(unicodedata.category(character) == "Cc" for character in name):
+            raise PerfEngineError("benchmark name is invalid")
         if name in rows:
             raise PerfEngineError("duplicate benchmark name")
         if unit not in _SUPPORTED_UNITS:
@@ -339,7 +342,10 @@ def compare_suites(
 
     A candidate mean strictly above ``threshold`` times the baseline is a regression.
     A mean strictly below the baseline divided by ``threshold`` is an improvement.
-    Names or units that do not match are unavailable, not a pass. Warmups are ignored.
+    A missing suite, a malformed sample, or an invalid name raises. A missing
+    benchmark name or a unit mismatch is unavailable, and any unavailable row
+    makes the suite unavailable so a partial comparison cannot pass or regress.
+    Warmups are ignored. Host metadata is neither collected nor copied.
     """
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
         raise PerfEngineError("threshold must be a finite number > 1")
@@ -377,12 +383,10 @@ def compare_suites(
             }
         )
     statuses = {row["status"] for row in compared}
-    if not compared:
+    if not compared or "unavailable" in statuses:
         overall = "unavailable"
     elif "regression" in statuses:
         overall = "regression"
-    elif "unavailable" in statuses:
-        overall = "unavailable"
     elif "improvement" in statuses:
         overall = "improvement"
     else:
