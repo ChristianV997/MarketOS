@@ -91,6 +91,8 @@ class TestRequestTargetIsExact:
             "https://@www.cjdropshipping.com/product/x",
             "https://www.cjdropshipping.com:8443/product/x",
             "https://www.cjdropshipping.com:80/product/x",
+            "https://127.0.0.1:6379\\@www.cjdropshipping.com/latest/meta-data/",
+            "http://127.0.0.1:6379\\@www.cjdropshipping.com/latest/meta-data/",
         )
         with patch("socket.getaddrinfo", side_effect=_public_dns):
             with patch("requests.get") as get:
