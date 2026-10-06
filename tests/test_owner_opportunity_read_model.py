@@ -150,6 +150,30 @@ def test_workspace_authorities_are_explicitly_typed(
         build_owner_opportunity_read_model("discover", {"candidates": []}, **kwargs)
 
 
+def test_verified_workspace_access_binds_without_letting_the_caller_select_another() -> None:
+    from backend.identity.workspaces import WorkspaceAccess
+
+    access = WorkspaceAccess(
+        issuer="https://issuer.example",
+        subject="user-1",
+        workspace_id="workspace-owner",
+        workspace_type="internal",
+        display_name="Owner",
+        role="owner",
+    )
+    report = build_owner_opportunity_read_model("evaluate", product_payload(), workspace=access).to_dict()
+    assert report["workspace_id"] == "workspace-owner"
+    assert report["workspace_binding"] == "injected"
+    assert report["snapshot_resolution"]["persisted"] is False
+    assert report["safety"]["launch_authorized"] is False
+    assert report["ranked_candidate_ids"] == []
+
+    spoofed = product_payload()
+    spoofed["workspace_id"] = "workspace-other"
+    with pytest.raises(OwnerOpportunityReadModelError, match="workspace_mismatch"):
+        build_owner_opportunity_read_model("evaluate", spoofed, workspace=access)
+
+
 def test_workspace_mismatch_is_rejected_before_discovery() -> None:
     from backend.workspaces.client_workspace import ClientWorkspace
 

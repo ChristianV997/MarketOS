@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Mapping
 
+from backend.identity.workspaces import WorkspaceAccess
 from backend.workspaces.client_workspace import ClientWorkspace
 from backend.workspaces.registry import WorkspaceRegistry
 from services.opportunity_discovery.service import (
@@ -270,7 +271,7 @@ def build_owner_opportunity_read_model(
     mode: str,
     payload: Mapping[str, Any],
     *,
-    workspace: ClientWorkspace | None = None,
+    workspace: ClientWorkspace | WorkspaceAccess | None = None,
     registry: WorkspaceRegistry | None = None,
 ) -> "OwnerOpportunityReadModel":
     """Build a deterministic owner projection from the canonical discovery run.
@@ -285,7 +286,7 @@ def build_owner_opportunity_read_model(
         raise OwnerOpportunityReadModelError("payload_must_be_object")
     if registry is not None and not isinstance(registry, WorkspaceRegistry):
         raise OwnerOpportunityReadModelError("invalid_workspace_registry")
-    if workspace is not None and not isinstance(workspace, ClientWorkspace):
+    if workspace is not None and not isinstance(workspace, (ClientWorkspace, WorkspaceAccess)):
         raise OwnerOpportunityReadModelError("invalid_workspace")
     if workspace is not None and payload.get("workspace_id") not in (None, workspace.workspace_id):
         raise OwnerOpportunityReadModelError("workspace_mismatch")
