@@ -200,6 +200,49 @@ class TestBundledSnapshot:
         with pytest.raises(CategoryTaxonomyError, match="not valid UTF-8"):
             load_taxonomy(bad)
 
+    def test_a_path_containing_a_nul_byte_raises_the_module_error(self):
+        from pathlib import Path
+
+        with pytest.raises(CategoryTaxonomyError, match="snapshot unreadable"):
+            load_taxonomy(Path("a\0b"))
+
+    def test_a_directory_is_not_a_regular_file(self, tmp_path):
+        with pytest.raises(CategoryTaxonomyError, match="not a regular file"):
+            load_taxonomy(tmp_path)
+
+    @pytest.mark.skipif(not hasattr(__import__("os"), "mkfifo"), reason="needs POSIX FIFOs")
+    def test_a_fifo_is_rejected_without_blocking(self, tmp_path):
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        fifo = tmp_path / "snapshot.fifo"
+        os.mkfifo(fifo)
+        code = (
+            "import sys; from pathlib import Path; "
+            "from services.category_mapping.taxonomy_loader import load_taxonomy; "
+            "from services.category_mapping.schemas import CategoryTaxonomyError\n"
+            "try:\n    load_taxonomy(Path(sys.argv[1]))\nexcept CategoryTaxonomyError as e:\n    print('typed', e)\n"
+        )
+        repo_root = Path(__file__).resolve().parents[3]
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(fifo)], cwd=repo_root, capture_output=True, text=True, timeout=30
+        )
+        assert result.stdout.startswith("typed taxonomy snapshot is not a regular file"), result
+
+    def test_an_oversized_snapshot_is_rejected_before_it_is_read_whole(self, tmp_path, monkeypatch):
+        from services.category_mapping import taxonomy_loader
+
+        monkeypatch.setattr(taxonomy_loader, "_MAX_SNAPSHOT_BYTES", 1024)
+        big = tmp_path / "big.txt"
+        big.write_bytes(b"#" * 2048)
+        with pytest.raises(CategoryTaxonomyError, match="exceeds 1024 bytes"):
+            load_taxonomy(big)
+        # the real bundled file is far below the bound and still loads
+        monkeypatch.undo()
+        assert len(default_taxonomy()) > 0
+
     def test_byte_identical_copy_elsewhere_is_unverified_not_bundled_evidence(self, tmp_path):
         from services.category_mapping import taxonomy_loader
 

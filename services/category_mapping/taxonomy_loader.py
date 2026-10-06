@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import stat as stat_module
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -26,6 +27,10 @@ from .schemas import (
 _DEFAULT_SNAPSHOT_PATH = (
     Path(__file__).resolve().parents[2] / "data" / "shopify_product_taxonomy" / "categories.v2026-08.partial.txt"
 )
+
+# The bundled snapshot is ~0.2 MB; a full upstream taxonomy is a few MB. Anything larger is
+# not a taxonomy snapshot, and reading it whole would exhaust memory.
+_MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024
 
 _LINE_RE = re.compile(r"^gid://shopify/TaxonomyCategory/(\S+)\s*:\s*(.+?)\s*$")
 
@@ -153,6 +158,34 @@ def parse_taxonomy_text(
     )
 
 
+def _read_snapshot_bytes(snapshot_path: Path) -> bytes:
+    """Read the snapshot's raw bytes, failing closed with :class:`CategoryTaxonomyError`.
+
+    Only a regular file within the size bound is read: a FIFO or device node would
+    block or stream forever, and an oversized file would be read whole into memory.
+    ``ValueError`` (e.g. a path containing a NUL byte) is typed like ``OSError``.
+    """
+    name = snapshot_path.name.replace("\x00", "?")
+    # CategoryTaxonomyError subclasses ValueError, so only the system calls sit inside the
+    # except: our own typed errors must not be re-labelled "unreadable".
+    try:
+        info = snapshot_path.stat()
+    except (OSError, ValueError) as exc:
+        raise CategoryTaxonomyError(f"taxonomy snapshot unreadable: {name}") from exc
+    if not stat_module.S_ISREG(info.st_mode):
+        raise CategoryTaxonomyError(f"taxonomy snapshot is not a regular file: {name}")
+    if info.st_size > _MAX_SNAPSHOT_BYTES:
+        raise CategoryTaxonomyError(f"taxonomy snapshot exceeds {_MAX_SNAPSHOT_BYTES} bytes: {name}")
+    try:
+        with snapshot_path.open("rb") as handle:
+            raw = handle.read(_MAX_SNAPSHOT_BYTES + 1)
+    except (OSError, ValueError) as exc:
+        raise CategoryTaxonomyError(f"taxonomy snapshot unreadable: {name}") from exc
+    if len(raw) > _MAX_SNAPSHOT_BYTES:  # grew between stat and read
+        raise CategoryTaxonomyError(f"taxonomy snapshot exceeds {_MAX_SNAPSHOT_BYTES} bytes: {name}")
+    return raw
+
+
 def load_taxonomy(path: Path | None = None) -> TaxonomyIndex:
     """Load and validate the taxonomy snapshot from disk. Deterministic: the
     same file always produces the same :class:`TaxonomyIndex` contents.
@@ -164,10 +197,7 @@ def load_taxonomy(path: Path | None = None) -> TaxonomyIndex:
     callers see "evidence unavailable" rather than a raw OS/decoding error or,
     worse, an empty mapping."""
     snapshot_path = Path(path) if path is not None else _DEFAULT_SNAPSHOT_PATH
-    try:
-        raw = snapshot_path.read_bytes()
-    except OSError as exc:
-        raise CategoryTaxonomyError(f"taxonomy snapshot unreadable: {snapshot_path.name}") from exc
+    raw = _read_snapshot_bytes(snapshot_path)
     if snapshot_path.resolve() == _DEFAULT_SNAPSHOT_PATH.resolve():
         actual_digest = hashlib.sha256(raw).hexdigest()
         expected_digest = TAXONOMY_SOURCE_PROVENANCE["snapshot_sha256"]
