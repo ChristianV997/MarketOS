@@ -237,43 +237,41 @@ def test_jsonl_malformed_and_non_finite_rows_do_not_leak_contents(monkeypatch, t
     assert secret_marker not in serialized
 
 
-def test_jsonl_byte_cap_applies_to_stream_consumed_bytes(monkeypatch):
+def test_jsonl_byte_cap_applies_to_stream_consumed_bytes(monkeypatch, tmp_path):
     class StreamTracker:
-        def __init__(self, data: bytes):
-            self._data = data
-            self._pos = 0
+        def __init__(self, raw):
+            self._raw = raw
             self.read_calls: list[int] = []
 
         def __enter__(self):
             return self
 
         def __exit__(self, *args):
-            pass
+            self._raw.close()
 
         def read(self, size: int = -1) -> bytes:
             self.read_calls.append(size)
-            if size == -1 or size is None:
-                chunk = self._data[self._pos:]
-                self._pos = len(self._data)
-                return chunk
-            chunk = self._data[self._pos : self._pos + size]
-            self._pos += len(chunk)
-            return chunk
+            return self._raw.read(size)
 
-    stream = StreamTracker(b"a" * 100)
-    orig_open = query_service.Path.open
+    file_path = tmp_path / "stream.jsonl"
+    file_path.write_bytes(b"a" * 100)
+    trackers: list[StreamTracker] = []
+    orig_open = open
 
-    def mock_open(self, mode="r", *args, **kwargs):
-        if "b" in mode:
-            return stream
-        return orig_open(self, mode, *args, **kwargs)
+    def mock_open(file, mode="r", *args, **kwargs):
+        opened = orig_open(file, mode, *args, **kwargs)
+        if isinstance(file, int) and "b" in mode:
+            wrapped = StreamTracker(opened)
+            trackers.append(wrapped)
+            return wrapped
+        return opened
 
-    monkeypatch.setattr(query_service.Path, "open", mock_open)
-    events, warnings = query_service.load_events_from_jsonl("dummy.jsonl", max_bytes=50, oversized_warning="oversized")
+    monkeypatch.setattr("builtins.open", mock_open)
+    events, warnings = query_service.load_events_from_jsonl(file_path, max_bytes=50, oversized_warning="oversized")
 
     assert events == []
     assert warnings == ["oversized"]
-    assert stream.read_calls == [50, 1]
+    assert trackers and trackers[0].read_calls == [50, 1]
 
 
 def _jail(monkeypatch, tmp_path):
@@ -426,10 +424,42 @@ def test_loader_returns_unavailable_when_the_path_cannot_be_opened(tmp_path):
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are not available on this platform")
+def test_fifo_direct_loader_fails_promptly_in_subprocess(tmp_path):
+    import subprocess
+    import sys
+
+    fifo = tmp_path / "events.fifo"
+    getattr(os, "mkfifo")(fifo)
+    script = (
+        "import sys\n"
+        "from backend.events.query_service import load_events_from_jsonl\n"
+        "events, warnings = load_events_from_jsonl(sys.argv[1])\n"
+        "assert events == [], f'expected empty events, got {events}'\n"
+        "assert warnings == ['jsonl_file_unavailable'], f'expected unavailable warning, got {warnings}'\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script, str(fifo)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert proc.returncode == 0, f"stdout: {proc.stdout}, stderr: {proc.stderr}"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are not available on this platform")
+def test_fifo_direct_loader_fails_promptly_in_process(tmp_path):
+    fifo = tmp_path / "events.fifo"
+    getattr(os, "mkfifo")(fifo)
+    loaded, warnings = query_service.load_events_from_jsonl(fifo)
+    assert loaded == []
+    assert warnings == ["jsonl_file_unavailable"]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are not available on this platform")
 def test_fifo_under_artifacts_is_not_a_file_and_does_not_block(monkeypatch, tmp_path):
     artifacts = _jail(monkeypatch, tmp_path)
     fifo = artifacts / "events.jsonl"
-    os.mkfifo(fifo)
+    getattr(os, "mkfifo")(fifo)
     monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(fifo))
     outcome: list[dict] = []
     worker = threading.Thread(target=lambda: outcome.append(canonical_events._jsonl_report(_query())), daemon=True)
@@ -443,3 +473,24 @@ def test_fifo_under_artifacts_is_not_a_file_and_does_not_block(monkeypatch, tmp_
 
     assert outcome[0]["timeline"]["warnings"] == ["jsonl_read_path_unconfigured"]
     assert outcome[0]["timeline"]["events"] == []
+
+
+def test_regular_file_direct_loader_and_route(monkeypatch, tmp_path):
+    artifacts = _jail(monkeypatch, tmp_path)
+    path = artifacts / "events.jsonl"
+    line = _valid_event_line()
+    path.write_bytes(line)
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(path))
+
+    # Direct loader caller
+    events, warnings = query_service.load_events_from_jsonl(path)
+    assert warnings == []
+    assert len(events) == 1
+
+    # Route caller
+    report = canonical_events._jsonl_report(_query())
+    assert report["timeline"]["warnings"] == []
+    assert len(report["timeline"]["events"]) == 1
+    assert report["read_only"] is True
+    assert report["network_calls"] is False
+    assert report["mutated"] is False

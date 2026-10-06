@@ -1,17 +1,16 @@
 """Deterministic, read-only canonical event queries for JSONL and adapters."""
 from __future__ import annotations
 import json
+import os
 import re
+import stat
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Sequence
 from backend.contracts.events import Event
 from .query_models import CommerceRunSummary, CompetitionSummary, EventQuery, EventRecordView, EventTimeline, OpportunityRankingSummary, ResearchPortfolioSummary, ShopifyImportSummary
 
-# JSONL rows end at CR, LF or CRLF only. str.splitlines() also cuts at U+2028, U+2029 and U+0085,
-# which a JSON string may hold raw (Event.canonical_json uses ensure_ascii=False), so it would split
-# one valid row into two malformed ones and lose the event.
-_JSONL_LINE_BREAK = re.compile(r"\r\n|\r|\n")
+_JSONL_LINE_BREAK = re.compile(r"\x0d\x0a|\x0d|\x0a")
 
 def load_events_from_jsonl(
     path: str | Path,
@@ -23,14 +22,29 @@ def load_events_from_jsonl(
     if max_bytes is not None and (isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0):
         raise ValueError("max_bytes must be a non-negative integer or None")
     events: list[Event] = []; warnings: list[str] = []
+    fd: int | None = None
     try:
-        with Path(path).open("rb") as source:
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            os.close(fd)
+            fd = None
+            return events, ["jsonl_file_unavailable"]
+        with open(fd, "rb") as source:
+            fd = None
             raw = source.read() if max_bytes is None else source.read(max_bytes)
             if max_bytes is not None and source.read(1):
                 return events, [oversized_warning]
         text = raw.decode("utf-8")
     except (OSError, ValueError, OverflowError):
         return events, ["jsonl_file_unavailable"]
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
     lines = _JSONL_LINE_BREAK.split(text)
     if lines and lines[-1] == "":
         lines.pop()
