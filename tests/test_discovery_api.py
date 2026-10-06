@@ -117,8 +117,12 @@ def test_opportunity_discovery_api_preserves_missing_empty_and_nonempty_gaps(dis
     assert "shipping" in incomplete_data["decisions"][0]["evidence_gaps"]
 
     verified_workspace = WorkspaceAccess(ISSUER, "owner", WORKSPACE_ID, "internal", "Owner")
+    complete_projection = complete_data.pop("owner_opportunity")
+    incomplete_projection = incomplete_data.pop("owner_opportunity")
     assert complete_data == run_discovery("evaluate", complete_payload, workspace=verified_workspace).to_dict()
     assert incomplete_data == run_discovery("evaluate", incomplete_payload, workspace=verified_workspace).to_dict()
+    assert complete_projection["safety"]["launch_authorized"] is False
+    assert incomplete_projection["snapshot_resolution"]["persisted"] is False
 
 
 def test_opportunity_discovery_requires_verified_identity(discovery_client):
@@ -200,3 +204,24 @@ def test_opportunity_discovery_rejects_query_workspace_override(discovery_client
 
     assert response.status_code == 422
     assert response.json() == {"detail": {"code": "workspace_selector_rejected"}}
+
+
+def test_opportunity_discovery_adds_owner_projection_without_replacing_raw_run(discovery_client):
+    from services.opportunity_discovery import run_discovery
+
+    headers = {"Authorization": "Bearer valid-token"}
+    payload = {"candidates": []}
+    response = discovery_client.post("/api/discovery/opportunity-discovery", params={"mode": "evaluate"}, json=payload, headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    raw = run_discovery("evaluate", payload, workspace=WorkspaceAccess(ISSUER, "owner", WORKSPACE_ID, "internal", "Owner")).to_dict()
+    projection = body.pop("owner_opportunity")
+    assert body == raw
+    assert projection["snapshot_resolution"]["persisted"] is False
+    assert projection["snapshot_resolution"]["resolver"] == "unavailable"
+    assert projection["safety"]["ads_launched"] is False
+    assert projection["safety"]["publishing"] is False
+    assert projection["safety"]["launch_authorized"] is False
+    assert projection["authorized_workspace_id"] == WORKSPACE_ID
+    denied = discovery_client.post("/api/discovery/opportunity-discovery", json=payload)
+    assert denied.status_code == 401
