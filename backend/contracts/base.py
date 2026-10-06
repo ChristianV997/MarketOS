@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -20,6 +22,21 @@ from typing import Any
 
 
 _SCHEMA_VERSION = 1
+_ID_LOCK = threading.Lock()
+_ID_SEQUENCE = 0
+
+
+def _creation_nonce() -> str:
+    """Distinguish two new artifacts that share a timestamp.
+
+    The nonce is only an input to a newly minted id. A stored ``artifact_id``
+    is never recomputed, so replay of an existing record stays idempotent.
+    """
+    global _ID_SEQUENCE
+    with _ID_LOCK:
+        _ID_SEQUENCE += 1
+        sequence = _ID_SEQUENCE
+    return f"{os.getpid()}:{sequence}"
 
 
 @dataclass
@@ -45,7 +62,7 @@ class BaseArtifact:
 
     def _derive_id(self) -> str:
         """UUID5 from artifact_type + workspace + key content."""
-        key = f"{self.artifact_type}:{self.workspace}:{self.created_at}"
+        key = f"{self.artifact_type}:{self.workspace}:{self.created_at}:{_creation_nonce()}"
         namespace = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
         return str(uuid.uuid5(namespace, key))
 
