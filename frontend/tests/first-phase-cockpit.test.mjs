@@ -627,6 +627,7 @@ test("source contracts: no client re-ranking and no API client duplication", asy
 test("accessibility and focus contracts are present", async () => {
   const page = await readFile(new URL("../src/pages/FirstPhaseEvidenceCockpit.tsx", import.meta.url), "utf8");
   const table = await readFile(new URL("components/RankedCandidatesPanel.tsx", featureRoot), "utf8");
+  const nav = await readFile(new URL("lib/keyboardNav.ts", featureRoot), "utf8");
   const detail = await readFile(new URL("components/CandidateDetailPanel.tsx", featureRoot), "utf8");
   const banner = await readFile(new URL("components/CockpitStatusBanner.tsx", featureRoot), "utf8");
 
@@ -643,8 +644,8 @@ test("accessibility and focus contracts are present", async () => {
   assert.match(table, /aria-rowcount=\{candidates\.length \+ 1\}/);
   assert.match(table, /id="ranked-candidates-table"/);
   assert.match(table, /tabIndex=\{tabIndex\}/);
-  assert.match(table, /ArrowDown/);
-  assert.match(table, /ArrowUp/);
+  assert.match(nav, /ArrowDown/);
+  assert.match(nav, /ArrowUp/);
   assert.match(table, /Home/);
   assert.match(table, /End/);
   assert.match(table, /md:hidden/);

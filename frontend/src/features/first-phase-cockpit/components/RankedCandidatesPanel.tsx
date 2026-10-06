@@ -144,9 +144,9 @@ export function RankedCandidatesPanel({
       onWindowStartChange(0);
     } else if (event.key === "End") {
       onWindowStartChange(Math.max(0, nextIndex - CANDIDATE_WINDOW_SIZE + 1));
-    } else if (event.key === "ArrowDown" && nextIndex >= windowed.windowStart + windowed.windowSize) {
+    } else if (nextIndex >= windowed.windowStart + windowed.windowSize) {
       onWindowStartChange(nextWindowStart(windowed, "forward"));
-    } else if (event.key === "ArrowUp" && nextIndex < windowed.windowStart) {
+    } else if (nextIndex < windowed.windowStart) {
       onWindowStartChange(nextWindowStart(windowed, "back"));
     }
     queueMicrotask(() => focusRow(nextIndex));
