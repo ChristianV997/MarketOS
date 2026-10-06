@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,9 +14,10 @@ if str(ROOT) not in sys.path:
 from evaluation.trustos.control_plane import ACTION_CATEGORIES
 from evaluation.trustos.gate_runner import evaluate_action
 from evaluation.trustos.trustos_report import build_trustos_combined_report
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 
 SECRET_KEYS = {"actual_secret_value", "api_key", "raw_api_key", "raw_oauth_token", "oauth_token", "access_token", "refresh_token", "password", "private_key", "private_key_material", "authorization", "cookie", "cookies", "raw_payload", "raw_html", "html", "body", "response_body", "prompt", "source_code", "internal_prompt", "other_client_data", "client_private_data", "cross_client_data"}
-_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
+
 
 
 def _path(value: str, *, must_exist: bool = True, allow_external: bool = False) -> Path:
@@ -40,7 +40,7 @@ def _secret_like(value: Any) -> bool:
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza"))
+        return "-----begin " in lowered or "bearer " in lowered or contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza"))
     return False
 
 

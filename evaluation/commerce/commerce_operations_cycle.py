@@ -8,9 +8,9 @@ draft, and workspace-isolation surfaces into one deterministic readiness cycle.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from typing import Any, Callable, Mapping
 
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis
 
 try:
@@ -102,11 +102,8 @@ RAW_KEYS = frozenset(
         "internal_prompt",
     }
 )
-# `sk-` is an OpenAI-style credential prefix, not a substring of hyphenated ids
-# such as desk-clamp-lamp. Require a non-alphanumeric boundary. A URL escape
-# (%3D) or a literal backslash escape (\\n) ends in a letter or digit but is a
-# separator, so a token after one still starts the credential and is rejected.
-_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
+# Keep these provider markers local; evaluation.secret_markers is the sole
+# authority for boundary-prefixed `sk-` detection across input guards.
 _OTHER_SECRET_MARKERS = ("ghp_", "xoxb-", "aiza")
 LIVE_MODES = frozenset({"live_readonly", "public_live", "authenticated_live"})
 GOVERNOR_ACTIONS = (
@@ -196,7 +193,7 @@ def _secret_like(value: Any) -> bool:
 def _secret_marker_in_text(lowered: str) -> bool:
     if "-----begin " in lowered or "bearer " in lowered:
         return True
-    if _SK_PREFIX.search(lowered):
+    if contains_boundary_prefixed_sk_token(lowered):
         return True
     return any(marker in lowered for marker in _OTHER_SECRET_MARKERS)
 

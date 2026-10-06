@@ -57,7 +57,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import re
 import sys
 import tempfile
 from decimal import Decimal, InvalidOperation
@@ -72,6 +71,7 @@ from backend.deliverables.registry import DeliverableRegistry  # noqa: E402
 from backend.economics import CurrencyMismatchError, EconomicsError, EvidenceRef, Money  # noqa: E402
 from backend.workspaces.client_workspace import ClientWorkspace  # noqa: E402
 from backend.workspaces.registry import WorkspaceRegistry  # noqa: E402
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token  # noqa: E402
 from evaluation.companyos.service_delivery import (  # noqa: E402
     REQUIRED_CLIENT_DATA_FIELDS,
     assess_client_data_quality,
@@ -91,7 +91,7 @@ CLASSIFICATIONS = frozenset({"eligible", "data_inadequate", "blocked", "malforme
 # with the underlying authority's, without depending on its private
 # implementation detail.
 _SECRET_SHAPE_MARKERS = ("ghp_", "gho_", "ghu_", "ghs_", "ghr_", "-----begin", "bearer ")
-_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
+
 
 
 class IntakeError(ValueError):
@@ -101,7 +101,7 @@ class IntakeError(ValueError):
 def _reject_secret_shaped_recursive(value: Any, *, field_name: str) -> None:
     if isinstance(value, str):
         lowered = value.lower()
-        if _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
+        if contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
             raise IntakeError(f"secret-shaped value rejected in {field_name}")
     elif isinstance(value, Mapping):
         for key, item in value.items():

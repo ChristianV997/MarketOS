@@ -34,7 +34,6 @@ no conversion path of its own.
 from __future__ import annotations
 
 import hashlib
-import re
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Mapping
@@ -49,6 +48,7 @@ from backend.economics import (
     calculate_service_economics,
 )
 from backend.workspaces.client_workspace import ClientWorkspace
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 
 from .service_catalog import ServiceDeliverable, ServicePackage, default_service_catalog, package_map
 
@@ -414,12 +414,12 @@ class ClientEngagement:
 
 
 _SECRET_SHAPE_MARKERS = ("ghp_", "gho_", "ghu_", "ghs_", "ghr_", "-----begin", "bearer ")
-_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
+
 
 
 def _reject_secret_shaped(value: str, *, field_name: str) -> None:
     lowered = value.lower()
-    if _SK_PREFIX.search(lowered) is not None or any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
+    if contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
         raise ValueError(f"secret-shaped value rejected in {field_name}")
 
 
@@ -724,7 +724,7 @@ def _redact_client_unsafe_values(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_client_unsafe_values(item) for item in value]
     if isinstance(value, str) and (
-        _SK_PREFIX.search(value.lower()) is not None or any(marker in value.lower() for marker in _LEAK_MARKERS)
+        contains_boundary_prefixed_sk_token(value) or any(marker in value.lower() for marker in _LEAK_MARKERS)
     ):
         return "[redacted: client-unsafe value removed]"
     return value
