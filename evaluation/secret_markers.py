@@ -7,7 +7,8 @@ import re
 # weakens detection of URL-escaped or literal newline/tab/carriage-return forms.
 _LEGACY_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nrt])sk-")
 _BOUNDARY_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
-_BACKSLASH_ESCAPE = re.compile(r"\\(?:[abfnrtv0]|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})$")
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+_OCTAL_DIGITS = frozenset("01234567")
 _SIMPLE_ESCAPES = {
     "a": "\a",
     "b": "\b",
@@ -18,40 +19,61 @@ _SIMPLE_ESCAPES = {
     "v": "\v",
     "0": "\0",
 }
-_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 
-def _decode_backslash_escape(escape: str) -> str:
-    body = escape[1:]
-    if len(body) == 1:
-        return _SIMPLE_ESCAPES[body.lower()]
-    try:
-        codepoint = int(body[1:], 16)
-    except ValueError:
-        return "\ufffd"
-    if codepoint > 0x10FFFF:
-        return "\ufffd"
-    return chr(codepoint)
+def _decode_one_pass(s: str) -> str:
+    output: list[str] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        if s[i] == "%" and i + 2 < n and s[i + 1] in _HEX_DIGITS and s[i + 2] in _HEX_DIGITS:
+            output.append(chr(int(s[i + 1 : i + 3], 16)))
+            i += 3
+            continue
+        if s[i] == "\\" and i + 1 < n:
+            c = s[i + 1]
+            c_low = c.lower()
+            if c_low in _SIMPLE_ESCAPES:
+                if c == "0" and i + 3 < n and s[i + 2] in _OCTAL_DIGITS and s[i + 3] in _OCTAL_DIGITS:
+                    output.append(chr(int(s[i + 1 : i + 4], 8)))
+                    i += 4
+                    continue
+                if c == "0" and i + 2 < n and s[i + 2] in _OCTAL_DIGITS:
+                    output.append(chr(int(s[i + 1 : i + 3], 8)))
+                    i += 3
+                    continue
+                output.append(_SIMPLE_ESCAPES[c_low])
+                i += 2
+                continue
+            if c_low == "x" and i + 3 < n and s[i + 2] in _HEX_DIGITS and s[i + 3] in _HEX_DIGITS:
+                output.append(chr(int(s[i + 2 : i + 4], 16)))
+                i += 4
+                continue
+            if c_low == "u":
+                if i + 9 < n and all(ch in _HEX_DIGITS for ch in s[i + 2 : i + 10]):
+                    codepoint = int(s[i + 2 : i + 10], 16)
+                    output.append(chr(codepoint) if codepoint <= 0x10FFFF else "\ufffd")
+                    i += 10
+                    continue
+                if i + 5 < n and all(ch in _HEX_DIGITS for ch in s[i + 2 : i + 6]):
+                    codepoint = int(s[i + 2 : i + 6], 16)
+                    output.append(chr(codepoint) if codepoint <= 0x10FFFF else "\ufffd")
+                    i += 6
+                    continue
+        output.append(s[i])
+        i += 1
+    return "".join(output)
 
 
 def _canonical_secret_marker_view(value: str) -> str:
     """Decode separator escapes into a detection-only view; never return it externally."""
-    output: list[str] = []
-    for char in value:
-        output.append(char)
-        while True:
-            if len(output) >= 3 and output[-3] == "%" and output[-2] in _HEX_DIGITS and output[-1] in _HEX_DIGITS:
-                byte = int("".join(output[-2:]), 16)
-                output[-3:] = [chr(byte)]
-                continue
-            tail = "".join(output[-10:])
-            escape_match = _BACKSLASH_ESCAPE.search(tail)
-            if escape_match is None:
-                break
-            escape = escape_match.group(0)
-            del output[-len(escape) :]
-            output.append(_decode_backslash_escape(escape))
-    return "".join(output)
+    current = value
+    for _ in range(10):
+        next_view = _decode_one_pass(current)
+        if next_view == current:
+            break
+        current = next_view
+    return current
 
 
 def contains_boundary_prefixed_sk_token(value: str) -> bool:

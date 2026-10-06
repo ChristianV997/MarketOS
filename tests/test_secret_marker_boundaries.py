@@ -77,14 +77,33 @@ SECRET_SHAPES = (
 )
 ENCODED_SEPARATORS = (
     pytest.param(r"\b", id="escaped-backspace"),
+    pytest.param(r"\B", id="escaped-uppercase-backspace"),
     pytest.param(r"\x20", id="escaped-hex-space"),
+    pytest.param(r"\X20", id="escaped-uppercase-hex-space"),
     pytest.param("%253D", id="double-encoded-url-separator"),
     pytest.param(r"\u0020", id="escaped-unicode-space"),
+    pytest.param(r"\U0020", id="escaped-uppercase-unicode-4hex"),
+    pytest.param(r"\u00000020", id="escaped-lowercase-unicode-8hex"),
+    pytest.param(r"\U00000020", id="escaped-uppercase-unicode-8hex"),
+    pytest.param(r"\040", id="escaped-octal-space"),
+    pytest.param(r"\00", id="escaped-octal-null"),
 )
 SYNTHETIC_SK = "sk-" + "SYNTHETICEXAMPLE0000"
 
 
-@pytest.mark.parametrize("candidate_id", ("desk-clamp-lamp", "desk-clamp-lamp-amazon-mirror"))
+@pytest.mark.parametrize(
+    "candidate_id",
+    (
+        "desk-clamp-lamp",
+        "desk-clamp-lamp-amazon-mirror",
+        "whisk-attachment",
+        "flask-holder",
+        "disk-brake-pad",
+        "risk-assessment-template",
+        "kiosk-stand-mount",
+        "brisk-morning-tea",
+    ),
+)
 @pytest.mark.parametrize(("guard_name", "guard"), BOUNDARY_GUARDS, ids=[name for name, _ in BOUNDARY_GUARDS])
 def test_hyphenated_candidate_ids_are_not_secret_markers(guard_name: str, guard: Guard, candidate_id: str):
     assert not _rejects(guard, candidate_id), guard_name

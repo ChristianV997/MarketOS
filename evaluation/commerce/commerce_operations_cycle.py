@@ -186,16 +186,17 @@ def _secret_like(value: Any) -> bool:
         lowered = value.lower()
         if "<html" in lowered or "<!doctype html" in lowered:
             return True
-        return _secret_marker_in_text(lowered)
+        return _secret_marker_in_text(value, lowered=lowered)
     return False
 
 
-def _secret_marker_in_text(lowered: str) -> bool:
-    if "-----begin " in lowered or "bearer " in lowered:
+def _secret_marker_in_text(value: str, *, lowered: str | None = None) -> bool:
+    low = value.lower() if lowered is None else lowered
+    if "-----begin " in low or "bearer " in low:
         return True
-    if contains_boundary_prefixed_sk_token(lowered):
+    if contains_boundary_prefixed_sk_token(value):
         return True
-    return any(marker in lowered for marker in _OTHER_SECRET_MARKERS)
+    return any(marker in low for marker in _OTHER_SECRET_MARKERS)
 
 
 def reject_unsafe_input(value: Any, *, label: str = "input") -> None:
