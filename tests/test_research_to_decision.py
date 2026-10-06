@@ -1899,3 +1899,44 @@ def test_no_corpus_entry_ever_escapes_as_a_bare_exception() -> None:
                     call()
                 except ResearchToDecisionError:
                     pass
+
+
+def test_http_document_reference_with_an_absolute_url_path_never_probes_host_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # _reference_text accepts an http(s) URL with a path; as a local evidence reference its absolute
+    # path ("/bin/x.pdf") must be rejected BEFORE the symlink walk, which would otherwise call
+    # is_symlink() on host paths outside the evidence root (and answer "must not be a symlink").
+    root = tmp_path / "evidence"
+    root.mkdir()
+    probed: list[Path] = []
+    real_is_symlink = Path.is_symlink
+
+    def recording_is_symlink(self: Path) -> bool:
+        probed.append(self)
+        return real_is_symlink(self)
+
+    monkeypatch.setattr(Path, "is_symlink", recording_is_symlink)
+    for reference in ("https://h.example/bin/x.pdf", "https://h.example/proc/self/x.pdf", "https://h.example/x.pdf"):
+        with pytest.raises(ResearchToDecisionError, match="must remain relative to the manifest"):
+            rtd._supplier_document_evidence_bindings([("o", "s", reference, "0" * 64)], evidence_root=root)
+    resolved_root = root.resolve()
+    assert all(resolved_root in (p, *p.parents) for p in probed), probed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs unprivileged symlink creation")
+@pytest.mark.parametrize("which", ["evidence_root", "base_dir"])
+def test_symlink_loop_roots_fail_closed_without_echoing_the_path(tmp_path: Path, which: str) -> None:
+    loop_a, loop_b = tmp_path / "loop_a", tmp_path / "loop_b"
+    loop_a.symlink_to(loop_b)
+    loop_b.symlink_to(loop_a)
+    good = tmp_path / "good"
+    good.mkdir()
+    expected = "could not be resolved safely|does not exist or is not a directory"  # 3.13 resolves loops lazily
+    if which == "evidence_root":
+        with pytest.raises(ResearchToDecisionError, match=expected) as caught:
+            rtd._supplier_document_evidence_bindings([("o", "s", "manual:a.pdf", "0" * 64)], evidence_root=loop_a)
+    else:
+        manifest = {"captured_at": "2026-09-16T09:00:00-06:00", "lane": dict(LANE), "candidates": [{"candidate_id": "x"}]}
+        with pytest.raises((ResearchToDecisionError, FileNotFoundError, NotADirectoryError)) as caught:
+            build_research_to_decision(manifest, base_dir=loop_a)
+        assert not isinstance(caught.value, RuntimeError)
+    assert str(tmp_path) not in str(caught.value)

@@ -253,6 +253,18 @@ def _parse_url(value: str, error: str):
 _HOST_LABEL = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?")
 
 
+def _resolve_root(path: Path | str, label: str) -> Path:
+    """``Path.resolve()`` for an operator-supplied root that fails closed.
+
+    A symlink loop raises a bare RuntimeError (3.11/3.12) whose text echoes the path; an
+    over-long or unencodable name raises OSError/ValueError. Neither may escape as-is.
+    """
+    try:
+        return Path(path).resolve()
+    except (RuntimeError, OSError, ValueError):
+        raise ResearchToDecisionError(f"{label} could not be resolved safely") from None
+
+
 def _is_well_formed_http_host(hostname: str | None) -> bool:
     """True only for a real DNS name (IDN allowed), a dotted-quad IPv4 or a bracketed IPv6 literal.
 
@@ -700,7 +712,7 @@ def _supplier_document_evidence_bindings(
         return {}
     if evidence_root is None:
         raise ResearchToDecisionError("supplier document evidence bindings require an evidence root")
-    root = evidence_root.resolve()
+    root = _resolve_root(evidence_root, "supplier evidence root")
     if not root.is_dir():
         raise ResearchToDecisionError("supplier evidence root does not exist or is not a directory")
     bindings: dict[tuple[str, str], dict[str, Any]] = {}
@@ -726,6 +738,11 @@ def _supplier_document_evidence_bindings(
         if key in bindings:
             raise ResearchToDecisionError(f"duplicate supplier document evidence binding for offer {offer_id}/{exact_sku}")
         relative_path = urlparse(reference).path or reference
+        # An http(s) reference is accepted by _reference_text with an absolute URL path ("/bin/x.pdf");
+        # as a local evidence path that must be rejected *before* the walk below, which would
+        # otherwise call is_symlink() on host paths outside the evidence root (an existence oracle).
+        if _is_unsafe_relative_path(relative_path):
+            raise ResearchToDecisionError("document_evidence.reference must remain relative to the manifest")
         # Checked on the *unresolved* path, walking every component: once
         # _resolve() calls Path.resolve() it follows symlinks and returns
         # the real target, which is never itself a symlink -- so a symlink
@@ -1678,9 +1695,9 @@ def build_research_to_decision(
     """
     lane, metadata, captured_at = _validate_manifest(manifest)
     operator_confirmations = _operator_supplier_confirmations(operator_confirmed_supplier_documents)
-    evidence_root = Path(supplier_evidence_root).resolve() if supplier_evidence_root else None
+    evidence_root = _resolve_root(supplier_evidence_root, "supplier evidence root") if supplier_evidence_root else None
     document_evidence_bindings = _supplier_document_evidence_bindings(confirmed_supplier_document_evidence, evidence_root=evidence_root)
-    base = Path(base_dir).resolve()
+    base = _resolve_root(base_dir, "manifest base directory")
     entries_total = sum(len(manifest.get(key, []) or []) for key in ("supplier_inputs", "marketplace_inputs", "consumer_attention_inputs", "observation_inputs")) + (1 if manifest.get("public_market_seed") else 0)
     if entries_total > MAX_INPUT_FILES:
         raise ResearchToDecisionError(f"manifest exceeds {MAX_INPUT_FILES} input files")
