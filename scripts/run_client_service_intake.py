@@ -105,7 +105,10 @@ def _reject_secret_shaped_recursive(value: Any, *, field_name: str) -> None:
             raise IntakeError(f"secret-shaped value rejected in {field_name}")
     elif isinstance(value, Mapping):
         for key, item in value.items():
-            _reject_secret_shaped_recursive(item, field_name=f"{field_name}.{key}")
+            key_text = str(key)
+            if contains_boundary_prefixed_sk_token(key_text) or any(marker in key_text.lower() for marker in _SECRET_SHAPE_MARKERS):
+                raise IntakeError(f"secret-shaped value rejected in {field_name}.[redacted-key]")
+            _reject_secret_shaped_recursive(item, field_name=f"{field_name}.{key_text}")
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
             _reject_secret_shaped_recursive(item, field_name=f"{field_name}[{index}]")
@@ -149,7 +152,8 @@ def load_data_quality_csv(path: Path) -> dict[str, dict[str, Any]]:
             if not name:
                 continue
             if name not in REQUIRED_CLIENT_DATA_FIELDS:
-                raise IntakeError(f"unknown data-quality field in CSV: {name!r}")
+                shown = "[redacted-key]" if contains_boundary_prefixed_sk_token(name) or any(m in name.lower() for m in _SECRET_SHAPE_MARKERS) else name
+                raise IntakeError(f"unknown data-quality field in CSV: {shown!r}")
             _reject_secret_shaped_recursive(row, field_name=f"data_quality_csv.{name}")
             entry: dict[str, Any] = {"available": str(row.get("available", "")).strip().lower() in {"1", "true", "yes"}}
             age = (row.get("as_of_days_ago") or "").strip()

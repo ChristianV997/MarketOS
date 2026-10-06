@@ -153,3 +153,63 @@ def test_client_workspace_findings_do_not_serialize_secret(separator: str):
 @pytest.mark.parametrize(("guard_name", "guard"), AIZA_GUARDS, ids=[name for name, _ in AIZA_GUARDS])
 def test_case_insensitive_google_secret_marker_still_fails_closed(guard_name: str, guard: Guard):
     assert _rejects(guard, "AIza" + "SYNTHETICEXAMPLE0000"), guard_name
+
+
+OCTAL_AND_NESTED_SEPARATORS = (
+    "\\1",
+    "\\12",
+    "\\012",
+    "\\040",
+    "\\011",
+    "%" + "25" * 11 + "20",
+    "%" + "25" * 30 + "20",
+)
+
+
+@pytest.mark.parametrize("separator", OCTAL_AND_NESTED_SEPARATORS)
+def test_octal_and_deeply_nested_separators_fail_closed(separator: str):
+    from evaluation.secret_markers import contains_boundary_prefixed_sk_token
+
+    assert contains_boundary_prefixed_sk_token("a" + separator + SYNTHETIC_SK)
+    # ordinary identifiers stay accepted
+    for ordinary in ("desk-clamp-lamp", "brisk-walk", "task-list"):
+        assert not contains_boundary_prefixed_sk_token(ordinary)
+
+
+def test_ordinary_ids_not_flagged_by_nested_percent():
+    from evaluation.secret_markers import contains_boundary_prefixed_sk_token
+
+    assert not contains_boundary_prefixed_sk_token("desk-clamp-lamp%2520x")
+
+
+def _leaky_key_payload(key: str) -> dict:
+    return {"note": "ok", "nested": {key: "value"}}
+
+
+@pytest.mark.parametrize("key", ["a%20" + SYNTHETIC_SK, SYNTHETIC_SK, "a\\012" + SYNTHETIC_SK])
+def test_canary_mapping_keys_are_rejected_without_echo(key: str):
+    payload = _leaky_key_payload(key)
+    errors: list[BaseException] = []
+    for call in (
+        lambda: service_delivery._reject_secret_shaped_recursive(payload, field_name="intake_data"),
+        lambda: run_client_service_intake._reject_secret_shaped_recursive(payload, field_name="intake"),
+    ):
+        with pytest.raises(ValueError) as excinfo:
+            call()
+        errors.append(excinfo.value)
+    for error in errors:
+        rendered = " ".join([str(error), repr(error), repr(error.args)])
+        assert key not in rendered and SYNTHETIC_SK not in rendered
+    findings = client_workspace_isolation.check_workspace_leakage(payload)
+    serialized = json.dumps([finding.to_dict() for finding in findings])
+    assert findings
+    assert key not in serialized and SYNTHETIC_SK not in serialized
+
+
+def test_redaction_removes_canary_keys_tuples_and_bytes():
+    redacted = service_delivery._redact_client_unsafe_values(
+        {SYNTHETIC_SK: "x", "items": (SYNTHETIC_SK, b"raw"), "ok": "desk-clamp-lamp"}
+    )
+    rendered = json.dumps(redacted, default=str)
+    assert SYNTHETIC_SK not in rendered and "raw" not in rendered
+    assert redacted["ok"] == "desk-clamp-lamp"

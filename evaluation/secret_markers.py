@@ -9,6 +9,7 @@ _LEGACY_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-|(?<=%[0-9a-f]{2})sk-|(?<=\\[nr
 _BOUNDARY_SK_PREFIX = re.compile(r"(?<![a-z0-9])sk-")
 _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 _OCTAL_DIGITS = frozenset("01234567")
+_MAX_DECODE_PASSES = 10
 _SIMPLE_ESCAPES = {
     "a": "\a",
     "b": "\b",
@@ -17,7 +18,6 @@ _SIMPLE_ESCAPES = {
     "r": "\r",
     "t": "\t",
     "v": "\v",
-    "0": "\0",
 }
 
 
@@ -33,15 +33,16 @@ def _decode_one_pass(s: str) -> str:
         if s[i] == "\\" and i + 1 < n:
             c = s[i + 1]
             c_low = c.lower()
+            if c in _OCTAL_DIGITS:
+                j = i + 1
+                while j < n and j < i + 4 and s[j] in _OCTAL_DIGITS:
+                    j += 1
+                if j - (i + 1) == 3 and int(s[i + 1 : j], 8) > 0o377:
+                    j -= 1
+                output.append(chr(int(s[i + 1 : j], 8)))
+                i = j
+                continue
             if c_low in _SIMPLE_ESCAPES:
-                if c == "0" and i + 3 < n and s[i + 2] in _OCTAL_DIGITS and s[i + 3] in _OCTAL_DIGITS:
-                    output.append(chr(int(s[i + 1 : i + 4], 8)))
-                    i += 4
-                    continue
-                if c == "0" and i + 2 < n and s[i + 2] in _OCTAL_DIGITS:
-                    output.append(chr(int(s[i + 1 : i + 3], 8)))
-                    i += 3
-                    continue
                 output.append(_SIMPLE_ESCAPES[c_low])
                 i += 2
                 continue
@@ -65,15 +66,18 @@ def _decode_one_pass(s: str) -> str:
     return "".join(output)
 
 
-def _canonical_secret_marker_view(value: str) -> str:
-    """Decode separator escapes into a detection-only view; never return it externally."""
+def _canonical_secret_marker_view(value: str) -> tuple[str, bool]:
+    """Decode separator escapes into a detection-only view; never return it externally.
+
+    The flag is False when decoding had not converged, which callers treat as suspicious.
+    """
     current = value
-    for _ in range(10):
+    for _ in range(_MAX_DECODE_PASSES):
         next_view = _decode_one_pass(current)
         if next_view == current:
-            break
+            return current, True
         current = next_view
-    return current
+    return current, _decode_one_pass(current) == current
 
 
 def contains_boundary_prefixed_sk_token(value: str) -> bool:
@@ -83,7 +87,10 @@ def contains_boundary_prefixed_sk_token(value: str) -> bool:
     lowered = value.lower()
     if _LEGACY_SK_PREFIX.search(lowered) is not None:
         return True
-    return _BOUNDARY_SK_PREFIX.search(_canonical_secret_marker_view(value).lower()) is not None
+    view, converged = _canonical_secret_marker_view(value)
+    if not converged:
+        return True  # fail closed on deeply nested encodings
+    return _BOUNDARY_SK_PREFIX.search(view.lower()) is not None
 
 
 __all__ = ["contains_boundary_prefixed_sk_token"]

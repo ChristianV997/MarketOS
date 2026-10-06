@@ -344,13 +344,15 @@ def check_workspace_leakage(payload: Mapping[str, Any], *, client_safe: bool = T
                     or (client_safe and data_class in {"client_private_data", "global_provider_intelligence"})
                     or any(marker in key_text for marker in _FORBIDDEN_KEY_MARKERS)
                     or _contains_filesystem_path(str(key))
+                    or contains_boundary_prefixed_sk_token(str(key))
                 )
+                safe_key = "[redacted-key]" if contains_boundary_prefixed_sk_token(str(key)) else str(key)
                 if forbidden_key:
                     cls = data_class or "client_private_data"
-                    findings.append(ClientWorkspaceLeakageCheck(f"leak-{len(findings)+1}", cls, f"{path}.{key}".strip("."), "internal content exposed to client projection", "critical" if cls in INTERNAL_KEYS or key_text in SECRET_KEYS else "high", "remove field or replace with an approved redacted summary", False, True, "hard_block"))
+                    findings.append(ClientWorkspaceLeakageCheck(f"leak-{len(findings)+1}", cls, f"{path}.{safe_key}".strip("."), "internal content exposed to client projection", "critical" if cls in INTERNAL_KEYS or key_text in SECRET_KEYS else "high", "remove field or replace with an approved redacted summary", False, True, "hard_block"))
                 elif data_class in {"lawyer_ready_packet", "accountant_ready_packet", "security_reviewer_packet"}:
-                    findings.append(ClientWorkspaceLeakageCheck(f"review-{len(findings)+1}", data_class, f"{path}.{key}".strip("."), "professional packet requires redaction review", "medium", "complete professional review before export", True, False, "requires_review"))
-                walk(child, f"{path}.{key}".strip("."))
+                    findings.append(ClientWorkspaceLeakageCheck(f"review-{len(findings)+1}", data_class, f"{path}.{safe_key}".strip("."), "professional packet requires redaction review", "medium", "complete professional review before export", True, False, "requires_review"))
+                walk(child, f"{path}.{safe_key}".strip("."))
         elif isinstance(value, (list, tuple)):
             for index, child in enumerate(value): walk(child, f"{path}[{index}]")
         elif isinstance(value, str) and (_contains_forbidden_value(value) or _contains_filesystem_path(value)):

@@ -423,6 +423,15 @@ def _reject_secret_shaped(value: str, *, field_name: str) -> None:
         raise ValueError(f"secret-shaped value rejected in {field_name}")
 
 
+def _key_is_secret_shaped(key: Any) -> bool:
+    text = str(key)
+    return contains_boundary_prefixed_sk_token(text) or any(marker in text.lower() for marker in _SECRET_SHAPE_MARKERS)
+
+
+def _safe_key_segment(key: Any) -> str:
+    return "[redacted-key]" if _key_is_secret_shaped(key) else str(key)
+
+
 def _reject_secret_shaped_recursive(value: Any, *, field_name: str) -> None:
     """Scan every string reachable from ``value``, including strings nested
     inside dicts/lists at any depth -- a secret pasted into a nested intake
@@ -432,7 +441,10 @@ def _reject_secret_shaped_recursive(value: Any, *, field_name: str) -> None:
         _reject_secret_shaped(value, field_name=field_name)
     elif isinstance(value, Mapping):
         for key, item in value.items():
-            _reject_secret_shaped_recursive(item, field_name=f"{field_name}.{key}")
+            segment = _safe_key_segment(key)
+            if segment == "[redacted-key]":
+                raise ValueError(f"secret-shaped value rejected in {field_name}.{segment}")
+            _reject_secret_shaped_recursive(item, field_name=f"{field_name}.{segment}")
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
             _reject_secret_shaped_recursive(item, field_name=f"{field_name}[{index}]")
@@ -453,7 +465,10 @@ def create_engagement(
         raise ValueError("client_id is required")
     _reject_secret_shaped(scope, field_name="scope")
     for key, value in (intake_data or {}).items():
-        _reject_secret_shaped_recursive(value, field_name=f"intake_data.{key}")
+        segment = _safe_key_segment(key)
+        if segment == "[redacted-key]":
+            raise ValueError(f"secret-shaped value rejected in intake_data.{segment}")
+        _reject_secret_shaped_recursive(value, field_name=f"intake_data.{segment}")
     engagement_id = new_engagement_id(client_id, workspace.workspace_id, package.package_id, created_at)
     return ClientEngagement(
         engagement_id=engagement_id, client_id=client_id, workspace_id=workspace.workspace_id,
@@ -720,9 +735,19 @@ def _redact_client_unsafe_values(value: Any) -> Any:
     flags rather than re-implementing detection.
     """
     if isinstance(value, Mapping):
-        return {key: "[redacted: internal-only field removed]" if str(key).lower() in _FORBIDDEN_KEYS else _redact_client_unsafe_values(item) for key, item in value.items()}
-    if isinstance(value, list):
+        redacted: dict[Any, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            if _key_is_secret_shaped(key):
+                redacted[f"[redacted-key-{index}]"] = "[redacted: client-unsafe value removed]"
+            elif str(key).lower() in _FORBIDDEN_KEYS:
+                redacted[key] = "[redacted: internal-only field removed]"
+            else:
+                redacted[key] = _redact_client_unsafe_values(item)
+        return redacted
+    if isinstance(value, (list, tuple)):
         return [_redact_client_unsafe_values(item) for item in value]
+    if isinstance(value, (bytes, bytearray)):
+        return "[redacted: client-unsafe value removed]"
     if isinstance(value, str) and (
         contains_boundary_prefixed_sk_token(value) or any(marker in value.lower() for marker in _LEAK_MARKERS)
     ):
