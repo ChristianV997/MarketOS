@@ -65,6 +65,85 @@ class TestUrlSafety:
         assert evidence.warnings[0].startswith("rejected:")
 
 
+def _public_dns(*_args, **_kwargs):
+    import socket
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))]
+
+
+class TestRequestTargetIsExact:
+    def test_suffix_host_not_fetched(self):
+        with patch("socket.getaddrinfo", side_effect=_public_dns):
+            with patch("requests.get") as get:
+                for url in (
+                    "https://evil.cjdropshipping.com/product/x",
+                    "https://evil.www.cjdropshipping.com/product/x",
+                ):
+                    with pytest.raises(PermissionError):
+                        mod._validate_public_url(url)
+                    evidence = mod.fetch_product_evidence(url, context=SidecarContext(dry_run=False))
+                    assert evidence.warnings[0].startswith("rejected:")
+                get.assert_not_called()
+
+    def test_http_userinfo_and_non_443_port_are_not_fetched(self):
+        urls = (
+            "http://www.cjdropshipping.com/product/x.html",
+            "https://user:pass@www.cjdropshipping.com/product/x",
+            "https://@www.cjdropshipping.com/product/x",
+            "https://www.cjdropshipping.com:8443/product/x",
+            "https://www.cjdropshipping.com:80/product/x",
+        )
+        with patch("socket.getaddrinfo", side_effect=_public_dns):
+            with patch("requests.get") as get:
+                with pytest.raises(ValueError):
+                    mod._validate_public_url(urls[0])
+                for url in urls[1:]:
+                    with pytest.raises(PermissionError):
+                        mod._validate_public_url(url)
+                for url in urls:
+                    evidence = mod.fetch_product_evidence(url, context=SidecarContext(dry_run=False))
+                    assert evidence.warnings[0].startswith("rejected:")
+                get.assert_not_called()
+
+    def test_rebuilt_url_is_what_gets_fetched(self, monkeypatch):
+        seen = {}
+
+        class _StubRobots:
+            def __init__(self, url):
+                seen["robots"] = url
+
+            def read(self):
+                return None
+
+            def can_fetch(self, _agent, url):
+                seen["page"] = url
+                return True
+
+        class _Response:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size=65536):
+                yield JSONLD_PRODUCT_HTML.encode()
+
+        monkeypatch.setattr(mod.robotparser, "RobotFileParser", _StubRobots)
+        raw = "https://cjdropshipping.com:443/product/x.html?id=1#frag"
+        expected = "https://www.cjdropshipping.com/product/x.html?id=1"
+        with patch("socket.getaddrinfo", side_effect=_public_dns):
+            with patch("requests.get", return_value=_Response()) as get:
+                with patch.object(mod, "_check_robots", _real_check_robots):
+                    evidence = mod.fetch_product_evidence(raw, context=SidecarContext(dry_run=False))
+                    mod.fetch_product_evidence(expected, context=SidecarContext(dry_run=False))
+        assert get.call_count == 1
+        assert get.call_args.args[0] == expected
+        assert seen["robots"] == "https://www.cjdropshipping.com/robots.txt"
+        assert seen["page"] == expected
+        assert expected in mod._CACHE
+        assert evidence.title == "Portable Espresso Maker"
+
+
+
 class TestDryRunGate:
     def test_dry_run_never_performs_network_io(self):
         with patch.object(mod, "_bounded_get", side_effect=AssertionError("must not be called in dry-run")):
@@ -177,8 +256,6 @@ class TestNetworkFailureDegradation:
         assert "fetch_failed:ValueError" in evidence.warnings[0]
 
     def test_redirect_is_rejected_not_followed(self):
-        import requests
-
         class _FakeResponse:
             status_code = 302
             headers = {"Location": "https://evil.example.com/"}

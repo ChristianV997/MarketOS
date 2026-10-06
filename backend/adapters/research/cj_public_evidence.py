@@ -127,29 +127,45 @@ def _degraded(source_url: str, *, reason: str, extraction_method: str = "none") 
 def _validate_public_url(url: str) -> str:
     """Return the validated hostname, or raise ValueError/PermissionError.
 
-    Resolves DNS and rejects private/loopback/link-local/reserved/multicast
-    destinations (SSRF-by-DNS-rebinding guard, not just a string check on
-    the literal hostname), and restricts the host to the one selected
-    Phase 1 supplier source.
+    Only the two selected supplier hosts are accepted. The hostname must
+    match exactly: a suffix or subdomain is not the allowlisted site.
+    Credentials, cleartext, and non-443 ports are rejected. DNS is checked
+    for the host that will actually be contacted, not for the raw input.
     """
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
-        raise ValueError("evidence URL must be http(s)")
-    hostname = (parsed.hostname or "").lower()
-    if not hostname:
-        raise ValueError("evidence URL has no hostname")
-    if not any(hostname == host or hostname.endswith("." + host) for host in ALLOWED_HOSTS):
-        raise PermissionError(f"host is not the selected Phase 1 supplier source: {hostname}")
+        raise ValueError("evidence URL must be https")
+    if parsed.username is not None or parsed.password is not None or parsed.port not in (None, 443):
+        raise PermissionError("evidence URL target is not allowed")
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    if hostname not in ALLOWED_HOSTS:
+        raise PermissionError("host is not the selected Phase 1 supplier source")
+    if parsed.scheme != "https":
+        raise ValueError("evidence URL must be https")
+    connect_host = "www.cjdropshipping.com"
     try:
-        infos = socket.getaddrinfo(hostname, None)
+        infos = socket.getaddrinfo(connect_host, 443)
     except socket.gaierror as exc:
-        raise PermissionError(f"could not resolve evidence host: {hostname}") from exc
+        raise PermissionError("could not resolve evidence host") from exc
     for info in infos:
         addr = info[4][0]
         ip = ipaddress.ip_address(addr)
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            raise PermissionError(f"evidence host resolves to a disallowed network: {hostname} -> {addr}")
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise PermissionError("evidence host resolves to a disallowed network")
     return hostname
+
+
+def _safe_request_url(url: str) -> str:
+    """Rebuild a request URL whose host is the constant supplier origin."""
+    _validate_public_url(url)
+    parsed = urlparse(url)
+    path = parsed.path or "/"
+    if not path.startswith("/") or path.startswith("//") or "\\" in path or "\r" in url or "\n" in url:
+        raise PermissionError("evidence URL target is not allowed")
+    safe = "https://www.cjdropshipping.com" + path
+    if parsed.query:
+        safe += "?" + parsed.query
+    return safe
 
 
 def _check_robots(hostname: str, url: str) -> None:
@@ -274,31 +290,31 @@ def fetch_product_evidence(url: str, *, context: SidecarContext) -> CJProductEvi
     degraded (all fields "unavailable") on any rejection, block, or
     failure, so callers never need a special error path."""
     try:
-        hostname = _validate_public_url(url)
+        safe_url = _safe_request_url(url)
     except (ValueError, PermissionError) as exc:
         return _degraded(url, reason=f"rejected:{exc}")
     if context.dry_run:
         return _degraded(url, reason="dry_run_simulated", extraction_method="simulated")
     try:
-        _check_robots(hostname, url)
+        _check_robots("www.cjdropshipping.com", safe_url)
     except PermissionError as exc:
         return _degraded(url, reason=f"robots_blocked:{exc}")
-    html = _cache_get(url)
+    html = _cache_get(safe_url)
     fetch_failure: str | None = None
     if html is None:
         try:
-            html = _bounded_get(url)
+            html = _bounded_get(safe_url)
         except Exception as exc:  # noqa: BLE001 - network boundary must degrade, never raise
-            _log.warning("cj_evidence_fetch_failed url=%s error=%s", url, type(exc).__name__)
+            _log.warning("cj_evidence_fetch_failed error=%s", type(exc).__name__)
             fetch_failure = f"fetch_failed:{type(exc).__name__}"
         else:
-            _cache_put(url, html)
-    evidence = _extract_from_jsonld(html, url) if html is not None else None
+            _cache_put(safe_url, html)
+    evidence = _extract_from_jsonld(html, safe_url) if html is not None else None
     if evidence is None:
-        rendered = _extract_with_optional_js_render(url, context=context)
+        rendered = _extract_with_optional_js_render(safe_url, context=context)
         if rendered is not None:
             return rendered
-        return _degraded(url, reason=fetch_failure or "no_structured_product_data_found")
+        return _degraded(safe_url, reason=fetch_failure or "no_structured_product_data_found")
     return evidence
 
 
@@ -321,19 +337,19 @@ def discover_candidate_urls(query: str, *, context: SidecarContext, max_results:
     """
     search_url = build_search_url(query)
     try:
-        hostname = _validate_public_url(search_url)
+        safe_url = _safe_request_url(search_url)
     except (ValueError, PermissionError):
         return []
     if context.dry_run:
         return []
     try:
-        _check_robots(hostname, search_url)
-        html = _cache_get(search_url)
+        _check_robots("www.cjdropshipping.com", safe_url)
+        html = _cache_get(safe_url)
         if html is None:
-            html = _bounded_get(search_url)
-            _cache_put(search_url, html)
+            html = _bounded_get(safe_url)
+            _cache_put(safe_url, html)
     except Exception as exc:  # noqa: BLE001 - discovery degrades to empty, never raises
-        _log.info("cj_discovery_unavailable query=%s error=%s", query, type(exc).__name__)
+        _log.info("cj_discovery_unavailable error=%s", type(exc).__name__)
         return []
     urls: list[str] = []
     for match in re.finditer(r'href=["\'](https://www\.cjdropshipping\.com/product/[^"\'#?]+)', html):
