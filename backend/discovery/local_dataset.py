@@ -11,6 +11,10 @@ from .evidence_source_contract import EvidenceRecord
 MAX_RECORDS = 10_000
 
 
+def _project_root() -> Path:
+    return Path.cwd().resolve()
+
+
 def validate_dataset(dataset: dict[str, Any]) -> dict[str, Any]:
     errors: list[str] = []
     if not isinstance(dataset, dict): errors.append("dataset_must_be_object")
@@ -24,9 +28,15 @@ def validate_dataset(dataset: dict[str, Any]) -> dict[str, Any]:
 
 def load_local_evidence_dataset(path: str) -> dict[str, Any]:
     candidate = Path(path)
-    if ".." in candidate.parts: raise ValueError("dataset_path_traversal_blocked")
-    if not candidate.exists() or not candidate.is_file(): raise FileNotFoundError(str(candidate))
-    dataset = json.loads(candidate.read_text(encoding="utf-8"))
+    if ".." in candidate.parts:
+        raise ValueError("dataset_path_traversal_blocked")
+    resolved = candidate.resolve()
+    root = _project_root()
+    if not resolved.is_relative_to(root):
+        raise ValueError("dataset_path_outside_project_root")
+    if not resolved.is_file():
+        raise FileNotFoundError(resolved.name)
+    dataset = json.loads(resolved.read_text(encoding="utf-8"))
     validation = validate_dataset(dataset)
     if not validation["valid"]: raise ValueError(";".join(validation["errors"]))
     return dataset
