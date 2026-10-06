@@ -5,7 +5,8 @@ Enforces:
 2. actions/setup-node@v4 explicitly configures cache-dependency-path to frontend/package-lock.json.
 3. The referenced frontend/package-lock.json exists, while no root lockfile is present.
 4. The workflow runs npm ci, build, and test without skipping or weakening checks.
-5. The core CI workflow (.github/workflows/ci.yml) remains isolated and untouched.
+5. The matrix uses supported Node.js LTS lines and preserves evidence from both legs.
+6. The core CI workflow (.github/workflows/ci.yml) remains isolated and untouched.
 """
 from __future__ import annotations
 
@@ -56,8 +57,10 @@ def test_node_ci_targets_frontend_toolchain_and_lockfile_cache():
     strategy = build_job.get("strategy", {})
     matrix = strategy.get("matrix", {})
     node_versions = matrix.get("node-version", [])
-    assert isinstance(node_versions, list) and len(node_versions) >= 1
-    assert "22.x" in node_versions
+    assert node_versions == ["22.x", "24.x"]
+    assert "18.x" not in node_versions
+    assert "20.x" not in node_versions
+    assert strategy.get("fail-fast") is False
 
     # Step-level cache and lockfile contract
     steps = build_job.get("steps", [])
