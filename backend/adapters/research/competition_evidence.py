@@ -384,11 +384,32 @@ def _contact_surface(value: str) -> str:
     return text.replace("%2540", "@").replace("%40", "@")
 
 
-def _contact_like(value: str) -> bool:
+def _is_product_identifier_title(value: str) -> bool:
+    """Recognize title-only SKU/model tokens and check-digit-valid GTINs."""
+    text = _contact_surface(value).strip()
+    labeled_code = re.fullmatch(
+        r"(?i)(?:sku|model(?:\s*(?:number|no\.?))?)\s*[:#]?\s*[0-9]{10,15}",
+        text,
+    )
+    if labeled_code is not None:
+        return True
+    if re.fullmatch(r"[0-9]+", text) is None or len(text) not in {8, 12, 13, 14}:
+        return False
+    digits = [int(digit) for digit in text]
+    weighted_sum = sum(
+        digit * (3 if index % 2 == 0 else 1)
+        for index, digit in enumerate(reversed(digits[:-1]))
+    )
+    return (10 - weighted_sum % 10) % 10 == digits[-1]
+
+
+def _contact_like(value: str, *, allow_product_identifier: bool = False) -> bool:
     """High-confidence email or phone only. Ordinary product text, including '@' and SKUs, stays."""
     if not value:
         return False
     text = _contact_surface(value)
+    if allow_product_identifier and _is_product_identifier_title(text):
+        return False
     if (
         _CONTACT_SCHEME.search(text)
         or _EMAIL.search(text)
@@ -526,7 +547,12 @@ def import_manual_competitor_csv(
         shipping_raw = mapped.get("shipping_cost", "")
         rating_raw = mapped.get("rating", "")
         if any(_contact_like(value) for value in (
-            title, seller, brand, listing_id, availability, source_url_raw, source_raw, image_raw,
+            (
+                title
+                if _contact_like(title, allow_product_identifier=True)
+                else ""
+            ),
+            seller, brand, listing_id, availability, source_url_raw, source_raw, image_raw,
             price_raw, shipping_raw, rating_raw,
         )):
             rejections.append(_manual_rejection(row_number, "contact_data_rejected"))

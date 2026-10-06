@@ -437,3 +437,33 @@ def test_digit_only_phone_in_seller_and_cells_is_rejected_and_never_echoed(tmp_p
     assert payload["offer_count"] == 1
     assert payload["offers"][0]["title"] == "Model 12-34-5678 UPC 012345678905"
 
+
+def test_explicit_product_identifiers_are_not_misclassified_as_contacts():
+    # These compact values are intentionally phone-shaped or all-numeric,
+    # but explicit product context and valid GTIN check digits make them IDs.
+    identifiers = (
+        "SKU 2025550199",
+        "Model 2125550199",
+        "036000291452",
+        "4006381333931",
+        "04006381333931",
+    )
+    for index, title in enumerate(identifiers, start=1):
+        text = chr(10).join(("listing_id,title,price,currency", f"a{index},{title},0,USD", ""))
+        result = import_manual_competitor_csv(text, candidate_id="cand-1")
+        assert result["status"] == "accepted"
+        assert result["offer_count"] == 1
+        assert result["offers"][0]["title"] == title
+        assert result["offers"][0]["price"] == 0.0
+
+    actual_phone = "4155550199"
+    rejected = import_manual_competitor_csv(
+        chr(10).join(("listing_id,title,price,currency,seller", f"a1,Copper Bottle,0,USD,{actual_phone}", "")),
+        candidate_id="cand-1",
+    )
+    encoded = json.dumps(rejected)
+    assert actual_phone not in encoded
+    assert rejected["status"] == "rejected"
+    assert rejected["offer_count"] == 0
+    assert rejected["rejections"][0]["code"] == "contact_data_rejected"
+
