@@ -222,6 +222,8 @@ def test_opportunity_discovery_adds_owner_projection_without_replacing_raw_run(d
     assert projection["safety"]["ads_launched"] is False
     assert projection["safety"]["publishing"] is False
     assert projection["safety"]["launch_authorized"] is False
+    assert projection["workspace_id"] == WORKSPACE_ID
+    assert projection["workspace_binding"] == "injected"
     assert projection["authorized_workspace_id"] == WORKSPACE_ID
     denied = discovery_client.post("/api/discovery/opportunity-discovery", json=payload)
     assert denied.status_code == 401

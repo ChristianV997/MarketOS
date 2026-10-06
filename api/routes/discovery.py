@@ -86,7 +86,11 @@ def opportunity_discovery(
     except OpportunityDiscoveryError as exc:
         return {"status": "malformed", "error": exc.code}
     try:
-        projection = build_owner_opportunity_read_model(mode, payload).to_dict()
+        projection = build_owner_opportunity_read_model(
+            mode,
+            payload,
+            workspace=workspace,
+        ).to_dict()
     except OwnerOpportunityReadModelError as exc:
         projection = {
             "schema": "owner-opportunity-read-model-v1",
