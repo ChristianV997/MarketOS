@@ -1,6 +1,7 @@
 """Registry/work-order entries for Shopify taxonomy must match the real mapper path and pinned source."""
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 from pathlib import Path
@@ -37,3 +38,14 @@ def test_registry_artifacts_regenerate_byte_identically(tmp_path):
     build_and_save(reg, wo)
     assert reg.read_bytes() == (ROOT / "data" / "source_adaptation_registry.json").read_bytes()
     assert wo.read_bytes() == (ROOT / "data" / "source_adaptation_work_orders.json").read_bytes()
+
+
+def test_bundled_taxonomy_gitattributes_preserves_lf_bytes():
+    gitattributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "data/shopify_product_taxonomy/categories.v2026-08.partial.txt text eol=lf" in gitattributes
+
+    from services.category_mapping.taxonomy_loader import _DEFAULT_SNAPSHOT_PATH
+
+    raw = _DEFAULT_SNAPSHOT_PATH.read_bytes()
+    assert b"\r\n" not in raw
+    assert hashlib.sha256(raw).hexdigest() == TAXONOMY_SOURCE_PROVENANCE["snapshot_sha256"]

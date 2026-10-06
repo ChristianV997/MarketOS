@@ -5,9 +5,11 @@ malformed/duplicate cases never touch the real bundled snapshot file.
 """
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
-from services.category_mapping.schemas import CategoryTaxonomyError
+from services.category_mapping.schemas import CategoryTaxonomyError, TAXONOMY_SOURCE_PROVENANCE
 from services.category_mapping.taxonomy_loader import (
     default_taxonomy,
     load_taxonomy,
@@ -252,6 +254,13 @@ class TestBundledSnapshot:
         assert source["evidence_mode"] == "unverified_local_file"
         assert source["live_validation"] is False
         assert "snapshot_sha256" not in source and "commit_sha" not in source
+
+    def test_bundled_snapshot_bytes_preserve_exact_lf_endings_without_crlf(self):
+        from services.category_mapping import taxonomy_loader
+
+        raw = taxonomy_loader._DEFAULT_SNAPSHOT_PATH.read_bytes()
+        assert b"\r\n" not in raw
+        assert hashlib.sha256(raw).hexdigest() == TAXONOMY_SOURCE_PROVENANCE["snapshot_sha256"]
 
     def test_curated_sub_level_three_categories_resolve_with_valid_parents(self):
         index = default_taxonomy()
