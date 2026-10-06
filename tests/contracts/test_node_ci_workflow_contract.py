@@ -110,3 +110,41 @@ def test_node_ci_isolation_from_ci_yml():
     assert "actions/setup-node" not in ci_content, (
         ".github/workflows/ci.yml must not be modified or tangled with node.js.yml"
     )
+
+
+def test_node_ci_workflow_permissions_contract():
+    """Verify that the Node.js CI workflow enforces least-privilege permissions.
+
+    Enforces:
+    1. Top-level 'permissions:' block exists in node.js.yml.
+    2. 'contents: read' is explicitly configured.
+    3. No write permissions exist (no 'write', no 'all', and all permission values are strictly 'read').
+    """
+    data = _load_node_workflow()
+
+    # 1. Verify top-level permissions block exists
+    assert "permissions" in data, (
+        "Workflow must define a top-level 'permissions' block for least-privilege security"
+    )
+    permissions = data["permissions"]
+    assert isinstance(permissions, dict), (
+        "Top-level 'permissions' must be a mapping specifying explicit permission scopes"
+    )
+
+    # 2. Verify contents: read is set
+    assert permissions.get("contents") == "read", (
+        "Workflow top-level permissions must explicitly set 'contents: read'"
+    )
+
+    # 3. Verify no write permissions exist and all granted scopes are strictly 'read'
+    for scope, access in permissions.items():
+        assert access != "write", (
+            f"Permission scope '{scope}' must not have write access"
+        )
+        assert access != "all", (
+            f"Permission scope '{scope}' must not have 'all' access"
+        )
+        assert access == "read", (
+            f"Permission scope '{scope}' has unexpected access level '{access}'; "
+            "all granted permissions must be strictly 'read'"
+        )
