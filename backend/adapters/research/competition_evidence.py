@@ -385,14 +385,8 @@ def _contact_surface(value: str) -> str:
 
 
 def _is_product_identifier_title(value: str) -> bool:
-    """Recognize title-only SKU/model tokens and check-digit-valid GTINs."""
+    """Recognize a standalone, check-digit-valid GTIN title."""
     text = _contact_surface(value).strip()
-    labeled_code = re.fullmatch(
-        r"(?i)(?:sku|model(?:\s*(?:number|no\.?))?)\s*[:#]?\s*[0-9]{10,15}",
-        text,
-    )
-    if labeled_code is not None:
-        return True
     if re.fullmatch(r"[0-9]+", text) is None or len(text) not in {8, 12, 13, 14}:
         return False
     digits = [int(digit) for digit in text]

@@ -439,13 +439,14 @@ def test_digit_only_phone_in_seller_and_cells_is_rejected_and_never_echoed(tmp_p
 
 
 def test_explicit_product_identifiers_are_not_misclassified_as_contacts():
-    # These compact values are intentionally phone-shaped or all-numeric,
-    # but explicit product context and valid GTIN check digits make them IDs.
+    # Explicit non-contact SKUs/models and checksum-valid GTINs remain IDs.
     identifiers = (
-        "SKU 2025550199",
-        "Model 2125550199",
+        "SKU 1234567890",
+        "Model 12-34-5678",
+        "96385074",
         "036000291452",
         "4006381333931",
+        "9780306406157",
         "04006381333931",
     )
     for index, title in enumerate(identifiers, start=1):
@@ -466,4 +467,16 @@ def test_explicit_product_identifiers_are_not_misclassified_as_contacts():
     assert rejected["status"] == "rejected"
     assert rejected["offer_count"] == 0
     assert rejected["rejections"][0]["code"] == "contact_data_rejected"
+
+
+def test_phone_in_product_labeled_title_is_rejected_without_echo():
+    phone = "4155550199"
+    result = import_manual_competitor_csv(
+        chr(10).join(("listing_id,title,price,currency", f"a1,SKU {phone},0,USD", "")),
+        candidate_id="cand-1",
+    )
+    assert phone not in json.dumps(result)
+    assert result["status"] == "rejected"
+    assert result["offer_count"] == 0
+    assert result["rejections"][0]["code"] == "contact_data_rejected"
 
