@@ -1639,3 +1639,263 @@ def test_record_source_url_with_a_malformed_host_fails_closed() -> None:
     record = types.SimpleNamespace(source_url="http://[::1")
     with pytest.raises(ResearchToDecisionError, match="unsafe source_url"):
         rtd._check_lane([record], dict(LANE), label="supplier_inputs")
+
+
+# --- Bounded deterministic adversarial corpus: filesystem and symlink containment ---
+
+_FAIL_CLOSED_RESOLVE = "could not be resolved safely"
+_EMOJI_OVER_255_BYTES = "\U0001F600" * 70 + ".json"  # 70 characters, 280 bytes: under MAX_TEXT, over NAME_MAX
+
+
+def _symlink_or_skip(link: Path, target: str) -> None:
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available on this platform")
+
+
+@pytest.mark.parametrize("shape", ["two-cycle", "self-loop", "loop-as-parent", "loop-chain"])
+def test_symlink_loops_fail_closed_with_the_module_error_and_never_echo_the_path(tmp_path: Path, shape: str) -> None:
+    if shape == "two-cycle":
+        _symlink_or_skip(tmp_path / "a.json", "b.json")
+        _symlink_or_skip(tmp_path / "b.json", "a.json")
+        raw = "a.json"
+    elif shape == "self-loop":
+        _symlink_or_skip(tmp_path / "self.json", "self.json")
+        raw = "self.json"
+    elif shape == "loop-as-parent":
+        _symlink_or_skip(tmp_path / "loopdir", "loopdir")
+        raw = "loopdir/x.json"
+    else:
+        _symlink_or_skip(tmp_path / "c1.json", "c2.json")
+        _symlink_or_skip(tmp_path / "c2.json", "c3.json")
+        _symlink_or_skip(tmp_path / "c3.json", "c1.json")
+        raw = "c1.json"
+    with pytest.raises(ResearchToDecisionError, match=_FAIL_CLOSED_RESOLVE) as caught:
+        rtd._resolve(tmp_path, raw, label="supplier_inputs.path")
+    assert str(tmp_path) not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["a\ud800b.json", "\ud800", "dir/\udfffx.json"],
+    ids=["lone-high-surrogate-in-name", "lone-surrogate-only", "lone-low-surrogate-in-subpath"],
+)
+def test_lone_surrogates_in_a_path_fail_closed_instead_of_unicode_errors(tmp_path: Path, raw: str) -> None:
+    with pytest.raises(ResearchToDecisionError, match="relative to the manifest|" + _FAIL_CLOSED_RESOLVE):
+        rtd._resolve(tmp_path, raw, label="supplier_inputs.path")
+
+
+def test_a_multibyte_name_over_the_filesystem_limit_fails_closed(tmp_path: Path) -> None:
+    assert len(_EMOJI_OVER_255_BYTES) < rtd.MAX_TEXT
+    with pytest.raises(ResearchToDecisionError, match=_FAIL_CLOSED_RESOLVE) as caught:
+        rtd._resolve(tmp_path, _EMOJI_OVER_255_BYTES, label="supplier_inputs.path")
+    assert str(tmp_path) not in str(caught.value) and "\U0001F600" not in str(caught.value)
+
+
+@pytest.mark.parametrize("reference", ["loop.txt", _EMOJI_OVER_255_BYTES.replace(".json", ".txt"), "a\ud800b.txt"], ids=["symlink-loop", "multibyte-over-limit", "surrogate"])
+def test_evidence_bindings_fail_closed_on_hostile_references(tmp_path: Path, reference: str) -> None:
+    _symlink_or_skip(tmp_path / "loop.txt", "loop.txt")
+    digest = hashlib.sha256(b"x").hexdigest()
+    with pytest.raises(ResearchToDecisionError):
+        rtd._supplier_document_evidence_bindings([("o1", "sku1", reference, digest)], evidence_root=tmp_path)
+
+
+def test_symlink_loop_in_the_cli_exits_with_a_rejection_and_no_traceback_or_path(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    manifest = load_fixture("hydroponics_promising.json")
+    manifest["supplier_inputs"][0]["path"] = "loop.json"
+    _symlink_or_skip(tmp_path / "loop.json", "loop.json")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert main(["--manifest", str(manifest_path)]) == 2
+    out = capsys.readouterr().out
+    assert json.loads(out)["status"] == "rejected" and str(tmp_path) not in out
+
+
+@pytest.mark.parametrize("shape", ["file-symlink-out", "dir-symlink-out", "chain-out", "dangling-out", "nested-dir-symlink-out"])
+def test_symlink_escapes_are_rejected_and_inside_symlinks_never_resolve_outside(tmp_path: Path, shape: str) -> None:
+    base = tmp_path / "base"
+    outside = tmp_path / "outside"
+    (base / "sub").mkdir(parents=True)
+    outside.mkdir()
+    (outside / "out.json").write_text("[]", encoding="utf-8")
+    if shape == "file-symlink-out":
+        _symlink_or_skip(base / "l.json", str(outside / "out.json"))
+        raw = "l.json"
+    elif shape == "dir-symlink-out":
+        _symlink_or_skip(base / "ld", str(outside))
+        raw = "ld/out.json"
+    elif shape == "chain-out":
+        _symlink_or_skip(base / "c2.json", str(outside / "out.json"))
+        _symlink_or_skip(base / "c1.json", "c2.json")
+        raw = "c1.json"
+    elif shape == "dangling-out":
+        _symlink_or_skip(base / "d.json", str(outside / "missing.json"))
+        raw = "d.json"
+    else:
+        _symlink_or_skip(base / "sub" / "up", "../../outside")
+        raw = "sub/up/out.json"
+    with pytest.raises(ResearchToDecisionError, match="escapes the manifest directory|does not exist"):
+        rtd._resolve(base, raw, label="supplier_inputs.path")
+
+
+@pytest.mark.parametrize("name", ["a..b.json", "..hidden.json", "x..json", "dots.. in name.json"])
+def test_names_that_merely_contain_dots_are_not_traversal(tmp_path: Path, name: str) -> None:
+    (tmp_path / name).write_text("[]", encoding="utf-8")
+    assert rtd._resolve(tmp_path, name, label="supplier_inputs.path") == (tmp_path / name).resolve()
+
+
+_ADVERSARIAL_PATHS_REJECTED_ON_EVERY_PLATFORM = [
+    "/etc/passwd", "//srv/share/x", "\\", "\\\\", "\\\\?\\C:\\x", "\\\\.\\C:\\x", "//?/C:/x", "c:/x", "C:", "C:x", "C:\\x",
+    "a\\..\\b", "a/..\\b", "a\\../b", "sub/../../x", "..", "../", "..\\", ".\\..\\x", "./../x",
+]
+
+
+@pytest.mark.parametrize("raw", _ADVERSARIAL_PATHS_REJECTED_ON_EVERY_PLATFORM)
+def test_adversarial_manifest_paths_are_rejected_under_posix_and_windows_rules(tmp_path: Path, raw: str) -> None:
+    assert rtd._is_unsafe_relative_path(raw)
+    with pytest.raises(ResearchToDecisionError, match="relative to the manifest"):
+        rtd._resolve(tmp_path, raw, label="supplier_inputs.path")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a backslash is only an ordinary filename character on POSIX")
+@pytest.mark.parametrize("name", ["safe\\name.json", "a\\b\\c.json", "trailing\\.json", "x\\y..json"])
+def test_posix_literal_backslash_filenames_are_accepted_and_stay_inside(tmp_path: Path, name: str) -> None:
+    assert not rtd._is_unsafe_relative_path(name)
+    (tmp_path / name).write_text("[]", encoding="utf-8")
+    assert rtd._resolve(tmp_path, name, label="supplier_inputs.path") == (tmp_path / name).resolve()
+
+
+# --- Bounded deterministic adversarial corpus: URL parsing ---
+
+_FOLDING_DOT = "\uff0e\uff0e"  # fullwidth full stops: IDNA folds this host to ".."
+_REJECTED_HTTP_URLS = [
+    # hosts that fold, or hide, under IDNA / NFKC
+    f"http://{_FOLDING_DOT}/x", "http://\u3002/x", "http://\ufe52/x",
+    "http://ex\u00adample.test/x", "http://ex\u200bample.test/x", "http://ex\ufeffample.test/x",
+    "http://ex\u200eample.test/x", "http://ex\u202eample.test/x",
+    "http://good.test\uff3cevil/x", "http://\uff05\uff12\uff45\uff05\uff12\uff45/x",
+    # empty or present userinfo, stray authority characters
+    "http://@evil/x", "http://:@evil/x", "http://good@evil/x", "http://good:pw@evil/x", "http://good\\@evil/x",
+    "http://evil\\.good/x", "http://e.test\\x",
+    # non-hostname characters, hyphen-edged and ambiguous numeric hosts
+    "http://ex$ample/x", "http://ex;ample/x", "http://ex,ample/x", "http://ex'ample/x", "http://ex*ample/x",
+    "http://ex!ample/x", "http://ex|ample/x", "http://ex^ample/x", "http://ex`ample/x", "http://ex{ample}/x",
+    "http://-bad.test/x", "http://bad-.test/x", "http://0x7f.1/x", "http://999.1.1.1/x", "http://1.2.3/x",
+    # malformed brackets, IPv6 literals and ports
+    "http://[::1", "http://[::1]x/", "http://[]/x", "http://[::g]/x", "http://[[::1]]/x", "http://a[::1]/x",
+    "http://[v1.x]/x", "http://[1.2.3.4]/x", "http://[fe80::1%25eth0]/x", "http://[::1]:99999/x", "http://[::1]:80x/x",
+    "http://example.test:0/x", "http://example.test:99999/x", "http://example.test:abc/x", "http://example.test:-1/x",
+    "http://example.test:+80/x", "http://example.test: 80/x", "http://example.test:\uff18\uff10/x",
+    # dot hosts and empty labels
+    "http://./x", "http://../x", "http://.../x", "http://a..b/x", "http://.example.test/x", "http://:80/x",
+    # percent-, double-percent-, ;- and backslash-encoded traversal in the URL path
+    "http://example.test/a/../b", "http://example.test/a/%2e%2e/b", "http://example.test/a/%2E%2E/b",
+    "http://example.test/a/.%2e/b", "http://example.test/a/%2e./b", "http://example.test/a/%252e%252e/b",
+    "http://example.test/a/..;/b", "http://example.test/a/..;x=1/b", "http://example.test/a/..%5cb",
+    "http://example.test/a/%5c..%5cb", "http://example.test/a/..%2fb", "http://example.test/a\\..\\b", "http://example.test/..",
+    # raw control characters and markup
+    "http://example.test/x\r\nHost: evil", "http://example.test/x\nY", "http://example.test/x\x00", "http://example.test/<x>",
+    "http://exa\nmple.test/x", "ht\ttp://example.test/x",
+    # lone surrogates (would raise when the reference is hashed)
+    "http://example.test/\ud800", "http://\ud800.test/x",
+    # scheme and authority shapes
+    "http:/x", "http:x", "http:///x", "https:\\\\x", "//evil/x", "http:", "ftp://example.test/x", "javascript:alert(1)", "mailto:a@b.test",
+]
+_ACCEPTED_HTTP_URLS = [
+    "https://example.test/item", "HTTP://EXAMPLE.TEST/x", "hTTps://example.test/a/b.json", "https://example.test./x",
+    "http://[::1]/x", "http://[::1]:8080/x", "http://[2001:db8::1]/x", "http://[::ffff:1.2.3.4]/x",
+    "https://e.test:8443/a", "https://e.test:/a", "http://1.2.3.4/x", "http://127.0.0.1:8080/x",
+    "https://b\u00fccher.example/x", "https://xn--bcher-kva.example/x", "https://sub-domain.e_x.test/x",
+    "https://example.test/a/./b", "https://example.test/a/..b", "https://example.test/a/b..", "https://example.test/100%25",
+    "http://a\u3002b/x",  # U+3002 is an IDNA dot: the host is simply a.b
+]
+_CORPUS_BOUND = 400
+
+
+def test_url_adversarial_corpus_is_bounded() -> None:
+    assert len(_REJECTED_HTTP_URLS) + len(_ACCEPTED_HTTP_URLS) <= _CORPUS_BOUND
+
+
+@pytest.mark.parametrize("allow_query", [False, True], ids=["no-query", "query-allowed"])
+@pytest.mark.parametrize("url", _REJECTED_HTTP_URLS)
+def test_adversarial_urls_fail_closed_with_the_module_error_and_never_echo_the_input(url: str, allow_query: bool) -> None:
+    with pytest.raises(ResearchToDecisionError, match="must be a safe reference") as caught:
+        rtd._reference_text(url, "f", allow_url_query=allow_query)
+    message = str(caught.value)
+    assert message == "f must be a safe reference" and "example" not in message and "evil" not in message
+
+
+@pytest.mark.parametrize("url", _ACCEPTED_HTTP_URLS)
+def test_legitimate_urls_with_unusual_but_valid_forms_stay_accepted(url: str) -> None:
+    assert rtd._reference_text(url, "f") == " ".join(url.split())
+    assert rtd._reference_text(url, "f", allow_url_query=True)
+
+
+def test_idna_form_of_every_accepted_host_is_a_real_name_or_address() -> None:
+    from urllib.parse import urlsplit
+
+    for url in _ACCEPTED_HTTP_URLS:
+        host = urlsplit(url).hostname
+        assert host and ".." not in host and not host.startswith(".")
+        if ":" not in host:
+            ascii_host = host.encode("idna").decode("ascii")
+            assert all(label for label in ascii_host.rstrip(".").split("."))
+
+
+@pytest.mark.parametrize("url", ["a\ud800b", "http://example.test/\ud800"])
+def test_a_lone_surrogate_never_escapes_when_the_reference_is_hashed(url: str) -> None:
+    with pytest.raises(ResearchToDecisionError, match="safe reference"):
+        rtd._evidence_reference(url, "f")
+
+
+@pytest.mark.parametrize("url", ["http://good@evil.test/x", "http://example.test:99999/x", "http://ex\u00adample.test/x", "ht\ttp://example.test/x", "http://exa\nmple.test/x", "http://[::1"])
+def test_record_source_urls_get_the_same_authority_rules_as_references(url: str) -> None:
+    with pytest.raises(ResearchToDecisionError, match="unsafe source_url"):
+        rtd._check_lane([types.SimpleNamespace(source_url=url)], dict(LANE), label="supplier_inputs")
+
+
+@pytest.mark.parametrize("url", ["https://example.test/item", "http://[::1]:8080/x", "https://b\u00fccher.example/x"])
+def test_record_source_urls_that_are_well_formed_still_pass(url: str) -> None:
+    assert rtd._check_lane([types.SimpleNamespace(source_url=url)], dict(LANE), label="supplier_inputs") is not None
+
+
+@pytest.mark.parametrize("bad_url", ["http://good@evil.test:99999/x", "http://ex\u00adample.test/x", "http://example.test/a/%2e%2e/b"])
+def test_reviewed_url_is_validated_even_when_a_source_reference_supplies_the_evidence_id(tmp_path: Path, bad_url: str) -> None:
+    (tmp_path / "review.json").write_text(json.dumps([{"candidate_id": "x", "url": bad_url, "source_reference": "manual:ok"}]), encoding="utf-8")
+    manifest = {
+        "captured_at": "2026-09-16T09:00:00-06:00",
+        "lane": dict(LANE),
+        "candidates": [{"candidate_id": "x"}],
+        "observation_inputs": [{"path": "review.json", "kind": "reviewed_url"}],
+    }
+    with pytest.raises(ResearchToDecisionError, match="reviewed_url.url must be a safe reference"):
+        build_research_to_decision(manifest, base_dir=tmp_path)
+
+
+@pytest.mark.parametrize("raw", ["ok\nname.json", "ok\rname.json", "a\r\nb"])
+def test_raw_cr_lf_in_a_local_reference_is_rejected_before_whitespace_folding(raw: str) -> None:
+    with pytest.raises(ResearchToDecisionError, match="safe reference"):
+        rtd._reference_text(raw, "f")
+
+
+@pytest.mark.parametrize("name", ["safe\\name.json", "dir\\safe\\name.json", "fixture:a\\name.json"])
+def test_literal_backslash_references_stay_accepted_while_rooted_and_traversing_forms_do_not(name: str) -> None:
+    assert rtd._reference_text(name, "f") == name
+    for unsafe in ("a\\..\\b", "..\\x", "\\x", "\\\\srv\\share", "C:\\x", "fixture:C:\\x", "file:C:\\x"):
+        with pytest.raises(ResearchToDecisionError, match="safe reference"):
+            rtd._reference_text(unsafe, "f")
+
+
+def test_no_corpus_entry_ever_escapes_as_a_bare_exception() -> None:
+    for url in [*_REJECTED_HTTP_URLS, *_ACCEPTED_HTTP_URLS]:
+        for allow_query in (False, True):
+            for call in (
+                lambda: rtd._reference_text(url, "f", allow_url_query=allow_query),
+                lambda: rtd._evidence_reference(url, "f", allow_url_query=allow_query),
+                lambda: rtd._check_lane([types.SimpleNamespace(source_url=url)], dict(LANE), label="x"),
+            ):
+                try:
+                    call()
+                except ResearchToDecisionError:
+                    pass

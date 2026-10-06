@@ -10,15 +10,17 @@ import argparse
 import csv
 import errno
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import stat as stat_module
 import sys
+import unicodedata
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Sequence
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 # Allow direct ``python scripts/research_to_decision.py`` execution from any cwd.
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -248,19 +250,77 @@ def _parse_url(value: str, error: str):
         raise ResearchToDecisionError(error) from None
 
 
-def _is_well_formed_http_host(hostname: str | None) -> bool:
-    """Reject empty, dot-only/dot-leading, ``..``-containing or non-printable host names.
+_HOST_LABEL = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?")
 
-    Whitespace, control characters, a backslash or a percent sign never belong in a
-    host here (``http://a b/x``, ``http://%2e%2e/x``, ``http://e.test\\x``), and a
-    host such as ``..`` or ``a..b`` is malformed rather than a harmless name.
+
+def _is_well_formed_http_host(hostname: str | None) -> bool:
+    """True only for a real DNS name (IDN allowed), a dotted-quad IPv4 or a bracketed IPv6 literal.
+
+    A non-ASCII host is judged by its IDNA form, because that is the host a client connects to:
+    ``http://\uff0e\uff0e/x`` folds to ``..``, and soft-hyphen, zero-width and bidi characters are
+    dropped or refused rather than hiding in the text. Whitespace, controls, backslash, percent,
+    shell and URL punctuation, empty or hyphen-edged labels, and ambiguous numeric hosts such as
+    ``0x7f.1`` or ``999.1.1.1`` are malformed.
     """
-    if not hostname or hostname.startswith(".") or ".." in hostname:
+    if not hostname:
         return False
-    return not any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 or ch in "\\%" for ch in hostname)
+    # Invisible and format characters (soft hyphen, zero-width, bidi) are dropped by IDNA, so two
+    # visibly different strings would name one host; refuse them instead of normalising them away.
+    if any(unicodedata.category(char) in {"Cc", "Cf", "Zs", "Zl", "Zp"} for char in hostname):
+        return False
+    if ":" in hostname:  # urlsplit strips the brackets of an IPv6 literal
+        if "%" in hostname:  # IPv6Address would accept a '%zone' scope id; it is never a reference host
+            return False
+        try:
+            ipaddress.IPv6Address(hostname)
+        except ValueError:
+            return False
+        return True
+    try:
+        ascii_host = hostname.encode("idna").decode("ascii")
+    except (UnicodeError, ValueError):
+        return False
+    labels = ascii_host[:-1].split(".") if ascii_host.endswith(".") else ascii_host.split(".")
+    if not all(_HOST_LABEL.fullmatch(label) for label in labels):
+        return False
+    last = labels[-1].lower()
+    if last.isdigit() or last.startswith("0x"):  # numeric-looking: only a strict dotted quad is a host
+        try:
+            ipaddress.IPv4Address(".".join(labels))
+        except ValueError:
+            return False
+    return True
+
+
+def _http_authority_is_safe(parsed) -> bool:
+    """Well-formed host, a valid port, no userinfo (not even an empty one) and no stray brackets."""
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if port == 0 or not parsed.netloc or "@" in parsed.netloc:
+        return False
+    if "[" in parsed.netloc and ":" not in (parsed.hostname or ""):  # only an IPv6 literal may be bracketed
+        return False
+    return _is_well_formed_http_host(parsed.hostname)
+
+
+def _url_path_has_traversal(path: str) -> bool:
+    """A ``..`` segment in a URL path, however separated, percent-encoded (even twice) or ``;``-suffixed."""
+    decoded = path
+    for _ in range(3):
+        step = unquote(decoded)
+        if step == decoded:
+            break
+        decoded = step
+    return any(segment.split(";", 1)[0].strip() == ".." for segment in re.split(r"[/\\]", decoded))
 
 
 def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_query: bool = False) -> str:
+    # CR/LF are rejected on the raw value: _text() would otherwise fold them into a space and
+    # let a header-shaped tail ("x\r\nHost: evil") through as ordinary text.
+    if isinstance(value, str) and any(char in value for char in "\r\n"):
+        raise ResearchToDecisionError(f"{field} must be a safe reference")
     reference = _text(value, field, required=required)
     if not reference:
         return reference
@@ -268,6 +328,10 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
     # cannot be silently normalized out of an operator-supplied reference.
     if "\x00" in reference:
         raise ResearchToDecisionError(f"{field} must be a safe reference")
+    try:
+        reference.encode("utf-8")  # a lone surrogate would otherwise escape later, when the reference is hashed
+    except UnicodeEncodeError:
+        raise ResearchToDecisionError(f"{field} must be a safe reference") from None
     try:
         parsed = urlparse(reference)
         # ``port`` raises ValueError for a non-numeric or out-of-range port, and
@@ -278,22 +342,23 @@ def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_
     except ValueError:
         raise ResearchToDecisionError(f"{field} must be a safe reference") from None
     if parsed.scheme in {"http", "https"}:
-        if not parsed.netloc or not _is_well_formed_http_host(parsed.hostname) or parsed.username or parsed.password:
+        if not _http_authority_is_safe(parsed) or parsed.username or parsed.password:
             raise ResearchToDecisionError(f"{field} must be a safe reference")
         if (parsed.query or parsed.fragment) and not allow_url_query:
             raise ResearchToDecisionError(f"{field} must not contain a query or fragment")
         if allow_url_query:
             reference = parsed._replace(query="", fragment="").geturl()
-    elif parsed.scheme:
-        if "://" in reference or parsed.scheme not in {"fixture", "file", "manual"}:
-            raise ResearchToDecisionError(f"{field} must be a safe reference")
+    elif "://" in reference or (parsed.scheme and parsed.scheme not in {"fixture", "file", "manual"}):
+        # Also covers a URL whose scheme text was damaged by whitespace folding (\"ht\ttp://x\"): it no
+        # longer parses as a scheme, but a local reference never contains "://".
+        raise ResearchToDecisionError(f"{field} must be a safe reference")
     path_text = parsed.path or reference
     if parsed.scheme in {"http", "https"}:
         # A URL path is not a filesystem path: its leading "/" is the URL root, not an
         # absolute local path (host-OS ``Path.is_absolute`` disagreed across platforms).
         # Traversal segments are still rejected, and hostnames like '..' or '.' are rejected.
         unsafe_path = (
-            ".." in path_text.replace("\\", "/").split("/")
+            _url_path_has_traversal(path_text)
             or parsed.hostname in {".", ".."}
             or ".." in parsed.netloc.replace("\\", "/").split("/")
             or any(part in {".", ".."} for part in parsed.netloc.split(":"))
@@ -668,7 +733,11 @@ def _supplier_document_evidence_bindings(
         walked = root
         for part in Path(relative_path).parts:
             walked = walked / part
-            if walked.is_symlink():
+            try:
+                symlink = walked.is_symlink()
+            except OSError:  # e.g. a multibyte component over 255 bytes; the platform error echoes the path
+                raise ResearchToDecisionError("document_evidence.reference could not be resolved safely") from None
+            if symlink:
                 raise ResearchToDecisionError("document_evidence.reference must not be a symlink")
         resolved = _resolve(root, relative_path, label="document_evidence.reference")
         if resolved.suffix.lower() not in SUPPORTED_EVIDENCE_DOCUMENT_EXTENSIONS:
@@ -762,10 +831,19 @@ def _resolve(base_dir: Path, value: Any, *, label: str) -> Path:
     if _is_unsafe_relative_path(raw):
         raise ResearchToDecisionError(f"{label} must remain relative to the manifest")
     candidate = Path(raw)
-    resolved = (base_dir / candidate).resolve()
-    if base_dir.resolve() not in resolved.parents:
+    try:
+        resolved = (base_dir / candidate).resolve()
+        resolved_base = base_dir.resolve()
+        inside = resolved_base in resolved.parents
+        is_file = inside and resolved.is_file()
+    except (RuntimeError, OSError, ValueError):
+        # A symlink loop (RuntimeError), an over-long component (OSError, e.g. a multibyte name
+        # over 255 bytes) or a lone surrogate (UnicodeEncodeError) must fail closed with this
+        # module's error, not escape bare. Never echo the path: the platform error text does.
+        raise ResearchToDecisionError(f"{label} could not be resolved safely") from None
+    if not inside:
         raise ResearchToDecisionError(f"{label} escapes the manifest directory")
-    if not resolved.is_file():
+    if not is_file:
         raise ResearchToDecisionError(f"{label} does not exist")
     return resolved
 
@@ -936,7 +1014,13 @@ def _check_lane(records: list[Any], lane: Mapping[str, Any], *, label: str) -> l
         source_url = str(getattr(record, "source_url", "") or "")
         if source_url:
             parsed = _parse_url(source_url, f"unsafe source_url in {label}")
-            if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
+            if (
+                any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in source_url)  # urlparse strips tab/CR/LF
+                or parsed.scheme not in {"http", "https"}
+                or not _http_authority_is_safe(parsed)
+                or parsed.query
+                or parsed.fragment
+            ):
                 raise ResearchToDecisionError(f"unsafe source_url in {label}")
     return sorted(set(warnings))
 
@@ -1245,6 +1329,7 @@ def _load_observation(path: Path, entry: Mapping[str, Any], *, lane: Mapping[str
             reviewed = _parse_url(url, f"reviewed_url requires an http(s) URL: {label}") if isinstance(url, str) else None
             if reviewed is None or reviewed.scheme not in {"http", "https"} or not reviewed.netloc:
                 raise ResearchToDecisionError(f"reviewed_url requires an http(s) URL: {label}")
+            _reference_text(url, "reviewed_url.url", allow_url_query=True)
         reference_value = row.get("source_reference") or row.get("document_reference") or (url if kind == "reviewed_url" else row.get("source")) or entry.get("source_reference") or label
         reference_id = _evidence_reference(reference_value, f"{kind}.source_reference", allow_url_query=kind == "reviewed_url")
         method = _text(row.get("extraction_method") or entry.get("extraction_method") or ("operator_reviewed_url" if kind == "reviewed_url" else "manual_document_review"), f"{kind}.extraction_method", required=True)
