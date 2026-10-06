@@ -169,6 +169,24 @@ def port_in_use(host: str, port: int) -> bool:
         sock.close()
 
 
+def _lingering_connections(port: int) -> bool | None:
+    """Linux only: True when /proc/net/tcp lists connection-state sockets (TIME_WAIT, FIN_WAIT...) on
+    this local port, False when it lists none, None when that cannot be read (non-Linux hosts)."""
+    try:
+        with open("/proc/net/tcp", encoding="ascii") as table:
+            rows = table.read().splitlines()[1:]
+    except (OSError, ValueError):
+        return None
+    for row in rows:
+        fields = row.split()
+        try:
+            if len(fields) > 1 and int(fields[1].rsplit(":", 1)[1], 16) == port:
+                return True
+        except (IndexError, ValueError):
+            continue
+    return False
+
+
 def port_bind_conflict(host: str, port: int) -> bool:
     """True when the local bind would fail (occupied or not yet reusable)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -184,6 +202,27 @@ def port_bind_conflict(host: str, port: int) -> bool:
         return True
     finally:
         sock.close()
+    if os.name != "nt" and _bound_without_listening(host, port):
+        return True
+    return False
+
+
+def _bound_without_listening(host: str, port: int) -> bool:
+    """POSIX: True for a socket that is bound but not listening yet.
+
+    SO_REUSEADDR hides it from the probe above, and every real server sets that option, so this is
+    the state between bind() and listen() (or a descendant that never listens). A plain bind still
+    fails for it, but also for TIME_WAIT, which is reusable; only the latter shows up as a
+    connection-state socket in /proc/net/tcp. Where /proc is unavailable the reusable-address
+    result above stands.
+    """
+    plain = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        plain.bind((host, port))
+    except OSError:
+        return _lingering_connections(port) is False
+    finally:
+        plain.close()
     return False
 
 

@@ -6,6 +6,8 @@ providers.
 """
 from __future__ import annotations
 
+import os
+import signal
 import socket
 import sys
 import textwrap
@@ -739,6 +741,24 @@ def test_cleanup_terminates_child_process_tree(tmp_path: Path):
     assert stack.port_in_use(cfg.api_host, cfg.api_port) is False
 
 
+class _ExitedLauncherProcess(stack.ManagedProcess):
+    """Waits for the launcher to exit before cleanup runs.
+
+    Without this the test races: cleanup reports "already_exited" only if the launcher happens to
+    exit before the health checks finish, so the exited-launcher path was exercised roughly half the time.
+    """
+
+    def terminate(self, timeout_s: float = 2.0) -> str:
+        deadline = time.monotonic() + 5.0
+        while self.proc is not None and self.proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return super().terminate(timeout_s)
+
+
+def _exited_launcher_factory(name: str, argv: list[str], log_cap: int) -> stack.ManagedProcess:
+    return _ExitedLauncherProcess(name=name, argv=argv, log_cap_bytes=log_cap)
+
+
 def test_cleanup_terminates_child_when_launcher_exits_first(tmp_path: Path):
     """An exited launcher must not leave a child-owned port behind."""
     repo = _write_repo(tmp_path)
@@ -770,6 +790,7 @@ def test_cleanup_terminates_child_when_launcher_exits_first(tmp_path: Path):
     report = stack.run_rehearsal(
         cfg,
         backend_argv_override=[sys.executable, str(parent), str(child), cfg.api_host, str(cfg.api_port)],
+        process_factory=_exited_launcher_factory,
     )
 
     assert report["cleanup"]["backend"] == "already_exited"
@@ -1055,3 +1076,162 @@ def test_combined_repeated_invocations_clean(tmp_path: Path):
         assert report["classification"] in {"passed", "partial", "failed", "timeout"}, (
             f"invocation {invocation}: unexpected classification, report={report}"
         )
+
+
+# --- POSIX lifecycle evidence (Linux-only where it reads /proc/net/tcp) ---
+
+_LINUX_ONLY = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="connection states are read from /proc/net/tcp")
+
+
+def _bound_socket(*, reuseaddr: bool) -> tuple[socket.socket, int]:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if reuseaddr:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    return sock, int(sock.getsockname()[1])
+
+
+@_LINUX_ONLY
+def test_bound_non_listening_socket_with_reuseaddr_is_occupied():
+    """Every real server sets SO_REUSEADDR; between bind() and listen() the port is still taken."""
+    sock, port = _bound_socket(reuseaddr=True)
+    try:
+        assert stack.port_in_use("127.0.0.1", port) is False
+        assert stack.port_bind_conflict("127.0.0.1", port) is True
+        assert stack.wait_port_free("127.0.0.1", port, timeout_s=0.1) is False
+    finally:
+        sock.close()
+    assert stack.port_bind_conflict("127.0.0.1", port) is False
+    assert stack.wait_port_free("127.0.0.1", port, timeout_s=0.1) is True
+
+
+def _has_time_wait(port: int) -> bool:
+    """True when /proc/net/tcp shows a TIME_WAIT (state 06) socket on this local port."""
+    with open("/proc/net/tcp", encoding="ascii") as table:
+        for row in table.read().splitlines()[1:]:
+            fields = row.split()
+            if int(fields[1].rsplit(":", 1)[1], 16) == port and fields[3] == "06":
+                return True
+    return False
+
+
+@_LINUX_ONLY
+def test_time_wait_after_a_listener_closes_is_not_occupied():
+    """The listener closes first, so TIME_WAIT lands on its port; a replacement server may still bind."""
+    server, port = _bound_socket(reuseaddr=True)
+    server.listen(1)
+    client = socket.create_connection(("127.0.0.1", port), timeout=2)
+    connection, _ = server.accept()
+    connection.close()
+    client.settimeout(2)
+    client.recv(1)
+    client.close()
+    server.close()
+    if not _has_time_wait(port):
+        pytest.skip("kernel did not leave a TIME_WAIT socket to probe")
+
+    assert stack.port_in_use("127.0.0.1", port) is False
+    assert stack.port_bind_conflict("127.0.0.1", port) is False
+    assert stack.wait_port_free("127.0.0.1", port, timeout_s=0.5) is True
+    replacement = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        replacement.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        replacement.bind(("127.0.0.1", port))
+        replacement.listen(1)
+    finally:
+        replacement.close()
+
+
+def test_live_listener_is_detected_by_connect_and_bind_and_blocks_wait_port_free():
+    port = _free_port()
+    listener = _occupy("127.0.0.1", port)
+    try:
+        assert stack.port_in_use("127.0.0.1", port) is True
+        assert stack.port_bind_conflict("127.0.0.1", port) is True
+        assert stack.wait_port_free("127.0.0.1", port, timeout_s=0.2) is False
+    finally:
+        listener.close()
+    assert stack.wait_port_free("127.0.0.1", port, timeout_s=0.5) is True
+
+
+def _process_alive(pid: int) -> bool:
+    """True for a live process; a zombie awaiting its reaper no longer holds anything."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        with open(f"/proc/{pid}/stat", encoding="ascii") as handle:
+            return handle.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGTERM-ignoring descendants are a POSIX process-group case")
+def test_cleanup_kills_a_sigterm_ignoring_descendant_when_the_launcher_dies_first(tmp_path: Path):
+    """SIGTERM ends the launcher at once; its descendant ignores it and must still be killed with the group.
+
+    The descendant's own PID is checked: a connect probe alone can look "free" once an
+    unaccepted backlog fills, so the port is not the evidence here.
+    """
+    port = _free_port()
+    pid_file = tmp_path / "descendant.pid"
+    child = tmp_path / "ignore_term_server.py"
+    child.write_text(
+        textwrap.dedent(
+            """
+            import os, signal, socket, sys
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(8)
+            with open(sys.argv[2], "w") as handle:
+                handle.write(str(os.getpid()))
+            while True:
+                connection, _ = s.accept()
+                connection.close()
+            """
+        ),
+        encoding="utf-8",
+    )
+    parent = tmp_path / "launcher.py"
+    parent.write_text(
+        textwrap.dedent(
+            """
+            import subprocess, sys, time
+            subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2], sys.argv[3]])
+            while True:
+                time.sleep(0.2)
+            """
+        ),
+        encoding="utf-8",
+    )
+    managed = stack.ManagedProcess(name="backend", argv=[sys.executable, str(parent), str(child), str(port), str(pid_file)])
+    managed.start(cwd=tmp_path, env=dict(os.environ))
+    descendant = 0
+    try:
+        assert stack.wait_port("127.0.0.1", port, 5.0) is True
+        deadline = time.monotonic() + 5.0
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        descendant = int(pid_file.read_text())
+        assert _process_alive(descendant) is True
+
+        assert managed.terminate() == "terminated"
+
+        deadline = time.monotonic() + 3.0
+        while _process_alive(descendant) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert _process_alive(descendant) is False
+        assert stack.wait_port_free("127.0.0.1", port, timeout_s=2.0) is True
+    finally:
+        try:
+            os.killpg(managed.proc.pid, signal.SIGKILL)  # only the group this test created
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        if descendant and _process_alive(descendant):
+            try:
+                os.kill(descendant, signal.SIGKILL)  # only the child this test created
+            except OSError:
+                pass
