@@ -171,3 +171,13 @@ def test_repository_identity_status_does_not_refresh_index(tmp_path: Path, monke
     after = _index_digest(repo)
     assert identity["clean"] is True
     assert before == after
+
+
+def test_repository_identity_does_not_claim_clean_when_git_status_is_unavailable(tmp_path: Path) -> None:
+    non_repository = tmp_path / "not-a-git-repository"
+    non_repository.mkdir()
+
+    identity = get_repository_identity(non_repository)
+
+    assert identity["worktree_status_available"] is False
+    assert identity["clean"] is False
