@@ -10,6 +10,7 @@ No test depends on wall-clock timing; equal timestamps are fixed explicitly.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -37,6 +38,12 @@ def _no_durable_log(monkeypatch):
 
 def _artifact(**overrides) -> BaseArtifact:
     return BaseArtifact(artifact_type="base", workspace="prod", created_at=STAMP, **overrides)
+
+
+def _expected_replay_hash(artifact: BaseArtifact) -> str:
+    payload = {**artifact.to_dict(), "replay_hash": ""}
+    content = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
 # --- uniqueness of newly created records ------------------------------------
@@ -97,7 +104,9 @@ def test_explicit_id_is_preserved_and_never_minted(monkeypatch):
     monkeypatch.setattr(base_module.uuid, "uuid4", forbidden)
     artifact = _artifact(artifact_id="caller-supplied-id")
     assert artifact.artifact_id == "caller-supplied-id"
-    assert BaseArtifact.from_dict(artifact.to_dict()).artifact_id == "caller-supplied-id"
+    restored = BaseArtifact.from_dict(artifact.to_dict())
+    assert restored.artifact_id == "caller-supplied-id"
+    assert restored.replay_hash == artifact.replay_hash
 
 
 def test_id_is_minted_exactly_once_per_new_record(monkeypatch):
@@ -226,3 +235,51 @@ def test_payload_without_an_id_is_a_new_record_each_time_it_is_built():
     payload = {k: v for k, v in _artifact().to_dict().items() if k not in {"artifact_id", "replay_hash"}}
     first, second = BaseArtifact.from_dict(dict(payload)), BaseArtifact.from_dict(dict(payload))
     assert first.artifact_id and second.artifact_id and first.artifact_id != second.artifact_id
+
+
+def test_partial_deserialization_rehashes_when_artifact_id_is_missing():
+    original = _artifact()
+    payload = original.to_dict()
+    payload.pop("artifact_id")
+
+    restored = BaseArtifact.from_dict(payload)
+
+    assert restored.artifact_id != original.artifact_id
+    assert restored.replay_hash != original.replay_hash
+    assert restored.replay_hash == _expected_replay_hash(restored)
+
+
+def test_partial_envelope_rebinds_identity_linked_experiment_id_and_rehashes():
+    original = CommercialRunEnvelope(service_name="x", workspace_id="ws-1", created_at=STAMP)
+    payload = original.to_dict()
+    payload.pop("artifact_id")
+
+    restored = CommercialRunEnvelope.from_dict(payload)
+
+    assert restored.artifact_id != original.artifact_id
+    assert restored.experiment_id == restored.artifact_id
+    assert restored.replay_hash != original.replay_hash
+    assert restored.replay_hash == _expected_replay_hash(restored)
+
+
+def test_partial_payload_retries_are_distinct_and_registry_hydration_skips_them():
+    original = CommercialRunEnvelope(service_name="x", workspace_id="ws-1", created_at=STAMP)
+    payload = original.to_dict()
+    payload.pop("artifact_id")
+
+    first = CommercialRunEnvelope.from_dict(dict(payload))
+    second = CommercialRunEnvelope.from_dict(dict(payload))
+    assert first.artifact_id != second.artifact_id
+    assert first.replay_hash != second.replay_hash
+
+    registry = ArtifactRegistry()
+    restored = registry.deserialize(payload)
+    assert isinstance(restored, CommercialRunEnvelope)
+    registry.register(restored)
+    assert registry.get(restored.artifact_id) is restored
+    assert restored.experiment_id == restored.artifact_id
+
+    replay_registry = ArtifactRegistry()
+    event = {"type": "artifact.commercial_run_envelope.registered", "payload": payload}
+    assert replay_registry.hydrate([event]) == 0
+    assert replay_registry.count() == 0

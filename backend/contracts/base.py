@@ -89,7 +89,13 @@ class BaseArtifact:
         # campaign_id and outcome_recorded, not merely BaseArtifact fields.
         if is_dataclass(cls):
             valid_fields = {item.name for item in fields(cls)}
-            return cls(**{key: value for key, value in d.items() if key in valid_fields})
+            payload = {key: value for key, value in d.items() if key in valid_fields}
+            if not payload.get("artifact_id"):
+                # The replay hash includes artifact_id. If an incomplete
+                # payload has lost that identity, the constructor will mint a
+                # new one, so the retained hash no longer describes this row.
+                payload["replay_hash"] = ""
+            return cls(**payload)
         obj = cls.__new__(cls)
         obj.artifact_id    = d.get("artifact_id", "")
         obj.artifact_type  = d.get("artifact_type", "base")
