@@ -1,7 +1,8 @@
 """BaseArtifact — root dataclass for all typed cross-system artifacts.
 
 Every artifact produced by MarketOS or its connected repositories carries:
-  - deterministic artifact_id (content-addressed)
+  - artifact_id: random (UUID4) when a new artifact is created, then persisted
+    and preserved; an explicitly supplied id is never replaced or recomputed
   - full lineage chain (parent_ids list)
   - workspace ownership
   - creation timestamp
@@ -13,8 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import threading
 import time
 import uuid
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -22,21 +21,6 @@ from typing import Any
 
 
 _SCHEMA_VERSION = 1
-_ID_LOCK = threading.Lock()
-_ID_SEQUENCE = 0
-
-
-def _creation_nonce() -> str:
-    """Distinguish two new artifacts that share a timestamp.
-
-    The nonce is only an input to a newly minted id. A stored ``artifact_id``
-    is never recomputed, so replay of an existing record stays idempotent.
-    """
-    global _ID_SEQUENCE
-    with _ID_LOCK:
-        _ID_SEQUENCE += 1
-        sequence = _ID_SEQUENCE
-    return f"{os.getpid()}:{sequence}"
 
 
 @dataclass
@@ -54,20 +38,33 @@ class BaseArtifact:
 
     def __post_init__(self) -> None:
         if not self.artifact_id:
-            self.artifact_id = self._derive_id()
+            self.artifact_id = self._mint_id()
         if not self.replay_hash:
             self.replay_hash = self._derive_replay_hash()
 
     # ── identity ──────────────────────────────────────────────────────────────
 
-    def _derive_id(self) -> str:
-        """UUID5 from artifact_type + workspace + key content."""
-        key = f"{self.artifact_type}:{self.workspace}:{self.created_at}:{_creation_nonce()}"
-        namespace = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
-        return str(uuid.uuid5(namespace, key))
+    def _mint_id(self) -> str:
+        """Mint the identity of a newly created artifact.
+
+        Identity semantics:
+
+        * New record (no ``artifact_id``): a random UUID4, drawn from the OS
+          entropy source, minted once here and persisted by ``to_dict``. It is
+          unique across threads, processes, restarts, PID reuse and equal
+          timestamps because it carries no process-local state.
+        * Stored record (``artifact_id`` present, including replay and
+          ``from_dict`` of a serialized artifact): the id is preserved exactly.
+          Registering the same id again replaces the earlier version.
+        * A payload with no ``artifact_id`` has no persisted identity, so it is
+          a new record and receives a fresh id each time it is built. Retrying
+          a logical operation is therefore only idempotent when the caller
+          supplies a stable ``artifact_id`` of its own.
+        """
+        return str(uuid.uuid4())
 
     def _derive_replay_hash(self) -> str:
-        """Content-addressed hash for replay deduplication."""
+        """Hash of the serialized record, including its artifact_id."""
         content = json.dumps(self.to_dict(), sort_keys=True, default=str)
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
