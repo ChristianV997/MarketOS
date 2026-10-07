@@ -7,6 +7,9 @@ import pytest
 
 from backend.adapters.research import cj_public_evidence as mod
 from backend.contracts.adapters import SidecarContext
+from backend.mvp_commerce.supplier_evidence import SupplierEvidenceResult, supplier_evidence_events
+from evaluation.contracts import DataQuality, ProductCandidate
+from evaluation.readiness import evaluate_product
 
 JSONLD_PRODUCT_HTML = """
 <html><head>
@@ -19,6 +22,9 @@ JSONLD_PRODUCT_HTML = """
 """
 
 NO_PRODUCT_HTML = "<html><body><p>Just a page with no structured data.</p></body></html>"
+JSONLD_MISSING_PRICE_HTML = '''<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "Product", "name": "Unpriced Widget", "sku": "CJ-NO-PRICE"}
+</script>'''
 
 # Captured before the autouse fixture below patches mod._check_robots, so
 # TestRobotsEnforcement can still exercise the real implementation.
@@ -282,7 +288,8 @@ class TestNormalization:
         offer = mod.to_supplier_offer(evidence)
         assert offer is not None
         assert offer.unit_cost == 9.5
-        assert offer.quality.provenance == "live"
+        assert offer.quality.provenance == "public_page"
+        assert offer.quality.is_live_attributed is False
         assert offer.quality.source_ref == evidence.source_url
 
     def test_to_supplier_offer_none_without_observed_price(self):
@@ -292,6 +299,49 @@ class TestNormalization:
     def test_to_product_candidate_requires_title(self):
         evidence = mod._degraded("https://www.cjdropshipping.com/product/x.html", reason="test")
         assert mod.to_product_candidate(evidence) is None
+
+    def test_missing_price_stays_missing_instead_of_becoming_zero(self):
+        url = "https://www.cjdropshipping.com/product/unpriced.html"
+        evidence = mod._extract_from_jsonld(JSONLD_MISSING_PRICE_HTML, url)
+
+        assert evidence is not None
+        assert evidence.price is None
+        assert evidence.field_status["price"] == "unavailable"
+        assert mod.to_supplier_offer(evidence) is None
+        assert mod.to_product_candidate(evidence) is None
+
+    def test_public_page_product_candidate_is_not_live_supplier_proof(self):
+        evidence = mod.CJProductEvidence(
+            source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
+            observed_at=1.0, external_product_id="x", title="Widget",
+            field_status={"title": "observed", "price": "observed"}, price=9.5,
+        )
+
+        candidate = mod.to_product_candidate(evidence)
+
+        assert candidate is not None
+        assert candidate.quality.provenance == "public_page"
+        assert candidate.quality.is_live_attributed is False
+        assert candidate.quality.completeness == "partial"
+
+    def test_public_page_supplier_offer_cannot_satisfy_launch_readiness(self):
+        evidence = mod.CJProductEvidence(
+            source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
+            observed_at=1.0, external_product_id="x", title="Widget",
+            field_status={"title": "observed", "price": "observed"}, price=5.0,
+        )
+        product = ProductCandidate(
+            product_id="market-widget", name="Widget", selling_price=100.0,
+            quality=DataQuality(provenance="live", attribution="attributed"),
+        )
+        offer = mod.to_supplier_offer(evidence)
+
+        readiness = evaluate_product(product, offer)
+
+        assert offer is not None
+        assert offer.quality.completeness == "partial"
+        assert readiness.launchable is False
+        assert "incomplete_data" in readiness.reasons
 
 
 class TestScoring:
@@ -308,6 +358,40 @@ class TestScoring:
         ranking = mod.score_candidates([evidence], "anything")
         assert ranking[0]["composite_score"] == 0.0
         assert len(ranking[0]["missing_evidence"]) == len(mod._EVIDENCE_FIELDS)
+
+    def test_missing_price_and_public_only_scope_survive_scoring(self):
+        evidence = mod._extract_from_jsonld(
+            JSONLD_MISSING_PRICE_HTML, "https://www.cjdropshipping.com/product/unpriced.html"
+        )
+        assert evidence is not None
+
+        score = mod.score_candidates([evidence], "unpriced widget")[0]
+
+        assert "price" in score["missing_evidence"]
+        assert "price" in score["assumptions_still_required"]
+        assert score["evidence_mode"] == "public_page_observation"
+        assert score["supplier_live_proof"] is False
+
+
+def test_supplier_public_evidence_events_have_no_external_authority():
+    evidence = mod.CJProductEvidence(
+        source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
+        observed_at=1.0, external_product_id="x", title="Widget",
+        field_status={"title": "observed", "price": "observed"}, price=9.5,
+    )
+    result = SupplierEvidenceResult(
+        attempted=True, unit_cost=9.5, shipping_cost=None, source_url=evidence.source_url,
+        evidence=evidence, source_type="public_page_static", status="observed",
+    )
+
+    events = supplier_evidence_events(result, workspace_id="ws", run_id="fixture-run", occurred_at=1.0)
+
+    assert all(event.metadata["non_authoritative"] is True for event in events)
+    for key in (
+        "no_launch_authority", "no_ad_authority", "no_spend_authority",
+        "no_order_authority", "no_payment_authority",
+    ):
+        assert all(event.metadata[key] is True for event in events)
 
 
 class TestDiscovery:

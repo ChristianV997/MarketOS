@@ -137,7 +137,8 @@ def supplier_evidence_events(result: SupplierEvidenceResult, *, workspace_id: st
     metadata = {
         "dry_run": True, "advisory": True, "no_credentials": not authenticated, "public_source": not authenticated,
         "authenticated_readonly": authenticated, "supplier_source": result.source_type,
-        "non_authoritative": True, "no_launch_authority": True, "no_spend_authority": True,
+        "non_authoritative": True, "no_launch_authority": True, "no_ad_authority": True,
+        "no_spend_authority": True,
         "no_order_authority": True, "no_supplier_mutation_authority": True,
         "no_inventory_mutation_authority": True, "no_fulfillment_authority": True,
         "no_payment_authority": True, "no_customer_message_authority": True,

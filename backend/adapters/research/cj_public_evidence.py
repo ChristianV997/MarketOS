@@ -362,49 +362,47 @@ def discover_candidate_urls(query: str, *, context: SidecarContext, max_results:
 
 
 def to_supplier_offer(evidence: CJProductEvidence, *, supplier_id: str = SOURCE) -> SupplierOffer | None:
-    """None when no observed cost evidence exists.
+    """None when no observed price evidence exists.
 
-    Unlike a general-purpose retail-site crawl (where a page price is a
-    *selling* price to end consumers, not a wholesale cost — see
-    Crawl4AIResearchAdapter.normalize_supplier_offers's caution), a CJ
-    Dropshipping product page's price genuinely is what MarketOS would pay
-    to source the item: CJ is a wholesale/dropship supplier catalog, not a
-    retail storefront selling to the public. Treating that observed price
-    as unit_cost is therefore correct here, not an inference.
+    A public CJ page can expose a candidate catalog price, but that
+    observation is not authenticated supplier-live proof. Preserve that
+    distinction in DataQuality so generic commerce gates do not accept it as
+    live-attributed evidence.
     """
     if evidence.price is None or evidence.field_status.get("price") != "observed":
         return None
-    incomplete = any(status == "unavailable" for status in evidence.field_status.values())
     return SupplierOffer(
         supplier_id=supplier_id, product_id=evidence.external_product_id,
         unit_cost=evidence.price, shipping_cost=evidence.shipping_cost or 0.0,
         fulfillment_days=evidence.estimated_delivery_days,
         currency=evidence.currency,
         quality=DataQuality(
-            provenance="live", attribution="attributed", source_ref=evidence.source_url,
-            completeness="partial" if incomplete else "complete",
+            provenance="public_page", attribution="attributed", source_ref=evidence.source_url,
+            completeness="partial",
         ),
     )
 
 
 def to_product_candidate(evidence: CJProductEvidence) -> ProductCandidate | None:
-    if not evidence.title:
+    """Return a priced public-page candidate; never encode a missing price as 0."""
+    if not evidence.title or evidence.price is None or evidence.field_status.get("price") != "observed":
         return None
     return ProductCandidate(
         product_id=evidence.external_product_id, name=evidence.title, currency=evidence.currency,
-        selling_price=evidence.price or 0.0, source_signal_ids=(evidence.source_url,),
+        selling_price=evidence.price, source_signal_ids=(evidence.source_url,),
         quality=DataQuality(
-            provenance="live" if evidence.field_status.get("title") == "observed" else "unknown",
-            attribution="attributed", source_ref=evidence.source_url,
+            provenance="public_page", attribution="attributed", completeness="partial",
+            source_ref=evidence.source_url,
         ),
     )
 
 
 def score_candidates(evidences: list[CJProductEvidence], query: str) -> list[dict[str, Any]]:
-    """Deterministic supplier-evidence comparison, ranked highest first.
+    """Deterministic public-page-evidence comparison, ranked highest first.
 
     Unknown fields reduce confidence; they are never treated as favorable
     evidence and never silently become a zero-cost/zero-risk assumption.
+    These scores are public-page observations, never supplier-live proof.
     """
     query_tokens = {token for token in query.lower().split() if token}
     scored: list[dict[str, Any]] = []
@@ -420,9 +418,10 @@ def score_candidates(evidences: list[CJProductEvidence], query: str) -> list[dic
             "product_id": evidence.external_product_id, "title": evidence.title,
             "source_url": evidence.source_url, "relevance_score": round(relevance, 4),
             "evidence_completeness": round(completeness, 4), "extraction_confidence": evidence.confidence,
+            "evidence_mode": "public_page_observation", "supplier_live_proof": False,
             "composite_score": composite, "missing_evidence": missing, "conflicting_evidence": conflicting,
             "assumptions_still_required": [name for name in missing if name in
-                                            {"weight_kg", "shipping_cost", "warehouse_origin", "estimated_delivery_days"}],
+                                            {"price", "weight_kg", "shipping_cost", "warehouse_origin", "estimated_delivery_days"}],
         })
     return sorted(scored, key=lambda item: item["composite_score"], reverse=True)
 
