@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from decimal import Decimal
 from typing import Any, Iterable, Mapping
 
-from backend.economics import MarketLane, Money, UnitEconomicsAssumptions
+from backend.economics import CurrencyMismatchError, MarketLane, Money, UnitEconomicsAssumptions
 from backend.economics import calculate_unit_economics as calculate_canonical_unit_economics
 
 PROVENANCE = frozenset(
@@ -157,6 +157,8 @@ class UnitEconomicsScenario:
     assumptions: tuple[str, ...] = ()
     canonical_economics: Mapping[str, Any] | None = None
     currency: str = "USD"
+    cost_currency: str | None = None
+    shipping_currency: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -174,6 +176,9 @@ def calculate_unit_economics(
     platform_fee_rate: float = 0.05,
     lane: MarketLane | None = None,
     currency: str | None = None,
+    cost_currency: str | None = None,
+    shipping_currency: str | None = None,
+    sell_currency: str | None = None,
 ) -> UnitEconomicsScenario:
     """Compatibility adapter over the canonical Decimal economics model."""
     sell = number(target_sell_price)
@@ -181,24 +186,124 @@ def calculate_unit_economics(
     shipping = number(shipping_cost)
     landed = number(estimated_landed_cost)
     assumptions: list[str] = []
-    resolved_currency = lane.currency if lane else (currency or "USD")
+
+    resolved_sell_currency: str | None = None
+    if sell_currency is not None and str(sell_currency).strip():
+        resolved_sell_currency = str(sell_currency).strip().upper()
+    elif lane and lane.currency:
+        resolved_sell_currency = str(lane.currency).strip().upper()
+
+    resolved_cost_currency: str | None = None
+    if cost_currency is not None:
+        val = str(cost_currency).strip().upper()
+        resolved_cost_currency = val if val else None
+    elif currency is not None:
+        val = str(currency).strip().upper()
+        resolved_cost_currency = val if val else None
+
+    if resolved_sell_currency is None:
+        if resolved_cost_currency is not None:
+            resolved_sell_currency = resolved_cost_currency
+        else:
+            resolved_sell_currency = "USD"
+            resolved_cost_currency = "USD"
+    elif resolved_cost_currency is None and cost_currency is None and currency is None:
+        resolved_cost_currency = resolved_sell_currency
+
+    resolved_shipping_currency: str | None = None
+    if shipping is not None:
+        if shipping_currency is not None:
+            val = str(shipping_currency).strip().upper()
+            resolved_shipping_currency = val if val else None
+        else:
+            resolved_shipping_currency = resolved_cost_currency
+
     if landed is None and cost is not None:
         if shipping is not None:
             landed = cost + shipping
         else:
             assumptions.append("shipping_cost_missing")
             landed = cost
+
     if sell is None or landed is None:
-        return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, None, None, None, None, None, tuple(assumptions + ["sell_price_or_landed_cost_missing"]), currency=resolved_currency)
-    if lane and currency and currency.upper() != lane.currency:
-        return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, None, None, None, None, None, tuple(assumptions + ["currency_mismatch"]), currency=resolved_currency)
+        return UnitEconomicsScenario(
+            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
+            None, None, None, None, None,
+            tuple(assumptions + ["sell_price_or_landed_cost_missing"]),
+            currency=resolved_sell_currency or "USD",
+            cost_currency=resolved_cost_currency,
+            shipping_currency=resolved_shipping_currency,
+        )
+
+    # 1. Missing currency check
+    if cost is not None and not resolved_cost_currency:
+        return UnitEconomicsScenario(
+            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
+            None, None, None, None, None,
+            tuple(assumptions + ["currency_missing"]),
+            currency=resolved_sell_currency or "USD",
+            cost_currency=None,
+            shipping_currency=resolved_shipping_currency,
+        )
+
+    if shipping is not None and not resolved_shipping_currency:
+        return UnitEconomicsScenario(
+            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
+            None, None, None, None, None,
+            tuple(assumptions + ["currency_missing"]),
+            currency=resolved_sell_currency or "USD",
+            cost_currency=resolved_cost_currency,
+            shipping_currency=None,
+        )
+
+    if sell is not None and not resolved_sell_currency:
+        return UnitEconomicsScenario(
+            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
+            None, None, None, None, None,
+            tuple(assumptions + ["currency_missing"]),
+            currency="USD",
+            cost_currency=resolved_cost_currency,
+            shipping_currency=resolved_shipping_currency,
+        )
+
+    # 2. Currency mismatch check
+    if lane and lane.currency and resolved_sell_currency and lane.currency.strip().upper() != resolved_sell_currency:
+        return UnitEconomicsScenario(
+            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
+            None, None, None, None, None,
+            tuple(assumptions + ["currency_mismatch"]),
+            currency=lane.currency,
+            cost_currency=resolved_cost_currency,
+            shipping_currency=resolved_shipping_currency,
+        )
+
+    if resolved_cost_currency and resolved_sell_currency and resolved_cost_currency != resolved_sell_currency:
+        return UnitEconomicsScenario(
+            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
+            None, None, None, None, None,
+            tuple(assumptions + ["currency_mismatch"]),
+            currency=resolved_sell_currency,
+            cost_currency=resolved_cost_currency,
+            shipping_currency=resolved_shipping_currency,
+        )
+
+    if shipping is not None and resolved_shipping_currency and resolved_sell_currency and resolved_shipping_currency != resolved_sell_currency:
+        return UnitEconomicsScenario(
+            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
+            None, None, None, None, None,
+            tuple(assumptions + ["currency_mismatch"]),
+            currency=resolved_sell_currency,
+            cost_currency=resolved_cost_currency,
+            shipping_currency=resolved_shipping_currency,
+        )
+
     try:
         canonical = calculate_canonical_unit_economics(
-            Money(sell, resolved_currency, source="supplier_feasibility", provenance="assumed"),
-            Money(cost, resolved_currency, source="supplier_feasibility", provenance="assumed"),
+            Money(sell, resolved_sell_currency, source="supplier_feasibility", provenance="assumed"),
+            Money(cost, resolved_sell_currency, source="supplier_feasibility", provenance="assumed"),
             lane=lane,
             assumptions=UnitEconomicsAssumptions(
-                supplier_shipping=Money(shipping, resolved_currency, source="supplier_feasibility", provenance="assumed") if shipping is not None else None,
+                supplier_shipping=Money(shipping, resolved_sell_currency, source="supplier_feasibility", provenance="assumed") if shipping is not None else None,
                 payment_fee_rate=None if lane and lane.payment_fee_rate is not None else Decimal(str(payment_fee_rate)),
                 platform_fee_rate=None if lane and lane.platform_fee_rate is not None else Decimal(str(platform_fee_rate)),
                 tax_rate=None if lane else Decimal("0"),
@@ -214,13 +319,37 @@ def calculate_unit_economics(
                 marketplace_fee_rate=Decimal("0"),
             ),
         )
+    except CurrencyMismatchError:
+        return UnitEconomicsScenario(
+            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
+            None, None, None, None, None,
+            tuple(assumptions + ["currency_mismatch"]),
+            currency=resolved_sell_currency,
+            cost_currency=resolved_cost_currency,
+            shipping_currency=resolved_shipping_currency,
+        )
     except (TypeError, ValueError):
-        return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, None, None, None, None, None, tuple(assumptions + ["invalid_economics_input"]), currency=resolved_currency)
+        return UnitEconomicsScenario(
+            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
+            None, None, None, None, None,
+            tuple(assumptions + ["invalid_economics_input"]),
+            currency=resolved_sell_currency,
+            cost_currency=resolved_cost_currency,
+            shipping_currency=resolved_shipping_currency,
+        )
     profit = float(canonical.contribution_before_cac.amount)
     margin_percent = float(canonical.contribution_margin) if canonical.contribution_margin is not None else None
     cpa = float(canonical.break_even_cac.amount)
     roas = float(canonical.break_even_roas) if canonical.break_even_roas is not None else None
-    return UnitEconomicsScenario(sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate, profit, margin_percent, cpa, roas, profit, tuple(assumptions), canonical.to_dict(), resolved_currency)
+    return UnitEconomicsScenario(
+        sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
+        profit, margin_percent, cpa, roas, profit,
+        tuple(assumptions),
+        canonical.to_dict(),
+        resolved_sell_currency,
+        cost_currency=resolved_cost_currency,
+        shipping_currency=resolved_shipping_currency,
+    )
 
 
 @dataclass(frozen=True)
@@ -240,6 +369,7 @@ class SupplierFeasibilityEvidence:
     unit_cost: float | None = None
     currency: str = "USD"
     shipping_cost: float | None = None
+    shipping_currency: str | None = None
     estimated_landed_cost: float | None = None
     delivery_min_days: int | None = None
     delivery_max_days: int | None = None
@@ -392,6 +522,12 @@ def _risk_flags(records: list[SupplierFeasibilityEvidence], economics: UnitEcono
         flags.append(SupplierRiskFlag("high_moq", "warning", "MOQ is high for a dropshipping-style test."))
     if economics and economics.gross_margin_percent is not None and economics.gross_margin_percent < 0.15:
         flags.append(SupplierRiskFlag("low_margin_proxy", "blocker", "Scenario margin is below the 15% feasibility floor."))
+    if economics and "currency_mismatch" in economics.assumptions:
+        flags.append(SupplierRiskFlag("currency_mismatch", "blocker", "Supplier and market lane currencies do not match."))
+    elif economics and "currency_missing" in economics.assumptions:
+        flags.append(SupplierRiskFlag("currency_missing", "blocker", "Currency is missing or unspecified."))
+    elif economics and "unsupported_currency" in economics.assumptions:
+        flags.append(SupplierRiskFlag("unsupported_currency", "blocker", "Currency is unsupported by canonical economics."))
     return tuple(flags)
 
 
@@ -414,6 +550,8 @@ def score_candidate(
         payment_fee_rate=payment_fee_rate,
         platform_fee_rate=platform_fee_rate,
         lane=lane,
+        cost_currency=best.currency if best else None,
+        shipping_currency=getattr(best, "shipping_currency", None) if best else None,
     )
     if not best:
         return SupplierFeasibilityScore(candidate_id, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, "validate_live_supplier_first", {}, ("no_supplier_evidence",), economics, _risk_flags([], economics))
@@ -425,7 +563,12 @@ def score_candidate(
     delivery_risk = 1.0 - speed if max_days is not None else 0.8
     reliability = bounded((best.supplier_rating or 0) / 5) * (0.5 + bounded((best.supplier_review_count or 0) / 1000) * 0.5)
     fulfillment = _confidence(best, "fulfillment_method")
-    margin = bounded(((economics.gross_margin_percent or 0) + 0.1) / 0.6) if economics.gross_margin_percent is not None else 0.25
+    if economics and economics.gross_margin_percent is not None:
+        margin = bounded(((economics.gross_margin_percent or 0) + 0.1) / 0.6)
+    elif economics and any(marker in economics.assumptions for marker in ("currency_mismatch", "currency_missing", "unsupported_currency")):
+        margin = 0.0
+    else:
+        margin = 0.25
     options = bounded(len({(item.supplier, item.supplier_product_id) for item in evidence}) / 3)
     diversity = bounded(len({item.supplier for item in evidence}) / 3)
     contributions = {
@@ -447,6 +590,8 @@ def score_candidate(
     reasons = [flag.code for flag in flags]
     if costs == 0:
         recommendation = "validate_live_supplier_first"
+    elif any(flag.code in {"currency_mismatch", "currency_missing", "unsupported_currency"} for flag in flags):
+        recommendation = "hold_for_manual_review"
     elif economics.gross_margin_percent is not None and economics.gross_margin_percent < 0.15:
         recommendation = "reject_poor_margin"
     elif max_days is not None and max_days > 30:

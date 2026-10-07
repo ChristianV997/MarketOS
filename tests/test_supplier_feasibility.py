@@ -323,7 +323,7 @@ def test_unit_economics_calculates_break_even_cpa_and_roas():
 
 
 def test_supplier_report_forwards_market_lane_to_canonical_economics():
-    row = normalize_record({"candidate_id": "x", "supplier": "cj", "unit_cost": 10, "shipping_cost": 5, "delivery_window": "5-9", "inventory_status": "in_stock"})
+    row = normalize_record({"candidate_id": "x", "supplier": "cj", "unit_cost": 10, "shipping_cost": 5, "currency": "MXN", "delivery_window": "5-9", "inventory_status": "in_stock"})
     assert row is not None
     lane = MarketLane("cn-mx", "CN", "CN", "fixture-warehouse", "MX", currency="MXN", tax_rate="0.16")
     score = score_candidate("x", [row], target_sell_price=30, lane=lane)
@@ -528,3 +528,206 @@ def test_client_safe_offer_strips_nested_secret_and_html():
     assert safe["nested"]["ok"] == "keep"
     assert "note" not in safe
     assert client_safe_offer(row)["candidate_id"] == "x"
+
+
+def test_unit_economics_same_currency_preserves_provenance():
+    # Same currency (EUR vs EUR)
+    scenario_eur = calculate_unit_economics(
+        target_sell_price=100.0,
+        unit_cost=30.0,
+        shipping_cost=10.0,
+        cost_currency="EUR",
+        lane=MarketLane("cn-de", "CN", "CN", "fixture-warehouse", "DE", currency="EUR"),
+    )
+    assert scenario_eur.currency == "EUR"
+    assert scenario_eur.cost_currency == "EUR"
+    assert scenario_eur.shipping_currency == "EUR"
+    assert scenario_eur.gross_margin is not None
+    assert scenario_eur.gross_margin_percent is not None
+    assert "currency_mismatch" not in scenario_eur.assumptions
+
+    # Same currency (MXN vs MXN)
+    scenario_mxn = calculate_unit_economics(
+        target_sell_price=500.0,
+        unit_cost=150.0,
+        shipping_cost=50.0,
+        cost_currency="MXN",
+        lane=MarketLane("cn-mx", "CN", "CN", "fixture-warehouse", "MX", currency="MXN"),
+    )
+    assert scenario_mxn.currency == "MXN"
+    assert scenario_mxn.cost_currency == "MXN"
+    assert scenario_mxn.shipping_currency == "MXN"
+    assert scenario_mxn.gross_margin is not None
+    assert "currency_mismatch" not in scenario_mxn.assumptions
+
+
+def test_unit_economics_currency_mismatch_fails_closed():
+    # EUR supplier offer vs MXN market lane
+    row = normalize_record({
+        "candidate_id": "eur-offer-1",
+        "supplier": "cj",
+        "unit_cost": 10.0,
+        "shipping_cost": 2.0,
+        "currency": "EUR",
+        "delivery_window": "5-9",
+        "inventory_status": "in_stock",
+    })
+    assert row is not None
+    assert row.currency == "EUR"
+    lane = MarketLane("cn-mx", "CN", "CN", "fixture-warehouse", "MX", currency="MXN", tax_rate="0.16")
+
+    score = score_candidate("eur-offer-1", [row], target_sell_price=100.0, lane=lane)
+
+    # Derived economics must be unavailable
+    assert score.economics is not None
+    assert score.economics.currency == "MXN"
+    assert score.economics.cost_currency == "EUR"
+    assert score.economics.gross_margin is None
+    assert score.economics.gross_margin_percent is None
+    assert score.economics.break_even_cpa is None
+    assert score.economics.break_even_roas is None
+    assert score.economics.profit_per_order_before_ad_spend is None
+    assert "currency_mismatch" in score.economics.assumptions
+
+    # Risk flags and readiness must block fail-closed
+    assert "currency_mismatch" in score.reasons
+    matching_flags = [f for f in score.risk_flags if f.code == "currency_mismatch"]
+    assert len(matching_flags) == 1
+    assert matching_flags[0].severity == "blocker"
+    assert score.recommendation == "hold_for_manual_review"
+    assert score.contributions["margin_feasibility_proxy"] == 0.0
+
+    # Report level must reflect the blocker
+    report = build_report([row], target_sell_prices={"eur-offer-1": 100.0}, lane=lane).to_dict()
+    assert report["top_candidate_id"] == "eur-offer-1"
+    assert report["next_best_action"] == "hold_for_manual_review:eur-offer-1"
+    assert report["candidates"][0]["score"]["economics"]["gross_margin"] is None
+    assert "currency_mismatch" in report["candidates"][0]["score"]["economics"]["assumptions"]
+
+
+def test_unit_economics_absent_currency_fails_closed():
+    # Cost currency is empty/missing
+    scenario = calculate_unit_economics(
+        target_sell_price=100.0,
+        unit_cost=25.0,
+        shipping_cost=5.0,
+        cost_currency="",
+        lane=MarketLane("cn-us", "CN", "CN", "fixture-warehouse", "US", currency="USD"),
+    )
+    assert scenario.gross_margin is None
+    assert "currency_missing" in scenario.assumptions
+
+    # Evidence with empty currency fails closed in scoring
+    evidence = SupplierFeasibilityEvidence(
+        candidate_id="absent-cur-1",
+        query="widget",
+        supplier="cj",
+        source_type="fixture_demo",
+        unit_cost=15.0,
+        shipping_cost=3.0,
+        currency="",
+    )
+    lane = MarketLane("cn-us", "CN", "CN", "fixture-warehouse", "US", currency="USD")
+    score = score_candidate("absent-cur-1", [evidence], target_sell_price=40.0, lane=lane)
+    assert score.economics is not None
+    assert score.economics.gross_margin is None
+    assert "currency_missing" in score.economics.assumptions
+    assert "currency_missing" in score.reasons
+    assert any(f.code == "currency_missing" and f.severity == "blocker" for f in score.risk_flags)
+    assert score.recommendation == "hold_for_manual_review"
+
+
+def test_unit_economics_explicit_zero_costs_preserved():
+    # Explicit zero costs must not be coerced to None or missing
+    scenario_zero = calculate_unit_economics(
+        target_sell_price=50.0,
+        unit_cost=0.0,
+        shipping_cost=0.0,
+    )
+    assert scenario_zero.unit_cost == 0.0
+    assert scenario_zero.shipping_cost == 0.0
+    assert scenario_zero.estimated_landed_cost == 0.0
+    assert "shipping_cost_missing" not in scenario_zero.assumptions
+    assert "sell_price_or_landed_cost_missing" not in scenario_zero.assumptions
+    assert scenario_zero.gross_margin is not None
+    assert scenario_zero.gross_margin > 0.0
+
+    # Missing shipping cost is cleanly distinguished
+    scenario_missing = calculate_unit_economics(
+        target_sell_price=50.0,
+        unit_cost=10.0,
+        shipping_cost=None,
+    )
+    assert scenario_missing.shipping_cost is None
+    assert "shipping_cost_missing" in scenario_missing.assumptions
+
+    # In candidate scoring, 0.0 cost is not flagged as supplier_cost_missing
+    row_zero = normalize_record({
+        "candidate_id": "zero-cost",
+        "supplier": "cj",
+        "unit_cost": 0.0,
+        "shipping_cost": 0.0,
+        "delivery_window": "5-9",
+        "inventory_status": "in_stock",
+    })
+    assert row_zero is not None
+    score_zero = score_candidate("zero-cost", [row_zero], target_sell_price=50.0)
+    assert "supplier_cost_missing" not in score_zero.reasons
+    assert "shipping_cost_missing" not in score_zero.reasons
+    assert score_zero.economics.unit_cost == 0.0
+    assert score_zero.economics.shipping_cost == 0.0
+
+
+def test_unit_economics_shipping_currency_mismatch():
+    # Unit cost in EUR, shipping cost in USD, market in EUR -> mismatch
+    scenario = calculate_unit_economics(
+        target_sell_price=60.0,
+        unit_cost=20.0,
+        shipping_cost=5.0,
+        cost_currency="EUR",
+        shipping_currency="USD",
+        lane=MarketLane("cn-de", "CN", "CN", "fixture-warehouse", "DE", currency="EUR"),
+    )
+    assert scenario.gross_margin is None
+    assert "currency_mismatch" in scenario.assumptions
+    assert scenario.cost_currency == "EUR"
+    assert scenario.shipping_currency == "USD"
+
+    # Evidence with mismatched shipping_currency
+    evidence = SupplierFeasibilityEvidence(
+        candidate_id="ship-mismatch",
+        query="widget",
+        supplier="cj",
+        source_type="fixture_demo",
+        unit_cost=20.0,
+        currency="EUR",
+        shipping_cost=5.0,
+        shipping_currency="USD",
+    )
+    lane = MarketLane("cn-de", "CN", "CN", "fixture-warehouse", "DE", currency="EUR")
+    score = score_candidate("ship-mismatch", [evidence], target_sell_price=60.0, lane=lane)
+    assert score.economics is not None
+    assert score.economics.gross_margin is None
+    assert "currency_mismatch" in score.economics.assumptions
+    assert "currency_mismatch" in score.reasons
+    assert any(f.code == "currency_mismatch" and f.severity == "blocker" for f in score.risk_flags)
+    assert score.recommendation == "hold_for_manual_review"
+
+
+def test_supplier_feasibility_evidence_labels_unescalated():
+    # Evidence labels stay fixture/manual and never escalate to live authorization
+    rows_fixture = import_cj_validation_pack(fixture("cj_validation_pack_success.json"))
+    report_fixture = build_report(rows_fixture, evidence_mode="fixture")
+    assert report_fixture.evidence_mode == "fixture"
+    assert "supplier_feasibility_is_not_live_supplier_authorization" in report_fixture.warnings
+    assert not report_fixture.network_calls
+    assert not report_fixture.mutated
+    assert report_fixture.read_only
+
+    rows_manual = import_csv(fixture("cj_manual_import.csv"), supplier="cj", source_type="cj_manual_import")
+    report_manual = build_report(rows_manual, evidence_mode="manual_import")
+    assert report_manual.evidence_mode == "manual_import"
+    assert all(r.evidence_mode == "manual_import" for r in rows_manual)
+    # Manual evidence cannot escalate to advance_to_launch_draft
+    for candidate in report_manual.candidates:
+        assert candidate.score.recommendation != "advance_to_launch_draft"
