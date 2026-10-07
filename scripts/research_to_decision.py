@@ -235,6 +235,8 @@ def _is_unsafe_relative_path(text: str) -> bool:
     """
     if ".." in text.replace("\\", "/").split("/"):
         return True
+    if ":" in text:
+        return True
     for flavour in (PurePosixPath, PureWindowsPath):
         candidate = flavour(text)
         if candidate.is_absolute() or candidate.drive or candidate.root:
@@ -260,6 +262,7 @@ def _resolve_root(path: Path | str, label: str) -> Path:
     over-long or unencodable name raises OSError/ValueError. Neither may escape as-is.
     """
     try:
+        str(path).encode("utf-8")
         return Path(path).resolve()
     except (RuntimeError, OSError, ValueError):
         raise ResearchToDecisionError(f"{label} could not be resolved safely") from None
@@ -845,8 +848,14 @@ def _resolve(base_dir: Path, value: Any, *, label: str) -> Path:
         # (nothing is ever read before this point), but an unhandled
         # exception is not this module's fail-closed contract.
         raise ResearchToDecisionError(f"{label} must not contain a NUL byte")
+    try:
+        raw.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ResearchToDecisionError(f"{label} could not be resolved safely") from None
     if _is_unsafe_relative_path(raw):
         raise ResearchToDecisionError(f"{label} must remain relative to the manifest")
+    if any(len(part.encode("utf-8")) > 255 for part in re.split(r"[/\\]", raw)):
+        raise ResearchToDecisionError(f"{label} could not be resolved safely")
     candidate = Path(raw)
     try:
         resolved = (base_dir / candidate).resolve()

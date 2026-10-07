@@ -1748,6 +1748,7 @@ def test_names_that_merely_contain_dots_are_not_traversal(tmp_path: Path, name: 
 _ADVERSARIAL_PATHS_REJECTED_ON_EVERY_PLATFORM = [
     "/etc/passwd", "//srv/share/x", "\\", "\\\\", "\\\\?\\C:\\x", "\\\\.\\C:\\x", "//?/C:/x", "c:/x", "C:", "C:x", "C:\\x",
     "a\\..\\b", "a/..\\b", "a\\../b", "sub/../../x", "..", "../", "..\\", ".\\..\\x", "./../x",
+    "file.json:stream", "file.json::$DATA", "sub/file.json:stream", "file.json:stream:$DATA", "sub\\file.json:stream",
 ]
 
 
@@ -1756,6 +1757,14 @@ def test_adversarial_manifest_paths_are_rejected_under_posix_and_windows_rules(t
     assert rtd._is_unsafe_relative_path(raw)
     with pytest.raises(ResearchToDecisionError, match="relative to the manifest"):
         rtd._resolve(tmp_path, raw, label="supplier_inputs.path")
+
+
+@pytest.mark.parametrize("stream_path", ["file.json:stream", "file.json::$DATA", "dir/file.json:stream", "file.json:stream:$DATA"])
+def test_ntfs_alternate_data_streams_are_rejected_as_unsafe_manifest_paths(tmp_path: Path, stream_path: str) -> None:
+    (tmp_path / "file.json").write_text("[]", encoding="utf-8")
+    assert rtd._is_unsafe_relative_path(stream_path)
+    with pytest.raises(ResearchToDecisionError, match="relative to the manifest"):
+        rtd._resolve(tmp_path, stream_path, label="supplier_inputs.path")
 
 
 @pytest.mark.skipif(os.name != "posix", reason="a backslash is only an ordinary filename character on POSIX")
