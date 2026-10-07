@@ -56,7 +56,7 @@ facebook-business
 tiktok-business-api-sdk-official
 
 # ── inference kernel ──────────────────────────────────────────────────────────
-openai>=3.19.2         # OpenAI provider (cloud completions + embeddings)
+openai>=3.24.0         # OpenAI provider (cloud completions + embeddings)
 # Optional backends — install as needed for local inference:
 #   pip install airllm           # AirLLM: 70B models on 4 GB VRAM
 #   pip install litellm          # LiteLLM: unified multi-provider router
