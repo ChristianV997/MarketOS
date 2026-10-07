@@ -31,7 +31,6 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: python -m pip install -r requirements.txt
       - name: Reject unbound dispatch inputs
         env:
           MAX_CANDIDATES: ${{ inputs.max_candidates }}
@@ -44,9 +43,11 @@ jobs:
               limit != "1"
               or not query.strip()
               or len(query) > 120
-              or any(ord(char) < 32 or ord(char) == 127 for char in query)
+              or query.startswith("-")
+              or any(not char.isprintable() for char in query)
           )
           sys.exit("invalid_dispatch_input" if invalid else 0)'
+      - run: python -m pip install -r requirements.txt
       - run: python scripts/check_readonly_deployment_readiness.py --json
       - if: ${{ inputs.run_supplier_preflight == true }}
         run: python scripts/check_phase1_supplier_readonly_access.py --provider cj --json
