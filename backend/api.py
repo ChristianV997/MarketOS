@@ -70,7 +70,9 @@ except ImportError:
     _prom_integration_configured = _prom_integration_reachable = _prom_integration_probe_duration = _prom_integration_probes = None
 
 from backend.core.state import SystemState
-from backend.execution.loop import run_cycle
+# Defer loop import: backend.execution.loop pulls heavy numerical/causal dependencies
+# (scipy, sklearn, statsmodels, qdrant) which stall cold API startup and health checks.
+# run_cycle is resolved lazily in _background_runner() or via __getattr__.
 
 # ── config ────────────────────────────────────────────────────────────────────
 
@@ -239,6 +241,7 @@ _api_log = logging.getLogger(__name__)
 
 def _background_runner():
     global _state, _last_cycle_at
+    from backend.execution.loop import run_cycle
     sleep_s = 60.0 / _CYCLES_PER_MINUTE
     while _bg_running:
         t0 = time.time()
@@ -1014,3 +1017,10 @@ try:
 
 except ImportError:
     pass
+
+
+def __getattr__(name: str) -> Any:
+    if name == "run_cycle":
+        from backend.execution.loop import run_cycle
+        return run_cycle
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
