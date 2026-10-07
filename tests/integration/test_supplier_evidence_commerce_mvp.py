@@ -55,13 +55,14 @@ class TestEconomicsPrecedence:
             unit_cost = 9.5
             shipping_cost = 2.25
             source_url = "https://www.cjdropshipping.com/product/example.html"
+            source_type = "public_page_static"
 
         result = _economics_with_evidence(candidate, 49.0, 15.0, 6.0, 12.0, 0.08, 0.03, evidence=_Evidence())
         assert result.source == "partial_observed_supplier_evidence"
         assert result.assumed_unit_cost == 9.5
         assert result.assumed_shipping_cost == 2.25
-        assert "Observed CJ supplier cost=9.5" in result.assumptions[1]
-        assert "Observed CJ shipping=2.25" in result.assumptions[2]
+        assert "Observed CJ public-page catalog price (not supplier-live proof)=9.5" in result.assumptions[1]
+        assert "Observed CJ public-page shipping value (not supplier-live proof)=2.25" in result.assumptions[2]
         # price/CAC/return-rate remain plain assumptions — only supplier
         # cost/shipping are ever marked observed.
         assert result.assumptions[0] == "Assumed price=49.0"
@@ -74,11 +75,12 @@ class TestEconomicsPrecedence:
             unit_cost = 9.5
             shipping_cost = None
             source_url = "https://www.cjdropshipping.com/product/example.html"
+            source_type = "public_page_static"
 
         result = _economics_with_evidence(candidate, 49.0, 15.0, 6.0, 12.0, 0.08, 0.03, evidence=_CostOnlyEvidence())
         assert result.assumed_unit_cost == 9.5
         assert result.assumed_shipping_cost == 6.0  # unchanged assumption
-        assert "Observed CJ supplier cost" in result.assumptions[1]
+        assert "public-page catalog price (not supplier-live proof)" in result.assumptions[1]
         assert result.assumptions[2] == "Assumed shipping=6.0"
 
     def test_no_evidence_at_all_falls_back_to_assumptions_with_evidence_path(self):

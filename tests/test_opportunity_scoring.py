@@ -53,7 +53,7 @@ def _evidence(
     )
 
 
-def _evidence_result(evidence: CJProductEvidence | None, *, unit_cost=9.5, shipping_cost=2.0) -> SupplierEvidenceResult:
+def _evidence_result(evidence: CJProductEvidence | None, *, unit_cost: float | None = 9.5, shipping_cost=2.0) -> SupplierEvidenceResult:
     ranking = ({"product_id": "cj-1", "composite_score": 0.82, "relevance": 0.9, "completeness": 0.8, "confidence": 0.7},) if evidence else ()
     return SupplierEvidenceResult(
         attempted=True, unit_cost=unit_cost, shipping_cost=shipping_cost, source_url="https://www.cjdropshipping.com/product/x.html",
@@ -105,8 +105,19 @@ class TestDimensionsWithEvidence:
         by_name = {d.name: d for d in score.dimensions}
         assert by_name["supplier_evidence_quality"].provenance == "observed"
         assert by_name["supplier_evidence_quality"].is_unknown is False
+        assert "public-page observation is not supplier-live proof" in by_name["supplier_evidence_quality"].reason
         assert by_name["observed_supplier_cost"].provenance == "observed"
         assert by_name["observed_supplier_cost"].raw_value == 9.5
+        assert "not supplier-live proof" in by_name["observed_supplier_cost"].reason
+
+    def test_missing_public_page_price_stays_unavailable_in_scoring(self):
+        result = _evidence_result(_evidence(price=None, price_status="unavailable"), unit_cost=None)
+
+        score = mod.score_opportunity(_candidate(), supplier_evidence=result)
+
+        cost = {dimension.name: dimension for dimension in score.dimensions}["observed_supplier_cost"]
+        assert cost.is_unknown is True
+        assert cost.raw_value is None
 
     def test_product_simplicity_uses_observed_variant_count(self):
         evidence = _evidence(variants=({"name": "A"},))

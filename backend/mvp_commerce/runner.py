@@ -71,8 +71,12 @@ def _economics_with_evidence(candidate: OpportunityCandidate, price: float, assu
     fee = round(float(canonical.payment_fees.amount), 2)
     gross = round(float(canonical.contribution_before_cac.amount), 2)
     contribution = round(float(canonical.contribution_after_cac.amount), 2)
-    cost_note = f"Observed CJ supplier cost={unit_cost} (source={evidence.source_url})" if has_cost else f"Assumed unit cost={unit_cost}"
-    shipping_note = f"Observed CJ shipping={shipping} (source={evidence.source_url})" if has_shipping else f"Assumed shipping={shipping}"
+    public_page = evidence is not None and str(getattr(evidence, "source_type", "")).startswith("public_page")
+    source_url = getattr(evidence, "source_url", "") if evidence is not None else ""
+    cost_label = "Observed CJ public-page catalog price (not supplier-live proof)" if public_page else "Observed CJ supplier cost"
+    shipping_label = "Observed CJ public-page shipping value (not supplier-live proof)" if public_page else "Observed CJ shipping"
+    cost_note = f"{cost_label}={unit_cost} (source={source_url})" if has_cost else f"Assumed unit cost={unit_cost}"
+    shipping_note = f"{shipping_label}={shipping} (source={source_url})" if has_shipping else f"Assumed shipping={shipping}"
     source = "partial_observed_supplier_evidence" if (has_cost or has_shipping) else "dry_run_assumption"
     warnings = ("Price, CAC, and return-rate inputs remain dry-run assumptions unless explicitly marked 'Observed' below; "
                 "no actual margin, CAC, profitability, or ROAS conclusion is supported.",)

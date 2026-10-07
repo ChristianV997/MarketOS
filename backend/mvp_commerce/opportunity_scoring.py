@@ -61,7 +61,7 @@ category-level stability, and no data source for that exists.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from backend.contracts.events import Event
@@ -219,8 +219,10 @@ def _supplier_evidence_quality(evidence: SupplierEvidenceResult | None) -> Score
     best = evidence.ranking[0]
     normalized = round(float(best["composite_score"]) * 100.0, 2)
     provenance = "observed" if evidence.evidence is not None else "assumed"
+    public_page = evidence.source_type.startswith("public_page")
+    scope = "; public-page observation is not supplier-live proof" if public_page else ""
     return _dim("supplier_evidence_quality", float(best["composite_score"]), normalized,
-                f"best CJ public-page candidate composite score {best['composite_score']}", provenance)
+                f"best CJ candidate composite score {best['composite_score']}{scope}", provenance)
 
 
 def _observed_supplier_cost(evidence: SupplierEvidenceResult | None) -> ScoreDimension:
@@ -232,8 +234,13 @@ def _observed_supplier_cost(evidence: SupplierEvidenceResult | None) -> ScoreDim
     if evidence is None or evidence.unit_cost is None:
         return _dim("observed_supplier_cost", None, None,
                      "no observed CJ supplier cost for this candidate", "unavailable")
+    if evidence.source_type.startswith("public_page"):
+        reason = (f"public-page catalog price observed: {evidence.unit_cost}; "
+                  f"not supplier-live proof (source={evidence.source_url})")
+    else:
+        reason = f"supplier unit cost observed: {evidence.unit_cost} (source={evidence.source_url})"
     return _dim("observed_supplier_cost", evidence.unit_cost, 100.0,
-                f"supplier unit cost observed: {evidence.unit_cost} (source={evidence.source_url})", "observed")
+                reason, "observed")
 
 
 def _assumption_count(candidate: OpportunityCandidate) -> ScoreDimension:
