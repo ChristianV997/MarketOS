@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import stat
 import sys
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -46,8 +48,28 @@ def _fingerprint(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
+class _UnsafeXML(Exception):
+    """Raised when a document declares a DTD or entity (checked after decoding)."""
+
+
+class _NoDoctypeBuilder(ET.TreeBuilder):
+    def doctype(self, *_args: Any) -> None:
+        raise _UnsafeXML
+
+
+def _parse_without_dtd(data: bytes) -> ET.Element:
+    # The byte-level scan above only sees ASCII-compatible encodings; the parser
+    # reports DOCTYPE on the decoded document, so UTF-16 and similar cannot hide one.
+    parser = ET.XMLParser(target=_NoDoctypeBuilder())
+    parser.feed(data)
+    return parser.close()
+
+
 def _read_bounded(path: Path) -> tuple[bytes | None, str | None]:
     try:
+        # Refuse FIFOs/devices before open(): opening a FIFO would block forever.
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            return None, "report_not_a_file"
         with path.open("rb") as handle:
             data = handle.read(MAX_REPORT_BYTES + 1)
     except FileNotFoundError:
@@ -72,8 +94,10 @@ def _attribute_values(element: ET.Element) -> tuple[dict[str, str], list[str]]:
             continue
         value = str(raw).strip()
         if len(value) > MAX_FIELD_LENGTH:
-            issues.append("testcase_field_too_long")
-            continue
+            # Long pytest parametrize ids are legitimate. Keep identity stable and
+            # bounded by truncating to a prefix plus a digest of the full value.
+            digest = hashlib.sha256(value.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+            value = f"{value[: MAX_FIELD_LENGTH - 18]}~{digest}"
         values[name] = value
     return values, issues
 
@@ -121,8 +145,17 @@ def _load_report(path: Path, role: str) -> dict[str, Any]:
             "cases": [],
         }
     try:
-        root = ET.fromstring(data)
-    except (ET.ParseError, UnicodeDecodeError):
+        root = _parse_without_dtd(data)
+    except _UnsafeXML:
+        return {
+            "role": role,
+            "status": "incomplete",
+            "issue_codes": ["unsafe_xml_declaration"],
+            "test_count": 0,
+            "counts": {},
+            "cases": [],
+        }
+    except (ET.ParseError, UnicodeDecodeError, ValueError, RecursionError):
         return {
             "role": role,
             "status": "incomplete",
@@ -166,20 +199,6 @@ def _load_report(path: Path, role: str) -> dict[str, Any]:
         issues.add("no_testcases")
 
     declared: dict[str, int] = {}
-    for name in _COUNT_ATTRIBUTES:
-        raw_value = root.attrib.get(name)
-        if raw_value is None:
-            continue
-        try:
-            value = int(raw_value)
-        except (TypeError, ValueError):
-            issues.add("invalid_declared_count")
-            continue
-        if value < 0:
-            issues.add("invalid_declared_count")
-            continue
-        declared[name] = value
-
     counts = Counter(case["outcome"] for case in raw_cases)
     observed_counts = {
         "tests": len(raw_cases),
@@ -187,8 +206,33 @@ def _load_report(path: Path, role: str) -> dict[str, Any]:
         "errors": counts[OUTCOME_ERROR],
         "skipped": counts[OUTCOME_SKIPPED],
     }
-    if declared and any(declared[name] != observed_counts[name] for name in declared):
-        issues.add("declared_count_mismatch")
+    # Real pytest output declares counts on the nested <testsuite>, not on the
+    # <testsuites> wrapper, so every suite element is checked against its own subtree.
+    for suite in (element for element in root.iter() if _tag(element) in {"testsuite", "testsuites"}):
+        suite_cases = [element for element in suite.iter() if _tag(element) == "testcase"]
+        suite_outcomes = Counter(_outcome(element)[0] for element in suite_cases)
+        suite_observed = {
+            "tests": len(suite_cases),
+            "failures": suite_outcomes[OUTCOME_FAILURE],
+            "errors": suite_outcomes[OUTCOME_ERROR],
+            "skipped": suite_outcomes[OUTCOME_SKIPPED],
+        }
+        for name in _COUNT_ATTRIBUTES:
+            raw_value = suite.attrib.get(name)
+            if raw_value is None:
+                continue
+            try:
+                value = int(raw_value)
+            except (TypeError, ValueError):
+                issues.add("invalid_declared_count")
+                continue
+            if value < 0:
+                issues.add("invalid_declared_count")
+                continue
+            if suite is root:
+                declared[name] = value
+            if value != suite_observed[name]:
+                issues.add("declared_count_mismatch")
 
     grouped: dict[str, list[dict[str, Any]]] = {}
     for case in raw_cases:

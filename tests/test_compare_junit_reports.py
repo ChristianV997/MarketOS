@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -250,3 +251,135 @@ def test_text_includes_outcome_changes(tmp_path: Path) -> None:
 
     assert "outcome_changes: 1" in rendered
     assert '- {"classname":"tests.example","name":"changed"}: passed -> failure' in rendered
+
+
+def _generate_pytest_junit(tmp_path: Path, name: str, source: str) -> Path:
+    """Run a tiny hermetic pytest project and return its real JUnit XML report."""
+    project = tmp_path / f"proj-{name}"
+    project.mkdir()
+    (project / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    (project / "test_sample.py").write_text(source, encoding="utf-8")
+    report = tmp_path / f"{name}.xml"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={report}", "-c", "pytest.ini"],
+        cwd=project,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    return report
+
+
+_PYTEST_BASE = '''
+import pytest
+
+@pytest.fixture
+def boom():
+    raise RuntimeError("sk-CANARYFAKE0000 fixture")
+
+def test_pass(): pass
+def test_resolved(): assert False, "sk-CANARYFAKE0000 message"
+def test_errors(boom): pass
+@pytest.mark.skip(reason="r")
+def test_skipped(): pass
+@pytest.mark.xfail
+def test_xfail(): assert False
+@pytest.mark.xfail(strict=True)
+def test_xpass_strict(): pass
+@pytest.mark.parametrize("value", ["a b", "<&>", "x" * 700, "x" * 700 + "y"])
+def test_param(value): pass
+'''
+_PYTEST_CANDIDATE = _PYTEST_BASE.replace(
+    "def test_pass(): pass", "def test_pass(): assert False"
+).replace('def test_resolved(): assert False, "sk-CANARYFAKE0000 message"', "def test_resolved(): pass")
+
+
+def test_real_pytest_junit_round_trip_is_complete_and_classified(tmp_path: Path) -> None:
+    base = _generate_pytest_junit(tmp_path, "base", _PYTEST_BASE)
+    candidate = _generate_pytest_junit(tmp_path, "candidate", _PYTEST_CANDIDATE)
+    result = comparator.compare(base, candidate)
+
+    assert result["status"] == "complete", result["errors"]
+    # pytest declares counts on the nested <testsuite>, which must be validated too.
+    assert result["reports"]["base"]["counts"]["tests"] == 10
+    comparison = result["comparison"]
+    assert [key for key in comparison["candidate_only_failures"] if "test_pass" in key]
+    assert [key for key in comparison["base_only_failures"] if "test_resolved" in key]
+    assert any("test_errors" in key for key in comparison["shared_failures"])
+    assert any("test_xpass_strict" in key for key in comparison["shared_failures"])
+    # xfail is reported by pytest as <skipped>; it is an unchanged skip, not a failure.
+    assert any("test_xfail" in key for key in comparison["shared_skips"])
+    assert any("test_skipped" in key for key in comparison["shared_skips"])
+    assert {change["node_key"].count("test_pass") for change in comparison["outcome_changes"]} >= {1}
+    # long parametrize ids stay distinct, bounded, and do not invalidate the report
+    long_keys = [key for key in comparison["unchanged"] if "test_param" in key and "~" in key]
+    assert len(long_keys) == 2 and len(set(long_keys)) == 2
+    assert all(len(key) < 1200 for key in long_keys)
+
+    serialized = comparator._canonical_json(result) + comparator.render_text(result)
+    assert "CANARYFAKE" not in serialized
+    assert comparator.compare(base, candidate) == result
+
+
+def test_long_testcase_field_is_truncated_with_stable_digest_not_rejected(tmp_path: Path) -> None:
+    long_name = "n" * (comparator.MAX_FIELD_LENGTH + 50)
+    first = _write_report(tmp_path, "a.xml", _suite(_case(long_name), tests=1, failures=0, errors=0, skipped=0))
+    second = _write_report(tmp_path, "b.xml", _suite(_case(long_name), tests=1, failures=0, errors=0, skipped=0))
+    loaded = comparator._load_report(first, "base")
+    assert loaded["status"] == "complete"
+    assert loaded["issue_codes"] == []
+    assert len(loaded["cases"][0]["identity"]["name"]) <= comparator.MAX_FIELD_LENGTH
+    assert comparator.compare(first, second)["comparison"]["unchanged"] == [loaded["cases"][0]["node_key"]]
+
+
+def test_nested_suite_declared_count_mismatch_is_incomplete(tmp_path: Path) -> None:
+    good = _write_report(
+        tmp_path, "good.xml", f"<testsuites>{_suite(_case('a'), tests=1, failures=0, errors=0, skipped=0)}</testsuites>"
+    )
+    bad = _write_report(
+        tmp_path, "bad.xml", f"<testsuites>{_suite(_case('a'), tests=3, failures=0, errors=0, skipped=0)}</testsuites>"
+    )
+    result = comparator.compare(good, bad)
+    assert result["status"] == "incomplete"
+    assert {"role": "candidate", "code": "declared_count_mismatch"} in result["errors"]
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-le", "utf-8"])
+def test_doctype_is_rejected_regardless_of_encoding(tmp_path: Path, encoding: str) -> None:
+    declaration = '<?xml version="1.0" encoding="%s"?>' % ("utf-16" if encoding.startswith("utf-16") else "utf-8")
+    body = declaration + '<!DOCTYPE a [<!ENTITY e "x">]>' + _suite(_case("a"))
+    hostile = tmp_path / "hostile.xml"
+    hostile.write_bytes(body.encode(encoding))
+    clean = _write_report(tmp_path, "clean.xml", _suite(_case("a")))
+    result = comparator.compare(hostile, clean)
+    assert result["status"] == "incomplete"
+    assert {"role": "base", "code": "unsafe_xml_declaration"} in result["errors"]
+
+
+def test_errors_never_echo_report_content(tmp_path: Path) -> None:
+    canary = "sk-CANARYFAKE0000"
+    hostile = _write_report(tmp_path, "bad.xml", f"<testsuite><testcase name='{canary}'><failure message='{canary}'")
+    clean = _write_report(tmp_path, "clean.xml", _suite(_case("a")))
+    result = comparator.compare(hostile, clean)
+    rendered = comparator._canonical_json(result) + comparator.render_text(result)
+    assert result["status"] == "incomplete"
+    assert canary not in rendered
+
+
+def test_directory_and_fifo_reports_are_not_files_and_never_block(tmp_path: Path) -> None:
+    clean = _write_report(tmp_path, "clean.xml", _suite(_case("a")))
+    result = comparator.compare(tmp_path, clean)
+    assert {"role": "base", "code": "report_not_a_file"} in result["errors"]
+    if hasattr(os, "mkfifo"):
+        fifo = tmp_path / "fifo.xml"
+        os.mkfifo(fifo)
+        result = comparator.compare(fifo, clean)
+        assert {"role": "base", "code": "report_not_a_file"} in result["errors"]
+
+
+def test_same_identity_duplicates_pair_independently_of_document_order(tmp_path: Path) -> None:
+    forward = _write_report(tmp_path, "f.xml", _suite(_case("dup"), _case("dup", body="<failure />")))
+    reverse = _write_report(tmp_path, "r.xml", _suite(_case("dup", body="<failure />"), _case("dup")))
+    result = comparator.compare(forward, reverse)
+    assert result["status"] == "complete"
+    assert result["comparison"]["outcome_changes"] == []
