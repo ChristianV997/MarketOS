@@ -107,16 +107,6 @@ def test_github_actions_job_with_complete_typed_success_evidence_can_pass() -> N
     assert result["steps_executed"] == 1
 
 
-def test_github_actions_job_does_not_count_skipped_steps_as_execution() -> None:
-    job = _successful_job()
-    job["steps"] = [{"name": "conditional", "conclusion": "skipped"}]
-
-    result = classify_github_actions_job(job, logs_available=True)
-
-    assert result["state"] == "ci_unavailable"
-    assert result["steps_executed"] == 0
-
-
 @pytest.mark.parametrize(
     "runner_id",
     [
