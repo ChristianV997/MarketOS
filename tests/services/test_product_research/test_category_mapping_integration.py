@@ -103,3 +103,51 @@ class TestCategoryMappingEvidenceComposition:
         result, _ = run_product_audit("Widget", category="Bird Supplies")
         as_dict = result.to_dict()
         assert "category_mapping_evidence" in as_dict
+
+
+def _without_mapping(result: ProductAuditResult) -> dict:
+    payload = result.to_dict()
+    payload.pop("category_mapping_evidence", None)
+    payload.pop("generated_at", None)  # wall-clock stamp, not audit content
+    # The first audit is remembered as a "similar past product" by the second one. That is
+    # existing run-history behaviour, independent of category mapping.
+    validation = dict(payload.get("validation") or {})
+    validation.pop("similar_past_products", None)
+    payload["validation"] = validation
+    return payload
+
+
+def _summary_section(markdown: str) -> str:
+    """The rendered Summary section (product, category, recommendation) only."""
+    start = markdown.index("## Summary")
+    end = markdown.index("\n## ", start + 1)
+    return markdown[start:end]
+
+
+class TestMappingCannotChangeDecisionOrReadiness:
+    @pytest.mark.parametrize(
+        "category",
+        ["Bird Supplies", "Bags", "Completely Unrecognizable Made Up Thing"],  # mapped, ambiguous, unmapped
+    )
+    def test_audit_output_is_identical_with_and_without_mapping_evidence(self, monkeypatch, category):
+        """Recommendation, status, pricing, blockers and every non-mapping field must not
+        depend on whether (or how) the supplemental mapper ran."""
+        from services.product_research.report import render_product_audit_markdown
+
+        with_mapping, _ = run_product_audit("Widget", category=category)
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("simulated category mapping failure")
+
+        monkeypatch.setattr("services.category_mapping.build_category_mapping_evidence", _boom)
+        without_mapping, _ = run_product_audit("Widget", category=category)
+
+        assert with_mapping.category_mapping_evidence is not None
+        assert with_mapping.category_mapping_evidence["status"] in {"mapped", "ambiguous", "unmapped"}
+        assert without_mapping.category_mapping_evidence is None
+        assert _without_mapping(with_mapping) == _without_mapping(without_mapping)
+        assert with_mapping.recommendation == without_mapping.recommendation
+        assert with_mapping.status == without_mapping.status
+        assert _summary_section(render_product_audit_markdown(with_mapping)) == _summary_section(
+            render_product_audit_markdown(without_mapping)
+        )
