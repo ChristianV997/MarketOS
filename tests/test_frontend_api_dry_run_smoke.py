@@ -12,6 +12,7 @@ import re
 import shutil
 import socket
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -48,10 +49,19 @@ class InertThread:
         return None
 
 
+class _ThreadingShim:
+    """Inert Thread for backend.api only; anyio and concurrent.futures keep the real threading module."""
+
+    Thread = InertThread
+
+    def __getattr__(self, name):
+        return getattr(threading, name)
+
+
 def _install_inert_runtime(monkeypatch):
     import backend.api as api
 
-    monkeypatch.setattr(api.threading, "Thread", InertThread)
+    monkeypatch.setattr(api, "threading", _ThreadingShim())
     monkeypatch.setattr("backend.core.serializer.load", lambda _path: None)
     monkeypatch.setattr("backend.core.serializer.save", lambda *_args: None)
     monkeypatch.setattr(api, "_start_runtime_services", lambda: None)
