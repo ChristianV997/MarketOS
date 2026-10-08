@@ -29,36 +29,64 @@ def validate_dataset(dataset: dict[str, Any]) -> dict[str, Any]:
 
 
 def _confined_dataset_path(path: str) -> str:
-    """Return the real path of ``path`` if it stays under the project root, else raise.
+    """Return a root-relative posix path if ``path`` stays under the project root.
 
     Relative paths are taken from the project root. Symlinks are resolved first, so a
-    link inside the project that points outside is rejected. A rejected path raises the
-    same error whether or not it exists, so the result is not an existence oracle.
+    link inside the project that points outside is rejected. Confinement uses a path
+    boundary check (``commonpath`` / ``relative_to``), not a plain string prefix, so
+    sibling directories that share a name prefix cannot sneak through. A rejected path
+    raises the same error whether or not it exists, so the result is not an existence
+    oracle. The return value is relative and safe to open via ``dir_fd``.
     """
+    if not isinstance(path, str) or not path or "\x00" in path:
+        raise ValueError("dataset_path_invalid")
     if ".." in Path(path).parts:
         raise ValueError("dataset_path_traversal_blocked")
-    root = os.path.realpath(_project_root())
+    root = Path(os.path.realpath(_project_root()))
+    root_s = str(root)
+    candidate = Path(path) if Path(path).is_absolute() else root / path
     try:
-        resolved = os.path.realpath(os.path.join(root, path))
-    except ValueError:
+        resolved_s = os.path.realpath(candidate)
+    except (OSError, ValueError):
         raise ValueError("dataset_path_invalid") from None
-    if not (resolved == root or resolved.startswith(root.rstrip(os.sep) + os.sep)):
-        raise ValueError("dataset_path_outside_project_root")
-    return resolved
-
-
-def _read_regular_file(resolved: str) -> bytes:
-    """Open without following a final-component symlink and read only a regular file.
-
-    The path was validated a moment ago; ``O_NOFOLLOW`` stops the last component from
-    being swapped for an outside symlink in between, and ``O_NONBLOCK`` plus the regular
-    file check keep a FIFO or device from hanging or feeding the loader.
-    """
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
-        descriptor = os.open(resolved, flags)
+        if os.path.commonpath([root_s, resolved_s]) != root_s:
+            raise ValueError("dataset_path_outside_project_root")
+        relative = Path(resolved_s).relative_to(root)
+    except ValueError:
+        raise ValueError("dataset_path_outside_project_root") from None
+    if not relative.parts or relative == Path(".") or ".." in relative.parts:
+        raise ValueError("dataset_path_outside_project_root")
+    return relative.as_posix()
+
+
+def _read_regular_file(relative: str) -> bytes:
+    """Open ``relative`` under the project root without following a final-component symlink.
+
+    The path was confined to a root-relative form a moment ago. Opening through the
+    project-root directory descriptor keeps the sink inside that root; ``O_NOFOLLOW``
+    stops the last component from being swapped for an outside symlink in between;
+    ``O_NONBLOCK`` plus the regular-file check keep a FIFO or device from hanging or
+    feeding the loader. Descriptors are always closed.
+    """
+    if not isinstance(relative, str) or not relative or "\x00" in relative:
+        raise ValueError("dataset_path_invalid")
+    if ".." in Path(relative).parts or Path(relative).is_absolute():
+        raise ValueError("dataset_path_traversal_blocked")
+    root_s = os.path.realpath(_project_root())
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        root_fd = os.open(root_s, dir_flags)
     except OSError:
         raise FileNotFoundError("dataset_not_found") from None
+    try:
+        try:
+            descriptor = os.open(relative, flags, dir_fd=root_fd)
+        except OSError:
+            raise FileNotFoundError("dataset_not_found") from None
+    finally:
+        os.close(root_fd)
     with os.fdopen(descriptor, "rb") as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
             raise FileNotFoundError("dataset_not_found")

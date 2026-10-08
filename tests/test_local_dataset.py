@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -27,11 +28,31 @@ def _canary_payload() -> str:
     })
 
 
+@pytest.fixture(autouse=True)
+def _from_repo_root(monkeypatch):
+    monkeypatch.chdir(REPO)
+
+
 def test_seed_fixture_parses():
     path = Path(__file__).resolve().parent / "fixtures" / "market_evidence_seed.json"
     dataset = load_local_evidence_dataset(str(path))
     records = parse_evidence_records(dataset)
     assert records and all(record.provenance.get("not_real_market_data") for record in records)
+
+
+def test_project_root_itself_is_rejected():
+    with pytest.raises(ValueError, match="dataset_path_outside_project_root"):
+        load_local_evidence_dataset(str(REPO))
+    with pytest.raises(ValueError, match="dataset_path_outside_project_root"):
+        load_local_evidence_dataset(".")
+
+
+def test_in_root_relative_and_absolute_file_loads():
+    relative = "tests/fixtures/market_evidence_seed.json"
+    absolute = str(REPO / relative)
+    for path in (relative, absolute, "./" + relative):
+        dataset = load_local_evidence_dataset(path)
+        assert dataset["dataset_id"]
 
 
 def test_missing_provenance_rejected():
@@ -50,18 +71,19 @@ def test_traversal_rejected():
 def test_absolute_outside_root_is_not_read(tmp_path, monkeypatch):
     outside = tmp_path / "outside_dataset.json"
     outside.write_text(_canary_payload(), encoding="utf-8")
-    opened: list[Path] = []
-    real_open = Path.open
+    opened: list[str] = []
+    real_open = os.open
 
-    def tracking_open(self, *args, **kwargs):
-        opened.append(Path(self))
-        return real_open(self, *args, **kwargs)
+    def tracking_open(path, flags, *args, dir_fd=None, **kwargs):
+        opened.append(os.fspath(path))
+        return real_open(path, flags, *args, dir_fd=dir_fd, **kwargs)
 
-    monkeypatch.setattr(Path, "open", tracking_open)
+    monkeypatch.setattr(os, "open", tracking_open)
     with pytest.raises(ValueError, match="dataset_path_outside_project_root") as caught:
         load_local_evidence_dataset(str(outside))
     assert CANARY not in str(caught.value)
-    assert outside.resolve() not in {item.resolve() for item in opened}
+    assert str(outside.resolve()) not in opened
+    assert all(not os.path.isabs(item) or os.path.realpath(item) == os.path.realpath(REPO) for item in opened)
 
     body = market_discovery({"dataset_paths": [str(outside)], "run_validation_services": False})
     rendered = json.dumps(body)
@@ -70,21 +92,36 @@ def test_absolute_outside_root_is_not_read(tmp_path, monkeypatch):
     assert any(item.endswith(":ValueError") and item.startswith("dataset_failed:") for item in body["warnings"])
 
 
+def test_sibling_prefix_path_is_rejected(tmp_path, monkeypatch):
+    parent = tmp_path / "parents"
+    parent.mkdir()
+    real_root = parent / "MarketOS"
+    sibling = parent / "MarketOS-evil"
+    real_root.mkdir()
+    sibling.mkdir()
+    outside = sibling / "outside_dataset.json"
+    outside.write_text(_canary_payload(), encoding="utf-8")
+    monkeypatch.chdir(real_root)
+    with pytest.raises(ValueError, match="dataset_path_outside_project_root") as caught:
+        load_local_evidence_dataset(str(outside))
+    assert CANARY not in str(caught.value)
+
+
 def test_symlink_inside_project_cannot_escape(tmp_path, monkeypatch):
     outside = tmp_path / "outside_dataset.json"
     outside.write_text(_canary_payload(), encoding="utf-8")
-    opened: list[Path] = []
-    real_open = Path.open
+    opened: list[str] = []
+    real_open = os.open
 
-    def tracking_open(self, *args, **kwargs):
-        opened.append(Path(self))
-        return real_open(self, *args, **kwargs)
+    def tracking_open(path, flags, *args, dir_fd=None, **kwargs):
+        opened.append(os.fspath(path))
+        return real_open(path, flags, *args, dir_fd=dir_fd, **kwargs)
 
-    monkeypatch.setattr(Path, "open", tracking_open)
+    monkeypatch.setattr(os, "open", tracking_open)
     with tempfile.TemporaryDirectory(dir=REPO) as inside:
         link = Path(inside) / "inside_link.json"
         link.symlink_to(outside)
         with pytest.raises(ValueError, match="dataset_path_outside_project_root") as caught:
             load_local_evidence_dataset(str(link))
         assert CANARY not in str(caught.value)
-        assert outside.resolve() not in {item.resolve() for item in opened}
+        assert str(outside.resolve()) not in opened

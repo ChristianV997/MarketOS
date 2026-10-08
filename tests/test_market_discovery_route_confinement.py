@@ -236,12 +236,31 @@ def test_final_component_swapped_to_an_outside_symlink_after_the_check_is_not_fo
     real_confine = local_dataset._confined_dataset_path
 
     def confine_then_swap(path: str) -> str:
-        resolved = real_confine(path)
-        os.unlink(resolved)
-        os.symlink(outside, resolved)
-        return resolved
+        relative = real_confine(path)
+        absolute = REPO / relative
+        os.unlink(absolute)
+        os.symlink(outside, absolute)
+        return relative
 
     monkeypatch.setattr(local_dataset, "_confined_dataset_path", confine_then_swap)
     with pytest.raises(FileNotFoundError) as caught:
         local_dataset.load_local_evidence_dataset(str(target))
     assert CANARY not in str(caught.value)
+
+
+def test_sibling_prefix_directory_outside_root_cannot_influence_the_response(tmp_path, monkeypatch):
+    """A sibling whose name only shares a string prefix with the project root must not pass."""
+    parent = tmp_path / "parents"
+    parent.mkdir()
+    real_root = parent / "MarketOS"
+    sibling = parent / "MarketOS-evil"
+    real_root.mkdir()
+    sibling.mkdir()
+    outside = sibling / "outside_dataset.json"
+    outside.write_text(_dataset(), encoding="utf-8")
+    monkeypatch.chdir(real_root)
+    status, body, rendered = _discover(str(outside))
+    assert status == 200
+    assert body["status"] == "blocked"
+    _assert_no_leak(rendered, str(sibling), str(outside))
+    assert any(item.startswith("dataset_failed:") and item.endswith(":ValueError") for item in body["warnings"])
