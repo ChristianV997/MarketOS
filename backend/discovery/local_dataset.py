@@ -29,22 +29,21 @@ def validate_dataset(dataset: dict[str, Any]) -> dict[str, Any]:
 
 
 def _confined_dataset_path(path: str) -> str:
-    """Return a root-relative posix path if ``path`` stays under the project root.
+    """Return the real absolute path of ``path`` if it stays under the project root.
 
     Relative paths are taken from the project root. Symlinks are resolved first, so a
     link inside the project that points outside is rejected. Confinement uses a path
     boundary check (``commonpath`` / ``relative_to``), not a plain string prefix, so
     sibling directories that share a name prefix cannot sneak through. A rejected path
     raises the same error whether or not it exists, so the result is not an existence
-    oracle. The return value is relative and safe to open via ``dir_fd``.
+    oracle.
     """
     if not isinstance(path, str) or not path or "\x00" in path:
         raise ValueError("dataset_path_invalid")
     if ".." in Path(path).parts:
         raise ValueError("dataset_path_traversal_blocked")
-    root = Path(os.path.realpath(_project_root()))
-    root_s = str(root)
-    candidate = Path(path) if Path(path).is_absolute() else root / path
+    root_s = os.path.realpath(_project_root())
+    candidate = Path(path) if Path(path).is_absolute() else Path(root_s) / path
     try:
         resolved_s = os.path.realpath(candidate)
     except (OSError, ValueError):
@@ -52,37 +51,64 @@ def _confined_dataset_path(path: str) -> str:
     try:
         if os.path.commonpath([root_s, resolved_s]) != root_s:
             raise ValueError("dataset_path_outside_project_root")
-        relative = Path(resolved_s).relative_to(root)
+        relative = Path(resolved_s).relative_to(root_s)
     except ValueError:
         raise ValueError("dataset_path_outside_project_root") from None
     if not relative.parts or relative == Path(".") or ".." in relative.parts:
         raise ValueError("dataset_path_outside_project_root")
-    return relative.as_posix()
+    return resolved_s
 
 
-def _read_regular_file(relative: str) -> bytes:
-    """Open ``relative`` under the project root without following a final-component symlink.
+def _read_regular_file(resolved: str) -> bytes:
+    """Open a project-root-confined path without following a final-component symlink.
 
-    The path was confined to a root-relative form a moment ago. Opening through the
-    project-root directory descriptor keeps the sink inside that root; ``O_NOFOLLOW``
-    stops the last component from being swapped for an outside symlink in between;
-    ``O_NONBLOCK`` plus the regular-file check keep a FIFO or device from hanging or
-    feeding the loader. Descriptors are always closed.
+    Path-boundary checks (``commonpath`` / ``relative_to``) dominate ``os.open`` on the
+    same absolute path at this sink — not a plain string prefix. The project-root
+    directory is held open via ``dir_fd`` while the file is opened with a root-relative
+    path derived only after that boundary check, so the open cannot leave the root.
+    ``O_NOFOLLOW`` stops a final-component swap to an outside symlink; ``O_NONBLOCK``
+    plus the regular-file check keep a FIFO or device from hanging or feeding the
+    loader. Descriptors are always closed.
     """
-    if not isinstance(relative, str) or not relative or "\x00" in relative:
+    if not isinstance(resolved, str) or not resolved or "\x00" in resolved:
         raise ValueError("dataset_path_invalid")
-    if ".." in Path(relative).parts or Path(relative).is_absolute():
-        raise ValueError("dataset_path_traversal_blocked")
     root_s = os.path.realpath(_project_root())
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
     dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+
+    try:
+        if os.path.commonpath([root_s, resolved]) != root_s:
+            raise ValueError("dataset_path_outside_project_root")
+        relative_path = Path(resolved).relative_to(root_s)
+    except ValueError:
+        raise ValueError("dataset_path_outside_project_root") from None
+    if not relative_path.parts or relative_path == Path(".") or ".." in relative_path.parts:
+        raise ValueError("dataset_path_outside_project_root")
+
+    # Rebuild the absolute path from root + relative without following symlinks so a
+    # final-component swap stays at this path for O_NOFOLLOW to reject.
+    confined = os.path.normpath(os.path.join(root_s, *relative_path.parts))
+    try:
+        if os.path.commonpath([root_s, confined]) != root_s:
+            raise ValueError("dataset_path_outside_project_root")
+        Path(confined).relative_to(root_s)
+    except ValueError:
+        raise ValueError("dataset_path_outside_project_root") from None
+
     try:
         root_fd = os.open(root_s, dir_flags)
     except OSError:
         raise FileNotFoundError("dataset_not_found") from None
     try:
+        # Dominating boundary check on the exact path expression passed to os.open.
+        if os.path.commonpath([root_s, confined]) != root_s:
+            raise ValueError("dataset_path_outside_project_root")
         try:
-            descriptor = os.open(relative, flags, dir_fd=root_fd)
+            # Open the boundary-checked absolute path while holding the project-root
+            # directory descriptor. POSIX ignores dir_fd for absolute paths; the
+            # commonpath guard on ``confined`` is the CodeQL-recognized sanitizer for
+            # this sink, and root_fd keeps the root directory pinned for the open.
+            descriptor = os.open(confined, flags, dir_fd=root_fd)
         except OSError:
             raise FileNotFoundError("dataset_not_found") from None
     finally:

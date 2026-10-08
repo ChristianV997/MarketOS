@@ -236,11 +236,10 @@ def test_final_component_swapped_to_an_outside_symlink_after_the_check_is_not_fo
     real_confine = local_dataset._confined_dataset_path
 
     def confine_then_swap(path: str) -> str:
-        relative = real_confine(path)
-        absolute = REPO / relative
+        absolute = real_confine(path)
         os.unlink(absolute)
         os.symlink(outside, absolute)
-        return relative
+        return absolute
 
     monkeypatch.setattr(local_dataset, "_confined_dataset_path", confine_then_swap)
     with pytest.raises(FileNotFoundError) as caught:
