@@ -180,8 +180,12 @@ def _lingering_connections(port: int) -> bool | None:
     for row in rows:
         fields = row.split()
         try:
-            if len(fields) > 1 and int(fields[1].rsplit(":", 1)[1], 16) == port:
-                return True
+            if len(fields) > 3 and int(fields[1].rsplit(":", 1)[1], 16) == port:
+                # Connection states in TCP: TIME_WAIT (06), FIN_WAIT1 (04), FIN_WAIT2 (05),
+                # CLOSING (0B), LAST_ACK (09), CLOSE_WAIT (08).
+                # Listening (0A) and bound/closed (07) are not lingering connection states.
+                if fields[3] in {"04", "05", "06", "08", "09", "0B"}:
+                    return True
         except (IndexError, ValueError):
             continue
     return False
@@ -508,14 +512,15 @@ class ManagedProcess:
                         self.proc.terminate()
                     except OSError:
                         pass
-        elif not already_exited:
+        else:
             try:
                 os.killpg(pid, signal.SIGTERM)
             except (ProcessLookupError, PermissionError, OSError):
-                try:
-                    self.proc.terminate()
-                except OSError:
-                    pass
+                if not already_exited:
+                    try:
+                        self.proc.terminate()
+                    except OSError:
+                        pass
 
         deadline = time.monotonic() + min(timeout_s, 1.0)
         while time.monotonic() < deadline and self.proc.poll() is None:

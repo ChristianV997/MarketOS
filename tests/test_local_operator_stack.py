@@ -1235,3 +1235,59 @@ def test_cleanup_kills_a_sigterm_ignoring_descendant_when_the_launcher_dies_firs
                 os.kill(descendant, signal.SIGKILL)  # only the child this test created
             except OSError:
                 pass
+
+
+def test_lingering_connections_filters_tcp_states(monkeypatch: pytest.MonkeyPatch):
+    """_lingering_connections must only match connection states (TIME_WAIT, FIN_WAIT), not LISTEN or bound-only."""
+    sample_proc_tcp = textwrap.dedent(
+        """\
+          sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+           0: 0100007F:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0
+           1: 0100007F:0BB9 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 12346 1 0000000000000000 100 0 0 10 0
+           2: 0100007F:0BBA 00000000:0000 06 00000000:00000000 00:00000000 00000000     0        0 12347 1 0000000000000000 100 0 0 10 0
+           3: 0100007F:0BBB 00000000:0000 04 00000000:00000000 00:00000000 00000000     0        0 12348 1 0000000000000000 100 0 0 10 0
+        """
+    )
+    import io
+    def fake_open(path, *args, **kwargs):
+        if path == "/proc/net/tcp":
+            return io.StringIO(sample_proc_tcp)
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+
+    # Port 0x0BB8 (3000) is in state 0A (LISTEN) -> not lingering
+    assert stack._lingering_connections(3000) is False
+    # Port 0x0BB9 (3001) is in state 07 (TCP_CLOSE / bound-only) -> not lingering
+    assert stack._lingering_connections(3001) is False
+    # Port 0x0BBA (3002) is in state 06 (TIME_WAIT) -> lingering connection
+    assert stack._lingering_connections(3002) is True
+    # Port 0x0BBB (3003) is in state 04 (FIN_WAIT1) -> lingering connection
+    assert stack._lingering_connections(3003) is True
+    # Port 0x0BBC (3004) is absent -> not lingering
+    assert stack._lingering_connections(3004) is False
+
+
+def test_lingering_connections_returns_none_on_read_failure(monkeypatch: pytest.MonkeyPatch):
+    def fake_open_err(path, *args, **kwargs):
+        raise OSError("procfs unavailable")
+
+    monkeypatch.setattr("builtins.open", fake_open_err)
+    assert stack._lingering_connections(3000) is None
+
+
+def test_bound_without_listening_classification(monkeypatch: pytest.MonkeyPatch):
+    """_bound_without_listening returns True when bind fails and no lingering connection exists, False otherwise."""
+    port = _free_port()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", port))
+    try:
+        # With socket bound and no lingering connection, it is classified as bound without listening
+        monkeypatch.setattr(stack, "_lingering_connections", lambda p: False)
+        assert stack._bound_without_listening("127.0.0.1", port) is True
+
+        # When a lingering connection (e.g. TIME_WAIT) is present, it is not classified as bound-without-listening
+        monkeypatch.setattr(stack, "_lingering_connections", lambda p: True)
+        assert stack._bound_without_listening("127.0.0.1", port) is False
+    finally:
+        sock.close()
