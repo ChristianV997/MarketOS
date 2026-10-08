@@ -43,13 +43,15 @@ def _evidence(
     fetch_provenance: str = "fresh_fetch",
 ) -> CJProductEvidence:
     field_status = {
-        "price": price_status, "shipping_cost": shipping_status,
+        "price": price_status, "currency": "observed", "shipping_cost": shipping_status,
+        "shipping_currency": "observed" if shipping_cost is not None else "unavailable",
         "estimated_delivery_days": delivery_status, "weight_kg": weight_status, "variants": variants_status,
     }
     return CJProductEvidence(
         source="cj_public_page", source_url="https://www.cjdropshipping.com/product/x.html", observed_at=1_700_000_000.0,
         external_product_id="cj-1", title="Portable Espresso Maker", field_status=field_status,
-        price=price, variants=variants, weight_kg=weight_kg, shipping_cost=shipping_cost,
+        price=price, currency="USD", variants=variants, weight_kg=weight_kg,
+        shipping_cost=shipping_cost, shipping_currency="USD" if shipping_cost is not None else None,
         estimated_delivery_days=delivery_days, fetch_provenance=fetch_provenance,
     )
 
@@ -135,7 +137,25 @@ class TestDimensionsWithEvidence:
         score = mod.score_opportunity(_candidate(), supplier_evidence=result)
         by_name = {d.name: d for d in score.dimensions}
         assert by_name["product_simplicity"].raw_value == 1.0
-        assert by_name["product_simplicity"].provenance == "observed"
+        assert by_name["product_simplicity"].provenance == "public_page"
+
+    def test_foreign_currency_cost_and_shipping_are_not_used_by_scoring(self):
+        evidence = _evidence()
+        evidence = CJProductEvidence(
+            source=evidence.source, source_url=evidence.source_url, observed_at=evidence.observed_at,
+            fetched_at=evidence.fetched_at, external_product_id=evidence.external_product_id,
+            title=evidence.title, field_status=evidence.field_status, price=evidence.price,
+            currency="EUR", shipping_cost=evidence.shipping_cost, shipping_currency="EUR",
+            estimated_delivery_days=None, variants=evidence.variants, weight_kg=evidence.weight_kg,
+            fetch_provenance=evidence.fetch_provenance,
+        )
+        result = _evidence_result(evidence, unit_cost=9.5, shipping_cost=2.0)
+        dimensions = {item.name: item for item in mod.score_opportunity(_candidate(), supplier_evidence=result).dimensions}
+
+        assert dimensions["observed_supplier_cost"].is_unknown is True
+        assert dimensions["observed_supplier_cost"].raw_value is None
+        assert dimensions["shipping_complexity"].is_unknown is True
+        assert "EUR" in dimensions["shipping_complexity"].reason
 
     def test_shipping_complexity_unavailable_when_not_observed(self):
         evidence = _evidence(shipping_status="unavailable", shipping_cost=None,

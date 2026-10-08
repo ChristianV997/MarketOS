@@ -257,6 +257,58 @@ class TestJsonLdExtraction:
         assert result.evidence.price == 0.0
         assert "price_not_usable_as_supplier_cost" in result.warnings
 
+    def test_jsonld_keeps_currency_field_level_and_never_defaults_usd(self):
+        url = "https://www.cjdropshipping.com/product/currency.html"
+        declared = {
+            "@type": "Product",
+            "name": "Currency Widget",
+            "offers": {
+                "price": "9.50",
+                "priceCurrency": "EUR",
+                "shippingDetails": {"shippingRate": {"value": "0", "currency": "USD"}},
+            },
+        }
+        missing = {"@type": "Product", "name": "Currency Unknown", "offers": {"price": "9.50"}}
+
+        declared_record = Crawl4AIResearchAdapter._product_records_from_jsonld(
+            '<script type="application/ld+json">' + json.dumps(declared) + "</script>", url,
+        )[0]
+        missing_record = Crawl4AIResearchAdapter._product_records_from_jsonld(
+            '<script type="application/ld+json">' + json.dumps(missing) + "</script>", url,
+        )[0]
+
+        assert declared_record["currency"] == "EUR"
+        assert declared_record["shipping_currency"] == "USD"
+        assert declared_record["quality"]["provenance"] == "public_page"
+        assert declared_record["fetched_at"] is None
+        assert "retrieved_at" not in declared_record
+        assert missing_record["currency"] is None
+        assert missing_record["shipping_currency"] is None
+
+    def test_shared_offer_normalizer_rejects_unknown_or_mismatched_currency_as_public_only(self):
+        offers = Crawl4AIResearchAdapter.normalize_supplier_offers([
+            {
+                "product_id": "matching-currency", "unit_cost": 4.0, "shipping_cost": 0.0,
+                "currency": "EUR", "shipping_currency": "EUR", "url": "https://supplier.example/p/1",
+                "fetched_at": 1_700_000_000.0, "retrieval_mode": "fresh_fetch",
+            },
+            {
+                "product_id": "mismatched-currency", "unit_cost": 4.0, "shipping_cost": 0.0,
+                "currency": "EUR", "shipping_currency": "USD", "url": "https://supplier.example/p/2",
+                "fetched_at": 1_700_000_000.0, "retrieval_mode": "fresh_fetch",
+            },
+            {
+                "product_id": "unknown-currency", "unit_cost": 4.0, "shipping_cost": 0.0,
+                "url": "https://supplier.example/p/3",
+                "fetched_at": 1_700_000_000.0, "retrieval_mode": "fresh_fetch",
+            },
+        ])
+
+        assert [offer.product_id for offer in offers] == ["matching-currency"]
+        assert offers[0].currency == "EUR"
+        assert offers[0].quality.provenance == "public_page"
+        assert offers[0].quality.is_live_attributed is False
+
     def test_mapping_without_fetch_time_does_not_invent_observed_at(self):
         evidence = mod._evidence_from_record(
             {"name": "Mapped Widget", "selling_price": 9.5},
@@ -274,6 +326,7 @@ class TestJsonLdExtraction:
             "@type": "Product", "name": "Cached Widget",
             "offers": {
                 "price": 9.5,
+                "priceCurrency": "USD",
                 "shippingDetails": {"shippingRate": {"value": 0, "currency": "USD"}},
             },
         }
@@ -309,7 +362,8 @@ class TestJsonLdExtraction:
             fetch_provenance="fresh_fetch",
         )
         free_shipping = mod._evidence_from_record(
-            {"name": "Shipping Widget", "selling_price": 9.5, "shipping_cost": 0.0}, url,
+            {"name": "Shipping Widget", "selling_price": 9.5, "currency": "USD",
+             "shipping_cost": 0.0, "shipping_currency": "USD"}, url,
             extraction_method="fixture", observed_at=1_700_000_000.0,
             fetch_provenance="fresh_fetch",
         )
@@ -416,7 +470,8 @@ class TestNormalization:
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
             observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
             field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
-            price=9.5, shipping_cost=2.25, fetch_provenance="fresh_fetch",
+            price=9.5, currency="USD", shipping_cost=2.25, shipping_currency="USD",
+            fetch_provenance="fresh_fetch",
         )
         offer = mod.to_supplier_offer(evidence)
         assert offer is not None
@@ -452,7 +507,7 @@ class TestNormalization:
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
             observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
             field_status={"title": "observed", "price": "observed", "shipping_cost": "unavailable"},
-            price=9.5, shipping_cost=None, fetch_provenance="fresh_fetch",
+            price=9.5, currency="USD", shipping_cost=None, fetch_provenance="fresh_fetch",
         )
 
         assert mod.to_supplier_offer(evidence) is None
@@ -462,7 +517,8 @@ class TestNormalization:
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
             observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
             field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
-            price=9.5, shipping_cost=0.0, fetch_provenance="fresh_fetch",
+            price=9.5, currency="USD", shipping_cost=0.0, shipping_currency="USD",
+            fetch_provenance="fresh_fetch",
         )
 
         offer = mod.to_supplier_offer(evidence)
@@ -484,7 +540,11 @@ class TestNormalization:
     def test_shared_offer_normalizer_requires_shipping_and_preserves_zero(self):
         offers = Crawl4AIResearchAdapter.normalize_supplier_offers([
             {"product_id": "missing-shipping", "unit_cost": 6.5},
-            {"product_id": "zero-shipping", "unit_cost": 4.0, "shipping_cost": 0.0},
+            {
+                "product_id": "zero-shipping", "unit_cost": 4.0, "shipping_cost": 0.0,
+                "currency": "USD", "shipping_currency": "USD", "fetched_at": 1_700_000_000.0,
+                "retrieval_mode": "fresh_fetch",
+            },
         ])
 
         assert [offer.product_id for offer in offers] == ["zero-shipping"]
@@ -502,7 +562,7 @@ class TestNormalization:
         evidence = mod.CJProductEvidence(
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
             observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
-            field_status={"title": "observed", "price": "observed"}, price=9.5,
+            field_status={"title": "observed", "price": "observed"}, price=9.5, currency="USD",
             fetch_provenance="fresh_fetch",
         )
 
@@ -519,7 +579,8 @@ class TestNormalization:
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
             observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
             field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
-            price=5.0, shipping_cost=1.0, fetch_provenance="fresh_fetch",
+            price=5.0, currency="USD", shipping_cost=1.0, shipping_currency="USD",
+            fetch_provenance="fresh_fetch",
         )
         product = ProductCandidate(
             product_id="market-widget", name="Widget", selling_price=100.0,
