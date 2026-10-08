@@ -18,6 +18,8 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from .schemas import (
+    BUNDLED_EVIDENCE_MODE,
+    BUNDLED_TAXONOMY_ROWS_SHA256,
     CategoryTaxonomyError,
     IN_MEMORY_FIXTURE_PROVENANCE,
     TAXONOMY_SOURCE_PROVENANCE,
@@ -53,6 +55,14 @@ class TaxonomyIndex:
                 "source_provenance",
                 MappingProxyType(dict(self.source_provenance)),
             )
+        if self.source_provenance.get("evidence_mode") == BUNDLED_EVIDENCE_MODE and (
+            _rows_digest(self.by_code.values()) != BUNDLED_TAXONOMY_ROWS_SHA256
+        ):
+            # The label is a claim about content, not a caller option: only rows identical to the
+            # verified bundle may carry it (a custom file must stay "unverified_local_file").
+            raise CategoryTaxonomyError(
+                "bundled provenance may only label the verified bundled taxonomy rows"
+            )
 
     def get(self, code: str) -> TaxonomyCategory | None:
         return self.by_code.get(code)
@@ -62,6 +72,11 @@ class TaxonomyIndex:
 
     def __iter__(self):
         return iter(self.by_code.values())
+
+
+def _rows_digest(categories: Any) -> str:
+    rows = sorted((category.code, category.full_path) for category in categories)
+    return hashlib.sha256("\n".join(f"{code}\t{path}" for code, path in rows).encode("utf-8")).hexdigest()
 
 
 def _parse_line(line: str, line_number: int) -> tuple[str, str, str] | None:

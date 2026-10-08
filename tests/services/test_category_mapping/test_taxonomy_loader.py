@@ -369,3 +369,54 @@ class TestPartialSnapshotRepresentation:
         first = [c.code for c in load_taxonomy()]
         second = [c.code for c in load_taxonomy()]
         assert first == second
+
+
+# --- the "bundled" label is bound to the verified rows, not to a caller option -----------------
+
+
+def test_pinned_rows_digest_matches_the_bundled_snapshot():
+    """Changing the bundled data without re-pinning BUNDLED_TAXONOMY_ROWS_SHA256 must fail here."""
+    import hashlib
+
+    from services.category_mapping.schemas import BUNDLED_TAXONOMY_ROWS_SHA256
+    from services.category_mapping.taxonomy_loader import default_taxonomy
+
+    rows = sorted((category.code, category.full_path) for category in default_taxonomy())
+    digest = hashlib.sha256("\n".join(f"{code}\t{path}" for code, path in rows).encode("utf-8")).hexdigest()
+    assert digest == BUNDLED_TAXONOMY_ROWS_SHA256
+    assert default_taxonomy().source_provenance["evidence_mode"] == "bundled_offline_snapshot"
+
+
+def test_custom_rows_cannot_be_stamped_with_the_bundled_provenance():
+    from types import MappingProxyType
+
+    from services.category_mapping.schemas import TAXONOMY_SOURCE_PROVENANCE, CategoryTaxonomyError
+    from services.category_mapping.taxonomy_loader import TaxonomyIndex, parse_taxonomy_text
+
+    custom = "gid://shopify/TaxonomyCategory/zz : Custom Thing\n"
+    for provenance in (TAXONOMY_SOURCE_PROVENANCE, dict(TAXONOMY_SOURCE_PROVENANCE), MappingProxyType(dict(TAXONOMY_SOURCE_PROVENANCE))):
+        with pytest.raises(CategoryTaxonomyError, match="bundled provenance"):
+            parse_taxonomy_text(custom, source_provenance=provenance)
+    honest = parse_taxonomy_text(custom)
+    with pytest.raises(CategoryTaxonomyError, match="bundled provenance"):
+        TaxonomyIndex(by_code=dict(honest.by_code), source_provenance=TAXONOMY_SOURCE_PROVENANCE)
+
+
+def test_a_forged_bundle_label_never_reaches_mapping_evidence():
+    from services.category_mapping import build_category_mapping_evidence
+    from services.category_mapping.schemas import TAXONOMY_SOURCE_PROVENANCE, CategoryTaxonomyError
+    from services.category_mapping.taxonomy_loader import parse_taxonomy_text
+
+    with pytest.raises(CategoryTaxonomyError):
+        parse_taxonomy_text("gid://shopify/TaxonomyCategory/zz : Custom Thing\n", source_provenance=TAXONOMY_SOURCE_PROVENANCE)
+    evidence = build_category_mapping_evidence("Custom Thing", taxonomy=parse_taxonomy_text("gid://shopify/TaxonomyCategory/zz : Custom Thing\n"))
+    assert evidence.taxonomy_source["evidence_mode"] == "in_memory_fixture"
+    assert evidence.human_review_required is True and evidence.decision_authority == "none"
+
+
+def test_bundled_rows_parsed_from_text_may_carry_the_bundled_label():
+    from services.category_mapping.schemas import TAXONOMY_SOURCE_PROVENANCE
+    from services.category_mapping.taxonomy_loader import _DEFAULT_SNAPSHOT_PATH, parse_taxonomy_text
+
+    index = parse_taxonomy_text(_DEFAULT_SNAPSHOT_PATH.read_bytes().decode("utf-8"), source_provenance=TAXONOMY_SOURCE_PROVENANCE)
+    assert index.source_provenance["evidence_mode"] == "bundled_offline_snapshot"

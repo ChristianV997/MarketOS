@@ -83,6 +83,13 @@ TAXONOMY_SOURCE_PROVENANCE: Mapping[str, Any] = MappingProxyType({
     "snapshot_sha256": "e2c0193602e5a21afadf5ffc940cec4975eeec2e698fe33d9cb1437d106dedb2",
 })
 
+# Digest of the *parsed rows* of the bundled snapshot ("code<TAB>full_path" per category, sorted by
+# code, joined by newlines). TAXONOMY_SOURCE_PROVENANCE says "bundled_offline_snapshot"; a taxonomy index
+# may carry that label only if its rows hash to this value, so a custom row set cannot be stamped as the
+# verified bundle by passing the bundle's provenance to ``parse_taxonomy_text``/``TaxonomyIndex``.
+BUNDLED_TAXONOMY_ROWS_SHA256 = "307acdb63b4b8daaa0c839a7f959aab78c75769dc3183d6044e3092aeb53085c"
+BUNDLED_EVIDENCE_MODE = "bundled_offline_snapshot"
+
 IN_MEMORY_FIXTURE_PROVENANCE: Mapping[str, Any] = MappingProxyType({
     "evidence_mode": "in_memory_fixture",
     "live_validation": False,
