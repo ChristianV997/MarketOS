@@ -4,6 +4,7 @@ import {
   type RankedCandidateRow,
 } from "../contracts/firstPhaseEvidencePacket";
 import { adjacentCandidateIndex, shouldHandoffDetailFocus } from "../lib/keyboardNav";
+import { candidateElements, firstLaidOut } from "../lib/focusTarget";
 import {
   ensureSelectionInWindow,
   nextWindowStart,
@@ -46,6 +47,14 @@ export function RankedCandidatesPanel({
   const detailFocusRequested = useRef(false);
   const pendingFocusCandidateId = useRef<string | null>(null);
 
+  // The desktop row and the mobile option for a candidate are both in the DOM; only the laid-out one can take focus.
+  function laidOutCandidateElement(candidateId: string): HTMLElement | null {
+    return firstLaidOut([
+      ...candidateElements(tbodyRef.current, candidateId),
+      ...candidateElements(mobileListRef.current, candidateId),
+    ]);
+  }
+
   const alignedStart = useMemo(
     () => ensureSelectionInWindow(candidates, selectedId, windowStart, CANDIDATE_WINDOW_SIZE),
     [candidates, selectedId, windowStart],
@@ -70,19 +79,12 @@ export function RankedCandidatesPanel({
   }, [selectedId]);
 
   useEffect(() => {
-    if (!pendingFocusCandidateId.current) return;
     const targetId = pendingFocusCandidateId.current;
-    const row = tbodyRef.current?.querySelector<HTMLElement>(`tr[data-candidate-id="${targetId}"]`);
-    if (row) {
+    if (!targetId) return;
+    const target = laidOutCandidateElement(targetId);
+    if (target) {
       pendingFocusCandidateId.current = null;
-      row.focus();
-      return;
-    }
-    const mobileButton = mobileListRef.current?.querySelector<HTMLElement>(`button[data-candidate-id="${targetId}"]`);
-    if (mobileButton) {
-      pendingFocusCandidateId.current = null;
-      mobileButton.focus();
-      return;
+      target.focus();
     }
   });
 
@@ -105,17 +107,10 @@ export function RankedCandidatesPanel({
   function focusRow(absoluteIndex: number) {
     const candidate = candidates[absoluteIndex];
     if (!candidate) return;
-    const row = tbodyRef.current?.querySelector<HTMLElement>(`tr[data-candidate-id="${candidate.candidateId}"]`);
-    if (row) {
+    const target = laidOutCandidateElement(candidate.candidateId);
+    if (target) {
       pendingFocusCandidateId.current = null;
-      row.focus();
-      return;
-    }
-    const mobileButton = mobileListRef.current?.querySelector<HTMLElement>(`button[data-candidate-id="${candidate.candidateId}"]`);
-    if (mobileButton) {
-      pendingFocusCandidateId.current = null;
-      mobileButton.focus();
-      return;
+      target.focus();
     }
   }
 

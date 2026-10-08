@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { adjacentCandidateIndex, shouldHandoffDetailFocus } from "../src/features/first-phase-cockpit/lib/keyboardNav.ts";
+import { candidateElements, firstLaidOut, isLaidOut } from "../src/features/first-phase-cockpit/lib/focusTarget.ts";
 
 const featureRoot = new URL("../src/features/first-phase-cockpit/", import.meta.url);
 
@@ -662,7 +663,8 @@ test("accessibility and focus contracts are present", async () => {
   assert.match(table, /adjacentCandidateIndex/);
   assert.match(table, /shouldHandoffDetailFocus/);
   assert.match(table, /ref=\{mobileListRef\}/);
-  assert.match(table, /mobileButton\.focus\(\)/);
+  assert.match(table, /from "\.\.\/lib\/focusTarget"/);
+  assert.match(detail, /from "\.\.\/lib\/focusTarget"/);
   assert.match(table, /pendingFocusCandidateId/);
   assert.match(table, /focusRow\(nextIndex\)/);
   assert.match(detail, /onKeyDown=\{\(event\) => \{/);
@@ -740,13 +742,6 @@ test("keyboard navigation preserves order and handoff keys", () => {
   assert.equal(shouldHandoffDetailFocus("Tab"), false);
   assert.equal(shouldHandoffDetailFocus("Escape"), false);
   assert.equal(shouldHandoffDetailFocus("ArrowDown"), false);
-});
-
-test("detail focus return targets active roving tabIndex candidate row", () => {
-  const returnSelector =
-    '#ranked-candidates-table tr[tabindex="0"], #ranked-candidates-table [role="option"][tabindex="0"], #ranked-candidates-table';
-  assert.match(returnSelector, /tabindex="0"/);
-  assert.match(returnSelector, /ranked-candidates-table/);
 });
 
 test("executable interaction: keyboard paging traverses across window boundaries", () => {
@@ -828,92 +823,38 @@ test("executable interaction: keyboard paging traverses across window boundaries
   assert.equal(win.visible[0].candidateId, "cand-0");
 });
 
-test("executable interaction: detail focus handoff dispatches immediately when candidate is already selected", () => {
-  const candidates = [
-    { candidateId: "cand-1", title: "One" },
-    { candidateId: "cand-2", title: "Two" },
-  ];
+test("focus targets choose the laid-out copy of a candidate, never the copy CSS hides", () => {
+  // The mobile listbox and the desktop table both render each visible candidate. focus() is a no-op on an
+  // element that is not laid out, so the lookup must skip the hidden copy wherever it sits in DOM order.
+  const hidden = (name) => ({ name, getClientRects: () => [] });
+  const shown = (name) => ({ name, getClientRects: () => [{}] });
 
-  let selectedId = "cand-1";
-  let detailFocusHandedOff = false;
-  let onSelectCalledWith = null;
-
-  function simulateRowHandoff(key, candidateIndex) {
-    if (shouldHandoffDetailFocus(key)) {
-      const targetId = candidates[candidateIndex].candidateId;
-      onSelectCalledWith = targetId;
-      if (selectedId === targetId) {
-        detailFocusHandedOff = true;
-      }
-    }
-  }
-
-  // Pressing Enter when cand-1 is already selected dispatches immediate focus handoff
-  simulateRowHandoff("Enter", 0);
-  assert.equal(onSelectCalledWith, "cand-1");
-  assert.equal(detailFocusHandedOff, true);
-
-  // Pressing Space when cand-2 is NOT selected yet dispatches onSelect without immediate handoff
-  detailFocusHandedOff = false;
-  onSelectCalledWith = null;
-  simulateRowHandoff(" ", 1);
-  assert.equal(onSelectCalledWith, "cand-2");
-  assert.equal(detailFocusHandedOff, false);
+  assert.equal(firstLaidOut([hidden("desktop-row"), shown("mobile-option")])?.name, "mobile-option");
+  assert.equal(firstLaidOut([hidden("mobile-option"), shown("desktop-row")])?.name, "desktop-row");
+  assert.equal(firstLaidOut([shown("first"), shown("second")])?.name, "first");
+  assert.equal(firstLaidOut([hidden("a"), hidden("b")]), null);
+  assert.equal(firstLaidOut([]), null);
+  assert.equal(isLaidOut(shown("x")), true);
+  assert.equal(isLaidOut(hidden("x")), false);
 });
 
-test("executable interaction: Escape and Clear return focus targeting originating candidate row", () => {
-  const domElements = new Map([
-    ['#ranked-candidates-table tr[data-candidate-id="cand-1"]', { id: "tr-1" }],
-    ['#ranked-candidates-table tr[data-candidate-id="cand-2"]', { id: "tr-2" }],
-    ['#ranked-candidates-table tr[tabindex="0"]', { id: "tr-active" }],
-    ['#ranked-candidates-table', { id: "table-container" }],
-  ]);
-
-  function resolveFocusTarget(preferredCandidateId) {
-    if (preferredCandidateId) {
-      const preferred = domElements.get(`#ranked-candidates-table tr[data-candidate-id="${preferredCandidateId}"]`);
-      if (preferred) return preferred;
-    }
-    return domElements.get('#ranked-candidates-table tr[tabindex="0"]') ?? domElements.get('#ranked-candidates-table');
-  }
-
-  assert.equal(resolveFocusTarget("cand-1").id, "tr-1");
-  assert.equal(resolveFocusTarget("cand-2").id, "tr-2");
-  assert.equal(resolveFocusTarget("cand-missing").id, "tr-active");
-  domElements.delete('#ranked-candidates-table tr[tabindex="0"]');
-  assert.equal(resolveFocusTarget(null).id, "table-container");
-});
-
-test("executable interaction: mobile listbox roving tabIndex and option hierarchy", () => {
-  const candidates = [
-    { candidateId: "c-0", title: "C0" },
-    { candidateId: "c-1", title: "C1" },
-    { candidateId: "c-2", title: "C2" },
+test("candidate element lookup compares ids exactly and never builds a selector from them", () => {
+  const selectors = [];
+  const nodes = [
+    { dataset: { candidateId: 'cand-1" , [x' } },
+    { dataset: { candidateId: "cand-1" } },
+    { dataset: { candidateId: "cand-10" } },
   ];
-  const activeId = "c-1";
-
-  const options = candidates.map((candidate, index) => {
-    const tabIndex = candidate.candidateId === activeId ? 0 : -1;
-    const selected = candidate.candidateId === "c-1";
-    return {
-      candidateId: candidate.candidateId,
-      tabIndex,
-      role: "option",
-      selected,
-      posinset: index + 1,
-      setsize: candidates.length,
-    };
-  });
-
-  const tabStops = options.filter((opt) => opt.tabIndex === 0);
-  assert.equal(tabStops.length, 1);
-  assert.equal(tabStops[0].candidateId, "c-1");
-  assert.equal(options[0].tabIndex, -1);
-  assert.equal(options[2].tabIndex, -1);
-  assert.equal(options[0].posinset, 1);
-  assert.equal(options[1].posinset, 2);
-  assert.equal(options[2].posinset, 3);
-  assert.equal(options[0].setsize, 3);
+  const root = {
+    querySelectorAll(selector) {
+      selectors.push(selector);
+      return nodes;
+    },
+  };
+  assert.deepEqual(candidateElements(root, "cand-1").map((node) => node.dataset.candidateId), ["cand-1"]);
+  assert.equal(candidateElements(root, 'cand-1" , [x').length, 1);
+  assert.deepEqual(candidateElements(null, "cand-1"), []);
+  assert.deepEqual(selectors, ["[data-candidate-id]", "[data-candidate-id]"]);
 });
 
 test("research-to-decision overlay fills identity without re-ranking", () => {

@@ -1,4 +1,5 @@
 import type { RankedCandidateRow } from "../contracts/firstPhaseEvidencePacket";
+import { candidateElements, firstLaidOut } from "../lib/focusTarget";
 import { CommercialReviewTags, DecisionTimelinePanel, NextActionWorkflowPanel } from "./DecisionReviewPanels";
 
 export function CandidateDetailPanel({
@@ -10,18 +11,12 @@ export function CandidateDetailPanel({
 }) {
   function returnFocusToTable(preferredCandidateId?: string) {
     queueMicrotask(() => {
-      let returnTarget: HTMLElement | null = null;
-      if (preferredCandidateId) {
-        returnTarget = document.querySelector<HTMLElement>(
-          `#ranked-candidates-table tr[data-candidate-id="${preferredCandidateId}"], #ranked-candidates-table [role="option"][data-candidate-id="${preferredCandidateId}"]`
-        );
-      }
-      if (!returnTarget) {
-        returnTarget = document.querySelector<HTMLElement>(
-          '#ranked-candidates-table tr[tabindex="0"], #ranked-candidates-table [role="option"][tabindex="0"], #ranked-candidates-table'
-        );
-      }
-      returnTarget?.focus();
+      const table = document.getElementById("ranked-candidates-table");
+      const preferred = preferredCandidateId ? candidateElements(table, preferredCandidateId) : [];
+      const roving = Array.from(
+        table?.querySelectorAll<HTMLElement>('tr[tabindex="0"], [role="option"][tabindex="0"]') ?? [],
+      );
+      (firstLaidOut(preferred) ?? firstLaidOut(roving))?.focus();
     });
   }
 
