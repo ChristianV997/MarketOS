@@ -1,6 +1,4 @@
 """Tests for credential management and verification."""
-import json
-import os
 import tempfile
 from pathlib import Path
 
@@ -10,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from api.credentials_setup import router as credentials_router
 from backend.config import get_credential, set_credential, list_configured_services, is_dry_run
+from backend.runtime.mutation_boundary import ENV_VAR, SAFE_DENIAL_DETAIL
 
 
 @pytest.fixture
@@ -22,8 +21,22 @@ def temp_config(monkeypatch):
 
 
 @pytest.fixture
-def client(temp_config):
-    """FastAPI test client with credentials router."""
+def local_mutation_mode(monkeypatch):
+    """Explicit local dry-run path required for mutating setup routes."""
+    monkeypatch.setenv(ENV_VAR, "local_dry_run")
+
+
+@pytest.fixture
+def client(temp_config, local_mutation_mode):
+    """FastAPI test client with credentials router (local mutation permitted)."""
+    app = FastAPI()
+    app.include_router(credentials_router, prefix="/api/setup")
+    return TestClient(app)
+
+
+@pytest.fixture
+def ungated_client(temp_config):
+    """Client without forcing MARKETOS_ENVIRONMENT (default fail-closed)."""
     app = FastAPI()
     app.include_router(credentials_router, prefix="/api/setup")
     return TestClient(app)
@@ -97,7 +110,7 @@ class TestCredentialsAPI:
     """Test REST API endpoints."""
 
     def test_set_credential_endpoint(self, client, temp_config):
-        """POST /credentials/set stores credential."""
+        """POST /credentials/set stores credential when local_dry_run is set."""
         response = client.post(
             "/api/setup/credentials/set",
             json={"key": "TEST_TOKEN", "value": "secret123"},
@@ -157,6 +170,83 @@ class TestCredentialsAPI:
         """Unknown service returns 404."""
         response = client.post("/api/setup/test/unknown_service")
         assert response.status_code == 404
+
+
+class TestMutationBoundaryOnCredentialsAPI:
+    """Fail-closed gate for credential write and provider test routes."""
+
+    def test_set_denied_when_mode_absent(self, ungated_client, temp_config, monkeypatch):
+        monkeypatch.delenv(ENV_VAR, raising=False)
+        response = ungated_client.post(
+            "/api/setup/credentials/set",
+            json={"key": "TEST_TOKEN", "value": "secret123"},
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == SAFE_DENIAL_DETAIL
+        assert get_credential("TEST_TOKEN") is None
+
+    @pytest.mark.parametrize("mode", ["staging", "production", "hosted", "weird"])
+    def test_set_denied_when_hosted_or_unrecognized(
+        self, ungated_client, temp_config, monkeypatch, mode
+    ):
+        monkeypatch.setenv(ENV_VAR, mode)
+        response = ungated_client.post(
+            "/api/setup/credentials/set",
+            json={"key": "TEST_TOKEN", "value": "secret123"},
+        )
+        assert response.status_code == 403
+        body = response.json()
+        assert body["detail"] == SAFE_DENIAL_DETAIL
+        assert "secret123" not in str(body)
+        assert get_credential("TEST_TOKEN") is None
+
+    def test_provider_test_denied_without_provider_call(
+        self, ungated_client, temp_config, monkeypatch
+    ):
+        """Denial happens before provider import/call."""
+        monkeypatch.delenv(ENV_VAR, raising=False)
+        provider_calls: list[str] = []
+
+        def _forbidden_import(name, *args, **kwargs):
+            if name.startswith("backend.integrations") or name.startswith(
+                "backend.creation"
+            ):
+                provider_calls.append(name)
+            return original_import(name, *args, **kwargs)
+
+        import builtins
+
+        original_import = builtins.__import__
+        monkeypatch.setattr(builtins, "__import__", _forbidden_import)
+
+        response = ungated_client.post("/api/setup/test/meta")
+        assert response.status_code == 403
+        assert response.json()["detail"] == SAFE_DENIAL_DETAIL
+        assert provider_calls == []
+
+    def test_readonly_status_available_without_mode(
+        self, ungated_client, temp_config, monkeypatch
+    ):
+        monkeypatch.delenv(ENV_VAR, raising=False)
+        response = ungated_client.get("/api/setup/credentials/status")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+    def test_readonly_instructions_available_without_mode(
+        self, ungated_client, monkeypatch
+    ):
+        monkeypatch.delenv(ENV_VAR, raising=False)
+        response = ungated_client.get("/api/setup/instructions")
+        assert response.status_code == 200
+        assert "services" in response.json()
+
+    def test_local_dry_run_permits_set(self, client, temp_config):
+        response = client.post(
+            "/api/setup/credentials/set",
+            json={"key": "LOCAL_TOKEN", "value": "local-only"},
+        )
+        assert response.status_code == 200
+        assert get_credential("LOCAL_TOKEN") == "local-only"
 
 
 class TestServiceConfigurationStatus:

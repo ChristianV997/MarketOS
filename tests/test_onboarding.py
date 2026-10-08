@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.onboarding import router as onboarding_router
+from backend.runtime.mutation_boundary import ENV_VAR, SAFE_DENIAL_DETAIL
 
 
 @pytest.fixture
@@ -174,3 +175,58 @@ class TestOnboardingStepInstructions:
             # Advance to next step if possible
             if step < 4:
                 client.post(f"/api/onboarding/step/{session_id}/complete")
+
+
+class TestOnboardingMutationBoundary:
+    """Credential verify and launch require local_dry_run."""
+
+    def test_verify_credential_denied_when_mode_absent(self, client, monkeypatch):
+        monkeypatch.delenv(ENV_VAR, raising=False)
+        start = client.post("/api/onboarding/start")
+        session_id = start.json()["session_id"]
+        client.post(
+            "/api/onboarding/step/1/store-info",
+            json={
+                "session_id": session_id,
+                "store_info": {
+                    "business_name": "Gate Store",
+                    "store_type": "shopify",
+                    "budget_daily": 50.0,
+                },
+            },
+        )
+        response = client.post(
+            "/api/onboarding/step/2/verify-credential",
+            json={
+                "session_id": session_id,
+                "service": "meta",
+                "credential_key": "META_ACCESS_TOKEN",
+                "credential_value": "should-not-persist",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == SAFE_DENIAL_DETAIL
+
+    def test_launch_denied_when_hosted(self, client, monkeypatch):
+        monkeypatch.setenv(ENV_VAR, "production")
+        start = client.post("/api/onboarding/start")
+        session_id = start.json()["session_id"]
+        client.post(
+            "/api/onboarding/step/1/store-info",
+            json={
+                "session_id": session_id,
+                "store_info": {
+                    "business_name": "Gate Store",
+                    "store_type": "shopify",
+                    "budget_daily": 50.0,
+                },
+            },
+        )
+        # Advance to a launchable step without verifying credentials.
+        client.post(f"/api/onboarding/step/{session_id}/complete")  # -> 3
+        response = client.post(
+            "/api/onboarding/step/4/launch",
+            json={"session_id": session_id, "product_ids": ["p1"]},
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == SAFE_DENIAL_DETAIL

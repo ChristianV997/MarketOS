@@ -12,9 +12,13 @@ from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Body
 
+from backend.runtime.mutation_boundary import enforce_local_mutation_http
+
 _log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_SAFE_INTERNAL_ERROR = "Request failed; see server logs for details."
 
 
 # Data models for onboarding state
@@ -148,7 +152,12 @@ async def verify_and_set_credential(
     credential_key: str = Body(...),
     credential_value: str = Body(...),
 ) -> dict:
-    """Verify and store a single credential."""
+    """Verify and store a single credential.
+
+    Denied unless MARKETOS_ENVIRONMENT=local_dry_run (no provider call on denial).
+    """
+    enforce_local_mutation_http(action="onboarding.verify_credential")
+
     state = _sessions.get(session_id)
     if not state:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -165,7 +174,7 @@ async def verify_and_set_credential(
         set_credential(credential_key, credential_value)
         _log.info("credential_set session=%s service=%s key=%s", session_id, service, credential_key)
 
-        # Test if it works
+        # Test if it works (re-checks the same local-only boundary)
         test_result = await test_credentials(service)
 
         # Track status
@@ -184,10 +193,16 @@ async def verify_and_set_credential(
                 "services_total": 3,
             },
         }
+    except HTTPException:
+        raise
     except Exception as exc:
-        _log.error("failed_to_verify_credential session=%s service=%s error=%s",
-                  session_id, service, exc)
-        raise HTTPException(status_code=400, detail=f"Failed to verify credential: {exc}")
+        _log.error(
+            "failed_to_verify_credential session=%s service=%s error=%s",
+            session_id,
+            service,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=400, detail=_SAFE_INTERNAL_ERROR) from None
 
 
 @router.post("/step/{session_id}/complete")
@@ -304,7 +319,12 @@ async def launch_campaigns(
     session_id: str = Body(...),
     product_ids: list[str] = Body(...),
 ) -> dict:
-    """Launch campaigns for validated products."""
+    """Launch campaigns for validated products.
+
+    Denied unless MARKETOS_ENVIRONMENT=local_dry_run (no provider call on denial).
+    """
+    enforce_local_mutation_http(action="onboarding.launch")
+
     state = _sessions.get(session_id)
     if not state:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -337,9 +357,11 @@ async def launch_campaigns(
                 "Add more products to expand reach",
             ],
         }
+    except HTTPException:
+        raise
     except Exception as exc:
-        _log.error("failed_to_launch_campaigns session=%s error=%s", session_id, exc)
-        raise HTTPException(status_code=500, detail=f"Launch failed: {exc}")
+        _log.error("failed_to_launch_campaigns session=%s error=%s", session_id, type(exc).__name__)
+        raise HTTPException(status_code=500, detail=_SAFE_INTERNAL_ERROR) from None
 
 
 @router.get("/step/4/summary/{session_id}")

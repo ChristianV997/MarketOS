@@ -7,15 +7,22 @@ Usage:
   POST /api/setup/credentials/set    (set a credential)
   GET /api/setup/credentials/status  (view which services are configured)
   GET /api/setup/instructions        (view setup instructions)
+
+Mutating and provider-test routes are fail-closed behind
+``backend.runtime.mutation_boundary`` (MARKETOS_ENVIRONMENT=local_dry_run only).
+Read-only status/instructions remain available in all modes.
 """
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Body
+
+from backend.runtime.mutation_boundary import enforce_local_mutation_http
 
 _log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_SAFE_INTERNAL_ERROR = "Request failed; see server logs for details."
 
 
 @router.post("/credentials/set")
@@ -36,7 +43,10 @@ async def set_credential(
       - Credential value is NOT logged
       - Stored in ~/.marketos/credentials.json with 0o600 permissions
       - Only your user can read it
+      - Denied unless MARKETOS_ENVIRONMENT=local_dry_run
     """
+    enforce_local_mutation_http(action="credentials.set")
+
     # Validate key format
     if not key or not value:
         raise HTTPException(status_code=400, detail="Key and value required")
@@ -53,8 +63,8 @@ async def set_credential(
             "message": f"Credential {key} saved successfully",
         }
     except Exception as exc:
-        _log.error("failed_to_set_credential key=%s error=%s", key, exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        _log.error("failed_to_set_credential key=%s error=%s", key, type(exc).__name__)
+        raise HTTPException(status_code=500, detail=_SAFE_INTERNAL_ERROR) from None
 
 
 @router.get("/credentials/status")
@@ -79,8 +89,8 @@ async def credentials_status() -> dict:
             "services_total": len(services),
         }
     except Exception as exc:
-        _log.error("failed_to_get_status error=%s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        _log.error("failed_to_get_status error=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail=_SAFE_INTERNAL_ERROR) from None
 
 
 @router.get("/instructions/{service}")
@@ -187,7 +197,10 @@ async def test_credentials(service: str) -> dict:
     """Test if credentials for a service are valid.
 
     Makes a minimal API call to verify credentials work.
+    Denied unless MARKETOS_ENVIRONMENT=local_dry_run (no provider call on denial).
     """
+    enforce_local_mutation_http(action=f"credentials.test.{service}")
+
     service = service.lower()
 
     if service == "meta":
@@ -215,9 +228,10 @@ async def test_credentials(service: str) -> dict:
                     "message": "Failed to create test campaign",
                 }
         except Exception as exc:
+            _log.error("meta_test_failed error=%s", type(exc).__name__)
             return {
                 "status": "error",
-                "message": str(exc),
+                "message": _SAFE_INTERNAL_ERROR,
             }
 
     elif service == "tiktok":
@@ -244,10 +258,10 @@ async def test_credentials(service: str) -> dict:
                     "message": "Failed to create test campaign",
                 }
         except Exception as exc:
-            _log.exception("tiktok_test_failed")
+            _log.error("tiktok_test_failed error=%s", type(exc).__name__)
             return {
                 "status": "error",
-                "message": str(exc),
+                "message": _SAFE_INTERNAL_ERROR,
             }
 
     elif service == "shopify":
@@ -278,10 +292,10 @@ async def test_credentials(service: str) -> dict:
                     "message": "Failed to create test product",
                 }
         except Exception as exc:
-            _log.exception("shopify_test_failed")
+            _log.error("shopify_test_failed error=%s", type(exc).__name__)
             return {
                 "status": "error",
-                "message": str(exc),
+                "message": _SAFE_INTERNAL_ERROR,
             }
 
     else:
