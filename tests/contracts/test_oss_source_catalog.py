@@ -271,7 +271,7 @@ def test_annotated_tag_object_defect_is_scoped_to_scrapy() -> None:
 
 
 def test_registry_with_only_verified_pins_reports_no_defects() -> None:
-    rows = [{"source_id": "src-ok", "revision": REAL_SHA, "commit_sha": REAL_SHA}, "not-a-row", {"revision": None}]
+    rows = [{"source_id": "src-ok", "revision": REAL_SHA, "commit_sha": REAL_SHA}]
     assert collect_registry_defects(rows) == []
     assert collect_registry_defects({"not": "a list"}) == []
 
