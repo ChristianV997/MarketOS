@@ -1949,3 +1949,158 @@ def test_symlink_loop_roots_fail_closed_without_echoing_the_path(tmp_path: Path,
             build_research_to_decision(manifest, base_dir=loop_a)
         assert not isinstance(caught.value, RuntimeError)
     assert str(tmp_path) not in str(caught.value)
+
+
+# --- cross-platform path / reference contract -------------------------------------------------
+# Pure-string cases: nothing below touches the filesystem, so no device path is ever opened.
+# They run on the host OS but judge the *text*; the Windows rules they encode (device names, ADS,
+# drive-relative, UNC, trailing dots/spaces) are documented behaviour, exercised here by string
+# policy and NOT validated on a native Windows host.
+
+# (path text, unsafe_as_local_manifest_file, why)
+_LOCAL_FILE_PATH_CONTRACT = [
+    # ordinary names stay legitimate
+    ("data.json", False, "plain"),
+    ("sub/data.json", False, "nested"),
+    ("./data.json", False, "dot segment"),
+    ("sub//data.json", False, "empty segment"),
+    ("report.v2.json", False, "multi-dot"),
+    ("my file.json", False, "inner space"),
+    ("caf\u00e9.json", False, "non-ascii"),
+    ("a,b.json", False, "comma"),
+    (".hidden/data.json", False, "dotfile dir"),
+    ("contract.json", False, "starts with 'con'"),
+    ("console.csv", False, "starts with 'con'"),
+    ("com10.json", False, "not a reserved COM device"),
+    ("auxiliary/data.json", False, "starts with 'aux'"),
+    ("nullable.json", False, "starts with 'nul'"),
+    ("a\\b.json", False, "literal backslash is a separator-like character, not traversal"),
+    # traversal
+    ("../x.json", True, "posix traversal"),
+    ("..\\x.json", True, "windows traversal"),
+    ("a/../../x.json", True, "nested traversal"),
+    # absolute / drive / UNC / device
+    ("/etc/passwd", True, "posix absolute"),
+    ("\\rooted.json", True, "windows rooted"),
+    ("C:data.json", True, "drive-relative"),
+    ("C:\\data.json", True, "drive absolute"),
+    ("\\\\server\\share\\x.json", True, "unc"),
+    ("//server/share/x.json", True, "unc with slashes"),
+    ("\\\\.\\C:\\x.json", True, "device namespace"),
+    ("\\\\?\\C:\\x.json", True, "extended-length"),
+    # NTFS alternate data streams
+    ("data.json:stream", True, "ads"),
+    ("data.json::$DATA", True, "ads default stream"),
+    # reserved device names, any case/extension/directory
+    ("nul", True, "device"),
+    ("NUL", True, "device upper"),
+    ("Con.json", True, "device with extension"),
+    ("aux.txt", True, "device with extension"),
+    ("prn", True, "device"),
+    ("COM1", True, "device"),
+    ("com9.csv", True, "device with extension"),
+    ("LPT1", True, "device"),
+    ("nul .txt", True, "space before extension"),
+    ("COM\u00b9", True, "superscript digit device"),
+    ("sub/nul", True, "device in subdir"),
+    ("sub\\nul", True, "device in subdir backslash"),
+    ("CONIN$", True, "console input"),
+    # trailing dots and spaces (Windows drops them)
+    ("data.json.", True, "trailing dot"),
+    ("sub./data.json", True, "trailing dot dir"),
+    ("sub /data.json", True, "trailing space dir"),
+    ("a/.. /b.json", True, "space-padded parent segment"),
+    ("...", True, "all dots"),
+]
+
+
+@pytest.mark.parametrize(("text", "unsafe", "why"), _LOCAL_FILE_PATH_CONTRACT, ids=[f"{t!r}" for t, _, _ in _LOCAL_FILE_PATH_CONTRACT])
+def test_local_manifest_file_path_contract(text: str, unsafe: bool, why: str) -> None:
+    assert rtd._is_unsafe_local_file_path(text) is unsafe, why
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "nul",
+        "Con.json",
+        "COM1",
+        "sub/lpt2.csv",
+        "data.json.",
+        "sub /data.json",
+        "data.json:stream",
+        "C:data.json",
+        "\\\\server\\share\\x.json",
+    ],
+)
+def test_resolve_rejects_non_portable_manifest_paths_before_touching_the_filesystem(tmp_path: Path, text: str) -> None:
+    (tmp_path / "data.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ResearchToDecisionError, match="must remain relative to the manifest") as caught:
+        rtd._resolve(tmp_path, text, label="supplier_inputs.path")
+    assert text not in str(caught.value)
+
+
+def test_resolve_still_accepts_a_legitimate_nested_file(tmp_path: Path) -> None:
+    (tmp_path / "contract files").mkdir()
+    target = tmp_path / "contract files" / "console.v2.json"
+    target.write_text("{}", encoding="utf-8")
+    assert rtd._resolve(tmp_path, "contract files/console.v2.json", label="supplier_inputs.path") == target.resolve()
+
+
+# (reference, accepted, why): URL references are NOT local paths.
+_REFERENCE_CONTRACT = [
+    ("https://example.com/a/b.pdf", True, "https"),
+    ("http://example.com:8080/a", True, "explicit port"),
+    ("https://[2001:db8::1]:443/x", True, "bracketed ipv6 with port"),
+    ("https://example.com/con", True, "device-like URL path segment is just a URL path"),
+    ("https://example.com/a.json.", True, "trailing dot in a URL path is not a local file name"),
+    ("fixture:data/offer.json", True, "fixture scheme"),
+    ("manual:quote 2026-10", True, "manual note"),
+    ("file:offer.json", True, "file scheme relative"),
+    ("Acme price sheet.", True, "free-text reference with a trailing dot"),
+    ("https://example.com:99999/x", False, "port out of range"),
+    ("https://example.com:0/x", False, "port zero"),
+    ("https://example.com:abc/x", False, "non-numeric port"),
+    ("https://[::1/x", False, "unterminated ipv6"),
+    ("https://[::1%25eth0]/x", False, "ipv6 zone id"),
+    ("https://user:pw@example.com/x", False, "userinfo"),
+    ("https://example.com/../x", False, "url traversal"),
+    ("https://example.com/%2e%2e/x", False, "encoded traversal"),
+    ("https://example.com/%252e%252e/x", False, "double-encoded traversal"),
+    ("https://example.com/a\\..\\x", False, "backslash traversal in url path"),
+    ("https://exa mple.com/x", False, "space in host"),
+    ("ftp://example.com/x", False, "foreign scheme"),
+    ("//example.com/x", False, "scheme-relative treated as rooted path"),
+    ("file:///etc/passwd", False, "file absolute"),
+    ("fixture:../x.json", False, "fixture traversal"),
+    ("manual:C:\\x", False, "drive in manual ref"),
+    ("data.json:stream", False, "ads in bare ref"),
+    ("C:\\x.json", False, "drive path"),
+    ("\\\\server\\share", False, "unc"),
+    ("a\x00b", False, "nul"),
+    ("a\nb", False, "newline"),
+    ("..\\x", False, "backslash traversal"),
+    ("a\\b.json", True, "literal backslash is an ordinary character on POSIX"),
+]
+
+
+@pytest.mark.parametrize(("reference", "accepted", "why"), _REFERENCE_CONTRACT, ids=[f"{r!r}" for r, _, _ in _REFERENCE_CONTRACT])
+def test_reference_contract_separates_urls_from_local_paths(reference: str, accepted: bool, why: str) -> None:
+    if accepted:
+        assert rtd._reference_text(reference, "source_reference") == reference.strip(), why
+    else:
+        with pytest.raises(ResearchToDecisionError, match="safe reference|query or fragment") as caught:
+            rtd._reference_text(reference, "source_reference")
+        assert reference not in str(caught.value) or reference == ""
+
+
+def test_document_evidence_reference_rejects_reserved_device_names_without_opening_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    opened: list[object] = []
+    monkeypatch.setattr(rtd.os, "open", lambda *a, **k: opened.append(a) or (_ for _ in ()).throw(AssertionError("open must not be reached")))
+    for reference in ("fixture:nul", "fixture:sub/CON.pdf", "fixture:COM1.pdf", "fixture:doc.pdf."):
+        with pytest.raises(ResearchToDecisionError, match="must remain relative to the manifest"):
+            rtd._supplier_document_evidence_bindings(
+                [("offer-1", "SKU-1", reference, "0" * 64)],
+                evidence_root=tmp_path,
+            )
+    assert opened == []

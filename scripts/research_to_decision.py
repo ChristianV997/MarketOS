@@ -244,6 +244,37 @@ def _is_unsafe_relative_path(text: str) -> bool:
     return False
 
 
+_WINDOWS_RESERVED_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"COM{digit}" for digit in "123456789\u00b9\u00b2\u00b3"}
+    | {f"LPT{digit}" for digit in "123456789\u00b9\u00b2\u00b3"}
+)
+
+
+def _has_windows_unportable_component(text: str) -> bool:
+    """True when any path component names a Windows device or cannot exist as written on Windows.
+
+    Windows treats ``NUL``, ``CON``, ``COM1`` ... as devices whatever the extension (``nul.txt``) and
+    silently drops trailing dots and spaces from a component (``report.json.`` is ``report.json``, and
+    ``.. `` is ``..``). A manifest path that means one thing on POSIX and another on Windows breaks the
+    "judged identically on every host" contract, so it is refused here on every host. Ordinary names such
+    as ``contract.json`` or ``console.csv`` are unaffected: only a reserved *stem* matches.
+    """
+    for part in re.split(r"[/\\]", text):
+        if not part or part == ".":
+            continue
+        if part.endswith((" ", ".")):
+            return True
+        if part.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_RESERVED_DEVICE_NAMES:
+            return True
+    return False
+
+
+def _is_unsafe_local_file_path(text: str) -> bool:
+    """A manifest *file* path that is unsafe or non-portable (see the two checks it combines)."""
+    return _is_unsafe_relative_path(text) or _has_windows_unportable_component(text)
+
+
 def _parse_url(value: str, error: str):
     """``urlparse`` that fails closed: a malformed (e.g. unterminated IPv6) URL raises the module error."""
     try:
@@ -744,7 +775,7 @@ def _supplier_document_evidence_bindings(
         # An http(s) reference is accepted by _reference_text with an absolute URL path ("/bin/x.pdf");
         # as a local evidence path that must be rejected *before* the walk below, which would
         # otherwise call is_symlink() on host paths outside the evidence root (an existence oracle).
-        if _is_unsafe_relative_path(relative_path):
+        if _is_unsafe_local_file_path(relative_path):
             raise ResearchToDecisionError("document_evidence.reference must remain relative to the manifest")
         # Checked on the *unresolved* path, walking every component: once
         # _resolve() calls Path.resolve() it follows symlinks and returns
@@ -852,7 +883,7 @@ def _resolve(base_dir: Path, value: Any, *, label: str) -> Path:
         raw.encode("utf-8")
     except UnicodeEncodeError:
         raise ResearchToDecisionError(f"{label} could not be resolved safely") from None
-    if _is_unsafe_relative_path(raw):
+    if _is_unsafe_local_file_path(raw):
         raise ResearchToDecisionError(f"{label} must remain relative to the manifest")
     if any(len(part.encode("utf-8")) > 255 for part in re.split(r"[/\\]", raw)):
         raise ResearchToDecisionError(f"{label} could not be resolved safely")
