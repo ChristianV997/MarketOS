@@ -356,6 +356,36 @@ def test_doctype_is_rejected_regardless_of_encoding(tmp_path: Path, encoding: st
     assert {"role": "base", "code": "unsafe_xml_declaration"} in result["errors"]
 
 
+def test_doctype_like_text_in_cdata_is_not_rejected(tmp_path: Path) -> None:
+    literal = "<![CDATA[Literal markers: <!DOCTYPE and <!ENTITY are text here.]]>"
+    report = _write_report(tmp_path, "cdata.xml", _suite(_case("literal", body=literal)))
+    clean = _write_report(tmp_path, "clean.xml", _suite(_case("literal")))
+
+    result = comparator.compare(report, clean)
+
+    assert result["status"] == "complete"
+    assert result["comparison"]["unchanged"] == ['{"classname":"tests.example","name":"literal"}']
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        '<!DOCTYPE testsuite SYSTEM "file:///not-present">',
+        '<!DOCTYPE testsuite [<!ENTITY external SYSTEM "file:///not-present">]>',
+    ],
+)
+def test_external_doctype_and_entity_declarations_remain_rejected(
+    tmp_path: Path, declaration: str
+) -> None:
+    hostile = _write_report(tmp_path, "external.xml", declaration + _suite(_case("a")))
+    clean = _write_report(tmp_path, "clean.xml", _suite(_case("a")))
+
+    result = comparator.compare(hostile, clean)
+
+    assert result["status"] == "incomplete"
+    assert {"role": "base", "code": "unsafe_xml_declaration"} in result["errors"]
+
+
 def test_errors_never_echo_report_content(tmp_path: Path) -> None:
     canary = "sk-CANARYFAKE0000"
     hostile = _write_report(tmp_path, "bad.xml", f"<testsuite><testcase name='{canary}'><failure message='{canary}'")
@@ -377,9 +407,64 @@ def test_directory_and_fifo_reports_are_not_files_and_never_block(tmp_path: Path
         assert {"role": "base", "code": "report_not_a_file"} in result["errors"]
 
 
-def test_same_identity_duplicates_pair_independently_of_document_order(tmp_path: Path) -> None:
+def test_same_identity_duplicates_with_matching_outcomes_are_order_independent(tmp_path: Path) -> None:
     forward = _write_report(tmp_path, "f.xml", _suite(_case("dup"), _case("dup", body="<failure />")))
     reverse = _write_report(tmp_path, "r.xml", _suite(_case("dup", body="<failure />"), _case("dup")))
     result = comparator.compare(forward, reverse)
     assert result["status"] == "complete"
     assert result["comparison"]["outcome_changes"] == []
+
+
+def test_duplicate_identity_multiplicity_change_is_incomplete(tmp_path: Path) -> None:
+    base = _write_report(
+        tmp_path,
+        "base.xml",
+        _suite(_case("dup", body="<failure />")),
+    )
+    candidate = _write_report(
+        tmp_path,
+        "candidate.xml",
+        _suite(_case("dup", body="<failure />"), _case("dup")),
+    )
+
+    result = comparator.compare(base, candidate)
+
+    assert result["status"] == "incomplete"
+    assert result["comparison"] is None
+    assert {"role": "comparison", "code": "ambiguous_duplicate_testcase_identity"} in result["errors"]
+
+
+def test_duplicate_identity_outcome_distribution_change_is_incomplete(tmp_path: Path) -> None:
+    base = _write_report(
+        tmp_path,
+        "base.xml",
+        _suite(_case("dup", body="<failure />"), _case("dup")),
+    )
+    candidate = _write_report(
+        tmp_path,
+        "candidate.xml",
+        _suite(_case("dup", body="<error />"), _case("dup")),
+    )
+
+    result = comparator.compare(base, candidate)
+
+    assert result["status"] == "incomplete"
+    assert result["comparison"] is None
+    assert {"role": "comparison", "code": "ambiguous_duplicate_testcase_identity"} in result["errors"]
+
+
+def test_report_above_testcase_limit_retains_observed_count(tmp_path: Path) -> None:
+    count = comparator.MAX_TESTCASES + 1
+    body = f'<testsuite tests="{count}">' + '<testcase name="x"/>' * count + "</testsuite>"
+    assert len(body.encode("utf-8")) < comparator.MAX_REPORT_BYTES
+    oversized_count = _write_report(tmp_path, "many.xml", body)
+    clean = _write_report(tmp_path, "clean.xml", _suite(_case("one")))
+
+    result = comparator.compare(oversized_count, clean)
+    base = result["reports"]["base"]
+
+    assert result["status"] == "incomplete"
+    assert base["test_count"] == count
+    assert base["counts"]["tests"] == count
+    assert "too_many_testcases" in base["issue_codes"]
+    assert "no_testcases" not in base["issue_codes"]

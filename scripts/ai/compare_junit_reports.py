@@ -49,7 +49,7 @@ def _fingerprint(value: Any) -> str:
 
 
 class _UnsafeXML(Exception):
-    """Raised when a document declares a DTD or entity (checked after decoding)."""
+    """Raised when the XML parser recognizes a document type declaration."""
 
 
 class _NoDoctypeBuilder(ET.TreeBuilder):
@@ -58,8 +58,8 @@ class _NoDoctypeBuilder(ET.TreeBuilder):
 
 
 def _parse_without_dtd(data: bytes) -> ET.Element:
-    # The byte-level scan above only sees ASCII-compatible encodings; the parser
-    # reports DOCTYPE on the decoded document, so UTF-16 and similar cannot hide one.
+    # Let the parser distinguish declarations from lookalike text in CDATA. Its
+    # doctype callback also catches declarations in non-ASCII-compatible encodings.
     parser = ET.XMLParser(target=_NoDoctypeBuilder())
     parser.feed(data)
     return parser.close()
@@ -135,15 +135,6 @@ def _load_report(path: Path, role: str) -> dict[str, Any]:
         }
 
     assert data is not None
-    if b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
-        return {
-            "role": role,
-            "status": "incomplete",
-            "issue_codes": ["unsafe_xml_declaration"],
-            "test_count": 0,
-            "counts": {},
-            "cases": [],
-        }
     try:
         root = _parse_without_dtd(data)
     except _UnsafeXML:
@@ -176,32 +167,34 @@ def _load_report(path: Path, role: str) -> dict[str, Any]:
         }
 
     elements = [element for element in root.iter() if _tag(element) == "testcase"]
+    test_count = len(elements)
     issues: set[str] = set()
-    if len(elements) > MAX_TESTCASES:
+    too_many_testcases = test_count > MAX_TESTCASES
+    if too_many_testcases:
         issues.add("too_many_testcases")
-        elements = []
     raw_cases: list[dict[str, Any]] = []
-    for ordinal, element in enumerate(elements, start=1):
-        attributes, attribute_issues = _attribute_values(element)
-        issues.update(attribute_issues)
-        if not attributes.get("name") and not attributes.get("id") and not attributes.get("classname"):
-            issues.add("missing_testcase_identity")
-        outcome, detail = _outcome(element)
-        identity = _node_identity(attributes, ordinal)
-        raw_cases.append({
-            "identity": identity,
-            "outcome": outcome,
-            "detail": detail,
-            "ordinal": ordinal,
-        })
+    if not too_many_testcases:
+        for ordinal, element in enumerate(elements, start=1):
+            attributes, attribute_issues = _attribute_values(element)
+            issues.update(attribute_issues)
+            if not attributes.get("name") and not attributes.get("id") and not attributes.get("classname"):
+                issues.add("missing_testcase_identity")
+            outcome, detail = _outcome(element)
+            identity = _node_identity(attributes, ordinal)
+            raw_cases.append({
+                "identity": identity,
+                "outcome": outcome,
+                "detail": detail,
+                "ordinal": ordinal,
+            })
 
-    if not raw_cases:
+    if test_count == 0:
         issues.add("no_testcases")
 
     declared: dict[str, int] = {}
-    counts = Counter(case["outcome"] for case in raw_cases)
+    counts = Counter(_outcome(element)[0] for element in elements)
     observed_counts = {
-        "tests": len(raw_cases),
+        "tests": test_count,
         "failures": counts[OUTCOME_FAILURE],
         "errors": counts[OUTCOME_ERROR],
         "skipped": counts[OUTCOME_SKIPPED],
@@ -259,7 +252,7 @@ def _load_report(path: Path, role: str) -> dict[str, Any]:
         "role": role,
         "status": "complete" if not issues else "incomplete",
         "issue_codes": sorted(issues),
-        "test_count": len(cases),
+        "test_count": test_count,
         "counts": dict(sorted(observed_counts.items())),
         "declared_counts": dict(sorted(declared.items())),
         "cases": cases,
@@ -283,7 +276,26 @@ def _case_map(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {case["node_key"]: case for case in report["cases"]}
 
 
+def _duplicate_identity_outcomes(report: dict[str, Any]) -> dict[str, Counter[tuple[str, str | None]]]:
+    grouped: dict[str, Counter[tuple[str, str | None]]] = {}
+    for case in report["cases"]:
+        identity_key = _canonical_json(case["identity"])
+        grouped.setdefault(identity_key, Counter())[(case["outcome"], case["detail"])] += 1
+    return grouped
+
+
 def _compare_complete(base: dict[str, Any], candidate: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    base_groups = _duplicate_identity_outcomes(base)
+    candidate_groups = _duplicate_identity_outcomes(candidate)
+    for identity_key in base_groups.keys() | candidate_groups.keys():
+        base_outcomes = base_groups.get(identity_key, Counter())
+        candidate_outcomes = candidate_groups.get(identity_key, Counter())
+        multiplicity = max(sum(base_outcomes.values()), sum(candidate_outcomes.values()))
+        if multiplicity > 1 and base_outcomes != candidate_outcomes:
+            # A duplicate identity is pairable only when both reports have the
+            # same outcome/detail multiset; otherwise a node-level delta is ambiguous.
+            return None, "ambiguous_duplicate_testcase_identity"
+
     base_cases = _case_map(base)
     candidate_cases = _case_map(candidate)
     all_keys = sorted(set(base_cases) | set(candidate_cases))
