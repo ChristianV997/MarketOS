@@ -1,12 +1,17 @@
 """Tests for backend.adapters.research.cj_public_evidence."""
 from __future__ import annotations
 
+import json
+import socket
 from unittest.mock import patch
 
 import pytest
 
 from backend.adapters.research import cj_public_evidence as mod
+from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
+from backend.commerce.contracts import _quality_dict
 from backend.contracts.adapters import SidecarContext
+from backend.mvp_commerce import supplier_evidence as supplier_mod
 from backend.mvp_commerce.supplier_evidence import SupplierEvidenceResult, supplier_evidence_events
 from evaluation.contracts import DataQuality, ProductCandidate
 from evaluation.readiness import evaluate_product
@@ -72,8 +77,18 @@ class TestUrlSafety:
 
 
 def _public_dns(*_args, **_kwargs):
-    import socket
     return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))]
+
+
+@pytest.fixture(autouse=True)
+def _block_live_sockets(monkeypatch):
+    def _blocked(*_args, **_kwargs):
+        raise AssertionError("live sockets are disabled in CJ public-evidence tests")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _public_dns)
+    monkeypatch.setattr(socket, "create_connection", _blocked)
+    monkeypatch.setattr(socket.socket, "connect", _blocked)
+    monkeypatch.setattr(socket.socket, "connect_ex", _blocked)
 
 
 class TestRequestTargetIsExact:
@@ -205,6 +220,109 @@ class TestJsonLdExtraction:
         assert evidence.price is None
         assert evidence.field_status["price"] == "unavailable"
 
+    def test_explicit_zero_price_stays_distinct_and_is_not_supplier_cost(self):
+        url = "https://www.cjdropshipping.com/product/zero.html"
+
+        def _page(*, price_present):
+            offer = {"price": 0} if price_present else {}
+            product = {"@type": "Product", "name": "Zero Widget", "offers": offer}
+            return '<script type="application/ld+json">' + json.dumps(product) + "</script>"
+
+        zero_record = Crawl4AIResearchAdapter._product_records_from_jsonld(_page(price_present=True), url)[0]
+        missing_record = Crawl4AIResearchAdapter._product_records_from_jsonld(_page(price_present=False), url)[0]
+        assert zero_record["selling_price"] == 0.0
+        assert missing_record["selling_price"] is None
+
+        zero = mod._evidence_from_record(
+            zero_record, url, extraction_method="fixture", observed_at=1_700_000_000.0,
+            fetch_provenance="fresh_fetch",
+        )
+        missing = mod._evidence_from_record(
+            missing_record, url, extraction_method="fixture", observed_at=1_700_000_000.0,
+            fetch_provenance="fresh_fetch",
+        )
+        assert zero.price == 0.0
+        assert zero.field_status["price"] == "observed"
+        assert missing.price is None
+        assert missing.field_status["price"] == "unavailable"
+
+        assert mod.to_supplier_offer(zero) is None
+        with patch.object(supplier_mod, "fetch_product_evidence", return_value=zero):
+            result = supplier_mod.gather_supplier_evidence(
+                "Zero Widget", context=SidecarContext(dry_run=False), candidate_urls=[url],
+            )
+        assert result.unit_cost is None
+        assert result.status != "observed"
+        assert result.evidence is not None
+        assert result.evidence.price == 0.0
+        assert "price_not_usable_as_supplier_cost" in result.warnings
+
+    def test_mapping_without_fetch_time_does_not_invent_observed_at(self):
+        evidence = mod._evidence_from_record(
+            {"name": "Mapped Widget", "selling_price": 9.5},
+            "https://www.cjdropshipping.com/product/mapped.html",
+            extraction_method="fixture",
+        )
+
+        assert evidence.observed_at is None
+        assert evidence.fetch_provenance == "unknown"
+        assert mod.to_supplier_offer(evidence) is None
+
+    def test_cache_hit_retains_fetch_time_and_cache_provenance(self):
+        url = "https://www.cjdropshipping.com/product/cached.html"
+        product = {
+            "@type": "Product", "name": "Cached Widget",
+            "offers": {
+                "price": 9.5,
+                "shippingDetails": {"shippingRate": {"value": 0, "currency": "USD"}},
+            },
+        }
+        html = '<script type="application/ld+json">' + json.dumps(product) + "</script>"
+        fetched_at = 1_700_000_000.0
+        with patch.object(mod, "_bounded_get", return_value=html) as get:
+            with patch.object(mod.time, "time", side_effect=[fetched_at, fetched_at + 900]):
+                fresh = mod.fetch_product_evidence(url, context=SidecarContext(dry_run=False))
+                cached = mod.fetch_product_evidence(url, context=SidecarContext(dry_run=False))
+
+        assert get.call_count == 1
+        assert fresh.observed_at == cached.observed_at == fetched_at
+        assert fresh.fetch_provenance == "fresh_fetch"
+        assert cached.fetch_provenance == "cache_hit"
+        assert cached.source == "cj_public_page"
+        offer = mod.to_supplier_offer(cached)
+        assert offer is not None
+        assert offer.shipping_cost == 0.0
+        assert offer.quality.provenance == "public_page"
+        assert offer.quality.is_live_attributed is False
+        assert offer.quality.retrieval_mode == "cache_hit"
+        assert _quality_dict(offer.quality)["retrieval_mode"] == "cache_hit"
+        candidate = mod.to_product_candidate(cached)
+        assert candidate is not None
+        assert candidate.quality.provenance == "public_page"
+        assert _quality_dict(candidate.quality)["retrieval_mode"] == "cache_hit"
+
+    def test_missing_shipping_is_not_free_and_explicit_zero_is_valid(self):
+        url = "https://www.cjdropshipping.com/product/shipping.html"
+        missing = mod._evidence_from_record(
+            {"name": "Shipping Widget", "selling_price": 9.5}, url,
+            extraction_method="fixture", observed_at=1_700_000_000.0,
+            fetch_provenance="fresh_fetch",
+        )
+        free_shipping = mod._evidence_from_record(
+            {"name": "Shipping Widget", "selling_price": 9.5, "shipping_cost": 0.0}, url,
+            extraction_method="fixture", observed_at=1_700_000_000.0,
+            fetch_provenance="fresh_fetch",
+        )
+
+        assert missing.shipping_cost is None
+        assert missing.field_status["shipping_cost"] == "unavailable"
+        assert mod.to_supplier_offer(missing) is None
+        assert free_shipping.shipping_cost == 0.0
+        assert free_shipping.field_status["shipping_cost"] == "observed"
+        offer = mod.to_supplier_offer(free_shipping)
+        assert offer is not None
+        assert offer.shipping_cost == 0.0
+
 
 class TestOptionalJsRendering:
     def test_js_render_fallback_is_disabled_by_default(self, monkeypatch):
@@ -280,6 +398,17 @@ class TestCaching:
             mod.fetch_product_evidence("https://www.cjdropshipping.com/product/cached.html", context=SidecarContext(dry_run=False))
         assert fake_get.call_count == 1
 
+    def test_cache_without_fetch_timestamp_is_labeled_unknown(self):
+        url = "https://www.cjdropshipping.com/product/legacy-cache.html"
+        with patch.object(mod.time, "monotonic", return_value=100.0):
+            mod._CACHE[url] = (99.0, JSONLD_PRODUCT_HTML)
+            with patch.object(mod, "_bounded_get", side_effect=AssertionError("legacy cache should be used")):
+                evidence = mod.fetch_product_evidence(url, context=SidecarContext(dry_run=False))
+
+        assert evidence.fetch_provenance == "cache_hit_timestamp_unknown"
+        assert evidence.observed_at is None
+        assert mod.to_supplier_offer(evidence) is None
+
 
 class TestNormalization:
     def test_to_supplier_offer_uses_observed_price_and_shipping(self):
@@ -287,7 +416,7 @@ class TestNormalization:
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
             observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
             field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
-            price=9.5, shipping_cost=2.25,
+            price=9.5, shipping_cost=2.25, fetch_provenance="fresh_fetch",
         )
         offer = mod.to_supplier_offer(evidence)
         assert offer is not None
@@ -297,6 +426,7 @@ class TestNormalization:
         assert offer.quality.is_live_attributed is False
         assert offer.quality.source_ref == evidence.source_url
         assert offer.quality.observed_at.timestamp() == 1_700_000_000.0
+        assert offer.quality.retrieval_mode == "fresh_fetch"
 
     def test_to_supplier_offer_none_without_observed_price(self):
         evidence = mod._degraded("https://www.cjdropshipping.com/product/x.html", reason="test")
@@ -322,7 +452,7 @@ class TestNormalization:
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
             observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
             field_status={"title": "observed", "price": "observed", "shipping_cost": "unavailable"},
-            price=9.5, shipping_cost=None,
+            price=9.5, shipping_cost=None, fetch_provenance="fresh_fetch",
         )
 
         assert mod.to_supplier_offer(evidence) is None
@@ -332,7 +462,7 @@ class TestNormalization:
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
             observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
             field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
-            price=9.5, shipping_cost=0.0,
+            price=9.5, shipping_cost=0.0, fetch_provenance="fresh_fetch",
         )
 
         offer = mod.to_supplier_offer(evidence)
@@ -340,11 +470,40 @@ class TestNormalization:
         assert offer is not None
         assert offer.shipping_cost == 0.0
 
+    def test_authenticated_catalog_records_are_not_relabelled_as_public_pages(self):
+        evidence = mod.CJProductEvidence(
+            source="cj_authenticated_api", source_url="https://developers.cjdropshipping.com/api2.0/v1/product/query",
+            observed_at=1_700_000_000.0, external_product_id="auth-product", title="Widget",
+            field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
+            price=9.5, shipping_cost=0.0, fetch_provenance="fresh_fetch",
+        )
+
+        assert mod.to_supplier_offer(evidence) is None
+        assert mod.to_product_candidate(evidence) is None
+
+    def test_shared_offer_normalizer_requires_shipping_and_preserves_zero(self):
+        offers = Crawl4AIResearchAdapter.normalize_supplier_offers([
+            {"product_id": "missing-shipping", "unit_cost": 6.5},
+            {"product_id": "zero-shipping", "unit_cost": 4.0, "shipping_cost": 0.0},
+        ])
+
+        assert [offer.product_id for offer in offers] == ["zero-shipping"]
+        assert offers[0].shipping_cost == 0.0
+
+    def test_shared_candidate_normalizer_rejects_missing_and_zero_prices(self):
+        candidates = Crawl4AIResearchAdapter.normalize_candidates([
+            {"product_id": "missing-price", "name": "Missing Widget", "selling_price": None},
+            {"product_id": "zero-price", "name": "Zero Widget", "selling_price": 0.0},
+        ])
+
+        assert candidates == []
+
     def test_public_page_product_candidate_is_not_live_supplier_proof(self):
         evidence = mod.CJProductEvidence(
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
             observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
             field_status={"title": "observed", "price": "observed"}, price=9.5,
+            fetch_provenance="fresh_fetch",
         )
 
         candidate = mod.to_product_candidate(evidence)
@@ -360,7 +519,7 @@ class TestNormalization:
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
             observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
             field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
-            price=5.0, shipping_cost=1.0,
+            price=5.0, shipping_cost=1.0, fetch_provenance="fresh_fetch",
         )
         product = ProductCandidate(
             product_id="market-widget", name="Widget", selling_price=100.0,

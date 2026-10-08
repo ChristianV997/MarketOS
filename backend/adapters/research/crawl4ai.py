@@ -9,6 +9,7 @@ import os
 import hashlib
 import asyncio
 import json
+import math
 import re
 import time
 from datetime import datetime, timezone
@@ -114,11 +115,19 @@ class Crawl4AIResearchAdapter:
             offers = product.get("offers")
             offer_rows = offers if isinstance(offers, list) else [offers]
             offer = next((item for item in offer_rows if isinstance(item, Mapping)), {})
-            raw_price = offer.get("price", offer.get("lowPrice", product.get("price", 0.0))) if isinstance(offer, Mapping) else product.get("price", 0.0)
+            raw_price = None
+            if isinstance(offer, Mapping):
+                raw_price = offer.get("price")
+                if raw_price is None:
+                    raw_price = offer.get("lowPrice")
+            if raw_price is None:
+                raw_price = product.get("price")
             try:
-                price = float(raw_price or 0.0)
+                price = float(raw_price) if raw_price not in (None, "") else None
+                if price is not None and not math.isfinite(price):
+                    price = None
             except (TypeError, ValueError):
-                price = 0.0
+                price = None
             product_id = str(product.get("sku") or product.get("mpn") or product.get("productID") or "").strip()
             dedupe_key = (product_id, name.casefold())
             if dedupe_key in seen:
@@ -130,7 +139,7 @@ class Crawl4AIResearchAdapter:
                 "name": name,
                 "url": str(product.get("url") or url),
                 "source": "crawl4ai",
-                "selling_price": max(0.0, price),
+                "selling_price": price,
                 "currency": str(offer.get("priceCurrency") or product.get("priceCurrency") or "USD").upper() if isinstance(offer, Mapping) else str(product.get("priceCurrency") or "USD").upper(),
                 "availability": str(offer.get("availability") or "") if isinstance(offer, Mapping) else "",
                 "brand": brand_name,
@@ -313,15 +322,20 @@ class Crawl4AIResearchAdapter:
                 attribution="attributed" if source_ref else "unknown",
                 source_ref=source_ref,
             )
+            raw_price = record.get("selling_price", record.get("price"))
+            if raw_price is None or isinstance(raw_price, bool):
+                continue
             try:
-                price = float(record.get("selling_price", record.get("price", 0.0)) or 0.0)
+                price = float(raw_price)
             except (TypeError, ValueError):
-                price = 0.0
+                continue
+            if not math.isfinite(price) or price <= 0:
+                continue
             candidates.append(ProductCandidate(
                 product_id=product_id,
                 name=name,
                 currency=str(record.get("currency", "USD")),
-                selling_price=max(0.0, price),
+                selling_price=price,
                 source_signal_ids=(source_ref,) if source_ref else (),
                 quality=quality,
             ))
@@ -341,16 +355,23 @@ class Crawl4AIResearchAdapter:
             if not product_id:
                 continue
             raw_cost = record.get("unit_cost", record.get("wholesale_price", record.get("supplier_price")))
+            if raw_cost is None or isinstance(raw_cost, bool):
+                continue
             try:
                 unit_cost = float(raw_cost)
             except (TypeError, ValueError):
                 continue
-            if unit_cost <= 0:
+            if not math.isfinite(unit_cost) or unit_cost <= 0:
+                continue
+            raw_shipping = record.get("shipping_cost")
+            if raw_shipping is None or isinstance(raw_shipping, bool):
                 continue
             try:
-                shipping_cost = max(0.0, float(record.get("shipping_cost", 0.0) or 0.0))
+                shipping_cost = float(raw_shipping)
             except (TypeError, ValueError):
-                shipping_cost = 0.0
+                continue
+            if not math.isfinite(shipping_cost) or shipping_cost < 0:
+                continue
             try:
                 fulfillment_days = int(record["fulfillment_days"]) if record.get("fulfillment_days") is not None else None
             except (TypeError, ValueError):

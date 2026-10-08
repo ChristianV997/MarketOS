@@ -60,6 +60,7 @@ category-level stability, and no data source for that exists.
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -95,9 +96,12 @@ _WEIGHTS: dict[str, float] = {
     "variant_complexity": 5.0,
 }
 
-# Provenance -> confidence-tier weight (see _confidence). Assumed evidence
-# is worth something but far less than observed; unknown is worth nothing.
-_PROVENANCE_CONFIDENCE_WEIGHT = {"observed": 1.0, "derived": 0.7, "assumed": 0.35, "unavailable": 0.0}
+# Provenance -> deterministic confidence-tier weight (not a calibrated
+# success probability). Public-page evidence remains separate and below
+# supplier-observed evidence because it is not supplier-live proof.
+_PROVENANCE_CONFIDENCE_WEIGHT = {
+    "observed": 1.0, "public_page": 0.7, "derived": 0.7, "assumed": 0.35, "unavailable": 0.0,
+}
 
 
 @dataclass(frozen=True)
@@ -108,7 +112,7 @@ class ScoreDimension:
     weight: float                    # 0 when not computed
     contribution: float              # normalized_value * (renormalized weight), 0 when not computed
     reason: str
-    provenance: str                  # "observed" | "derived" | "assumed" | "unavailable"
+    provenance: str                  # observed | public_page | derived | assumed | unavailable
     is_unknown: bool
 
     def to_dict(self) -> dict[str, Any]:
@@ -218,9 +222,10 @@ def _supplier_evidence_quality(evidence: SupplierEvidenceResult | None) -> Score
                      "no supplier evidence was gathered for this candidate", "unavailable")
     best = evidence.ranking[0]
     normalized = round(float(best["composite_score"]) * 100.0, 2)
-    provenance = "observed" if evidence.evidence is not None else "assumed"
-    public_page = evidence.source_type.startswith("public_page")
-    scope = "; public-page observation is not supplier-live proof" if public_page else ""
+    public_page = evidence.source_type.startswith("public_page") and evidence.evidence is not None
+    provenance = "public_page" if public_page else "observed" if evidence.evidence is not None else "assumed"
+    retrieval = getattr(evidence.evidence, "fetch_provenance", "unknown")
+    scope = f"; public-page observation is not supplier-live proof; retrieval={retrieval}" if public_page else ""
     return _dim("supplier_evidence_quality", float(best["composite_score"]), normalized,
                 f"best CJ candidate composite score {best['composite_score']}{scope}", provenance)
 
@@ -234,13 +239,22 @@ def _observed_supplier_cost(evidence: SupplierEvidenceResult | None) -> ScoreDim
     if evidence is None or evidence.unit_cost is None:
         return _dim("observed_supplier_cost", None, None,
                      "no observed CJ supplier cost for this candidate", "unavailable")
+    try:
+        unit_cost = float(evidence.unit_cost)
+    except (TypeError, ValueError):
+        unit_cost = math.nan
+    if not math.isfinite(unit_cost) or unit_cost <= 0:
+        return _dim("observed_supplier_cost", None, None,
+                    "no positive observed CJ supplier cost for this candidate", "unavailable")
+    public_page = evidence.source_type.startswith("public_page")
+    retrieval = getattr(evidence.evidence, "fetch_provenance", "unknown")
     if evidence.source_type.startswith("public_page"):
         reason = (f"public-page catalog price observed: {evidence.unit_cost}; "
-                  f"not supplier-live proof (source={evidence.source_url})")
+                  f"not supplier-live proof (source={evidence.source_url}; retrieval={retrieval})")
     else:
         reason = f"supplier unit cost observed: {evidence.unit_cost} (source={evidence.source_url})"
-    return _dim("observed_supplier_cost", evidence.unit_cost, 100.0,
-                reason, "observed")
+    return _dim("observed_supplier_cost", unit_cost, 100.0,
+                reason, "public_page" if public_page else "observed")
 
 
 def _assumption_count(candidate: OpportunityCandidate) -> ScoreDimension:
@@ -416,10 +430,10 @@ def _confidence(dimensions: tuple[ScoreDimension, ...]) -> tuple[float, float, f
     Tiered by provenance so an "unavailable" dimension reduces confidence
     without ever touching the composite score."""
     total = len(dimensions) or 1
-    counts = {"observed": 0, "derived": 0, "assumed": 0, "unavailable": 0}
+    counts = {"observed": 0, "public_page": 0, "derived": 0, "assumed": 0, "unavailable": 0}
     for dimension in dimensions:
         counts[dimension.provenance] += 1
-    observed_pct = round(counts["observed"] / total * 100.0, 2)
+    observed_pct = round((counts["observed"] + counts["public_page"]) / total * 100.0, 2)
     derived_pct = round(counts["derived"] / total * 100.0, 2)
     assumed_pct = round(counts["assumed"] / total * 100.0, 2)
     unknown_pct = round(counts["unavailable"] / total * 100.0, 2)
@@ -489,7 +503,11 @@ def rank_opportunities(
 
 _EVENT_METADATA = {
     "dry_run": True, "advisory": True, "non_authoritative": True,
-    "no_launch_authority": True, "no_spend_authority": True, "no_order_authority": True,
+    "no_launch_authority": True, "no_ad_authority": True,
+    "no_spend_authority": True, "no_order_authority": True,
+    "no_payment_authority": True, "no_outreach_authority": True,
+    "no_supplier_mutation_authority": True, "no_inventory_mutation_authority": True,
+    "no_customer_message_authority": True, "no_external_action_authority": True,
 }
 
 

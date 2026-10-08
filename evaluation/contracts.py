@@ -14,6 +14,7 @@ class DataQuality:
     completeness: str = "complete"
     observed_at: datetime = field(default_factory=_now)
     source_ref: str = ""
+    retrieval_mode: str = "unknown"
     @property
     def is_synthetic(self) -> bool:
         return self.provenance in {"mock", "simulated", "fallback"}

@@ -1,6 +1,6 @@
 """Composable, deterministic Commerce MVP packet runner."""
 from __future__ import annotations
-import hashlib, json
+import hashlib, json, math
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -63,21 +63,40 @@ def _economics_with_evidence(candidate: OpportunityCandidate, price: float, assu
     and records which component was observed vs assumed. Additive only:
     _economics() itself is unchanged and remains what every existing caller
     (with evidence=None) gets."""
-    has_cost = evidence is not None and evidence.unit_cost is not None
-    has_shipping = evidence is not None and evidence.shipping_cost is not None
-    unit_cost = evidence.unit_cost if has_cost else assumed_unit_cost
-    shipping = evidence.shipping_cost if has_shipping else assumed_shipping_cost
+    def _usable_amount(value: Any, *, positive: bool) -> float | None:
+        if value is None:
+            return None
+        try:
+            amount = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(amount) or (amount <= 0 if positive else amount < 0):
+            return None
+        return amount
+
+    observed_cost = _usable_amount(getattr(evidence, "unit_cost", None), positive=True)
+    observed_shipping = _usable_amount(getattr(evidence, "shipping_cost", None), positive=False)
+    has_cost = observed_cost is not None
+    has_shipping = observed_shipping is not None
+    unit_cost = observed_cost if has_cost else assumed_unit_cost
+    shipping = observed_shipping if has_shipping else assumed_shipping_cost
     canonical = _canonical_economics(price, unit_cost, shipping, cac, returns, payment_rate)
     fee = round(float(canonical.payment_fees.amount), 2)
     gross = round(float(canonical.contribution_before_cac.amount), 2)
     contribution = round(float(canonical.contribution_after_cac.amount), 2)
     public_page = evidence is not None and str(getattr(evidence, "source_type", "")).startswith("public_page")
     source_url = getattr(evidence, "source_url", "") if evidence is not None else ""
+    page_record = getattr(evidence, "evidence", None) if evidence is not None else None
+    fetch_provenance = getattr(page_record, "fetch_provenance", "unknown")
     cost_label = "Observed CJ public-page catalog price (not supplier-live proof)" if public_page else "Observed CJ supplier cost"
     shipping_label = "Observed CJ public-page shipping value (not supplier-live proof)" if public_page else "Observed CJ shipping"
-    cost_note = f"{cost_label}={unit_cost} (source={source_url})" if has_cost else f"Assumed unit cost={unit_cost}"
-    shipping_note = f"{shipping_label}={shipping} (source={source_url})" if has_shipping else f"Assumed shipping={shipping}"
-    source = "partial_observed_supplier_evidence" if (has_cost or has_shipping) else "dry_run_assumption"
+    cost_note = f"{cost_label}={unit_cost} (source={source_url}; retrieval={fetch_provenance})" if has_cost else f"Assumed unit cost={unit_cost}"
+    shipping_note = f"{shipping_label}={shipping} (source={source_url}; retrieval={fetch_provenance})" if has_shipping else f"Assumed shipping={shipping}"
+    source = (
+        "partial_observed_public_page_evidence" if public_page and (has_cost or has_shipping)
+        else "partial_observed_supplier_evidence" if has_cost or has_shipping
+        else "dry_run_assumption"
+    )
     warnings = ("Price, CAC, and return-rate inputs remain dry-run assumptions unless explicitly marked 'Observed' below; "
                 "no actual margin, CAC, profitability, or ROAS conclusion is supported.",)
     return UnitEconomicsSummary(candidate.candidate_id, price, unit_cost, shipping, fee, returns, cac, gross, contribution, gross,

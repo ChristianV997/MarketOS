@@ -33,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import logging
+import math
 import os
 import re
 import socket
@@ -73,7 +74,7 @@ class CJProductEvidence:
 
     source: str
     source_url: str
-    observed_at: float
+    observed_at: float | None
     external_product_id: str
     title: str
     field_status: dict[str, str] = dataclass_field(default_factory=dict)
@@ -96,10 +97,12 @@ class CJProductEvidence:
     extraction_method: str = "jsonld_schema_org_product"
     confidence: float = 0.0
     warnings: tuple[str, ...] = ()
+    fetch_provenance: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "source": self.source, "source_url": self.source_url, "observed_at": self.observed_at,
+            "fetch_provenance": self.fetch_provenance,
             "external_product_id": self.external_product_id, "title": self.title, "sku": self.sku,
             "category": self.category, "price": self.price, "currency": self.currency,
             "variants": [dict(v) for v in self.variants], "weight_kg": self.weight_kg,
@@ -113,15 +116,23 @@ class CJProductEvidence:
         }
 
 
-def _degraded(source_url: str, *, reason: str, extraction_method: str = "none") -> CJProductEvidence:
+def _degraded(
+    source_url: str,
+    *,
+    reason: str,
+    extraction_method: str = "none",
+    observed_at: float | None = None,
+    fetch_provenance: str = "not_fetched",
+) -> CJProductEvidence:
     """A structurally valid, fully-honest "observed nothing" result — the
     fallback for every rejected/blocked/failed path below, never an
     exception the caller must handle specially."""
     return CJProductEvidence(
-        source=SOURCE, source_url=source_url, observed_at=time.time(),
+        source=SOURCE, source_url=source_url, observed_at=observed_at,
         external_product_id=hashlib.sha256(source_url.encode()).hexdigest()[:16],
         title="", field_status={name: "unavailable" for name in _EVIDENCE_FIELDS},
         extraction_method=extraction_method, confidence=0.0, warnings=(reason,),
+        fetch_provenance=fetch_provenance,
     )
 
 
@@ -179,22 +190,24 @@ def _check_robots(hostname: str, url: str) -> None:
         raise PermissionError(f"robots.txt disallows evidence URL: {url}")
 
 
-_CACHE: dict[str, tuple[float, str]] = {}
+_CacheEntry = tuple[float, str] | tuple[float, str, float | None]
+_CACHE: dict[str, _CacheEntry] = {}
 
 
-def _cache_get(url: str) -> str | None:
+def _cache_get(url: str) -> tuple[str, float | None] | None:
     ttl_s = max(0.0, float(os.getenv("CJ_EVIDENCE_CACHE_TTL_S", "900")))
     cached = _CACHE.get(url)
     if cached and time.monotonic() - cached[0] < ttl_s:
-        return cached[1]
+        fetched_at = cached[2] if len(cached) == 3 else None
+        return cached[1], fetched_at
     if cached:
         _CACHE.pop(url, None)
     return None
 
 
-def _cache_put(url: str, html: str) -> None:
+def _cache_put(url: str, html: str, *, fetched_at: float | None = None) -> None:
     max_entries = max(1, min(int(os.getenv("CJ_EVIDENCE_CACHE_MAX_ENTRIES", "100")), 1000))
-    _CACHE[url] = (time.monotonic(), html)
+    _CACHE[url] = (time.monotonic(), html, fetched_at)
     if len(_CACHE) > max_entries:
         oldest = min(_CACHE, key=lambda key: _CACHE[key][0])
         _CACHE.pop(oldest, None)
@@ -223,13 +236,28 @@ def _bounded_get(url: str, *, timeout: int = DEFAULT_TIMEOUT_S) -> str:
     return b"".join(chunks).decode("utf-8", errors="replace")
 
 
-def _evidence_from_record(record: dict[str, Any], url: str, *, extraction_method: str) -> CJProductEvidence:
+def _evidence_from_record(
+    record: dict[str, Any],
+    url: str,
+    *,
+    extraction_method: str,
+    observed_at: float | None = None,
+    fetch_provenance: str = "unknown",
+) -> CJProductEvidence:
     """Map one shared normalized Product record into supplier evidence."""
     field_status = {name: "unavailable" for name in _EVIDENCE_FIELDS}
     if record.get("name"):
         field_status["title"] = "observed"
-    if record.get("selling_price"):
-        field_status["price"] = "observed"
+    raw_price = record.get("selling_price")
+    price: float | None = None
+    if raw_price is not None:
+        try:
+            parsed_price = float(raw_price)
+        except (TypeError, ValueError):
+            parsed_price = math.nan
+        if math.isfinite(parsed_price):
+            price = parsed_price
+            field_status["price"] = "observed"
     if record.get("product_id"):
         field_status["sku"] = "observed"
     if record.get("availability"):
@@ -245,31 +273,45 @@ def _evidence_from_record(record: dict[str, Any], url: str, *, extraction_method
     if record.get("shipping_cost") is not None:
         field_status["shipping_cost"] = "observed"
     confidence = round(sum(1 for status in field_status.values() if status == "observed") / len(field_status), 3)
-    warnings = () if field_status["price"] == "observed" else ("price_not_found_in_structured_data",)
+    warnings = []
+    if price is None:
+        warnings.append("price_not_found_in_structured_data")
+    elif price <= 0:
+        warnings.append("price_not_usable_as_supplier_cost")
     image = record.get("image")
     images = (str(image),) if image else ()
     return CJProductEvidence(
-        source=SOURCE, source_url=url, observed_at=time.time(),
+        source=SOURCE, source_url=url, observed_at=observed_at,
         external_product_id=str(record.get("product_id") or hashlib.sha256(url.encode()).hexdigest()[:16]),
         title=str(record.get("name", "")), field_status=field_status,
         sku=str(record.get("product_id", "")),
-        price=record.get("selling_price") or None, currency=str(record.get("currency", "USD")),
+        price=price, currency=str(record.get("currency", "USD")),
         inventory_status=str(record.get("availability") or "unavailable_publicly"),
         shipping_cost=record.get("shipping_cost"),
         rating=record.get("rating"), reviews_count=record.get("review_count"),
         images=images, description=str(record.get("description", "")),
-        extraction_method=extraction_method, confidence=confidence, warnings=warnings,
+        extraction_method=extraction_method, confidence=confidence, warnings=tuple(warnings),
+        fetch_provenance=fetch_provenance,
     )
 
 
-def _extract_from_jsonld(html: str, url: str) -> CJProductEvidence | None:
+def _extract_from_jsonld(
+    html: str,
+    url: str,
+    *,
+    observed_at: float | None = None,
+    fetch_provenance: str = "unknown",
+) -> CJProductEvidence | None:
     """Reuses Crawl4AIResearchAdapter's JSON-LD Product parser rather than
     duplicating it — the same conservative rule applies: a page without a
     valid schema.org Product object yields no evidence, never a guess."""
     records = Crawl4AIResearchAdapter._product_records_from_jsonld(html, url)
     if not records:
         return None
-    return _evidence_from_record(records[0], url, extraction_method="jsonld_schema_org_product")
+    return _evidence_from_record(
+        records[0], url, extraction_method="jsonld_schema_org_product",
+        observed_at=observed_at, fetch_provenance=fetch_provenance,
+    )
 
 
 def _extract_with_optional_js_render(url: str, *, context: SidecarContext) -> CJProductEvidence | None:
@@ -283,7 +325,11 @@ def _extract_with_optional_js_render(url: str, *, context: SidecarContext) -> CJ
         return None
     if not records:
         return None
-    return _evidence_from_record(records[0], url, extraction_method="crawl4ai_js_rendered_structured_product")
+    return _evidence_from_record(
+        records[0], url,
+        extraction_method="crawl4ai_js_rendered_structured_product",
+        fetch_provenance="renderer_timestamp_unavailable",
+    )
 
 
 def fetch_product_evidence(url: str, *, context: SidecarContext) -> CJProductEvidence:
@@ -300,22 +346,40 @@ def fetch_product_evidence(url: str, *, context: SidecarContext) -> CJProductEvi
         _check_robots("www.cjdropshipping.com", safe_url)
     except PermissionError as exc:
         return _degraded(url, reason=f"robots_blocked:{exc}")
-    html = _cache_get(safe_url)
+    cached = _cache_get(safe_url)
     fetch_failure: str | None = None
-    if html is None:
+    html: str | None = None
+    observed_at: float | None = None
+    fetch_provenance = "fetch_failed"
+    if cached is not None:
+        html, observed_at = cached
+        fetch_provenance = "cache_hit" if observed_at is not None else "cache_hit_timestamp_unknown"
+    else:
         try:
             html = _bounded_get(safe_url)
         except Exception as exc:  # noqa: BLE001 - network boundary must degrade, never raise
             _log.warning("cj_evidence_fetch_failed error=%s", type(exc).__name__)
             fetch_failure = f"fetch_failed:{type(exc).__name__}"
         else:
-            _cache_put(safe_url, html)
-    evidence = _extract_from_jsonld(html, safe_url) if html is not None else None
+            observed_at = time.time()
+            fetch_provenance = "fresh_fetch"
+            _cache_put(safe_url, html, fetched_at=observed_at)
+    evidence = (
+        _extract_from_jsonld(
+            html, safe_url, observed_at=observed_at, fetch_provenance=fetch_provenance,
+        )
+        if html is not None else None
+    )
     if evidence is None:
         rendered = _extract_with_optional_js_render(safe_url, context=context)
         if rendered is not None:
             return rendered
-        return _degraded(safe_url, reason=fetch_failure or "no_structured_product_data_found")
+        return _degraded(
+            safe_url,
+            reason=fetch_failure or "no_structured_product_data_found",
+            observed_at=observed_at,
+            fetch_provenance=fetch_provenance,
+        )
     return evidence
 
 
@@ -345,10 +409,12 @@ def discover_candidate_urls(query: str, *, context: SidecarContext, max_results:
         return []
     try:
         _check_robots("www.cjdropshipping.com", safe_url)
-        html = _cache_get(safe_url)
-        if html is None:
+        cached = _cache_get(safe_url)
+        if cached is not None:
+            html, _ = cached
+        else:
             html = _bounded_get(safe_url)
-            _cache_put(safe_url, html)
+            _cache_put(safe_url, html, fetched_at=time.time())
     except Exception as exc:  # noqa: BLE001 - discovery degrades to empty, never raises
         _log.info("cj_discovery_unavailable error=%s", type(exc).__name__)
         return []
@@ -362,14 +428,31 @@ def discover_candidate_urls(query: str, *, context: SidecarContext, max_results:
     return urls
 
 
+def _has_known_fetch(evidence: CJProductEvidence) -> bool:
+    if evidence.source != SOURCE or evidence.fetch_provenance not in {"fresh_fetch", "cache_hit"}:
+        return False
+    if evidence.observed_at is None:
+        return False
+    try:
+        return math.isfinite(float(evidence.observed_at))
+    except (TypeError, ValueError):
+        return False
+
+
 def _quality_from_evidence(evidence: CJProductEvidence) -> DataQuality:
-    """Public-page quality only. Never live-attributed; stamp the observation time."""
+    """Public-page quality only; use the original fetch time and retrieval mode."""
+    if not _has_known_fetch(evidence):
+        raise ValueError("public-page quality requires known fetch provenance and timestamp")
+    if evidence.observed_at is None:
+        raise ValueError("public-page quality requires an observation timestamp")
+    observed_at = float(evidence.observed_at)
     return DataQuality(
         provenance="public_page",
         attribution="attributed",
         completeness="partial",
         source_ref=evidence.source_url,
-        observed_at=datetime.fromtimestamp(float(evidence.observed_at), tz=timezone.utc),
+        observed_at=datetime.fromtimestamp(observed_at, tz=timezone.utc),
+        retrieval_mode=evidence.fetch_provenance,
     )
 
 
@@ -380,7 +463,11 @@ def _observed_number(evidence: CJProductEvidence, field_name: str) -> float | No
     value = getattr(evidence, field_name, None)
     if value is None:
         return None
-    return float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def to_supplier_offer(evidence: CJProductEvidence, *, supplier_id: str = SOURCE) -> SupplierOffer | None:
@@ -398,7 +485,13 @@ def to_supplier_offer(evidence: CJProductEvidence, *, supplier_id: str = SOURCE)
     """
     unit_cost = _observed_number(evidence, "price")
     shipping_cost = _observed_number(evidence, "shipping_cost")
-    if unit_cost is None or shipping_cost is None:
+    if (
+        not _has_known_fetch(evidence)
+        or unit_cost is None
+        or unit_cost <= 0
+        or shipping_cost is None
+        or shipping_cost < 0
+    ):
         return None
     return SupplierOffer(
         supplier_id=supplier_id, product_id=evidence.external_product_id,
@@ -411,10 +504,13 @@ def to_supplier_offer(evidence: CJProductEvidence, *, supplier_id: str = SOURCE)
 
 def to_product_candidate(evidence: CJProductEvidence) -> ProductCandidate | None:
     """Return a priced public-page candidate; never encode a missing price as 0."""
-    if not evidence.title:
+    if (
+        not _has_known_fetch(evidence)
+        or not evidence.title
+    ):
         return None
     price = _observed_number(evidence, "price")
-    if price is None:
+    if price is None or price <= 0:
         return None
     return ProductCandidate(
         product_id=evidence.external_product_id, name=evidence.title, currency=evidence.currency,
@@ -438,6 +534,10 @@ def score_candidates(evidences: list[CJProductEvidence], query: str) -> list[dic
         observed = sum(1 for status in evidence.field_status.values() if status == "observed")
         completeness = observed / max(1, len(evidence.field_status))
         missing = sorted(name for name, status in evidence.field_status.items() if status == "unavailable")
+        invalid = sorted(
+            name for name, status in evidence.field_status.items()
+            if status == "malformed" or (name == "price" and status == "observed" and evidence.price is not None and evidence.price <= 0)
+        )
         conflicting = sorted(name for name, status in evidence.field_status.items() if status == "conflicting")
         composite = round(relevance * 0.4 + completeness * 0.4 + evidence.confidence * 0.2, 4)
         scored.append({
@@ -445,8 +545,9 @@ def score_candidates(evidences: list[CJProductEvidence], query: str) -> list[dic
             "source_url": evidence.source_url, "relevance_score": round(relevance, 4),
             "evidence_completeness": round(completeness, 4), "extraction_confidence": evidence.confidence,
             "evidence_mode": "public_page_observation", "supplier_live_proof": False,
-            "composite_score": composite, "missing_evidence": missing, "conflicting_evidence": conflicting,
-            "assumptions_still_required": [name for name in missing if name in
+            "composite_score": composite, "missing_evidence": missing, "invalid_evidence": invalid,
+            "conflicting_evidence": conflicting,
+            "assumptions_still_required": [name for name in (*missing, *invalid) if name in
                                             {"price", "weight_kg", "shipping_cost", "warehouse_origin", "estimated_delivery_days"}],
         })
     return sorted(scored, key=lambda item: item["composite_score"], reverse=True)

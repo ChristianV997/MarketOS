@@ -58,7 +58,7 @@ class TestEconomicsPrecedence:
             source_type = "public_page_static"
 
         result = _economics_with_evidence(candidate, 49.0, 15.0, 6.0, 12.0, 0.08, 0.03, evidence=_Evidence())
-        assert result.source == "partial_observed_supplier_evidence"
+        assert result.source == "partial_observed_public_page_evidence"
         assert result.assumed_unit_cost == 9.5
         assert result.assumed_shipping_cost == 2.25
         assert "Observed CJ public-page catalog price (not supplier-live proof)=9.5" in result.assumptions[1]
@@ -82,6 +82,21 @@ class TestEconomicsPrecedence:
         assert result.assumed_shipping_cost == 6.0  # unchanged assumption
         assert "public-page catalog price (not supplier-live proof)" in result.assumptions[1]
         assert result.assumptions[2] == "Assumed shipping=6.0"
+
+    def test_zero_public_page_price_does_not_replace_assumed_supplier_cost(self):
+        candidate = _selected_candidate()
+
+        class _ZeroCostEvidence:
+            unit_cost = 0.0
+            shipping_cost = 0.0
+            source_url = "https://www.cjdropshipping.com/product/example.html"
+            source_type = "public_page_static"
+
+        result = _economics_with_evidence(candidate, 49.0, 15.0, 6.0, 12.0, 0.08, 0.03, evidence=_ZeroCostEvidence())
+        assert result.assumed_unit_cost == 15.0
+        assert result.assumed_shipping_cost == 0.0
+        assert "Assumed unit cost=15.0" in result.assumptions[1]
+        assert "public-page shipping value" in result.assumptions[2]
 
     def test_no_evidence_at_all_falls_back_to_assumptions_with_evidence_path(self):
         candidate = _selected_candidate()
@@ -114,8 +129,9 @@ class TestGatherSupplierEvidence:
         good = CJProductEvidence(
             source="cj_public_page", source_url="https://www.cjdropshipping.com/product/good.html",
             observed_at=0.0, external_product_id="good", title="Portable Espresso Maker",
-            field_status={"title": "observed", "price": "observed"}, price=9.5, shipping_cost=2.0,
-            confidence=0.9,
+            field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
+            price=9.5, shipping_cost=2.0,
+            confidence=0.9, fetch_provenance="fresh_fetch",
         )
         bad = CJProductEvidence(
             source="cj_public_page", source_url="https://www.cjdropshipping.com/product/bad.html",
@@ -131,6 +147,9 @@ class TestGatherSupplierEvidence:
         assert result.shipping_cost == 2.0
         assert result.source_url == "https://www.cjdropshipping.com/product/good.html"
         assert result.candidates_considered == 2
+        assert result.source_type == "public_page_static"
+        assert result.evidence is not None
+        assert result.evidence.source == "cj_public_page"
 
     def test_no_priced_candidates_returns_none_cost_with_ranking(self):
         unpriced = CJProductEvidence(
@@ -146,6 +165,35 @@ class TestGatherSupplierEvidence:
         assert result.unit_cost is None
         assert result.ranking
 
+    def test_missing_shipping_is_assumed_and_zero_shipping_is_observed(self):
+        url = "https://www.cjdropshipping.com/product/shipping.html"
+
+        def _evidence(shipping_cost):
+            return CJProductEvidence(
+                source="cj_public_page", source_url=url, observed_at=1_700_000_000.0,
+                external_product_id="shipping-widget", title="Portable Espresso Maker",
+                field_status={"title": "observed", "price": "observed",
+                              "shipping_cost": "unavailable" if shipping_cost is None else "observed"},
+                price=9.5, shipping_cost=shipping_cost, confidence=0.9,
+                fetch_provenance="fresh_fetch",
+            )
+
+        missing_shipping = _evidence(None)
+        with patch("backend.mvp_commerce.supplier_evidence.fetch_product_evidence", return_value=missing_shipping):
+            missing = gather_supplier_evidence(
+                "portable espresso maker", context=SidecarContext(dry_run=False), candidate_urls=[url],
+            )
+        assert missing.shipping_cost is None
+        assert "shipping_cost: unavailable_publicly" in missing.warnings
+
+        zero_shipping = _evidence(0.0)
+        with patch("backend.mvp_commerce.supplier_evidence.fetch_product_evidence", return_value=zero_shipping):
+            zero = gather_supplier_evidence(
+                "portable espresso maker", context=SidecarContext(dry_run=False), candidate_urls=[url],
+            )
+        assert zero.shipping_cost == 0.0
+        assert "shipping_cost: unavailable_publicly" not in zero.warnings
+
 
 class TestSupplierEvidenceEvents:
     def test_events_for_observed_evidence(self):
@@ -153,6 +201,7 @@ class TestSupplierEvidenceEvents:
             source="cj_public_page", source_url="https://www.cjdropshipping.com/product/good.html",
             observed_at=0.0, external_product_id="good", title="Portable Espresso Maker",
             field_status={"title": "observed", "price": "observed"}, price=9.5, confidence=0.9,
+            fetch_provenance="cache_hit",
         )
         result = SupplierEvidenceResult(
             attempted=True, unit_cost=9.5, shipping_cost=None, source_url=evidence.source_url,
@@ -164,6 +213,13 @@ class TestSupplierEvidenceEvents:
         assert all(event.correlation_id == "run-1" for event in events)
         assert all(event.metadata["no_order_authority"] is True for event in events)
         assert events[1].payload["external_product_id"] == "good"
+        assert events[1].payload["fetch_provenance"] == "cache_hit"
+        assert events[1].metadata["no_outreach_authority"] is True
+        assert events[1].metadata["public_source"] is True
+        assert events[1].metadata["authenticated_readonly"] is False
+        assert events[1].metadata["supplier_source"] == "public_page_static"
+        assert events[2].payload["fetch_provenance"] == "cache_hit"
+        assert events[2].payload["observed_at"] == 0.0
 
     def test_events_for_degraded_evidence(self):
         result = SupplierEvidenceResult(

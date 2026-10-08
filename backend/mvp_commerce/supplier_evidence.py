@@ -14,6 +14,7 @@ runner.py, used only when a caller explicitly supplies
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,6 +25,24 @@ from backend.contracts.adapters import SidecarContext
 from backend.contracts.events import Event
 
 SOURCE = "backend.mvp_commerce.supplier_evidence"
+
+
+def _public_page_source_type(evidence: CJProductEvidence | None) -> str:
+    if evidence is not None and evidence.extraction_method.startswith("crawl4ai_js_rendered"):
+        return "public_page_js"
+    return "public_page_static"
+
+
+def _finite_amount(value: Any, *, positive: bool) -> float | None:
+    if value is None:
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(amount) or (amount <= 0 if positive else amount < 0):
+        return None
+    return amount
 
 
 @dataclass(frozen=True)
@@ -44,6 +63,24 @@ class SupplierEvidenceResult:
     warnings: tuple[str, ...] = ()
     source_type: str = "public_page_static"
     status: str = "unavailable"
+
+    def __post_init__(self) -> None:
+        warnings = list(self.warnings)
+        cost = _finite_amount(self.unit_cost, positive=True)
+        if self.unit_cost is not None and cost is None:
+            object.__setattr__(self, "unit_cost", None)
+            if "price_not_usable_as_supplier_cost" not in warnings:
+                warnings.append("price_not_usable_as_supplier_cost")
+        elif cost is not None:
+            object.__setattr__(self, "unit_cost", cost)
+        shipping = _finite_amount(self.shipping_cost, positive=False)
+        if self.shipping_cost is not None and shipping is None:
+            object.__setattr__(self, "shipping_cost", None)
+            if "shipping_cost_not_usable" not in warnings:
+                warnings.append("shipping_cost_not_usable")
+        elif shipping is not None:
+            object.__setattr__(self, "shipping_cost", shipping)
+        object.__setattr__(self, "warnings", tuple(warnings))
 
 
 def gather_supplier_evidence(
@@ -71,24 +108,48 @@ def gather_supplier_evidence(
 
     evidences = [fetch_product_evidence(url, context=context) for url in urls[:max_candidates]]
     ranking = score_candidates(evidences, query)
-    priced_ids = {e.external_product_id for e in evidences if e.price is not None and e.field_status.get("price") == "observed"}
+    priced_ids = {
+        e.external_product_id for e in evidences
+        if _finite_amount(e.price, positive=True) is not None
+        and e.field_status.get("price") == "observed"
+        and e.observed_at is not None and e.fetch_provenance in {"fresh_fetch", "cache_hit"}
+    }
     # ranking is already sorted best-first; keep that order, just restrict
     # to candidates with an actual observed price.
     priced_ranking = [item for item in ranking if item["product_id"] in priced_ids]
     if not priced_ranking:
+        best_id = ranking[0]["product_id"] if ranking else None
+        best = next((e for e in evidences if e.external_product_id == best_id), None)
+        warnings = {warning for evidence in evidences for warning in evidence.warnings}
+        if best is not None and best.field_status.get("shipping_cost") != "observed":
+            warnings.add("shipping_cost: unavailable_publicly")
         return SupplierEvidenceResult(
-            attempted=True, unit_cost=None, shipping_cost=None, source_url="",
+            attempted=True, unit_cost=None, shipping_cost=None,
+            source_url=best.source_url if best is not None else "",
             candidates_considered=len(evidences), ranking=tuple(ranking),
-            warnings=tuple(sorted({warning for evidence in evidences for warning in evidence.warnings})),
+            evidence=best if best is not None and best.title else None,
+            warnings=tuple(sorted(warnings)),
+            source_type=_public_page_source_type(best),
         )
     best_id = priced_ranking[0]["product_id"]
     best = next(e for e in evidences if e.external_product_id == best_id)
+    observed_shipping = (
+        _finite_amount(best.shipping_cost, positive=False)
+        if best.field_status.get("shipping_cost") == "observed" else None
+    )
+    warnings = best.warnings
+    if observed_shipping is None:
+        warnings += ("shipping_cost: unavailable_publicly",)
+        if best.field_status.get("shipping_cost") == "observed" and best.shipping_cost is not None:
+            warnings += ("shipping_cost_not_usable",)
     return SupplierEvidenceResult(
-        attempted=True, unit_cost=best.price, shipping_cost=best.shipping_cost,
+        attempted=True,
+        unit_cost=_finite_amount(best.price, positive=True),
+        shipping_cost=observed_shipping,
         source_url=best.source_url, candidates_considered=len(evidences),
         evidence=best, ranking=tuple(ranking),
-        warnings=best.warnings if best.shipping_cost is None else best.warnings + ("shipping_cost: unavailable_publicly",),
-        source_type="public_page_js" if "js" in best.extraction_method.lower() else "public_page_static",
+        warnings=warnings,
+        source_type=_public_page_source_type(best),
         status="observed",
     )
 
@@ -141,7 +202,8 @@ def supplier_evidence_events(result: SupplierEvidenceResult, *, workspace_id: st
         "no_spend_authority": True,
         "no_order_authority": True, "no_supplier_mutation_authority": True,
         "no_inventory_mutation_authority": True, "no_fulfillment_authority": True,
-        "no_payment_authority": True, "no_customer_message_authority": True,
+        "no_payment_authority": True, "no_outreach_authority": True,
+        "no_customer_message_authority": True,
     }
     events.append(Event(
         _event_id("requested"), workspace_id, "commerce_mvp_run", run_id,
@@ -164,6 +226,8 @@ def supplier_evidence_events(result: SupplierEvidenceResult, *, workspace_id: st
                 "unit_cost": result.unit_cost,
                 "shipping_source": f"observed_{result.source_type}" if result.shipping_cost is not None else "assumption_unchanged",
                 "shipping_cost": result.shipping_cost, "source_url": result.evidence.source_url,
+                "observed_at": result.evidence.observed_at,
+                "fetch_provenance": result.evidence.fetch_provenance,
             },
             metadata=metadata,
         ))
