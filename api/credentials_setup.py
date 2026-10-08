@@ -9,21 +9,36 @@ Usage:
   GET /api/setup/instructions        (view setup instructions)
 """
 import logging
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, Body, Depends, HTTPException
+
+from backend.identity.http import require_workspace_permission
+from backend.identity.repository import CLIENT_TYPE
+from backend.identity.roles import CREDENTIAL_WRITE
+from backend.identity.workspaces import WorkspaceAccess
 
 _log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_MAX_VALUE_LEN = 4096
+_write_gate = require_workspace_permission(CLIENT_TYPE, CREDENTIAL_WRITE)
+
+
+def _allowed_keys() -> frozenset[str]:
+    """Only provider credential keys; never ``*_DRY_RUN`` flags or arbitrary names."""
+    from backend.config import _SERVICE_CREDENTIALS
+
+    return frozenset(k for keys in _SERVICE_CREDENTIALS.values() for k in keys)
 
 
 @router.post("/credentials/set")
 async def set_credential(
     key: str = Body(...),
     value: str = Body(...),
+    _access: WorkspaceAccess = Depends(_write_gate),
 ) -> dict:
-    """Securely set a credential.
+    """Securely set a credential (verified internal operator only).
 
     Args:
       key: Credential key (e.g., META_ACCESS_TOKEN)
@@ -37,12 +52,10 @@ async def set_credential(
       - Stored in ~/.marketos/credentials.json with 0o600 permissions
       - Only your user can read it
     """
-    # Validate key format
-    if not key or not value:
-        raise HTTPException(status_code=400, detail="Key and value required")
-
-    if not key.isupper() or not key.replace("_", "").isalnum():
-        raise HTTPException(status_code=400, detail="Invalid key format")
+    if key not in _allowed_keys():
+        raise HTTPException(status_code=400, detail="Unsupported credential key")
+    if not value or len(value) > _MAX_VALUE_LEN or any(c in value for c in "\r\n\x00"):
+        raise HTTPException(status_code=400, detail="Invalid credential value")
 
     try:
         from backend.config import set_credential
@@ -53,8 +66,8 @@ async def set_credential(
             "message": f"Credential {key} saved successfully",
         }
     except Exception as exc:
-        _log.error("failed_to_set_credential key=%s error=%s", key, exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        _log.error("failed_to_set_credential key=%s error_type=%s", key, type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Failed to store credential")
 
 
 @router.get("/credentials/status")
@@ -182,110 +195,43 @@ async def all_instructions() -> dict:
     }
 
 
-@router.post("/test/{service}")
-async def test_credentials(service: str) -> dict:
-    """Test if credentials for a service are valid.
+_TEST_SERVICES = ("meta", "tiktok", "shopify")
 
-    Makes a minimal API call to verify credentials work.
+
+async def run_service_test(service: str) -> dict:
+    """Offline-only credential check; never calls a provider.
+
+    No server-side approval seam exists for live provider actions (the cockpit
+    approval store is unauthenticated, the Approval Ledger is an offline record),
+    so a service that would go live is reported ``blocked`` instead of exercised.
+    Also used directly by ``api/onboarding.py``.
     """
+    from backend.config import is_dry_run
+
     service = service.lower()
-
-    if service == "meta":
-        try:
-            from backend.integrations import meta_ads_client
-            from backend.config import is_dry_run
-
-            if is_dry_run("meta"):
-                return {
-                    "status": "dry_run",
-                    "message": "Meta is in dry-run mode (no credentials detected)",
-                }
-
-            # Try to create a test campaign
-            campaign_id = meta_ads_client.create_campaign("__TEST__Campaign__")
-            if campaign_id and campaign_id.startswith("dry_") is False:
-                return {
-                    "status": "ok",
-                    "message": "Meta credentials are valid",
-                    "campaign_id": campaign_id,
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": "Failed to create test campaign",
-                }
-        except Exception as exc:
-            return {
-                "status": "error",
-                "message": str(exc),
-            }
-
-    elif service == "tiktok":
-        try:
-            from backend.config import is_dry_run
-            from backend.integrations import tiktok_ads
-
-            if is_dry_run("tiktok"):
-                return {
-                    "status": "dry_run",
-                    "message": "TikTok is in dry-run mode (no credentials detected)",
-                }
-
-            campaign_id = tiktok_ads.create_campaign("__TEST__Campaign__", budget=1.0)
-            if campaign_id and not str(campaign_id).startswith("dry"):
-                return {
-                    "status": "ok",
-                    "message": "TikTok credentials are valid",
-                    "campaign_id": str(campaign_id),
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": "Failed to create test campaign",
-                }
-        except Exception as exc:
-            _log.exception("tiktok_test_failed")
-            return {
-                "status": "error",
-                "message": str(exc),
-            }
-
-    elif service == "shopify":
-        try:
-            from backend.config import is_dry_run
-            from backend.creation.store_builder import create_product_page
-
-            if is_dry_run("shopify"):
-                return {
-                    "status": "dry_run",
-                    "message": "Shopify is in dry-run mode (no credentials detected)",
-                }
-
-            page = create_product_page(
-                "__TEST__Product__",
-                "<p>Test product for credential verification</p>",
-                1.0
-            )
-            if page.get("status") == "ok" and page.get("dry_run") is not True:
-                return {
-                    "status": "ok",
-                    "message": "Shopify credentials are valid",
-                    "product_id": page.get("product_id"),
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": "Failed to create test product",
-                }
-        except Exception as exc:
-            _log.exception("shopify_test_failed")
-            return {
-                "status": "error",
-                "message": str(exc),
-            }
-
-    else:
-        raise HTTPException(status_code=404, detail=f"Unknown service: {service}")
+    if service not in _TEST_SERVICES:
+        raise HTTPException(status_code=404, detail="Unknown service")
+    if is_dry_run(service):
+        return {
+            "status": "dry_run",
+            "message": f"{service} is in dry-run mode (no credentials detected)",
+        }
+    return {
+        "status": "blocked",
+        "message": "Live provider tests are disabled: no approval mechanism is available",
+    }
 
 
-__all__ = ["router"]
+@router.post("/test/{service}")
+async def test_credentials_route(
+    service: str,
+    _access: WorkspaceAccess = Depends(_write_gate),
+) -> dict:
+    """Offline credential-readiness check (verified internal operator only)."""
+    return await run_service_test(service)
+
+
+# api/onboarding.py imports this name; it is the same offline-only helper.
+test_credentials = run_service_test
+
+__all__ = ["router", "run_service_test"]

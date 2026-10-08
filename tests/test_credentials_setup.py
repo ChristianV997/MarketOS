@@ -18,14 +18,20 @@ def temp_config(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         config_path = Path(tmpdir) / "credentials.json"
         monkeypatch.setenv("MARKETOS_CONFIG_PATH", str(config_path))
+        monkeypatch.setattr("backend.config._CONFIG_PATH", config_path)  # resolved at import time
         yield config_path
 
 
 @pytest.fixture
 def client(temp_config):
     """FastAPI test client with credentials router."""
+    from api.credentials_setup import _write_gate
+    from backend.identity.workspaces import WorkspaceAccess
+
     app = FastAPI()
     app.include_router(credentials_router, prefix="/api/setup")
+    # Identity/role enforcement is covered in tests/identity/test_credentials_setup_gate.py.
+    app.dependency_overrides[_write_gate] = lambda: WorkspaceAccess("i", "s", "w", "client_service", "n")
     return TestClient(app)
 
 
@@ -100,11 +106,11 @@ class TestCredentialsAPI:
         """POST /credentials/set stores credential."""
         response = client.post(
             "/api/setup/credentials/set",
-            json={"key": "TEST_TOKEN", "value": "secret123"},
+            json={"key": "META_ACCESS_TOKEN", "value": "secret123"},
         )
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
-        assert get_credential("TEST_TOKEN") == "secret123"
+        assert get_credential("META_ACCESS_TOKEN") == "secret123"
 
     def test_set_credential_invalid_key(self, client, temp_config):
         """Invalid key format rejected."""
@@ -118,7 +124,7 @@ class TestCredentialsAPI:
         """Missing value rejected."""
         response = client.post(
             "/api/setup/credentials/set",
-            json={"key": "TEST_KEY"},
+            json={"key": "META_ACCESS_TOKEN"},
         )
         assert response.status_code == 422  # Validation error
 

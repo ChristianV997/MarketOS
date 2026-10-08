@@ -15,10 +15,11 @@ ROLES = (CLIENT_VIEWER, INTERNAL_OPERATOR)
 PROFILE_READ = "client_profile:read"
 PROFILE_CREATE = "client_profile:create"
 PROFILE_UPDATE = "client_profile:update"
+CREDENTIAL_WRITE = "setup_credential:write"
 
 ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
     CLIENT_VIEWER: frozenset({PROFILE_READ}),
-    INTERNAL_OPERATOR: frozenset({PROFILE_READ, PROFILE_CREATE, PROFILE_UPDATE}),
+    INTERNAL_OPERATOR: frozenset({PROFILE_READ, PROFILE_CREATE, PROFILE_UPDATE, CREDENTIAL_WRITE}),
 }
 
 
