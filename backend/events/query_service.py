@@ -12,11 +12,36 @@ from .query_models import CommerceRunSummary, CompetitionSummary, EventQuery, Ev
 
 _JSONL_LINE_BREAK = re.compile(r"\x0d\x0a|\x0d|\x0a")
 
+
+def _opened_regular_path(fd: int) -> Path | None:
+    """Return the path of an already-opened fd when the host exposes it.
+
+    Linux uses ``/proc/self/fd/<n>`` so confinement is judged on the opened
+    object, not a pre-open ``resolve()``/``is_file()`` race. Hosts without that
+    interface return ``None`` and callers must fail closed when a root was
+    requested. Windows reparse-point identity is not exercised here.
+    """
+    try:
+        return Path(os.readlink(f"/proc/self/fd/{fd}"))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _path_is_within_root(path: Path, root: Path) -> bool:
+    try:
+        resolved = path.resolve()
+        bound = root.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return resolved == bound or bound in resolved.parents
+
+
 def load_events_from_jsonl(
     path: str | Path,
     *,
     max_bytes: int | None = None,
     oversized_warning: str = "jsonl_file_oversized",
+    allowed_root: str | Path | None = None,
 ) -> tuple[list[Event], list[str]]:
     # A negative cap would make read() unbounded, so it must never be accepted as a bound.
     if max_bytes is not None and (isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0):
@@ -31,6 +56,12 @@ def load_events_from_jsonl(
             os.close(fd)
             fd = None
             return events, ["jsonl_file_unavailable"]
+        if allowed_root is not None:
+            opened = _opened_regular_path(fd)
+            if opened is None or not _path_is_within_root(opened, Path(allowed_root)):
+                os.close(fd)
+                fd = None
+                return events, ["jsonl_path_outside_allowed_root"]
         with open(fd, "rb") as source:
             fd = None
             raw = source.read() if max_bytes is None else source.read(max_bytes)

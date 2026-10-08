@@ -48,6 +48,7 @@ def _jsonl_report(query: EventQuery) -> dict:
         path,
         max_bytes=MAX_JSONL_BYTES,
         oversized_warning="jsonl_read_path_oversized",
+        allowed_root=ARTIFACTS,
     )
     return event_query_report(events, query, warnings)
 def _report(source: str, query: EventQuery) -> dict:

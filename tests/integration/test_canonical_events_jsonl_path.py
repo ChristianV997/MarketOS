@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import threading
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -63,9 +64,14 @@ def test_jsonl_oversized_artifact_is_rejected_before_read(monkeypatch, tmp_path)
     calls = []
     original_loader = canonical_events.load_events_from_jsonl
 
-    def _bounded_loader(path, *, max_bytes, oversized_warning):
+    def _bounded_loader(path, *, max_bytes, oversized_warning, allowed_root=None):
         calls.append(max_bytes)
-        return original_loader(path, max_bytes=max_bytes, oversized_warning=oversized_warning)
+        return original_loader(
+            path,
+            max_bytes=max_bytes,
+            oversized_warning=oversized_warning,
+            allowed_root=allowed_root,
+        )
 
     monkeypatch.setattr(canonical_events, "load_events_from_jsonl", _bounded_loader)
     report = canonical_events._jsonl_report(_query())
@@ -493,4 +499,85 @@ def test_regular_file_direct_loader_and_route(monkeypatch, tmp_path):
     assert len(report["timeline"]["events"]) == 1
     assert report["read_only"] is True
     assert report["network_calls"] is False
+    assert report["mutated"] is False
+
+
+def test_direct_loader_without_root_still_reads_outside_files_for_cli(tmp_path):
+    """CLI/rehearsal callers pass explicit paths; no global root is assumed."""
+    outsider = tmp_path / "outside.jsonl"
+    outsider.write_bytes(_valid_event_line())
+    events, warnings = query_service.load_events_from_jsonl(outsider)
+    assert warnings == []
+    assert len(events) == 1
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").exists(), reason="opened-fd path identity requires /proc/self/fd (native Linux)")
+def test_direct_loader_with_allowed_root_rejects_outside_regular_file(tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    outsider = tmp_path / "outside.jsonl"
+    outsider.write_bytes(_valid_event_line())
+    events, warnings = query_service.load_events_from_jsonl(outsider, allowed_root=artifacts)
+    assert events == []
+    assert warnings == ["jsonl_path_outside_allowed_root"]
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").exists(), reason="opened-fd path identity requires /proc/self/fd (native Linux)")
+def test_direct_loader_with_allowed_root_accepts_in_root_file_and_size_cap(tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    path = artifacts / "events.jsonl"
+    path.write_bytes(_valid_event_line())
+    events, warnings = query_service.load_events_from_jsonl(path, allowed_root=artifacts)
+    assert warnings == [] and len(events) == 1
+
+    path.write_bytes(b"x" * 64)
+    empty, oversized = query_service.load_events_from_jsonl(
+        path, allowed_root=artifacts, max_bytes=16, oversized_warning="oversized"
+    )
+    assert empty == [] and oversized == ["oversized"]
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").exists(), reason="opened-fd path identity requires /proc/self/fd (native Linux)")
+def test_direct_loader_symlink_escape_rejected_at_opened_object(tmp_path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    outsider = tmp_path / "outside.jsonl"
+    outsider.write_bytes(_valid_event_line())
+    link = artifacts / "link.jsonl"
+    try:
+        link.symlink_to(outsider)
+    except OSError:
+        pytest.skip("symlinks are not available on this platform")
+    events, warnings = query_service.load_events_from_jsonl(link, allowed_root=artifacts)
+    assert events == []
+    assert warnings == ["jsonl_path_outside_allowed_root"]
+
+
+def test_windows_reparse_point_identity_not_exercised_on_this_host():
+    """Document host coverage: this Linux runner validates /proc/self/fd, not NT reparse points."""
+    assert os.name == "posix"
+    assert Path("/proc/self/fd").exists()
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").exists(), reason="opened-fd path identity requires /proc/self/fd (native Linux)")
+def test_route_passes_allowed_root_so_swapped_outside_target_fail_closes(monkeypatch, tmp_path):
+    """After the route's resolve check, the loader still binds the opened object to ARTIFACTS."""
+    artifacts = _jail(monkeypatch, tmp_path)
+    path = artifacts / "events.jsonl"
+    path.write_bytes(_valid_event_line())
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(path))
+
+    original = query_service.load_events_from_jsonl
+    seen: list[object] = []
+
+    def _capture(path, **kwargs):
+        seen.append(kwargs.get("allowed_root"))
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(canonical_events, "load_events_from_jsonl", _capture)
+    report = canonical_events._jsonl_report(_query())
+    assert seen == [artifacts.resolve()] or seen == [canonical_events.ARTIFACTS]
+    assert report["timeline"]["events"]
+    assert report["read_only"] is True
     assert report["mutated"] is False
