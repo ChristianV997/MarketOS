@@ -93,7 +93,10 @@ def test_node_ci_steps_execute_install_build_and_test():
     run_commands = [step["run"] for step in steps if "run" in step]
     assert len(run_commands) >= 3, f"Expected at least 3 run steps, found: {run_commands}"
     assert run_commands[0] == "npm ci"
-    assert "npm run build" in run_commands[1]
+    assert run_commands[1] == "npm run build"
+    assert "--if-present" not in run_commands[1], (
+        "The frontend build must be required; optional execution can report a green matrix leg without building"
+    )
     assert run_commands[2] == "npm test"
 
     # Ensure no weakening flags (e.g. '|| true', 'continue-on-error')
