@@ -45,6 +45,7 @@ SOURCE_TYPES = frozenset(
         "fixture_demo",
     }
 )
+FIXTURE_SOURCE_TYPES = frozenset({"cj_readonly_fixture", "fixture_demo"})
 
 
 def number(value: Any) -> float | None:
@@ -206,7 +207,8 @@ def calculate_unit_economics(
             resolved_sell_currency = resolved_cost_currency
         else:
             resolved_sell_currency = "USD"
-            resolved_cost_currency = "USD"
+            if cost_currency is None and currency is None:
+                resolved_cost_currency = "USD"
     elif resolved_cost_currency is None and cost_currency is None and currency is None:
         resolved_cost_currency = resolved_sell_currency
 
@@ -225,74 +227,52 @@ def calculate_unit_economics(
             assumptions.append("shipping_cost_missing")
             landed = cost
 
+    def currency_blocked(reason: str, *, output_currency: str | None = None) -> UnitEconomicsScenario:
+        return UnitEconomicsScenario(
+            sell, cost, shipping, None, payment_fee_rate, platform_fee_rate,
+            None, None, None, None, None,
+            tuple(assumptions + [reason]),
+            currency=output_currency or resolved_sell_currency or "USD",
+            cost_currency=resolved_cost_currency,
+            shipping_currency=resolved_shipping_currency,
+        )
+
+    # Let the canonical Money contract validate currency support; do not maintain
+    # a second list or treat unsupported currencies as ordinary bad arithmetic.
+    for candidate_currency in (resolved_sell_currency, resolved_cost_currency, resolved_shipping_currency):
+        if candidate_currency is None:
+            continue
+        try:
+            Money(0, candidate_currency, source="supplier_feasibility", provenance="assumed")
+        except (TypeError, ValueError):
+            return currency_blocked("unsupported_currency")
+
+    # 1. Missing currency check
+    if cost is not None and not resolved_cost_currency:
+        return currency_blocked("currency_missing")
+
+    if shipping is not None and not resolved_shipping_currency:
+        return currency_blocked("currency_missing")
+
+    if sell is not None and not resolved_sell_currency:
+        return currency_blocked("currency_missing", output_currency="USD")
+
+    # 2. Currency mismatch check
+    if lane and lane.currency and resolved_sell_currency and lane.currency.strip().upper() != resolved_sell_currency:
+        return currency_blocked("currency_mismatch", output_currency=lane.currency)
+
+    if resolved_cost_currency and resolved_sell_currency and resolved_cost_currency != resolved_sell_currency:
+        return currency_blocked("currency_mismatch")
+
+    if shipping is not None and resolved_shipping_currency and resolved_sell_currency and resolved_shipping_currency != resolved_sell_currency:
+        return currency_blocked("currency_mismatch")
+
     if sell is None or landed is None:
         return UnitEconomicsScenario(
             sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
             None, None, None, None, None,
             tuple(assumptions + ["sell_price_or_landed_cost_missing"]),
             currency=resolved_sell_currency or "USD",
-            cost_currency=resolved_cost_currency,
-            shipping_currency=resolved_shipping_currency,
-        )
-
-    # 1. Missing currency check
-    if cost is not None and not resolved_cost_currency:
-        return UnitEconomicsScenario(
-            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
-            None, None, None, None, None,
-            tuple(assumptions + ["currency_missing"]),
-            currency=resolved_sell_currency or "USD",
-            cost_currency=None,
-            shipping_currency=resolved_shipping_currency,
-        )
-
-    if shipping is not None and not resolved_shipping_currency:
-        return UnitEconomicsScenario(
-            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
-            None, None, None, None, None,
-            tuple(assumptions + ["currency_missing"]),
-            currency=resolved_sell_currency or "USD",
-            cost_currency=resolved_cost_currency,
-            shipping_currency=None,
-        )
-
-    if sell is not None and not resolved_sell_currency:
-        return UnitEconomicsScenario(
-            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
-            None, None, None, None, None,
-            tuple(assumptions + ["currency_missing"]),
-            currency="USD",
-            cost_currency=resolved_cost_currency,
-            shipping_currency=resolved_shipping_currency,
-        )
-
-    # 2. Currency mismatch check
-    if lane and lane.currency and resolved_sell_currency and lane.currency.strip().upper() != resolved_sell_currency:
-        return UnitEconomicsScenario(
-            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
-            None, None, None, None, None,
-            tuple(assumptions + ["currency_mismatch"]),
-            currency=lane.currency,
-            cost_currency=resolved_cost_currency,
-            shipping_currency=resolved_shipping_currency,
-        )
-
-    if resolved_cost_currency and resolved_sell_currency and resolved_cost_currency != resolved_sell_currency:
-        return UnitEconomicsScenario(
-            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
-            None, None, None, None, None,
-            tuple(assumptions + ["currency_mismatch"]),
-            currency=resolved_sell_currency,
-            cost_currency=resolved_cost_currency,
-            shipping_currency=resolved_shipping_currency,
-        )
-
-    if shipping is not None and resolved_shipping_currency and resolved_sell_currency and resolved_shipping_currency != resolved_sell_currency:
-        return UnitEconomicsScenario(
-            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
-            None, None, None, None, None,
-            tuple(assumptions + ["currency_mismatch"]),
-            currency=resolved_sell_currency,
             cost_currency=resolved_cost_currency,
             shipping_currency=resolved_shipping_currency,
         )
@@ -320,14 +300,7 @@ def calculate_unit_economics(
             ),
         )
     except CurrencyMismatchError:
-        return UnitEconomicsScenario(
-            sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
-            None, None, None, None, None,
-            tuple(assumptions + ["currency_mismatch"]),
-            currency=resolved_sell_currency,
-            cost_currency=resolved_cost_currency,
-            shipping_currency=resolved_shipping_currency,
-        )
+        return currency_blocked("currency_mismatch")
     except (TypeError, ValueError):
         return UnitEconomicsScenario(
             sell, cost, shipping, landed, payment_fee_rate, platform_fee_rate,
@@ -398,6 +371,23 @@ class SupplierFeasibilityEvidence:
             raise ValueError(f"unsupported supplier: {self.supplier}")
         if self.source_type not in SOURCE_TYPES:
             raise ValueError(f"unsupported source_type: {self.source_type}")
+        provenance_fallback: str | None = None
+        if self.source_type in FIXTURE_SOURCE_TYPES:
+            provenance_fallback = "fixture"
+        elif self.source_type == "manual_csv_import" or self.source_type.endswith("_manual_import"):
+            provenance_fallback = "manual_import"
+        if provenance_fallback is not None:
+            if self.evidence_mode == "live_readonly":
+                object.__setattr__(self, "evidence_mode", provenance_fallback)
+            if any(value == "live_readonly" for value in self.field_provenance.values()):
+                object.__setattr__(
+                    self,
+                    "field_provenance",
+                    {
+                        key: provenance_fallback if value == "live_readonly" else value
+                        for key, value in self.field_provenance.items()
+                    },
+                )
         if set(self.field_provenance.values()) - PROVENANCE:
             raise ValueError("invalid supplier evidence provenance")
         if not self.read_only or self.network_calls or self.mutated:
@@ -550,7 +540,7 @@ def score_candidate(
         payment_fee_rate=payment_fee_rate,
         platform_fee_rate=platform_fee_rate,
         lane=lane,
-        cost_currency=best.currency if best else None,
+        cost_currency=("" if lane is not None and "currency_assumed_usd" in best.warnings else best.currency) if best else None,
         shipping_currency=getattr(best, "shipping_currency", None) if best else None,
     )
     if not best:
@@ -609,6 +599,16 @@ def score_candidate(
 
 def build_report(records: list[SupplierFeasibilityEvidence], *, evidence_mode: str = "fixture", target_sell_prices: Mapping[str, Any] | None = None, lane: MarketLane | None = None) -> SupplierFeasibilityReport:
     records = collapse_duplicates(records)
+    record_modes = {record.evidence_mode for record in records}
+    report_evidence_mode = evidence_mode
+    if "unknown" in record_modes:
+        report_evidence_mode = "unknown"
+    elif "fixture" in record_modes:
+        report_evidence_mode = "fixture"
+    elif "manual_import" in record_modes:
+        report_evidence_mode = "manual_import"
+    elif report_evidence_mode == "live_readonly" and record_modes != {"live_readonly"}:
+        report_evidence_mode = "unknown"
     grouped: dict[str, list[SupplierFeasibilityEvidence]] = {}
     for record in records:
         if record.candidate_id:
@@ -620,4 +620,4 @@ def build_report(records: list[SupplierFeasibilityEvidence], *, evidence_mode: s
     results = tuple(sorted(results, key=lambda item: (-item.score.overall_supplier_feasibility, item.candidate_id)))
     top = results[0] if results else None
     warnings = ("supplier_feasibility_is_not_live_supplier_authorization",) if records else ("supplier_feasibility_not_supplied",)
-    return SupplierFeasibilityReport("supplier-feasibility-v1", evidence_mode, len(results), len(records), tuple(sorted({record.supplier for record in records})), top.candidate_id if top else None, f"{top.score.recommendation}:{top.candidate_id}" if top else "validate_live_supplier_first", results, warnings)
+    return SupplierFeasibilityReport("supplier-feasibility-v1", report_evidence_mode, len(results), len(records), tuple(sorted({record.supplier for record in records})), top.candidate_id if top else None, f"{top.score.recommendation}:{top.candidate_id}" if top else "validate_live_supplier_first", results, warnings)

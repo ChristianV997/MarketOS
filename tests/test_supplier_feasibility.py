@@ -587,6 +587,7 @@ def test_unit_economics_currency_mismatch_fails_closed():
     assert score.economics.break_even_cpa is None
     assert score.economics.break_even_roas is None
     assert score.economics.profit_per_order_before_ad_spend is None
+    assert score.economics.estimated_landed_cost is None
     assert "currency_mismatch" in score.economics.assumptions
 
     # Risk flags and readiness must block fail-closed
@@ -603,6 +604,16 @@ def test_unit_economics_currency_mismatch_fails_closed():
     assert report["next_best_action"] == "hold_for_manual_review:eur-offer-1"
     assert report["candidates"][0]["score"]["economics"]["gross_margin"] is None
     assert "currency_mismatch" in report["candidates"][0]["score"]["economics"]["assumptions"]
+
+    missing_price = calculate_unit_economics(
+        target_sell_price=None,
+        unit_cost=10.0,
+        shipping_cost=2.0,
+        cost_currency="EUR",
+        lane=lane,
+    )
+    assert missing_price.estimated_landed_cost is None
+    assert "currency_mismatch" in missing_price.assumptions
 
 
 def test_unit_economics_absent_currency_fails_closed():
@@ -689,6 +700,7 @@ def test_unit_economics_shipping_currency_mismatch():
         lane=MarketLane("cn-de", "CN", "CN", "fixture-warehouse", "DE", currency="EUR"),
     )
     assert scenario.gross_margin is None
+    assert scenario.estimated_landed_cost is None
     assert "currency_mismatch" in scenario.assumptions
     assert scenario.cost_currency == "EUR"
     assert scenario.shipping_currency == "USD"
@@ -731,3 +743,103 @@ def test_supplier_feasibility_evidence_labels_unescalated():
     # Manual evidence cannot escalate to advance_to_launch_draft
     for candidate in report_manual.candidates:
         assert candidate.score.recommendation != "advance_to_launch_draft"
+
+
+def test_imported_missing_currency_fails_closed():
+    row = normalize_record({
+        "candidate_id": "missing-currency",
+        "supplier": "cj",
+        "unit_cost": 25.0,
+        "shipping_cost": 5.0,
+        "delivery_window": "5-9",
+        "inventory_status": "in_stock",
+    })
+    assert row is not None
+    assert "currency_assumed_usd" in row.warnings
+
+    lane = MarketLane("cn-us", "CN", "CN", "fixture-warehouse", "US", currency="USD")
+    score = score_candidate(row.candidate_id, [row], target_sell_price=100.0, lane=lane)
+
+    assert score.economics is not None
+    assert score.economics.gross_margin is None
+    assert score.economics.estimated_landed_cost is None
+    assert "currency_missing" in score.economics.assumptions
+    assert "currency_missing" in score.reasons
+    assert any(flag.code == "currency_missing" and flag.severity == "blocker" for flag in score.risk_flags)
+    assert score.recommendation == "hold_for_manual_review"
+
+
+def test_unsupported_currency_is_a_blocker():
+    evidence = SupplierFeasibilityEvidence(
+        candidate_id="unsupported-currency",
+        query="widget",
+        supplier="cj",
+        source_type="fixture_demo",
+        unit_cost=10.0,
+        shipping_cost=2.0,
+        currency="JPY",
+    )
+
+    score = score_candidate(evidence.candidate_id, [evidence], target_sell_price=30.0)
+
+    assert score.economics is not None
+    assert score.economics.gross_margin is None
+    assert "unsupported_currency" in score.economics.assumptions
+    assert "unsupported_currency" in score.reasons
+    assert any(flag.code == "unsupported_currency" and flag.severity == "blocker" for flag in score.risk_flags)
+    assert score.recommendation == "hold_for_manual_review"
+    assert score.contributions["margin_feasibility_proxy"] == 0.0
+
+
+@pytest.mark.parametrize(
+    "source_type,expected_mode",
+    [("fixture_demo", "fixture"), ("cj_manual_import", "manual_import")],
+)
+def test_fixture_or_manual_supplier_evidence_cannot_claim_live_readonly(source_type, expected_mode):
+    row = normalize_record({
+        "candidate_id": "fixture-live-label",
+        "supplier": "cj",
+        "source_type": source_type,
+        "evidence_mode": "live_readonly",
+        "unit_cost": 5.0,
+        "shipping_cost": 2.0,
+        "delivery_window": "3-7",
+        "inventory_status": "in_stock",
+        "inventory_quantity": 1000,
+        "supplier_rating": 4.9,
+        "supplier_review_count": 5000,
+        "fulfillment_method": "domestic_fulfillment",
+        "source_confidence": 1.0,
+        "field_provenance": {
+            "unit_cost": "live_readonly",
+            "shipping_cost": "live_readonly",
+            "estimated_landed_cost": "live_readonly",
+            "inventory_status": "live_readonly",
+            "fulfillment_method": "live_readonly",
+        },
+    }, mode="fixture")
+    assert row is not None
+
+    report = build_report([row], evidence_mode="live_readonly", target_sell_prices={row.candidate_id: 30.0})
+
+    assert row.evidence_mode == expected_mode
+    assert all(value != "live_readonly" for value in row.field_provenance.values())
+    assert report.evidence_mode == expected_mode
+    assert report.candidates[0].offers[0].evidence_mode == expected_mode
+    assert report.candidates[0].score.recommendation != "advance_to_launch_draft"
+
+
+def test_unknown_supplier_evidence_cannot_be_reported_as_live_readonly():
+    evidence = SupplierFeasibilityEvidence(
+        candidate_id="unknown-evidence-mode",
+        query="widget",
+        supplier="cj",
+        source_type="cj_validation_pack_report",
+        evidence_mode="unknown",
+        unit_cost=10.0,
+        shipping_cost=2.0,
+    )
+
+    report = build_report([evidence], evidence_mode="live_readonly", target_sell_prices={evidence.candidate_id: 30.0})
+
+    assert report.evidence_mode == "unknown"
