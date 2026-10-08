@@ -94,6 +94,21 @@ class CommercialRunEnvelope(BaseArtifact):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "CommercialRunEnvelope":
         artifact_id = d.get("artifact_id", "")
+        experiment_id = d.get("experiment_id", "")
+        replay_hash = d.get("replay_hash", "")
+        if not artifact_id:
+            # A stored experiment_id may either be caller-chosen or have been
+            # linked to the missing artifact_id. Recover the latter only when
+            # treating it as the old artifact_id reproduces the stored hash.
+            if experiment_id and replay_hash:
+                identity_payload = {
+                    key: value for key, value in d.items()
+                    if key in cls.__dataclass_fields__
+                }
+                identity_payload.update(artifact_id=experiment_id, replay_hash="")
+                identity_candidate = cls(**identity_payload)
+                if identity_candidate.replay_hash == replay_hash:
+                    experiment_id = ""
         return cls(
             artifact_id=artifact_id,
             artifact_type=d.get("artifact_type", ARTIFACT_TYPE),
@@ -102,8 +117,8 @@ class CommercialRunEnvelope(BaseArtifact):
             created_at=d.get("created_at", time.time()),
             schema_version=d.get("schema_version", 1),
             metadata=dict(d.get("metadata", {})),
-            replay_hash=d.get("replay_hash", "") if artifact_id else "",
-            experiment_id=d.get("experiment_id", "") if artifact_id else "",
+            replay_hash=replay_hash if artifact_id else "",
+            experiment_id=experiment_id,
             service_name=d.get("service_name", ""),
             workspace_id=d.get("workspace_id", ""),
             mode=d.get("mode", "dry_run"),

@@ -262,6 +262,21 @@ def test_partial_envelope_rebinds_identity_linked_experiment_id_and_rehashes():
     assert restored.replay_hash == _expected_replay_hash(restored)
 
 
+def test_partial_envelope_preserves_custom_experiment_id_and_rehashes():
+    original = CommercialRunEnvelope(
+        service_name="x", workspace_id="ws-1", created_at=STAMP, experiment_id="caller-exp-keep"
+    )
+    payload = original.to_dict()
+    payload.pop("artifact_id")
+
+    restored = CommercialRunEnvelope.from_dict(payload)
+
+    assert restored.artifact_id != original.artifact_id
+    assert restored.experiment_id == "caller-exp-keep"
+    assert restored.replay_hash != original.replay_hash
+    assert restored.replay_hash == _expected_replay_hash(restored)
+
+
 def test_partial_payload_retries_are_distinct_and_registry_hydration_skips_them():
     original = CommercialRunEnvelope(service_name="x", workspace_id="ws-1", created_at=STAMP)
     payload = original.to_dict()
