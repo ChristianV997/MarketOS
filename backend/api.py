@@ -70,9 +70,10 @@ except ImportError:
     _prom_integration_configured = _prom_integration_reachable = _prom_integration_probe_duration = _prom_integration_probes = None
 
 from backend.core.state import SystemState
-# Defer loop import: backend.execution.loop pulls heavy numerical/causal dependencies
-# (scipy, sklearn, statsmodels, qdrant) which stall cold API startup and health checks.
-# run_cycle is resolved lazily in _background_runner() or via __getattr__.
+# Defer the loop import: backend.execution.loop is only needed when a cycle runs, so
+# importing this module (and serving /health) does not load it. scipy and sklearn are
+# still imported at startup by other routes (decisions, governance), so this does not
+# remove them. run_cycle is resolved lazily in _background_runner() or via __getattr__.
 
 # ── config ────────────────────────────────────────────────────────────────────
 

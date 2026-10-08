@@ -122,3 +122,77 @@ print("__BENCHMARK_OUTPUT__:" + json.dumps(output))
     # 3. run_cycle remains accessible and callable via module attribute access
     assert data["run_cycle_callable"] is True
     assert data["loop_loaded_after_access"] is True
+
+
+_ASGI_RUNNER = r"""
+import asyncio, json, sys
+from unittest import mock
+import backend.api as api
+
+def call(method, path):
+    sent = []
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+    async def send(message):
+        sent.append(message)
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": method,
+             "scheme": "http", "path": path, "raw_path": path.encode(), "query_string": b"",
+             "headers": [(b"host", b"t"), (b"content-length", b"0")], "client": ("127.0.0.1", 1), "server": ("t", 80)}
+    asyncio.run(api.app(scope, receive, send))
+    return next(m["status"] for m in sent if m["type"] == "http.response.start")
+
+LOOP = "backend.execution.loop"
+out = {"loaded_at_import": LOOP in sys.modules}
+out["health"] = call("GET", "/health")
+out["loaded_after_health"] = LOOP in sys.modules
+out["risk_status"] = call("GET", "/risk/status")
+out["loaded_after_risk_status"] = LOOP in sys.modules
+out["agents"] = call("GET", "/agents")
+out["loaded_after_agents"] = LOOP in sys.modules
+import backend.execution.loop as loop
+with mock.patch.object(loop, "run_cycle", side_effect=lambda state: state) as patched:
+    out["cycle"] = call("POST", "/cycle")
+    out["cycle_used_patched_loop"] = patched.called
+with mock.patch.object(loop, "run_cycle", side_effect=RuntimeError("offline-failure")):
+    try:
+        call("POST", "/cycle")
+        out["cycle_error"] = "swallowed"
+    except RuntimeError:
+        out["cycle_error"] = "propagated"
+print("__ASGI__:" + json.dumps(out))
+"""
+
+
+def _run_asgi_scenario() -> dict:
+    proc = subprocess.run(
+        [sys.executable, "-B", "-c", _ASGI_RUNNER],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    return json.loads(proc.stdout.split("__ASGI__:", 1)[1].splitlines()[0])
+
+
+def test_lazy_route_imports_load_on_first_use_and_routes_still_answer():
+    """Offline, no HTTP client: /health and /risk/status leave the loop unloaded; /agents and /cycle load it.
+
+    The routes keep answering 200, and a failing cycle still propagates to the caller as before.
+    """
+    data = _run_asgi_scenario()
+    assert data["loaded_at_import"] is False
+    assert data["health"] == 200 and data["loaded_after_health"] is False
+    assert data["risk_status"] == 200 and data["loaded_after_risk_status"] is False
+    assert data["agents"] == 200 and data["loaded_after_agents"] is True
+    assert data["cycle"] == 200 and data["cycle_used_patched_loop"] is True
+    assert data["cycle_error"] == "propagated"
+
+
+def test_route_modules_have_no_top_level_loop_import():
+    for relative in ("api/routes/cycle_control.py", "api/routes/agents_risk.py"):
+        tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"), filename=relative)
+        for node in tree.body:
+            names = [alias.name for alias in node.names] if isinstance(node, ast.Import) else [node.module or ""] if isinstance(node, ast.ImportFrom) else []
+            assert not any("backend.execution.loop" in name for name in names), f"eager loop import in {relative}"
