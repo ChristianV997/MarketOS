@@ -38,6 +38,7 @@ import re
 import socket
 import time
 from dataclasses import dataclass, field as dataclass_field
+from datetime import datetime, timezone
 from typing import Any
 from urllib import robotparser
 from urllib.parse import quote_plus, urlparse
@@ -361,39 +362,64 @@ def discover_candidate_urls(query: str, *, context: SidecarContext, max_results:
     return urls
 
 
+def _quality_from_evidence(evidence: CJProductEvidence) -> DataQuality:
+    """Public-page quality only. Never live-attributed; stamp the observation time."""
+    return DataQuality(
+        provenance="public_page",
+        attribution="attributed",
+        completeness="partial",
+        source_ref=evidence.source_url,
+        observed_at=datetime.fromtimestamp(float(evidence.observed_at), tz=timezone.utc),
+    )
+
+
+def _observed_number(evidence: CJProductEvidence, field_name: str) -> float | None:
+    """Return an observed numeric field, preserving explicit zeros. Missing stays None."""
+    if evidence.field_status.get(field_name) != "observed":
+        return None
+    value = getattr(evidence, field_name, None)
+    if value is None:
+        return None
+    return float(value)
+
+
 def to_supplier_offer(evidence: CJProductEvidence, *, supplier_id: str = SOURCE) -> SupplierOffer | None:
-    """None when no observed price evidence exists.
+    """None when observed unit cost or shipping cannot be represented honestly.
 
     A public CJ page can expose a candidate catalog price, but that
     observation is not authenticated supplier-live proof. Preserve that
     distinction in DataQuality so generic commerce gates do not accept it as
     live-attributed evidence.
+
+    ``SupplierOffer.shipping_cost`` is a non-optional float in evaluation
+    contracts, so a missing shipping observation must not become ``0.0``
+    (free shipping). Callers that need nullable shipping use
+    ``SupplierEvidenceResult`` instead.
     """
-    if evidence.price is None or evidence.field_status.get("price") != "observed":
+    unit_cost = _observed_number(evidence, "price")
+    shipping_cost = _observed_number(evidence, "shipping_cost")
+    if unit_cost is None or shipping_cost is None:
         return None
     return SupplierOffer(
         supplier_id=supplier_id, product_id=evidence.external_product_id,
-        unit_cost=evidence.price, shipping_cost=evidence.shipping_cost or 0.0,
+        unit_cost=unit_cost, shipping_cost=shipping_cost,
         fulfillment_days=evidence.estimated_delivery_days,
         currency=evidence.currency,
-        quality=DataQuality(
-            provenance="public_page", attribution="attributed", source_ref=evidence.source_url,
-            completeness="partial",
-        ),
+        quality=_quality_from_evidence(evidence),
     )
 
 
 def to_product_candidate(evidence: CJProductEvidence) -> ProductCandidate | None:
     """Return a priced public-page candidate; never encode a missing price as 0."""
-    if not evidence.title or evidence.price is None or evidence.field_status.get("price") != "observed":
+    if not evidence.title:
+        return None
+    price = _observed_number(evidence, "price")
+    if price is None:
         return None
     return ProductCandidate(
         product_id=evidence.external_product_id, name=evidence.title, currency=evidence.currency,
-        selling_price=evidence.price, source_signal_ids=(evidence.source_url,),
-        quality=DataQuality(
-            provenance="public_page", attribution="attributed", completeness="partial",
-            source_ref=evidence.source_url,
-        ),
+        selling_price=price, source_signal_ids=(evidence.source_url,),
+        quality=_quality_from_evidence(evidence),
     )
 
 

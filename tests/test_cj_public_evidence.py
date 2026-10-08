@@ -282,15 +282,21 @@ class TestCaching:
 
 
 class TestNormalization:
-    def test_to_supplier_offer_uses_observed_price_as_unit_cost(self):
-        with patch.object(mod, "_bounded_get", return_value=JSONLD_PRODUCT_HTML):
-            evidence = mod.fetch_product_evidence("https://www.cjdropshipping.com/product/x.html", context=SidecarContext(dry_run=False))
+    def test_to_supplier_offer_uses_observed_price_and_shipping(self):
+        evidence = mod.CJProductEvidence(
+            source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
+            observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
+            field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
+            price=9.5, shipping_cost=2.25,
+        )
         offer = mod.to_supplier_offer(evidence)
         assert offer is not None
         assert offer.unit_cost == 9.5
+        assert offer.shipping_cost == 2.25
         assert offer.quality.provenance == "public_page"
         assert offer.quality.is_live_attributed is False
         assert offer.quality.source_ref == evidence.source_url
+        assert offer.quality.observed_at.timestamp() == 1_700_000_000.0
 
     def test_to_supplier_offer_none_without_observed_price(self):
         evidence = mod._degraded("https://www.cjdropshipping.com/product/x.html", reason="test")
@@ -310,10 +316,34 @@ class TestNormalization:
         assert mod.to_supplier_offer(evidence) is None
         assert mod.to_product_candidate(evidence) is None
 
+    def test_missing_shipping_is_not_coerced_to_free_shipping(self):
+        """SupplierOffer.shipping_cost is a bare float; missing must not become 0.0."""
+        evidence = mod.CJProductEvidence(
+            source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
+            observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
+            field_status={"title": "observed", "price": "observed", "shipping_cost": "unavailable"},
+            price=9.5, shipping_cost=None,
+        )
+
+        assert mod.to_supplier_offer(evidence) is None
+
+    def test_explicit_zero_shipping_is_preserved(self):
+        evidence = mod.CJProductEvidence(
+            source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
+            observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
+            field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
+            price=9.5, shipping_cost=0.0,
+        )
+
+        offer = mod.to_supplier_offer(evidence)
+
+        assert offer is not None
+        assert offer.shipping_cost == 0.0
+
     def test_public_page_product_candidate_is_not_live_supplier_proof(self):
         evidence = mod.CJProductEvidence(
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
-            observed_at=1.0, external_product_id="x", title="Widget",
+            observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
             field_status={"title": "observed", "price": "observed"}, price=9.5,
         )
 
@@ -323,12 +353,14 @@ class TestNormalization:
         assert candidate.quality.provenance == "public_page"
         assert candidate.quality.is_live_attributed is False
         assert candidate.quality.completeness == "partial"
+        assert candidate.quality.observed_at.timestamp() == 1_700_000_000.0
 
     def test_public_page_supplier_offer_cannot_satisfy_launch_readiness(self):
         evidence = mod.CJProductEvidence(
             source=mod.SOURCE, source_url="https://www.cjdropshipping.com/product/x.html",
-            observed_at=1.0, external_product_id="x", title="Widget",
-            field_status={"title": "observed", "price": "observed"}, price=5.0,
+            observed_at=1_700_000_000.0, external_product_id="x", title="Widget",
+            field_status={"title": "observed", "price": "observed", "shipping_cost": "observed"},
+            price=5.0, shipping_cost=1.0,
         )
         product = ProductCandidate(
             product_id="market-widget", name="Widget", selling_price=100.0,
@@ -340,6 +372,7 @@ class TestNormalization:
 
         assert offer is not None
         assert offer.quality.completeness == "partial"
+        assert offer.quality.is_live_attributed is False
         assert readiness.launchable is False
         assert "incomplete_data" in readiness.reasons
 
