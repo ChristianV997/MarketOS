@@ -174,8 +174,11 @@ def _mapping(value: Any) -> dict[str, Any] | None:
 def _secret_like(value: Any) -> bool:
     if isinstance(value, Mapping):
         for key, item in value.items():
-            normalized = str(key).lower().replace("-", "_")
+            key_text = str(key)
+            normalized = key_text.lower().replace("-", "_")
             if normalized in SECRET_KEYS or normalized in RAW_KEYS:
+                return True
+            if _secret_like(key_text):
                 return True
             if _secret_like(item):
                 return True

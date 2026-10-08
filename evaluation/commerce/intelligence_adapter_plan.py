@@ -81,8 +81,9 @@ def _tuple(value: Any) -> tuple[str, ...]:
 def _secret_like(value: Any) -> bool:
     if isinstance(value, Mapping):
         for key, item in value.items():
-            normalized = str(key).lower().replace("-", "_")
-            if normalized in _SECRET_KEYS or normalized in _RAW_KEYS or _secret_like(item):
+            key_text = str(key)
+            normalized = key_text.lower().replace("-", "_")
+            if normalized in _SECRET_KEYS or normalized in _RAW_KEYS or _secret_like(key_text) or _secret_like(item):
                 return True
         return False
     if isinstance(value, (tuple, list, set)):

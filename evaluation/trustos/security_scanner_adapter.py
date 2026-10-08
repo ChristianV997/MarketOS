@@ -29,7 +29,12 @@ SECRET_KEYS = {"actual_secret_value", "api_key", "raw_api_key", "oauth_token", "
 
 def _secret_like(value: Any) -> bool:
     if isinstance(value, Mapping):
-        return any(str(key).lower().replace("-", "_") in SECRET_KEYS or _secret_like(item) for key, item in value.items())
+        return any(
+            str(key).lower().replace("-", "_") in SECRET_KEYS
+            or _secret_like(str(key))
+            or _secret_like(item)
+            for key, item in value.items()
+        )
     if isinstance(value, (list, tuple)):
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):

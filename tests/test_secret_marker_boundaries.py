@@ -213,3 +213,47 @@ def test_redaction_removes_canary_keys_tuples_and_bytes():
     rendered = json.dumps(redacted, default=str)
     assert SYNTHETIC_SK not in rendered and "raw" not in rendered
     assert redacted["ok"] == "desk-clamp-lamp"
+
+
+CONSUMER_KEY_PREDICATES: tuple[tuple[str, Callable[[dict], bool]], ...] = (
+    ("commerce_operations_cycle", commerce_operations_cycle._secret_like),
+    ("dataforseo_adapter", dataforseo_adapter._secret_like),
+    ("intelligence_adapter_plan", intelligence_adapter_plan._secret_like),
+    ("security_scanner_adapter", security_scanner_adapter._secret_like),
+    ("trustos_cli", run_trustos_control_plane._secret_like),
+    ("approval_ledger_cli", run_companyos_approval_ledger._secret_like),
+    ("provider_registry_cli", run_companyos_provider_registry._secret_like),
+    ("dataforseo_cli", run_dataforseo_readonly_adapter._secret_like),
+    ("intelligence_adapter_cli", run_intelligence_adapter_plan._secret_like),
+    ("serpapi_projection_cli", run_serpapi_commerce_projection._secret_like),
+)
+
+
+@pytest.mark.parametrize("key", ["a%20" + SYNTHETIC_SK, SYNTHETIC_SK, "a\\012" + SYNTHETIC_SK])
+@pytest.mark.parametrize(("name", "predicate"), CONSUMER_KEY_PREDICATES)
+def test_consumer_guards_reject_canary_mapping_keys(key: str, name: str, predicate: Callable[[dict], bool]):
+    payload = _leaky_key_payload(key)
+    assert predicate(payload), f"{name} failed to reject canary secret key"
+
+
+@pytest.mark.parametrize("key", ["a%20" + SYNTHETIC_SK, SYNTHETIC_SK, "a\\012" + SYNTHETIC_SK])
+def test_consumer_guards_reject_canary_mapping_keys_in_top_level_and_nested_without_echo(key: str):
+    payload = _leaky_key_payload(key)
+    with pytest.raises(ValueError) as excinfo:
+        commerce_operations_cycle.reject_unsafe_input(payload, label="fixture")
+    err = str(excinfo.value)
+    assert key not in err and SYNTHETIC_SK not in err
+
+    with pytest.raises(ValueError) as excinfo:
+        market_research_report._validate_safe_inputs(payload)
+    err = str(excinfo.value)
+    assert key not in err and SYNTHETIC_SK not in err
+
+
+@pytest.mark.parametrize("ordinary_key", ("desk-clamp-lamp", "desk-clamp-lamp-mirror", "kiosk-stand", "flask-holder"))
+@pytest.mark.parametrize(("name", "predicate"), CONSUMER_KEY_PREDICATES)
+def test_consumer_guards_accept_ordinary_mapping_keys(ordinary_key: str, name: str, predicate: Callable[[dict], bool]):
+    payload = {"note": "ok", ordinary_key: "value", "nested": {ordinary_key: "another_value"}}
+    assert not predicate(payload), f"{name} falsely rejected ordinary key {ordinary_key}"
+    commerce_operations_cycle.reject_unsafe_input(payload, label="fixture")
+    market_research_report._validate_safe_inputs(payload)

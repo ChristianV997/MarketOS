@@ -35,7 +35,12 @@ def _safe_path(value: str | None, *, must_exist: bool = True) -> Path | None:
 
 def _secret_like(value: Any) -> bool:
     if isinstance(value, dict):
-        return any(str(key).lower().replace("-", "_") in SECRET_KEYS or _secret_like(item) for key, item in value.items())
+        return any(
+            str(key).lower().replace("-", "_") in SECRET_KEYS
+            or _secret_like(str(key))
+            or _secret_like(item)
+            for key, item in value.items()
+        )
     if isinstance(value, list):
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):

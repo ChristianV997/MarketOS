@@ -42,10 +42,9 @@ def _output_path(value: str) -> Path:
 def _secret_like(value: Any) -> bool:
     if isinstance(value, dict):
         for key, item in value.items():
-            normalized = str(key).lower().replace("-", "_")
-            if normalized in SECRET_KEYS:
-                return True
-            if _secret_like(item):
+            key_text = str(key)
+            normalized = key_text.lower().replace("-", "_")
+            if normalized in SECRET_KEYS or _secret_like(key_text) or _secret_like(item):
                 return True
     elif isinstance(value, list):
         return any(_secret_like(item) for item in value)

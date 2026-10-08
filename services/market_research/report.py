@@ -96,6 +96,7 @@ def _validate_safe_inputs(value: Any, *, depth: int = 0, nodes: list[int] | None
             key_text = str(key).casefold().replace("-", "_").replace(" ", "_")
             if key_text in _UNSAFE_KEYS or any(marker in key_text for marker in ("raw_payload", "provider_payload")):
                 raise ValueError("unsafe_evidence_input")
+            _validate_safe_inputs(str(key), depth=depth + 1, nodes=nodes)
             _validate_safe_inputs(child, depth=depth + 1, nodes=nodes)
         return
     if isinstance(value, (list, tuple)):
