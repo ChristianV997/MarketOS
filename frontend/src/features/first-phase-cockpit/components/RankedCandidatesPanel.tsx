@@ -3,12 +3,12 @@ import {
   CANDIDATE_WINDOW_SIZE,
   type RankedCandidateRow,
 } from "../contracts/firstPhaseEvidencePacket";
-import { adjacentCandidateIndex, shouldHandoffDetailFocus } from "../lib/keyboardNav";
+import { adjacentCandidateIndex, rovingActiveId, shouldHandoffDetailFocus } from "../lib/keyboardNav";
 import { candidateElements, firstLaidOut } from "../lib/focusTarget";
 import {
-  ensureSelectionInWindow,
   nextWindowStart,
   windowCandidates,
+  windowStartAfterChange,
 } from "../lib/windowCandidates";
 
 function formatPct(value: number | null): string {
@@ -55,18 +55,18 @@ export function RankedCandidatesPanel({
     ]);
   }
 
-  const alignedStart = useMemo(
-    () => ensureSelectionInWindow(candidates, selectedId, windowStart, CANDIDATE_WINDOW_SIZE),
-    [candidates, selectedId, windowStart],
-  );
+  // The selection pulls the window only when the selection or the candidate list changes; paging does not.
+  const alignmentKey = useRef<{ candidates: RankedCandidateRow[]; selectedId: string | null } | null>(null);
 
   useEffect(() => {
-    if (alignedStart !== windowStart) onWindowStartChange(alignedStart);
-  }, [alignedStart, windowStart, onWindowStartChange]);
+    const next = windowStartAfterChange(candidates, selectedId, windowStart, alignmentKey.current);
+    alignmentKey.current = { candidates, selectedId };
+    if (next !== windowStart) onWindowStartChange(next);
+  }, [candidates, selectedId, windowStart, onWindowStartChange]);
 
   const windowed = useMemo(
-    () => windowCandidates(candidates, alignedStart, CANDIDATE_WINDOW_SIZE),
-    [candidates, alignedStart],
+    () => windowCandidates(candidates, windowStart, CANDIDATE_WINDOW_SIZE),
+    [candidates, windowStart],
   );
 
   useEffect(() => {
@@ -147,7 +147,10 @@ export function RankedCandidatesPanel({
     queueMicrotask(() => focusRow(nextIndex));
   }
 
-  const activeId = selectedId ?? windowed.visible[0]?.candidateId ?? null;
+  const activeId = rovingActiveId(
+    windowed.visible.map((candidate: RankedCandidateRow) => candidate.candidateId),
+    selectedId,
+  );
 
   return (
     <section

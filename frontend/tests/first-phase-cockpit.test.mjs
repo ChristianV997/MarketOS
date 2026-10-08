@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { adjacentCandidateIndex, shouldHandoffDetailFocus } from "../src/features/first-phase-cockpit/lib/keyboardNav.ts";
+import { adjacentCandidateIndex, rovingActiveId, shouldHandoffDetailFocus } from "../src/features/first-phase-cockpit/lib/keyboardNav.ts";
+import { nextWindowStart, windowCandidates, windowStartAfterChange } from "../src/features/first-phase-cockpit/lib/windowCandidates.ts";
 import { candidateElements, firstLaidOut, isLaidOut } from "../src/features/first-phase-cockpit/lib/focusTarget.ts";
 
 const featureRoot = new URL("../src/features/first-phase-cockpit/", import.meta.url);
@@ -95,26 +96,6 @@ function filterCandidates(candidates, filter) {
     filtered.push(candidate);
   }
   return filtered;
-}
-
-function windowCandidates(candidates, windowStart, windowSize = WINDOW_SIZE) {
-  const size = Math.max(1, windowSize);
-  const start = candidates.length === 0 ? 0 : Math.min(Math.max(0, windowStart), Math.max(0, candidates.length - size));
-  return {
-    visible: candidates.slice(start, start + size),
-    windowStart: start,
-    windowSize: size,
-    total: candidates.length,
-    hasMoreBefore: start > 0,
-    hasMoreAfter: start + size < candidates.length,
-  };
-}
-
-function nextWindowStart(current, direction) {
-  if (direction === "forward") {
-    return Math.min(current.windowStart + current.windowSize, Math.max(0, current.total - current.windowSize));
-  }
-  return Math.max(0, current.windowStart - current.windowSize);
 }
 
 function formatFreshnessLabel(generatedAt, nowMs) {
@@ -855,6 +836,30 @@ test("candidate element lookup compares ids exactly and never builds a selector 
   assert.equal(candidateElements(root, 'cand-1" , [x').length, 1);
   assert.deepEqual(candidateElements(null, "cand-1"), []);
   assert.deepEqual(selectors, ["[data-candidate-id]", "[data-candidate-id]"]);
+});
+
+test("paging with Previous/Next is not undone while the selection sits outside the new window", () => {
+  const candidates = Array.from({ length: 120 }, (_, i) => ({ candidateId: `cand-${i}`, title: `C${i}`, rankIndex: i }));
+  const requested = nextWindowStart(windowCandidates(candidates, 0, 50), "forward");
+  assert.equal(requested, 50);
+  // The selection (cand-0) is unchanged by the click, so the window keeps the requested page.
+  assert.equal(windowStartAfterChange(candidates, "cand-0", requested, { candidates, selectedId: "cand-0" }), 50);
+  assert.equal(windowCandidates(candidates, 50, 50).visible[0].candidateId, "cand-50");
+});
+
+test("a selection or candidate-list change still pulls the window to the selection", () => {
+  const candidates = Array.from({ length: 120 }, (_, i) => ({ candidateId: `cand-${i}`, title: `C${i}`, rankIndex: i }));
+  assert.equal(windowStartAfterChange(candidates, "cand-119", 0, { candidates, selectedId: null }), 70);
+  assert.equal(windowStartAfterChange(candidates, "cand-0", 50, null), 0);
+  assert.equal(windowStartAfterChange(candidates, "cand-0", 50, { candidates: candidates.slice(), selectedId: "cand-0" }), 0);
+});
+
+test("the roving tab stop is always a rendered candidate, even when the selection is not rendered", () => {
+  assert.equal(rovingActiveId(["a", "b", "c"], "b"), "b");
+  assert.equal(rovingActiveId(["a", "b", "c"], "z"), "a");
+  assert.equal(rovingActiveId(["a", "b", "c"], null), "a");
+  assert.equal(rovingActiveId([], "a"), null);
+  assert.equal(rovingActiveId([], null), null);
 });
 
 test("research-to-decision overlay fills identity without re-ranking", () => {
