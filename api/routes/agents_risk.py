@@ -5,7 +5,6 @@ from fastapi import APIRouter
 
 from agents.arbitration import arbitrate
 from backend import api as _core
-from backend.execution.loop import TOTAL_CYCLE_BUDGET
 
 router = APIRouter()
 
@@ -15,6 +14,8 @@ def agent_performance():
     """Agent performance panel: decisions, PnL, drift detection, and the
     arbitrated outcome (see agents.arbitration) of the four agents' input
     for the latest window."""
+    from backend.execution.loop import TOTAL_CYCLE_BUDGET
+
     state = _core._state
     rows = state.event_log.rows
     recent = rows[-_core._RECENT_ROWS_WINDOW:] if rows else []
