@@ -5,6 +5,11 @@ from typing import Any
 
 from .evidence_source_contract import EvidenceRecord
 
+# Internal filesystem paths stay on the in-memory job for local processing only.
+# Client-facing / persisted projections must omit them so TrustOS leakage checks
+# (evaluation.trustos.client_workspace_isolation) do not see path-shaped values.
+_CLIENT_OMITTED_JOB_FIELDS = frozenset({"input_path"})
+
 
 @dataclass
 class EvidenceImportJob:
@@ -24,11 +29,19 @@ class EvidenceImportJob:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {key: getattr(self, key) for key in self.__dataclass_fields__}
+        return {
+            key: getattr(self, key)
+            for key in self.__dataclass_fields__
+            if key not in _CLIENT_OMITTED_JOB_FIELDS
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EvidenceImportJob":
-        return cls(**{key: data[key] for key in cls.__dataclass_fields__ if key in data})
+        payload = {key: data[key] for key in cls.__dataclass_fields__ if key in data}
+        # Client-safe / registry projections omit input_path; default empty for reload.
+        if "input_path" not in payload:
+            payload["input_path"] = ""
+        return cls(**payload)
 
 
 @dataclass
