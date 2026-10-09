@@ -161,7 +161,13 @@ def test_supplier_feasibility_can_consume_a_market_lane():
     lane = MarketLane("cn-mx", "CN", "CN", "fixture-warehouse", "MX", currency="MXN", tax_rate="0.16", duty_rate="0.05", payment_fee_rate="0.03", platform_fee_rate="0.02")
     from evaluation.commerce.supplier_feasibility import calculate_unit_economics as supplier_economics
 
-    result = supplier_economics(target_sell_price="100", unit_cost="20", shipping_cost="10", lane=lane)
+    result = supplier_economics(
+        target_sell_price="100",
+        unit_cost="20",
+        shipping_cost="10",
+        lane=lane,
+        currency="MXN",
+    )
     assert result.gross_margin is not None and result.gross_margin < 100
 
 
