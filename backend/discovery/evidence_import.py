@@ -37,10 +37,15 @@ class EvidenceImportJob:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EvidenceImportJob":
-        payload = {key: data[key] for key in cls.__dataclass_fields__ if key in data}
-        # Client-safe / registry projections omit input_path; default empty for reload.
-        if "input_path" not in payload:
-            payload["input_path"] = ""
+        # Fail closed: serialized/client/registry JSON is not a trusted path boundary.
+        # Never restore input_path from dict — only the in-process constructor may set it
+        # for local processing (e.g. normalize_imported_evidence).
+        payload = {
+            key: data[key]
+            for key in cls.__dataclass_fields__
+            if key in data and key not in _CLIENT_OMITTED_JOB_FIELDS
+        }
+        payload["input_path"] = ""
         return cls(**payload)
 
 

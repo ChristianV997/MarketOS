@@ -137,12 +137,43 @@ def test_from_dict_tolerates_omitted_input_path_for_registry_reload():
     assert restored.status == job.status
 
 
-def test_to_dict_is_deterministic():
+def test_from_dict_ignores_untrusted_input_path_injection():
+    """Serialized JSON must not restore a filesystem path for later reads."""
+    forged = {
+        "import_id": "import_forged_0001",
+        "workspace_id": "workspace_synth",
+        "source_name": "synthetic_source",
+        "source_type": "local_file",
+        "input_path": _SYNTHETIC_SECRET_PATH,
+        "parser_type": "generic_market_csv",
+        "status": "completed",
+        "records_imported": 1,
+        "records_rejected": 0,
+        "warnings": [],
+        "blocked_reasons": [],
+        "created_at": 1.0,
+        "finished_at": 2.0,
+        "metadata": {"read_only": True},
+    }
+    restored = EvidenceImportJob.from_dict(forged)
+    assert restored.input_path == ""
+    assert _SYNTHETIC_SECRET_PATH not in json.dumps(restored.to_dict(), sort_keys=True)
+    assert _check_workspace_leakage(restored.to_dict()) == ()
+
+
+def test_to_dict_from_dict_round_trip_is_deterministic():
     job = _sample_job()
     first = job.to_dict()
     second = job.to_dict()
     assert first == second
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+    restored = EvidenceImportJob.from_dict(first)
+    assert restored.input_path == ""
+    round_trip = restored.to_dict()
+    assert round_trip == first
+    assert json.dumps(round_trip, sort_keys=True) == json.dumps(first, sort_keys=True)
+    assert EvidenceImportJob.from_dict(round_trip).to_dict() == round_trip
 
 
 def test_serialized_job_does_not_leak_exception_details():
