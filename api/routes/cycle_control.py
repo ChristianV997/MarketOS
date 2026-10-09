@@ -7,7 +7,6 @@ import time
 from fastapi import APIRouter
 
 from backend import api as _core
-from backend.execution.loop import run_cycle
 
 router = APIRouter()
 
@@ -15,6 +14,8 @@ router = APIRouter()
 @router.post("/cycle")
 def cycle():
     """Trigger one manual cycle (useful for testing / Replit buttons)."""
+    from backend.execution.loop import run_cycle
+
     new_state = run_cycle(_core._state)
     with _core._lock:
         _core._state = new_state
