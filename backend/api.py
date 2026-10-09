@@ -70,7 +70,10 @@ except ImportError:
     _prom_integration_configured = _prom_integration_reachable = _prom_integration_probe_duration = _prom_integration_probes = None
 
 from backend.core.state import SystemState
-from backend.execution.loop import run_cycle
+# Defer the loop import: backend.execution.loop is only needed when a cycle runs, so
+# importing this module (and serving /health) does not load it. scipy and sklearn are
+# still imported at startup by other routes (decisions, governance), so this does not
+# remove them. run_cycle is resolved lazily in _background_runner() or via __getattr__.
 
 # ── config ────────────────────────────────────────────────────────────────────
 
@@ -239,6 +242,7 @@ _api_log = logging.getLogger(__name__)
 
 def _background_runner():
     global _state, _last_cycle_at
+    from backend.execution.loop import run_cycle
     sleep_s = 60.0 / _CYCLES_PER_MINUTE
     while _bg_running:
         t0 = time.time()
@@ -1014,3 +1018,10 @@ try:
 
 except ImportError:
     pass
+
+
+def __getattr__(name: str) -> Any:
+    if name == "run_cycle":
+        from backend.execution.loop import run_cycle
+        return run_cycle
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
