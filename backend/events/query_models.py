@@ -1,6 +1,6 @@
 """JSON-safe, read-only models for canonical event operator views."""
 from __future__ import annotations
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 @dataclass(frozen=True)
