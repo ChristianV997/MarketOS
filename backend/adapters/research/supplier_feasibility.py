@@ -33,9 +33,9 @@ DUMP_ALIASES = (
     ("supplier_product_id", ("product_id", "item_id", "id", "pid", "productId")),
     ("candidate_id", ("product_id", "supplier_product_id", "id", "pid", "productId", "item_id")),
     ("supplier_title", ("nameEn", "productNameEn", "name", "title", "product_title")),
-    ("unit_cost", ("sellPrice", "regular_price", "unitCost", "supplier_price", "price", "cost")),
+    ("unit_cost", ("sellPrice", "regular_price", "unitCost", "supplier_price", "price", "cost", "supplier_cost")),
     ("moq", ("directMinOrderNum", "min_order_quantity", "minimum_order_quantity", "minimum_quantity")),
-    ("delivery_window", ("deliveryCycle", "deliveryTime", "delivery_time", "estimated_delivery", "shipping_time")),
+    ("delivery_window", ("deliveryCycle", "deliveryTime", "delivery_time", "estimated_delivery", "shipping_time", "lead_time_days", "lead_time")),
     ("inventory_quantity", ("totalInventory", "inventoryQuantity", "stock_quantity", "cjInventory", "stock", "inventory")),
     ("warehouse_region", ("areaEn", "store_code", "origin_country", "countryCodeOfOrigin", "warehouse", "origin")),
     ("destination_region", ("ship_to_country", "destination")),
@@ -120,6 +120,13 @@ def _fallback_provenance(mode: str) -> str:
     return "manual_import" if mode == "manual_import" else "fixture"
 
 
+def _manual_provenance(value: str) -> str:
+    """Prevent caller metadata from upgrading a manual row to live evidence."""
+    if value in {"observed", "live_readonly", "mutated"}:
+        return "manual_import"
+    return value
+
+
 def _apply_aliases(row: Mapping[str, Any]) -> dict[str, Any]:
     """Copy public dump keys onto existing evidence fields. Not an identity authority."""
     result = dict(row)
@@ -198,7 +205,14 @@ def _provenance(row: Mapping[str, Any], mode: str) -> dict[str, str]:
     raw = row.get("field_provenance")
     result = {}
     if isinstance(raw, Mapping):
-        result = {str(key): str(value) if str(value) in PROVENANCE else "malformed" for key, value in raw.items()}
+        result = {
+            str(key): (
+                _manual_provenance(str(value))
+                if mode == "manual_import" and str(value) in PROVENANCE
+                else str(value) if str(value) in PROVENANCE else "malformed"
+            )
+            for key, value in raw.items()
+        }
     fallback = _fallback_provenance(mode)
     fields = (
         "supplier_product_id", "supplier_title", "supplier_sku", "variant_count", "moq", "unit_cost", "shipping_cost", "shipping_currency",
@@ -229,25 +243,42 @@ def normalize_record(
     row = _clean(row)
     nested = row.get("product") if isinstance(row.get("product"), Mapping) else {}
     merged = _apply_aliases({**nested, **row})
-    supplier = str(_value(merged, "supplier", "provider") or default_supplier).lower()
-    if supplier not in SUPPLIERS:
+    raw_supplier = str(_value(merged, "supplier", "provider") or default_supplier).lower()
+    if raw_supplier in SUPPLIERS:
+        supplier = raw_supplier
+    elif raw_supplier in {"synthetic supplier", "synthetic_supplier", "synthetic", "catalog"}:
+        supplier = "manual"
+    else:
         return None
     source_type = str(_value(merged, "source_type") or default_source_type)
     if source_type not in SOURCE_TYPES:
         source_type = default_source_type if default_source_type in SOURCE_TYPES else "fixture_demo"
-    candidate_id = str(_value(merged, "candidate_id", "product_id", "supplier_product_id") or "").strip()
+    candidate_val = _value(merged, "candidate_id", "product_id", "supplier_product_id")
+    candidate_id = str(candidate_val or "").strip()
     if not candidate_id:
         return None
     delivery_min = integer(_value(merged, "delivery_min_days", "min_delivery_days"))
     delivery_max = integer(_value(merged, "delivery_max_days", "max_delivery_days"))
     if delivery_min is None or delivery_max is None:
-        parsed_min, parsed_max = normalize_delivery_window(_value(merged, "delivery_window", "estimated_delivery", "shipping_time"))
+        parsed_min, parsed_max = normalize_delivery_window(_value(merged, "delivery_window", "estimated_delivery", "shipping_time", "lead_time_days", "lead_time"))
         delivery_min = delivery_min if delivery_min is not None else parsed_min
         delivery_max = delivery_max if delivery_max is not None else parsed_max
-    unit_cost = number(_value(merged, "unit_cost", "supplier_price", "price", "cost"))
-    shipping_cost = number(_value(merged, "shipping_cost", "shipping", "freight_cost"))
+    raw_unit_cost = _value(merged, "unit_cost", "supplier_cost", "supplier_price", "price", "cost")
+    raw_shipping_cost = _value(merged, "shipping_cost", "shipping", "freight_cost")
+    unit_cost = number(raw_unit_cost)
+    shipping_cost = number(raw_shipping_cost)
     landed = number(_value(merged, "estimated_landed_cost", "landed_cost"))
     warnings = [str(item) for item in merged.get("warnings", []) if isinstance(item, str)]
+    if raw_unit_cost not in (None, "") and unit_cost is None:
+        warnings.append("invalid_economics_input")
+    if raw_shipping_cost not in (None, "") and shipping_cost is None:
+        warnings.append("invalid_economics_input")
+    raw_field_provenance = merged.get("field_provenance")
+    if mode == "manual_import" and isinstance(raw_field_provenance, Mapping) and any(
+        str(value) in {"observed", "live_readonly", "mutated"}
+        for value in raw_field_provenance.values()
+    ):
+        warnings.append("field_provenance_overridden")
     if landed is None and unit_cost is not None and shipping_cost is not None:
         landed = unit_cost + shipping_cost
         if "landed_cost_derived" not in warnings:
@@ -264,6 +295,9 @@ def normalize_record(
     inventory = normalize_inventory_status(_value(merged, "inventory_status", "stock_status", "availability"), quantity)
     raw_evidence_mode = _value(merged, "evidence_mode")
     evidence_mode = str(raw_evidence_mode) if raw_evidence_mode is not None else mode
+    if mode == "manual_import" and evidence_mode != "manual_import":
+        evidence_mode = "manual_import"
+        warnings.append("evidence_mode_overridden")
     observed = _value(merged, "observed_at", "captured_at")
     raw_confidence = _value(merged, "source_confidence", "confidence")
     parsed_confidence = number(raw_confidence)
@@ -272,15 +306,27 @@ def normalize_record(
         source_confidence = 0.7 if mode == "manual_import" else 0.55
     else:
         source_confidence = max(0.0, min(1.0, parsed_confidence))
+    product_title = str(row.get("product")).strip() if isinstance(row.get("product"), str) else ""
+    supplier_title = str(_value(merged, "supplier_title", "title", "product_title") or product_title or "")
+    query = str(_value(merged, "query") or product_title or supplier_title or candidate_id)
+    prov_source = {
+        **merged,
+        "unit_cost": unit_cost,
+        "shipping_cost": shipping_cost,
+        "delivery_min_days": delivery_min,
+        "delivery_max_days": delivery_max,
+        "supplier_title": supplier_title or None,
+        "estimated_landed_cost": merged.get("estimated_landed_cost"),
+    }
     return SupplierFeasibilityEvidence(
         candidate_id=candidate_id,
-        query=str(_value(merged, "query", "supplier_title", "title") or candidate_id),
+        query=query,
         supplier=supplier,
         source_type=source_type,
         source_url=str(_value(merged, "source_url", "url") or ""),
         evidence_mode=evidence_mode,
         supplier_product_id=str(_value(merged, "supplier_product_id", "product_id", "item_id") or ""),
-        supplier_title=str(_value(merged, "supplier_title", "title", "product_title") or ""),
+        supplier_title=supplier_title,
         supplier_brand=str(_value(merged, "supplier_brand", "brand") or ""),
         supplier_sku=str(_value(merged, "supplier_sku", "sku", "variant_sku") or ""),
         variant_count=_resolve_variant_count(merged),
@@ -305,7 +351,7 @@ def normalize_record(
         return_policy_signal=str(_value(merged, "return_policy_signal", "return_policy") or ""),
         refund_policy_signal=str(_value(merged, "refund_policy_signal", "refund_policy") or ""),
         source_confidence=source_confidence,
-        field_provenance=_provenance(merged, mode),
+        field_provenance=_provenance(prov_source, mode),
         warnings=tuple(sorted(set(warnings))),
         observed_at="" if observed is None else str(observed),
     )

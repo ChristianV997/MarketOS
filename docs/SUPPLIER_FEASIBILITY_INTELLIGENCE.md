@@ -137,4 +137,8 @@ similar titles with different product ids stay separate. Conflicting
 
 This layer does not convert FX, apply shipping-zone tables, or add a
 title-similarity alias identity. Currency labels pass through; missing currency
-is assumed USD as a warning only.
+is assumed USD as a warning only. Manual supplier CSV rows must provide an
+explicit stable `candidate_id` (or a documented product-ID alias such as
+`product_id`/`supplier_product_id`). A product display name or vendor display
+name is never promoted to candidate or supplier identity; unsupported rows are
+dropped rather than treated as supplier proof.

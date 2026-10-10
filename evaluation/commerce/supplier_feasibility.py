@@ -420,10 +420,16 @@ def calculate_unit_economics(
         resolved_shipping_currency = val if val else None
 
     def currency_blocked(reason: str, *, output_currency: str | None = None) -> UnitEconomicsScenario:
+        blocked_assumptions = list(assumptions)
+        if shipping_amount is None:
+            blocked_assumptions.append("shipping_cost_missing")
+        blocked_landed = landed
+        if blocked_landed is None and cost == 0 and shipping == 0:
+            blocked_landed = 0.0
         return UnitEconomicsScenario(
-            sell, cost, shipping, None, payment_rate_value, platform_rate_value,
+            sell, cost, shipping, blocked_landed, payment_rate_value, platform_rate_value,
             None, None, None, None, None,
-            tuple(assumptions + [reason]),
+            tuple(dict.fromkeys([*blocked_assumptions, reason])),
             currency=output_currency or resolved_sell_currency,
             cost_currency=resolved_cost_currency,
             shipping_currency=resolved_shipping_currency,
@@ -1004,9 +1010,15 @@ def score_candidate(
         shipping_currency=getattr(best, "shipping_currency", None) if best else None,
     )
     if economics and offer_issues:
+        zero_cost_boundary = bool(
+            best
+            and best.unit_cost == 0
+            and best.shipping_cost == 0
+            and best.estimated_landed_cost == 0
+        )
         economics = replace(
             economics,
-            estimated_landed_cost=None,
+            estimated_landed_cost=economics.estimated_landed_cost if zero_cost_boundary else None,
             gross_margin=None,
             gross_margin_percent=None,
             break_even_cpa=None,

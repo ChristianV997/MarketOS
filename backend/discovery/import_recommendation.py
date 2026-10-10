@@ -16,7 +16,7 @@ _FIELDS = {
     "meta_ad_library_csv": (["category", "product", "ad_count"], ["advertiser", "active_days", "platform", "region"]),
     "reddit_keyword_csv": (["keyword", "category"], ["subreddit", "mentions", "upvotes", "comments", "pain_point", "sentiment"]),
     "mercadolibre_snapshot_csv": (["category", "product", "price"], ["sold_count", "rating", "reviews", "seller_count"]),
-    "supplier_catalog_csv": (["category", "product", "supplier_cost"], ["shipping_cost", "moq", "lead_time_days", "availability", "supplier"]),
+    "supplier_catalog_csv": (["category", "candidate_id", "product", "supplier_cost"], ["shipping_cost", "moq", "lead_time_days", "availability", "supplier"]),
     "shopify_orders_csv": (["product", "category", "net_sales"], ["gross_sales", "quantity", "refunds", "discount", "created_at"]),
     "stripe_payments_csv": (["product", "amount", "currency", "status"], ["refunded", "created_at"]),
     "generic_market_csv": (["entity_type", "entity_name", "signal_type", "value"], ["weight", "confidence", "category", "metadata_json"]),
