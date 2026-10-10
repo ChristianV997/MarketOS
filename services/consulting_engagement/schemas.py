@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from evaluation.commerce.kernel_integration import replay_fingerprint
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 from services.consulting_offers import OFFER_IDS
 from services.reporting.render import render_markdown_report
 
@@ -25,10 +26,11 @@ ALLOWED_DELIVERABLES = frozenset({
     "profit_stack_advisor", "service_engagement", "service_delivery", "client_safe_export",
 })
 SECRET_MARKERS = (
-    "sk-", "ghp_", "github_pat_", "bearer ", "-----begin", "api_key", "access_token",
+    "ghp_", "github_pat_", "bearer ", "-----begin", "api_key", "access_token",
     "private_key", "password", "client_secret", "cookie=", "raw_payload",
 )
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
 
 
 class SchemaValidationError(ValueError):
@@ -43,7 +45,7 @@ def _safe_text(value: Any, field_name: str, *, required: bool = True, max_length
     if any(unicodedata.category(char).startswith("C") for char in value):
         raise SchemaValidationError(f"invalid {field_name}")
     lowered = value.casefold()
-    if any(marker in lowered for marker in SECRET_MARKERS):
+    if contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in SECRET_MARKERS):
         raise SchemaValidationError(f"unsafe {field_name}")
     return value.strip()
 
