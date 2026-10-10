@@ -1,7 +1,7 @@
 import {
   CANDIDATE_WINDOW_SIZE,
   type RankedCandidateRow,
-} from "../contracts/firstPhaseEvidencePacket";
+} from "../contracts/firstPhaseEvidencePacket.ts";
 
 export interface CandidateWindow {
   visible: RankedCandidateRow[];
@@ -55,4 +55,20 @@ export function ensureSelectionInWindow(
   if (index < windowStart) return index;
   if (index >= windowStart + windowSize) return Math.max(0, index - windowSize + 1);
   return windowStart;
+}
+
+/**
+ * Window start for the next render. The selection pulls the window only when the selection or the candidate
+ * list changes. Paging with Previous/Next moves the window alone, so a selection that is outside the new
+ * window must not undo the page.
+ */
+export function windowStartAfterChange(
+  candidates: RankedCandidateRow[],
+  selectedId: string | null,
+  windowStart: number,
+  previous: { candidates: RankedCandidateRow[]; selectedId: string | null } | null,
+  windowSize: number = CANDIDATE_WINDOW_SIZE,
+): number {
+  if (previous && previous.candidates === candidates && previous.selectedId === selectedId) return windowStart;
+  return ensureSelectionInWindow(candidates, selectedId, windowStart, windowSize);
 }

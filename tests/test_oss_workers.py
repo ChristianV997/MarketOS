@@ -142,13 +142,19 @@ def test_crawl4ai_requires_allowlist_for_live_research():
 
 def test_crawl4ai_normalizes_only_named_records_to_marketos_contract():
     candidates = Crawl4AIResearchAdapter.normalize_candidates([
-        {"name": "Travel Mug", "url": "https://supplier.example/mug", "price": "19.95", "quality": {"provenance": "live"}},
+        {
+            "name": "Travel Mug", "url": "https://supplier.example/mug", "price": "19.95",
+            "currency": "USD", "fetched_at": 1_700_000_000.0, "retrieval_mode": "fresh_fetch",
+            "quality": {"provenance": "live"},
+        },
         {"content": "not a product"},
     ])
     assert len(candidates) == 1
     assert candidates[0].name == "Travel Mug"
     assert candidates[0].selling_price == 19.95
     assert candidates[0].quality.source_ref == "https://supplier.example/mug"
+    assert candidates[0].quality.provenance == "public_page"
+    assert candidates[0].quality.observed_at.timestamp() == 1_700_000_000.0
 
 
 def test_crawl4ai_extracts_only_explicit_jsonld_product_evidence():
@@ -191,9 +197,15 @@ def test_crawl4ai_raw_page_cache_is_separate_from_dry_run_and_reextracts_product
 def test_crawl4ai_supplier_offers_require_an_explicit_cost_not_selling_price():
     offers = Crawl4AIResearchAdapter.normalize_supplier_offers([
         {"product_id": "mug-blue", "price": 19.95, "url": "https://supplier.example/mug"},
-        {"product_id": "mug-blue", "unit_cost": 6.5, "shipping_cost": 2, "inventory_units": 25, "url": "https://supplier.example/mug"},
+        {
+            "product_id": "mug-blue", "unit_cost": 6.5, "shipping_cost": 2, "inventory_units": 25,
+            "currency": "USD", "shipping_currency": "USD", "fetched_at": 1_700_000_000.0,
+            "retrieval_mode": "fresh_fetch", "url": "https://supplier.example/mug",
+        },
     ])
     assert len(offers) == 1
     assert offers[0].unit_cost == 6.5
     assert offers[0].shipping_cost == 2.0
     assert offers[0].supplier_id == "supplier.example"
+    assert offers[0].quality.provenance == "public_page"
+    assert offers[0].quality.observed_at.timestamp() == 1_700_000_000.0

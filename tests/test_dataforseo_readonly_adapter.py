@@ -24,6 +24,7 @@ from evaluation.commerce.dataforseo_adapter import (
     to_opportunity_search_context,
     to_product_validation_search_summary,
 )
+from scripts.run_dataforseo_readonly_adapter import _secret_like as _cli_secret_like
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "dataforseo_adapter"
@@ -132,6 +133,32 @@ def test_shopping_fixture_parses():
     assert len(result.shopping_signals) == 2
     assert result.shopping_signals[0].evidence_category == "ShoppingResultEvidence"
     assert result.shopping_signals[0].seller_placeholder == "Synthetic Seller"
+
+
+@pytest.mark.parametrize("candidate_id", ("desk-clamp-lamp", "desk-clamp-lamp-amazon-mirror"))
+def test_hyphenated_candidate_id_is_accepted_by_adapter_and_cli_guard(candidate_id: str):
+    payload = load("dataforseo_shopping_fixture.json")
+    payload["tasks"][0]["candidate_id"] = candidate_id
+    result = parse_dataforseo_fixture(payload, request_kind="serp_google_shopping_snapshot")
+    assert {item.candidate_id for item in result.shopping_signals} == {candidate_id}
+    assert _cli_secret_like({"candidate_id": candidate_id}) is False
+
+
+@pytest.mark.parametrize(
+    "secret_marker",
+    (
+        "sk-" + "SYNTHETICEXAMPLE0000",
+        "AIza" + "SYNTHETICEXAMPLE0000",
+        "api%3Dsk-" + "SYNTHETICEXAMPLE0000",
+        r"line\nsk-" + "SYNTHETICEXAMPLE0000",
+    ),
+)
+def test_adapter_and_cli_guard_still_reject_secret_shaped_markers(secret_marker: str):
+    payload = load("dataforseo_shopping_fixture.json")
+    payload["tasks"][0]["query"] = secret_marker
+    with pytest.raises(ValueError, match="secret-like"):
+        parse_dataforseo_fixture(payload, request_kind="serp_google_shopping_snapshot")
+    assert _cli_secret_like({"note": secret_marker}) is True
 
 
 def test_keyword_fixture_parses_as_search():

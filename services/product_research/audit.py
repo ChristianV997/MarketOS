@@ -100,6 +100,13 @@ def run_product_audit(
     from services.status import commercial_status
     status = commercial_status(workspace=workspace)  # no external credentials/live data needed
 
+    category_mapping_evidence: dict[str, Any] | None = None
+    try:
+        from services.category_mapping import build_category_mapping_evidence
+        category_mapping_evidence = build_category_mapping_evidence(category).to_dict()
+    except Exception as exc:  # noqa: BLE001 -- supplemental evidence only, never blocks the audit
+        _log.debug("product_audit_category_mapping_failed category=%s error=%s", category, exc)
+
     result = ProductAuditResult(
         product_name=product_name,
         category=category,
@@ -111,6 +118,7 @@ def run_product_audit(
         recommendation=validation.get("recommendation", "unknown"),
         dry_run=workspace.dry_run_default,
         status=status,
+        category_mapping_evidence=category_mapping_evidence,
     )
 
     try:

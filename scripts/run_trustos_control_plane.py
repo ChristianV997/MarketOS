@@ -11,11 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from evaluation.trustos.control_plane import ACTION_CATEGORIES, build_policy_packs_from_controls, build_trust_controls
+from evaluation.trustos.control_plane import ACTION_CATEGORIES
 from evaluation.trustos.gate_runner import evaluate_action
 from evaluation.trustos.trustos_report import build_trustos_combined_report
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 
 SECRET_KEYS = {"actual_secret_value", "api_key", "raw_api_key", "raw_oauth_token", "oauth_token", "access_token", "refresh_token", "password", "private_key", "private_key_material", "authorization", "cookie", "cookies", "raw_payload", "raw_html", "html", "body", "response_body", "prompt", "source_code", "internal_prompt", "other_client_data", "client_private_data", "cross_client_data"}
+
 
 
 def _path(value: str, *, must_exist: bool = True, allow_external: bool = False) -> Path:
@@ -33,12 +35,17 @@ def _path(value: str, *, must_exist: bool = True, allow_external: bool = False) 
 
 def _secret_like(value: Any) -> bool:
     if isinstance(value, dict):
-        return any(str(key).lower().replace("-", "_") in SECRET_KEYS or _secret_like(item) for key, item in value.items())
+        return any(
+            str(key).lower().replace("-", "_") in SECRET_KEYS
+            or _secret_like(str(key))
+            or _secret_like(item)
+            for key, item in value.items()
+        )
     if isinstance(value, list):
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza"))
+        return "-----begin " in lowered or "bearer " in lowered or contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza"))
     return False
 
 

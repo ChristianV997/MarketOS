@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import threading
-from typing import Any, Iterable
+from typing import Any
 
 from evaluation import CampaignCandidate, CampaignObservation, DataQuality, evaluate_campaign
 
@@ -69,6 +69,7 @@ def _quality_dict(quality: DataQuality) -> dict[str, Any]:
         "completeness": quality.completeness,
         "observed_at": quality.observed_at.isoformat(),
         "source_ref": quality.source_ref,
+        "retrieval_mode": quality.retrieval_mode,
     }
 
 
