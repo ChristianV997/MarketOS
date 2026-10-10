@@ -180,6 +180,7 @@ def test_contact_canaries_never_reach_records_warnings_or_errors():
         "(415) 555-0199",
         "+44 20 7946 0958",
         "415-555-0134",
+        "4155550199",
         "mailto:canary.ada@secret.test",
         "tel:+1-415-555-0199",
         "https://cdn.example/p.png?e=canary.ada%40secret.test",
@@ -375,3 +376,106 @@ def test_parenthesized_phone_without_separator_is_not_echoed():
     assert result["offer_count"] == 0
     assert result["rejections"][0]["code"] == "contact_data_rejected"
     assert result["evidence_state"] == "manual_import"
+
+
+def test_digit_only_phone_in_seller_and_cells_is_rejected_and_never_echoed(tmp_path):
+    # Red-team scenario: digit-only phone in seller or other fields
+    digit_phones = ("4155550199", "14155550199", "442079460919")
+    for phone in digit_phones:
+        text = f"listing_id,title,price,currency,seller\na1,Copper Bottle,10,USD,{phone}\n"
+        res = import_manual_competitor_csv(text, candidate_id="cand-1")
+        blob = json.dumps(res)
+        assert phone not in blob
+        assert res["status"] == "rejected"
+        assert res["offer_count"] == 0
+        assert res["rejections"][0]["code"] == "contact_data_rejected"
+
+    fields = ("seller", "title", "brand", "availability", "source", "source_url", "image")
+    canary = "4155550199"
+    for field in fields:
+        row = {
+            "listing_id": "bad1",
+            "title": "Clean Product",
+            "price": "10.00",
+            "currency": "USD",
+        }
+        row[field] = canary
+        cols = list(row)
+        csv_text = ",".join(cols) + "\n" + ",".join(row[c] for c in cols) + "\n"
+        res = import_manual_competitor_csv(csv_text, candidate_id="cand-1")
+        blob = json.dumps(res)
+        assert canary not in blob, f"Canary {canary} leaked in field {field}"
+        assert res["status"] == "rejected"
+        assert res["offer_count"] == 0
+
+    # Mixed CSV: 1 valid offer with explicit 0 price, 1 rejected offer with digit-only phone
+    mixed_csv = (
+        "listing_id,title,price,currency,seller\n"
+        "good1,Model 12-34-5678 UPC 012345678905,0,USD,ACME Supply\n"
+        "bad1,Copper Bottle,10,USD,4155550199\n"
+    )
+    mixed_res = import_manual_competitor_csv(mixed_csv, candidate_id="cand-1")
+    mixed_blob = json.dumps(mixed_res)
+    assert canary not in mixed_blob
+    assert mixed_res["status"] == "accepted"
+    assert mixed_res["offer_count"] == 1
+    assert mixed_res["offers"][0]["external_listing_id"] == "good1"
+    assert mixed_res["offers"][0]["price"] == 0.0
+    assert mixed_res["offers"][0]["title"] == "Model 12-34-5678 UPC 012345678905"
+
+    # CLI test ensuring digit phone is never echoed in stdout/stderr
+    mixed_path = tmp_path / "mixed_digit_phone.csv"
+    mixed_path.write_text(mixed_csv, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, "scripts/import_competitor_evidence.py", "--csv", str(mixed_path), "--candidate-id", "cand-1"],
+        cwd=ROOT, check=False, capture_output=True, text=True,
+    )
+    assert canary not in completed.stdout
+    assert canary not in completed.stderr
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert payload["offer_count"] == 1
+    assert payload["offers"][0]["title"] == "Model 12-34-5678 UPC 012345678905"
+
+
+def test_explicit_product_identifiers_are_not_misclassified_as_contacts():
+    # Explicit non-contact SKUs/models and checksum-valid GTINs remain IDs.
+    identifiers = (
+        "SKU 1234567890",
+        "Model 12-34-5678",
+        "96385074",
+        "036000291452",
+        "4006381333931",
+        "9780306406157",
+        "04006381333931",
+    )
+    for index, title in enumerate(identifiers, start=1):
+        text = chr(10).join(("listing_id,title,price,currency", f"a{index},{title},0,USD", ""))
+        result = import_manual_competitor_csv(text, candidate_id="cand-1")
+        assert result["status"] == "accepted"
+        assert result["offer_count"] == 1
+        assert result["offers"][0]["title"] == title
+        assert result["offers"][0]["price"] == 0.0
+
+    actual_phone = "4155550199"
+    rejected = import_manual_competitor_csv(
+        chr(10).join(("listing_id,title,price,currency,seller", f"a1,Copper Bottle,0,USD,{actual_phone}", "")),
+        candidate_id="cand-1",
+    )
+    encoded = json.dumps(rejected)
+    assert actual_phone not in encoded
+    assert rejected["status"] == "rejected"
+    assert rejected["offer_count"] == 0
+    assert rejected["rejections"][0]["code"] == "contact_data_rejected"
+
+
+def test_phone_in_product_labeled_title_is_rejected_without_echo():
+    phone = "4155550199"
+    result = import_manual_competitor_csv(
+        chr(10).join(("listing_id,title,price,currency", f"a1,SKU {phone},0,USD", "")),
+        candidate_id="cand-1",
+    )
+    assert phone not in json.dumps(result)
+    assert result["status"] == "rejected"
+    assert result["offer_count"] == 0
+    assert result["rejections"][0]["code"] == "contact_data_rejected"
