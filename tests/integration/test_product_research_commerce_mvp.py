@@ -103,13 +103,32 @@ class TestResearchPortfolioOptIn:
 
     def test_economics_grounded_by_supplier_evidence_supplied_alongside_portfolio(self):
         portfolio, _ = _portfolio_for_fixture()
-        evidence = SupplierEvidenceResult(attempted=True, unit_cost=9.5, shipping_cost=2.0, source_url="https://cj.example/x")
+        evidence = SupplierEvidenceResult(
+            attempted=True,
+            unit_cost=9.5,
+            shipping_cost=2.0,
+            source_url="https://cj.example/x",
+            source_type="public_page_static",
+            status="observed",
+            currency="USD",
+            shipping_currency="USD",
+            # The default source type is a public page, not a supplier-live quote.
+            fetch_provenance="fixture",
+        )
         run = run_commerce_mvp_slice(
             query="portable espresso maker", signal_fixture_path=FIXTURE,
             research_portfolio=portfolio, supplier_evidence=evidence,
         )
-        assert run.unit_economics_summary.source == "partial_observed_supplier_evidence"
-        assert run.unit_economics_summary.assumed_unit_cost == 9.5
+        summary = run.unit_economics_summary
+        assert summary.source == "partial_observed_public_page_evidence"
+        assert summary.assumed_unit_cost == 9.5
+        assert summary.assumed_shipping_cost == 2.0
+        assert "Observed CJ public-page catalog price (not supplier-live proof)=9.5 USD" in summary.assumptions[1]
+        assert "Observed CJ public-page shipping value (not supplier-live proof)=2.0 USD" in summary.assumptions[2]
+        assert "retrieval=fixture" in summary.assumptions[1]
+        assert run.metadata["network_used"] is False
+        assert run.metadata["provider_calls"] is False
+        assert run.metadata["no_supplier_mutation_authority"] is True
 
     def test_unmatched_top_candidate_id_falls_back_to_default_selection(self):
         portfolio, _ = _portfolio_for_fixture(force_top_id=None)
