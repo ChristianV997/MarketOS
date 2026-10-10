@@ -356,9 +356,9 @@ _OBFUSCATED_DOT_EMAIL = re.compile(
     r"(?:\(\s*dot\s*\)|\[\s*dot\s*\]|\{\s*dot\s*\}|\bdot\b)\s*"
     r"[a-z]{2,24}(?![\w])"
 )
-_NANP = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)[-.\s]?|\d{3}[-.\s])\d{3}[-.\s]\d{4}(?!\d)")
-_INTL_PHONE = re.compile(r"(?<!\w)\+\d{1,3}(?:[-.\s()]+\d{2,4}){2,5}(?!\d)")
-_E164 = re.compile(r"(?<!\w)\+\d{8,15}(?!\d)")
+_NANP = re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?(?:\([2-9]\d{2}\)[-.\s]?|[2-9]\d{2}[-.\s]?)[2-9]\d{2}[-.\s]?\d{4}(?!\d)")
+_INTL_PHONE = re.compile(r"(?<!\w)(?:\+|00|011)\d{1,3}(?:[-.\s()]+\d{2,4}){2,5}(?!\d)")
+_E164 = re.compile(r"(?<!\w)(?:\+|00|011)\d{8,15}(?!\d)")
 _CONTACT_SCHEME = re.compile(r"(?i)(?:mailto|tel)\s*:")
 _INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200c\u200d\ufeff\u2060\u180e"), None)
 _DASHES = str.maketrans({"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-"})
@@ -384,11 +384,26 @@ def _contact_surface(value: str) -> str:
     return text.replace("%2540", "@").replace("%40", "@")
 
 
-def _contact_like(value: str) -> bool:
+def _is_product_identifier_title(value: str) -> bool:
+    """Recognize a standalone, check-digit-valid GTIN title."""
+    text = _contact_surface(value).strip()
+    if re.fullmatch(r"[0-9]+", text) is None or len(text) not in {8, 12, 13, 14}:
+        return False
+    digits = [int(digit) for digit in text]
+    weighted_sum = sum(
+        digit * (3 if index % 2 == 0 else 1)
+        for index, digit in enumerate(reversed(digits[:-1]))
+    )
+    return (10 - weighted_sum % 10) % 10 == digits[-1]
+
+
+def _contact_like(value: str, *, allow_product_identifier: bool = False) -> bool:
     """High-confidence email or phone only. Ordinary product text, including '@' and SKUs, stays."""
     if not value:
         return False
     text = _contact_surface(value)
+    if allow_product_identifier and _is_product_identifier_title(text):
+        return False
     if (
         _CONTACT_SCHEME.search(text)
         or _EMAIL.search(text)
@@ -399,7 +414,10 @@ def _contact_like(value: str) -> bool:
     ):
         return True
     match = _INTL_PHONE.search(text)
-    return match is not None and len(re.sub(r"\D", "", match.group(0))) >= 8
+    if match is not None and len(re.sub(r"\D", "", match.group(0))) >= 8:
+        return True
+    digits = re.sub(r"\D", "", text)
+    return not re.search(r"[a-zA-Z]", text) and 10 <= len(digits) <= 15
 
 
 def _header_is_sensitive(header: str) -> bool:
@@ -523,7 +541,12 @@ def import_manual_competitor_csv(
         shipping_raw = mapped.get("shipping_cost", "")
         rating_raw = mapped.get("rating", "")
         if any(_contact_like(value) for value in (
-            title, seller, brand, listing_id, availability, source_url_raw, source_raw, image_raw,
+            (
+                title
+                if _contact_like(title, allow_product_identifier=True)
+                else ""
+            ),
+            seller, brand, listing_id, availability, source_url_raw, source_raw, image_raw,
             price_raw, shipping_raw, rating_raw,
         )):
             rejections.append(_manual_rejection(row_number, "contact_data_rejected"))
