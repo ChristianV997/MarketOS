@@ -61,3 +61,36 @@ def test_spend_this_month_excludes_spend_from_before_this_month():
     reg.register(old)
 
     assert reg.spend_this_month("ws-a") == 0.0
+
+
+def test_same_timestamp_envelopes_are_both_retained_and_isolated():
+    stamp = 1_700_000_000.0
+    reg = _fresh_registry()
+    first = CommercialRunEnvelope(
+        service_name="x", workspace_id="ws-a", actual_spend=30.0, created_at=stamp, parent_ids=["p"]
+    )
+    second = CommercialRunEnvelope(
+        service_name="x", workspace_id="ws-a", actual_spend=20.0, created_at=stamp, parent_ids=["p"]
+    )
+    shared_a = CommercialRunEnvelope(
+        service_name="x", workspace="shared", workspace_id="ws-a", actual_spend=5.0, created_at=stamp
+    )
+    shared_b = CommercialRunEnvelope(
+        service_name="x", workspace="shared", workspace_id="ws-b", actual_spend=1000.0, created_at=stamp
+    )
+    reg.register(first)
+    reg.register(second)
+    reg.register(shared_a)
+    reg.register(shared_b)
+
+    assert len({first.experiment_id, second.experiment_id, shared_a.experiment_id, shared_b.experiment_id}) == 4
+    assert reg.spend_this_month("ws-a", now=stamp) == 55.0
+    assert reg.spend_this_month("ws-b", now=stamp) == 1000.0
+    assert reg._registry.count("commercial_run_envelope") == 4
+    assert len(reg._registry.children_of("p")) == 2
+
+    restored = CommercialRunEnvelope.from_dict(first.to_dict())
+    reg.register(restored)
+    assert reg._registry.count("commercial_run_envelope") == 4
+    assert len(reg._registry.children_of("p")) == 2
+    assert reg.get(first.experiment_id).actual_spend == 30.0
