@@ -186,10 +186,21 @@ def test_registry_and_capability_defects_are_reported_without_failing() -> None:
     capabilities = json.loads(CAPABILITY_PATH.read_text(encoding="utf-8"))
     assert report["registry_defects"] == collect_registry_defects(registry)
     assert report["capability_catalog_defects"] == collect_capability_defects(capabilities)
-    found = {(item["record_id"], item["field"], item["value"]) for item in report["registry_defects"]}
+    # The committed registry has been repaired: it must no longer carry the obsolete
+    # placeholder pins or the annotated Scrapy tag object. The validator still reports
+    # those defect classes; that is proven on injected registries below, not on this file.
+    committed_pins = {
+        (row["source_id"], field, row.get(field))
+        for row in registry
+        for field in ("revision", "commit_sha")
+    }
     for source_id, sha in PLACEHOLDER_SHAS.items():
-        assert (source_id, "revision", sha) in found
-        assert (source_id, "commit_sha", sha) in found
+        assert (source_id, "revision", sha) not in committed_pins
+        assert (source_id, "commit_sha", sha) not in committed_pins
+    assert not any(
+        item["defect"] in {"patterned_placeholder_sha", "annotated_tag_object_sha"}
+        for item in report["registry_defects"]
+    )
     zero_ids = {
         row["capability_id"]
         for row in capabilities
@@ -200,11 +211,69 @@ def test_registry_and_capability_defects_are_reported_without_failing() -> None:
     assert "meta_ad_library" in reported_ids
     assert "tiktok_creative_center" in reported_ids
     assert len(reported_ids) == 15
-    scrapy_defects = [item for item in report["registry_defects"] if item["record_id"] == "src-scrapy"]
-    assert {(item["field"], item["defect"], item["value"]) for item in scrapy_defects} == {
-        ("revision", "annotated_tag_object_sha", "8c85937adef8279f12e35e0ee9a20c52ff6d1648"),
-        ("commit_sha", "annotated_tag_object_sha", "8c85937adef8279f12e35e0ee9a20c52ff6d1648"),
+    scrapy = next(row for row in registry if row["source_id"] == "src-scrapy")
+    assert scrapy["revision"] == scrapy["commit_sha"] != ANNOTATED_TAG_OBJECT_SHA
+
+
+ANNOTATED_TAG_OBJECT_SHA = "8c85937adef8279f12e35e0ee9a20c52ff6d1648"
+
+
+def _injected_registry(tmp_path: Path) -> tuple[Path, dict[str, tuple[str, str]]]:
+    """Copy the committed registry and inject one malformed pin per defect class.
+
+    Returns the path and {source_id: (field value, expected defect)}. Only the temporary
+    copy is changed; the committed data is never rewritten.
+    """
+    registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    injected = {
+        "src-coderos": (PLACEHOLDER_SHAS["src-coderos"], "patterned_placeholder_sha"),
+        "src-gstack": (ZERO_SHA, "all_zero_sha"),
+        "src-scrapy": (ANNOTATED_TAG_OBJECT_SHA, "annotated_tag_object_sha"),
     }
+    for row in registry:
+        if row["source_id"] in injected:
+            value = injected[row["source_id"]][0]
+            row["revision"] = value
+            row["commit_sha"] = value
+    path = tmp_path / "registry.json"
+    path.write_text(json.dumps(registry), encoding="utf-8")
+    return path, injected
+
+
+def test_injected_registry_defect_classes_are_reported_without_failing(tmp_path: Path) -> None:
+    path, injected = _injected_registry(tmp_path)
+    report, status = validate_paths(INTAKE_PATH, path, CAPABILITY_PATH)
+    assert status == 0 and report["valid"] is True
+    found = {(item["record_id"], item["field"], item["defect"], item["value"]) for item in report["registry_defects"]}
+    expected = {
+        (source_id, field, defect, value)
+        for source_id, (value, defect) in injected.items()
+        for field in ("revision", "commit_sha")
+    }
+    assert found == expected
+    assert report["registry_defects"] == sorted(
+        report["registry_defects"], key=lambda item: (item["record_id"], item["field"], item["defect"])
+    )
+
+
+def test_annotated_tag_object_defect_is_scoped_to_scrapy() -> None:
+    row = {"source_id": "src-other", "revision": ANNOTATED_TAG_OBJECT_SHA, "commit_sha": REAL_SHA}
+    assert collect_registry_defects([row]) == []
+    assert collect_registry_defects([{**row, "source_id": "src-scrapy"}]) == [
+        {
+            "defect": "annotated_tag_object_sha",
+            "field": "revision",
+            "record_id": "src-scrapy",
+            "record_kind": "source_adaptation_registry",
+            "value": ANNOTATED_TAG_OBJECT_SHA,
+        }
+    ]
+
+
+def test_registry_with_only_verified_pins_reports_no_defects() -> None:
+    rows = [{"source_id": "src-ok", "revision": REAL_SHA, "commit_sha": REAL_SHA}]
+    assert collect_registry_defects(rows) == []
+    assert collect_registry_defects({"not": "a list"}) == []
 
 
 def test_report_is_deterministic() -> None:
@@ -481,8 +550,38 @@ def test_cli_json_exit_codes(tmp_path: Path) -> None:
     assert good.returncode == 0
     payload = json.loads(good.stdout)
     assert payload["valid"] is True
-    assert payload["registry_defects"]
+    committed_registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    committed_capabilities = json.loads(CAPABILITY_PATH.read_text(encoding="utf-8"))
+    assert payload["registry_defects"] == collect_registry_defects(committed_registry)
+    assert payload["capability_catalog_defects"] == collect_capability_defects(committed_capabilities)
+    # The committed capability catalog still carries its all-zero SaaS pins; those stay reported.
     assert payload["capability_catalog_defects"]
+    injected_path, injected = _injected_registry(tmp_path)
+    defective = subprocess.run(
+        [sys.executable, str(VALIDATOR_PATH), "--json", "--intake", str(INTAKE_PATH), "--registry", str(injected_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert defective.returncode == 0  # registry defects are reported, never an exit failure
+    defect_payload = json.loads(defective.stdout)
+    assert defect_payload["valid"] is True
+    assert {item["record_id"] for item in defect_payload["registry_defects"]} == set(injected)
+    unreadable_path = tmp_path / "registry_bad.json"
+    unreadable_path.write_text("{not json", encoding="utf-8")
+    unreadable = subprocess.run(
+        [sys.executable, str(VALIDATOR_PATH), "--json", "--intake", str(INTAKE_PATH), "--registry", str(unreadable_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    # Defective pins are advisory (exit 0), but a registry that cannot be read fails closed:
+    # the intake's registry_ref rows cannot be verified, so the run is invalid (exit 1).
+    assert unreadable.returncode == 1
+    unreadable_payload = json.loads(unreadable.stdout)
+    assert unreadable_payload["valid"] is False
+    assert [item["defect"] for item in unreadable_payload["registry_defects"]] == ["unreadable"]
+    assert any("registry_ref does not exist" in error for error in unreadable_payload["errors"])
     missing = subprocess.run(
         [sys.executable, str(VALIDATOR_PATH), "--json", "--intake", str(tmp_path / "missing.json")],
         check=False,
