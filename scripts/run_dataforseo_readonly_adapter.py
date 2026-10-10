@@ -12,8 +12,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from evaluation.commerce.dataforseo_adapter import REQUEST_KINDS, build_dataforseo_adapter_report
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 
 SECRET_KEYS = {"actual_secret_value", "api_key", "raw_api_key", "raw_oauth_token", "oauth_token", "access_token", "refresh_token", "password", "private_key", "private_key_material", "authorization", "cookie", "cookies", "raw_payload", "raw_html", "html", "body", "response_body", "javascript", "browser_trace"}
+
 
 
 def _path(value: str, *, must_exist: bool = True, allow_external: bool = False) -> Path:
@@ -31,12 +33,17 @@ def _path(value: str, *, must_exist: bool = True, allow_external: bool = False) 
 
 def _secret_like(value: Any) -> bool:
     if isinstance(value, dict):
-        return any(str(key).lower().replace("-", "_") in SECRET_KEYS or _secret_like(item) for key, item in value.items())
+        return any(
+            str(key).lower().replace("-", "_") in SECRET_KEYS
+            or _secret_like(str(key))
+            or _secret_like(item)
+            for key, item in value.items()
+        )
     if isinstance(value, list):
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza"))
+        return "-----begin " in lowered or "bearer " in lowered or contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza"))
     return False
 
 

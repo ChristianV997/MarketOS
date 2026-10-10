@@ -18,6 +18,7 @@ class ProductAuditResult:
     recommendation: str = "unknown"
     dry_run: bool = True
     status: str = "ready_for_client_service"
+    category_mapping_evidence: dict[str, Any] | None = None
     generated_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
@@ -32,5 +33,6 @@ class ProductAuditResult:
             "recommendation": self.recommendation,
             "dry_run": self.dry_run,
             "status": self.status,
+            "category_mapping_evidence": self.category_mapping_evidence,
             "generated_at": self.generated_at,
         }

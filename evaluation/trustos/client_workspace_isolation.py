@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from backend.workspaces.client_workspace import ClientWorkspace
 from backend.workspaces.registry import WorkspaceRegistry, get_workspace_registry
 
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 from .control_plane import ACTION_CATEGORIES, EVIDENCE_STATUSES, _clean
 from .gate_runner import evaluate_action
 
@@ -26,7 +27,8 @@ DEFAULT_ACCESS.update({"client_private_data": "workspace_only", "client_safe_sum
 INTERNAL_KEYS = {"internal_prompt", "internal_scoring_formula", "internal_heuristic", "internal_strategy_note", "internal_pricing_note", "internal_upsell_note", "internal_agent_instruction", "source_code", "cross_client_learning"}
 SECRET_KEYS = {"api_key", "private_key", "password", "raw_payload", "raw_html", "credentials", "credential", "access_token", "refresh_token", "authorization", "cookie", "cookies", "jwt", "token", "tokens", "client_secret", "webhook_secret", "raw_provider_payload", "provider_payload", "raw_provider_response", "provider_response"}
 _FORBIDDEN_KEY_MARKERS = ("prompt", "formula", "heuristic", "strategy", "pricing", "upsell", "agent_instruction", "source_code", "cross_client", "other_client", "private_tenant", "client_private_data", "provider_payload", "raw_payload", "provider_response", "raw_response", "credential", "secret", "password", "api_key", "access_token", "refresh_token", "authorization", "cookie", "token")
-_FORBIDDEN_VALUE_MARKERS = ("sk-", "ghp_", "github_pat_", "-----begin", "bearer ", "cookie=", "session=", "<html", "other_client", "cross_client", "prompt", "formula", "heuristic", "strategy", "credential", "token", "cookie", "source code", "provider response", "raw payload")
+_FORBIDDEN_VALUE_MARKERS = ("ghp_", "github_pat_", "-----begin", "bearer ", "cookie=", "session=", "<html", "other_client", "cross_client", "prompt", "formula", "heuristic", "strategy", "credential", "token", "cookie", "source code", "provider response", "raw payload")
+
 _SOURCE_CODE_VALUE = re.compile(r"(?im)^\s*(?:def|class|import|from)\s+\w+")
 _FILESYSTEM_PATH_VALUE = re.compile(r"(?i)(?:^|[\s=(\[{,:])(?:file://|[a-z]:[\\/]|\\\\|/(?!/)|[^\\/\s]+\\[^\\/\s]+)")
 _NON_AUTHORITATIVE_CLAIM_MARKERS = ("actual", "live", "live_validated", "verified_live", "production")
@@ -342,13 +344,15 @@ def check_workspace_leakage(payload: Mapping[str, Any], *, client_safe: bool = T
                     or (client_safe and data_class in {"client_private_data", "global_provider_intelligence"})
                     or any(marker in key_text for marker in _FORBIDDEN_KEY_MARKERS)
                     or _contains_filesystem_path(str(key))
+                    or contains_boundary_prefixed_sk_token(str(key))
                 )
+                safe_key = "[redacted-key]" if contains_boundary_prefixed_sk_token(str(key)) else str(key)
                 if forbidden_key:
                     cls = data_class or "client_private_data"
-                    findings.append(ClientWorkspaceLeakageCheck(f"leak-{len(findings)+1}", cls, f"{path}.{key}".strip("."), "internal content exposed to client projection", "critical" if cls in INTERNAL_KEYS or key_text in SECRET_KEYS else "high", "remove field or replace with an approved redacted summary", False, True, "hard_block"))
+                    findings.append(ClientWorkspaceLeakageCheck(f"leak-{len(findings)+1}", cls, f"{path}.{safe_key}".strip("."), "internal content exposed to client projection", "critical" if cls in INTERNAL_KEYS or key_text in SECRET_KEYS else "high", "remove field or replace with an approved redacted summary", False, True, "hard_block"))
                 elif data_class in {"lawyer_ready_packet", "accountant_ready_packet", "security_reviewer_packet"}:
-                    findings.append(ClientWorkspaceLeakageCheck(f"review-{len(findings)+1}", data_class, f"{path}.{key}".strip("."), "professional packet requires redaction review", "medium", "complete professional review before export", True, False, "requires_review"))
-                walk(child, f"{path}.{key}".strip("."))
+                    findings.append(ClientWorkspaceLeakageCheck(f"review-{len(findings)+1}", data_class, f"{path}.{safe_key}".strip("."), "professional packet requires redaction review", "medium", "complete professional review before export", True, False, "requires_review"))
+                walk(child, f"{path}.{safe_key}".strip("."))
         elif isinstance(value, (list, tuple)):
             for index, child in enumerate(value): walk(child, f"{path}[{index}]")
         elif isinstance(value, str) and (_contains_forbidden_value(value) or _contains_filesystem_path(value)):
@@ -359,7 +363,7 @@ def check_workspace_leakage(payload: Mapping[str, Any], *, client_safe: bool = T
 
 def _contains_forbidden_value(value: str) -> bool:
     lowered = value.lower()
-    return any(marker in lowered for marker in _FORBIDDEN_VALUE_MARKERS) or _SOURCE_CODE_VALUE.search(value) is not None
+    return contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in _FORBIDDEN_VALUE_MARKERS) or _SOURCE_CODE_VALUE.search(value) is not None
 
 
 def _contains_filesystem_path(value: str) -> bool:

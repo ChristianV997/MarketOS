@@ -215,7 +215,7 @@ def _provenance(row: Mapping[str, Any], mode: str) -> dict[str, str]:
         }
     fallback = _fallback_provenance(mode)
     fields = (
-        "supplier_product_id", "supplier_title", "supplier_sku", "variant_count", "moq", "unit_cost", "shipping_cost",
+        "supplier_product_id", "supplier_title", "supplier_sku", "variant_count", "moq", "unit_cost", "shipping_cost", "shipping_currency",
         "estimated_landed_cost", "delivery_min_days", "delivery_max_days", "inventory_status", "inventory_quantity",
         "warehouse_region", "destination_region", "fulfillment_method", "supplier_rating", "supplier_review_count",
         "order_count_text", "best_seller_badge", "trend_label", "return_policy_signal", "refund_policy_signal",
@@ -263,10 +263,16 @@ def normalize_record(
         parsed_min, parsed_max = normalize_delivery_window(_value(merged, "delivery_window", "estimated_delivery", "shipping_time", "lead_time_days", "lead_time"))
         delivery_min = delivery_min if delivery_min is not None else parsed_min
         delivery_max = delivery_max if delivery_max is not None else parsed_max
-    unit_cost = number(_value(merged, "unit_cost", "supplier_cost", "supplier_price", "price", "cost"))
-    shipping_cost = number(_value(merged, "shipping_cost", "shipping", "freight_cost"))
+    raw_unit_cost = _value(merged, "unit_cost", "supplier_cost", "supplier_price", "price", "cost")
+    raw_shipping_cost = _value(merged, "shipping_cost", "shipping", "freight_cost")
+    unit_cost = number(raw_unit_cost)
+    shipping_cost = number(raw_shipping_cost)
     landed = number(_value(merged, "estimated_landed_cost", "landed_cost"))
     warnings = [str(item) for item in merged.get("warnings", []) if isinstance(item, str)]
+    if raw_unit_cost not in (None, "") and unit_cost is None:
+        warnings.append("invalid_economics_input")
+    if raw_shipping_cost not in (None, "") and shipping_cost is None:
+        warnings.append("invalid_economics_input")
     raw_field_provenance = merged.get("field_provenance")
     if mode == "manual_import" and isinstance(raw_field_provenance, Mapping) and any(
         str(value) in {"observed", "live_readonly", "mutated"}
@@ -284,6 +290,7 @@ def normalize_record(
     raw_currency = _value(merged, "currency", "price_currency")
     if raw_currency is None:
         warnings.append("currency_assumed_usd")
+    raw_shipping_currency = _value(merged, "shipping_currency", "shipping_price_currency", "freight_currency")
     quantity = integer(_value(merged, "inventory_quantity", "stock", "inventory"))
     inventory = normalize_inventory_status(_value(merged, "inventory_status", "stock_status", "availability"), quantity)
     raw_evidence_mode = _value(merged, "evidence_mode")
@@ -327,6 +334,7 @@ def normalize_record(
         unit_cost=unit_cost,
         currency=str(raw_currency or "USD").upper(),
         shipping_cost=shipping_cost,
+        shipping_currency=(str(raw_shipping_currency).strip().upper() or None) if raw_shipping_currency is not None else None,
         estimated_landed_cost=landed,
         delivery_min_days=delivery_min,
         delivery_max_days=delivery_max,

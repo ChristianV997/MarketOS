@@ -54,10 +54,9 @@ ShopifyAPI
 stripe
 facebook-business
 tiktok-business-api-sdk-official
-evidently
 
 # ── inference kernel ──────────────────────────────────────────────────────────
-openai>=3.16.2         # OpenAI provider (cloud completions + embeddings)
+openai>=3.24.0         # OpenAI provider (cloud completions + embeddings)
 # Optional backends — install as needed for local inference:
 #   pip install airllm           # AirLLM: 70B models on 4 GB VRAM
 #   pip install litellm          # LiteLLM: unified multi-provider router
@@ -70,7 +69,7 @@ qdrant-client>=1.19.1   # Qdrant vector store (in-memory fallback used without D
 # ── AWS standby (optional) ────────────────────────────────────────────────────
 # boto3: only needed if MARKETOS_HEARTBEAT_BUCKET is set (backend/aws/heartbeat.py,
 # deploy/aws/main.tf) — the PC/AWS standby heartbeat fails soft without it.
-boto3>=1.43.98  # AWS Secrets Manager research credentials and standby heartbeat
+boto3>=1.43.108  # AWS Secrets Manager research credentials and standby heartbeat
 
 # ── dev / test ────────────────────────────────────────────────────────────────
 pytest

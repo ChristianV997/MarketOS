@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis
 
 try:
@@ -101,6 +102,9 @@ RAW_KEYS = frozenset(
         "internal_prompt",
     }
 )
+# Keep these provider markers local; evaluation.secret_markers is the sole
+# authority for boundary-prefixed `sk-` detection across input guards.
+_OTHER_SECRET_MARKERS = ("ghp_", "xoxb-", "aiza")
 LIVE_MODES = frozenset({"live_readonly", "public_live", "authenticated_live"})
 GOVERNOR_ACTIONS = (
     ("screen_product_opportunities", "intelligence", "intelligence", "report_generation_quota"),
@@ -170,8 +174,11 @@ def _mapping(value: Any) -> dict[str, Any] | None:
 def _secret_like(value: Any) -> bool:
     if isinstance(value, Mapping):
         for key, item in value.items():
-            normalized = str(key).lower().replace("-", "_")
+            key_text = str(key)
+            normalized = key_text.lower().replace("-", "_")
             if normalized in SECRET_KEYS or normalized in RAW_KEYS:
+                return True
+            if _secret_like(key_text):
                 return True
             if _secret_like(item):
                 return True
@@ -182,10 +189,17 @@ def _secret_like(value: Any) -> bool:
         lowered = value.lower()
         if "<html" in lowered or "<!doctype html" in lowered:
             return True
-        return "-----begin " in lowered or "bearer " in lowered or any(
-            marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "aiza")
-        )
+        return _secret_marker_in_text(value, lowered=lowered)
     return False
+
+
+def _secret_marker_in_text(value: str, *, lowered: str | None = None) -> bool:
+    low = value.lower() if lowered is None else lowered
+    if "-----begin " in low or "bearer " in low:
+        return True
+    if contains_boundary_prefixed_sk_token(value):
+        return True
+    return any(marker in low for marker in _OTHER_SECRET_MARKERS)
 
 
 def reject_unsafe_input(value: Any, *, label: str = "input") -> None:

@@ -3,11 +3,12 @@ import {
   CANDIDATE_WINDOW_SIZE,
   type RankedCandidateRow,
 } from "../contracts/firstPhaseEvidencePacket";
-import { adjacentCandidateIndex, shouldHandoffDetailFocus } from "../lib/keyboardNav";
+import { adjacentCandidateIndex, rovingActiveId, shouldHandoffDetailFocus } from "../lib/keyboardNav";
+import { candidateElements, firstLaidOut } from "../lib/focusTarget";
 import {
-  ensureSelectionInWindow,
   nextWindowStart,
   windowCandidates,
+  windowStartAfterChange,
 } from "../lib/windowCandidates";
 
 function formatPct(value: number | null): string {
@@ -42,28 +43,50 @@ export function RankedCandidatesPanel({
   onWindowStartChange: (start: number) => void;
 }) {
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  const mobileListRef = useRef<HTMLUListElement>(null);
   const detailFocusRequested = useRef(false);
+  const pendingFocusCandidateId = useRef<string | null>(null);
 
-  const alignedStart = useMemo(
-    () => ensureSelectionInWindow(candidates, selectedId, windowStart, CANDIDATE_WINDOW_SIZE),
-    [candidates, selectedId, windowStart],
-  );
+  // The desktop row and the mobile option for a candidate are both in the DOM; only the laid-out one can take focus.
+  function laidOutCandidateElement(candidateId: string): HTMLElement | null {
+    return firstLaidOut([
+      ...candidateElements(tbodyRef.current, candidateId),
+      ...candidateElements(mobileListRef.current, candidateId),
+    ]);
+  }
+
+  // The selection pulls the window only when the selection or the candidate list changes; paging does not.
+  const alignmentKey = useRef<{ candidates: RankedCandidateRow[]; selectedId: string | null } | null>(null);
 
   useEffect(() => {
-    if (alignedStart !== windowStart) onWindowStartChange(alignedStart);
-  }, [alignedStart, windowStart, onWindowStartChange]);
+    const next = windowStartAfterChange(candidates, selectedId, windowStart, alignmentKey.current);
+    alignmentKey.current = { candidates, selectedId };
+    if (next !== windowStart) onWindowStartChange(next);
+  }, [candidates, selectedId, windowStart, onWindowStartChange]);
 
   const windowed = useMemo(
-    () => windowCandidates(candidates, alignedStart, CANDIDATE_WINDOW_SIZE),
-    [candidates, alignedStart],
+    () => windowCandidates(candidates, windowStart, CANDIDATE_WINDOW_SIZE),
+    [candidates, windowStart],
   );
 
   useEffect(() => {
     if (!selectedId || !detailFocusRequested.current) return;
     detailFocusRequested.current = false;
-    const detail = document.getElementById("candidate-detail-panel");
-    detail?.focus();
+    queueMicrotask(() => {
+      const detail = document.getElementById("candidate-detail-panel");
+      detail?.focus();
+    });
   }, [selectedId]);
+
+  useEffect(() => {
+    const targetId = pendingFocusCandidateId.current;
+    if (!targetId) return;
+    const target = laidOutCandidateElement(targetId);
+    if (target) {
+      pendingFocusCandidateId.current = null;
+      target.focus();
+    }
+  });
 
   if (!candidates.length) {
     return (
@@ -82,24 +105,39 @@ export function RankedCandidatesPanel({
   }
 
   function focusRow(absoluteIndex: number) {
-    const relative = absoluteIndex - windowed.windowStart;
-    const row = tbodyRef.current?.children[relative] as HTMLElement | undefined;
-    row?.focus();
+    const candidate = candidates[absoluteIndex];
+    if (!candidate) return;
+    const target = laidOutCandidateElement(candidate.candidateId);
+    if (target) {
+      pendingFocusCandidateId.current = null;
+      target.focus();
+    }
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>, absoluteIndex: number) {
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>, absoluteIndex: number) {
     if (shouldHandoffDetailFocus(event.key)) {
       event.preventDefault();
       detailFocusRequested.current = true;
       onSelect(candidates[absoluteIndex].candidateId);
+      if (selectedId === candidates[absoluteIndex].candidateId) {
+        detailFocusRequested.current = false;
+        queueMicrotask(() => {
+          document.getElementById("candidate-detail-panel")?.focus();
+        });
+      }
       return;
     }
     const nextIndex = adjacentCandidateIndex(candidates.length, absoluteIndex, event.key);
     if (nextIndex === absoluteIndex || nextIndex < 0) return;
     event.preventDefault();
+    const nextCandidate = candidates[nextIndex];
+    if (nextCandidate) {
+      pendingFocusCandidateId.current = nextCandidate.candidateId;
+    }
     onSelect(candidates[nextIndex].candidateId);
-    if (event.key === "Home") onWindowStartChange(0);
-    else if (event.key === "End") {
+    if (event.key === "Home") {
+      onWindowStartChange(0);
+    } else if (event.key === "End") {
       onWindowStartChange(Math.max(0, nextIndex - CANDIDATE_WINDOW_SIZE + 1));
     } else if (nextIndex >= windowed.windowStart + windowed.windowSize) {
       onWindowStartChange(nextWindowStart(windowed, "forward"));
@@ -109,7 +147,10 @@ export function RankedCandidatesPanel({
     queueMicrotask(() => focusRow(nextIndex));
   }
 
-  const activeId = selectedId ?? windowed.visible[0]?.candidateId ?? null;
+  const activeId = rovingActiveId(
+    windowed.visible.map((candidate: RankedCandidateRow) => candidate.candidateId),
+    selectedId,
+  );
 
   return (
     <section
@@ -150,6 +191,7 @@ export function RankedCandidatesPanel({
 
       {/* Mobile card list */}
       <ul
+        ref={mobileListRef}
         className="mt-3 space-y-2 md:hidden"
         role="listbox"
         aria-labelledby="ranked-candidates-heading"
@@ -159,16 +201,28 @@ export function RankedCandidatesPanel({
           const absoluteIndex = windowed.windowStart + relativeIndex;
           const selected = candidate.candidateId === selectedId;
           const { market, supplier } = pillarLookup(candidate);
+          const tabIndex = candidate.candidateId === activeId ? 0 : -1;
           return (
-            <li key={candidate.candidateId}>
+            <li key={candidate.candidateId} role="presentation">
               <button
                 type="button"
+                data-candidate-id={candidate.candidateId}
                 role="option"
+                tabIndex={tabIndex}
                 aria-selected={selected}
+                aria-posinset={absoluteIndex + 1}
+                aria-setsize={candidates.length}
                 onClick={() => {
                   detailFocusRequested.current = true;
                   onSelect(candidate.candidateId);
+                  if (selectedId === candidate.candidateId) {
+                    detailFocusRequested.current = false;
+                    queueMicrotask(() => {
+                      document.getElementById("candidate-detail-panel")?.focus();
+                    });
+                  }
                 }}
+                onKeyDown={(event) => handleKeyDown(event, absoluteIndex)}
                 className={`w-full rounded border p-3 text-left text-xs outline-none focus-visible:ring-1 focus-visible:ring-indigo-400 ${
                   selected
                     ? "border-indigo-500/40 bg-indigo-500/10"
@@ -246,6 +300,7 @@ export function RankedCandidatesPanel({
               return (
                 <tr
                   key={candidate.candidateId}
+                  data-candidate-id={candidate.candidateId}
                   role="row"
                   tabIndex={tabIndex}
                   aria-selected={selected}
@@ -253,6 +308,12 @@ export function RankedCandidatesPanel({
                   onClick={() => {
                     detailFocusRequested.current = true;
                     onSelect(candidate.candidateId);
+                    if (selectedId === candidate.candidateId) {
+                      detailFocusRequested.current = false;
+                      queueMicrotask(() => {
+                        document.getElementById("candidate-detail-panel")?.focus();
+                      });
+                    }
                   }}
                   onKeyDown={(event) => handleKeyDown(event, absoluteIndex)}
                   className={`cursor-pointer border-t border-zinc-800 text-zinc-300 outline-none focus-visible:bg-indigo-500/10 focus-visible:ring-1 focus-visible:ring-indigo-400 ${

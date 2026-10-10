@@ -12,8 +12,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from evaluation.companyos.provider_credential_report import build_provider_credential_report
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 
 SECRET_KEYS = {"actual_secret_value", "raw_api_key", "raw_oauth_token", "password", "private_key_material", "api_key", "access_token", "refresh_token", "client_secret"}
+
 
 
 def _path(value: str | None) -> Path | None:
@@ -37,12 +39,17 @@ def _output(value: str) -> Path:
 
 def _secret_like(value: Any) -> bool:
     if isinstance(value, dict):
-        return any(str(key).lower().replace("-", "_") in SECRET_KEYS or _secret_like(item) for key, item in value.items())
+        return any(
+            str(key).lower().replace("-", "_") in SECRET_KEYS
+            or _secret_like(str(key))
+            or _secret_like(item)
+            for key, item in value.items()
+        )
     if isinstance(value, list):
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza"))
+        return "-----begin " in lowered or "bearer " in lowered or contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza"))
     return False
 
 

@@ -33,11 +33,13 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import logging
+import math
 import os
 import re
 import socket
 import time
 from dataclasses import dataclass, field as dataclass_field
+from datetime import datetime, timezone
 from typing import Any
 from urllib import robotparser
 from urllib.parse import quote_plus, urlparse
@@ -60,32 +62,34 @@ USER_AGENT = "MarketOS-SupplierEvidence/1.0 (+https://github.com/ChristianV997/M
 FIELD_STATUSES = ("observed", "derived", "assumed", "unavailable", "malformed", "stale", "conflicting")
 
 _EVIDENCE_FIELDS = (
-    "title", "price", "sku", "category", "variants", "weight_kg", "inventory_status",
-    "inventory_quantity", "warehouse_origin", "shipping_cost", "estimated_delivery_days", "quality_evidence",
+    "title", "price", "currency", "sku", "category", "variants", "weight_kg", "inventory_status",
+    "inventory_quantity", "warehouse_origin", "shipping_cost", "shipping_currency", "estimated_delivery_days", "quality_evidence",
     "rating", "reviews_count", "images", "description",
 )
 
 
 @dataclass(frozen=True)
 class CJProductEvidence:
-    """One CJ public product-page observation with field-level provenance."""
+    """One CJ page observation; timestamps denote fetch time, not page update time."""
 
     source: str
     source_url: str
-    observed_at: float
+    observed_at: float | None
     external_product_id: str
     title: str
+    fetched_at: float | None = None
     field_status: dict[str, str] = dataclass_field(default_factory=dict)
     sku: str = ""
     category: str = ""
     price: float | None = None
-    currency: str = "USD"
+    currency: str | None = None
     variants: tuple[dict[str, Any], ...] = ()
     weight_kg: float | None = None
     inventory_status: str = "unavailable_publicly"
     inventory_quantity: int | None = None
     warehouse_origin: str = ""
     shipping_cost: float | None = None
+    shipping_currency: str | None = None
     estimated_delivery_days: int | None = None
     quality_evidence: str = ""
     rating: float | None = None
@@ -95,16 +99,27 @@ class CJProductEvidence:
     extraction_method: str = "jsonld_schema_org_product"
     confidence: float = 0.0
     warnings: tuple[str, ...] = ()
+    fetch_provenance: str = "unknown"
+
+    def __post_init__(self) -> None:
+        # Keep the legacy name while exposing the timestamp's retrieval semantics explicitly.
+        if self.fetched_at is None and self.observed_at is not None:
+            object.__setattr__(self, "fetched_at", self.observed_at)
+        elif self.observed_at is None and self.fetched_at is not None:
+            object.__setattr__(self, "observed_at", self.fetched_at)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "source": self.source, "source_url": self.source_url, "observed_at": self.observed_at,
+            "fetched_at": self.fetched_at,
+            "fetch_provenance": self.fetch_provenance,
             "external_product_id": self.external_product_id, "title": self.title, "sku": self.sku,
             "category": self.category, "price": self.price, "currency": self.currency,
             "variants": [dict(v) for v in self.variants], "weight_kg": self.weight_kg,
             "inventory_status": self.inventory_status, "inventory_quantity": self.inventory_quantity,
             "warehouse_origin": self.warehouse_origin,
-            "shipping_cost": self.shipping_cost, "estimated_delivery_days": self.estimated_delivery_days,
+            "shipping_cost": self.shipping_cost, "shipping_currency": self.shipping_currency,
+            "estimated_delivery_days": self.estimated_delivery_days,
             "quality_evidence": self.quality_evidence, "rating": self.rating, "reviews_count": self.reviews_count,
             "images": list(self.images), "description": self.description,
             "field_status": dict(self.field_status), "extraction_method": self.extraction_method,
@@ -112,44 +127,68 @@ class CJProductEvidence:
         }
 
 
-def _degraded(source_url: str, *, reason: str, extraction_method: str = "none") -> CJProductEvidence:
+def _degraded(
+    source_url: str,
+    *,
+    reason: str,
+    extraction_method: str = "none",
+    observed_at: float | None = None,
+    fetch_provenance: str = "not_fetched",
+) -> CJProductEvidence:
     """A structurally valid, fully-honest "observed nothing" result — the
     fallback for every rejected/blocked/failed path below, never an
     exception the caller must handle specially."""
     return CJProductEvidence(
-        source=SOURCE, source_url=source_url, observed_at=time.time(),
+        source=SOURCE, source_url=source_url, observed_at=observed_at,
         external_product_id=hashlib.sha256(source_url.encode()).hexdigest()[:16],
-        title="", field_status={name: "unavailable" for name in _EVIDENCE_FIELDS},
+        title="", fetched_at=observed_at, field_status={name: "unavailable" for name in _EVIDENCE_FIELDS},
         extraction_method=extraction_method, confidence=0.0, warnings=(reason,),
+        fetch_provenance=fetch_provenance,
     )
 
 
 def _validate_public_url(url: str) -> str:
     """Return the validated hostname, or raise ValueError/PermissionError.
 
-    Resolves DNS and rejects private/loopback/link-local/reserved/multicast
-    destinations (SSRF-by-DNS-rebinding guard, not just a string check on
-    the literal hostname), and restricts the host to the one selected
-    Phase 1 supplier source.
+    Only the two selected supplier hosts are accepted. The hostname must
+    match exactly: a suffix or subdomain is not the allowlisted site.
+    Credentials, cleartext, and non-443 ports are rejected. DNS is checked
+    for the host that will actually be contacted, not for the raw input.
     """
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
-        raise ValueError("evidence URL must be http(s)")
-    hostname = (parsed.hostname or "").lower()
-    if not hostname:
-        raise ValueError("evidence URL has no hostname")
-    if not any(hostname == host or hostname.endswith("." + host) for host in ALLOWED_HOSTS):
-        raise PermissionError(f"host is not the selected Phase 1 supplier source: {hostname}")
+        raise ValueError("evidence URL must be https")
+    if parsed.username is not None or parsed.password is not None or parsed.port not in (None, 443):
+        raise PermissionError("evidence URL target is not allowed")
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    if hostname not in ALLOWED_HOSTS:
+        raise PermissionError("host is not the selected Phase 1 supplier source")
+    if parsed.scheme != "https":
+        raise ValueError("evidence URL must be https")
+    connect_host = "www.cjdropshipping.com"
     try:
-        infos = socket.getaddrinfo(hostname, None)
+        infos = socket.getaddrinfo(connect_host, 443)
     except socket.gaierror as exc:
-        raise PermissionError(f"could not resolve evidence host: {hostname}") from exc
+        raise PermissionError("could not resolve evidence host") from exc
     for info in infos:
         addr = info[4][0]
         ip = ipaddress.ip_address(addr)
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            raise PermissionError(f"evidence host resolves to a disallowed network: {hostname} -> {addr}")
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise PermissionError("evidence host resolves to a disallowed network")
     return hostname
+
+
+def _safe_request_url(url: str) -> str:
+    """Rebuild a request URL whose host is the constant supplier origin."""
+    _validate_public_url(url)
+    parsed = urlparse(url)
+    path = parsed.path or "/"
+    if not path.startswith("/") or path.startswith("//") or "\\" in path or "\r" in url or "\n" in url:
+        raise PermissionError("evidence URL target is not allowed")
+    safe = "https://www.cjdropshipping.com" + path
+    if parsed.query:
+        safe += "?" + parsed.query
+    return safe
 
 
 def _check_robots(hostname: str, url: str) -> None:
@@ -162,22 +201,24 @@ def _check_robots(hostname: str, url: str) -> None:
         raise PermissionError(f"robots.txt disallows evidence URL: {url}")
 
 
-_CACHE: dict[str, tuple[float, str]] = {}
+_CacheEntry = tuple[float, str] | tuple[float, str, float | None]
+_CACHE: dict[str, _CacheEntry] = {}
 
 
-def _cache_get(url: str) -> str | None:
+def _cache_get(url: str) -> tuple[str, float | None] | None:
     ttl_s = max(0.0, float(os.getenv("CJ_EVIDENCE_CACHE_TTL_S", "900")))
     cached = _CACHE.get(url)
     if cached and time.monotonic() - cached[0] < ttl_s:
-        return cached[1]
+        fetched_at = cached[2] if len(cached) == 3 else None
+        return cached[1], fetched_at
     if cached:
         _CACHE.pop(url, None)
     return None
 
 
-def _cache_put(url: str, html: str) -> None:
+def _cache_put(url: str, html: str, *, fetched_at: float | None = None) -> None:
     max_entries = max(1, min(int(os.getenv("CJ_EVIDENCE_CACHE_MAX_ENTRIES", "100")), 1000))
-    _CACHE[url] = (time.monotonic(), html)
+    _CACHE[url] = (time.monotonic(), html, fetched_at)
     if len(_CACHE) > max_entries:
         oldest = min(_CACHE, key=lambda key: _CACHE[key][0])
         _CACHE.pop(oldest, None)
@@ -206,13 +247,36 @@ def _bounded_get(url: str, *, timeout: int = DEFAULT_TIMEOUT_S) -> str:
     return b"".join(chunks).decode("utf-8", errors="replace")
 
 
-def _evidence_from_record(record: dict[str, Any], url: str, *, extraction_method: str) -> CJProductEvidence:
+def _evidence_from_record(
+    record: dict[str, Any],
+    url: str,
+    *,
+    extraction_method: str,
+    observed_at: float | None = None,
+    fetch_provenance: str = "unknown",
+) -> CJProductEvidence:
     """Map one shared normalized Product record into supplier evidence."""
     field_status = {name: "unavailable" for name in _EVIDENCE_FIELDS}
     if record.get("name"):
         field_status["title"] = "observed"
-    if record.get("selling_price"):
-        field_status["price"] = "observed"
+    raw_price = record.get("selling_price")
+    price: float | None = None
+    if raw_price is not None:
+        try:
+            parsed_price = float(raw_price)
+        except (TypeError, ValueError):
+            parsed_price = math.nan
+        if math.isfinite(parsed_price):
+            price = parsed_price
+            field_status["price"] = "observed"
+        else:
+            field_status["price"] = "malformed"
+    raw_currency = record.get("currency")
+    currency = str(raw_currency).strip().upper() if isinstance(raw_currency, str) and raw_currency.strip() else None
+    if currency is not None:
+        field_status["currency"] = "observed"
+    elif raw_currency is not None:
+        field_status["currency"] = "malformed"
     if record.get("product_id"):
         field_status["sku"] = "observed"
     if record.get("availability"):
@@ -225,34 +289,78 @@ def _evidence_from_record(record: dict[str, Any], url: str, *, extraction_method
         field_status["reviews_count"] = "observed"
     if record.get("image"):
         field_status["images"] = "observed"
-    if record.get("shipping_cost") is not None:
-        field_status["shipping_cost"] = "observed"
+    raw_shipping = record.get("shipping_cost")
+    shipping_cost: float | None = None
+    if raw_shipping is not None:
+        try:
+            parsed_shipping = float(raw_shipping)
+        except (TypeError, ValueError):
+            parsed_shipping = math.nan
+        if math.isfinite(parsed_shipping) and parsed_shipping >= 0:
+            shipping_cost = parsed_shipping
+            field_status["shipping_cost"] = "observed"
+        else:
+            field_status["shipping_cost"] = "malformed"
+    elif record.get("shipping_cost_status") == "malformed":
+        field_status["shipping_cost"] = "malformed"
+    raw_shipping_currency = record.get("shipping_currency")
+    shipping_currency = (
+        str(raw_shipping_currency).strip().upper()
+        if isinstance(raw_shipping_currency, str) and raw_shipping_currency.strip() else None
+    )
+    if shipping_currency is not None:
+        field_status["shipping_currency"] = "observed"
+    elif raw_shipping_currency is not None:
+        field_status["shipping_currency"] = "malformed"
     confidence = round(sum(1 for status in field_status.values() if status == "observed") / len(field_status), 3)
-    warnings = () if field_status["price"] == "observed" else ("price_not_found_in_structured_data",)
+    warnings = []
+    if price is None:
+        warnings.append(
+            "price_malformed_in_structured_data"
+            if field_status["price"] == "malformed" else "price_not_found_in_structured_data"
+        )
+    elif price <= 0:
+        warnings.append("price_not_usable_as_supplier_cost")
+    if price is not None and currency is None:
+        warnings.append("price_currency_unavailable")
+    if field_status["shipping_cost"] == "malformed":
+        warnings.append("shipping_cost_malformed_in_structured_data")
+    if shipping_cost is not None and shipping_currency is None:
+        warnings.append("shipping_currency_unavailable")
     image = record.get("image")
     images = (str(image),) if image else ()
     return CJProductEvidence(
-        source=SOURCE, source_url=url, observed_at=time.time(),
+        source=SOURCE, source_url=url, observed_at=observed_at,
         external_product_id=str(record.get("product_id") or hashlib.sha256(url.encode()).hexdigest()[:16]),
-        title=str(record.get("name", "")), field_status=field_status,
+        title=str(record.get("name", "")), fetched_at=observed_at, field_status=field_status,
         sku=str(record.get("product_id", "")),
-        price=record.get("selling_price") or None, currency=str(record.get("currency", "USD")),
+        price=price, currency=currency,
         inventory_status=str(record.get("availability") or "unavailable_publicly"),
-        shipping_cost=record.get("shipping_cost"),
+        shipping_cost=shipping_cost, shipping_currency=shipping_currency,
         rating=record.get("rating"), reviews_count=record.get("review_count"),
         images=images, description=str(record.get("description", "")),
-        extraction_method=extraction_method, confidence=confidence, warnings=warnings,
+        extraction_method=extraction_method, confidence=confidence, warnings=tuple(warnings),
+        fetch_provenance=fetch_provenance,
     )
 
 
-def _extract_from_jsonld(html: str, url: str) -> CJProductEvidence | None:
+def _extract_from_jsonld(
+    html: str,
+    url: str,
+    *,
+    observed_at: float | None = None,
+    fetch_provenance: str = "unknown",
+) -> CJProductEvidence | None:
     """Reuses Crawl4AIResearchAdapter's JSON-LD Product parser rather than
     duplicating it — the same conservative rule applies: a page without a
     valid schema.org Product object yields no evidence, never a guess."""
     records = Crawl4AIResearchAdapter._product_records_from_jsonld(html, url)
     if not records:
         return None
-    return _evidence_from_record(records[0], url, extraction_method="jsonld_schema_org_product")
+    return _evidence_from_record(
+        records[0], url, extraction_method="jsonld_schema_org_product",
+        observed_at=observed_at, fetch_provenance=fetch_provenance,
+    )
 
 
 def _extract_with_optional_js_render(url: str, *, context: SidecarContext) -> CJProductEvidence | None:
@@ -266,7 +374,24 @@ def _extract_with_optional_js_render(url: str, *, context: SidecarContext) -> CJ
         return None
     if not records:
         return None
-    return _evidence_from_record(records[0], url, extraction_method="crawl4ai_js_rendered_structured_product")
+    record = records[0]
+    fetched_at: float | None = None
+    try:
+        raw_fetched_at = record.get("fetched_at")
+        fetched_at = float(raw_fetched_at) if raw_fetched_at is not None else None
+        if fetched_at is not None and not math.isfinite(fetched_at):
+            fetched_at = None
+    except (TypeError, ValueError):
+        fetched_at = None
+    fetch_provenance = str(record.get("retrieval_mode") or "unknown")
+    if fetched_at is None or fetch_provenance not in {"fresh_fetch", "cache_hit"}:
+        fetched_at = None
+        fetch_provenance = "renderer_timestamp_unavailable"
+    return _evidence_from_record(
+        record, url, observed_at=fetched_at,
+        extraction_method="crawl4ai_js_rendered_structured_product",
+        fetch_provenance=fetch_provenance,
+    )
 
 
 def fetch_product_evidence(url: str, *, context: SidecarContext) -> CJProductEvidence:
@@ -274,31 +399,49 @@ def fetch_product_evidence(url: str, *, context: SidecarContext) -> CJProductEvi
     degraded (all fields "unavailable") on any rejection, block, or
     failure, so callers never need a special error path."""
     try:
-        hostname = _validate_public_url(url)
+        safe_url = _safe_request_url(url)
     except (ValueError, PermissionError) as exc:
         return _degraded(url, reason=f"rejected:{exc}")
     if context.dry_run:
         return _degraded(url, reason="dry_run_simulated", extraction_method="simulated")
     try:
-        _check_robots(hostname, url)
+        _check_robots("www.cjdropshipping.com", safe_url)
     except PermissionError as exc:
         return _degraded(url, reason=f"robots_blocked:{exc}")
-    html = _cache_get(url)
+    cached = _cache_get(safe_url)
     fetch_failure: str | None = None
-    if html is None:
+    html: str | None = None
+    fetched_at: float | None = None
+    fetch_provenance = "fetch_failed"
+    if cached is not None:
+        html, fetched_at = cached
+        fetch_provenance = "cache_hit" if fetched_at is not None else "cache_hit_timestamp_unknown"
+    else:
         try:
-            html = _bounded_get(url)
+            html = _bounded_get(safe_url)
         except Exception as exc:  # noqa: BLE001 - network boundary must degrade, never raise
-            _log.warning("cj_evidence_fetch_failed url=%s error=%s", url, type(exc).__name__)
+            _log.warning("cj_evidence_fetch_failed error=%s", type(exc).__name__)
             fetch_failure = f"fetch_failed:{type(exc).__name__}"
         else:
-            _cache_put(url, html)
-    evidence = _extract_from_jsonld(html, url) if html is not None else None
+            fetched_at = time.time()
+            fetch_provenance = "fresh_fetch"
+            _cache_put(safe_url, html, fetched_at=fetched_at)
+    evidence = (
+        _extract_from_jsonld(
+            html, safe_url, observed_at=fetched_at, fetch_provenance=fetch_provenance,
+        )
+        if html is not None else None
+    )
     if evidence is None:
-        rendered = _extract_with_optional_js_render(url, context=context)
+        rendered = _extract_with_optional_js_render(safe_url, context=context)
         if rendered is not None:
             return rendered
-        return _degraded(url, reason=fetch_failure or "no_structured_product_data_found")
+        return _degraded(
+            safe_url,
+            reason=fetch_failure or "no_structured_product_data_found",
+            observed_at=fetched_at,
+            fetch_provenance=fetch_provenance,
+        )
     return evidence
 
 
@@ -321,19 +464,21 @@ def discover_candidate_urls(query: str, *, context: SidecarContext, max_results:
     """
     search_url = build_search_url(query)
     try:
-        hostname = _validate_public_url(search_url)
+        safe_url = _safe_request_url(search_url)
     except (ValueError, PermissionError):
         return []
     if context.dry_run:
         return []
     try:
-        _check_robots(hostname, search_url)
-        html = _cache_get(search_url)
-        if html is None:
-            html = _bounded_get(search_url)
-            _cache_put(search_url, html)
+        _check_robots("www.cjdropshipping.com", safe_url)
+        cached = _cache_get(safe_url)
+        if cached is not None:
+            html, _ = cached
+        else:
+            html = _bounded_get(safe_url)
+            _cache_put(safe_url, html, fetched_at=time.time())
     except Exception as exc:  # noqa: BLE001 - discovery degrades to empty, never raises
-        _log.info("cj_discovery_unavailable query=%s error=%s", query, type(exc).__name__)
+        _log.info("cj_discovery_unavailable error=%s", type(exc).__name__)
         return []
     urls: list[str] = []
     for match in re.finditer(r'href=["\'](https://www\.cjdropshipping\.com/product/[^"\'#?]+)', html):
@@ -345,50 +490,110 @@ def discover_candidate_urls(query: str, *, context: SidecarContext, max_results:
     return urls
 
 
-def to_supplier_offer(evidence: CJProductEvidence, *, supplier_id: str = SOURCE) -> SupplierOffer | None:
-    """None when no observed cost evidence exists.
+def _has_known_fetch(evidence: CJProductEvidence) -> bool:
+    if evidence.source != SOURCE or evidence.fetch_provenance not in {"fresh_fetch", "cache_hit"}:
+        return False
+    fetched_at = evidence.fetched_at if evidence.fetched_at is not None else evidence.observed_at
+    if fetched_at is None:
+        return False
+    try:
+        timestamp = float(fetched_at)
+        return math.isfinite(timestamp) and timestamp >= 0
+    except (TypeError, ValueError):
+        return False
 
-    Unlike a general-purpose retail-site crawl (where a page price is a
-    *selling* price to end consumers, not a wholesale cost — see
-    Crawl4AIResearchAdapter.normalize_supplier_offers's caution), a CJ
-    Dropshipping product page's price genuinely is what MarketOS would pay
-    to source the item: CJ is a wholesale/dropship supplier catalog, not a
-    retail storefront selling to the public. Treating that observed price
-    as unit_cost is therefore correct here, not an inference.
-    """
-    if evidence.price is None or evidence.field_status.get("price") != "observed":
+
+def _quality_from_evidence(evidence: CJProductEvidence) -> DataQuality:
+    """Public-page quality only; use the original fetch time and retrieval mode."""
+    if not _has_known_fetch(evidence):
+        raise ValueError("public-page quality requires known fetch provenance and timestamp")
+    fetched_at = evidence.fetched_at if evidence.fetched_at is not None else evidence.observed_at
+    if fetched_at is None:
+        raise ValueError("public-page quality requires an observation timestamp")
+    observed_at = float(fetched_at)
+    return DataQuality(
+        provenance="public_page",
+        attribution="attributed",
+        completeness="partial",
+        source_ref=evidence.source_url,
+        observed_at=datetime.fromtimestamp(observed_at, tz=timezone.utc),
+        retrieval_mode=evidence.fetch_provenance,
+    )
+
+
+def _observed_number(evidence: CJProductEvidence, field_name: str) -> float | None:
+    """Return an observed numeric field, preserving explicit zeros. Missing stays None."""
+    if evidence.field_status.get(field_name) != "observed":
         return None
-    incomplete = any(status == "unavailable" for status in evidence.field_status.values())
+    value = getattr(evidence, field_name, None)
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def to_supplier_offer(evidence: CJProductEvidence, *, supplier_id: str = SOURCE) -> SupplierOffer | None:
+    """None when observed unit cost or shipping cannot be represented honestly.
+
+    A public CJ page can expose a candidate catalog price, but that
+    observation is not authenticated supplier-live proof. Preserve that
+    distinction in DataQuality so generic commerce gates do not accept it as
+    live-attributed evidence.
+
+    ``SupplierOffer.shipping_cost`` is a non-optional float in evaluation
+    contracts, so a missing shipping observation must not become ``0.0``
+    (free shipping). Callers that need nullable shipping use
+    ``SupplierEvidenceResult`` instead.
+    """
+    unit_cost = _observed_number(evidence, "price")
+    shipping_cost = _observed_number(evidence, "shipping_cost")
+    if (
+        not _has_known_fetch(evidence)
+        or unit_cost is None
+        or unit_cost <= 0
+        or shipping_cost is None
+        or shipping_cost < 0
+        or not evidence.currency
+        or not evidence.shipping_currency
+        or evidence.currency != evidence.shipping_currency
+    ):
+        return None
     return SupplierOffer(
         supplier_id=supplier_id, product_id=evidence.external_product_id,
-        unit_cost=evidence.price, shipping_cost=evidence.shipping_cost or 0.0,
+        unit_cost=unit_cost, shipping_cost=shipping_cost,
         fulfillment_days=evidence.estimated_delivery_days,
         currency=evidence.currency,
-        quality=DataQuality(
-            provenance="live", attribution="attributed", source_ref=evidence.source_url,
-            completeness="partial" if incomplete else "complete",
-        ),
+        quality=_quality_from_evidence(evidence),
     )
 
 
 def to_product_candidate(evidence: CJProductEvidence) -> ProductCandidate | None:
-    if not evidence.title:
+    """Return a priced public-page candidate; never encode a missing price as 0."""
+    if (
+        not _has_known_fetch(evidence)
+        or not evidence.title
+        or not evidence.currency
+    ):
+        return None
+    price = _observed_number(evidence, "price")
+    if price is None or price <= 0:
         return None
     return ProductCandidate(
         product_id=evidence.external_product_id, name=evidence.title, currency=evidence.currency,
-        selling_price=evidence.price or 0.0, source_signal_ids=(evidence.source_url,),
-        quality=DataQuality(
-            provenance="live" if evidence.field_status.get("title") == "observed" else "unknown",
-            attribution="attributed", source_ref=evidence.source_url,
-        ),
+        selling_price=price, source_signal_ids=(evidence.source_url,),
+        quality=_quality_from_evidence(evidence),
     )
 
 
 def score_candidates(evidences: list[CJProductEvidence], query: str) -> list[dict[str, Any]]:
-    """Deterministic supplier-evidence comparison, ranked highest first.
+    """Deterministic public-page-evidence comparison, ranked highest first.
 
     Unknown fields reduce confidence; they are never treated as favorable
     evidence and never silently become a zero-cost/zero-risk assumption.
+    These scores are public-page observations, never supplier-live proof.
     """
     query_tokens = {token for token in query.lower().split() if token}
     scored: list[dict[str, Any]] = []
@@ -398,15 +603,21 @@ def score_candidates(evidences: list[CJProductEvidence], query: str) -> list[dic
         observed = sum(1 for status in evidence.field_status.values() if status == "observed")
         completeness = observed / max(1, len(evidence.field_status))
         missing = sorted(name for name, status in evidence.field_status.items() if status == "unavailable")
+        invalid = sorted(
+            name for name, status in evidence.field_status.items()
+            if status == "malformed" or (name == "price" and status == "observed" and evidence.price is not None and evidence.price <= 0)
+        )
         conflicting = sorted(name for name, status in evidence.field_status.items() if status == "conflicting")
         composite = round(relevance * 0.4 + completeness * 0.4 + evidence.confidence * 0.2, 4)
         scored.append({
             "product_id": evidence.external_product_id, "title": evidence.title,
             "source_url": evidence.source_url, "relevance_score": round(relevance, 4),
             "evidence_completeness": round(completeness, 4), "extraction_confidence": evidence.confidence,
-            "composite_score": composite, "missing_evidence": missing, "conflicting_evidence": conflicting,
-            "assumptions_still_required": [name for name in missing if name in
-                                            {"weight_kg", "shipping_cost", "warehouse_origin", "estimated_delivery_days"}],
+            "evidence_mode": "public_page_observation", "supplier_live_proof": False,
+            "composite_score": composite, "missing_evidence": missing, "invalid_evidence": invalid,
+            "conflicting_evidence": conflicting,
+            "assumptions_still_required": [name for name in (*missing, *invalid) if name in
+                                            {"price", "weight_kg", "shipping_cost", "warehouse_origin", "estimated_delivery_days"}],
         })
     return sorted(scored, key=lambda item: item["composite_score"], reverse=True)
 

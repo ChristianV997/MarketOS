@@ -25,6 +25,7 @@ from typing import Any, Mapping
 
 from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis
 from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 from services.reporting.render import json_safe, render_markdown_report
 from services.market_research_evidence import build_evidence_integrity_report
 from services.market_research_evidence.freshness import classify_freshness
@@ -66,7 +67,7 @@ _UNSAFE_KEYS = frozenset({
     "filesystem_path",
 })
 _UNSAFE_VALUE_MARKERS = (
-    "<html", "<script", "-----begin", "sk-", "ghp_", "github_pat_", "bearer ",
+    "<html", "<script", "-----begin", "ghp_", "github_pat_", "bearer ",
     "api_key", "access_token", "raw_payload", "provider_payload", "internal_prompt",
     "provider_response", "raw_response", "source_code", "pricing formula", "internal pricing",
     "formula", "heuristic", "strategy", "other_client", "cross_client", ".env",
@@ -79,6 +80,7 @@ _UNSAFE_SECRET_PATTERNS = (
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b"),
 )
+
 
 
 def _validate_safe_inputs(value: Any, *, depth: int = 0, nodes: list[int] | None = None) -> None:
@@ -94,6 +96,7 @@ def _validate_safe_inputs(value: Any, *, depth: int = 0, nodes: list[int] | None
             key_text = str(key).casefold().replace("-", "_").replace(" ", "_")
             if key_text in _UNSAFE_KEYS or any(marker in key_text for marker in ("raw_payload", "provider_payload")):
                 raise ValueError("unsafe_evidence_input")
+            _validate_safe_inputs(str(key), depth=depth + 1, nodes=nodes)
             _validate_safe_inputs(child, depth=depth + 1, nodes=nodes)
         return
     if isinstance(value, (list, tuple)):
@@ -105,7 +108,8 @@ def _validate_safe_inputs(value: Any, *, depth: int = 0, nodes: list[int] | None
             raise ValueError("evidence_input_bounds_exceeded")
         lowered = value.casefold()
         if (
-            any(marker in lowered for marker in _UNSAFE_VALUE_MARKERS)
+            contains_boundary_prefixed_sk_token(value)
+            or any(marker in lowered for marker in _UNSAFE_VALUE_MARKERS)
             or _UNSAFE_HTML_TAG.search(value)
             or any(pattern.search(value) for pattern in _UNSAFE_SECRET_PATTERNS)
             or _ABSOLUTE_PATH.match(value)

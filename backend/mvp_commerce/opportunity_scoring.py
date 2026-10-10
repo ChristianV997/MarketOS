@@ -60,8 +60,9 @@ category-level stability, and no data source for that exists.
 """
 from __future__ import annotations
 
+import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from backend.contracts.events import Event
@@ -95,9 +96,12 @@ _WEIGHTS: dict[str, float] = {
     "variant_complexity": 5.0,
 }
 
-# Provenance -> confidence-tier weight (see _confidence). Assumed evidence
-# is worth something but far less than observed; unknown is worth nothing.
-_PROVENANCE_CONFIDENCE_WEIGHT = {"observed": 1.0, "derived": 0.7, "assumed": 0.35, "unavailable": 0.0}
+# Provenance -> deterministic confidence-tier weight (not a calibrated
+# success probability). Public-page evidence remains separate and below
+# supplier-observed evidence because it is not supplier-live proof.
+_PROVENANCE_CONFIDENCE_WEIGHT = {
+    "observed": 1.0, "public_page": 0.7, "derived": 0.7, "assumed": 0.35, "unavailable": 0.0,
+}
 
 
 @dataclass(frozen=True)
@@ -108,7 +112,7 @@ class ScoreDimension:
     weight: float                    # 0 when not computed
     contribution: float              # normalized_value * (renormalized weight), 0 when not computed
     reason: str
-    provenance: str                  # "observed" | "derived" | "assumed" | "unavailable"
+    provenance: str                  # observed | public_page | derived | assumed | unavailable
     is_unknown: bool
 
     def to_dict(self) -> dict[str, Any]:
@@ -182,6 +186,22 @@ def _dim(name: str, raw: float | None, normalized: float | None, reason: str, pr
     return ScoreDimension(name, raw, normalized, 0.0, 0.0, reason, provenance, is_unknown)
 
 
+def _supplier_provenance(evidence: SupplierEvidenceResult) -> str:
+    return "public_page" if evidence.source_type.startswith("public_page") else "observed"
+
+
+def _supplier_provenance_context(evidence: SupplierEvidenceResult) -> str:
+    page = evidence.evidence
+    currency = evidence.currency or (page.currency if page is not None else None) or "unknown"
+    fetched_at = evidence.fetched_at
+    if fetched_at is None and page is not None:
+        fetched_at = page.fetched_at if page.fetched_at is not None else page.observed_at
+    retrieval = evidence.fetch_provenance
+    if retrieval == "unknown" and page is not None:
+        retrieval = page.fetch_provenance
+    return f"currency={currency}; fetched_at={fetched_at if fetched_at is not None else 'unknown'}; retrieval={retrieval}"
+
+
 def _trend_strength(candidate: OpportunityCandidate) -> ScoreDimension:
     # source_local_score is already 0-100 (backend/mvp_commerce/opportunity.py);
     # reused directly, never recomputed — this dimension IS that field.
@@ -218,9 +238,11 @@ def _supplier_evidence_quality(evidence: SupplierEvidenceResult | None) -> Score
                      "no supplier evidence was gathered for this candidate", "unavailable")
     best = evidence.ranking[0]
     normalized = round(float(best["composite_score"]) * 100.0, 2)
-    provenance = "observed" if evidence.evidence is not None else "assumed"
+    public_page = evidence.source_type.startswith("public_page") and evidence.evidence is not None
+    provenance = "public_page" if public_page else "observed" if evidence.evidence is not None else "assumed"
+    scope = f"; public-page observation is not supplier-live proof; {_supplier_provenance_context(evidence)}" if public_page else f"; {_supplier_provenance_context(evidence)}"
     return _dim("supplier_evidence_quality", float(best["composite_score"]), normalized,
-                f"best CJ public-page candidate composite score {best['composite_score']}", provenance)
+                f"best CJ candidate composite score {best['composite_score']}{scope}", provenance)
 
 
 def _observed_supplier_cost(evidence: SupplierEvidenceResult | None) -> ScoreDimension:
@@ -229,11 +251,44 @@ def _observed_supplier_cost(evidence: SupplierEvidenceResult | None) -> ScoreDim
     # to say what counts as a *good* price, so this only rewards having a
     # real observed cost at all (vs. an assumption) rather than guessing at
     # price attractiveness.
-    if evidence is None or evidence.unit_cost is None:
+    if evidence is None:
         return _dim("observed_supplier_cost", None, None,
-                     "no observed CJ supplier cost for this candidate", "unavailable")
-    return _dim("observed_supplier_cost", evidence.unit_cost, 100.0,
-                f"supplier unit cost observed: {evidence.unit_cost} (source={evidence.source_url})", "observed")
+                    "no observed CJ supplier cost for this candidate", "unavailable")
+    context = _supplier_provenance_context(evidence)
+    page = evidence.evidence
+    if evidence.unit_cost is None:
+        if page is not None and page.field_status.get("price") == "observed":
+            currency = evidence.currency or page.currency or "unknown"
+            return _dim(
+                "observed_supplier_cost", None, None,
+                f"public-page price observation {page.price} {currency} is not an eligible USD supplier cost; "
+                f"not supplier-live proof; {context}",
+                "unavailable",
+            )
+        return _dim("observed_supplier_cost", None, None,
+                    f"no eligible USD supplier cost for this candidate; {context}", "unavailable")
+    currency = str(evidence.currency or "").strip().upper()
+    if currency != "USD":
+        return _dim(
+            "observed_supplier_cost", None, None,
+            f"supplier amount currency {currency or 'unknown'} is not eligible for USD economics; {context}",
+            "unavailable",
+        )
+    try:
+        unit_cost = float(evidence.unit_cost)
+    except (TypeError, ValueError):
+        unit_cost = math.nan
+    if not math.isfinite(unit_cost) or unit_cost <= 0:
+        return _dim("observed_supplier_cost", None, None,
+                    "no positive observed CJ supplier cost for this candidate", "unavailable")
+    public_page = evidence.source_type.startswith("public_page")
+    if evidence.source_type.startswith("public_page"):
+        reason = (f"public-page catalog price observed: {evidence.unit_cost}; "
+                  f"not supplier-live proof (source={evidence.source_url}; {context})")
+    else:
+        reason = f"supplier unit cost observed: {evidence.unit_cost} (source={evidence.source_url}; {context})"
+    return _dim("observed_supplier_cost", unit_cost, 100.0,
+                reason, "public_page" if public_page else "observed")
 
 
 def _assumption_count(candidate: OpportunityCandidate) -> ScoreDimension:
@@ -257,25 +312,40 @@ def _product_simplicity(evidence: SupplierEvidenceResult | None) -> ScoreDimensi
         return _unavailable("product_simplicity", "no observed variant data for this candidate's supplier evidence")
     variant_count = len(evidence.evidence.variants)
     normalized = max(0.0, 100.0 - variant_count * 10.0)
-    return _dim("product_simplicity", float(variant_count), normalized, f"{variant_count} observed variant(s)", "observed")
+    return _dim(
+        "product_simplicity", float(variant_count), normalized,
+        f"{variant_count} observed variant(s)", _supplier_provenance(evidence),
+    )
 
 
 def _shipping_complexity(evidence: SupplierEvidenceResult | None) -> ScoreDimension:
     if evidence is None or evidence.evidence is None:
         return _unavailable("shipping_complexity", "no supplier evidence gathered for this candidate")
     ev = evidence.evidence
-    if ev.field_status.get("shipping_cost") != "observed" and ev.field_status.get("estimated_delivery_days") != "observed":
-        return _unavailable("shipping_complexity", "shipping cost/delivery estimate not exposed by the supplier page")
+    shipping_currency = str(evidence.shipping_currency or "").strip().upper()
+    eligible_shipping = evidence.shipping_cost if shipping_currency == "USD" else None
+    has_delivery = ev.field_status.get("estimated_delivery_days") == "observed" and ev.estimated_delivery_days is not None
+    if eligible_shipping is None and not has_delivery:
+        context = _supplier_provenance_context(evidence)
+        if ev.field_status.get("shipping_cost") == "observed":
+            reason = f"shipping amount in {shipping_currency or 'unknown'} currency is not eligible for USD economics; {context}"
+        else:
+            reason = f"shipping cost/delivery estimate not exposed by the supplier page; {context}"
+        return _unavailable("shipping_complexity", reason)
     penalty = 0.0
     parts = []
-    if ev.shipping_cost is not None:
-        penalty += min(50.0, ev.shipping_cost * 5.0)
-        parts.append(f"shipping cost {ev.shipping_cost}")
-    if ev.estimated_delivery_days is not None:
+    if eligible_shipping is not None:
+        penalty += min(50.0, eligible_shipping * 5.0)
+        parts.append(f"shipping cost {eligible_shipping} USD")
+    if has_delivery and ev.estimated_delivery_days is not None:
         penalty += min(50.0, max(0.0, ev.estimated_delivery_days - 7) * 3.0)
         parts.append(f"{ev.estimated_delivery_days}-day estimated delivery")
     normalized = max(0.0, 100.0 - penalty)
-    return _dim("shipping_complexity", penalty, round(normalized, 2), "; ".join(parts) or "observed shipping data", "observed")
+    return _dim(
+        "shipping_complexity", penalty, round(normalized, 2),
+        f"{'; '.join(parts) or 'observed shipping data'}; {_supplier_provenance_context(evidence)}",
+        _supplier_provenance(evidence),
+    )
 
 
 def _weight_volume(evidence: SupplierEvidenceResult | None) -> ScoreDimension:
@@ -283,7 +353,10 @@ def _weight_volume(evidence: SupplierEvidenceResult | None) -> ScoreDimension:
         return _unavailable("weight_volume", "no observed weight/dimension data for this candidate's supplier evidence")
     weight = evidence.evidence.weight_kg or 0.0
     normalized = max(0.0, 100.0 - weight * 10.0)
-    return _dim("weight_volume", weight, round(normalized, 2), f"observed weight {weight}kg", "observed")
+    return _dim(
+        "weight_volume", weight, round(normalized, 2), f"observed weight {weight}kg",
+        _supplier_provenance(evidence),
+    )
 
 
 def _variant_complexity(evidence: SupplierEvidenceResult | None) -> ScoreDimension:
@@ -291,7 +364,10 @@ def _variant_complexity(evidence: SupplierEvidenceResult | None) -> ScoreDimensi
         return _unavailable("variant_complexity", "no observed variant data for this candidate's supplier evidence")
     count = len(evidence.evidence.variants)
     normalized = max(0.0, 100.0 - count * 8.0)
-    return _dim("variant_complexity", float(count), normalized, f"{count} observed variant option(s)", "observed")
+    return _dim(
+        "variant_complexity", float(count), normalized, f"{count} observed variant option(s)",
+        _supplier_provenance(evidence),
+    )
 
 
 def _market_saturation(competition: MarketIntelligenceReport | None) -> ScoreDimension:
@@ -409,10 +485,10 @@ def _confidence(dimensions: tuple[ScoreDimension, ...]) -> tuple[float, float, f
     Tiered by provenance so an "unavailable" dimension reduces confidence
     without ever touching the composite score."""
     total = len(dimensions) or 1
-    counts = {"observed": 0, "derived": 0, "assumed": 0, "unavailable": 0}
+    counts = {"observed": 0, "public_page": 0, "derived": 0, "assumed": 0, "unavailable": 0}
     for dimension in dimensions:
         counts[dimension.provenance] += 1
-    observed_pct = round(counts["observed"] / total * 100.0, 2)
+    observed_pct = round((counts["observed"] + counts["public_page"]) / total * 100.0, 2)
     derived_pct = round(counts["derived"] / total * 100.0, 2)
     assumed_pct = round(counts["assumed"] / total * 100.0, 2)
     unknown_pct = round(counts["unavailable"] / total * 100.0, 2)
@@ -482,7 +558,11 @@ def rank_opportunities(
 
 _EVENT_METADATA = {
     "dry_run": True, "advisory": True, "non_authoritative": True,
-    "no_launch_authority": True, "no_spend_authority": True, "no_order_authority": True,
+    "no_launch_authority": True, "no_ad_authority": True,
+    "no_spend_authority": True, "no_order_authority": True,
+    "no_payment_authority": True, "no_outreach_authority": True,
+    "no_supplier_mutation_authority": True, "no_inventory_mutation_authority": True,
+    "no_customer_message_authority": True, "no_external_action_authority": True,
 }
 
 

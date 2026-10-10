@@ -19,7 +19,9 @@ Validates the 14 key requirements:
 
 from __future__ import annotations
 
+import ast
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -42,9 +44,36 @@ from backend.deployment.promotion_rehearsal import (
     check_container_static_hardening,
     classify_ci_evidence,
     execute_promotion_rehearsal,
+    get_repository_identity,
     redact_secrets,
 )
 from backend.deployment import promotion_rehearsal as rehearsal_module
+
+
+def test_deployment_rehearsal_does_not_depend_on_script_layer() -> None:
+    source_path = Path(__file__).resolve().parents[2] / "backend" / "deployment" / "promotion_rehearsal.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    imported_modules = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    imported_modules.update(
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    )
+    assert "scripts.run_high_value_path_harness" not in imported_modules
+
+
+def test_operator_harness_wrapper_delegates_to_canonical_module() -> None:
+    from backend.deployment import high_value_path_harness
+    import scripts.run_high_value_path_harness as operator_harness
+
+    assert operator_harness.run_harness is high_value_path_harness.run_harness
+    assert operator_harness.main is high_value_path_harness.main
+    assert operator_harness.PATH_IDS == high_value_path_harness.PATH_IDS
 
 
 def test_local_dry_run_requires_zero_credentials() -> None:
@@ -52,11 +81,19 @@ def test_local_dry_run_requires_zero_credentials() -> None:
         environment="local_dry_run",
         environ={},
     )
-    assert bundle.readiness_state == "ci_unavailable"
     assert "ci_evidence_ci_unavailable" in bundle.blockers
     assert bundle.credential_classification.get("no_credentials_required") is True
     assert bundle.high_value_path_summary["evidence_classification"] == "actual_executed"
-    assert bundle.high_value_path_summary["status"] == "passed"
+    if bundle.high_value_path_summary["status"] == "passed":
+        # A successful local harness still cannot establish release readiness
+        # when CI evidence was not actually executed.
+        assert bundle.readiness_state == "ci_unavailable"
+    else:
+        # An executed harness failure is application evidence, not a CI
+        # availability gap. Preserve that distinction in the bundle.
+        assert bundle.high_value_path_summary["status"] == "failed"
+        assert bundle.readiness_state == "failed"
+        assert "high_value_path_failed" in bundle.blockers
 
 
 def test_local_execution_does_not_self_attest_release_readiness() -> None:
@@ -78,7 +115,31 @@ def test_local_execution_does_not_self_attest_release_readiness() -> None:
     assert bundle.operator_stack["status"] in {"unavailable", "not_run"}
 
 
-def test_rehearsal_surfaces_are_sanitized_and_deterministic() -> None:
+def _git(cwd: Path, *args: str) -> None:
+    env = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "PATH": os.environ.get("PATH", "")}
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.test", "-c", "commit.gpgsign=false", *args],
+        cwd=cwd, check=True, capture_output=True, env=env,
+    )
+
+
+@pytest.fixture
+def two_commit_repo(tmp_path: Path) -> Path:
+    """A hermetic repository with a known parent revision, independent of the host checkout's depth."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    for name in ("first", "second"):
+        (repo / f"{name}.txt").write_text(name, encoding="utf-8")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", name)
+    return repo
+
+
+def test_rehearsal_surfaces_are_sanitized_and_deterministic(two_commit_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Rollback evidence needs a parent revision, which a depth-1 CI checkout does not have.
+    # Pin the repository to a hermetic two-commit repo so this test never depends on host history.
+    monkeypatch.setattr(rehearsal_module, "get_repository_identity", lambda: get_repository_identity(two_commit_repo))
     first = execute_promotion_rehearsal(environment="local_dry_run", environ={})
     second = execute_promotion_rehearsal(environment="local_dry_run", environ={})
     assert first.deterministic_hash == second.deterministic_hash
@@ -86,6 +147,42 @@ def test_rehearsal_surfaces_are_sanitized_and_deterministic() -> None:
     assert first.rollback_evidence["status"] == "passed"
     assert first.to_dict()["phase1_readiness"]["network_calls"] is False
     assert "CJ_API_KEY" not in json.dumps(first.to_dict())
+
+
+def test_rollback_evidence_identifies_the_previous_revision_without_mutating(two_commit_repo: Path) -> None:
+    identity = get_repository_identity(two_commit_repo)
+    evidence = rehearsal_module._rollback_evidence(identity)
+    parent = subprocess.run(["git", "rev-parse", "HEAD^"], cwd=two_commit_repo, capture_output=True, text=True, check=True).stdout.strip()
+    assert evidence["status"] == "passed"
+    assert evidence["current_revision"] == identity["commit_sha"]
+    assert evidence["previous_revision"] == parent
+    assert evidence["mutation_performed"] is False
+    assert get_repository_identity(two_commit_repo)["clean"] is True
+
+
+@pytest.mark.parametrize("history", ["single_commit", "shallow_clone"])
+def test_rollback_evidence_is_unavailable_without_a_parent_revision_and_blocks_promotion(
+    history: str, two_commit_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if history == "single_commit":
+        repo = tmp_path / "single"
+        repo.mkdir()
+        _git(repo, "init", "-q")
+        (repo / "only.txt").write_text("only", encoding="utf-8")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", "only")
+    else:
+        repo = tmp_path / "shallow"
+        _git(tmp_path, "clone", "-q", "--depth", "1", f"file://{two_commit_repo}", str(repo))
+    monkeypatch.setattr(rehearsal_module, "get_repository_identity", lambda: get_repository_identity(repo))
+    evidence = rehearsal_module._rollback_evidence(get_repository_identity(repo))
+    assert evidence["status"] == "unavailable"
+    assert evidence["previous_revision"] is None
+    assert evidence["mutation_performed"] is False
+    bundle = execute_promotion_rehearsal(environment="local_dry_run", environ={})
+    assert bundle.rollback_evidence["status"] == "unavailable"
+    assert "rollback_evidence_unavailable" in bundle.blockers
+    assert bundle.readiness_state == "ci_unavailable"  # a local rehearsal never becomes a promotion pass
 
 
 @pytest.mark.parametrize("marker", ["stale", "partial"])
@@ -496,17 +593,16 @@ def _fake_operator_stack_payload(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
-def test_operator_stack_evidence_reports_unavailable_when_the_runner_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The exact current-branch state: #290's runner is not merged here.
-    subprocess.Popen must never even be called in this case."""
-    called = []
-    monkeypatch.setattr(rehearsal_module.subprocess, "Popen", lambda *a, **k: called.append(1))
+def test_operator_stack_evidence_reports_installed_runner_as_read_only() -> None:
+    """The installed runner is available, but default rehearsal stays dry-run."""
     from backend.deployment.promotion_rehearsal import _operator_stack_evidence
 
     result = _operator_stack_evidence()
-    assert result["status"] == "unavailable"
-    assert result["runner_present"] is False
-    assert called == []
+    assert result["status"] == "not_run"
+    assert result["runner_present"] is True
+    assert result["dry_run"] is True
+    assert result["network_calls"] is False
+    assert result["mutated"] is False
 
 
 class _FakePopen:

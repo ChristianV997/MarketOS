@@ -19,6 +19,7 @@ from evaluation.commerce.intelligence_adapter_plan import (
     normalize_provider_record,
     parse_dry_run_fixture,
 )
+from scripts.run_intelligence_adapter_plan import _secret_like as _cli_secret_like
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "intelligence_adapter_plan"
@@ -208,6 +209,32 @@ def test_normalized_marketplace_signal_has_required_provenance():
     assert item.terms_notes
     assert item.privacy_notes
     assert item.can_feed_reports is True
+
+
+@pytest.mark.parametrize("candidate_id", ("desk-clamp-lamp", "desk-clamp-lamp-amazon-mirror"))
+def test_hyphenated_candidate_id_is_accepted_by_adapter_and_cli_guard(candidate_id: str):
+    item = normalize_provider_record(
+        "apify",
+        "MarketplaceEvidence",
+        {"candidate_id": candidate_id, "query": "desk clamp lamp"},
+    )
+    assert item.normalized_fields["candidate_id"] == candidate_id
+    assert _cli_secret_like({"candidate_id": candidate_id}) is False
+
+
+@pytest.mark.parametrize(
+    "secret_marker",
+    (
+        "sk-" + "SYNTHETICEXAMPLE0000",
+        "AIza" + "SYNTHETICEXAMPLE0000",
+        "api%3Dsk-" + "SYNTHETICEXAMPLE0000",
+        r"line\nsk-" + "SYNTHETICEXAMPLE0000",
+    ),
+)
+def test_adapter_and_cli_guard_still_reject_secret_shaped_markers(secret_marker: str):
+    with pytest.raises(ValueError, match="secret-like"):
+        normalize_provider_record("apify", "MarketplaceEvidence", {"note": secret_marker})
+    assert _cli_secret_like({"note": secret_marker}) is True
 
 
 @pytest.mark.parametrize("field", ("candidate_id", "query", "title", "price", "currency", "rank", "review_count", "rating", "trend_label"))

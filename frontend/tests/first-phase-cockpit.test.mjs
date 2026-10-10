@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { adjacentCandidateIndex, rovingActiveId, shouldHandoffDetailFocus } from "../src/features/first-phase-cockpit/lib/keyboardNav.ts";
+import { nextWindowStart, windowCandidates, windowStartAfterChange } from "../src/features/first-phase-cockpit/lib/windowCandidates.ts";
+import { candidateElements, firstLaidOut, isLaidOut } from "../src/features/first-phase-cockpit/lib/focusTarget.ts";
 
 const featureRoot = new URL("../src/features/first-phase-cockpit/", import.meta.url);
 
@@ -93,19 +96,6 @@ function filterCandidates(candidates, filter) {
     filtered.push(candidate);
   }
   return filtered;
-}
-
-function windowCandidates(candidates, windowStart, windowSize = WINDOW_SIZE) {
-  const size = Math.max(1, windowSize);
-  const start = candidates.length === 0 ? 0 : Math.min(Math.max(0, windowStart), Math.max(0, candidates.length - size));
-  return {
-    visible: candidates.slice(start, start + size),
-    windowStart: start,
-    windowSize: size,
-    total: candidates.length,
-    hasMoreBefore: start > 0,
-    hasMoreAfter: start + size < candidates.length,
-  };
 }
 
 function formatFreshnessLabel(generatedAt, nowMs) {
@@ -619,6 +609,7 @@ test("source contracts: no client re-ranking and no API client duplication", asy
 test("accessibility and focus contracts are present", async () => {
   const page = await readFile(new URL("../src/pages/FirstPhaseEvidenceCockpit.tsx", import.meta.url), "utf8");
   const table = await readFile(new URL("components/RankedCandidatesPanel.tsx", featureRoot), "utf8");
+  const nav = await readFile(new URL("lib/keyboardNav.ts", featureRoot), "utf8");
   const detail = await readFile(new URL("components/CandidateDetailPanel.tsx", featureRoot), "utf8");
   const banner = await readFile(new URL("components/CockpitStatusBanner.tsx", featureRoot), "utf8");
 
@@ -635,18 +626,29 @@ test("accessibility and focus contracts are present", async () => {
   assert.match(table, /aria-rowcount=\{candidates\.length \+ 1\}/);
   assert.match(table, /id="ranked-candidates-table"/);
   assert.match(table, /tabIndex=\{tabIndex\}/);
+  assert.match(nav, /ArrowDown/);
+  assert.match(nav, /ArrowUp/);
   assert.match(table, /Home/);
   assert.match(table, /End/);
   assert.match(table, /md:hidden/);
   assert.match(table, /overflow-x-auto/);
   assert.match(table, /focus-visible:ring-1/);
   assert.match(detail, /id="candidate-detail-panel"/);
+  assert.match(detail, /Escape/);
+  assert.match(detail, /returnFocusToTable/);
+  assert.match(detail, /Clear selection/);
   assert.match(detail, /Exact SKU/);
   assert.match(detail, /Market lane/);
   assert.match(detail, /Promotion state/);
   assert.match(detail, /Next best action/);
   assert.match(table, /adjacentCandidateIndex/);
   assert.match(table, /shouldHandoffDetailFocus/);
+  assert.match(table, /ref=\{mobileListRef\}/);
+  assert.match(table, /from "\.\.\/lib\/focusTarget"/);
+  assert.match(detail, /from "\.\.\/lib\/focusTarget"/);
+  assert.match(table, /pendingFocusCandidateId/);
+  assert.match(table, /focusRow\(nextIndex\)/);
+  assert.match(detail, /onKeyDown=\{\(event\) => \{/);
   assert.match(banner, /partial/);
   assert.match(banner, /aria-live="polite"/);
   assert.match(banner, /Fixture evidence is screening-only/);
@@ -704,21 +706,160 @@ test("demo fixture packet is not live-sales-validated", async () => {
 });
 
 test("keyboard navigation preserves order and handoff keys", () => {
-  function adjacentCandidateIndex(length, currentIndex, key) {
-    if (length <= 0) return -1;
-    const current = Math.min(Math.max(0, currentIndex), length - 1);
-    if (key === "Home") return 0;
-    if (key === "End") return length - 1;
-    if (key === "ArrowDown") return Math.min(current + 1, length - 1);
-    if (key === "ArrowUp") return Math.max(current - 1, 0);
-    return current;
-  }
   const ids = ["a", "b", "c"];
   assert.equal(ids[adjacentCandidateIndex(3, 0, "ArrowDown")], "b");
   assert.equal(ids[adjacentCandidateIndex(3, 1, "ArrowUp")], "a");
   assert.equal(ids[adjacentCandidateIndex(3, 1, "Home")], "a");
   assert.equal(ids[adjacentCandidateIndex(3, 0, "End")], "c");
   assert.equal(adjacentCandidateIndex(3, 2, "ArrowDown"), 2);
+  assert.equal(adjacentCandidateIndex(3, 0, "ArrowUp"), 0);
+  assert.equal(adjacentCandidateIndex(0, 0, "ArrowDown"), -1);
+  assert.equal(adjacentCandidateIndex(-1, 0, "ArrowDown"), -1);
+  assert.equal(adjacentCandidateIndex(3, -5, "ArrowDown"), 1);
+  assert.equal(adjacentCandidateIndex(3, 10, "ArrowUp"), 1);
+  assert.equal(adjacentCandidateIndex(3, 1, "UnrecognizedKey"), 1);
+  assert.equal(shouldHandoffDetailFocus("Enter"), true);
+  assert.equal(shouldHandoffDetailFocus(" "), true);
+  assert.equal(shouldHandoffDetailFocus("Tab"), false);
+  assert.equal(shouldHandoffDetailFocus("Escape"), false);
+  assert.equal(shouldHandoffDetailFocus("ArrowDown"), false);
+});
+
+test("executable interaction: keyboard paging traverses across window boundaries", () => {
+  const candidates = Array.from({ length: 120 }, (_, i) => ({
+    candidateId: `cand-${i}`,
+    title: `Candidate ${i}`,
+    rankIndex: i,
+  }));
+
+  let windowStart = 0;
+  let selectedId = null;
+  const windowSize = 50;
+
+  function simulateKeyDown(key, currentIndex) {
+    const nextIndex = adjacentCandidateIndex(candidates.length, currentIndex, key);
+    if (nextIndex === currentIndex || nextIndex < 0) return { nextIndex, windowStart, selectedId };
+    selectedId = candidates[nextIndex].candidateId;
+    const currentWindow = windowCandidates(candidates, windowStart, windowSize);
+    if (key === "Home") {
+      windowStart = 0;
+    } else if (key === "End") {
+      windowStart = Math.max(0, nextIndex - windowSize + 1);
+    } else if (key === "ArrowDown" && nextIndex >= currentWindow.windowStart + currentWindow.windowSize) {
+      windowStart = nextWindowStart(currentWindow, "forward");
+    } else if (key === "ArrowUp" && nextIndex < currentWindow.windowStart) {
+      windowStart = nextWindowStart(currentWindow, "back");
+    }
+    return { nextIndex, windowStart, selectedId };
+  }
+
+  // Initial state: window 0-50, first candidate active
+  let state = { nextIndex: 0, windowStart: 0, selectedId: null };
+  let win = windowCandidates(candidates, state.windowStart, windowSize);
+  assert.equal(win.windowStart, 0);
+  assert.equal(win.visible.length, 50);
+  assert.equal(win.visible[0].candidateId, "cand-0");
+
+  // Step to the end of first window (index 49)
+  for (let i = 0; i < 49; i++) {
+    state = simulateKeyDown("ArrowDown", state.nextIndex);
+  }
+  assert.equal(state.nextIndex, 49);
+  assert.equal(state.windowStart, 0);
+  assert.equal(state.selectedId, "cand-49");
+
+  // Paging forward across boundary (index 49 -> 50)
+  state = simulateKeyDown("ArrowDown", state.nextIndex);
+  assert.equal(state.nextIndex, 50);
+  assert.equal(state.windowStart, 50);
+  assert.equal(state.selectedId, "cand-50");
+  win = windowCandidates(candidates, state.windowStart, windowSize);
+  assert.equal(win.visible[0].candidateId, "cand-50");
+  assert.equal(win.visible[0].rankIndex, 50);
+  assert.equal(win.hasMoreBefore, true);
+
+  // Paging backward across boundary (index 50 -> 49)
+  state = simulateKeyDown("ArrowUp", state.nextIndex);
+  assert.equal(state.nextIndex, 49);
+  assert.equal(state.windowStart, 0);
+  assert.equal(state.selectedId, "cand-49");
+  win = windowCandidates(candidates, state.windowStart, windowSize);
+  assert.equal(win.visible[49].candidateId, "cand-49");
+  assert.equal(win.hasMoreBefore, false);
+
+  // Jump to End
+  state = simulateKeyDown("End", state.nextIndex);
+  assert.equal(state.nextIndex, 119);
+  assert.equal(state.windowStart, 70); // 119 - 50 + 1 = 70
+  assert.equal(state.selectedId, "cand-119");
+  win = windowCandidates(candidates, state.windowStart, windowSize);
+  assert.equal(win.visible[win.visible.length - 1].candidateId, "cand-119");
+
+  // Jump to Home
+  state = simulateKeyDown("Home", state.nextIndex);
+  assert.equal(state.nextIndex, 0);
+  assert.equal(state.windowStart, 0);
+  assert.equal(state.selectedId, "cand-0");
+  win = windowCandidates(candidates, state.windowStart, windowSize);
+  assert.equal(win.visible[0].candidateId, "cand-0");
+});
+
+test("focus targets choose the laid-out copy of a candidate, never the copy CSS hides", () => {
+  // The mobile listbox and the desktop table both render each visible candidate. focus() is a no-op on an
+  // element that is not laid out, so the lookup must skip the hidden copy wherever it sits in DOM order.
+  const hidden = (name) => ({ name, getClientRects: () => [] });
+  const shown = (name) => ({ name, getClientRects: () => [{}] });
+
+  assert.equal(firstLaidOut([hidden("desktop-row"), shown("mobile-option")])?.name, "mobile-option");
+  assert.equal(firstLaidOut([hidden("mobile-option"), shown("desktop-row")])?.name, "desktop-row");
+  assert.equal(firstLaidOut([shown("first"), shown("second")])?.name, "first");
+  assert.equal(firstLaidOut([hidden("a"), hidden("b")]), null);
+  assert.equal(firstLaidOut([]), null);
+  assert.equal(isLaidOut(shown("x")), true);
+  assert.equal(isLaidOut(hidden("x")), false);
+});
+
+test("candidate element lookup compares ids exactly and never builds a selector from them", () => {
+  const selectors = [];
+  const nodes = [
+    { dataset: { candidateId: 'cand-1" , [x' } },
+    { dataset: { candidateId: "cand-1" } },
+    { dataset: { candidateId: "cand-10" } },
+  ];
+  const root = {
+    querySelectorAll(selector) {
+      selectors.push(selector);
+      return nodes;
+    },
+  };
+  assert.deepEqual(candidateElements(root, "cand-1").map((node) => node.dataset.candidateId), ["cand-1"]);
+  assert.equal(candidateElements(root, 'cand-1" , [x').length, 1);
+  assert.deepEqual(candidateElements(null, "cand-1"), []);
+  assert.deepEqual(selectors, ["[data-candidate-id]", "[data-candidate-id]"]);
+});
+
+test("paging with Previous/Next is not undone while the selection sits outside the new window", () => {
+  const candidates = Array.from({ length: 120 }, (_, i) => ({ candidateId: `cand-${i}`, title: `C${i}`, rankIndex: i }));
+  const requested = nextWindowStart(windowCandidates(candidates, 0, 50), "forward");
+  assert.equal(requested, 50);
+  // The selection (cand-0) is unchanged by the click, so the window keeps the requested page.
+  assert.equal(windowStartAfterChange(candidates, "cand-0", requested, { candidates, selectedId: "cand-0" }), 50);
+  assert.equal(windowCandidates(candidates, 50, 50).visible[0].candidateId, "cand-50");
+});
+
+test("a selection or candidate-list change still pulls the window to the selection", () => {
+  const candidates = Array.from({ length: 120 }, (_, i) => ({ candidateId: `cand-${i}`, title: `C${i}`, rankIndex: i }));
+  assert.equal(windowStartAfterChange(candidates, "cand-119", 0, { candidates, selectedId: null }), 70);
+  assert.equal(windowStartAfterChange(candidates, "cand-0", 50, null), 0);
+  assert.equal(windowStartAfterChange(candidates, "cand-0", 50, { candidates: candidates.slice(), selectedId: "cand-0" }), 0);
+});
+
+test("the roving tab stop is always a rendered candidate, even when the selection is not rendered", () => {
+  assert.equal(rovingActiveId(["a", "b", "c"], "b"), "b");
+  assert.equal(rovingActiveId(["a", "b", "c"], "z"), "a");
+  assert.equal(rovingActiveId(["a", "b", "c"], null), "a");
+  assert.equal(rovingActiveId([], "a"), null);
+  assert.equal(rovingActiveId([], null), null);
 });
 
 test("research-to-decision overlay fills identity without re-ranking", () => {
@@ -905,4 +1046,84 @@ test("filter persistence round-trips URL state without re-ranking", async () => 
   assert.match(page, /replaceState/);
   const validateSource = await readFile(new URL("lib/validateEvidencePacket.ts", featureRoot), "utf8");
   assert.match(validateSource, /!rankedCandidates\.accepted\) state = "unavailable"/);
+});
+
+test("draft preview panel enforces input provenance, blueprint drafts, and governance safety gates", async () => {
+  const panel = await readFile(new URL("components/DraftPreviewPanel.tsx", featureRoot), "utf8");
+
+  // Accessibility & Identification
+  assert.match(panel, /id="draft-preview-panel"/);
+  assert.match(panel, /aria-label="Draft preview and operator governance panel"/);
+  assert.match(panel, /Draft output preview & governance gate/);
+
+  // Input Provenance: Fixture/Manual vs Live-Observed
+  assert.match(panel, /Input provenance & observation mode/);
+  assert.match(panel, /Screening Input \(Fixture \/ Manual\)/);
+  assert.match(panel, /Live-Observed \(Read-Only API\)/);
+  assert.match(panel, /Simulated Input \(Projection Only\)/);
+  assert.match(panel, /never live commercial validation/);
+  assert.match(panel, /never supplier proof/);
+  assert.match(panel, /never order verification/);
+  assert.match(panel, /LIVE_PROOF_EVIDENCE_CLASSES/);
+
+  // Candidate Identity, Assumptions & Hard Gates
+  assert.match(panel, /Identity & Replay/);
+  assert.match(panel, /Active Assumptions/);
+  assert.match(panel, /Hard Gates & Blockers/);
+  assert.match(panel, /Assumptions require empirical verification before promotion/);
+
+  // Launch & Site Draft Blueprints
+  assert.match(panel, /Launch Draft Pack Blueprint/);
+  assert.match(panel, /draft_only_pending_human_approval/);
+  assert.match(panel, /Offer Stack/);
+  assert.match(panel, /Product Listing Copy \(Draft\)/);
+  assert.match(panel, /Landing Page Hero \(Draft\)/);
+  assert.match(panel, /Shopify Draft:.*status: "draft"/);
+  assert.match(panel, /Medusa Draft:.*status: "draft"/);
+  assert.match(panel, /Site Draft Pack Blueprint/);
+  assert.match(panel, /draft_blueprint_only/);
+  assert.match(panel, /Route Manifest/);
+  assert.match(panel, /Shopify Theme:.*status: "draft"/);
+  assert.match(panel, /Medusa Storefront:.*status: "draft"/);
+  assert.match(panel, /Launch Draft Pack \/ Higgsfield creative assets: deferred/);
+
+  // Sanitized Client-Safe Export
+  assert.match(panel, /first-phase-cockpit-client-safe-v1/);
+  assert.match(panel, /zero internal prompts, zero scoring formulas/);
+  assert.match(panel, /Download Client-Safe Report/);
+
+  // Governance Safety Gate: Blocked or Draft is NEVER Authorization
+  assert.match(panel, /Governance Safety Gate/);
+  assert.match(panel, /Blocked or Draft is NEVER Authorization to Publish or Transact/);
+  assert.match(panel, /publishing_authorized/);
+  assert.match(panel, /ads_launched \/ spend/);
+  assert.match(panel, /orders_created/);
+  assert.match(panel, /payments_created/);
+  assert.match(panel, /customer_messages_sent/);
+  assert.match(panel, /live_mutations/);
+  assert.match(panel, /false \(offline\)/);
+
+  // Offline Supplier CSV Preview Integration
+  assert.match(panel, /Offline Manual Supplier CSV Evidence \(Preview\)/);
+  assert.match(panel, /evidence_mode=manual_import · unverified/);
+  assert.match(panel, /Notice: Manual CSV preview evidence is unverified screening data only/);
+});
+
+test("cockpit page mounts draft preview panel and offline supplier CSV preview without mutating server order", async () => {
+  const page = await readFile(new URL("../src/pages/FirstPhaseEvidenceCockpit.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /import { DraftPreviewPanel }/);
+  assert.match(page, /import { SupplierCsvPreview }/);
+  assert.match(page, /<DraftPreviewPanel/);
+  assert.match(page, /candidate=\{selectedCandidate\}/);
+  assert.match(page, /fingerprint=\{packet\.fingerprint\}/);
+  assert.match(page, /onExport=\{handleExport\}/);
+  assert.match(page, /supplierCsvPreview=\{supplierCsvPreview\}/);
+  assert.match(page, /<SupplierCsvPreview/);
+  assert.match(page, /onPreviewChange=\{setSupplierCsvPreview\}/);
+  assert.match(page, /selectedCandidateId=\{selectedId\}/);
+  assert.match(page, /onSelectCandidateId=\{\(id\) => setSelectedId\(id\)\}/);
+  assert.match(page, /id="supplier-csv-preview-section"/);
+  assert.match(page, /Supplier catalog CSV preview \(offline inspection\)/);
+  assert.match(page, /Offline manual evidence/);
 });

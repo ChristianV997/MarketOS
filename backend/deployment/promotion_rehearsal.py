@@ -4,7 +4,7 @@ engine for MarketOS local-to-private-staging readiness.
 Composes existing authorities without duplicating or replacing them:
 - Environment Contract (backend.deployment.environment_contract)
 - Failure Diagnostics (backend.deployment.diagnostics)
-- High-Value-Path Harness (scripts.run_high_value_path_harness)
+- High-Value-Path Harness (backend.deployment.high_value_path_harness)
 - Container Hardening static checks (Dockerfile & docker-compose)
 - CoderOS status and CI evidence classification
 
@@ -108,13 +108,28 @@ def redact_secrets(val: Any, key_name: str | None = None) -> Any:
     return val
 
 
+def _git_read_environment() -> dict[str, str]:
+    """Keep ambient Git settings from redirecting evidence or writing the index."""
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env.update(
+        {
+            "GIT_NO_REPLACE_OBJECTS": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+    )
+    return env
+
+
 def get_repository_identity(root_path: Path | None = None) -> dict[str, Any]:
     """Inspect git repository identity and worktree state without mutating anything."""
     base = root_path or ROOT
     sha = "unknown"
     branch = "unknown"
     dirty_files: list[str] = []
+    status_available = False
     is_worktree = False
+    git_env = _git_read_environment()
 
     try:
         res_sha = subprocess.run(
@@ -124,6 +139,7 @@ def get_repository_identity(root_path: Path | None = None) -> dict[str, Any]:
             text=True,
             timeout=5,
             check=False,
+            env=git_env,
         )
         if res_sha.returncode == 0:
             sha = res_sha.stdout.strip()
@@ -135,6 +151,7 @@ def get_repository_identity(root_path: Path | None = None) -> dict[str, Any]:
             text=True,
             timeout=5,
             check=False,
+            env=git_env,
         )
         if res_branch.returncode == 0:
             branch = res_branch.stdout.strip()
@@ -146,8 +163,10 @@ def get_repository_identity(root_path: Path | None = None) -> dict[str, Any]:
             text=True,
             timeout=5,
             check=False,
+            env=git_env,
         )
         if res_status.returncode == 0:
+            status_available = True
             dirty_files = [line.strip() for line in res_status.stdout.splitlines() if line.strip()]
 
         # Worktree check
@@ -162,8 +181,9 @@ def get_repository_identity(root_path: Path | None = None) -> dict[str, Any]:
         "branch": branch,
         "worktree_path": str(base),
         "is_isolated_worktree": is_worktree,
-        "clean": len(dirty_files) == 0,
+        "clean": status_available and len(dirty_files) == 0,
         "dirty_file_count": len(dirty_files),
+        "worktree_status_available": status_available,
     }
 
 
@@ -249,8 +269,18 @@ def classify_ci_evidence(
     runners_active: int = 0,
     logs_available: bool = True,
 ) -> dict[str, Any]:
-    """Classify CI evidence state fail-closed. Zero-step CI is never passed."""
-    if total_steps == 0 or runners_active == 0:
+    """Classify CI evidence fail-closed; malformed metadata cannot establish a pass."""
+    if (
+        type(total_steps) is not int
+        or total_steps < 0
+        or type(runners_active) is not int
+        or runners_active < 0
+        or type(logs_available) is not bool
+        or (ci_status is not None and not isinstance(ci_status, str))
+    ):
+        state = "ci_unavailable"
+        reason = "CI evidence contains malformed step, runner, or log metadata."
+    elif total_steps == 0 or runners_active == 0:
         state = "ci_unavailable"
         reason = "CI runners are inactive or the job reported zero executed steps."
     elif ci_status == "passed":
@@ -268,7 +298,7 @@ def classify_ci_evidence(
         reason = "An executed CI validation check timed out."
     else:
         state = "ci_unavailable"
-        reason = f"CI status '{ci_status}' cannot be promoted without verified logs."
+        reason = "CI status is not a recognized terminal state."
 
     return {
         "state": state,
@@ -289,17 +319,30 @@ _GITHUB_ACTIONS_CONCLUSION_TO_CI_STATUS = {
 # other status (queued/in_progress/waiting) means the run has not finished
 # and any conclusion value present is not yet trustworthy evidence.
 _GITHUB_ACTIONS_INCOMPLETE_STATUSES = frozenset({"queued", "in_progress", "waiting", "requested", "pending"})
+_GITHUB_ACTIONS_STEP_CONCLUSIONS = frozenset(
+    {"success", "failure", "timed_out", "cancelled", "skipped", "neutral", "action_required", "stale", "startup_failure"}
+)
 
 
-def _github_actions_unavailable(reason: str, *, pending: bool = False) -> dict[str, Any]:
+def _github_actions_unavailable(
+    reason: str,
+    *,
+    pending: bool = False,
+    runner_id: int | None = None,
+    steps_executed: int = 0,
+    runner_assigned: bool = False,
+    total_steps: int = 0,
+    runners_active: int = 0,
+    logs_available: bool = False,
+) -> dict[str, Any]:
     return {
         "state": "ci_unavailable",
-        "total_steps": 0,
-        "runners_active": 0,
-        "logs_available": False,
-        "runner_id": None,
-        "steps_executed": 0,
-        "runner_assigned": False,
+        "total_steps": total_steps,
+        "runners_active": runners_active,
+        "logs_available": logs_available,
+        "runner_id": runner_id,
+        "steps_executed": steps_executed,
+        "runner_assigned": runner_assigned,
         "pending": pending,
         "classification_reason": reason,
     }
@@ -345,39 +388,83 @@ def classify_github_actions_job(job: Mapping[str, Any] | None, *, logs_available
         )
     if not isinstance(job, Mapping):
         return _github_actions_unavailable(f"job_malformed: expected a GitHub Actions job mapping, got {type(job).__name__}.")
+    if type(logs_available) is not bool:
+        return _github_actions_unavailable("job_malformed: logs_available must be a boolean.")
 
-    status = str(job.get("status", "") or "").strip().lower()
+    status_raw = job.get("status")
+    if not isinstance(status_raw, str):
+        return _github_actions_unavailable("job_malformed: status must be a string.")
+    status = status_raw.strip().lower()
     if status in _GITHUB_ACTIONS_INCOMPLETE_STATUSES:
         return _github_actions_unavailable(
             f"job_pending: workflow status is '{status}' -- not yet completed, so any conclusion present is not admissible evidence.",
             pending=True,
         )
-
-    steps = job.get("steps")
-    steps_list = steps if isinstance(steps, list) else []
-    steps_executed = len(steps_list)
+    if status != "completed":
+        return _github_actions_unavailable("job_malformed: status is not a recognized completed or pending state.")
 
     runner_id_raw = job.get("runner_id", 0)
-    runner_id = int(runner_id_raw) if isinstance(runner_id_raw, (int, float)) and not isinstance(runner_id_raw, bool) else 0
-    if runner_id < 0:
-        # GitHub never reports a negative runner_id for real evidence;
-        # treat an implausible value the same as "never assigned" rather
-        # than trusting it as a real, active runner.
-        runner_id = 0
-    runner_assigned = runner_id != 0
+    runner_id_valid = type(runner_id_raw) is int and runner_id_raw >= 0
+    runner_id = runner_id_raw if runner_id_valid else 0
+    runner_assigned = runner_id > 0
+
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return _github_actions_unavailable(
+            "job_malformed: steps must be a list.", runner_id=runner_id, runner_assigned=runner_assigned
+        )
+
+    steps_executed = 0
+    for step in steps:
+        if not isinstance(step, Mapping):
+            return _github_actions_unavailable(
+                "job_malformed: every step must be a mapping with a name and conclusion.",
+                runner_id=runner_id,
+                runner_assigned=runner_assigned,
+            )
+        step_name = step.get("name")
+        step_conclusion = step.get("conclusion")
+        if (
+            not isinstance(step_name, str)
+            or not step_name.strip()
+            or not isinstance(step_conclusion, str)
+            or step_conclusion not in _GITHUB_ACTIONS_STEP_CONCLUSIONS
+        ):
+            return _github_actions_unavailable(
+                "job_malformed: every step requires a non-empty name and recognized conclusion.",
+                runner_id=runner_id,
+                runner_assigned=runner_assigned,
+            )
+        steps_executed += 1
+
+    if steps_executed == 0:
+        return _github_actions_unavailable(
+            "job_has_no_executed_steps: empty step lists are not execution proof.",
+            runner_id=runner_id,
+            runner_assigned=runner_assigned,
+        )
+    if not runner_id_valid or not runner_assigned:
+        return _github_actions_unavailable(
+            "job_runner_unavailable: runner_id must be a positive integer.",
+            runner_id=runner_id,
+            steps_executed=steps_executed,
+            runner_assigned=False,
+            total_steps=steps_executed,
+            logs_available=logs_available,
+        )
 
     conclusion = job.get("conclusion")
-    ci_status = _GITHUB_ACTIONS_CONCLUSION_TO_CI_STATUS.get(str(conclusion), "ci_unavailable")
+    ci_status = _GITHUB_ACTIONS_CONCLUSION_TO_CI_STATUS.get(conclusion, "ci_unavailable") if isinstance(conclusion, str) else "ci_unavailable"
 
     result = classify_ci_evidence(
         ci_status=ci_status,
         total_steps=steps_executed,
-        runners_active=1 if runner_assigned else 0,
+        runners_active=1,
         logs_available=logs_available,
     )
     result["runner_id"] = runner_id
     result["steps_executed"] = steps_executed
-    result["runner_assigned"] = runner_assigned
+    result["runner_assigned"] = True
     result["pending"] = False
     return result
 
@@ -393,7 +480,7 @@ def _harness_status(summary: Mapping[str, Any]) -> str:
 def _run_high_value_path_harness() -> dict[str, Any]:
     """Execute the bounded offline harness; never synthesize a green result."""
     try:
-        from scripts.run_high_value_path_harness import run_harness
+        from backend.deployment.high_value_path_harness import run_harness
     except ModuleNotFoundError:
         return {
             "status": "unavailable",
@@ -738,19 +825,76 @@ def _event_read_path_evidence(environ: Mapping[str, str]) -> dict[str, Any]:
 
 
 def _rollback_evidence(repository: Mapping[str, Any]) -> dict[str, Any]:
-    """Identify a prior revision without changing the worktree."""
-    current = str(repository.get("commit_sha", ""))
-    previous = ""
+    """Identify a verified parent of the actual HEAD without changing the worktree."""
+    unavailable = {
+        "status": "unavailable",
+        "current_revision": "unknown",
+        "previous_revision": None,
+        "mutation_performed": False,
+        "command": "git revert --no-commit <current_revision> (operator-reviewed only)",
+    }
+    if not isinstance(repository, Mapping):
+        return unavailable
+
+    claimed_revision = repository.get("commit_sha")
+    worktree_path = repository.get("worktree_path")
+    is_full_oid = lambda value: isinstance(value, str) and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", value) is not None
+    if not is_full_oid(claimed_revision) or not isinstance(worktree_path, (str, os.PathLike)) or not str(worktree_path).strip():
+        return unavailable
+
     try:
-        result = subprocess.run(["git", "rev-parse", "HEAD^"], cwd=repository.get("worktree_path"), capture_output=True, text=True, timeout=5, check=False)
-        if result.returncode == 0:
-            previous = result.stdout.strip()
+        git_env = _git_read_environment()
+        head_result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+            cwd=str(worktree_path),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=git_env,
+        )
+        actual_head = head_result.stdout.strip() if head_result.returncode == 0 else ""
+        if not is_full_oid(actual_head):
+            return unavailable
+        if actual_head != claimed_revision:
+            return {**unavailable, "current_revision": actual_head}
+
+        commit_result = subprocess.run(
+            ["git", "cat-file", "commit", actual_head],
+            cwd=str(worktree_path),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=git_env,
+        )
+        if commit_result.returncode != 0:
+            return {**unavailable, "current_revision": actual_head}
+
+        headers = commit_result.stdout.partition("\n\n")[0].splitlines()
+        parent_line = next((line for line in headers if line.startswith("parent ")), None)
+        parent = parent_line.removeprefix("parent ") if parent_line else ""
+        if not is_full_oid(parent):
+            return {**unavailable, "current_revision": actual_head}
+
+        parent_result = subprocess.run(
+            ["git", "cat-file", "-t", parent],
+            cwd=str(worktree_path),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=git_env,
+        )
+        if parent_result.returncode != 0 or parent_result.stdout.strip() != "commit":
+            return {**unavailable, "current_revision": actual_head}
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        return unavailable
+
     return {
-        "status": "passed" if current and previous else "unavailable",
-        "current_revision": current,
-        "previous_revision": previous or None,
+        "status": "passed",
+        "current_revision": actual_head,
+        "previous_revision": parent,
         "mutation_performed": False,
         "command": "git revert --no-commit <current_revision> (operator-reviewed only)",
     }

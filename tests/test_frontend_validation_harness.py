@@ -24,12 +24,22 @@ def test_frontend_selector_runs_validation_harness():
 
 def test_node_test_script_is_allowlisted():
     assert gate._safe_frontend_script("node --experimental-strip-types --test") is True
+    assert gate._safe_frontend_script("node --test tests/*.test.mjs") is False
+    assert gate._safe_frontend_script("node --test") is False
     assert gate._safe_frontend_script("node -e \"require('https').get('https://example.invalid')\"") is False
     assert gate._safe_frontend_script("node ./scripts/arbitrary.mjs") is False
     assert gate._safe_frontend_script(
         "node --experimental-strip-types --test && node -e \"process.env\""
     ) is False
     assert gate._safe_frontend_script("python -c \"print('vitest')\"") is False
+
+
+def test_safe_npm_scripts_match_canonical_manifest_and_harness():
+    assert SAFE_NPM_SCRIPTS == run_frontend_validation.EXPECTED_FRONTEND_SCRIPTS
+    manifest_path = run_frontend_validation.REPOSITORY_ROOT / "frontend" / "package.json"
+    package = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for script_name, expected_command in SAFE_NPM_SCRIPTS.items():
+        assert package["scripts"].get(script_name) == expected_command
 
 
 def test_test_runner_module_not_found_is_configuration():
@@ -40,6 +50,15 @@ def test_test_runner_module_not_found_is_configuration():
     }
     assert run_frontend_validation.classify_step("test", result) == "configuration"
     assert run_frontend_validation.classify_step("typecheck", result) == "dependency"
+
+
+def test_test_runner_unrecognized_strip_types_is_configuration():
+    result = {
+        "exit_code": 9,
+        "stdout_tail": "node: bad option: --experimental-strip-types",
+        "stderr_tail": "",
+    }
+    assert run_frontend_validation.classify_step("test", result) == "configuration"
 
 
 def test_validation_harness_fails_closed_without_lockfile(tmp_path):
@@ -74,6 +93,14 @@ def test_validation_harness_missing_node_modules_is_unavailable_without_install(
     [
         (
             {**SAFE_NPM_SCRIPTS, "test": "node --test && curl https://example.invalid"},
+            "frontend_script_not_allowlisted:test",
+        ),
+        (
+            {**SAFE_NPM_SCRIPTS, "test": "node --test tests/*.test.mjs"},
+            "frontend_script_not_allowlisted:test",
+        ),
+        (
+            {**SAFE_NPM_SCRIPTS, "test": "node --test"},
             "frontend_script_not_allowlisted:test",
         ),
         (
@@ -168,3 +195,38 @@ def test_validation_report_does_not_include_raw_output(tmp_path, monkeypatch):
     assert report["status"] == "failed"
     assert "sentinel-output" not in str(report)
     assert "stdout_tail" not in report["steps"][0]
+
+
+def test_validation_harness_passes_with_canonical_scripts(tmp_path, monkeypatch):
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text(json.dumps({"scripts": SAFE_NPM_SCRIPTS}), encoding="utf-8")
+    (frontend / "package-lock.json").write_text("{}", encoding="utf-8")
+    (frontend / "node_modules").mkdir()
+    monkeypatch.setattr(run_frontend_validation, "_npm", lambda: "npm")
+    executed_commands = []
+    monkeypatch.setattr(
+        run_frontend_validation,
+        "_run",
+        lambda command, cwd: (
+            executed_commands.append(command)
+            or {
+                "command": command,
+                "exit_code": 0,
+                "stdout_tail": "",
+                "stderr_tail": "",
+                "output_bytes": 0,
+                "output_truncated": False,
+                "timed_out": False,
+            }
+        ),
+    )
+    report = run_frontend_validation.run_frontend_validation(tmp_path)
+    assert report["status"] == "passed"
+    assert report["failure_class"] is None
+    assert [step["name"] for step in report["steps"]] == ["typecheck", "test", "build"]
+    assert executed_commands == [
+        ["npm", "run", "typecheck"],
+        ["npm", "run", "test"],
+        ["npm", "run", "build"],
+    ]

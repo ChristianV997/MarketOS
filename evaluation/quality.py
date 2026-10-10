@@ -399,6 +399,7 @@ def certify_data_quality(
         "completeness": quality.completeness,
         "observed_at": quality.observed_at.isoformat(),
         "source_ref": quality.source_ref,
+        "retrieval_mode": quality.retrieval_mode,
     }
     return active_certifier.certify(
         record,

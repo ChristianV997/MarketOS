@@ -477,6 +477,19 @@ def test_leakage_check_rejects_secret_marker():
     assert checks[0].severity == "critical"
 
 
+@pytest.mark.parametrize("candidate_id", ("desk-clamp-lamp", "desk-clamp-lamp-amazon-mirror"))
+def test_leakage_check_accepts_hyphenated_candidate_identifier(candidate_id: str):
+    assert check_workspace_leakage({"top_candidate_id": candidate_id}) == ()
+
+
+def test_leakage_check_rejects_sk_secret_prefix_without_echoing_value():
+    synthetic_secret = "sk-" + "SYNTHETICEXAMPLE0000"
+    checks = check_workspace_leakage({"note": synthetic_secret})
+    assert checks
+    assert all(item.status == "hard_block" for item in checks)
+    assert synthetic_secret not in str(checks)
+
+
 def test_leakage_check_rejects_html_marker():
     checks = check_workspace_leakage({"note": "<html>unsafe</html>"})
     assert checks[0].status == "hard_block"

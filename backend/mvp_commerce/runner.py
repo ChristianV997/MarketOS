@@ -1,6 +1,6 @@
 """Composable, deterministic Commerce MVP packet runner."""
 from __future__ import annotations
-import hashlib, json
+import hashlib, json, math
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -63,19 +63,109 @@ def _economics_with_evidence(candidate: OpportunityCandidate, price: float, assu
     and records which component was observed vs assumed. Additive only:
     _economics() itself is unchanged and remains what every existing caller
     (with evidence=None) gets."""
-    has_cost = evidence is not None and evidence.unit_cost is not None
-    has_shipping = evidence is not None and evidence.shipping_cost is not None
-    unit_cost = evidence.unit_cost if has_cost else assumed_unit_cost
-    shipping = evidence.shipping_cost if has_shipping else assumed_shipping_cost
+    def _usable_amount(value: Any, *, positive: bool) -> float | None:
+        if value is None:
+            return None
+        try:
+            amount = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(amount) or (amount <= 0 if positive else amount < 0):
+            return None
+        return amount
+
+    page_record = getattr(evidence, "evidence", None) if evidence is not None else None
+    currency = getattr(evidence, "currency", None) if evidence is not None else None
+    if currency is None and page_record is not None:
+        currency = getattr(page_record, "currency", None)
+    currency = str(currency).strip().upper() if isinstance(currency, str) and currency.strip() else None
+    shipping_currency = getattr(evidence, "shipping_currency", None) if evidence is not None else None
+    if shipping_currency is None and page_record is not None:
+        shipping_currency = getattr(page_record, "shipping_currency", None)
+    shipping_currency = (
+        str(shipping_currency).strip().upper()
+        if isinstance(shipping_currency, str) and shipping_currency.strip() else None
+    )
+    raw_cost = _usable_amount(getattr(evidence, "unit_cost", None), positive=True)
+    raw_shipping = _usable_amount(getattr(evidence, "shipping_cost", None), positive=False)
+    observed_cost = raw_cost if raw_cost is not None and currency == "USD" else None
+    observed_shipping = raw_shipping if raw_shipping is not None and shipping_currency == "USD" else None
+    has_cost = observed_cost is not None
+    has_shipping = observed_shipping is not None
+    evidence_warnings: list[str] = []
+    if evidence is not None:
+        evidence_warnings.extend(
+            warning for warning in (getattr(evidence, "warnings", ()) or ())
+            if isinstance(warning, str)
+        )
+    if raw_cost is not None and currency is None:
+        evidence_warnings.append("unit_cost_currency_unavailable: economics require USD")
+    elif raw_cost is not None and currency != "USD":
+        evidence_warnings.append(f"unit_cost_currency_mismatch: observed {currency}; economics require USD")
+    if raw_shipping is not None and shipping_currency is None:
+        evidence_warnings.append("shipping_currency_unavailable: economics require USD")
+    elif raw_shipping is not None and shipping_currency != "USD":
+        evidence_warnings.append(f"shipping_currency_mismatch: observed {shipping_currency}; economics require USD")
+    if page_record is not None and getattr(page_record, "field_status", {}).get("price") == "observed":
+        page_price = _usable_amount(getattr(page_record, "price", None), positive=True)
+        if page_price is None:
+            evidence_warnings.append("price_not_usable_as_supplier_cost")
+    unit_cost = observed_cost if has_cost else assumed_unit_cost
+    shipping = observed_shipping if has_shipping else assumed_shipping_cost
     canonical = _canonical_economics(price, unit_cost, shipping, cac, returns, payment_rate)
     fee = round(float(canonical.payment_fees.amount), 2)
     gross = round(float(canonical.contribution_before_cac.amount), 2)
     contribution = round(float(canonical.contribution_after_cac.amount), 2)
-    cost_note = f"Observed CJ supplier cost={unit_cost} (source={evidence.source_url})" if has_cost else f"Assumed unit cost={unit_cost}"
-    shipping_note = f"Observed CJ shipping={shipping} (source={evidence.source_url})" if has_shipping else f"Assumed shipping={shipping}"
-    source = "partial_observed_supplier_evidence" if (has_cost or has_shipping) else "dry_run_assumption"
-    warnings = ("Price, CAC, and return-rate inputs remain dry-run assumptions unless explicitly marked 'Observed' below; "
-                "no actual margin, CAC, profitability, or ROAS conclusion is supported.",)
+    public_page = evidence is not None and str(getattr(evidence, "source_type", "")).startswith("public_page")
+    source_url = getattr(evidence, "source_url", "") if evidence is not None else ""
+    fetch_provenance = getattr(evidence, "fetch_provenance", "unknown") if evidence is not None else "unknown"
+    if fetch_provenance == "unknown" and page_record is not None:
+        fetch_provenance = getattr(page_record, "fetch_provenance", "unknown")
+    fetched_at = getattr(evidence, "fetched_at", None) if evidence is not None else None
+    if fetched_at is None and page_record is not None:
+        fetched_at = getattr(page_record, "fetched_at", None)
+        if fetched_at is None:
+            fetched_at = getattr(page_record, "observed_at", None)
+    cost_label = "Observed CJ public-page catalog price (not supplier-live proof)" if public_page else "Observed CJ supplier cost"
+    shipping_label = "Observed CJ public-page shipping value (not supplier-live proof)" if public_page else "Observed CJ shipping"
+    timestamp_note = f"fetched_at={fetched_at if fetched_at is not None else 'unknown'}; retrieval={fetch_provenance}"
+    if has_cost:
+        cost_note = f"{cost_label}={unit_cost} USD (source={source_url}; {timestamp_note})"
+    else:
+        observed_price = getattr(page_record, "price", None) if page_record is not None else raw_cost
+        observed_price_currency = getattr(page_record, "currency", None) if page_record is not None else currency
+        if observed_price is not None:
+            cost_note = (
+                f"Assumed unit cost={unit_cost}; rejected public-page price={observed_price} "
+                f"{observed_price_currency or 'currency unknown'} (not supplier-live proof; source={source_url}; {timestamp_note})"
+            )
+        else:
+            cost_note = f"Assumed unit cost={unit_cost}; public-page price unavailable (source={source_url}; {timestamp_note})"
+    if has_shipping:
+        shipping_note = f"{shipping_label}={shipping} USD (source={source_url}; {timestamp_note})"
+    else:
+        observed_shipping_value = raw_shipping
+        observed_shipping_currency = shipping_currency
+        if page_record is not None and getattr(page_record, "field_status", {}).get("shipping_cost") == "observed":
+            observed_shipping_value = getattr(page_record, "shipping_cost", None)
+            observed_shipping_currency = getattr(page_record, "shipping_currency", None)
+        if observed_shipping_value is not None:
+            shipping_note = (
+                f"Assumed shipping={shipping}; rejected public-page shipping={observed_shipping_value} "
+                f"{observed_shipping_currency or 'currency unknown'} (not supplier-live proof; source={source_url}; {timestamp_note})"
+            )
+        else:
+            shipping_note = f"Assumed shipping={shipping}; public-page shipping unavailable (source={source_url}; {timestamp_note})"
+    source = (
+        "partial_observed_public_page_evidence" if public_page and (has_cost or has_shipping)
+        else "partial_observed_supplier_evidence" if has_cost or has_shipping
+        else "dry_run_assumption"
+    )
+    warnings = tuple(dict.fromkeys((
+        "Price, CAC, and return-rate inputs remain dry-run assumptions unless explicitly marked 'Observed' below; "
+        "no actual margin, CAC, profitability, or ROAS conclusion is supported.",
+        *evidence_warnings,
+    )))
     return UnitEconomicsSummary(candidate.candidate_id, price, unit_cost, shipping, fee, returns, cac, gross, contribution, gross,
         warnings, (f"Assumed price={price}", cost_note, shipping_note, f"Assumed CAC={cac}", f"Assumed return rate={returns}"), source, canonical.to_dict())
 
@@ -168,7 +258,14 @@ def run_commerce_mvp_slice(*, workspace_id: str = "commerce-mvp-dry-run", query:
     store = build_store_draft_packet(selected) if selected else None
     recommendations = _recommendations()
     approval = build_manual_approval_packet(selected, recommendations) if selected else None
-    metadata = {"network_used": False, "provider_calls": False, "supabase_default": False, "jsonl_default": False}
+    metadata: dict[str, Any] = {
+        "network_used": False, "provider_calls": False, "supabase_default": False, "jsonl_default": False,
+        "advisory": True, "non_authoritative": True,
+        "no_launch_authority": True, "no_ad_authority": True, "no_spend_authority": True,
+        "no_order_authority": True, "no_payment_authority": True, "no_outreach_authority": True,
+        "no_supplier_mutation_authority": True, "no_inventory_mutation_authority": True,
+        "no_customer_message_authority": True, "no_external_action_authority": True,
+    }
     if opportunity_assessment is not None: metadata["opportunity_assessment"] = opportunity_assessment.to_dict()
     if market_opportunity_report is not None: metadata["market_opportunity_report"] = market_opportunity_report.to_dict()
     if research_portfolio is not None: metadata["research_portfolio"] = research_portfolio.to_dict()
