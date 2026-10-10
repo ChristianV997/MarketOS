@@ -1,0 +1,244 @@
+"""services.category_mapping.taxonomy_loader -- deterministic, offline
+loader/parser for the pinned, partial Shopify Product Taxonomy snapshot.
+
+No network access, no dependency on any external package: this module reads
+one bundled, versioned text file (or, for tests, an equivalent in-memory
+string in the identical format) and fails closed on any malformed, duplicate,
+or structurally inconsistent row rather than silently dropping it.
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+import stat as stat_module
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any, Mapping
+
+from .schemas import (
+    BUNDLED_EVIDENCE_MODE,
+    BUNDLED_TAXONOMY_ROWS_SHA256,
+    CategoryTaxonomyError,
+    IN_MEMORY_FIXTURE_PROVENANCE,
+    TAXONOMY_SOURCE_PROVENANCE,
+    TaxonomyCategory,
+)
+
+_DEFAULT_SNAPSHOT_PATH = (
+    Path(__file__).resolve().parents[2] / "data" / "shopify_product_taxonomy" / "categories.v2026-08.partial.txt"
+)
+
+# The bundled snapshot is ~0.2 MB; a full upstream taxonomy is a few MB. Anything larger is
+# not a taxonomy snapshot, and reading it whole would exhaust memory.
+_MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024
+
+_LINE_RE = re.compile(r"^gid://shopify/TaxonomyCategory/(\S+)\s*:\s*(.+?)\s*$")
+
+
+@dataclass(frozen=True)
+class TaxonomyIndex:
+    """An immutable, validated index over the loaded taxonomy snapshot."""
+
+    by_code: Mapping[str, TaxonomyCategory]
+    source_provenance: Mapping[str, Any] = field(
+        default_factory=lambda: MappingProxyType(dict(IN_MEMORY_FIXTURE_PROVENANCE))
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.by_code, MappingProxyType):
+            object.__setattr__(self, "by_code", MappingProxyType(dict(self.by_code)))
+        if not isinstance(self.source_provenance, MappingProxyType):
+            object.__setattr__(
+                self,
+                "source_provenance",
+                MappingProxyType(dict(self.source_provenance)),
+            )
+        if self.source_provenance.get("evidence_mode") == BUNDLED_EVIDENCE_MODE and (
+            _rows_digest(self.by_code.values()) != BUNDLED_TAXONOMY_ROWS_SHA256
+        ):
+            # The label is a claim about content, not a caller option: only rows identical to the
+            # verified bundle may carry it (a custom file must stay "unverified_local_file").
+            raise CategoryTaxonomyError(
+                "bundled provenance may only label the verified bundled taxonomy rows"
+            )
+
+    def get(self, code: str) -> TaxonomyCategory | None:
+        return self.by_code.get(code)
+
+    def __len__(self) -> int:
+        return len(self.by_code)
+
+    def __iter__(self):
+        return iter(self.by_code.values())
+
+
+def _rows_digest(categories: Any) -> str:
+    rows = sorted((category.code, category.full_path) for category in categories)
+    return hashlib.sha256("\n".join(f"{code}\t{path}" for code, path in rows).encode("utf-8")).hexdigest()
+
+
+def _parse_line(line: str, line_number: int) -> tuple[str, str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    match = _LINE_RE.match(stripped)
+    if not match:
+        raise CategoryTaxonomyError(f"malformed taxonomy row at line {line_number}: {line!r}")
+    code, full_path = match.group(1), match.group(2)
+    if not code or "//" in code or code.startswith("-") or code.endswith("-") or "--" in code:
+        raise CategoryTaxonomyError(f"malformed taxonomy code at line {line_number}: {code!r}")
+    if not full_path:
+        raise CategoryTaxonomyError(f"empty taxonomy path at line {line_number} for code {code!r}")
+    gid = f"gid://shopify/TaxonomyCategory/{code}"
+    return code, gid, full_path
+
+
+def parse_taxonomy_text(
+    text: str,
+    *,
+    source_provenance: Mapping[str, Any] | None = None,
+) -> TaxonomyIndex:
+    """Parse the pinned snapshot format into a validated :class:`TaxonomyIndex`.
+
+    Fails closed (raises :class:`CategoryTaxonomyError`) on:
+    - a data row that does not match the pinned ``{GID} : {path}`` format;
+    - a duplicate category code;
+    - a category whose declared parent code is not itself present in the
+      same snapshot (parent/path consistency);
+    - a category whose full path's segment count does not match its code's
+      hierarchy depth, or whose path does not end in its own declared name.
+    """
+    by_code: dict[str, TaxonomyCategory] = {}
+    seen_codes: set[str] = set()
+
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        parsed = _parse_line(line, line_number)
+        if parsed is None:
+            continue
+        code, gid, full_path = parsed
+
+        if code in seen_codes:
+            raise CategoryTaxonomyError(f"duplicate taxonomy code {code!r} at line {line_number}")
+        seen_codes.add(code)
+
+        segments = code.split("-")
+        level = len(segments)
+        path_parts = [part.strip() for part in full_path.split(">")]
+        if len(path_parts) != level:
+            raise CategoryTaxonomyError(
+                f"path depth mismatch for code {code!r} at line {line_number}: "
+                f"code implies level {level}, path has {len(path_parts)} segments"
+            )
+        name = path_parts[-1]
+        if not name:
+            raise CategoryTaxonomyError(f"empty leaf name for code {code!r} at line {line_number}")
+
+        parent_code = "-".join(segments[:-1]) if level > 1 else None
+
+        by_code[code] = TaxonomyCategory(
+            code=code,
+            gid=gid,
+            name=name,
+            full_path=full_path,
+            parent_code=parent_code,
+            level=level,
+        )
+
+    for category in by_code.values():
+        if category.parent_code is not None and category.parent_code not in by_code:
+            raise CategoryTaxonomyError(
+                f"category {category.code!r} declares parent {category.parent_code!r}, "
+                "which is not present in this snapshot"
+            )
+        if category.parent_code is not None:
+            parent = by_code[category.parent_code]
+            if not category.full_path.startswith(parent.full_path + " > "):
+                raise CategoryTaxonomyError(
+                    f"category {category.code!r} path {category.full_path!r} is not a child "
+                    f"path of its declared parent {category.parent_code!r} ({parent.full_path!r})"
+                )
+
+    if not by_code:
+        raise CategoryTaxonomyError("taxonomy snapshot contained zero valid category rows")
+
+    return TaxonomyIndex(
+        by_code=by_code,
+        source_provenance=(
+            source_provenance
+            if source_provenance is not None
+            else IN_MEMORY_FIXTURE_PROVENANCE
+        ),
+    )
+
+
+def _read_snapshot_bytes(snapshot_path: Path) -> bytes:
+    """Read the snapshot's raw bytes, failing closed with :class:`CategoryTaxonomyError`.
+
+    Only a regular file within the size bound is read: a FIFO or device node would
+    block or stream forever, and an oversized file would be read whole into memory.
+    ``ValueError`` (e.g. a path containing a NUL byte) is typed like ``OSError``.
+    """
+    name = snapshot_path.name.replace("\x00", "?")
+    # CategoryTaxonomyError subclasses ValueError, so only the system calls sit inside the
+    # except: our own typed errors must not be re-labelled "unreadable".
+    try:
+        info = snapshot_path.stat()
+    except (OSError, ValueError) as exc:
+        raise CategoryTaxonomyError(f"taxonomy snapshot unreadable: {name}") from exc
+    if not stat_module.S_ISREG(info.st_mode):
+        raise CategoryTaxonomyError(f"taxonomy snapshot is not a regular file: {name}")
+    if info.st_size > _MAX_SNAPSHOT_BYTES:
+        raise CategoryTaxonomyError(f"taxonomy snapshot exceeds {_MAX_SNAPSHOT_BYTES} bytes: {name}")
+    try:
+        with snapshot_path.open("rb") as handle:
+            raw = handle.read(_MAX_SNAPSHOT_BYTES + 1)
+    except (OSError, ValueError) as exc:
+        raise CategoryTaxonomyError(f"taxonomy snapshot unreadable: {name}") from exc
+    if len(raw) > _MAX_SNAPSHOT_BYTES:  # grew between stat and read
+        raise CategoryTaxonomyError(f"taxonomy snapshot exceeds {_MAX_SNAPSHOT_BYTES} bytes: {name}")
+    return raw
+
+
+def load_taxonomy(path: Path | None = None) -> TaxonomyIndex:
+    """Load and validate the taxonomy snapshot from disk. Deterministic: the
+    same file always produces the same :class:`TaxonomyIndex` contents.
+
+    The bundled snapshot is verified against its pinned digest over the **raw
+    bytes** (never over decoded or newline-normalised text, which would let a
+    CRLF- or CR-rewritten copy pass as the bundled artifact). A missing,
+    unreadable or non-UTF-8 snapshot raises :class:`CategoryTaxonomyError`, so
+    callers see "evidence unavailable" rather than a raw OS/decoding error or,
+    worse, an empty mapping."""
+    snapshot_path = Path(path) if path is not None else _DEFAULT_SNAPSHOT_PATH
+    raw = _read_snapshot_bytes(snapshot_path)
+    if snapshot_path.resolve() == _DEFAULT_SNAPSHOT_PATH.resolve():
+        actual_digest = hashlib.sha256(raw).hexdigest()
+        expected_digest = TAXONOMY_SOURCE_PROVENANCE["snapshot_sha256"]
+        if actual_digest != expected_digest:
+            raise CategoryTaxonomyError("bundled taxonomy snapshot checksum mismatch")
+        source_provenance = TAXONOMY_SOURCE_PROVENANCE
+    else:
+        source_provenance = MappingProxyType({
+            "evidence_mode": "unverified_local_file",
+            "live_validation": False,
+            "snapshot_name": snapshot_path.name,
+        })
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CategoryTaxonomyError(f"taxonomy snapshot is not valid UTF-8: {snapshot_path.name}") from exc
+    return parse_taxonomy_text(text, source_provenance=source_provenance)
+
+
+@lru_cache(maxsize=1)
+def _cached_default_taxonomy() -> TaxonomyIndex:
+    return load_taxonomy()
+
+
+def default_taxonomy() -> TaxonomyIndex:
+    """The bundled snapshot, parsed once and reused. Callers that need an
+    isolated/injected taxonomy (tests, or a future alternate snapshot) should
+    call :func:`load_taxonomy` or :func:`parse_taxonomy_text` directly instead."""
+    return _cached_default_taxonomy()

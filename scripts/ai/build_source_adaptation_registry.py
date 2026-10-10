@@ -1257,6 +1257,50 @@ RECORDS = [
         "verification_evidence": "docs/ai/OSS_PATTERN_RETROFIT_ADR.md",
         "rejection_reason": None,
         "last_reviewed_at": "2026-09-17T20:00:00Z"
+    },
+    {
+        "source_id": "src-shopify-product-taxonomy",
+        "repository_url": "https://github.com/Shopify/product-taxonomy",
+        "organization": "Shopify",
+        "repository_name": "product-taxonomy",
+        "revision": "2e9aa2e9b882383952c63d212add13eb80f46cf9",
+        "commit_sha": "2e9aa2e9b882383952c63d212add13eb80f46cf9",
+        "version_tag": "v2026-08",
+        "source_type": "git_repository",
+        "license": "MIT",
+        "license_evidence_url": "https://github.com/Shopify/product-taxonomy/blob/v2026-08/LICENSE",
+        "inspected_paths": [
+            "dist/en/categories.txt",
+            "VERSION",
+            "LICENSE"
+        ],
+        "dependencies": [],
+        "security_surface": {
+            "network_access": False,
+            "credential_exposure": "none",
+            "code_execution": False,
+            "local_ipc": False,
+            "desktop_control_risk": False,
+            "attack_surface_notes": "Static plain-text category-name data file only; no code, no scripts, no runtime dependency on the upstream repository."
+        },
+        "data_network_behavior": {
+            "network_mode": "offline_only",
+            "outbound_calls_allowed": False,
+            "telemetry_mode": "none",
+            "data_persistence": "none"
+        },
+        "adaptation_mode": "copy_pattern",
+        "marketos_target_authority": "services.category_mapping.mapper.build_category_mapping_evidence",
+        "expected_benefit": "Supplemental, human-reviewed category-mapping evidence for the existing marketplace/product-intake free-text category field, composing with (not replacing) evaluation.commerce.opportunity_synthesis and evaluation.trustos.client_workspace_isolation.",
+        "compatibility_status": "compatible",
+        "integration_status": "accepted_pattern",
+        "attribution_requirement": "Shopify Product Taxonomy MIT notice retained in THIRD_PARTY_NOTICES.md; pinned commit/tag/license recorded in data/shopify_product_taxonomy/README.md.",
+        "rollback_strategy": "Delete services/category_mapping/ and data/shopify_product_taxonomy/, and remove the optional category_mapping_evidence field/call site from services/product_research; no other module depends on this package.",
+        "owner": "antigravity-source-adaptation-governance-owner",
+        "reviewer": "quality-architecture-reviewer",
+        "verification_evidence": "docs/CATEGORY_MAPPING_EVIDENCE.md",
+        "rejection_reason": None,
+        "last_reviewed_at": "2026-09-27T10:02:53Z"
     }
 ]
 

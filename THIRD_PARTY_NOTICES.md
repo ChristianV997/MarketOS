@@ -38,6 +38,7 @@ legal advice.
 | duckdb | v1.1.3 | MIT | In-process analytical query pattern emulated in `backend.analytics.embedded_query_engine`; retain MIT notice. |
 | polars | py-1.17.1 | MIT | Tabular query expression patterns referenced in `backend.analytics.dataframe_engine`; retain MIT notice. |
 | scrapy | 2.12.0 | BSD-3-Clause | Staged item validation pipeline pattern emulated in `backend.scouting.item_pipeline`; retain BSD-3-Clause notice. |
+| shopify/product-taxonomy | v2026-08 | MIT | Pinned, partial category-name data snapshot bundled in `data/shopify_product_taxonomy/`, consumed offline by `services.category_mapping`; retain upstream MIT notice. |
 
 The generated release SBOM captures resolved Python packages actually present
 in the build environment. Before enabling or updating any listed component,
