@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from itertools import permutations
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 from evaluation.companyos.resource_execution_governor import (
     ACTION_TYPES, DOMAINS, MODEL_POLICY_TIERS, OUTCOMES, RESOURCE_TYPES,
-    ExecutionDecisionRequest, ExecutionGovernorSafetySummary, LearningCaptureRequirement,
+    ExecutionDecisionRequest, ExecutionGovernorSafetySummary, ExecutionReservationState, LearningCaptureRequirement,
     ResourceBudget, ResourceQuota, apply_learning_influence, build_resource_execution_governor_report,
     evaluate_execution_request, request_from_mapping,
 )
@@ -800,3 +802,812 @@ def test_stacked_negative_learning_signals_coexist_and_hard_gate_still_independe
     assert "TrustOS gate is blocked" in result.blockers
     assert "required learning has not been captured" in result.blockers
     assert result.outcome == "hard_block"
+
+
+def test_planned_budget_is_reserved_across_requests_in_stable_order():
+    requests = (
+        base("run_frontier_llm_synthesis", request_id="frontier-b", requested_amount=60, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+        base("run_frontier_llm_synthesis", request_id="frontier-a", requested_amount=60, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+    )
+    report = build_resource_execution_governor_report(requests=requests)
+    decisions = {item.request_id: item for item in report.decisions}
+    assert [item.request_id for item in report.decisions] == ["frontier-a", "frontier-b"]
+    assert decisions["frontier-a"].budget_checks[0].status == "available"
+    assert decisions["frontier-b"].budget_checks[0].status == "blocked"
+    assert "aggregate planned budget" in decisions["frontier-b"].budget_checks[0].reason
+    assert build_resource_execution_governor_report(requests=tuple(reversed(requests))).to_dict() == report.to_dict()
+
+
+def test_missing_budget_limit_fails_closed_for_positive_request():
+    result = evaluate_execution_request(base("run_local_llm_task", requested_amount=1, resource_type="local_llm_capacity", model_tier="local_llm"), budgets=())
+    assert result.budget_checks[0].status == "missing"
+    assert result.outcome != "allow"
+    assert any("no budget is registered" in item for item in result.blockers)
+
+
+def test_missing_budget_never_authorizes_pending_approval_work():
+    fields = {
+        "request_id": "missing-cap-ad-test",
+        "action_type": "launch_ad_experiment",
+        "domain": "ads_content",
+        "owner_department": "marketing",
+        "workspace_id": "internal-companyos",
+        "requested_amount": 1,
+        "resource_type": "ad_spend",
+        "hypothesis": "bounded test",
+        "success_metric": "conversion_rate",
+        "kill_threshold": .02,
+    }
+    pending = evaluate_execution_request(ExecutionDecisionRequest(**fields), budgets=())
+    approved = evaluate_execution_request(ExecutionDecisionRequest(**{**fields, "approval_state": "approved"}), budgets=())
+    assert pending.budget_checks[0].status == "missing"
+    assert pending.outcome == "requires_approval"
+    assert approved.outcome == "soft_block"
+    assert any("no budget is registered" in item for item in approved.blockers)
+
+
+def test_explicit_zero_budget_is_distinct_from_missing_budget():
+    zero_budget = ResourceBudget("frontier_llm_budget", "finance", "internal-companyos", "monthly", 0, 0, 0, "USD", 0, 0, 0)
+    result = evaluate_execution_request(base("run_frontier_llm_synthesis", requested_amount=0, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"), budgets=(zero_budget,))
+    assert result.budget_checks[0].status == "available"
+
+
+def test_conflicting_budget_limits_fail_closed():
+    budget = ResourceBudget("frontier_llm_budget", "finance", "internal-companyos", "monthly", 100, 0, 0, "USD", 100, 75, 25)
+    conflict = ResourceBudget("frontier_llm_budget", "management", "internal-companyos", "monthly", 200, 0, 0, "USD", 200, 150, 50)
+    result = evaluate_execution_request(base("run_frontier_llm_synthesis", requested_amount=1, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"), budgets=(budget, conflict))
+    assert result.budget_checks[0].status == "conflict"
+    assert result.outcome != "allow"
+
+
+def test_duplicate_request_ids_reject_ambiguous_plan():
+    request = base("screen_product_opportunities", request_id="duplicate")
+    with pytest.raises(ValueError, match="duplicate request_id"):
+        build_resource_execution_governor_report(requests=(request, request))
+
+
+def test_aggregate_action_quota_blocks_excess_portfolio_allocation():
+    requests = (
+        base("generate_site_draft", request_id="site-a", resource_type="report_generation_quota"),
+        base("generate_site_draft", request_id="site-b", resource_type="report_generation_quota"),
+    )
+    report = build_resource_execution_governor_report(requests=requests)
+    decisions = {item.request_id: item for item in report.decisions}
+    assert decisions["site-a"].quota_checks[0].status == "available"
+    assert decisions["site-b"].quota_checks[0].status == "blocked"
+    assert "aggregate planned action quota" in decisions["site-b"].quota_checks[0].reason
+
+
+def test_non_finite_budget_cap_is_rejected():
+    with pytest.raises(ValueError, match="invalid resource budget"):
+        ResourceBudget("frontier_llm_budget", "finance", "internal-companyos", "monthly", float("nan"), 0, 0, "USD", 100, 75, 25)
+
+
+def test_conflicting_budget_cap_relationships_are_rejected():
+    with pytest.raises(ValueError, match="invalid resource budget"):
+        ResourceBudget("frontier_llm_budget", "finance", "internal-companyos", "monthly", 50, 0, 0, "USD", 50, 75, 25)
+
+
+def test_blocked_plan_items_do_not_reserve_budget_or_action_quota():
+    requests = (
+        base("generate_site_draft", request_id="a-blocked", requested_amount=1, resource_type="website_build_capacity", trustos_decision="hard_block"),
+        base("generate_site_draft", request_id="b-eligible", requested_amount=1, resource_type="website_build_capacity"),
+    )
+    report = build_resource_execution_governor_report(requests=requests)
+    decisions = {item.request_id: item for item in report.decisions}
+    assert decisions["a-blocked"].outcome == "hard_block"
+    assert decisions["b-eligible"].budget_checks[0].status == "available"
+    assert decisions["b-eligible"].quota_checks[0].status == "available"
+
+
+def test_client_export_action_quota_uses_the_canonical_action_name():
+    requests = tuple(
+        base("generate_client_export", request_id=f"export-{letter}", resource_type="client_export_quota", workspace_decision="allow")
+        for letter in "abcdef"
+    )
+    report = build_resource_execution_governor_report(requests=requests)
+    decisions = {item.request_id: item for item in report.decisions}
+    assert decisions["export-e"].quota_checks[0].status == "available"
+    assert decisions["export-f"].quota_checks[0].status == "blocked"
+    assert "aggregate planned action quota" in decisions["export-f"].quota_checks[0].reason
+
+
+def test_approval_gated_items_reserve_capacity_against_parallel_overcommit():
+    requests = tuple(
+        base(
+            "launch_ad_experiment",
+            request_id=f"ad-{letter}",
+            resource_type="ad_spend",
+            requested_amount=25,
+            hypothesis="bounded test",
+            success_metric="conversion_rate",
+            kill_threshold=.02,
+        )
+        for letter in "abcde"
+    )
+    report = build_resource_execution_governor_report(requests=requests)
+    decisions = {item.request_id: item for item in report.decisions}
+    assert all(not decisions[f"ad-{letter}"].blockers for letter in "abcd")
+    assert decisions["ad-a"].outcome == "requires_approval"
+    assert decisions["ad-e"].budget_checks[0].status == "blocked"
+    assert "aggregate planned budget" in decisions["ad-e"].budget_checks[0].reason
+
+
+def test_aggregate_under_limit_allows_all_concurrent_requests_and_updates_remaining_available():
+    requests = (
+        base("run_frontier_llm_synthesis", request_id="frontier-1", requested_amount=25, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+        base("run_frontier_llm_synthesis", request_id="frontier-2", requested_amount=25, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+        base("run_frontier_llm_synthesis", request_id="frontier-3", requested_amount=25, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+    )
+    report = build_resource_execution_governor_report(requests=requests)
+    decisions = {item.request_id: item for item in report.decisions}
+    assert all(not item.blockers for item in report.decisions)
+    assert decisions["frontier-1"].budget_checks[0].status == "available"
+    assert decisions["frontier-1"].budget_checks[0].available_amount == 100.0
+    assert decisions["frontier-1"].budget_checks[0].reason == "within budget"
+    assert decisions["frontier-2"].budget_checks[0].status == "available"
+    assert decisions["frontier-2"].budget_checks[0].available_amount == 75.0
+    assert decisions["frontier-2"].budget_checks[0].reason == "within aggregate plan budget"
+    assert decisions["frontier-3"].budget_checks[0].status == "available"
+    assert decisions["frontier-3"].budget_checks[0].available_amount == 50.0
+    assert decisions["frontier-3"].budget_checks[0].reason == "within aggregate plan budget"
+
+
+def test_budget_cap_compares_unrounded_remaining_before_reporting_available():
+    budget = ResourceBudget(
+        "frontier_llm_budget",
+        "finance",
+        "internal-companyos",
+        "monthly",
+        1.00006,
+        0.0,
+        0.0,
+        "USD",
+        1.00006,
+        1.00006,
+        0.0,
+    )
+    request = base(
+        "run_frontier_llm_synthesis",
+        request_id="fractional-cap",
+        requested_amount=1.00008,
+        resource_type="frontier_llm_budget",
+        model_tier="frontier_llm",
+        evidence_score=.9,
+        approval_state="approved",
+    )
+
+    report = build_resource_execution_governor_report(
+        requests=(request,),
+        budgets=(budget,),
+    )
+
+    assert report.decisions[0].budget_checks[0].status == "blocked"
+    assert report.decisions[0].budget_checks[0].available_amount == 1.00006
+    assert report.reservation_state.budget_reservations == ()
+
+
+def test_aggregate_under_limit_action_quotas_all_succeed():
+    requests = (
+        base("promote_product_candidate", request_id="promote-1", resource_type="report_generation_quota", approval_state="approved"),
+        base("promote_product_candidate", request_id="promote-2", resource_type="report_generation_quota", approval_state="approved"),
+    )
+    report = build_resource_execution_governor_report(requests=requests)
+    decisions = {item.request_id: item for item in report.decisions}
+    assert decisions["promote-1"].quota_checks[0].status == "available"
+    assert decisions["promote-1"].quota_checks[0].available_amount == 1.0
+    assert decisions["promote-2"].quota_checks[0].status == "available"
+    assert decisions["promote-2"].quota_checks[0].available_amount == 0.0
+
+
+def test_aggregate_over_limit_blocks_only_oversubscribing_request():
+    requests = tuple(
+        base("run_frontier_llm_synthesis", request_id=f"frontier-{letter}", requested_amount=30, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved")
+        for letter in "abcd"
+    )
+    report = build_resource_execution_governor_report(requests=requests)
+    decisions = {item.request_id: item for item in report.decisions}
+    assert decisions["frontier-a"].budget_checks[0].status == "available"
+    assert decisions["frontier-a"].budget_checks[0].available_amount == 100.0
+    assert decisions["frontier-b"].budget_checks[0].status == "available"
+    assert decisions["frontier-b"].budget_checks[0].available_amount == 70.0
+    assert decisions["frontier-c"].budget_checks[0].status == "soft_cap"
+    assert decisions["frontier-c"].budget_checks[0].available_amount == 40.0
+    assert decisions["frontier-c"].outcome == "requires_finance_review"
+    assert decisions["frontier-d"].budget_checks[0].status == "blocked"
+    assert decisions["frontier-d"].budget_checks[0].available_amount == 10.0
+    assert "hard cap or aggregate planned budget exceeded" in decisions["frontier-d"].budget_checks[0].reason
+    assert decisions["frontier-d"].outcome == "soft_block"
+
+
+def test_aggregate_over_limit_with_lower_budget_limit_than_hard_cap():
+    custom_budget = ResourceBudget("frontier_llm_budget", "finance", "internal-companyos", "monthly", 60.0, 0.0, 0.0, "USD", 100.0, 50.0, 25.0)
+    requests = (
+        base("run_frontier_llm_synthesis", request_id="frontier-1", requested_amount=25, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+        base("run_frontier_llm_synthesis", request_id="frontier-2", requested_amount=25, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+        base("run_frontier_llm_synthesis", request_id="frontier-3", requested_amount=25, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+    )
+    report = build_resource_execution_governor_report(requests=requests, budgets=(custom_budget,))
+    decisions = {item.request_id: item for item in report.decisions}
+    assert decisions["frontier-1"].budget_checks[0].status == "available"
+    assert decisions["frontier-1"].budget_checks[0].available_amount == 60.0
+    assert decisions["frontier-2"].budget_checks[0].status == "available"
+    assert decisions["frontier-2"].budget_checks[0].available_amount == 35.0
+    assert decisions["frontier-3"].budget_checks[0].status == "blocked"
+    assert decisions["frontier-3"].budget_checks[0].available_amount == 10.0
+    assert "aggregate planned budget exceeded" in decisions["frontier-3"].budget_checks[0].reason
+
+
+def test_aggregate_over_limit_action_quota_blocks_excess_and_does_not_reserve():
+    requests = tuple(
+        base("generate_launch_draft", request_id=f"launch-{letter}", resource_type="report_generation_quota")
+        for letter in "abc"
+    )
+    report = build_resource_execution_governor_report(requests=requests)
+    decisions = {item.request_id: item for item in report.decisions}
+    assert decisions["launch-a"].quota_checks[0].status == "available"
+    assert decisions["launch-b"].quota_checks[0].status == "available"
+    assert decisions["launch-c"].quota_checks[0].status == "blocked"
+    assert "aggregate planned action quota exceeded" in decisions["launch-c"].quota_checks[0].reason
+
+
+def test_deterministic_ordering_invariant_across_shuffled_requests():
+    reqs = (
+        base("run_cheap_llm_task", request_id="req-3", requested_amount=10, resource_type="cheap_llm_budget"),
+        base("screen_product_opportunities", request_id="req-1"),
+        base("generate_site_draft", request_id="req-5", requested_amount=1, resource_type="website_build_capacity"),
+        base("run_frontier_llm_synthesis", request_id="req-2", requested_amount=50, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+        base("run_frontier_llm_synthesis", request_id="req-4", requested_amount=60, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+    )
+    canonical_report = build_resource_execution_governor_report(requests=reqs)
+    ordered_ids = [item.request_id for item in canonical_report.decisions]
+    assert ordered_ids == ["req-1", "req-2", "req-3", "req-4", "req-5"]
+    assert canonical_report.decisions[1].budget_checks[0].status == "available"
+    assert canonical_report.decisions[3].budget_checks[0].status == "blocked"
+
+    for permutation in permutations(reqs):
+        perm_report = build_resource_execution_governor_report(requests=permutation)
+        assert [item.request_id for item in perm_report.decisions] == ordered_ids
+        assert perm_report.to_dict() == canonical_report.to_dict()
+
+
+def test_non_finite_and_negative_prior_plan_amounts_rejected():
+    request = base("run_local_llm_task", requested_amount=1, resource_type="local_llm_capacity")
+    for bad_amount in (float("nan"), float("inf"), float("-inf"), -1.0, -0.01, True):
+        with pytest.raises(ValueError, match="prior plan amount must be finite and nonnegative"):
+            evaluate_execution_request(request, prior_plan_amount=bad_amount)
+
+
+def test_non_finite_and_negative_prior_action_counts_rejected():
+    request = base("screen_product_opportunities")
+    for bad_count in (-1, -10, True, 2.5):
+        with pytest.raises(ValueError, match="prior action count must be a nonnegative integer"):
+            evaluate_execution_request(request, prior_action_count=bad_count)
+
+
+def test_budget_limit_exceeding_hard_cap_rejected():
+    with pytest.raises(ValueError, match="invalid resource budget"):
+        ResourceBudget("frontier_llm_budget", "finance", "internal-companyos", "monthly", 150, 0, 0, "USD", 100, 75, 25)
+
+
+def test_duplicate_request_id_with_whitespace_variations_rejected():
+    req1 = base("screen_product_opportunities", request_id="request-alpha")
+    req2 = base("screen_product_opportunities", request_id="  request-alpha  ")
+    with pytest.raises(ValueError, match="duplicate request_id is ambiguous"):
+        build_resource_execution_governor_report(requests=(req1, req2))
+
+    for empty_id in ("", "   ", "\t\n"):
+        bad_req = base("screen_product_opportunities", request_id=empty_id)
+        with pytest.raises(ValueError, match="non-empty unique request_id"):
+            build_resource_execution_governor_report(requests=(bad_req,))
+
+
+def test_replayed_plan_evaluation_is_strictly_idempotent():
+    requests = (
+        base("screen_product_opportunities", request_id="replay-1"),
+        base("run_cheap_llm_task", request_id="replay-2", requested_amount=5, resource_type="cheap_llm_budget"),
+    )
+    first_run = build_resource_execution_governor_report(requests=requests)
+    second_run = build_resource_execution_governor_report(requests=requests)
+    assert first_run.to_dict() == second_run.to_dict()
+    assert first_run.to_markdown() == second_run.to_markdown()
+
+
+def test_replay_against_already_used_and_reserved_budget():
+    hydrated_budget = ResourceBudget("frontier_llm_budget", "finance", "internal-companyos", "monthly", 100.0, 40.0, 20.0, "USD", 100.0, 90.0, 25.0)
+    requests = (
+        base("run_frontier_llm_synthesis", request_id="replay-a", requested_amount=25, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+        base("run_frontier_llm_synthesis", request_id="replay-b", requested_amount=25, resource_type="frontier_llm_budget", model_tier="frontier_llm", evidence_score=.9, approval_state="approved"),
+    )
+    report = build_resource_execution_governor_report(requests=requests, budgets=(hydrated_budget,))
+    decisions = {item.request_id: item for item in report.decisions}
+    assert decisions["replay-a"].budget_checks[0].status == "available"
+    assert decisions["replay-a"].budget_checks[0].available_amount == 40.0
+    assert decisions["replay-b"].budget_checks[0].status == "blocked"
+    assert decisions["replay-b"].budget_checks[0].available_amount == 15.0
+    assert "hard cap or aggregate planned budget exceeded" in decisions["replay-b"].budget_checks[0].reason
+
+
+def test_sequential_plan_chunks_carry_budget_and_quota_reservations():
+    first = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_frontier_llm_synthesis",
+                request_id="chunk-frontier-a",
+                requested_amount=60,
+                resource_type="frontier_llm_budget",
+                model_tier="frontier_llm",
+                evidence_score=.9,
+                approval_state="approved",
+            ),
+            base("generate_launch_draft", request_id="chunk-launch-a", resource_type="report_generation_quota"),
+        )
+    )
+    second = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_frontier_llm_synthesis",
+                request_id="chunk-frontier-b",
+                requested_amount=60,
+                resource_type="frontier_llm_budget",
+                model_tier="frontier_llm",
+                evidence_score=.9,
+                approval_state="approved",
+            ),
+            base("generate_launch_draft", request_id="chunk-launch-b", resource_type="report_generation_quota"),
+        ),
+        reservation_state=first.reservation_state,
+    )
+    decisions = {item.request_id: item for item in second.decisions}
+    assert decisions["chunk-frontier-b"].budget_checks[0].status == "blocked"
+    assert decisions["chunk-frontier-b"].budget_checks[0].available_amount == 40.0
+    assert decisions["chunk-launch-b"].quota_checks[0].status == "available"
+    assert second.reservation_state.budget_reservations == (
+        ("chunk-frontier-a", "frontier_llm_budget", 60, "run_frontier_llm_synthesis"),
+        ("chunk-launch-a", "report_generation_quota", 0.0, "generate_launch_draft"),
+        ("chunk-launch-b", "report_generation_quota", 0.0, "generate_launch_draft"),
+    )
+    assert len(second.reservation_state.quota_reservations) == 3
+    assert len({item[0] for item in second.reservation_state.quota_reservations}) == 3
+
+
+def test_reusing_a_reservation_state_is_idempotent_and_serializable():
+    request = base(
+        "run_frontier_llm_synthesis",
+        request_id="replay-reservation",
+        requested_amount=25,
+        resource_type="frontier_llm_budget",
+        model_tier="frontier_llm",
+        evidence_score=.9,
+        approval_state="approved",
+    )
+    first = build_resource_execution_governor_report(requests=(request,))
+    replay = build_resource_execution_governor_report(
+        requests=(request,),
+        reservation_state=first.to_dict()["reservation_state"],
+    )
+    assert replay.reservation_state == first.reservation_state
+    assert replay.decisions[0].budget_checks[0].status == "available"
+    assert replay.decisions[0].budget_checks[0].available_amount == first.decisions[0].budget_checks[0].available_amount
+
+
+def test_failed_reservation_can_be_released_before_a_competing_request():
+    def frontier(request_id: str, amount: float = 60, **kwargs) -> ExecutionDecisionRequest:
+        return base(
+            "run_frontier_llm_synthesis",
+            request_id=request_id,
+            requested_amount=amount,
+            resource_type="frontier_llm_budget",
+            model_tier="frontier_llm",
+            evidence_score=.9,
+            approval_state="approved",
+            **kwargs,
+        )
+
+    first = build_resource_execution_governor_report(requests=(frontier("failed-reservation"),))
+    failed = build_resource_execution_governor_report(
+        requests=(frontier("failed-reservation", trustos_decision="hard_block"),),
+        reservation_state=first.reservation_state,
+    )
+    assert failed.decisions[0].outcome == "hard_block"
+    assert failed.reservation_state.budget_reservations
+
+    replacement = build_resource_execution_governor_report(
+        requests=(frontier("replacement", amount=50),),
+        reservation_state=failed.reservation_state,
+        release_request_ids=("failed-reservation",),
+    )
+
+    assert replacement.decisions[0].budget_checks[0].status == "available"
+    assert replacement.decisions[0].budget_checks[0].available_amount == 100.0
+    assert replacement.reservation_state.budget_reservations == (
+        ("replacement", "frontier_llm_budget", 50, "run_frontier_llm_synthesis"),
+    )
+
+
+def test_reservation_release_is_ordered_and_idempotent():
+    requests = tuple(
+        base(
+            "run_cheap_llm_task",
+            request_id=f"release-{suffix}",
+            requested_amount=5,
+            resource_type="cheap_llm_budget",
+            model_tier="cheap_llm",
+        )
+        for suffix in ("b", "a")
+    )
+    state = build_resource_execution_governor_report(requests=requests).reservation_state
+
+    released = state.release(("release-b", "release-a"))
+    repeated = released.release(("release-a", "already-released"))
+
+    assert released == ExecutionReservationState()
+    assert repeated == released
+    assert state.release(("release-a",)).budget_reservations == (
+        ("release-b", "cheap_llm_budget", 5, "run_cheap_llm_task"),
+    )
+
+
+def test_reservation_release_rejects_non_string_ids():
+    state = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_cheap_llm_task",
+                request_id="typed-release",
+                requested_amount=5,
+                resource_type="cheap_llm_budget",
+                model_tier="cheap_llm",
+            ),
+        )
+    ).reservation_state
+
+    with pytest.raises(ValueError, match="release request_ids must be strings"):
+        state.release((1,))
+
+
+def test_conflicting_request_reuse_fails_closed():
+    first = build_resource_execution_governor_report(
+        requests=(base("run_cheap_llm_task", request_id="conflict-reservation", requested_amount=5, resource_type="cheap_llm_budget", model_tier="cheap_llm"),)
+    )
+    with pytest.raises(ValueError, match="conflicts with an existing budget reservation"):
+        build_resource_execution_governor_report(
+            requests=(base("run_cheap_llm_task", request_id="conflict-reservation", requested_amount=6, resource_type="cheap_llm_budget", model_tier="cheap_llm"),),
+            reservation_state=first.reservation_state,
+        )
+
+
+def test_incomplete_reservation_state_fails_closed():
+    with pytest.raises(ValueError, match="reservation state is incomplete"):
+        build_resource_execution_governor_report(
+            requests=(base("screen_product_opportunities", request_id="malformed-state"),),
+            reservation_state={"budget_reservations": []},
+        )
+
+
+def test_reservation_replay_normalizes_request_id_across_chunks():
+    request_values = {
+        "action_type": "run_cheap_llm_task",
+        "requested_amount": 5,
+        "resource_type": "cheap_llm_budget",
+        "model_tier": "cheap_llm",
+    }
+    first = build_resource_execution_governor_report(
+        requests=(base(request_id="replay-normalization", **request_values),)
+    )
+    replay = build_resource_execution_governor_report(
+        requests=(base(request_id=" replay-normalization ", **request_values),),
+        reservation_state=first.reservation_state,
+    )
+
+    assert replay.reservation_state == first.reservation_state
+    assert replay.decisions[0].request_id == "replay-normalization"
+
+
+def test_whitespace_request_id_cannot_bypass_reservation_conflict_check():
+    first = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_cheap_llm_task",
+                request_id="reservation-conflict",
+                requested_amount=5,
+                resource_type="cheap_llm_budget",
+                model_tier="cheap_llm",
+            ),
+        )
+    )
+    conflicting = base(
+        "run_cheap_llm_task",
+        request_id=" reservation-conflict ",
+        requested_amount=6,
+        resource_type="cheap_llm_budget",
+        model_tier="cheap_llm",
+    )
+
+    with pytest.raises(ValueError, match="conflicts with an existing budget reservation"):
+        build_resource_execution_governor_report(
+            requests=(conflicting,),
+            reservation_state=first.reservation_state,
+        )
+
+
+def test_missing_quota_for_budget_reservation_fails_closed():
+    first = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "generate_site_draft",
+                request_id="website-reservation",
+                requested_amount=1,
+                resource_type="website_build_capacity",
+            ),
+        )
+    )
+    state = first.to_dict()["reservation_state"]
+    assert state["budget_reservations"]
+    assert state["quota_reservations"]
+    state["quota_reservations"] = []
+
+    with pytest.raises(ValueError, match="reservation state is incomplete"):
+        build_resource_execution_governor_report(
+            requests=(
+                base(
+                    "generate_site_draft",
+                    request_id="website-followup",
+                    requested_amount=1,
+                    resource_type="website_build_capacity",
+                ),
+            ),
+            reservation_state=state,
+        )
+
+
+def test_noncanonical_serialized_reservation_id_fails_closed():
+    first = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_cheap_llm_task",
+                request_id="canonical-reservation",
+                requested_amount=5,
+                resource_type="cheap_llm_budget",
+                model_tier="cheap_llm",
+            ),
+        )
+    )
+    state = first.to_dict()["reservation_state"]
+    state["budget_reservations"][0][0] = " canonical-reservation "
+
+    with pytest.raises(ValueError, match="invalid budget reservation state"):
+        build_resource_execution_governor_report(
+            requests=(
+                base(
+                    "run_cheap_llm_task",
+                    request_id="canonical-reservation",
+                    requested_amount=5,
+                    resource_type="cheap_llm_budget",
+                    model_tier="cheap_llm",
+                ),
+            ),
+            reservation_state=state,
+        )
+
+
+def test_budget_reservation_rejects_a_mismatched_historical_quota_action():
+    first = build_resource_execution_governor_report(
+        requests=(
+            base(
+                "run_cheap_llm_task",
+                request_id="historic-cheap",
+                requested_amount=1,
+                resource_type="cheap_llm_budget",
+                model_tier="cheap_llm",
+            ),
+        )
+    )
+    state = first.to_dict()["reservation_state"]
+    state["quota_reservations"][0][1] = "screen_product_opportunities"
+    later_requests = tuple(
+        base(
+            "run_cheap_llm_task",
+            request_id=f"later-cheap-{index}",
+            requested_amount=0,
+            resource_type="cheap_llm_budget",
+            model_tier="cheap_llm",
+        )
+        for index in range(25)
+    )
+
+    with pytest.raises(ValueError, match="reservation state has conflicting quota action"):
+        build_resource_execution_governor_report(
+            requests=later_requests,
+            reservation_state=state,
+        )
+
+
+def test_legacy_budget_reservation_without_action_fails_closed():
+    state = {
+        "budget_reservations": [["legacy-state", "cheap_llm_budget", 1]],
+        "quota_reservations": [["legacy-state", "run_cheap_llm_task"]],
+    }
+
+    with pytest.raises(ValueError, match="invalid budget reservation state"):
+        build_resource_execution_governor_report(requests=(), reservation_state=state)
+
+
+@pytest.mark.parametrize(
+    "changed_fields",
+    (
+        {"requested_amount": 5.0000000000005},
+        {"resource_type": "local_llm_capacity"},
+        {"action_type": "run_local_llm_task", "model_tier": "local_llm"},
+    ),
+)
+def test_request_id_reuse_requires_exact_reservation_binding(changed_fields):
+    first_request = base(
+        "run_cheap_llm_task",
+        request_id="exact-binding",
+        requested_amount=5,
+        resource_type="cheap_llm_budget",
+        model_tier="cheap_llm",
+    )
+    first = build_resource_execution_governor_report(requests=(first_request,))
+    changed_values = {
+        "request_id": "exact-binding",
+        "requested_amount": 5,
+        "resource_type": "cheap_llm_budget",
+        "model_tier": "cheap_llm",
+    }
+    changed_values.update(changed_fields)
+    changed_request = base("run_cheap_llm_task", **changed_values)
+
+    with pytest.raises(ValueError, match="conflicts with an existing budget reservation"):
+        build_resource_execution_governor_report(
+            requests=(changed_request,),
+            reservation_state=first.reservation_state,
+        )
+
+
+def test_reservation_state_freezes_mutable_rows_before_cross_chunk_budget_check():
+    first_request = base(
+        "run_frontier_llm_synthesis",
+        request_id="prior-frontier",
+        requested_amount=60,
+        resource_type="frontier_llm_budget",
+        model_tier="frontier_llm",
+        evidence_score=.9,
+        approval_state="approved",
+    )
+    first = build_resource_execution_governor_report(requests=(first_request,))
+    mutable_budget_rows = [list(row) for row in first.reservation_state.budget_reservations]
+    mutable_quota_rows = [list(row) for row in first.reservation_state.quota_reservations]
+    state = ExecutionReservationState(
+        cast(Any, mutable_budget_rows), cast(Any, mutable_quota_rows)
+    )
+    mutable_budget_rows[0][2] = 0.0
+
+    follow_up = base(
+        "run_frontier_llm_synthesis",
+        request_id="follow-up-frontier",
+        requested_amount=60,
+        resource_type="frontier_llm_budget",
+        model_tier="frontier_llm",
+        evidence_score=.9,
+        approval_state="approved",
+    )
+    continued = build_resource_execution_governor_report(
+        requests=(follow_up,),
+        reservation_state=state,
+    )
+
+    assert state.budget_reservations[0][2] == 60
+    assert continued.decisions[0].budget_checks[0].status == "blocked"
+
+
+def test_reservation_state_order_is_canonical_across_serialized_permutations():
+    budget_rows = (
+        ("z-budget", "cheap_llm_budget", 5, "run_cheap_llm_task"),
+        ("a-budget", "frontier_llm_budget", 10, "run_frontier_llm_synthesis"),
+    )
+    quota_rows = (
+        ("z-budget", "run_cheap_llm_task"),
+        ("a-budget", "run_frontier_llm_synthesis"),
+    )
+    snapshots = tuple(
+        ExecutionReservationState(budget_order, quota_order).to_dict()
+        for budget_order in permutations(budget_rows)
+        for quota_order in permutations(quota_rows)
+    )
+
+    assert len(snapshots) == 4
+    assert all(snapshot == snapshots[0] for snapshot in snapshots)
+    assert ExecutionReservationState.from_mapping(snapshots[0]).to_dict() == snapshots[0]
+
+
+def test_mismatched_quota_action_fails_closed_without_echoing_payload():
+    payload_marker = "malformed-reservation-payload-canary"
+    malformed_state = {
+        "budget_reservations": [
+            [payload_marker, "frontier_llm_budget", 60, "run_frontier_llm_synthesis"]
+        ],
+        "quota_reservations": [[payload_marker, "screen_product_opportunities"]],
+    }
+
+    with pytest.raises(ValueError) as error:
+        build_resource_execution_governor_report(
+            requests=(),
+            reservation_state=malformed_state,
+        )
+
+    assert "conflicting quota action" in str(error.value)
+    assert payload_marker not in str(error.value)
+
+
+def test_approval_gated_unbudgeted_action_keeps_quota_reservation_on_replay():
+    request = base(
+        "send_sales_outreach",
+        request_id="quota-only-sales",
+        requested_amount=1,
+        resource_type="sales_outreach_capacity",
+        domain="sales",
+        owner_department="sales",
+        approval_state="not_requested",
+    )
+    first = build_resource_execution_governor_report(requests=(request,))
+    replay = build_resource_execution_governor_report(
+        requests=(request,),
+        reservation_state=first.to_dict()["reservation_state"],
+    )
+
+    assert first.decisions[0].outcome == "requires_approval"
+    assert first.reservation_state.budget_reservations == ()
+    assert first.reservation_state.quota_reservations == (
+        ("quota-only-sales", "send_sales_outreach"),
+    )
+    assert replay.reservation_state == first.reservation_state
+
+
+def test_cross_chunk_exact_replay_preserves_budget_and_quota_caps():
+    first_frontier = base(
+        "run_frontier_llm_synthesis",
+        request_id="a-frontier",
+        requested_amount=60,
+        resource_type="frontier_llm_budget",
+        model_tier="frontier_llm",
+        evidence_score=.9,
+        approval_state="approved",
+    )
+    first_site = base(
+        "generate_site_draft",
+        request_id="b-site",
+        requested_amount=0,
+        resource_type="report_generation_quota",
+    )
+    first = build_resource_execution_governor_report(
+        requests=(first_frontier, first_site)
+    )
+    replay_frontier = first_frontier
+    replay_site = first_site
+    new_frontier = base(
+        "run_frontier_llm_synthesis",
+        request_id="c-frontier",
+        requested_amount=60,
+        resource_type="frontier_llm_budget",
+        model_tier="frontier_llm",
+        evidence_score=.9,
+        approval_state="approved",
+    )
+    new_site = base(
+        "generate_site_draft",
+        request_id="d-site",
+        requested_amount=0,
+        resource_type="report_generation_quota",
+    )
+    continued = build_resource_execution_governor_report(
+        requests=(new_site, replay_site, new_frontier, replay_frontier),
+        reservation_state=first.to_dict()["reservation_state"],
+    )
+    decisions = {item.request_id: item for item in continued.decisions}
+
+    assert decisions["a-frontier"].budget_checks[0].status == "available"
+    assert decisions["b-site"].quota_checks[0].status == "available"
+    assert decisions["c-frontier"].budget_checks[0].status == "blocked"
+    assert decisions["d-site"].quota_checks[0].status == "blocked"
+    assert continued.reservation_state == first.reservation_state
