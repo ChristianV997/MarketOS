@@ -2,8 +2,8 @@
 
 Isolates data, credentials, reports, experiments, and live-mode permissions
 per tenant. workspace_id is derived deterministically from ``name`` (via
-backend.vector.normalization.deterministic_id, the same uuid5 idiom
-BaseArtifact uses for artifact_id) so re-registering a workspace with the
+backend.vector.normalization.deterministic_id, a uuid5 derivation, unlike
+BaseArtifact's random artifact_id) so re-registering a workspace with the
 same name is idempotent rather than minting a new identity every call.
 """
 from __future__ import annotations
