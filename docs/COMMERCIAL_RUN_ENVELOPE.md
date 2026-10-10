@@ -19,7 +19,9 @@ subclasses the pre-existing `backend.contracts.base.BaseArtifact` (already
 used by `CommerceSignal`, `LaunchPlan`, `CampaignOutcome`, etc.). This gets
 it, for free:
 
-- `artifact_id` (content-addressed, deterministic per construction)
+- `artifact_id` (random UUID4 minted once when the record is created, then
+  persisted; an explicit id is preserved, and a retry is idempotent only when
+  the caller supplies a stable `artifact_id`)
 - `workspace` (BaseArtifact's lineage-namespace field — set equal to
   `workspace_id` at construction so it carries real tenant meaning here,
   without changing what that field means for other artifact types)
