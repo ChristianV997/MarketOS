@@ -5,3 +5,4 @@
 *.sh text eol=lf
 data/source_adaptation_registry.json text eol=lf
 data/source_adaptation_work_orders.json text eol=lf
+data/shopify_product_taxonomy/categories.v2026-08.partial.txt text eol=lf

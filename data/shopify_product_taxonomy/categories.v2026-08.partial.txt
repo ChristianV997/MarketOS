@@ -1,0 +1,1887 @@
+# Shopify Product Taxonomy - Categories (PARTIAL SNAPSHOT: levels 1-3 plus curated levels 4-5)
+# Source: https://github.com/Shopify/product-taxonomy
+# Pinned tag: v2026-08 (commit 2e9aa2e9b882383952c63d212add13eb80f46cf9)
+# Upstream VERSION: 2026-08
+# License: MIT (Copyright (c) Shopify) -- see THIRD_PARTY_NOTICES.md
+# Trimmed by MarketOS from the full 14606-category upstream file to the top
+# 3 hierarchy levels (verticals, level-2, level-3) plus a curated slice of
+# level 4-5 nodes matching real MarketOS candidate fixtures (e.g. automatic
+# pet feeders, espresso machines, coffee grinders, lunch containers, resistance bands).
+# This remains a small, versioned, supplemental artifact -- NOT a full taxonomy mirror.
+# Format: {GID} : {Ancestor name} > ... > {Category name}
+
+gid://shopify/TaxonomyCategory/ap                : Animals & Pet Supplies
+gid://shopify/TaxonomyCategory/ap-1              : Animals & Pet Supplies > Live Animals
+gid://shopify/TaxonomyCategory/ap-2              : Animals & Pet Supplies > Pet Supplies
+gid://shopify/TaxonomyCategory/ap-2-1            : Animals & Pet Supplies > Pet Supplies > Bird Supplies
+gid://shopify/TaxonomyCategory/ap-2-2            : Animals & Pet Supplies > Pet Supplies > Cat Supplies
+gid://shopify/TaxonomyCategory/ap-2-3            : Animals & Pet Supplies > Pet Supplies > Dog Supplies
+gid://shopify/TaxonomyCategory/ap-2-4            : Animals & Pet Supplies > Pet Supplies > Fish & Aquatic Supplies
+gid://shopify/TaxonomyCategory/ap-2-5            : Animals & Pet Supplies > Pet Supplies > Pet Agility Equipment
+gid://shopify/TaxonomyCategory/ap-2-6            : Animals & Pet Supplies > Pet Supplies > Pet Apparel
+gid://shopify/TaxonomyCategory/ap-2-7            : Animals & Pet Supplies > Pet Supplies > Pet Apparel Hangers
+gid://shopify/TaxonomyCategory/ap-2-8            : Animals & Pet Supplies > Pet Supplies > Pet Bed Accessories
+gid://shopify/TaxonomyCategory/ap-2-9            : Animals & Pet Supplies > Pet Supplies > Pet Beds
+gid://shopify/TaxonomyCategory/ap-2-10           : Animals & Pet Supplies > Pet Supplies > Pet Bells & Charms
+gid://shopify/TaxonomyCategory/ap-2-11           : Animals & Pet Supplies > Pet Supplies > Pet Biometric Monitors
+gid://shopify/TaxonomyCategory/ap-2-12           : Animals & Pet Supplies > Pet Supplies > Pet Bowl Mats
+gid://shopify/TaxonomyCategory/ap-2-13           : Animals & Pet Supplies > Pet Supplies > Pet Bowl Stands
+gid://shopify/TaxonomyCategory/ap-2-14           : Animals & Pet Supplies > Pet Supplies > Pet Bowls, Feeders & Waterers
+gid://shopify/TaxonomyCategory/ap-2-14-1         : Animals & Pet Supplies > Pet Supplies > Pet Bowls, Feeders & Waterers > Automatic Feeders
+gid://shopify/TaxonomyCategory/ap-2-15           : Animals & Pet Supplies > Pet Supplies > Pet Carrier & Crate Accessories
+gid://shopify/TaxonomyCategory/ap-2-16           : Animals & Pet Supplies > Pet Supplies > Pet Carriers & Crates
+gid://shopify/TaxonomyCategory/ap-2-17           : Animals & Pet Supplies > Pet Supplies > Pet Collars & Harnesses
+gid://shopify/TaxonomyCategory/ap-2-18           : Animals & Pet Supplies > Pet Supplies > Pet Containment Systems
+gid://shopify/TaxonomyCategory/ap-2-19           : Animals & Pet Supplies > Pet Supplies > Pet Door Accessories
+gid://shopify/TaxonomyCategory/ap-2-20           : Animals & Pet Supplies > Pet Supplies > Pet Doors
+gid://shopify/TaxonomyCategory/ap-2-21           : Animals & Pet Supplies > Pet Supplies > Pet Eye Drops & Lubricants
+gid://shopify/TaxonomyCategory/ap-2-22           : Animals & Pet Supplies > Pet Supplies > Pet First Aid & Emergency Kits
+gid://shopify/TaxonomyCategory/ap-2-23           : Animals & Pet Supplies > Pet Supplies > Pet Flea & Tick Control
+gid://shopify/TaxonomyCategory/ap-2-24           : Animals & Pet Supplies > Pet Supplies > Pet Food Containers
+gid://shopify/TaxonomyCategory/ap-2-25           : Animals & Pet Supplies > Pet Supplies > Pet Food Scoops
+gid://shopify/TaxonomyCategory/ap-2-26           : Animals & Pet Supplies > Pet Supplies > Pet Grooming Supplies
+gid://shopify/TaxonomyCategory/ap-2-27           : Animals & Pet Supplies > Pet Supplies > Pet Heating Pad Accessories
+gid://shopify/TaxonomyCategory/ap-2-28           : Animals & Pet Supplies > Pet Supplies > Pet Heating Pads
+gid://shopify/TaxonomyCategory/ap-2-29           : Animals & Pet Supplies > Pet Supplies > Pet ID Tags
+gid://shopify/TaxonomyCategory/ap-2-30           : Animals & Pet Supplies > Pet Supplies > Pet Leash Extensions
+gid://shopify/TaxonomyCategory/ap-2-31           : Animals & Pet Supplies > Pet Supplies > Pet Leashes
+gid://shopify/TaxonomyCategory/ap-2-32           : Animals & Pet Supplies > Pet Supplies > Pet Medical Collars
+gid://shopify/TaxonomyCategory/ap-2-33           : Animals & Pet Supplies > Pet Supplies > Pet Medical Tape & Bandages
+gid://shopify/TaxonomyCategory/ap-2-34           : Animals & Pet Supplies > Pet Supplies > Pet Medicine
+gid://shopify/TaxonomyCategory/ap-2-35           : Animals & Pet Supplies > Pet Supplies > Pet Muzzles
+gid://shopify/TaxonomyCategory/ap-2-36           : Animals & Pet Supplies > Pet Supplies > Pet Oral Care Supplies
+gid://shopify/TaxonomyCategory/ap-2-49           : Animals & Pet Supplies > Pet Supplies > Pet Steps & Ramps
+gid://shopify/TaxonomyCategory/ap-2-39           : Animals & Pet Supplies > Pet Supplies > Pet Strollers
+gid://shopify/TaxonomyCategory/ap-2-40           : Animals & Pet Supplies > Pet Supplies > Pet Sunscreen
+gid://shopify/TaxonomyCategory/ap-2-41           : Animals & Pet Supplies > Pet Supplies > Pet Training Aids
+gid://shopify/TaxonomyCategory/ap-2-42           : Animals & Pet Supplies > Pet Supplies > Pet Vitamins & Supplements
+gid://shopify/TaxonomyCategory/ap-2-43           : Animals & Pet Supplies > Pet Supplies > Pet Waste Bag Dispensers & Holders
+gid://shopify/TaxonomyCategory/ap-2-44           : Animals & Pet Supplies > Pet Supplies > Pet Waste Bags
+gid://shopify/TaxonomyCategory/ap-2-45           : Animals & Pet Supplies > Pet Supplies > Pet Waste Disposal Systems & Tools
+gid://shopify/TaxonomyCategory/ap-2-46           : Animals & Pet Supplies > Pet Supplies > Reptile & Amphibian Supplies
+gid://shopify/TaxonomyCategory/ap-2-47           : Animals & Pet Supplies > Pet Supplies > Small Animal Supplies
+gid://shopify/TaxonomyCategory/ap-2-48           : Animals & Pet Supplies > Pet Supplies > Vehicle Pet Barriers
+gid://shopify/TaxonomyCategory/aa                : Apparel & Accessories
+gid://shopify/TaxonomyCategory/aa-1              : Apparel & Accessories > Clothing
+gid://shopify/TaxonomyCategory/aa-1-1            : Apparel & Accessories > Clothing > Activewear
+gid://shopify/TaxonomyCategory/aa-1-25           : Apparel & Accessories > Clothing > Baby & Children's Clothing
+gid://shopify/TaxonomyCategory/aa-1-13           : Apparel & Accessories > Clothing > Clothing Tops
+gid://shopify/TaxonomyCategory/aa-1-4            : Apparel & Accessories > Clothing > Dresses
+gid://shopify/TaxonomyCategory/aa-1-6            : Apparel & Accessories > Clothing > Lingerie
+gid://shopify/TaxonomyCategory/aa-1-7            : Apparel & Accessories > Clothing > Maternity Clothing
+gid://shopify/TaxonomyCategory/aa-1-8            : Apparel & Accessories > Clothing > Men's Undergarments
+gid://shopify/TaxonomyCategory/aa-1-9            : Apparel & Accessories > Clothing > One-Pieces
+gid://shopify/TaxonomyCategory/aa-1-10           : Apparel & Accessories > Clothing > Outerwear
+gid://shopify/TaxonomyCategory/aa-1-11           : Apparel & Accessories > Clothing > Outfit Sets
+gid://shopify/TaxonomyCategory/aa-1-12           : Apparel & Accessories > Clothing > Pants
+gid://shopify/TaxonomyCategory/aa-1-14           : Apparel & Accessories > Clothing > Shorts
+gid://shopify/TaxonomyCategory/aa-1-15           : Apparel & Accessories > Clothing > Skirts
+gid://shopify/TaxonomyCategory/aa-1-16           : Apparel & Accessories > Clothing > Skorts
+gid://shopify/TaxonomyCategory/aa-1-17           : Apparel & Accessories > Clothing > Sleepwear & Loungewear
+gid://shopify/TaxonomyCategory/aa-1-18           : Apparel & Accessories > Clothing > Socks
+gid://shopify/TaxonomyCategory/aa-1-19           : Apparel & Accessories > Clothing > Suits
+gid://shopify/TaxonomyCategory/aa-1-20           : Apparel & Accessories > Clothing > Swimwear
+gid://shopify/TaxonomyCategory/aa-1-23           : Apparel & Accessories > Clothing > Traditional & Ceremonial Clothing
+gid://shopify/TaxonomyCategory/aa-1-24           : Apparel & Accessories > Clothing > Uniforms & Workwear
+gid://shopify/TaxonomyCategory/aa-1-22           : Apparel & Accessories > Clothing > Wedding & Bridal Party Dresses
+gid://shopify/TaxonomyCategory/aa-2              : Apparel & Accessories > Clothing Accessories
+gid://shopify/TaxonomyCategory/aa-2-1            : Apparel & Accessories > Clothing Accessories > Arm Warmers & Sleeves
+gid://shopify/TaxonomyCategory/aa-2-33           : Apparel & Accessories > Clothing Accessories > Baby & Children's Clothing Accessories
+gid://shopify/TaxonomyCategory/aa-2-3            : Apparel & Accessories > Clothing Accessories > Balaclavas
+gid://shopify/TaxonomyCategory/aa-2-4            : Apparel & Accessories > Clothing Accessories > Bandanas & Headties
+gid://shopify/TaxonomyCategory/aa-2-5            : Apparel & Accessories > Clothing Accessories > Belt Buckles
+gid://shopify/TaxonomyCategory/aa-2-6            : Apparel & Accessories > Clothing Accessories > Belts
+gid://shopify/TaxonomyCategory/aa-2-7            : Apparel & Accessories > Clothing Accessories > Bridal Accessories
+gid://shopify/TaxonomyCategory/aa-2-8            : Apparel & Accessories > Clothing Accessories > Button Studs
+gid://shopify/TaxonomyCategory/aa-2-35           : Apparel & Accessories > Clothing Accessories > Clothing Patches
+gid://shopify/TaxonomyCategory/aa-2-9            : Apparel & Accessories > Clothing Accessories > Collar Stays
+gid://shopify/TaxonomyCategory/aa-2-10           : Apparel & Accessories > Clothing Accessories > Cufflinks
+gid://shopify/TaxonomyCategory/aa-2-11           : Apparel & Accessories > Clothing Accessories > Decorative Fans
+gid://shopify/TaxonomyCategory/aa-2-36           : Apparel & Accessories > Clothing Accessories > Detachable Collars
+gid://shopify/TaxonomyCategory/aa-2-12           : Apparel & Accessories > Clothing Accessories > Earmuffs
+gid://shopify/TaxonomyCategory/aa-2-32           : Apparel & Accessories > Clothing Accessories > Fashion Face Masks
+gid://shopify/TaxonomyCategory/aa-2-13           : Apparel & Accessories > Clothing Accessories > Gloves & Mittens
+gid://shopify/TaxonomyCategory/aa-2-14           : Apparel & Accessories > Clothing Accessories > Hair Accessories
+gid://shopify/TaxonomyCategory/aa-2-15           : Apparel & Accessories > Clothing Accessories > Hand Muffs
+gid://shopify/TaxonomyCategory/aa-2-16           : Apparel & Accessories > Clothing Accessories > Handkerchiefs
+gid://shopify/TaxonomyCategory/aa-2-17           : Apparel & Accessories > Clothing Accessories > Hats
+gid://shopify/TaxonomyCategory/aa-2-18           : Apparel & Accessories > Clothing Accessories > Headwear
+gid://shopify/TaxonomyCategory/aa-2-19           : Apparel & Accessories > Clothing Accessories > Leg Warmers
+gid://shopify/TaxonomyCategory/aa-2-20           : Apparel & Accessories > Clothing Accessories > Leis
+gid://shopify/TaxonomyCategory/aa-2-21           : Apparel & Accessories > Clothing Accessories > Maternity Belts & Support Bands
+gid://shopify/TaxonomyCategory/aa-2-22           : Apparel & Accessories > Clothing Accessories > Neck Gaiters
+gid://shopify/TaxonomyCategory/aa-2-23           : Apparel & Accessories > Clothing Accessories > Neckties
+gid://shopify/TaxonomyCategory/aa-2-24           : Apparel & Accessories > Clothing Accessories > Pinback Buttons
+gid://shopify/TaxonomyCategory/aa-2-34           : Apparel & Accessories > Clothing Accessories > Pocket Squares
+gid://shopify/TaxonomyCategory/aa-2-25           : Apparel & Accessories > Clothing Accessories > Sashes
+gid://shopify/TaxonomyCategory/aa-2-26           : Apparel & Accessories > Clothing Accessories > Scarves & Shawls
+gid://shopify/TaxonomyCategory/aa-2-27           : Apparel & Accessories > Clothing Accessories > Sunglasses
+gid://shopify/TaxonomyCategory/aa-2-28           : Apparel & Accessories > Clothing Accessories > Suspenders
+gid://shopify/TaxonomyCategory/aa-2-29           : Apparel & Accessories > Clothing Accessories > Tie Clips
+gid://shopify/TaxonomyCategory/aa-2-31           : Apparel & Accessories > Clothing Accessories > Traditional Clothing Accessories
+gid://shopify/TaxonomyCategory/aa-2-30           : Apparel & Accessories > Clothing Accessories > Wristbands
+gid://shopify/TaxonomyCategory/aa-3              : Apparel & Accessories > Costumes & Accessories
+gid://shopify/TaxonomyCategory/aa-3-1            : Apparel & Accessories > Costumes & Accessories > Costume Accessories
+gid://shopify/TaxonomyCategory/aa-3-2            : Apparel & Accessories > Costumes & Accessories > Costume Shoes
+gid://shopify/TaxonomyCategory/aa-3-5            : Apparel & Accessories > Costumes & Accessories > Costume Wigs
+gid://shopify/TaxonomyCategory/aa-3-3            : Apparel & Accessories > Costumes & Accessories > Costumes
+gid://shopify/TaxonomyCategory/aa-3-4            : Apparel & Accessories > Costumes & Accessories > Masks
+gid://shopify/TaxonomyCategory/aa-4              : Apparel & Accessories > Handbag & Wallet Accessories
+gid://shopify/TaxonomyCategory/aa-4-5            : Apparel & Accessories > Handbag & Wallet Accessories > Bag Bases & Protectors
+gid://shopify/TaxonomyCategory/aa-4-8            : Apparel & Accessories > Handbag & Wallet Accessories > Bag Charms
+gid://shopify/TaxonomyCategory/aa-4-7            : Apparel & Accessories > Handbag & Wallet Accessories > Bag Inserts & Organizers
+gid://shopify/TaxonomyCategory/aa-4-4            : Apparel & Accessories > Handbag & Wallet Accessories > Bag Straps & Handles
+gid://shopify/TaxonomyCategory/aa-4-1            : Apparel & Accessories > Handbag & Wallet Accessories > Keychains
+gid://shopify/TaxonomyCategory/aa-4-2            : Apparel & Accessories > Handbag & Wallet Accessories > Lanyards
+gid://shopify/TaxonomyCategory/aa-4-6            : Apparel & Accessories > Handbag & Wallet Accessories > Purse Hooks & Hangers
+gid://shopify/TaxonomyCategory/aa-4-3            : Apparel & Accessories > Handbag & Wallet Accessories > Wallet Chains
+gid://shopify/TaxonomyCategory/aa-5              : Apparel & Accessories > Handbags, Wallets & Cases
+gid://shopify/TaxonomyCategory/aa-5-1            : Apparel & Accessories > Handbags, Wallets & Cases > Badge & Pass Holders
+gid://shopify/TaxonomyCategory/aa-5-2            : Apparel & Accessories > Handbags, Wallets & Cases > Business Card Cases
+gid://shopify/TaxonomyCategory/aa-5-3            : Apparel & Accessories > Handbags, Wallets & Cases > Checkbook Covers
+gid://shopify/TaxonomyCategory/aa-5-4            : Apparel & Accessories > Handbags, Wallets & Cases > Handbags
+gid://shopify/TaxonomyCategory/aa-5-5            : Apparel & Accessories > Handbags, Wallets & Cases > Wallets & Money Clips
+gid://shopify/TaxonomyCategory/aa-6              : Apparel & Accessories > Jewelry
+gid://shopify/TaxonomyCategory/aa-6-1            : Apparel & Accessories > Jewelry > Anklets
+gid://shopify/TaxonomyCategory/aa-6-2            : Apparel & Accessories > Jewelry > Body Jewelry
+gid://shopify/TaxonomyCategory/aa-6-3            : Apparel & Accessories > Jewelry > Bracelets
+gid://shopify/TaxonomyCategory/aa-6-4            : Apparel & Accessories > Jewelry > Brooches & Lapel Pins
+gid://shopify/TaxonomyCategory/aa-6-5            : Apparel & Accessories > Jewelry > Charms & Pendants
+gid://shopify/TaxonomyCategory/aa-6-13           : Apparel & Accessories > Jewelry > Dental Grills
+gid://shopify/TaxonomyCategory/aa-6-6            : Apparel & Accessories > Jewelry > Earrings
+gid://shopify/TaxonomyCategory/aa-6-7            : Apparel & Accessories > Jewelry > Jewelry Sets
+gid://shopify/TaxonomyCategory/aa-6-8            : Apparel & Accessories > Jewelry > Necklaces
+gid://shopify/TaxonomyCategory/aa-6-9            : Apparel & Accessories > Jewelry > Rings
+gid://shopify/TaxonomyCategory/aa-6-12           : Apparel & Accessories > Jewelry > Smart Watches
+gid://shopify/TaxonomyCategory/aa-6-10           : Apparel & Accessories > Jewelry > Watch Accessories
+gid://shopify/TaxonomyCategory/aa-6-11           : Apparel & Accessories > Jewelry > Watches
+gid://shopify/TaxonomyCategory/aa-7              : Apparel & Accessories > Shoe Accessories
+gid://shopify/TaxonomyCategory/aa-7-1            : Apparel & Accessories > Shoe Accessories > Boot Liners
+gid://shopify/TaxonomyCategory/aa-7-2            : Apparel & Accessories > Shoe Accessories > Gaiters
+gid://shopify/TaxonomyCategory/aa-7-3            : Apparel & Accessories > Shoe Accessories > Shoe Covers
+gid://shopify/TaxonomyCategory/aa-7-4            : Apparel & Accessories > Shoe Accessories > Shoe Grips
+gid://shopify/TaxonomyCategory/aa-7-5            : Apparel & Accessories > Shoe Accessories > Shoe Inserts
+gid://shopify/TaxonomyCategory/aa-7-6            : Apparel & Accessories > Shoe Accessories > Shoelaces
+gid://shopify/TaxonomyCategory/aa-7-7            : Apparel & Accessories > Shoe Accessories > Spurs
+gid://shopify/TaxonomyCategory/aa-8              : Apparel & Accessories > Shoes
+gid://shopify/TaxonomyCategory/aa-8-1            : Apparel & Accessories > Shoes > Athletic Shoes
+gid://shopify/TaxonomyCategory/aa-8-11           : Apparel & Accessories > Shoes > Baby & Children's Shoes
+gid://shopify/TaxonomyCategory/aa-8-3            : Apparel & Accessories > Shoes > Boots
+gid://shopify/TaxonomyCategory/aa-8-9            : Apparel & Accessories > Shoes > Flats
+gid://shopify/TaxonomyCategory/aa-8-10           : Apparel & Accessories > Shoes > Heels
+gid://shopify/TaxonomyCategory/aa-8-6            : Apparel & Accessories > Shoes > Sandals
+gid://shopify/TaxonomyCategory/aa-8-7            : Apparel & Accessories > Shoes > Slippers
+gid://shopify/TaxonomyCategory/aa-8-8            : Apparel & Accessories > Shoes > Sneakers
+gid://shopify/TaxonomyCategory/ae                : Arts & Entertainment
+gid://shopify/TaxonomyCategory/ae-1              : Arts & Entertainment > Event Tickets
+gid://shopify/TaxonomyCategory/ae-2              : Arts & Entertainment > Hobbies & Creative Arts
+gid://shopify/TaxonomyCategory/ae-2-1            : Arts & Entertainment > Hobbies & Creative Arts > Arts & Crafts
+gid://shopify/TaxonomyCategory/ae-2-2            : Arts & Entertainment > Hobbies & Creative Arts > Collectibles
+gid://shopify/TaxonomyCategory/ae-2-3            : Arts & Entertainment > Hobbies & Creative Arts > Homebrewing & Winemaking Supplies
+gid://shopify/TaxonomyCategory/ae-2-4            : Arts & Entertainment > Hobbies & Creative Arts > Juggling
+gid://shopify/TaxonomyCategory/ae-2-5            : Arts & Entertainment > Hobbies & Creative Arts > Magic & Novelties
+gid://shopify/TaxonomyCategory/ae-2-6            : Arts & Entertainment > Hobbies & Creative Arts > Model Making
+gid://shopify/TaxonomyCategory/ae-2-7            : Arts & Entertainment > Hobbies & Creative Arts > Musical Instrument & Orchestra Accessories
+gid://shopify/TaxonomyCategory/ae-2-8            : Arts & Entertainment > Hobbies & Creative Arts > Musical Instruments
+gid://shopify/TaxonomyCategory/ae-3              : Arts & Entertainment > Party & Celebration
+gid://shopify/TaxonomyCategory/ae-3-1            : Arts & Entertainment > Party & Celebration > Gift Giving
+gid://shopify/TaxonomyCategory/ae-3-2            : Arts & Entertainment > Party & Celebration > Party Supplies
+gid://shopify/TaxonomyCategory/ae-3-3            : Arts & Entertainment > Party & Celebration > Special Effects
+gid://shopify/TaxonomyCategory/ae-3-4            : Arts & Entertainment > Party & Celebration > Trophies & Awards
+gid://shopify/TaxonomyCategory/bt                : Baby & Toddler
+gid://shopify/TaxonomyCategory/bt-1              : Baby & Toddler > Baby Bathing
+gid://shopify/TaxonomyCategory/bt-1-1            : Baby & Toddler > Baby Bathing > Baby Bathtubs & Bath Seats
+gid://shopify/TaxonomyCategory/bt-1-2            : Baby & Toddler > Baby Bathing > Shower Visors
+gid://shopify/TaxonomyCategory/bt-2              : Baby & Toddler > Baby Gift Sets
+gid://shopify/TaxonomyCategory/bt-3              : Baby & Toddler > Baby Health
+gid://shopify/TaxonomyCategory/bt-3-1            : Baby & Toddler > Baby Health > Baby Health & Grooming Kits
+gid://shopify/TaxonomyCategory/bt-3-2            : Baby & Toddler > Baby Health > Nasal Aspirators
+gid://shopify/TaxonomyCategory/bt-3-3            : Baby & Toddler > Baby Health > Pacifier Clips & Holders
+gid://shopify/TaxonomyCategory/bt-3-4            : Baby & Toddler > Baby Health > Pacifier Wipes
+gid://shopify/TaxonomyCategory/bt-3-5            : Baby & Toddler > Baby Health > Pacifiers & Teethers
+gid://shopify/TaxonomyCategory/bt-4              : Baby & Toddler > Baby Safety
+gid://shopify/TaxonomyCategory/bt-4-1            : Baby & Toddler > Baby Safety > Baby & Pet Gate Accessories
+gid://shopify/TaxonomyCategory/bt-4-2            : Baby & Toddler > Baby Safety > Baby & Pet Gates
+gid://shopify/TaxonomyCategory/bt-4-3            : Baby & Toddler > Baby Safety > Baby Monitors
+gid://shopify/TaxonomyCategory/bt-4-4            : Baby & Toddler > Baby Safety > Baby Safety Harnesses & Leashes
+gid://shopify/TaxonomyCategory/bt-4-5            : Baby & Toddler > Baby Safety > Baby Safety Locks & Guards
+gid://shopify/TaxonomyCategory/bt-4-6            : Baby & Toddler > Baby Safety > Baby Safety Rails
+gid://shopify/TaxonomyCategory/bt-5              : Baby & Toddler > Baby Toys & Activity Equipment
+gid://shopify/TaxonomyCategory/bt-5-1            : Baby & Toddler > Baby Toys & Activity Equipment > Alphabet Toys
+gid://shopify/TaxonomyCategory/bt-5-2            : Baby & Toddler > Baby Toys & Activity Equipment > Baby Activity Toys
+gid://shopify/TaxonomyCategory/bt-5-3            : Baby & Toddler > Baby Toys & Activity Equipment > Baby Bouncers & Rockers
+gid://shopify/TaxonomyCategory/bt-5-4            : Baby & Toddler > Baby Toys & Activity Equipment > Baby Jumpers & Swings
+gid://shopify/TaxonomyCategory/bt-5-5            : Baby & Toddler > Baby Toys & Activity Equipment > Baby Mobile Accessories
+gid://shopify/TaxonomyCategory/bt-5-6            : Baby & Toddler > Baby Toys & Activity Equipment > Baby Mobiles
+gid://shopify/TaxonomyCategory/bt-5-7            : Baby & Toddler > Baby Toys & Activity Equipment > Baby Soothers
+gid://shopify/TaxonomyCategory/bt-5-8            : Baby & Toddler > Baby Toys & Activity Equipment > Baby Walkers & Entertainers
+gid://shopify/TaxonomyCategory/bt-5-9            : Baby & Toddler > Baby Toys & Activity Equipment > Play Mats & Gyms
+gid://shopify/TaxonomyCategory/bt-5-10           : Baby & Toddler > Baby Toys & Activity Equipment > Play Yards
+gid://shopify/TaxonomyCategory/bt-5-11           : Baby & Toddler > Baby Toys & Activity Equipment > Push & Pull Toys
+gid://shopify/TaxonomyCategory/bt-5-12           : Baby & Toddler > Baby Toys & Activity Equipment > Sorting & Stacking Toys
+gid://shopify/TaxonomyCategory/bt-6              : Baby & Toddler > Baby Transport
+gid://shopify/TaxonomyCategory/bt-6-1            : Baby & Toddler > Baby Transport > Baby & Toddler Car Seats
+gid://shopify/TaxonomyCategory/bt-6-2            : Baby & Toddler > Baby Transport > Baby Carriers
+gid://shopify/TaxonomyCategory/bt-6-3            : Baby & Toddler > Baby Transport > Baby Strollers
+gid://shopify/TaxonomyCategory/bt-7              : Baby & Toddler > Baby Transport Accessories
+gid://shopify/TaxonomyCategory/bt-7-1            : Baby & Toddler > Baby Transport Accessories > Baby & Toddler Car Seat Accessories
+gid://shopify/TaxonomyCategory/bt-7-2            : Baby & Toddler > Baby Transport Accessories > Baby Carrier Accessories
+gid://shopify/TaxonomyCategory/bt-7-3            : Baby & Toddler > Baby Transport Accessories > Baby Stroller Accessories
+gid://shopify/TaxonomyCategory/bt-7-4            : Baby & Toddler > Baby Transport Accessories > Baby Transport Liners & Sacks
+gid://shopify/TaxonomyCategory/bt-7-5            : Baby & Toddler > Baby Transport Accessories > Shopping Cart & High Chair Covers
+gid://shopify/TaxonomyCategory/bt-8              : Baby & Toddler > Baby Transport Replacement Parts
+gid://shopify/TaxonomyCategory/bt-9              : Baby & Toddler > Diapering
+gid://shopify/TaxonomyCategory/bt-9-1            : Baby & Toddler > Diapering > Baby Wipe Dispensers & Warmers
+gid://shopify/TaxonomyCategory/bt-9-2            : Baby & Toddler > Diapering > Baby Wipes
+gid://shopify/TaxonomyCategory/bt-9-3            : Baby & Toddler > Diapering > Changing Mat & Tray Covers
+gid://shopify/TaxonomyCategory/bt-9-4            : Baby & Toddler > Diapering > Changing Mats & Trays
+gid://shopify/TaxonomyCategory/bt-9-5            : Baby & Toddler > Diapering > Diaper Kits
+gid://shopify/TaxonomyCategory/bt-9-6            : Baby & Toddler > Diapering > Diaper Liners
+gid://shopify/TaxonomyCategory/bt-9-7            : Baby & Toddler > Diapering > Diaper Organizers
+gid://shopify/TaxonomyCategory/bt-9-8            : Baby & Toddler > Diapering > Diaper Pail Accessories
+gid://shopify/TaxonomyCategory/bt-9-9            : Baby & Toddler > Diapering > Diaper Pails
+gid://shopify/TaxonomyCategory/bt-9-10           : Baby & Toddler > Diapering > Diaper Rash Treatments
+gid://shopify/TaxonomyCategory/bt-9-11           : Baby & Toddler > Diapering > Diaper Wet Bags
+gid://shopify/TaxonomyCategory/bt-9-12           : Baby & Toddler > Diapering > Diapers
+gid://shopify/TaxonomyCategory/bt-10             : Baby & Toddler > Nursing & Feeding
+gid://shopify/TaxonomyCategory/bt-10-1           : Baby & Toddler > Nursing & Feeding > Baby & Toddler Food
+gid://shopify/TaxonomyCategory/bt-10-4           : Baby & Toddler > Nursing & Feeding > Baby Care Timers
+gid://shopify/TaxonomyCategory/bt-10-6           : Baby & Toddler > Nursing & Feeding > Bottle Warmers & Sterilizers
+gid://shopify/TaxonomyCategory/bt-10-7           : Baby & Toddler > Nursing & Feeding > Breast Milk Storage Containers
+gid://shopify/TaxonomyCategory/bt-10-8           : Baby & Toddler > Nursing & Feeding > Breast Pump Accessories
+gid://shopify/TaxonomyCategory/bt-10-9           : Baby & Toddler > Nursing & Feeding > Breast Pumps
+gid://shopify/TaxonomyCategory/bt-10-10          : Baby & Toddler > Nursing & Feeding > Burp Cloths
+gid://shopify/TaxonomyCategory/bt-10-16          : Baby & Toddler > Nursing & Feeding > Feeding Essentials
+gid://shopify/TaxonomyCategory/bt-10-11          : Baby & Toddler > Nursing & Feeding > Nursing Covers
+gid://shopify/TaxonomyCategory/bt-10-12          : Baby & Toddler > Nursing & Feeding > Nursing Pads & Shields
+gid://shopify/TaxonomyCategory/bt-10-13          : Baby & Toddler > Nursing & Feeding > Nursing Pillow Covers
+gid://shopify/TaxonomyCategory/bt-10-14          : Baby & Toddler > Nursing & Feeding > Nursing Pillows
+gid://shopify/TaxonomyCategory/bt-11             : Baby & Toddler > Potty Training
+gid://shopify/TaxonomyCategory/bt-11-1           : Baby & Toddler > Potty Training > Potties
+gid://shopify/TaxonomyCategory/bt-11-2           : Baby & Toddler > Potty Training > Potty Training Kits
+gid://shopify/TaxonomyCategory/bt-11-3           : Baby & Toddler > Potty Training > Toilet Seats & Step Stools
+gid://shopify/TaxonomyCategory/bt-12             : Baby & Toddler > Swaddling & Receiving Blankets
+gid://shopify/TaxonomyCategory/bt-12-1           : Baby & Toddler > Swaddling & Receiving Blankets > Receiving Blankets
+gid://shopify/TaxonomyCategory/bt-12-2           : Baby & Toddler > Swaddling & Receiving Blankets > Swaddling Blankets
+gid://shopify/TaxonomyCategory/bu                : Bundles
+gid://shopify/TaxonomyCategory/bi                : Business & Industrial
+gid://shopify/TaxonomyCategory/bi-1              : Business & Industrial > Advertising & Marketing
+gid://shopify/TaxonomyCategory/bi-1-1            : Business & Industrial > Advertising & Marketing > Brochures
+gid://shopify/TaxonomyCategory/bi-1-2            : Business & Industrial > Advertising & Marketing > Trade Show Counters
+gid://shopify/TaxonomyCategory/bi-1-3            : Business & Industrial > Advertising & Marketing > Trade Show Displays
+gid://shopify/TaxonomyCategory/bi-2              : Business & Industrial > Agriculture
+gid://shopify/TaxonomyCategory/bi-2-2            : Business & Industrial > Agriculture > Agriculture Machinery
+gid://shopify/TaxonomyCategory/bi-2-1            : Business & Industrial > Agriculture > Animal Husbandry
+gid://shopify/TaxonomyCategory/bi-3              : Business & Industrial > Automation Control Components
+gid://shopify/TaxonomyCategory/bi-3-1            : Business & Industrial > Automation Control Components > Programmable Logic Controllers
+gid://shopify/TaxonomyCategory/bi-3-2            : Business & Industrial > Automation Control Components > Variable Frequency & Adjustable Speed Drives
+gid://shopify/TaxonomyCategory/bi-4              : Business & Industrial > Construction
+gid://shopify/TaxonomyCategory/bi-4-3            : Business & Industrial > Construction > Raw Structural Components
+gid://shopify/TaxonomyCategory/bi-4-1            : Business & Industrial > Construction > Surveying
+gid://shopify/TaxonomyCategory/bi-4-2            : Business & Industrial > Construction > Traffic Cones & Barrels
+gid://shopify/TaxonomyCategory/bi-5              : Business & Industrial > Dentistry
+gid://shopify/TaxonomyCategory/bi-5-1            : Business & Industrial > Dentistry > Dental Cement
+gid://shopify/TaxonomyCategory/bi-5-2            : Business & Industrial > Dentistry > Dental Tools
+gid://shopify/TaxonomyCategory/bi-5-3            : Business & Industrial > Dentistry > Prophy Paste
+gid://shopify/TaxonomyCategory/bi-6              : Business & Industrial > Film & Television
+gid://shopify/TaxonomyCategory/bi-6-1            : Business & Industrial > Film & Television > Film & Television Costumes
+gid://shopify/TaxonomyCategory/bi-6-2            : Business & Industrial > Film & Television > Film & Television Props
+gid://shopify/TaxonomyCategory/bi-6-3            : Business & Industrial > Film & Television > Film & Television Set Pieces
+gid://shopify/TaxonomyCategory/bi-7              : Business & Industrial > Finance & Insurance
+gid://shopify/TaxonomyCategory/bi-7-1            : Business & Industrial > Finance & Insurance > Bullion
+gid://shopify/TaxonomyCategory/bi-8              : Business & Industrial > Food Service
+gid://shopify/TaxonomyCategory/bi-8-1            : Business & Industrial > Food Service > Bakery Boxes
+gid://shopify/TaxonomyCategory/bi-8-2            : Business & Industrial > Food Service > Bus Tubs
+gid://shopify/TaxonomyCategory/bi-8-3            : Business & Industrial > Food Service > Check Presenters
+gid://shopify/TaxonomyCategory/bi-8-4            : Business & Industrial > Food Service > Concession Food Containers
+gid://shopify/TaxonomyCategory/bi-8-5            : Business & Industrial > Food Service > Disposable Lids
+gid://shopify/TaxonomyCategory/bi-8-6            : Business & Industrial > Food Service > Disposable Serveware
+gid://shopify/TaxonomyCategory/bi-8-7            : Business & Industrial > Food Service > Disposable Tableware
+gid://shopify/TaxonomyCategory/bi-8-8            : Business & Industrial > Food Service > Food Service Baskets
+gid://shopify/TaxonomyCategory/bi-8-9            : Business & Industrial > Food Service > Food Service Carts
+gid://shopify/TaxonomyCategory/bi-8-10           : Business & Industrial > Food Service > Food Washers & Dryers
+gid://shopify/TaxonomyCategory/bi-8-11           : Business & Industrial > Food Service > Hot Dog Rollers
+gid://shopify/TaxonomyCategory/bi-8-12           : Business & Industrial > Food Service > Ice Bins
+gid://shopify/TaxonomyCategory/bi-8-13           : Business & Industrial > Food Service > Plate & Dish Warmers
+gid://shopify/TaxonomyCategory/bi-8-14           : Business & Industrial > Food Service > Sneeze Guards
+gid://shopify/TaxonomyCategory/bi-8-15           : Business & Industrial > Food Service > Take-Out Containers
+gid://shopify/TaxonomyCategory/bi-8-16           : Business & Industrial > Food Service > Tilt Skillets
+gid://shopify/TaxonomyCategory/bi-8-17           : Business & Industrial > Food Service > Vending Machines
+gid://shopify/TaxonomyCategory/bi-9              : Business & Industrial > Forestry & Logging
+gid://shopify/TaxonomyCategory/bi-9-1            : Business & Industrial > Forestry & Logging > Arborist Accessories
+gid://shopify/TaxonomyCategory/bi-9-2            : Business & Industrial > Forestry & Logging > Forestry & Logging Protective Gear
+gid://shopify/TaxonomyCategory/bi-9-3            : Business & Industrial > Forestry & Logging > Forestry & Logging Tools
+gid://shopify/TaxonomyCategory/bi-10             : Business & Industrial > Hairdressing & Cosmetology
+gid://shopify/TaxonomyCategory/bi-10-1           : Business & Industrial > Hairdressing & Cosmetology > Hairdressing Capes & Neck Covers
+gid://shopify/TaxonomyCategory/bi-10-2           : Business & Industrial > Hairdressing & Cosmetology > Pedicure Chairs
+gid://shopify/TaxonomyCategory/bi-10-3           : Business & Industrial > Hairdressing & Cosmetology > Salon Chairs
+gid://shopify/TaxonomyCategory/bi-11             : Business & Industrial > Heavy Machinery
+gid://shopify/TaxonomyCategory/bi-11-1           : Business & Industrial > Heavy Machinery > Backhoes
+gid://shopify/TaxonomyCategory/bi-11-2           : Business & Industrial > Heavy Machinery > Bulldozers
+gid://shopify/TaxonomyCategory/bi-11-3           : Business & Industrial > Heavy Machinery > Chippers
+gid://shopify/TaxonomyCategory/bi-11-20          : Business & Industrial > Heavy Machinery > Concrete Mixers
+gid://shopify/TaxonomyCategory/bi-11-18          : Business & Industrial > Heavy Machinery > Cranes
+gid://shopify/TaxonomyCategory/bi-11-4           : Business & Industrial > Heavy Machinery > Crawler Loaders
+gid://shopify/TaxonomyCategory/bi-11-5           : Business & Industrial > Heavy Machinery > Dump Trucks
+gid://shopify/TaxonomyCategory/bi-11-19          : Business & Industrial > Heavy Machinery > Electric & Hybrid Machinery
+gid://shopify/TaxonomyCategory/bi-11-6           : Business & Industrial > Heavy Machinery > Excavators
+gid://shopify/TaxonomyCategory/bi-11-7           : Business & Industrial > Heavy Machinery > Harvesters
+gid://shopify/TaxonomyCategory/bi-11-17          : Business & Industrial > Heavy Machinery > Heavy Machinery Parts & Accessories
+gid://shopify/TaxonomyCategory/bi-11-8           : Business & Industrial > Heavy Machinery > Motor Graders
+gid://shopify/TaxonomyCategory/bi-11-9           : Business & Industrial > Heavy Machinery > Pavers
+gid://shopify/TaxonomyCategory/bi-11-10          : Business & Industrial > Heavy Machinery > Scrapers
+gid://shopify/TaxonomyCategory/bi-11-11          : Business & Industrial > Heavy Machinery > Skid-Steer Loaders
+gid://shopify/TaxonomyCategory/bi-11-12          : Business & Industrial > Heavy Machinery > Tractors
+gid://shopify/TaxonomyCategory/bi-11-13          : Business & Industrial > Heavy Machinery > Trenchers
+gid://shopify/TaxonomyCategory/bi-11-14          : Business & Industrial > Heavy Machinery > Wheel Loaders
+gid://shopify/TaxonomyCategory/bi-11-15          : Business & Industrial > Heavy Machinery > Wheel Tractor Scrapers
+gid://shopify/TaxonomyCategory/bi-11-16          : Business & Industrial > Heavy Machinery > Yard Scrapers
+gid://shopify/TaxonomyCategory/bi-12             : Business & Industrial > Hotel & Hospitality
+gid://shopify/TaxonomyCategory/bi-12-1           : Business & Industrial > Hotel & Hospitality > Hospitality Supplies
+gid://shopify/TaxonomyCategory/bi-12-2           : Business & Industrial > Hotel & Hospitality > Hotel & Hospitality Accessories
+gid://shopify/TaxonomyCategory/bi-12-3           : Business & Industrial > Hotel & Hospitality > Hotel Supplies
+gid://shopify/TaxonomyCategory/bi-13             : Business & Industrial > Industrial Storage
+gid://shopify/TaxonomyCategory/bi-13-1           : Business & Industrial > Industrial Storage > Industrial Cabinets
+gid://shopify/TaxonomyCategory/bi-13-2           : Business & Industrial > Industrial Storage > Industrial Shelving
+gid://shopify/TaxonomyCategory/bi-13-3           : Business & Industrial > Industrial Storage > Shipping Containers
+gid://shopify/TaxonomyCategory/bi-13-4           : Business & Industrial > Industrial Storage > Wire Partitions, Enclosures & Doors
+gid://shopify/TaxonomyCategory/bi-14             : Business & Industrial > Industrial Storage Accessories
+gid://shopify/TaxonomyCategory/bi-14-1           : Business & Industrial > Industrial Storage Accessories > Individual Industrial Shelves
+gid://shopify/TaxonomyCategory/bi-14-2           : Business & Industrial > Industrial Storage Accessories > Industrial Shelf Dividers
+gid://shopify/TaxonomyCategory/bi-14-3           : Business & Industrial > Industrial Storage Accessories > Locking Clips & Pins
+gid://shopify/TaxonomyCategory/bi-15             : Business & Industrial > Janitorial Carts & Caddies
+gid://shopify/TaxonomyCategory/bi-15-1           : Business & Industrial > Janitorial Carts & Caddies > Cleaning Carts
+gid://shopify/TaxonomyCategory/bi-15-2           : Business & Industrial > Janitorial Carts & Caddies > Laundry Carts
+gid://shopify/TaxonomyCategory/bi-15-4           : Business & Industrial > Janitorial Carts & Caddies > Waste Collection Carts
+gid://shopify/TaxonomyCategory/bi-16             : Business & Industrial > Law Enforcement
+gid://shopify/TaxonomyCategory/bi-16-1           : Business & Industrial > Law Enforcement > Cuffs
+gid://shopify/TaxonomyCategory/bi-16-2           : Business & Industrial > Law Enforcement > Metal Detectors
+gid://shopify/TaxonomyCategory/bi-17             : Business & Industrial > Manufacturing
+gid://shopify/TaxonomyCategory/bi-17-1           : Business & Industrial > Manufacturing > Packaging Machines
+gid://shopify/TaxonomyCategory/bi-18             : Business & Industrial > Material Handling
+gid://shopify/TaxonomyCategory/bi-18-1           : Business & Industrial > Material Handling > Conveyors
+gid://shopify/TaxonomyCategory/bi-18-2           : Business & Industrial > Material Handling > Lifts & Hoists
+gid://shopify/TaxonomyCategory/bi-18-3           : Business & Industrial > Material Handling > Pallets & Loading Platforms
+gid://shopify/TaxonomyCategory/bi-19             : Business & Industrial > Medical
+gid://shopify/TaxonomyCategory/bi-19-1           : Business & Industrial > Medical > Hospital Curtains
+gid://shopify/TaxonomyCategory/bi-19-2           : Business & Industrial > Medical > Hospital Gowns
+gid://shopify/TaxonomyCategory/bi-19-3           : Business & Industrial > Medical > Medical Bedding
+gid://shopify/TaxonomyCategory/bi-19-4           : Business & Industrial > Medical > Medical Equipment
+gid://shopify/TaxonomyCategory/bi-19-5           : Business & Industrial > Medical > Medical Furniture
+gid://shopify/TaxonomyCategory/bi-19-6           : Business & Industrial > Medical > Medical Instruments
+gid://shopify/TaxonomyCategory/bi-19-7           : Business & Industrial > Medical > Medical Supplies
+gid://shopify/TaxonomyCategory/bi-19-8           : Business & Industrial > Medical > Medical Teaching Equipment
+gid://shopify/TaxonomyCategory/bi-19-9           : Business & Industrial > Medical > Scrub Caps
+gid://shopify/TaxonomyCategory/bi-19-11          : Business & Industrial > Medical > Surgical Gowns
+gid://shopify/TaxonomyCategory/bi-20             : Business & Industrial > Mining & Quarrying
+gid://shopify/TaxonomyCategory/bi-20-1           : Business & Industrial > Mining & Quarrying > Mining & Quarrying Machinery
+gid://shopify/TaxonomyCategory/bi-20-2           : Business & Industrial > Mining & Quarrying > Mining & Quarrying Supplies
+gid://shopify/TaxonomyCategory/bi-21             : Business & Industrial > Piercing & Tattooing
+gid://shopify/TaxonomyCategory/bi-21-1           : Business & Industrial > Piercing & Tattooing > Piercing Supplies
+gid://shopify/TaxonomyCategory/bi-21-2           : Business & Industrial > Piercing & Tattooing > Tattooing Supplies
+gid://shopify/TaxonomyCategory/bi-22             : Business & Industrial > Retail
+gid://shopify/TaxonomyCategory/bi-22-1           : Business & Industrial > Retail > Clothing Display Racks
+gid://shopify/TaxonomyCategory/bi-22-2           : Business & Industrial > Retail > Display Mannequins
+gid://shopify/TaxonomyCategory/bi-22-3           : Business & Industrial > Retail > Mannequin Parts
+gid://shopify/TaxonomyCategory/bi-22-4           : Business & Industrial > Retail > Money Handling
+gid://shopify/TaxonomyCategory/bi-22-5           : Business & Industrial > Retail > Paper & Plastic Shopping Bags
+gid://shopify/TaxonomyCategory/bi-22-6           : Business & Industrial > Retail > Pricing Guns
+gid://shopify/TaxonomyCategory/bi-22-7           : Business & Industrial > Retail > Retail Display Cases
+gid://shopify/TaxonomyCategory/bi-22-8           : Business & Industrial > Retail > Retail Display Props & Models
+gid://shopify/TaxonomyCategory/bi-23             : Business & Industrial > Science & Laboratory
+gid://shopify/TaxonomyCategory/bi-23-1           : Business & Industrial > Science & Laboratory > Biochemicals
+gid://shopify/TaxonomyCategory/bi-23-2           : Business & Industrial > Science & Laboratory > Dissection Kits
+gid://shopify/TaxonomyCategory/bi-23-3           : Business & Industrial > Science & Laboratory > Laboratory Chemicals
+gid://shopify/TaxonomyCategory/bi-23-4           : Business & Industrial > Science & Laboratory > Laboratory Equipment
+gid://shopify/TaxonomyCategory/bi-23-5           : Business & Industrial > Science & Laboratory > Laboratory Specimens
+gid://shopify/TaxonomyCategory/bi-23-6           : Business & Industrial > Science & Laboratory > Laboratory Supplies
+gid://shopify/TaxonomyCategory/bi-24             : Business & Industrial > Signage
+gid://shopify/TaxonomyCategory/bi-24-1           : Business & Industrial > Signage > Business Hour Signs
+gid://shopify/TaxonomyCategory/bi-24-2           : Business & Industrial > Signage > Digital Signs
+gid://shopify/TaxonomyCategory/bi-24-3           : Business & Industrial > Signage > Electric Signs
+gid://shopify/TaxonomyCategory/bi-24-4           : Business & Industrial > Signage > Emergency & Exit Signs
+gid://shopify/TaxonomyCategory/bi-24-5           : Business & Industrial > Signage > Facility Identification Signs
+gid://shopify/TaxonomyCategory/bi-24-6           : Business & Industrial > Signage > Open & Closed Signs
+gid://shopify/TaxonomyCategory/bi-24-7           : Business & Industrial > Signage > Parking Signs & Permits
+gid://shopify/TaxonomyCategory/bi-24-8           : Business & Industrial > Signage > Policy Signs
+gid://shopify/TaxonomyCategory/bi-24-9           : Business & Industrial > Signage > Retail & Sale Signs
+gid://shopify/TaxonomyCategory/bi-24-10          : Business & Industrial > Signage > Road & Traffic Signs
+gid://shopify/TaxonomyCategory/bi-24-11          : Business & Industrial > Signage > Safety & Warning Signs
+gid://shopify/TaxonomyCategory/bi-24-12          : Business & Industrial > Signage > Security Signs
+gid://shopify/TaxonomyCategory/bi-24-13          : Business & Industrial > Signage > Sidewalk & Yard Signs
+gid://shopify/TaxonomyCategory/bi-25             : Business & Industrial > Work Safety Protective Gear
+gid://shopify/TaxonomyCategory/bi-25-1           : Business & Industrial > Work Safety Protective Gear > Bullet Proof Vests
+gid://shopify/TaxonomyCategory/bi-25-2           : Business & Industrial > Work Safety Protective Gear > Gas Mask & Respirator Accessories
+gid://shopify/TaxonomyCategory/bi-25-3           : Business & Industrial > Work Safety Protective Gear > Hardhats
+gid://shopify/TaxonomyCategory/bi-25-4           : Business & Industrial > Work Safety Protective Gear > Hazardous Material Suits
+gid://shopify/TaxonomyCategory/bi-25-14          : Business & Industrial > Work Safety Protective Gear > High-Visibility Safety Apparel
+gid://shopify/TaxonomyCategory/bi-25-5           : Business & Industrial > Work Safety Protective Gear > Protective Aprons
+gid://shopify/TaxonomyCategory/bi-25-6           : Business & Industrial > Work Safety Protective Gear > Protective Eyewear
+gid://shopify/TaxonomyCategory/bi-25-7           : Business & Industrial > Work Safety Protective Gear > Protective Masks
+gid://shopify/TaxonomyCategory/bi-25-13          : Business & Industrial > Work Safety Protective Gear > Safety Boots
+gid://shopify/TaxonomyCategory/bi-25-8           : Business & Industrial > Work Safety Protective Gear > Safety Gloves
+gid://shopify/TaxonomyCategory/bi-25-9           : Business & Industrial > Work Safety Protective Gear > Safety Knee Pads
+gid://shopify/TaxonomyCategory/bi-25-10          : Business & Industrial > Work Safety Protective Gear > Welding Helmets
+gid://shopify/TaxonomyCategory/bi-25-11          : Business & Industrial > Work Safety Protective Gear > Work Safety Harnesses
+gid://shopify/TaxonomyCategory/bi-25-12          : Business & Industrial > Work Safety Protective Gear > Work Safety Tethers
+gid://shopify/TaxonomyCategory/co                : Cameras & Optics
+gid://shopify/TaxonomyCategory/co-1              : Cameras & Optics > Camera & Optic Accessories
+gid://shopify/TaxonomyCategory/co-1-1            : Cameras & Optics > Camera & Optic Accessories > Camera & Optic Replacement Cables
+gid://shopify/TaxonomyCategory/co-1-2            : Cameras & Optics > Camera & Optic Accessories > Camera & Video Camera Lenses
+gid://shopify/TaxonomyCategory/co-1-3            : Cameras & Optics > Camera & Optic Accessories > Camera Lens Accessories
+gid://shopify/TaxonomyCategory/co-1-4            : Cameras & Optics > Camera & Optic Accessories > Camera Parts & Accessories
+gid://shopify/TaxonomyCategory/co-1-5            : Cameras & Optics > Camera & Optic Accessories > Optic Accessories
+gid://shopify/TaxonomyCategory/co-1-6            : Cameras & Optics > Camera & Optic Accessories > Tripod & Monopod Accessories
+gid://shopify/TaxonomyCategory/co-1-7            : Cameras & Optics > Camera & Optic Accessories > Tripods & Monopods
+gid://shopify/TaxonomyCategory/co-2              : Cameras & Optics > Cameras
+gid://shopify/TaxonomyCategory/co-2-1            : Cameras & Optics > Cameras > Borescopes
+gid://shopify/TaxonomyCategory/co-2-2            : Cameras & Optics > Cameras > Digital Cameras
+gid://shopify/TaxonomyCategory/co-2-3            : Cameras & Optics > Cameras > Disposable Cameras
+gid://shopify/TaxonomyCategory/co-2-4            : Cameras & Optics > Cameras > Film Cameras
+gid://shopify/TaxonomyCategory/co-2-5            : Cameras & Optics > Cameras > Surveillance Cameras
+gid://shopify/TaxonomyCategory/co-2-6            : Cameras & Optics > Cameras > Trail Cameras
+gid://shopify/TaxonomyCategory/co-2-7            : Cameras & Optics > Cameras > Video Cameras
+gid://shopify/TaxonomyCategory/co-2-8            : Cameras & Optics > Cameras > Webcams
+gid://shopify/TaxonomyCategory/co-3              : Cameras & Optics > Optics
+gid://shopify/TaxonomyCategory/co-3-1            : Cameras & Optics > Optics > Binoculars
+gid://shopify/TaxonomyCategory/co-3-2            : Cameras & Optics > Optics > Monoculars
+gid://shopify/TaxonomyCategory/co-3-3            : Cameras & Optics > Optics > Rangefinders
+gid://shopify/TaxonomyCategory/co-3-4            : Cameras & Optics > Optics > Scopes
+gid://shopify/TaxonomyCategory/co-4              : Cameras & Optics > Photography
+gid://shopify/TaxonomyCategory/co-4-1            : Cameras & Optics > Photography > Darkroom
+gid://shopify/TaxonomyCategory/co-4-2            : Cameras & Optics > Photography > Lighting & Studio
+gid://shopify/TaxonomyCategory/co-4-3            : Cameras & Optics > Photography > Photo Mounting Supplies
+gid://shopify/TaxonomyCategory/co-4-4            : Cameras & Optics > Photography > Photo Negative & Slide Storage
+gid://shopify/TaxonomyCategory/el                : Electronics
+gid://shopify/TaxonomyCategory/el-1              : Electronics > Arcade Equipment
+gid://shopify/TaxonomyCategory/el-1-1            : Electronics > Arcade Equipment > Basketball Arcade Games
+gid://shopify/TaxonomyCategory/el-1-7            : Electronics > Arcade Equipment > Bingo Machines
+gid://shopify/TaxonomyCategory/el-1-8            : Electronics > Arcade Equipment > Claw Crane Machines
+gid://shopify/TaxonomyCategory/el-1-9            : Electronics > Arcade Equipment > Coin Pusher Machines
+gid://shopify/TaxonomyCategory/el-1-10           : Electronics > Arcade Equipment > Pachinko & Pachislot Machines
+gid://shopify/TaxonomyCategory/el-1-11           : Electronics > Arcade Equipment > Photo Booths
+gid://shopify/TaxonomyCategory/el-1-2            : Electronics > Arcade Equipment > Pinball Machine Accessories
+gid://shopify/TaxonomyCategory/el-1-3            : Electronics > Arcade Equipment > Pinball Machines
+gid://shopify/TaxonomyCategory/el-1-12           : Electronics > Arcade Equipment > Redemption Arcade Games
+gid://shopify/TaxonomyCategory/el-1-4            : Electronics > Arcade Equipment > Skee-Ball Machines
+gid://shopify/TaxonomyCategory/el-1-5            : Electronics > Arcade Equipment > Video Game Arcade Cabinet Accessories
+gid://shopify/TaxonomyCategory/el-1-6            : Electronics > Arcade Equipment > Video Game Arcade Cabinets
+gid://shopify/TaxonomyCategory/el-2              : Electronics > Audio
+gid://shopify/TaxonomyCategory/el-2-1            : Electronics > Audio > Audio Accessories
+gid://shopify/TaxonomyCategory/el-2-2            : Electronics > Audio > Audio Components
+gid://shopify/TaxonomyCategory/el-2-3            : Electronics > Audio > Audio Players & Recorders
+gid://shopify/TaxonomyCategory/el-2-4            : Electronics > Audio > Bullhorns
+gid://shopify/TaxonomyCategory/el-2-5            : Electronics > Audio > DJ & Specialty Audio
+gid://shopify/TaxonomyCategory/el-2-6            : Electronics > Audio > Public Address Systems
+gid://shopify/TaxonomyCategory/el-2-7            : Electronics > Audio > Stage Equipment
+gid://shopify/TaxonomyCategory/el-3              : Electronics > Circuit Boards & Components
+gid://shopify/TaxonomyCategory/el-3-1            : Electronics > Circuit Boards & Components > Circuit Board Accessories
+gid://shopify/TaxonomyCategory/el-3-2            : Electronics > Circuit Boards & Components > Circuit Decoders & Encoders
+gid://shopify/TaxonomyCategory/el-3-9            : Electronics > Circuit Boards & Components > Circuit Protection Components
+gid://shopify/TaxonomyCategory/el-3-3            : Electronics > Circuit Boards & Components > Circuit Prototyping
+gid://shopify/TaxonomyCategory/el-3-4            : Electronics > Circuit Boards & Components > Electronic Filters
+gid://shopify/TaxonomyCategory/el-3-8            : Electronics > Circuit Boards & Components > Motor Driver Modules
+gid://shopify/TaxonomyCategory/el-3-5            : Electronics > Circuit Boards & Components > Passive Circuit Components
+gid://shopify/TaxonomyCategory/el-3-6            : Electronics > Circuit Boards & Components > Printed Circuit Boards
+gid://shopify/TaxonomyCategory/el-3-7            : Electronics > Circuit Boards & Components > Semiconductors
+gid://shopify/TaxonomyCategory/el-3-10           : Electronics > Circuit Boards & Components > Vacuum Tubes
+gid://shopify/TaxonomyCategory/el-4              : Electronics > Communications
+gid://shopify/TaxonomyCategory/el-4-1            : Electronics > Communications > Answering Machines
+gid://shopify/TaxonomyCategory/el-4-2            : Electronics > Communications > Caller IDs
+gid://shopify/TaxonomyCategory/el-4-3            : Electronics > Communications > Communication Radio Accessories
+gid://shopify/TaxonomyCategory/el-4-4            : Electronics > Communications > Communication Radios
+gid://shopify/TaxonomyCategory/el-4-11           : Electronics > Communications > Fiber Optic Components
+gid://shopify/TaxonomyCategory/el-4-5            : Electronics > Communications > Intercom Accessories
+gid://shopify/TaxonomyCategory/el-4-6            : Electronics > Communications > Intercoms
+gid://shopify/TaxonomyCategory/el-4-12           : Electronics > Communications > Pager Accessories
+gid://shopify/TaxonomyCategory/el-4-7            : Electronics > Communications > Pagers
+gid://shopify/TaxonomyCategory/el-4-10           : Electronics > Communications > Satellite Communicators & Messengers
+gid://shopify/TaxonomyCategory/el-4-8            : Electronics > Communications > Telephony
+gid://shopify/TaxonomyCategory/el-4-9            : Electronics > Communications > Video Conferencing
+gid://shopify/TaxonomyCategory/el-4-13           : Electronics > Communications > Video Conferencing Accessories
+gid://shopify/TaxonomyCategory/el-4-14           : Electronics > Communications > Wireless Communication Modules
+gid://shopify/TaxonomyCategory/el-5              : Electronics > Components
+gid://shopify/TaxonomyCategory/el-5-1            : Electronics > Components > Accelerometers
+gid://shopify/TaxonomyCategory/el-5-6            : Electronics > Components > Amplifier Modules
+gid://shopify/TaxonomyCategory/el-5-2            : Electronics > Components > Converters
+gid://shopify/TaxonomyCategory/el-5-3            : Electronics > Components > Electronics Component Connectors
+gid://shopify/TaxonomyCategory/el-5-4            : Electronics > Components > Modulators
+gid://shopify/TaxonomyCategory/el-5-7            : Electronics > Components > Sensors
+gid://shopify/TaxonomyCategory/el-5-5            : Electronics > Components > Splitters
+gid://shopify/TaxonomyCategory/el-6              : Electronics > Computers
+gid://shopify/TaxonomyCategory/el-6-12           : Electronics > Computers > All-in-One Computers
+gid://shopify/TaxonomyCategory/el-6-1            : Electronics > Computers > Barebone Computers
+gid://shopify/TaxonomyCategory/el-6-2            : Electronics > Computers > Computer Servers
+gid://shopify/TaxonomyCategory/el-6-3            : Electronics > Computers > Desktop Computers
+gid://shopify/TaxonomyCategory/el-6-11           : Electronics > Computers > Gaming Computers
+gid://shopify/TaxonomyCategory/el-6-4            : Electronics > Computers > Handheld Devices
+gid://shopify/TaxonomyCategory/el-6-5            : Electronics > Computers > Interactive Kiosks
+gid://shopify/TaxonomyCategory/el-6-6            : Electronics > Computers > Laptops
+gid://shopify/TaxonomyCategory/el-6-7            : Electronics > Computers > Smart Glasses
+gid://shopify/TaxonomyCategory/el-6-8            : Electronics > Computers > Tablet Computers
+gid://shopify/TaxonomyCategory/el-6-9            : Electronics > Computers > Thin & Zero Clients
+gid://shopify/TaxonomyCategory/el-6-10           : Electronics > Computers > Touch Table Computers
+gid://shopify/TaxonomyCategory/el-7              : Electronics > Electronics Accessories
+gid://shopify/TaxonomyCategory/el-7-1            : Electronics > Electronics Accessories > Adapters
+gid://shopify/TaxonomyCategory/el-7-2            : Electronics > Electronics Accessories > Antenna Accessories
+gid://shopify/TaxonomyCategory/el-7-3            : Electronics > Electronics Accessories > Antennas
+gid://shopify/TaxonomyCategory/el-7-4            : Electronics > Electronics Accessories > Audio & Video Splitters & Switches
+gid://shopify/TaxonomyCategory/el-7-5            : Electronics > Electronics Accessories > Blank Media
+gid://shopify/TaxonomyCategory/el-7-6            : Electronics > Electronics Accessories > Cable Management
+gid://shopify/TaxonomyCategory/el-7-7            : Electronics > Electronics Accessories > Cables
+gid://shopify/TaxonomyCategory/el-7-8            : Electronics > Electronics Accessories > Computer Accessories
+gid://shopify/TaxonomyCategory/el-7-9            : Electronics > Electronics Accessories > Computer Components
+gid://shopify/TaxonomyCategory/el-7-19           : Electronics > Electronics Accessories > Drone Landing Pads
+gid://shopify/TaxonomyCategory/el-7-10           : Electronics > Electronics Accessories > Electronics Cleaners
+gid://shopify/TaxonomyCategory/el-7-11           : Electronics > Electronics Accessories > Electronics Films & Shields
+gid://shopify/TaxonomyCategory/el-7-12           : Electronics > Electronics Accessories > Memory
+gid://shopify/TaxonomyCategory/el-7-13           : Electronics > Electronics Accessories > Memory Accessories
+gid://shopify/TaxonomyCategory/el-7-14           : Electronics > Electronics Accessories > Mobile Phone & Tablet Tripods & Monopods
+gid://shopify/TaxonomyCategory/el-7-15           : Electronics > Electronics Accessories > Power
+gid://shopify/TaxonomyCategory/el-7-20           : Electronics > Electronics Accessories > Radar Detector Accessories
+gid://shopify/TaxonomyCategory/el-7-16           : Electronics > Electronics Accessories > Remote Controls
+gid://shopify/TaxonomyCategory/el-7-17           : Electronics > Electronics Accessories > Signal Boosters
+gid://shopify/TaxonomyCategory/el-7-18           : Electronics > Electronics Accessories > Signal Jammers
+gid://shopify/TaxonomyCategory/el-8              : Electronics > GPS Accessories
+gid://shopify/TaxonomyCategory/el-8-1            : Electronics > GPS Accessories > GPS Cases
+gid://shopify/TaxonomyCategory/el-8-3            : Electronics > GPS Accessories > GPS Modules & Receivers
+gid://shopify/TaxonomyCategory/el-8-2            : Electronics > GPS Accessories > GPS Mounts
+gid://shopify/TaxonomyCategory/el-9              : Electronics > GPS Navigation Systems
+gid://shopify/TaxonomyCategory/el-9-1            : Electronics > GPS Navigation Systems > Automotive GPS Navigation Systems
+gid://shopify/TaxonomyCategory/el-9-2            : Electronics > GPS Navigation Systems > Handheld & Outdoor GPS Navigation Devices
+gid://shopify/TaxonomyCategory/el-20             : Electronics > GPS Replacement Parts
+gid://shopify/TaxonomyCategory/el-10             : Electronics > GPS Tracking Devices
+gid://shopify/TaxonomyCategory/el-10-1           : Electronics > GPS Tracking Devices > Bluetooth Trackers
+gid://shopify/TaxonomyCategory/el-10-2           : Electronics > GPS Tracking Devices > Vehicle GPS Trackers
+gid://shopify/TaxonomyCategory/el-11             : Electronics > Marine Electronics
+gid://shopify/TaxonomyCategory/el-11-14          : Electronics > Marine Electronics > AIS Transceivers & Splitters
+gid://shopify/TaxonomyCategory/el-11-7           : Electronics > Marine Electronics > Fish Finder Accessories
+gid://shopify/TaxonomyCategory/el-11-1           : Electronics > Marine Electronics > Fish Finders
+gid://shopify/TaxonomyCategory/el-11-8           : Electronics > Marine Electronics > Marine AIS Receivers & Transceivers
+gid://shopify/TaxonomyCategory/el-11-9           : Electronics > Marine Electronics > Marine Amplifiers
+gid://shopify/TaxonomyCategory/el-11-2           : Electronics > Marine Electronics > Marine Audio & Video Receivers
+gid://shopify/TaxonomyCategory/el-11-10          : Electronics > Marine Electronics > Marine Autopilots
+gid://shopify/TaxonomyCategory/el-11-11          : Electronics > Marine Electronics > Marine Batteries & Chargers
+gid://shopify/TaxonomyCategory/el-11-3           : Electronics > Marine Electronics > Marine Chartplotters & GPS
+gid://shopify/TaxonomyCategory/el-11-12          : Electronics > Marine Electronics > Marine Networking & Data Interfaces
+gid://shopify/TaxonomyCategory/el-11-13          : Electronics > Marine Electronics > Marine Power Distribution & Switch Panels
+gid://shopify/TaxonomyCategory/el-11-4           : Electronics > Marine Electronics > Marine Radar
+gid://shopify/TaxonomyCategory/el-11-5           : Electronics > Marine Electronics > Marine Radios
+gid://shopify/TaxonomyCategory/el-11-15          : Electronics > Marine Electronics > Marine Sensors & Monitoring Devices
+gid://shopify/TaxonomyCategory/el-11-6           : Electronics > Marine Electronics > Marine Speakers
+gid://shopify/TaxonomyCategory/el-12             : Electronics > Networking
+gid://shopify/TaxonomyCategory/el-12-1           : Electronics > Networking > Bridges & Routers
+gid://shopify/TaxonomyCategory/el-12-2           : Electronics > Networking > Concentrators & Multiplexers
+gid://shopify/TaxonomyCategory/el-12-3           : Electronics > Networking > Hubs & Switches
+gid://shopify/TaxonomyCategory/el-12-4           : Electronics > Networking > Modem Accessories
+gid://shopify/TaxonomyCategory/el-12-5           : Electronics > Networking > Modems
+gid://shopify/TaxonomyCategory/el-12-6           : Electronics > Networking > Network Cards & Adapters
+gid://shopify/TaxonomyCategory/el-12-7           : Electronics > Networking > Network Security & Firewall Devices
+gid://shopify/TaxonomyCategory/el-12-8           : Electronics > Networking > Power Over Ethernet Adapters
+gid://shopify/TaxonomyCategory/el-12-9           : Electronics > Networking > Print Servers
+gid://shopify/TaxonomyCategory/el-12-10          : Electronics > Networking > Repeaters & Transceivers
+gid://shopify/TaxonomyCategory/el-13             : Electronics > Print, Copy, Scan & Fax
+gid://shopify/TaxonomyCategory/el-13-1           : Electronics > Print, Copy, Scan & Fax > 3D Printer Accessories
+gid://shopify/TaxonomyCategory/el-13-7           : Electronics > Print, Copy, Scan & Fax > 3D Printer Replacement Parts
+gid://shopify/TaxonomyCategory/el-13-2           : Electronics > Print, Copy, Scan & Fax > 3D Printers
+gid://shopify/TaxonomyCategory/el-13-3           : Electronics > Print, Copy, Scan & Fax > Printer, Copier & Fax Machine Accessories
+gid://shopify/TaxonomyCategory/el-13-4           : Electronics > Print, Copy, Scan & Fax > Printers, Copiers & Fax Machines
+gid://shopify/TaxonomyCategory/el-13-5           : Electronics > Print, Copy, Scan & Fax > Scanner Accessories
+gid://shopify/TaxonomyCategory/el-13-6           : Electronics > Print, Copy, Scan & Fax > Scanners
+gid://shopify/TaxonomyCategory/el-14             : Electronics > Radar Detectors
+gid://shopify/TaxonomyCategory/el-15             : Electronics > Speed Radars
+gid://shopify/TaxonomyCategory/el-16             : Electronics > Toll Collection Devices
+gid://shopify/TaxonomyCategory/el-17             : Electronics > Video
+gid://shopify/TaxonomyCategory/el-17-1           : Electronics > Video > Computer Monitors
+gid://shopify/TaxonomyCategory/el-17-11          : Electronics > Video > Interactive Displays & Whiteboards
+gid://shopify/TaxonomyCategory/el-17-2           : Electronics > Video > Projectors
+gid://shopify/TaxonomyCategory/el-17-3           : Electronics > Video > Satellite & Cable TV
+gid://shopify/TaxonomyCategory/el-17-4           : Electronics > Video > Televisions
+gid://shopify/TaxonomyCategory/el-17-5           : Electronics > Video > Video Accessories
+gid://shopify/TaxonomyCategory/el-17-6           : Electronics > Video > Video Editing Hardware & Production Equipment
+gid://shopify/TaxonomyCategory/el-17-7           : Electronics > Video > Video Multiplexers
+gid://shopify/TaxonomyCategory/el-17-8           : Electronics > Video > Video Players & Recorders
+gid://shopify/TaxonomyCategory/el-17-9           : Electronics > Video > Video Servers
+gid://shopify/TaxonomyCategory/el-17-10          : Electronics > Video > Video Transmitters
+gid://shopify/TaxonomyCategory/el-17-12          : Electronics > Video > Video Wall Displays & Packages
+gid://shopify/TaxonomyCategory/el-18             : Electronics > Video Game Console Accessories
+gid://shopify/TaxonomyCategory/el-18-1           : Electronics > Video Game Console Accessories > Charging Docks
+gid://shopify/TaxonomyCategory/el-18-3           : Electronics > Video Game Console Accessories > Home Game Console Accessories
+gid://shopify/TaxonomyCategory/el-18-6           : Electronics > Video Game Console Accessories > Interactive Gaming Figures
+gid://shopify/TaxonomyCategory/el-18-4           : Electronics > Video Game Console Accessories > Portable Game Console Accessories
+gid://shopify/TaxonomyCategory/el-18-7           : Electronics > Video Game Console Accessories > Sim Racing Cockpits
+gid://shopify/TaxonomyCategory/el-18-8           : Electronics > Video Game Console Accessories > Video Game Console Cables
+gid://shopify/TaxonomyCategory/el-18-5           : Electronics > Video Game Console Accessories > Video Game Controllers
+gid://shopify/TaxonomyCategory/el-18-9           : Electronics > Video Game Console Accessories > Virtual Reality Headset Accessories
+gid://shopify/TaxonomyCategory/el-19             : Electronics > Video Game Consoles
+gid://shopify/TaxonomyCategory/el-19-1           : Electronics > Video Game Consoles > Handheld Game Consoles
+gid://shopify/TaxonomyCategory/el-19-2           : Electronics > Video Game Consoles > Home Game Consoles
+gid://shopify/TaxonomyCategory/fb                : Food, Beverages & Tobacco
+gid://shopify/TaxonomyCategory/fb-1              : Food, Beverages & Tobacco > Beverages
+gid://shopify/TaxonomyCategory/fb-1-1            : Food, Beverages & Tobacco > Beverages > Alcoholic Beverages
+gid://shopify/TaxonomyCategory/fb-1-2            : Food, Beverages & Tobacco > Beverages > Buttermilk
+gid://shopify/TaxonomyCategory/fb-1-3            : Food, Beverages & Tobacco > Beverages > Coffee
+gid://shopify/TaxonomyCategory/fb-1-4            : Food, Beverages & Tobacco > Beverages > Cordials, Syrups & Squash
+gid://shopify/TaxonomyCategory/fb-1-5            : Food, Beverages & Tobacco > Beverages > Fruit Flavored Drinks
+gid://shopify/TaxonomyCategory/fb-1-6            : Food, Beverages & Tobacco > Beverages > Hot Chocolate
+gid://shopify/TaxonomyCategory/fb-1-7            : Food, Beverages & Tobacco > Beverages > Juices, Milkshakes & Smoothies
+gid://shopify/TaxonomyCategory/fb-1-8            : Food, Beverages & Tobacco > Beverages > Low Alcohol & Alcohol-Free Beverages
+gid://shopify/TaxonomyCategory/fb-1-9            : Food, Beverages & Tobacco > Beverages > Milk
+gid://shopify/TaxonomyCategory/fb-1-10           : Food, Beverages & Tobacco > Beverages > Non-Dairy Milk
+gid://shopify/TaxonomyCategory/fb-1-11           : Food, Beverages & Tobacco > Beverages > Powdered Beverage Mixes
+gid://shopify/TaxonomyCategory/fb-1-12           : Food, Beverages & Tobacco > Beverages > Soda
+gid://shopify/TaxonomyCategory/fb-1-13           : Food, Beverages & Tobacco > Beverages > Sports & Energy Drinks
+gid://shopify/TaxonomyCategory/fb-1-14           : Food, Beverages & Tobacco > Beverages > Tea & Infusions
+gid://shopify/TaxonomyCategory/fb-1-15           : Food, Beverages & Tobacco > Beverages > Vinegar Drinks
+gid://shopify/TaxonomyCategory/fb-1-16           : Food, Beverages & Tobacco > Beverages > Water
+gid://shopify/TaxonomyCategory/fb-4              : Food, Beverages & Tobacco > Cannabis Products
+gid://shopify/TaxonomyCategory/fb-4-3            : Food, Beverages & Tobacco > Cannabis Products > Cannabis Seeds
+gid://shopify/TaxonomyCategory/fb-4-2            : Food, Beverages & Tobacco > Cannabis Products > Medical Cannabis
+gid://shopify/TaxonomyCategory/fb-4-4            : Food, Beverages & Tobacco > Cannabis Products > Pipes & Bongs
+gid://shopify/TaxonomyCategory/fb-4-1            : Food, Beverages & Tobacco > Cannabis Products > Recreational Cannabis
+gid://shopify/TaxonomyCategory/fb-4-5            : Food, Beverages & Tobacco > Cannabis Products > Vaping
+gid://shopify/TaxonomyCategory/fb-2              : Food, Beverages & Tobacco > Food Items
+gid://shopify/TaxonomyCategory/fb-2-1            : Food, Beverages & Tobacco > Food Items > Bakery
+gid://shopify/TaxonomyCategory/fb-2-2            : Food, Beverages & Tobacco > Food Items > Candied & Chocolate Covered Fruit
+gid://shopify/TaxonomyCategory/fb-2-3            : Food, Beverages & Tobacco > Food Items > Candy & Chocolate
+gid://shopify/TaxonomyCategory/fb-2-4            : Food, Beverages & Tobacco > Food Items > Condiments & Sauces
+gid://shopify/TaxonomyCategory/fb-2-5            : Food, Beverages & Tobacco > Food Items > Cooking & Baking Ingredients
+gid://shopify/TaxonomyCategory/fb-2-6            : Food, Beverages & Tobacco > Food Items > Dairy Products
+gid://shopify/TaxonomyCategory/fb-2-7            : Food, Beverages & Tobacco > Food Items > Dips & Spreads
+gid://shopify/TaxonomyCategory/fb-2-8            : Food, Beverages & Tobacco > Food Items > Food Gift Baskets
+gid://shopify/TaxonomyCategory/fb-2-9            : Food, Beverages & Tobacco > Food Items > Frozen Desserts & Novelties
+gid://shopify/TaxonomyCategory/fb-2-10           : Food, Beverages & Tobacco > Food Items > Fruits & Vegetables
+gid://shopify/TaxonomyCategory/fb-2-11           : Food, Beverages & Tobacco > Food Items > Grains, Rice & Cereal
+gid://shopify/TaxonomyCategory/fb-2-12           : Food, Beverages & Tobacco > Food Items > Meat, Seafood & Eggs
+gid://shopify/TaxonomyCategory/fb-2-13           : Food, Beverages & Tobacco > Food Items > Nuts & Seeds
+gid://shopify/TaxonomyCategory/fb-2-14           : Food, Beverages & Tobacco > Food Items > Pasta & Noodles
+gid://shopify/TaxonomyCategory/fb-2-15           : Food, Beverages & Tobacco > Food Items > Prepared Foods
+gid://shopify/TaxonomyCategory/fb-2-16           : Food, Beverages & Tobacco > Food Items > Seasonings & Spices
+gid://shopify/TaxonomyCategory/fb-2-17           : Food, Beverages & Tobacco > Food Items > Snack Foods
+gid://shopify/TaxonomyCategory/fb-2-18           : Food, Beverages & Tobacco > Food Items > Soups & Broths
+gid://shopify/TaxonomyCategory/fb-2-19           : Food, Beverages & Tobacco > Food Items > Tofu, Soy & Vegetarian Products
+gid://shopify/TaxonomyCategory/fb-3              : Food, Beverages & Tobacco > Tobacco Products
+gid://shopify/TaxonomyCategory/fb-3-2            : Food, Beverages & Tobacco > Tobacco Products > Chewing Tobacco
+gid://shopify/TaxonomyCategory/fb-3-3            : Food, Beverages & Tobacco > Tobacco Products > Cigarettes
+gid://shopify/TaxonomyCategory/fb-3-4            : Food, Beverages & Tobacco > Tobacco Products > Cigars
+gid://shopify/TaxonomyCategory/fb-3-5            : Food, Beverages & Tobacco > Tobacco Products > Loose Tobacco
+gid://shopify/TaxonomyCategory/fb-3-10           : Food, Beverages & Tobacco > Tobacco Products > Nicotine Pouches
+gid://shopify/TaxonomyCategory/fb-3-8            : Food, Beverages & Tobacco > Tobacco Products > Rolling Papers
+gid://shopify/TaxonomyCategory/fb-3-11           : Food, Beverages & Tobacco > Tobacco Products > Rolling Tips & Filters
+gid://shopify/TaxonomyCategory/fb-3-6            : Food, Beverages & Tobacco > Tobacco Products > Smoking Pipes
+gid://shopify/TaxonomyCategory/fb-3-9            : Food, Beverages & Tobacco > Tobacco Products > Snuff & Snus
+gid://shopify/TaxonomyCategory/fb-3-7            : Food, Beverages & Tobacco > Tobacco Products > Vaporizers & Electronic Cigarettes
+gid://shopify/TaxonomyCategory/fr                : Furniture
+gid://shopify/TaxonomyCategory/fr-1              : Furniture > Baby & Toddler Furniture
+gid://shopify/TaxonomyCategory/fr-1-1            : Furniture > Baby & Toddler Furniture > Baby & Toddler Furniture Sets
+gid://shopify/TaxonomyCategory/fr-1-2            : Furniture > Baby & Toddler Furniture > Bassinet & Cradle Accessories
+gid://shopify/TaxonomyCategory/fr-1-3            : Furniture > Baby & Toddler Furniture > Bassinets & Cradles
+gid://shopify/TaxonomyCategory/fr-1-4            : Furniture > Baby & Toddler Furniture > Changing Tables
+gid://shopify/TaxonomyCategory/fr-1-5            : Furniture > Baby & Toddler Furniture > Crib & Toddler Bed Accessories
+gid://shopify/TaxonomyCategory/fr-1-6            : Furniture > Baby & Toddler Furniture > Cribs & Toddler Beds
+gid://shopify/TaxonomyCategory/fr-1-7            : Furniture > Baby & Toddler Furniture > High Chair & Booster Seat Accessories
+gid://shopify/TaxonomyCategory/fr-1-8            : Furniture > Baby & Toddler Furniture > High Chairs & Booster Seats
+gid://shopify/TaxonomyCategory/fr-1-10           : Furniture > Baby & Toddler Furniture > Kids Tables & Chair Sets
+gid://shopify/TaxonomyCategory/fr-1-11           : Furniture > Baby & Toddler Furniture > Learning Towers & Kitchen Helper Stools
+gid://shopify/TaxonomyCategory/fr-1-9            : Furniture > Baby & Toddler Furniture > Play Sofas
+gid://shopify/TaxonomyCategory/fr-1-12           : Furniture > Baby & Toddler Furniture > Step Stools & Booster Stools
+gid://shopify/TaxonomyCategory/fr-1-13           : Furniture > Baby & Toddler Furniture > Toddler Chairs & Armchairs
+gid://shopify/TaxonomyCategory/fr-2              : Furniture > Beds & Accessories
+gid://shopify/TaxonomyCategory/fr-2-1            : Furniture > Beds & Accessories > Bed & Bed Frame Accessories
+gid://shopify/TaxonomyCategory/fr-2-2            : Furniture > Beds & Accessories > Beds & Bed Frames
+gid://shopify/TaxonomyCategory/fr-2-3            : Furniture > Beds & Accessories > Footboards
+gid://shopify/TaxonomyCategory/fr-2-4            : Furniture > Beds & Accessories > Headboards
+gid://shopify/TaxonomyCategory/fr-2-5            : Furniture > Beds & Accessories > Mattress Foundations
+gid://shopify/TaxonomyCategory/fr-2-6            : Furniture > Beds & Accessories > Mattresses
+gid://shopify/TaxonomyCategory/fr-3              : Furniture > Benches
+gid://shopify/TaxonomyCategory/fr-3-4            : Furniture > Benches > Bedroom Benches
+gid://shopify/TaxonomyCategory/fr-3-1            : Furniture > Benches > Kitchen & Dining Benches
+gid://shopify/TaxonomyCategory/fr-3-2            : Furniture > Benches > Storage & Entryway Benches
+gid://shopify/TaxonomyCategory/fr-3-3            : Furniture > Benches > Vanity Benches
+gid://shopify/TaxonomyCategory/fr-4              : Furniture > Cabinets & Storage
+gid://shopify/TaxonomyCategory/fr-4-1            : Furniture > Cabinets & Storage > Armoires & Wardrobes
+gid://shopify/TaxonomyCategory/fr-4-2            : Furniture > Cabinets & Storage > Buffets
+gid://shopify/TaxonomyCategory/fr-4-3            : Furniture > Cabinets & Storage > China Cabinets & Hutches
+gid://shopify/TaxonomyCategory/fr-4-17           : Furniture > Cabinets & Storage > Closet Parts & Accessories
+gid://shopify/TaxonomyCategory/fr-4-4            : Furniture > Cabinets & Storage > Closets
+gid://shopify/TaxonomyCategory/fr-4-5            : Furniture > Cabinets & Storage > Dressers
+gid://shopify/TaxonomyCategory/fr-4-6            : Furniture > Cabinets & Storage > File Cabinets
+gid://shopify/TaxonomyCategory/fr-4-7            : Furniture > Cabinets & Storage > Ironing Centers
+gid://shopify/TaxonomyCategory/fr-4-8            : Furniture > Cabinets & Storage > Kitchen Cabinets
+gid://shopify/TaxonomyCategory/fr-4-9            : Furniture > Cabinets & Storage > Magazine Racks
+gid://shopify/TaxonomyCategory/fr-4-10           : Furniture > Cabinets & Storage > Media Storage Cabinets & Racks
+gid://shopify/TaxonomyCategory/fr-4-11           : Furniture > Cabinets & Storage > Sideboards
+gid://shopify/TaxonomyCategory/fr-4-12           : Furniture > Cabinets & Storage > Storage Cabinets & Lockers
+gid://shopify/TaxonomyCategory/fr-4-13           : Furniture > Cabinets & Storage > Storage Chests
+gid://shopify/TaxonomyCategory/fr-4-14           : Furniture > Cabinets & Storage > Vanities
+gid://shopify/TaxonomyCategory/fr-4-15           : Furniture > Cabinets & Storage > Wine & Liquor Cabinets
+gid://shopify/TaxonomyCategory/fr-4-16           : Furniture > Cabinets & Storage > Wine Racks
+gid://shopify/TaxonomyCategory/fr-5              : Furniture > Carts & Islands
+gid://shopify/TaxonomyCategory/fr-5-1            : Furniture > Carts & Islands > Carts
+gid://shopify/TaxonomyCategory/fr-5-2            : Furniture > Carts & Islands > Islands
+gid://shopify/TaxonomyCategory/fr-6              : Furniture > Chair Accessories
+gid://shopify/TaxonomyCategory/fr-6-3            : Furniture > Chair Accessories > Chair Armrest Pads
+gid://shopify/TaxonomyCategory/fr-6-6            : Furniture > Chair Accessories > Chair Casters & Wheels
+gid://shopify/TaxonomyCategory/fr-6-5            : Furniture > Chair Accessories > Chair Cushions & Pads
+gid://shopify/TaxonomyCategory/fr-6-4            : Furniture > Chair Accessories > Chair Feet & Glides
+gid://shopify/TaxonomyCategory/fr-6-2            : Furniture > Chair Accessories > Chair Replacement Parts
+gid://shopify/TaxonomyCategory/fr-6-1            : Furniture > Chair Accessories > Hanging Chair Replacement Parts
+gid://shopify/TaxonomyCategory/fr-7              : Furniture > Chairs
+gid://shopify/TaxonomyCategory/fr-7-1            : Furniture > Chairs > Armchairs, Recliners & Sleeper Chairs
+gid://shopify/TaxonomyCategory/fr-7-2            : Furniture > Chairs > Bean Bag Chairs
+gid://shopify/TaxonomyCategory/fr-7-3            : Furniture > Chairs > Chaises
+gid://shopify/TaxonomyCategory/fr-7-4            : Furniture > Chairs > Electric Massaging Chairs
+gid://shopify/TaxonomyCategory/fr-7-5            : Furniture > Chairs > Floor Chairs
+gid://shopify/TaxonomyCategory/fr-7-6            : Furniture > Chairs > Folding Chairs & Stools
+gid://shopify/TaxonomyCategory/fr-7-7            : Furniture > Chairs > Gaming Chairs
+gid://shopify/TaxonomyCategory/fr-7-8            : Furniture > Chairs > Hanging Chairs
+gid://shopify/TaxonomyCategory/fr-7-13           : Furniture > Chairs > Kids' Chairs
+gid://shopify/TaxonomyCategory/fr-7-9            : Furniture > Chairs > Kitchen & Dining Room Chairs
+gid://shopify/TaxonomyCategory/fr-7-10           : Furniture > Chairs > Rocking Chairs
+gid://shopify/TaxonomyCategory/fr-7-11           : Furniture > Chairs > Slipper Chairs
+gid://shopify/TaxonomyCategory/fr-7-12           : Furniture > Chairs > Table & Bar Stools
+gid://shopify/TaxonomyCategory/fr-8              : Furniture > Daybeds
+gid://shopify/TaxonomyCategory/fr-9              : Furniture > Entertainment Centers & TV Stands
+gid://shopify/TaxonomyCategory/fr-10             : Furniture > Furniture Sets
+gid://shopify/TaxonomyCategory/fr-10-1           : Furniture > Furniture Sets > Bathroom Furniture Sets
+gid://shopify/TaxonomyCategory/fr-10-2           : Furniture > Furniture Sets > Bedroom Furniture Sets
+gid://shopify/TaxonomyCategory/fr-10-3           : Furniture > Furniture Sets > Kitchen & Dining Furniture Sets
+gid://shopify/TaxonomyCategory/fr-10-4           : Furniture > Furniture Sets > Living Room Furniture Sets
+gid://shopify/TaxonomyCategory/fr-11             : Furniture > Futons
+gid://shopify/TaxonomyCategory/fr-11-3           : Furniture > Futons > Futon Covers
+gid://shopify/TaxonomyCategory/fr-11-1           : Furniture > Futons > Futon Frames
+gid://shopify/TaxonomyCategory/fr-11-2           : Furniture > Futons > Futon Pads
+gid://shopify/TaxonomyCategory/fr-12             : Furniture > Office Furniture
+gid://shopify/TaxonomyCategory/fr-12-1           : Furniture > Office Furniture > Desks
+gid://shopify/TaxonomyCategory/fr-12-2           : Furniture > Office Furniture > Office Chairs
+gid://shopify/TaxonomyCategory/fr-12-3           : Furniture > Office Furniture > Office Furniture Sets
+gid://shopify/TaxonomyCategory/fr-12-4           : Furniture > Office Furniture > Workspace Tables
+gid://shopify/TaxonomyCategory/fr-12-5           : Furniture > Office Furniture > Workstations & Cubicles
+gid://shopify/TaxonomyCategory/fr-13             : Furniture > Office Furniture Accessories
+gid://shopify/TaxonomyCategory/fr-13-1           : Furniture > Office Furniture Accessories > Desk Parts & Accessories
+gid://shopify/TaxonomyCategory/fr-13-2           : Furniture > Office Furniture Accessories > Office Chair Accessories
+gid://shopify/TaxonomyCategory/fr-13-3           : Furniture > Office Furniture Accessories > Workstation & Cubicle Accessories
+gid://shopify/TaxonomyCategory/fr-14             : Furniture > Ottomans
+gid://shopify/TaxonomyCategory/fr-15             : Furniture > Outdoor Furniture
+gid://shopify/TaxonomyCategory/fr-15-1           : Furniture > Outdoor Furniture > Outdoor Beds
+gid://shopify/TaxonomyCategory/fr-15-2           : Furniture > Outdoor Furniture > Outdoor Furniture Sets
+gid://shopify/TaxonomyCategory/fr-15-3           : Furniture > Outdoor Furniture > Outdoor Ottomans
+gid://shopify/TaxonomyCategory/fr-15-4           : Furniture > Outdoor Furniture > Outdoor Seating
+gid://shopify/TaxonomyCategory/fr-15-5           : Furniture > Outdoor Furniture > Outdoor Storage Boxes
+gid://shopify/TaxonomyCategory/fr-15-6           : Furniture > Outdoor Furniture > Outdoor Tables
+gid://shopify/TaxonomyCategory/fr-16             : Furniture > Outdoor Furniture Accessories
+gid://shopify/TaxonomyCategory/fr-16-2           : Furniture > Outdoor Furniture Accessories > Outdoor Furniture Care & Maintenance
+gid://shopify/TaxonomyCategory/fr-16-1           : Furniture > Outdoor Furniture Accessories > Outdoor Furniture Covers
+gid://shopify/TaxonomyCategory/fr-16-3           : Furniture > Outdoor Furniture Accessories > Outdoor Furniture Cushions
+gid://shopify/TaxonomyCategory/fr-16-4           : Furniture > Outdoor Furniture Accessories > Outdoor Furniture Replacement Parts
+gid://shopify/TaxonomyCategory/fr-25             : Furniture > Pedestals & Plinths
+gid://shopify/TaxonomyCategory/fr-17             : Furniture > Room Divider Accessories
+gid://shopify/TaxonomyCategory/fr-18             : Furniture > Room Dividers
+gid://shopify/TaxonomyCategory/fr-19             : Furniture > Shelving
+gid://shopify/TaxonomyCategory/fr-19-1           : Furniture > Shelving > Bookcases & Standing Shelves
+gid://shopify/TaxonomyCategory/fr-19-3           : Furniture > Shelving > Heavy Duty & Utility Shelving
+gid://shopify/TaxonomyCategory/fr-19-2           : Furniture > Shelving > Wall Shelves & Ledges
+gid://shopify/TaxonomyCategory/fr-20             : Furniture > Shelving Accessories
+gid://shopify/TaxonomyCategory/fr-20-1           : Furniture > Shelving Accessories > Replacement Shelves
+gid://shopify/TaxonomyCategory/fr-20-7           : Furniture > Shelving Accessories > Shelf Brackets
+gid://shopify/TaxonomyCategory/fr-20-3           : Furniture > Shelving Accessories > Shelf Dividers & Organizers
+gid://shopify/TaxonomyCategory/fr-20-6           : Furniture > Shelving Accessories > Shelf Liners & Covers
+gid://shopify/TaxonomyCategory/fr-20-2           : Furniture > Shelving Accessories > Shelf Pins & Pegs
+gid://shopify/TaxonomyCategory/fr-20-5           : Furniture > Shelving Accessories > Shelf Posts & Uprights
+gid://shopify/TaxonomyCategory/fr-20-4           : Furniture > Shelving Accessories > Shelf Rails & Guards
+gid://shopify/TaxonomyCategory/fr-21             : Furniture > Sofa Accessories
+gid://shopify/TaxonomyCategory/fr-21-1           : Furniture > Sofa Accessories > Chair & Sofa Supports
+gid://shopify/TaxonomyCategory/fr-21-2           : Furniture > Sofa Accessories > Sectional Sofa Units
+gid://shopify/TaxonomyCategory/fr-21-3           : Furniture > Sofa Accessories > Sofa Legs
+gid://shopify/TaxonomyCategory/fr-22             : Furniture > Sofas
+gid://shopify/TaxonomyCategory/fr-22-8           : Furniture > Sofas > Bean Bag Sofas
+gid://shopify/TaxonomyCategory/fr-22-1           : Furniture > Sofas > Chaise Longue Sofas
+gid://shopify/TaxonomyCategory/fr-22-3           : Furniture > Sofas > Corner Sofas
+gid://shopify/TaxonomyCategory/fr-22-4           : Furniture > Sofas > Loveseat Sofas
+gid://shopify/TaxonomyCategory/fr-22-6           : Furniture > Sofas > Sectional Sofas
+gid://shopify/TaxonomyCategory/fr-22-7           : Furniture > Sofas > Sofa Beds
+gid://shopify/TaxonomyCategory/fr-23             : Furniture > Table Accessories
+gid://shopify/TaxonomyCategory/fr-23-6           : Furniture > Table Accessories > Table Bases
+gid://shopify/TaxonomyCategory/fr-23-5           : Furniture > Table Accessories > Table Casters
+gid://shopify/TaxonomyCategory/fr-23-3           : Furniture > Table Accessories > Table Cup Holders
+gid://shopify/TaxonomyCategory/fr-23-4           : Furniture > Table Accessories > Table Leaves
+gid://shopify/TaxonomyCategory/fr-23-1           : Furniture > Table Accessories > Table Legs
+gid://shopify/TaxonomyCategory/fr-23-2           : Furniture > Table Accessories > Table Tops
+gid://shopify/TaxonomyCategory/fr-24             : Furniture > Tables
+gid://shopify/TaxonomyCategory/fr-24-1           : Furniture > Tables > Accent Tables
+gid://shopify/TaxonomyCategory/fr-24-2           : Furniture > Tables > Activity Tables
+gid://shopify/TaxonomyCategory/fr-24-3           : Furniture > Tables > Folding Tables
+gid://shopify/TaxonomyCategory/fr-24-4           : Furniture > Tables > Kitchen & Dining Room Tables
+gid://shopify/TaxonomyCategory/fr-24-5           : Furniture > Tables > Kotatsu
+gid://shopify/TaxonomyCategory/fr-24-6           : Furniture > Tables > Nightstands
+gid://shopify/TaxonomyCategory/fr-24-7           : Furniture > Tables > Overbed Tables
+gid://shopify/TaxonomyCategory/gc                : Gift Cards
+gid://shopify/TaxonomyCategory/ha                : Hardware
+gid://shopify/TaxonomyCategory/ha-1              : Hardware > Building Consumables
+gid://shopify/TaxonomyCategory/ha-1-1            : Hardware > Building Consumables > Chemicals
+gid://shopify/TaxonomyCategory/ha-1-2            : Hardware > Building Consumables > Hardware Glue & Adhesives
+gid://shopify/TaxonomyCategory/ha-1-3            : Hardware > Building Consumables > Hardware Tape
+gid://shopify/TaxonomyCategory/ha-1-4            : Hardware > Building Consumables > Lubricants
+gid://shopify/TaxonomyCategory/ha-1-5            : Hardware > Building Consumables > Masonry Consumables
+gid://shopify/TaxonomyCategory/ha-1-6            : Hardware > Building Consumables > Painting Consumables
+gid://shopify/TaxonomyCategory/ha-1-7            : Hardware > Building Consumables > Plumbing Primer
+gid://shopify/TaxonomyCategory/ha-1-8            : Hardware > Building Consumables > Protective Coatings & Sealants
+gid://shopify/TaxonomyCategory/ha-1-9            : Hardware > Building Consumables > Solder & Flux
+gid://shopify/TaxonomyCategory/ha-1-10           : Hardware > Building Consumables > Solvents, Strippers & Thinners
+gid://shopify/TaxonomyCategory/ha-1-11           : Hardware > Building Consumables > Wall Patching Compounds & Plaster
+gid://shopify/TaxonomyCategory/ha-2              : Hardware > Building Materials
+gid://shopify/TaxonomyCategory/ha-2-1            : Hardware > Building Materials > Countertops
+gid://shopify/TaxonomyCategory/ha-2-2            : Hardware > Building Materials > Door Hardware
+gid://shopify/TaxonomyCategory/ha-2-3            : Hardware > Building Materials > Doors
+gid://shopify/TaxonomyCategory/ha-2-4            : Hardware > Building Materials > Drywall
+gid://shopify/TaxonomyCategory/ha-2-5            : Hardware > Building Materials > Flooring & Carpet
+gid://shopify/TaxonomyCategory/ha-2-6            : Hardware > Building Materials > Glass
+gid://shopify/TaxonomyCategory/ha-2-7            : Hardware > Building Materials > Handrails & Railing Systems
+gid://shopify/TaxonomyCategory/ha-2-8            : Hardware > Building Materials > Hatches
+gid://shopify/TaxonomyCategory/ha-2-9            : Hardware > Building Materials > Insulation
+gid://shopify/TaxonomyCategory/ha-2-10           : Hardware > Building Materials > Lumber & Sheet Stock
+gid://shopify/TaxonomyCategory/ha-2-11           : Hardware > Building Materials > Molding
+gid://shopify/TaxonomyCategory/ha-2-12           : Hardware > Building Materials > Rebar & Remesh
+gid://shopify/TaxonomyCategory/ha-2-13           : Hardware > Building Materials > Roofing
+gid://shopify/TaxonomyCategory/ha-2-14           : Hardware > Building Materials > Shutters
+gid://shopify/TaxonomyCategory/ha-2-15           : Hardware > Building Materials > Siding
+gid://shopify/TaxonomyCategory/ha-2-16           : Hardware > Building Materials > Sound Dampening Panels & Foam
+gid://shopify/TaxonomyCategory/ha-2-17           : Hardware > Building Materials > Staircases
+gid://shopify/TaxonomyCategory/ha-2-18           : Hardware > Building Materials > Wall & Ceiling Tile
+gid://shopify/TaxonomyCategory/ha-2-19           : Hardware > Building Materials > Wall Paneling
+gid://shopify/TaxonomyCategory/ha-2-20           : Hardware > Building Materials > Weather Stripping & Weatherization Supplies
+gid://shopify/TaxonomyCategory/ha-2-21           : Hardware > Building Materials > Window Hardware
+gid://shopify/TaxonomyCategory/ha-2-22           : Hardware > Building Materials > Windows
+gid://shopify/TaxonomyCategory/ha-3              : Hardware > Fencing & Barriers
+gid://shopify/TaxonomyCategory/ha-3-1            : Hardware > Fencing & Barriers > Fence & Gate Accessories
+gid://shopify/TaxonomyCategory/ha-3-2            : Hardware > Fencing & Barriers > Fence Panels
+gid://shopify/TaxonomyCategory/ha-3-3            : Hardware > Fencing & Barriers > Fence Pickets
+gid://shopify/TaxonomyCategory/ha-3-4            : Hardware > Fencing & Barriers > Fence Posts & Rails
+gid://shopify/TaxonomyCategory/ha-3-5            : Hardware > Fencing & Barriers > Garden Borders & Edging
+gid://shopify/TaxonomyCategory/ha-3-6            : Hardware > Fencing & Barriers > Gates
+gid://shopify/TaxonomyCategory/ha-3-7            : Hardware > Fencing & Barriers > Lattice
+gid://shopify/TaxonomyCategory/ha-3-8            : Hardware > Fencing & Barriers > Safety & Crowd Control Barriers
+gid://shopify/TaxonomyCategory/ha-4              : Hardware > Fuel
+gid://shopify/TaxonomyCategory/ha-4-1            : Hardware > Fuel > Home Heating Oil
+gid://shopify/TaxonomyCategory/ha-4-2            : Hardware > Fuel > Kerosene
+gid://shopify/TaxonomyCategory/ha-4-3            : Hardware > Fuel > Propane
+gid://shopify/TaxonomyCategory/ha-5              : Hardware > Fuel Containers & Tanks
+gid://shopify/TaxonomyCategory/ha-5-1            : Hardware > Fuel Containers & Tanks > Diesel Cans
+gid://shopify/TaxonomyCategory/ha-5-2            : Hardware > Fuel Containers & Tanks > Fuel Transfer Tanks
+gid://shopify/TaxonomyCategory/ha-5-3            : Hardware > Fuel Containers & Tanks > Gas Cans
+gid://shopify/TaxonomyCategory/ha-5-4            : Hardware > Fuel Containers & Tanks > Kerosene Cans
+gid://shopify/TaxonomyCategory/ha-5-5            : Hardware > Fuel Containers & Tanks > Propane Tanks
+gid://shopify/TaxonomyCategory/ha-6              : Hardware > Hardware Accessories
+gid://shopify/TaxonomyCategory/ha-6-1            : Hardware > Hardware Accessories > Brackets & Reinforcement Braces
+gid://shopify/TaxonomyCategory/ha-6-2            : Hardware > Hardware Accessories > Cabinet Hardware
+gid://shopify/TaxonomyCategory/ha-6-3            : Hardware > Hardware Accessories > Casters
+gid://shopify/TaxonomyCategory/ha-6-4            : Hardware > Hardware Accessories > Chain, Wire & Rope
+gid://shopify/TaxonomyCategory/ha-6-5            : Hardware > Hardware Accessories > Coils
+gid://shopify/TaxonomyCategory/ha-6-6            : Hardware > Hardware Accessories > Concrete Molds
+gid://shopify/TaxonomyCategory/ha-6-7            : Hardware > Hardware Accessories > Dowel Pins & Rods
+gid://shopify/TaxonomyCategory/ha-6-8            : Hardware > Hardware Accessories > Drawer Slides
+gid://shopify/TaxonomyCategory/ha-6-9            : Hardware > Hardware Accessories > Drop Cloths
+gid://shopify/TaxonomyCategory/ha-6-10           : Hardware > Hardware Accessories > Filters & Screens
+gid://shopify/TaxonomyCategory/ha-6-11           : Hardware > Hardware Accessories > Flagging & Caution Tape
+gid://shopify/TaxonomyCategory/ha-6-12           : Hardware > Hardware Accessories > Gas Hoses
+gid://shopify/TaxonomyCategory/ha-6-13           : Hardware > Hardware Accessories > Ground Spikes
+gid://shopify/TaxonomyCategory/ha-6-14           : Hardware > Hardware Accessories > Hardware Fasteners
+gid://shopify/TaxonomyCategory/ha-6-15           : Hardware > Hardware Accessories > Hinges
+gid://shopify/TaxonomyCategory/ha-6-16           : Hardware > Hardware Accessories > Hooks, Buckles & Fasteners
+gid://shopify/TaxonomyCategory/ha-6-17           : Hardware > Hardware Accessories > Lubrication Hoses
+gid://shopify/TaxonomyCategory/ha-6-18           : Hardware > Hardware Accessories > Metal Casting Molds
+gid://shopify/TaxonomyCategory/ha-6-19           : Hardware > Hardware Accessories > Moving & Soundproofing Blankets & Covers
+gid://shopify/TaxonomyCategory/ha-6-20           : Hardware > Hardware Accessories > Pneumatic Hoses
+gid://shopify/TaxonomyCategory/ha-6-21           : Hardware > Hardware Accessories > Post Base Plates
+gid://shopify/TaxonomyCategory/ha-6-22           : Hardware > Hardware Accessories > Springs
+gid://shopify/TaxonomyCategory/ha-6-23           : Hardware > Hardware Accessories > Tarps
+gid://shopify/TaxonomyCategory/ha-6-24           : Hardware > Hardware Accessories > Tool Storage & Organization
+gid://shopify/TaxonomyCategory/ha-6-25           : Hardware > Hardware Accessories > Wall Jacks & Braces
+gid://shopify/TaxonomyCategory/ha-7              : Hardware > Hardware Pumps
+gid://shopify/TaxonomyCategory/ha-7-1            : Hardware > Hardware Pumps > Home Appliance Pumps
+gid://shopify/TaxonomyCategory/ha-7-2            : Hardware > Hardware Pumps > Pool, Fountain & Pond Pumps
+gid://shopify/TaxonomyCategory/ha-7-3            : Hardware > Hardware Pumps > Sprinkler, Booster & Irrigation System Pumps
+gid://shopify/TaxonomyCategory/ha-7-4            : Hardware > Hardware Pumps > Sump, Sewage & Effluent Pumps
+gid://shopify/TaxonomyCategory/ha-7-5            : Hardware > Hardware Pumps > Utility Pumps
+gid://shopify/TaxonomyCategory/ha-7-6            : Hardware > Hardware Pumps > Well Pumps & Systems
+gid://shopify/TaxonomyCategory/ha-8              : Hardware > Heating, Ventilation & Air Conditioning
+gid://shopify/TaxonomyCategory/ha-8-1            : Hardware > Heating, Ventilation & Air Conditioning > Air & Filter Dryers
+gid://shopify/TaxonomyCategory/ha-8-2            : Hardware > Heating, Ventilation & Air Conditioning > Air Ducts
+gid://shopify/TaxonomyCategory/ha-8-3            : Hardware > Heating, Ventilation & Air Conditioning > HVAC Controls
+gid://shopify/TaxonomyCategory/ha-8-4            : Hardware > Heating, Ventilation & Air Conditioning > Vents & Flues
+gid://shopify/TaxonomyCategory/ha-9              : Hardware > Locks & Keys
+gid://shopify/TaxonomyCategory/ha-9-1            : Hardware > Locks & Keys > Key Blanks
+gid://shopify/TaxonomyCategory/ha-9-2            : Hardware > Locks & Keys > Key Caps
+gid://shopify/TaxonomyCategory/ha-9-3            : Hardware > Locks & Keys > Key Card Entry Systems
+gid://shopify/TaxonomyCategory/ha-9-4            : Hardware > Locks & Keys > Locks & Latches
+gid://shopify/TaxonomyCategory/ha-10             : Hardware > Plumbing
+gid://shopify/TaxonomyCategory/ha-10-1           : Hardware > Plumbing > Plumbing Fittings & Supports
+gid://shopify/TaxonomyCategory/ha-10-2           : Hardware > Plumbing > Plumbing Fixture Hardware & Parts
+gid://shopify/TaxonomyCategory/ha-10-3           : Hardware > Plumbing > Plumbing Fixtures
+gid://shopify/TaxonomyCategory/ha-10-4           : Hardware > Plumbing > Plumbing Hoses & Supply Lines
+gid://shopify/TaxonomyCategory/ha-10-5           : Hardware > Plumbing > Plumbing Pipes
+gid://shopify/TaxonomyCategory/ha-10-6           : Hardware > Plumbing > Plumbing Repair Kits
+gid://shopify/TaxonomyCategory/ha-10-7           : Hardware > Plumbing > Water Dispensing & Filtration
+gid://shopify/TaxonomyCategory/ha-10-8           : Hardware > Plumbing > Water Levelers
+gid://shopify/TaxonomyCategory/ha-10-9           : Hardware > Plumbing > Water Timers
+gid://shopify/TaxonomyCategory/ha-10-10          : Hardware > Plumbing > Well Supplies
+gid://shopify/TaxonomyCategory/ha-11             : Hardware > Power & Electrical Supplies
+gid://shopify/TaxonomyCategory/ha-11-1           : Hardware > Power & Electrical Supplies > Armatures, Rotors & Stators
+gid://shopify/TaxonomyCategory/ha-11-2           : Hardware > Power & Electrical Supplies > Ballasts & Starters
+gid://shopify/TaxonomyCategory/ha-11-3           : Hardware > Power & Electrical Supplies > Carbon Brushes
+gid://shopify/TaxonomyCategory/ha-11-4           : Hardware > Power & Electrical Supplies > Circuit Breaker Panels
+gid://shopify/TaxonomyCategory/ha-11-5           : Hardware > Power & Electrical Supplies > Circuit Breakers
+gid://shopify/TaxonomyCategory/ha-11-6           : Hardware > Power & Electrical Supplies > Conduit & Housings
+gid://shopify/TaxonomyCategory/ha-11-7           : Hardware > Power & Electrical Supplies > Electrical Motors
+gid://shopify/TaxonomyCategory/ha-11-8           : Hardware > Power & Electrical Supplies > Electrical Mount Boxes & Brackets
+gid://shopify/TaxonomyCategory/ha-11-9           : Hardware > Power & Electrical Supplies > Electrical Plug Caps
+gid://shopify/TaxonomyCategory/ha-11-10          : Hardware > Power & Electrical Supplies > Electrical Switches
+gid://shopify/TaxonomyCategory/ha-11-11          : Hardware > Power & Electrical Supplies > Electrical Wires & Cable
+gid://shopify/TaxonomyCategory/ha-11-12          : Hardware > Power & Electrical Supplies > Extension Cord Accessories
+gid://shopify/TaxonomyCategory/ha-11-13          : Hardware > Power & Electrical Supplies > Extension Cords
+gid://shopify/TaxonomyCategory/ha-11-14          : Hardware > Power & Electrical Supplies > Generator Accessories
+gid://shopify/TaxonomyCategory/ha-11-15          : Hardware > Power & Electrical Supplies > Generators
+gid://shopify/TaxonomyCategory/ha-11-16          : Hardware > Power & Electrical Supplies > Home Automation Kits
+gid://shopify/TaxonomyCategory/ha-11-17          : Hardware > Power & Electrical Supplies > Phone & Data Jacks
+gid://shopify/TaxonomyCategory/ha-11-18          : Hardware > Power & Electrical Supplies > Power Converters
+gid://shopify/TaxonomyCategory/ha-11-19          : Hardware > Power & Electrical Supplies > Power Inlets
+gid://shopify/TaxonomyCategory/ha-11-20          : Hardware > Power & Electrical Supplies > Power Inverters
+gid://shopify/TaxonomyCategory/ha-11-21          : Hardware > Power & Electrical Supplies > Power Outlets & Sockets
+gid://shopify/TaxonomyCategory/ha-11-22          : Hardware > Power & Electrical Supplies > Solar Energy Kits
+gid://shopify/TaxonomyCategory/ha-11-23          : Hardware > Power & Electrical Supplies > Solar Panels
+gid://shopify/TaxonomyCategory/ha-11-24          : Hardware > Power & Electrical Supplies > Voltage Transformers & Regulators
+gid://shopify/TaxonomyCategory/ha-11-25          : Hardware > Power & Electrical Supplies > Wall Plates & Covers
+gid://shopify/TaxonomyCategory/ha-11-26          : Hardware > Power & Electrical Supplies > Wall Socket Controls & Sensors
+gid://shopify/TaxonomyCategory/ha-11-27          : Hardware > Power & Electrical Supplies > Wire Caps & Nuts
+gid://shopify/TaxonomyCategory/ha-11-28          : Hardware > Power & Electrical Supplies > Wire Terminals & Connectors
+gid://shopify/TaxonomyCategory/ha-12             : Hardware > Small Engines
+gid://shopify/TaxonomyCategory/ha-13             : Hardware > Storage Tanks
+gid://shopify/TaxonomyCategory/ha-14             : Hardware > Tool Accessories
+gid://shopify/TaxonomyCategory/ha-14-1           : Hardware > Tool Accessories > Abrasive Blaster Accessories
+gid://shopify/TaxonomyCategory/ha-14-2           : Hardware > Tool Accessories > Axe Accessories
+gid://shopify/TaxonomyCategory/ha-14-3           : Hardware > Tool Accessories > Cutter Accessories
+gid://shopify/TaxonomyCategory/ha-14-4           : Hardware > Tool Accessories > Drill & Screwdriver Accessories
+gid://shopify/TaxonomyCategory/ha-14-5           : Hardware > Tool Accessories > Driver Accessories
+gid://shopify/TaxonomyCategory/ha-14-6           : Hardware > Tool Accessories > Flashlight Accessories
+gid://shopify/TaxonomyCategory/ha-14-7           : Hardware > Tool Accessories > Grinder Accessories
+gid://shopify/TaxonomyCategory/ha-14-8           : Hardware > Tool Accessories > Hammer Accessories
+gid://shopify/TaxonomyCategory/ha-14-9           : Hardware > Tool Accessories > Industrial Staples
+gid://shopify/TaxonomyCategory/ha-14-10          : Hardware > Tool Accessories > Jigs
+gid://shopify/TaxonomyCategory/ha-14-11          : Hardware > Tool Accessories > Magnetizers & Demagnetizers
+gid://shopify/TaxonomyCategory/ha-14-12          : Hardware > Tool Accessories > Mattock & Pickaxe Accessories
+gid://shopify/TaxonomyCategory/ha-14-13          : Hardware > Tool Accessories > Measuring Tool & Sensor Accessories
+gid://shopify/TaxonomyCategory/ha-14-14          : Hardware > Tool Accessories > Mixing Tool Paddles
+gid://shopify/TaxonomyCategory/ha-14-15          : Hardware > Tool Accessories > Paint Tool Accessories
+gid://shopify/TaxonomyCategory/ha-14-16          : Hardware > Tool Accessories > Power Tool Batteries
+gid://shopify/TaxonomyCategory/ha-14-17          : Hardware > Tool Accessories > Power Tool Chargers
+gid://shopify/TaxonomyCategory/ha-14-18          : Hardware > Tool Accessories > Router Accessories
+gid://shopify/TaxonomyCategory/ha-14-19          : Hardware > Tool Accessories > Sanding Accessories
+gid://shopify/TaxonomyCategory/ha-14-20          : Hardware > Tool Accessories > Saw Accessories
+gid://shopify/TaxonomyCategory/ha-14-21          : Hardware > Tool Accessories > Shaper Accessories
+gid://shopify/TaxonomyCategory/ha-14-22          : Hardware > Tool Accessories > Soldering Iron Accessories
+gid://shopify/TaxonomyCategory/ha-14-23          : Hardware > Tool Accessories > Tool Blades
+gid://shopify/TaxonomyCategory/ha-14-24          : Hardware > Tool Accessories > Tool Handle Wedges
+gid://shopify/TaxonomyCategory/ha-14-25          : Hardware > Tool Accessories > Tool Safety Tethers
+gid://shopify/TaxonomyCategory/ha-14-26          : Hardware > Tool Accessories > Tool Sockets
+gid://shopify/TaxonomyCategory/ha-14-27          : Hardware > Tool Accessories > Tool Stands
+gid://shopify/TaxonomyCategory/ha-14-28          : Hardware > Tool Accessories > Wedge Tools
+gid://shopify/TaxonomyCategory/ha-14-29          : Hardware > Tool Accessories > Welding Accessories
+gid://shopify/TaxonomyCategory/ha-15             : Hardware > Tools
+gid://shopify/TaxonomyCategory/ha-15-1           : Hardware > Tools > Abrasive Blasters
+gid://shopify/TaxonomyCategory/ha-15-2           : Hardware > Tools > Anvils
+gid://shopify/TaxonomyCategory/ha-15-3           : Hardware > Tools > Axes
+gid://shopify/TaxonomyCategory/ha-15-4           : Hardware > Tools > Carpentry Jointers
+gid://shopify/TaxonomyCategory/ha-15-5           : Hardware > Tools > Carving Chisels & Gouges
+gid://shopify/TaxonomyCategory/ha-15-6           : Hardware > Tools > Caulking Tools
+gid://shopify/TaxonomyCategory/ha-15-7           : Hardware > Tools > Chimney Brushes
+gid://shopify/TaxonomyCategory/ha-15-8           : Hardware > Tools > Compactors
+gid://shopify/TaxonomyCategory/ha-15-9           : Hardware > Tools > Compressors
+gid://shopify/TaxonomyCategory/ha-15-10          : Hardware > Tools > Concrete Brooms
+gid://shopify/TaxonomyCategory/ha-15-11          : Hardware > Tools > Cutters
+gid://shopify/TaxonomyCategory/ha-15-12          : Hardware > Tools > Deburrers
+gid://shopify/TaxonomyCategory/ha-15-13          : Hardware > Tools > Dollies & Hand Trucks
+gid://shopify/TaxonomyCategory/ha-15-14          : Hardware > Tools > Drills
+gid://shopify/TaxonomyCategory/ha-15-15          : Hardware > Tools > Electrician Fish Tape
+gid://shopify/TaxonomyCategory/ha-15-16          : Hardware > Tools > Flashlights & Headlamps
+gid://shopify/TaxonomyCategory/ha-15-17          : Hardware > Tools > Grease Guns
+gid://shopify/TaxonomyCategory/ha-15-18          : Hardware > Tools > Grinders
+gid://shopify/TaxonomyCategory/ha-15-19          : Hardware > Tools > Grips
+gid://shopify/TaxonomyCategory/ha-15-20          : Hardware > Tools > Hammers
+gid://shopify/TaxonomyCategory/ha-15-21          : Hardware > Tools > Handheld Power Mixers
+gid://shopify/TaxonomyCategory/ha-15-22          : Hardware > Tools > Hardware Torches
+gid://shopify/TaxonomyCategory/ha-15-23          : Hardware > Tools > Heat Guns
+gid://shopify/TaxonomyCategory/ha-15-24          : Hardware > Tools > Impact Wrenches & Drivers
+gid://shopify/TaxonomyCategory/ha-15-25          : Hardware > Tools > Industrial Vibrators
+gid://shopify/TaxonomyCategory/ha-15-26          : Hardware > Tools > Inspection Mirrors
+gid://shopify/TaxonomyCategory/ha-15-27          : Hardware > Tools > Ladders & Scaffolding
+gid://shopify/TaxonomyCategory/ha-15-28          : Hardware > Tools > Lathes
+gid://shopify/TaxonomyCategory/ha-15-29          : Hardware > Tools > Light Bulb Changers
+gid://shopify/TaxonomyCategory/ha-15-30          : Hardware > Tools > Lighters & Matches
+gid://shopify/TaxonomyCategory/ha-15-31          : Hardware > Tools > Log Splitters
+gid://shopify/TaxonomyCategory/ha-15-32          : Hardware > Tools > Magnetic Sweepers
+gid://shopify/TaxonomyCategory/ha-15-33          : Hardware > Tools > Marking Tools
+gid://shopify/TaxonomyCategory/ha-15-34          : Hardware > Tools > Masonry Tools
+gid://shopify/TaxonomyCategory/ha-15-35          : Hardware > Tools > Mattocks & Pickaxes
+gid://shopify/TaxonomyCategory/ha-15-36          : Hardware > Tools > Measuring Tools & Sensors
+gid://shopify/TaxonomyCategory/ha-15-37          : Hardware > Tools > Milling Machines
+gid://shopify/TaxonomyCategory/ha-15-38          : Hardware > Tools > Multifunction Power Tools
+gid://shopify/TaxonomyCategory/ha-15-39          : Hardware > Tools > Nail Pullers
+gid://shopify/TaxonomyCategory/ha-15-40          : Hardware > Tools > Nailers & Staplers
+gid://shopify/TaxonomyCategory/ha-15-41          : Hardware > Tools > Oil Filter Drains
+gid://shopify/TaxonomyCategory/ha-15-42          : Hardware > Tools > Paint Tools
+gid://shopify/TaxonomyCategory/ha-15-43          : Hardware > Tools > Pickup Tools
+gid://shopify/TaxonomyCategory/ha-15-44          : Hardware > Tools > Pipe & Bar Benders
+gid://shopify/TaxonomyCategory/ha-15-45          : Hardware > Tools > Pipe & Tube Cleaners
+gid://shopify/TaxonomyCategory/ha-15-46          : Hardware > Tools > Pipe Brushes
+gid://shopify/TaxonomyCategory/ha-15-47          : Hardware > Tools > Planers
+gid://shopify/TaxonomyCategory/ha-15-48          : Hardware > Tools > Planes
+gid://shopify/TaxonomyCategory/ha-15-49          : Hardware > Tools > Pliers
+gid://shopify/TaxonomyCategory/ha-15-50          : Hardware > Tools > Plungers
+gid://shopify/TaxonomyCategory/ha-15-51          : Hardware > Tools > Polishers & Buffers
+gid://shopify/TaxonomyCategory/ha-15-52          : Hardware > Tools > Post Hole Diggers
+gid://shopify/TaxonomyCategory/ha-15-53          : Hardware > Tools > Pry Bars
+gid://shopify/TaxonomyCategory/ha-15-54          : Hardware > Tools > Punches & Awls
+gid://shopify/TaxonomyCategory/ha-15-55          : Hardware > Tools > Putty Knives & Scrapers
+gid://shopify/TaxonomyCategory/ha-15-56          : Hardware > Tools > Reamers
+gid://shopify/TaxonomyCategory/ha-15-57          : Hardware > Tools > Riveting Tools
+gid://shopify/TaxonomyCategory/ha-15-58          : Hardware > Tools > Routing Tools
+gid://shopify/TaxonomyCategory/ha-15-59          : Hardware > Tools > Sanders
+gid://shopify/TaxonomyCategory/ha-15-60          : Hardware > Tools > Sanding Blocks
+gid://shopify/TaxonomyCategory/ha-15-61          : Hardware > Tools > Saw Horses
+gid://shopify/TaxonomyCategory/ha-15-62          : Hardware > Tools > Saws
+gid://shopify/TaxonomyCategory/ha-15-63          : Hardware > Tools > Screwdrivers
+gid://shopify/TaxonomyCategory/ha-15-64          : Hardware > Tools > Shapers
+gid://shopify/TaxonomyCategory/ha-15-65          : Hardware > Tools > Sharpeners
+gid://shopify/TaxonomyCategory/ha-15-66          : Hardware > Tools > Socket Drivers
+gid://shopify/TaxonomyCategory/ha-15-67          : Hardware > Tools > Soldering Irons
+gid://shopify/TaxonomyCategory/ha-15-68          : Hardware > Tools > Tap Reseaters
+gid://shopify/TaxonomyCategory/ha-15-69          : Hardware > Tools > Taps & Dies
+gid://shopify/TaxonomyCategory/ha-15-70          : Hardware > Tools > Threading Machines
+gid://shopify/TaxonomyCategory/ha-15-71          : Hardware > Tools > Tool Clamps & Vises
+gid://shopify/TaxonomyCategory/ha-15-72          : Hardware > Tools > Tool Files
+gid://shopify/TaxonomyCategory/ha-15-73          : Hardware > Tools > Tool Keys
+gid://shopify/TaxonomyCategory/ha-15-74          : Hardware > Tools > Tool Knives
+gid://shopify/TaxonomyCategory/ha-15-75          : Hardware > Tools > Tool Sets
+gid://shopify/TaxonomyCategory/ha-15-76          : Hardware > Tools > Welders
+gid://shopify/TaxonomyCategory/ha-15-77          : Hardware > Tools > Welding Guns & Plasma Cutters
+gid://shopify/TaxonomyCategory/ha-15-78          : Hardware > Tools > Wire & Cable Hand Tools
+gid://shopify/TaxonomyCategory/ha-15-79          : Hardware > Tools > Work Lights
+gid://shopify/TaxonomyCategory/ha-15-80          : Hardware > Tools > Wrenches
+gid://shopify/TaxonomyCategory/hb                : Health & Beauty
+gid://shopify/TaxonomyCategory/hb-1              : Health & Beauty > Health Care
+gid://shopify/TaxonomyCategory/hb-1-1            : Health & Beauty > Health Care > Acupuncture
+gid://shopify/TaxonomyCategory/hb-1-2            : Health & Beauty > Health Care > Bed Pans
+gid://shopify/TaxonomyCategory/hb-1-3            : Health & Beauty > Health Care > Biometric Monitor Accessories
+gid://shopify/TaxonomyCategory/hb-1-4            : Health & Beauty > Health Care > Biometric Monitors
+gid://shopify/TaxonomyCategory/hb-1-5            : Health & Beauty > Health Care > Condoms
+gid://shopify/TaxonomyCategory/hb-1-6            : Health & Beauty > Health Care > Conductivity Gels & Lotions
+gid://shopify/TaxonomyCategory/hb-1-7            : Health & Beauty > Health Care > Contraceptive Cases
+gid://shopify/TaxonomyCategory/hb-1-8            : Health & Beauty > Health Care > First Aid
+gid://shopify/TaxonomyCategory/hb-1-9            : Health & Beauty > Health Care > Fitness & Nutrition
+gid://shopify/TaxonomyCategory/hb-1-31           : Health & Beauty > Health Care > Hearing Aid Accessories
+gid://shopify/TaxonomyCategory/hb-1-10           : Health & Beauty > Health Care > Hearing Aids
+gid://shopify/TaxonomyCategory/hb-1-11           : Health & Beauty > Health Care > Incontinence Aids
+gid://shopify/TaxonomyCategory/hb-1-27           : Health & Beauty > Health Care > Insulin Pump Accessories
+gid://shopify/TaxonomyCategory/hb-1-28           : Health & Beauty > Health Care > Insulin Pumps
+gid://shopify/TaxonomyCategory/hb-1-12           : Health & Beauty > Health Care > Light Therapy Lamps
+gid://shopify/TaxonomyCategory/hb-1-29           : Health & Beauty > Health Care > Mask Accessories
+gid://shopify/TaxonomyCategory/hb-1-13           : Health & Beauty > Health Care > Medical Alarm Systems
+gid://shopify/TaxonomyCategory/hb-1-26           : Health & Beauty > Health Care > Medical Face Masks
+gid://shopify/TaxonomyCategory/hb-1-30           : Health & Beauty > Health Care > Medical Gloves
+gid://shopify/TaxonomyCategory/hb-1-14           : Health & Beauty > Health Care > Medical Identification Tags & Jewelry
+gid://shopify/TaxonomyCategory/hb-1-15           : Health & Beauty > Health Care > Medical Tests
+gid://shopify/TaxonomyCategory/hb-1-16           : Health & Beauty > Health Care > Medicine & Drugs
+gid://shopify/TaxonomyCategory/hb-1-17           : Health & Beauty > Health Care > Mobility & Accessibility
+gid://shopify/TaxonomyCategory/hb-1-18           : Health & Beauty > Health Care > Occupational & Physical Therapy Equipment
+gid://shopify/TaxonomyCategory/hb-1-19           : Health & Beauty > Health Care > Pillboxes
+gid://shopify/TaxonomyCategory/hb-1-20           : Health & Beauty > Health Care > Respiratory Care
+gid://shopify/TaxonomyCategory/hb-1-21           : Health & Beauty > Health Care > Specimen Cups
+gid://shopify/TaxonomyCategory/hb-1-22           : Health & Beauty > Health Care > Spermicides
+gid://shopify/TaxonomyCategory/hb-1-23           : Health & Beauty > Health Care > Stump Shrinkers
+gid://shopify/TaxonomyCategory/hb-1-24           : Health & Beauty > Health Care > Supports & Braces
+gid://shopify/TaxonomyCategory/hb-1-25           : Health & Beauty > Health Care > Surgical Lubricants
+gid://shopify/TaxonomyCategory/hb-2              : Health & Beauty > Jewelry Cleaning & Care
+gid://shopify/TaxonomyCategory/hb-2-1            : Health & Beauty > Jewelry Cleaning & Care > Jewelry Cleaning Solutions & Polishes
+gid://shopify/TaxonomyCategory/hb-2-2            : Health & Beauty > Jewelry Cleaning & Care > Jewelry Cleaning Tools
+gid://shopify/TaxonomyCategory/hb-2-3            : Health & Beauty > Jewelry Cleaning & Care > Jewelry Holders
+gid://shopify/TaxonomyCategory/hb-2-6            : Health & Beauty > Jewelry Cleaning & Care > Jewelry Repair & Resizing Services
+gid://shopify/TaxonomyCategory/hb-2-7            : Health & Beauty > Jewelry Cleaning & Care > Jewelry Sizing Tools
+gid://shopify/TaxonomyCategory/hb-2-4            : Health & Beauty > Jewelry Cleaning & Care > Jewelry Steam Cleaners
+gid://shopify/TaxonomyCategory/hb-2-5            : Health & Beauty > Jewelry Cleaning & Care > Watch Repair Kits
+gid://shopify/TaxonomyCategory/hb-3              : Health & Beauty > Personal Care
+gid://shopify/TaxonomyCategory/hb-3-1            : Health & Beauty > Personal Care > Back Care
+gid://shopify/TaxonomyCategory/hb-3-2            : Health & Beauty > Personal Care > Cosmetics
+gid://shopify/TaxonomyCategory/hb-3-3            : Health & Beauty > Personal Care > Cotton Balls
+gid://shopify/TaxonomyCategory/hb-3-4            : Health & Beauty > Personal Care > Cotton Swabs
+gid://shopify/TaxonomyCategory/hb-3-5            : Health & Beauty > Personal Care > Deodorants & Anti-Perspirant
+gid://shopify/TaxonomyCategory/hb-3-6            : Health & Beauty > Personal Care > Ear Care
+gid://shopify/TaxonomyCategory/hb-3-7            : Health & Beauty > Personal Care > Enema Kits & Supplies
+gid://shopify/TaxonomyCategory/hb-3-22           : Health & Beauty > Personal Care > Essential Oil Accessories
+gid://shopify/TaxonomyCategory/hb-3-21           : Health & Beauty > Personal Care > Essential Oils
+gid://shopify/TaxonomyCategory/hb-3-8            : Health & Beauty > Personal Care > Feminine Sanitary Supplies
+gid://shopify/TaxonomyCategory/hb-3-9            : Health & Beauty > Personal Care > Foot Care
+gid://shopify/TaxonomyCategory/hb-3-10           : Health & Beauty > Personal Care > Hair Care
+gid://shopify/TaxonomyCategory/hb-3-11           : Health & Beauty > Personal Care > Massage & Relaxation
+gid://shopify/TaxonomyCategory/hb-3-12           : Health & Beauty > Personal Care > Oral Care
+gid://shopify/TaxonomyCategory/hb-3-20           : Health & Beauty > Personal Care > Personal Care Gift Sets & Kits
+gid://shopify/TaxonomyCategory/hb-3-13           : Health & Beauty > Personal Care > Personal Lubricants
+gid://shopify/TaxonomyCategory/hb-3-14           : Health & Beauty > Personal Care > Shaving & Grooming
+gid://shopify/TaxonomyCategory/hb-3-15           : Health & Beauty > Personal Care > Sleeping Aids
+gid://shopify/TaxonomyCategory/hb-3-16           : Health & Beauty > Personal Care > Spray Tanning Tents
+gid://shopify/TaxonomyCategory/hb-3-17           : Health & Beauty > Personal Care > Tanning Beds
+gid://shopify/TaxonomyCategory/hb-3-18           : Health & Beauty > Personal Care > Tweezers
+gid://shopify/TaxonomyCategory/hb-3-19           : Health & Beauty > Personal Care > Vision Care
+gid://shopify/TaxonomyCategory/hg                : Home & Garden
+gid://shopify/TaxonomyCategory/hg-1              : Home & Garden > Bathroom Accessories
+gid://shopify/TaxonomyCategory/hg-1-1            : Home & Garden > Bathroom Accessories > Bath Caddies
+gid://shopify/TaxonomyCategory/hg-1-2            : Home & Garden > Bathroom Accessories > Bath Mats & Rugs
+gid://shopify/TaxonomyCategory/hg-1-3            : Home & Garden > Bathroom Accessories > Bath Pillows
+gid://shopify/TaxonomyCategory/hg-1-4            : Home & Garden > Bathroom Accessories > Bathroom Accessory Mounts
+gid://shopify/TaxonomyCategory/hg-1-5            : Home & Garden > Bathroom Accessories > Bathroom Accessory Sets
+gid://shopify/TaxonomyCategory/hg-1-6            : Home & Garden > Bathroom Accessories > Facial Tissue Holders
+gid://shopify/TaxonomyCategory/hg-1-7            : Home & Garden > Bathroom Accessories > Hand Dryer Accessories
+gid://shopify/TaxonomyCategory/hg-1-8            : Home & Garden > Bathroom Accessories > Hand Dryers
+gid://shopify/TaxonomyCategory/hg-1-9            : Home & Garden > Bathroom Accessories > Medicine Cabinets
+gid://shopify/TaxonomyCategory/hg-1-10           : Home & Garden > Bathroom Accessories > Robe Hooks
+gid://shopify/TaxonomyCategory/hg-1-11           : Home & Garden > Bathroom Accessories > Safety Grab Bars
+gid://shopify/TaxonomyCategory/hg-1-12           : Home & Garden > Bathroom Accessories > Shower Curtain Rings
+gid://shopify/TaxonomyCategory/hg-1-13           : Home & Garden > Bathroom Accessories > Shower Curtains
+gid://shopify/TaxonomyCategory/hg-1-14           : Home & Garden > Bathroom Accessories > Shower Rods
+gid://shopify/TaxonomyCategory/hg-1-15           : Home & Garden > Bathroom Accessories > Soap & Lotion Dispensers
+gid://shopify/TaxonomyCategory/hg-1-16           : Home & Garden > Bathroom Accessories > Soap Dishes & Holders
+gid://shopify/TaxonomyCategory/hg-1-17           : Home & Garden > Bathroom Accessories > Toilet Brush Replacement Heads
+gid://shopify/TaxonomyCategory/hg-1-18           : Home & Garden > Bathroom Accessories > Toilet Brushes & Holders
+gid://shopify/TaxonomyCategory/hg-1-19           : Home & Garden > Bathroom Accessories > Toilet Paper Holders
+gid://shopify/TaxonomyCategory/hg-1-20           : Home & Garden > Bathroom Accessories > Toothbrush Holders
+gid://shopify/TaxonomyCategory/hg-1-21           : Home & Garden > Bathroom Accessories > Towel Racks & Holders
+gid://shopify/TaxonomyCategory/hg-2              : Home & Garden > Business & Home Security
+gid://shopify/TaxonomyCategory/hg-2-1            : Home & Garden > Business & Home Security > Dummy Surveillance Cameras
+gid://shopify/TaxonomyCategory/hg-2-2            : Home & Garden > Business & Home Security > Home Alarm Systems
+gid://shopify/TaxonomyCategory/hg-2-3            : Home & Garden > Business & Home Security > Motion Sensors
+gid://shopify/TaxonomyCategory/hg-2-4            : Home & Garden > Business & Home Security > Safety & Security Mirrors
+gid://shopify/TaxonomyCategory/hg-2-5            : Home & Garden > Business & Home Security > Security Lights
+gid://shopify/TaxonomyCategory/hg-2-6            : Home & Garden > Business & Home Security > Security Monitors & Recorders
+gid://shopify/TaxonomyCategory/hg-2-7            : Home & Garden > Business & Home Security > Security Safe Accessories
+gid://shopify/TaxonomyCategory/hg-2-8            : Home & Garden > Business & Home Security > Security Safes
+gid://shopify/TaxonomyCategory/hg-2-9            : Home & Garden > Business & Home Security > Security System Sensors
+gid://shopify/TaxonomyCategory/hg-3              : Home & Garden > Decor
+gid://shopify/TaxonomyCategory/hg-3-1            : Home & Garden > Decor > Address Signs
+gid://shopify/TaxonomyCategory/hg-3-2            : Home & Garden > Decor > Artificial Flora
+gid://shopify/TaxonomyCategory/hg-3-3            : Home & Garden > Decor > Artificial Food
+gid://shopify/TaxonomyCategory/hg-3-4            : Home & Garden > Decor > Artwork
+gid://shopify/TaxonomyCategory/hg-3-5            : Home & Garden > Decor > Backrest Pillows
+gid://shopify/TaxonomyCategory/hg-3-6            : Home & Garden > Decor > Baskets
+gid://shopify/TaxonomyCategory/hg-3-7            : Home & Garden > Decor > Bird & Wildlife Feeder Accessories
+gid://shopify/TaxonomyCategory/hg-3-8            : Home & Garden > Decor > Bird & Wildlife Feeders
+gid://shopify/TaxonomyCategory/hg-3-9            : Home & Garden > Decor > Bird & Wildlife House Accessories
+gid://shopify/TaxonomyCategory/hg-3-10           : Home & Garden > Decor > Bird & Wildlife Houses
+gid://shopify/TaxonomyCategory/hg-3-11           : Home & Garden > Decor > Bird Baths
+gid://shopify/TaxonomyCategory/hg-3-12           : Home & Garden > Decor > Bookends
+gid://shopify/TaxonomyCategory/hg-3-13           : Home & Garden > Decor > Cardboard Cutouts
+gid://shopify/TaxonomyCategory/hg-3-14           : Home & Garden > Decor > Chair & Sofa Cushion Covers
+gid://shopify/TaxonomyCategory/hg-3-15           : Home & Garden > Decor > Chair & Sofa Cushions
+gid://shopify/TaxonomyCategory/hg-3-77           : Home & Garden > Decor > Chair & Sofa Throws
+gid://shopify/TaxonomyCategory/hg-3-16           : Home & Garden > Decor > Clock Parts
+gid://shopify/TaxonomyCategory/hg-3-17           : Home & Garden > Decor > Clocks
+gid://shopify/TaxonomyCategory/hg-3-18           : Home & Garden > Decor > Coat & Hat Racks
+gid://shopify/TaxonomyCategory/hg-3-19           : Home & Garden > Decor > Decorative Bells
+gid://shopify/TaxonomyCategory/hg-3-20           : Home & Garden > Decor > Decorative Bottles
+gid://shopify/TaxonomyCategory/hg-3-21           : Home & Garden > Decor > Decorative Bowls
+gid://shopify/TaxonomyCategory/hg-3-22           : Home & Garden > Decor > Decorative Jars
+gid://shopify/TaxonomyCategory/hg-3-79           : Home & Garden > Decor > Decorative Lanterns
+gid://shopify/TaxonomyCategory/hg-3-23           : Home & Garden > Decor > Decorative Plaques
+gid://shopify/TaxonomyCategory/hg-3-24           : Home & Garden > Decor > Decorative Plates
+gid://shopify/TaxonomyCategory/hg-3-25           : Home & Garden > Decor > Decorative Trays
+gid://shopify/TaxonomyCategory/hg-3-26           : Home & Garden > Decor > Door Mats
+gid://shopify/TaxonomyCategory/hg-3-27           : Home & Garden > Decor > Dreamcatchers
+gid://shopify/TaxonomyCategory/hg-3-28           : Home & Garden > Decor > Dried Flowers
+gid://shopify/TaxonomyCategory/hg-3-29           : Home & Garden > Decor > Ecospheres
+gid://shopify/TaxonomyCategory/hg-3-30           : Home & Garden > Decor > Figurines
+gid://shopify/TaxonomyCategory/hg-3-31           : Home & Garden > Decor > Finials
+gid://shopify/TaxonomyCategory/hg-3-32           : Home & Garden > Decor > Flag & Windsock Accessories
+gid://shopify/TaxonomyCategory/hg-3-33           : Home & Garden > Decor > Flags & Windsocks
+gid://shopify/TaxonomyCategory/hg-3-34           : Home & Garden > Decor > Flameless Candles
+gid://shopify/TaxonomyCategory/hg-3-35           : Home & Garden > Decor > Fountains & Ponds
+gid://shopify/TaxonomyCategory/hg-3-36           : Home & Garden > Decor > Garden & Stepping Stones
+gid://shopify/TaxonomyCategory/hg-3-37           : Home & Garden > Decor > Growth Charts
+gid://shopify/TaxonomyCategory/hg-3-38           : Home & Garden > Decor > Home Decor Decals
+gid://shopify/TaxonomyCategory/hg-3-39           : Home & Garden > Decor > Home Fragrance Accessories
+gid://shopify/TaxonomyCategory/hg-3-40           : Home & Garden > Decor > Home Fragrances
+gid://shopify/TaxonomyCategory/hg-3-41           : Home & Garden > Decor > Hourglasses
+gid://shopify/TaxonomyCategory/hg-3-42           : Home & Garden > Decor > House Numbers & Letters
+gid://shopify/TaxonomyCategory/hg-3-43           : Home & Garden > Decor > Lawn Ornaments & Garden Sculptures
+gid://shopify/TaxonomyCategory/hg-3-44           : Home & Garden > Decor > Mail Slots
+gid://shopify/TaxonomyCategory/hg-3-45           : Home & Garden > Decor > Mailbox Accessories
+gid://shopify/TaxonomyCategory/hg-3-46           : Home & Garden > Decor > Mailboxes
+gid://shopify/TaxonomyCategory/hg-3-47           : Home & Garden > Decor > Mirrors
+gid://shopify/TaxonomyCategory/hg-3-48           : Home & Garden > Decor > Music Boxes
+gid://shopify/TaxonomyCategory/hg-3-49           : Home & Garden > Decor > Napkin Rings
+gid://shopify/TaxonomyCategory/hg-3-50           : Home & Garden > Decor > Novelty Signs
+gid://shopify/TaxonomyCategory/hg-3-51           : Home & Garden > Decor > Ottoman Cushions
+gid://shopify/TaxonomyCategory/hg-3-52           : Home & Garden > Decor > Picture Frames
+gid://shopify/TaxonomyCategory/hg-3-53           : Home & Garden > Decor > Piggy Banks & Money Jars
+gid://shopify/TaxonomyCategory/hg-3-54           : Home & Garden > Decor > Rain Chains
+gid://shopify/TaxonomyCategory/hg-3-55           : Home & Garden > Decor > Rain Gauges
+gid://shopify/TaxonomyCategory/hg-3-56           : Home & Garden > Decor > Refrigerator Magnets
+gid://shopify/TaxonomyCategory/hg-3-57           : Home & Garden > Decor > Rugs
+gid://shopify/TaxonomyCategory/hg-3-58           : Home & Garden > Decor > Seasonal & Holiday Decorations
+gid://shopify/TaxonomyCategory/hg-3-59           : Home & Garden > Decor > Shadow Boxes
+gid://shopify/TaxonomyCategory/hg-3-60           : Home & Garden > Decor > Slipcovers
+gid://shopify/TaxonomyCategory/hg-3-61           : Home & Garden > Decor > Snow Globes
+gid://shopify/TaxonomyCategory/hg-3-62           : Home & Garden > Decor > Suncatchers
+gid://shopify/TaxonomyCategory/hg-3-63           : Home & Garden > Decor > Sundials
+gid://shopify/TaxonomyCategory/hg-3-78           : Home & Garden > Decor > Throw Pillow Accessories
+gid://shopify/TaxonomyCategory/hg-3-64           : Home & Garden > Decor > Throw Pillows
+gid://shopify/TaxonomyCategory/hg-3-65           : Home & Garden > Decor > Trunks
+gid://shopify/TaxonomyCategory/hg-3-66           : Home & Garden > Decor > Vase Fillers & Table Scatters
+gid://shopify/TaxonomyCategory/hg-3-67           : Home & Garden > Decor > Vases
+gid://shopify/TaxonomyCategory/hg-3-68           : Home & Garden > Decor > Wallpaper
+gid://shopify/TaxonomyCategory/hg-3-69           : Home & Garden > Decor > Weather Vanes & Roof Decor
+gid://shopify/TaxonomyCategory/hg-3-70           : Home & Garden > Decor > Wind Chimes
+gid://shopify/TaxonomyCategory/hg-3-71           : Home & Garden > Decor > Wind Wheels & Spinners
+gid://shopify/TaxonomyCategory/hg-3-72           : Home & Garden > Decor > Window Magnets
+gid://shopify/TaxonomyCategory/hg-3-73           : Home & Garden > Decor > Window Treatment Accessories
+gid://shopify/TaxonomyCategory/hg-3-74           : Home & Garden > Decor > Window Treatments
+gid://shopify/TaxonomyCategory/hg-3-75           : Home & Garden > Decor > World Globes
+gid://shopify/TaxonomyCategory/hg-3-76           : Home & Garden > Decor > Wreaths & Garlands
+gid://shopify/TaxonomyCategory/hg-4              : Home & Garden > Emergency Preparedness
+gid://shopify/TaxonomyCategory/hg-4-1            : Home & Garden > Emergency Preparedness > Earthquake Alarms
+gid://shopify/TaxonomyCategory/hg-4-2            : Home & Garden > Emergency Preparedness > Emergency Blankets
+gid://shopify/TaxonomyCategory/hg-4-3            : Home & Garden > Emergency Preparedness > Emergency Food Kits
+gid://shopify/TaxonomyCategory/hg-4-4            : Home & Garden > Emergency Preparedness > Emergency Tools & Kits
+gid://shopify/TaxonomyCategory/hg-4-7            : Home & Garden > Emergency Preparedness > Emergency Water Storage Containers
+gid://shopify/TaxonomyCategory/hg-4-8            : Home & Garden > Emergency Preparedness > Fire Escape Ladders
+gid://shopify/TaxonomyCategory/hg-4-5            : Home & Garden > Emergency Preparedness > Furniture Anchors
+gid://shopify/TaxonomyCategory/hg-5              : Home & Garden > Fireplace & Wood Stove Accessories
+gid://shopify/TaxonomyCategory/hg-5-12           : Home & Garden > Fireplace & Wood Stove Accessories > Ash Buckets & Shovels
+gid://shopify/TaxonomyCategory/hg-5-1            : Home & Garden > Fireplace & Wood Stove Accessories > Bellows
+gid://shopify/TaxonomyCategory/hg-5-2            : Home & Garden > Fireplace & Wood Stove Accessories > Fireplace & Wood Stove Grates
+gid://shopify/TaxonomyCategory/hg-5-3            : Home & Garden > Fireplace & Wood Stove Accessories > Fireplace Andirons
+gid://shopify/TaxonomyCategory/hg-5-4            : Home & Garden > Fireplace & Wood Stove Accessories > Fireplace Reflectors
+gid://shopify/TaxonomyCategory/hg-5-5            : Home & Garden > Fireplace & Wood Stove Accessories > Fireplace Screens
+gid://shopify/TaxonomyCategory/hg-5-6            : Home & Garden > Fireplace & Wood Stove Accessories > Fireplace Tools
+gid://shopify/TaxonomyCategory/hg-5-7            : Home & Garden > Fireplace & Wood Stove Accessories > Firewood & Fuel
+gid://shopify/TaxonomyCategory/hg-5-8            : Home & Garden > Fireplace & Wood Stove Accessories > Hearth Pads
+gid://shopify/TaxonomyCategory/hg-5-9            : Home & Garden > Fireplace & Wood Stove Accessories > Log Rack & Carrier Accessories
+gid://shopify/TaxonomyCategory/hg-5-10           : Home & Garden > Fireplace & Wood Stove Accessories > Log Racks & Carriers
+gid://shopify/TaxonomyCategory/hg-5-11           : Home & Garden > Fireplace & Wood Stove Accessories > Wood Stove Fans & Blowers
+gid://shopify/TaxonomyCategory/hg-6              : Home & Garden > Fireplaces
+gid://shopify/TaxonomyCategory/hg-6-1            : Home & Garden > Fireplaces > Indoor Fireplaces
+gid://shopify/TaxonomyCategory/hg-6-2            : Home & Garden > Fireplaces > Outdoor Fireplaces
+gid://shopify/TaxonomyCategory/hg-7              : Home & Garden > Flood, Fire & Gas Safety
+gid://shopify/TaxonomyCategory/hg-7-1            : Home & Garden > Flood, Fire & Gas Safety > Fire Alarm Control Panels
+gid://shopify/TaxonomyCategory/hg-7-2            : Home & Garden > Flood, Fire & Gas Safety > Fire Alarms
+gid://shopify/TaxonomyCategory/hg-7-9            : Home & Garden > Flood, Fire & Gas Safety > Fire Blankets
+gid://shopify/TaxonomyCategory/hg-7-3            : Home & Garden > Flood, Fire & Gas Safety > Fire Extinguisher & Equipment Storage
+gid://shopify/TaxonomyCategory/hg-7-4            : Home & Garden > Flood, Fire & Gas Safety > Fire Extinguishers
+gid://shopify/TaxonomyCategory/hg-7-5            : Home & Garden > Flood, Fire & Gas Safety > Fire Sprinklers
+gid://shopify/TaxonomyCategory/hg-7-6            : Home & Garden > Flood, Fire & Gas Safety > Heat Detectors
+gid://shopify/TaxonomyCategory/hg-7-7            : Home & Garden > Flood, Fire & Gas Safety > Smoke & Carbon Monoxide Detectors
+gid://shopify/TaxonomyCategory/hg-7-8            : Home & Garden > Flood, Fire & Gas Safety > Water & Flood Detectors
+gid://shopify/TaxonomyCategory/hg-8              : Home & Garden > Household Appliance Accessories
+gid://shopify/TaxonomyCategory/hg-8-1            : Home & Garden > Household Appliance Accessories > Air Conditioner Accessories
+gid://shopify/TaxonomyCategory/hg-8-2            : Home & Garden > Household Appliance Accessories > Air Purifier Accessories
+gid://shopify/TaxonomyCategory/hg-8-3            : Home & Garden > Household Appliance Accessories > Dehumidifier Accessories
+gid://shopify/TaxonomyCategory/hg-8-13           : Home & Garden > Household Appliance Accessories > Evaporative Cooler Accessories
+gid://shopify/TaxonomyCategory/hg-8-4            : Home & Garden > Household Appliance Accessories > Fan Accessories
+gid://shopify/TaxonomyCategory/hg-8-5            : Home & Garden > Household Appliance Accessories > Floor & Steam Cleaner Accessories
+gid://shopify/TaxonomyCategory/hg-8-6            : Home & Garden > Household Appliance Accessories > Furnace & Boiler Accessories
+gid://shopify/TaxonomyCategory/hg-8-7            : Home & Garden > Household Appliance Accessories > Heating Radiator Accessories
+gid://shopify/TaxonomyCategory/hg-8-8            : Home & Garden > Household Appliance Accessories > Humidifier Accessories
+gid://shopify/TaxonomyCategory/hg-8-9            : Home & Garden > Household Appliance Accessories > Laundry Appliance Accessories
+gid://shopify/TaxonomyCategory/hg-8-10           : Home & Garden > Household Appliance Accessories > Patio Heater Accessories
+gid://shopify/TaxonomyCategory/hg-8-14           : Home & Garden > Household Appliance Accessories > Space Heater Accessories
+gid://shopify/TaxonomyCategory/hg-8-11           : Home & Garden > Household Appliance Accessories > Vacuum Accessories
+gid://shopify/TaxonomyCategory/hg-8-12           : Home & Garden > Household Appliance Accessories > Water Heater Accessories
+gid://shopify/TaxonomyCategory/hg-9              : Home & Garden > Household Appliances
+gid://shopify/TaxonomyCategory/hg-9-1            : Home & Garden > Household Appliances > Climate Control Appliances
+gid://shopify/TaxonomyCategory/hg-9-2            : Home & Garden > Household Appliances > Floor & Carpet Dryers
+gid://shopify/TaxonomyCategory/hg-9-3            : Home & Garden > Household Appliances > Floor & Steam Cleaners
+gid://shopify/TaxonomyCategory/hg-9-4            : Home & Garden > Household Appliances > Floor Polishers & Buffers
+gid://shopify/TaxonomyCategory/hg-9-5            : Home & Garden > Household Appliances > Futon Dryers
+gid://shopify/TaxonomyCategory/hg-9-6            : Home & Garden > Household Appliances > Garage Door Keypads & Remotes
+gid://shopify/TaxonomyCategory/hg-9-7            : Home & Garden > Household Appliances > Garage Door Openers
+gid://shopify/TaxonomyCategory/hg-9-8            : Home & Garden > Household Appliances > Laundry Appliances
+gid://shopify/TaxonomyCategory/hg-9-9            : Home & Garden > Household Appliances > Ultrasonic Cleaners
+gid://shopify/TaxonomyCategory/hg-9-10           : Home & Garden > Household Appliances > Vacuums
+gid://shopify/TaxonomyCategory/hg-9-11           : Home & Garden > Household Appliances > Wallpaper Steamers
+gid://shopify/TaxonomyCategory/hg-9-12           : Home & Garden > Household Appliances > Water Heaters
+gid://shopify/TaxonomyCategory/hg-10             : Home & Garden > Household Supplies
+gid://shopify/TaxonomyCategory/hg-10-1           : Home & Garden > Household Supplies > Drawer & Shelf Liners
+gid://shopify/TaxonomyCategory/hg-10-2           : Home & Garden > Household Supplies > Floor Protection Films & Runners
+gid://shopify/TaxonomyCategory/hg-10-3           : Home & Garden > Household Supplies > Furniture Floor Protectors
+gid://shopify/TaxonomyCategory/hg-10-4           : Home & Garden > Household Supplies > Garage Floor Mats
+gid://shopify/TaxonomyCategory/hg-10-5           : Home & Garden > Household Supplies > Garbage Bags
+gid://shopify/TaxonomyCategory/hg-10-6           : Home & Garden > Household Supplies > Household Cleaning Supplies
+gid://shopify/TaxonomyCategory/hg-10-7           : Home & Garden > Household Supplies > Household Paper Products
+gid://shopify/TaxonomyCategory/hg-10-8           : Home & Garden > Household Supplies > Household Thermometers
+gid://shopify/TaxonomyCategory/hg-10-9           : Home & Garden > Household Supplies > Laundry Supplies
+gid://shopify/TaxonomyCategory/hg-10-10          : Home & Garden > Household Supplies > Moisture Absorbers
+gid://shopify/TaxonomyCategory/hg-10-11          : Home & Garden > Household Supplies > Pest Control
+gid://shopify/TaxonomyCategory/hg-10-12          : Home & Garden > Household Supplies > Rug Covers
+gid://shopify/TaxonomyCategory/hg-10-13          : Home & Garden > Household Supplies > Rug Pads
+gid://shopify/TaxonomyCategory/hg-10-14          : Home & Garden > Household Supplies > Shoe Care & Tools
+gid://shopify/TaxonomyCategory/hg-10-15          : Home & Garden > Household Supplies > Stair Treads
+gid://shopify/TaxonomyCategory/hg-10-16          : Home & Garden > Household Supplies > Storage & Organization
+gid://shopify/TaxonomyCategory/hg-10-17          : Home & Garden > Household Supplies > Trash Compactor Accessories
+gid://shopify/TaxonomyCategory/hg-10-18          : Home & Garden > Household Supplies > Waste Containment
+gid://shopify/TaxonomyCategory/hg-10-19          : Home & Garden > Household Supplies > Waste Containment Accessories
+gid://shopify/TaxonomyCategory/hg-11             : Home & Garden > Kitchen & Dining
+gid://shopify/TaxonomyCategory/hg-11-1           : Home & Garden > Kitchen & Dining > Barware
+gid://shopify/TaxonomyCategory/hg-11-2           : Home & Garden > Kitchen & Dining > Cookware & Bakeware
+gid://shopify/TaxonomyCategory/hg-11-3           : Home & Garden > Kitchen & Dining > Food & Beverage Carriers
+gid://shopify/TaxonomyCategory/hg-11-3-7         : Home & Garden > Kitchen & Dining > Food & Beverage Carriers > Lunch Boxes & Totes
+gid://shopify/TaxonomyCategory/hg-11-3-7-5       : Home & Garden > Kitchen & Dining > Food & Beverage Carriers > Lunch Boxes & Totes > Bento Boxes
+gid://shopify/TaxonomyCategory/hg-11-3-7-3       : Home & Garden > Kitchen & Dining > Food & Beverage Carriers > Lunch Boxes & Totes > Lunch Containers
+gid://shopify/TaxonomyCategory/hg-11-4           : Home & Garden > Kitchen & Dining > Food Storage
+gid://shopify/TaxonomyCategory/hg-11-5           : Home & Garden > Kitchen & Dining > Food Storage Accessories
+gid://shopify/TaxonomyCategory/hg-11-6           : Home & Garden > Kitchen & Dining > Kitchen Appliance Accessories
+gid://shopify/TaxonomyCategory/hg-11-6-2         : Home & Garden > Kitchen & Dining > Kitchen Appliance Accessories > Coffee Maker & Espresso Machine Accessories
+gid://shopify/TaxonomyCategory/hg-11-6-2-6       : Home & Garden > Kitchen & Dining > Kitchen Appliance Accessories > Coffee Maker & Espresso Machine Accessories > Coffee Grinders
+gid://shopify/TaxonomyCategory/hg-11-7           : Home & Garden > Kitchen & Dining > Kitchen Appliances
+gid://shopify/TaxonomyCategory/hg-11-7-4         : Home & Garden > Kitchen & Dining > Kitchen Appliances > Coffee Makers & Espresso Machines
+gid://shopify/TaxonomyCategory/hg-11-7-4-3       : Home & Garden > Kitchen & Dining > Kitchen Appliances > Coffee Makers & Espresso Machines > Espresso Machines
+gid://shopify/TaxonomyCategory/hg-11-8           : Home & Garden > Kitchen & Dining > Kitchen Tools & Utensils
+gid://shopify/TaxonomyCategory/hg-11-11          : Home & Garden > Kitchen & Dining > Outdoor Kitchens
+gid://shopify/TaxonomyCategory/hg-11-9           : Home & Garden > Kitchen & Dining > Prefabricated Kitchens & Kitchenettes
+gid://shopify/TaxonomyCategory/hg-11-10          : Home & Garden > Kitchen & Dining > Tableware
+gid://shopify/TaxonomyCategory/hg-12             : Home & Garden > Lawn & Garden
+gid://shopify/TaxonomyCategory/hg-12-1           : Home & Garden > Lawn & Garden > Gardening
+gid://shopify/TaxonomyCategory/hg-12-2           : Home & Garden > Lawn & Garden > Outdoor Living
+gid://shopify/TaxonomyCategory/hg-12-3           : Home & Garden > Lawn & Garden > Outdoor Power Equipment
+gid://shopify/TaxonomyCategory/hg-12-4           : Home & Garden > Lawn & Garden > Outdoor Power Equipment Accessories
+gid://shopify/TaxonomyCategory/hg-12-5           : Home & Garden > Lawn & Garden > Snow Removal
+gid://shopify/TaxonomyCategory/hg-12-6           : Home & Garden > Lawn & Garden > Watering & Irrigation
+gid://shopify/TaxonomyCategory/hg-13             : Home & Garden > Lighting
+gid://shopify/TaxonomyCategory/hg-13-1           : Home & Garden > Lighting > Emergency Lighting
+gid://shopify/TaxonomyCategory/hg-13-2           : Home & Garden > Lighting > Floating & Submersible Lights
+gid://shopify/TaxonomyCategory/hg-13-3           : Home & Garden > Lighting > Flood & Spot Lights
+gid://shopify/TaxonomyCategory/hg-13-4           : Home & Garden > Lighting > In-Ground Lights
+gid://shopify/TaxonomyCategory/hg-13-5           : Home & Garden > Lighting > Lamps
+gid://shopify/TaxonomyCategory/hg-13-6           : Home & Garden > Lighting > Landscape Pathway Lighting
+gid://shopify/TaxonomyCategory/hg-13-7           : Home & Garden > Lighting > Light Bulbs
+gid://shopify/TaxonomyCategory/hg-13-8           : Home & Garden > Lighting > Light Ropes & Strings
+gid://shopify/TaxonomyCategory/hg-13-9           : Home & Garden > Lighting > Lighting Fixtures
+gid://shopify/TaxonomyCategory/hg-13-10          : Home & Garden > Lighting > Night Lights & Ambient Lighting
+gid://shopify/TaxonomyCategory/hg-13-11          : Home & Garden > Lighting > Picture Lights
+gid://shopify/TaxonomyCategory/hg-13-12          : Home & Garden > Lighting > Tiki Torches & Oil Lamps
+gid://shopify/TaxonomyCategory/hg-13-13          : Home & Garden > Lighting > Track Lighting
+gid://shopify/TaxonomyCategory/hg-14             : Home & Garden > Lighting Accessories
+gid://shopify/TaxonomyCategory/hg-14-6           : Home & Garden > Lighting Accessories > Lamp Chimneys
+gid://shopify/TaxonomyCategory/hg-14-7           : Home & Garden > Lighting Accessories > Lamp Finials
+gid://shopify/TaxonomyCategory/hg-14-8           : Home & Garden > Lighting Accessories > Lamp Harps
+gid://shopify/TaxonomyCategory/hg-14-1           : Home & Garden > Lighting Accessories > Lamp Post Bases
+gid://shopify/TaxonomyCategory/hg-14-2           : Home & Garden > Lighting Accessories > Lamp Post Mounts
+gid://shopify/TaxonomyCategory/hg-14-3           : Home & Garden > Lighting Accessories > Lamp Shades
+gid://shopify/TaxonomyCategory/hg-14-4           : Home & Garden > Lighting Accessories > Lighting Timers
+gid://shopify/TaxonomyCategory/hg-14-5           : Home & Garden > Lighting Accessories > Oil Lamp Fuel
+gid://shopify/TaxonomyCategory/hg-15             : Home & Garden > Linens & Bedding
+gid://shopify/TaxonomyCategory/hg-15-1           : Home & Garden > Linens & Bedding > Bedding
+gid://shopify/TaxonomyCategory/hg-15-2           : Home & Garden > Linens & Bedding > Kitchen Linens Sets
+gid://shopify/TaxonomyCategory/hg-15-3           : Home & Garden > Linens & Bedding > Table Linens
+gid://shopify/TaxonomyCategory/hg-15-4           : Home & Garden > Linens & Bedding > Towels
+gid://shopify/TaxonomyCategory/hg-16             : Home & Garden > Parasols & Rain Umbrellas
+gid://shopify/TaxonomyCategory/hg-16-1           : Home & Garden > Parasols & Rain Umbrellas > Parasols
+gid://shopify/TaxonomyCategory/hg-16-2           : Home & Garden > Parasols & Rain Umbrellas > Rain Umbrellas
+gid://shopify/TaxonomyCategory/hg-17             : Home & Garden > Plants
+gid://shopify/TaxonomyCategory/hg-17-1           : Home & Garden > Plants > Aquatic Plants
+gid://shopify/TaxonomyCategory/hg-17-2           : Home & Garden > Plants > Flowers
+gid://shopify/TaxonomyCategory/hg-17-3           : Home & Garden > Plants > Indoor & Outdoor Plants
+gid://shopify/TaxonomyCategory/hg-17-4           : Home & Garden > Plants > Plant & Herb Growing Kits
+gid://shopify/TaxonomyCategory/hg-17-5           : Home & Garden > Plants > Seeds, Bulbs & Accessories
+gid://shopify/TaxonomyCategory/hg-17-6           : Home & Garden > Plants > Trees
+gid://shopify/TaxonomyCategory/hg-18             : Home & Garden > Pool & Spa
+gid://shopify/TaxonomyCategory/hg-18-1           : Home & Garden > Pool & Spa > Pool & Spa Accessories
+gid://shopify/TaxonomyCategory/hg-18-2           : Home & Garden > Pool & Spa > Sauna Accessories
+gid://shopify/TaxonomyCategory/hg-18-3           : Home & Garden > Pool & Spa > Saunas
+gid://shopify/TaxonomyCategory/hg-18-4           : Home & Garden > Pool & Spa > Spas
+gid://shopify/TaxonomyCategory/hg-18-5           : Home & Garden > Pool & Spa > Swimming Pools
+gid://shopify/TaxonomyCategory/hg-19             : Home & Garden > Smoking Accessories
+gid://shopify/TaxonomyCategory/hg-19-1           : Home & Garden > Smoking Accessories > Ashtrays
+gid://shopify/TaxonomyCategory/hg-19-2           : Home & Garden > Smoking Accessories > Cigar Cases
+gid://shopify/TaxonomyCategory/hg-19-3           : Home & Garden > Smoking Accessories > Cigar Cutters & Punches
+gid://shopify/TaxonomyCategory/hg-19-4           : Home & Garden > Smoking Accessories > Cigarette Cases
+gid://shopify/TaxonomyCategory/hg-19-5           : Home & Garden > Smoking Accessories > Cigarette Holders
+gid://shopify/TaxonomyCategory/hg-19-12          : Home & Garden > Smoking Accessories > Dry Herb Vaporizer Accessories
+gid://shopify/TaxonomyCategory/hg-19-11          : Home & Garden > Smoking Accessories > Dry Herb Vaporizers
+gid://shopify/TaxonomyCategory/hg-19-13          : Home & Garden > Smoking Accessories > Grinders
+gid://shopify/TaxonomyCategory/hg-19-6           : Home & Garden > Smoking Accessories > Humidor Accessories
+gid://shopify/TaxonomyCategory/hg-19-7           : Home & Garden > Smoking Accessories > Humidors
+gid://shopify/TaxonomyCategory/hg-19-8           : Home & Garden > Smoking Accessories > Pipe Cleaners
+gid://shopify/TaxonomyCategory/hg-19-9           : Home & Garden > Smoking Accessories > Pipe Stands
+gid://shopify/TaxonomyCategory/hg-19-10          : Home & Garden > Smoking Accessories > Rolling Trays
+gid://shopify/TaxonomyCategory/hg-20             : Home & Garden > Umbrella Sleeves & Cases
+gid://shopify/TaxonomyCategory/hg-20-1           : Home & Garden > Umbrella Sleeves & Cases > Umbrella Cases
+gid://shopify/TaxonomyCategory/hg-20-2           : Home & Garden > Umbrella Sleeves & Cases > Umbrella Sleeves
+gid://shopify/TaxonomyCategory/hg-21             : Home & Garden > Wood Stoves
+gid://shopify/TaxonomyCategory/lb                : Luggage & Bags
+gid://shopify/TaxonomyCategory/lb-1              : Luggage & Bags > Backpacks
+gid://shopify/TaxonomyCategory/lb-1-15           : Luggage & Bags > Backpacks > Hiking Backpacks
+gid://shopify/TaxonomyCategory/lb-1-16           : Luggage & Bags > Backpacks > Laptop Backpacks
+gid://shopify/TaxonomyCategory/lb-1-17           : Luggage & Bags > Backpacks > Military Backpacks
+gid://shopify/TaxonomyCategory/lb-1-12           : Luggage & Bags > Backpacks > School Backpacks
+gid://shopify/TaxonomyCategory/lb-2              : Luggage & Bags > Briefcases
+gid://shopify/TaxonomyCategory/lb-3              : Luggage & Bags > Cosmetic & Toiletry Bags
+gid://shopify/TaxonomyCategory/lb-3-3            : Luggage & Bags > Cosmetic & Toiletry Bags > Makeup Bags
+gid://shopify/TaxonomyCategory/lb-3-4            : Luggage & Bags > Cosmetic & Toiletry Bags > Toiletry Bags
+gid://shopify/TaxonomyCategory/lb-3-5            : Luggage & Bags > Cosmetic & Toiletry Bags > Travel Organizer Bags
+gid://shopify/TaxonomyCategory/lb-4              : Luggage & Bags > Diaper Bags
+gid://shopify/TaxonomyCategory/lb-16             : Luggage & Bags > Dry Bags
+gid://shopify/TaxonomyCategory/lb-5              : Luggage & Bags > Dry Boxes
+gid://shopify/TaxonomyCategory/lb-6              : Luggage & Bags > Duffel Bags
+gid://shopify/TaxonomyCategory/lb-6-1            : Luggage & Bags > Duffel Bags > Gym Duffel Bags
+gid://shopify/TaxonomyCategory/lb-7              : Luggage & Bags > Fanny Packs
+gid://shopify/TaxonomyCategory/lb-8              : Luggage & Bags > Garment Bags
+gid://shopify/TaxonomyCategory/lb-15             : Luggage & Bags > Laptop Bags
+gid://shopify/TaxonomyCategory/lb-9              : Luggage & Bags > Luggage Accessories
+gid://shopify/TaxonomyCategory/lb-9-1            : Luggage & Bags > Luggage Accessories > Dry Box Liners & Inserts
+gid://shopify/TaxonomyCategory/lb-9-2            : Luggage & Bags > Luggage Accessories > Luggage Covers
+gid://shopify/TaxonomyCategory/lb-9-3            : Luggage & Bags > Luggage Accessories > Luggage Racks & Stands
+gid://shopify/TaxonomyCategory/lb-9-4            : Luggage & Bags > Luggage Accessories > Luggage Straps
+gid://shopify/TaxonomyCategory/lb-9-5            : Luggage & Bags > Luggage Accessories > Luggage Tags
+gid://shopify/TaxonomyCategory/lb-9-6            : Luggage & Bags > Luggage Accessories > Packing Organizers
+gid://shopify/TaxonomyCategory/lb-9-7            : Luggage & Bags > Luggage Accessories > Travel Bottles & Containers
+gid://shopify/TaxonomyCategory/lb-9-8            : Luggage & Bags > Luggage Accessories > Travel Pouches
+gid://shopify/TaxonomyCategory/lb-10             : Luggage & Bags > Messenger Bags
+gid://shopify/TaxonomyCategory/lb-11             : Luggage & Bags > Shopping Totes
+gid://shopify/TaxonomyCategory/lb-12             : Luggage & Bags > Suitcases
+gid://shopify/TaxonomyCategory/lb-12-2           : Luggage & Bags > Suitcases > Carry-On Suitcases
+gid://shopify/TaxonomyCategory/lb-12-3           : Luggage & Bags > Suitcases > Checked Suitcases
+gid://shopify/TaxonomyCategory/lb-12-5           : Luggage & Bags > Suitcases > Kids' Suitcases
+gid://shopify/TaxonomyCategory/lb-12-9           : Luggage & Bags > Suitcases > Suitcase Travel Sets
+gid://shopify/TaxonomyCategory/lb-13             : Luggage & Bags > Tote Bags
+gid://shopify/TaxonomyCategory/lb-14             : Luggage & Bags > Train Cases
+gid://shopify/TaxonomyCategory/ma                : Mature
+gid://shopify/TaxonomyCategory/ma-1              : Mature > Erotic
+gid://shopify/TaxonomyCategory/ma-1-6            : Mature > Erotic > Erotic Books
+gid://shopify/TaxonomyCategory/ma-1-1            : Mature > Erotic > Erotic Clothing
+gid://shopify/TaxonomyCategory/ma-1-2            : Mature > Erotic > Erotic Food & Edibles
+gid://shopify/TaxonomyCategory/ma-1-3            : Mature > Erotic > Erotic Magazines
+gid://shopify/TaxonomyCategory/ma-1-5            : Mature > Erotic > Erotic Videos
+gid://shopify/TaxonomyCategory/ma-1-4            : Mature > Erotic > Sex Toys & Erotic Games
+gid://shopify/TaxonomyCategory/ma-2              : Mature > Weapons & Weapon Accessories
+gid://shopify/TaxonomyCategory/ma-2-1            : Mature > Weapons & Weapon Accessories > Weapon Care & Accessories
+gid://shopify/TaxonomyCategory/ma-2-2            : Mature > Weapons & Weapon Accessories > Weapons
+gid://shopify/TaxonomyCategory/me                : Media
+gid://shopify/TaxonomyCategory/me-8              : Media > Academic Papers & Studies
+gid://shopify/TaxonomyCategory/me-1              : Media > Books
+gid://shopify/TaxonomyCategory/me-1-1            : Media > Books > Audiobooks
+gid://shopify/TaxonomyCategory/me-1-2            : Media > Books > E-Books
+gid://shopify/TaxonomyCategory/me-1-3            : Media > Books > Print Books
+gid://shopify/TaxonomyCategory/me-2              : Media > Magazines & Newspapers
+gid://shopify/TaxonomyCategory/me-2-1            : Media > Magazines & Newspapers > Magazines
+gid://shopify/TaxonomyCategory/me-2-2            : Media > Magazines & Newspapers > Newspapers
+gid://shopify/TaxonomyCategory/me-3              : Media > Music & Sound Recordings
+gid://shopify/TaxonomyCategory/me-3-1            : Media > Music & Sound Recordings > Digital Music Downloads
+gid://shopify/TaxonomyCategory/me-3-3            : Media > Music & Sound Recordings > Music CDs
+gid://shopify/TaxonomyCategory/me-3-2            : Media > Music & Sound Recordings > Music Cassette Tapes
+gid://shopify/TaxonomyCategory/me-3-4            : Media > Music & Sound Recordings > Records & LPs
+gid://shopify/TaxonomyCategory/me-3-5            : Media > Music & Sound Recordings > Spoken Word & Field Recordings
+gid://shopify/TaxonomyCategory/me-3-6            : Media > Music & Sound Recordings > Vinyl
+gid://shopify/TaxonomyCategory/me-9              : Media > Online Courses
+gid://shopify/TaxonomyCategory/me-4              : Media > Podcasts & Live Streams
+gid://shopify/TaxonomyCategory/me-4-1            : Media > Podcasts & Live Streams > Live Streams
+gid://shopify/TaxonomyCategory/me-4-2            : Media > Podcasts & Live Streams > Podcasts
+gid://shopify/TaxonomyCategory/me-4-3            : Media > Podcasts & Live Streams > Radio Shows
+gid://shopify/TaxonomyCategory/me-10             : Media > Printables
+gid://shopify/TaxonomyCategory/me-10-3           : Media > Printables > Activity Sheets
+gid://shopify/TaxonomyCategory/me-10-2           : Media > Printables > Planners
+gid://shopify/TaxonomyCategory/me-10-1           : Media > Printables > Wall Art
+gid://shopify/TaxonomyCategory/me-5              : Media > Product Manuals
+gid://shopify/TaxonomyCategory/me-6              : Media > Sheet Music
+gid://shopify/TaxonomyCategory/me-7              : Media > Videos
+gid://shopify/TaxonomyCategory/me-7-1            : Media > Videos > Blu-ray
+gid://shopify/TaxonomyCategory/me-7-3            : Media > Videos > DVDs
+gid://shopify/TaxonomyCategory/me-7-2            : Media > Videos > Digital Downloads
+gid://shopify/TaxonomyCategory/me-7-4            : Media > Videos > VHS Tapes
+gid://shopify/TaxonomyCategory/os                : Office Supplies
+gid://shopify/TaxonomyCategory/os-1              : Office Supplies > Book Accessories
+gid://shopify/TaxonomyCategory/os-1-1            : Office Supplies > Book Accessories > Book Covers
+gid://shopify/TaxonomyCategory/os-1-2            : Office Supplies > Book Accessories > Book Lights
+gid://shopify/TaxonomyCategory/os-1-3            : Office Supplies > Book Accessories > Book Stands & Rests
+gid://shopify/TaxonomyCategory/os-1-4            : Office Supplies > Book Accessories > Bookmarks
+gid://shopify/TaxonomyCategory/os-2              : Office Supplies > Desk Pads & Blotters
+gid://shopify/TaxonomyCategory/os-3              : Office Supplies > Filing & Organization
+gid://shopify/TaxonomyCategory/os-3-1            : Office Supplies > Filing & Organization > Address Books
+gid://shopify/TaxonomyCategory/os-3-2            : Office Supplies > Filing & Organization > Binding Supplies
+gid://shopify/TaxonomyCategory/os-3-3            : Office Supplies > Filing & Organization > Business Card Books
+gid://shopify/TaxonomyCategory/os-3-4            : Office Supplies > Filing & Organization > Business Card Stands
+gid://shopify/TaxonomyCategory/os-3-9            : Office Supplies > Filing & Organization > CD/DVD Cases & Organizers
+gid://shopify/TaxonomyCategory/os-3-5            : Office Supplies > Filing & Organization > Calendars, Organizers & Planners
+gid://shopify/TaxonomyCategory/os-3-6            : Office Supplies > Filing & Organization > Card Files
+gid://shopify/TaxonomyCategory/os-3-7            : Office Supplies > Filing & Organization > Card Sleeves
+gid://shopify/TaxonomyCategory/os-3-8            : Office Supplies > Filing & Organization > Cash Boxes
+gid://shopify/TaxonomyCategory/os-3-10           : Office Supplies > Filing & Organization > Desk Organizers
+gid://shopify/TaxonomyCategory/os-3-11           : Office Supplies > Filing & Organization > File Boxes
+gid://shopify/TaxonomyCategory/os-3-12           : Office Supplies > Filing & Organization > File Folders
+gid://shopify/TaxonomyCategory/os-3-13           : Office Supplies > Filing & Organization > Folders & Report Covers
+gid://shopify/TaxonomyCategory/os-3-14           : Office Supplies > Filing & Organization > Greeting Card Organizers
+gid://shopify/TaxonomyCategory/os-3-15           : Office Supplies > Filing & Organization > Mail Sorters
+gid://shopify/TaxonomyCategory/os-3-16           : Office Supplies > Filing & Organization > Pen & Pencil Cases
+gid://shopify/TaxonomyCategory/os-3-17           : Office Supplies > Filing & Organization > Portfolios & Padfolios
+gid://shopify/TaxonomyCategory/os-3-18           : Office Supplies > Filing & Organization > Recipe Card Boxes
+gid://shopify/TaxonomyCategory/os-4              : Office Supplies > General Office Supplies
+gid://shopify/TaxonomyCategory/os-4-1            : Office Supplies > General Office Supplies > Brass Fasteners
+gid://shopify/TaxonomyCategory/os-4-2            : Office Supplies > General Office Supplies > Correction Fluids, Pens & Tapes
+gid://shopify/TaxonomyCategory/os-4-3            : Office Supplies > General Office Supplies > Erasers
+gid://shopify/TaxonomyCategory/os-4-4            : Office Supplies > General Office Supplies > Labels & Tags
+gid://shopify/TaxonomyCategory/os-4-5            : Office Supplies > General Office Supplies > Laminating Film, Pouches & Sheets
+gid://shopify/TaxonomyCategory/os-4-6            : Office Supplies > General Office Supplies > Mounting Putty
+gid://shopify/TaxonomyCategory/os-4-7            : Office Supplies > General Office Supplies > Office Tape
+gid://shopify/TaxonomyCategory/os-4-8            : Office Supplies > General Office Supplies > Paper Clips & Clamps
+gid://shopify/TaxonomyCategory/os-4-9            : Office Supplies > General Office Supplies > Paper Products
+gid://shopify/TaxonomyCategory/os-4-10           : Office Supplies > General Office Supplies > Rubber Bands
+gid://shopify/TaxonomyCategory/os-4-11           : Office Supplies > General Office Supplies > Staples
+gid://shopify/TaxonomyCategory/os-4-12           : Office Supplies > General Office Supplies > Tacks & Pushpins
+gid://shopify/TaxonomyCategory/os-5              : Office Supplies > Impulse Sealers
+gid://shopify/TaxonomyCategory/os-5-1            : Office Supplies > Impulse Sealers > Handheld Impulse Sealers
+gid://shopify/TaxonomyCategory/os-5-2            : Office Supplies > Impulse Sealers > Tabletop Impulse Sealers
+gid://shopify/TaxonomyCategory/os-6              : Office Supplies > Lap Desks
+gid://shopify/TaxonomyCategory/os-7              : Office Supplies > Name Plates
+gid://shopify/TaxonomyCategory/os-7-1            : Office Supplies > Name Plates > Desk Name Plates
+gid://shopify/TaxonomyCategory/os-7-2            : Office Supplies > Name Plates > Door Name Plates
+gid://shopify/TaxonomyCategory/os-8              : Office Supplies > Office & Chair Mats
+gid://shopify/TaxonomyCategory/os-8-1            : Office Supplies > Office & Chair Mats > Anti-Fatigue Mats
+gid://shopify/TaxonomyCategory/os-8-2            : Office Supplies > Office & Chair Mats > Chair Mats
+gid://shopify/TaxonomyCategory/os-8-3            : Office Supplies > Office & Chair Mats > Office Mats
+gid://shopify/TaxonomyCategory/os-9              : Office Supplies > Office Carts
+gid://shopify/TaxonomyCategory/os-9-1            : Office Supplies > Office Carts > AV Carts
+gid://shopify/TaxonomyCategory/os-9-2            : Office Supplies > Office Carts > Book Carts
+gid://shopify/TaxonomyCategory/os-9-3            : Office Supplies > Office Carts > File Carts
+gid://shopify/TaxonomyCategory/os-9-4            : Office Supplies > Office Carts > Mail Carts
+gid://shopify/TaxonomyCategory/os-9-5            : Office Supplies > Office Carts > Utility Carts
+gid://shopify/TaxonomyCategory/os-10             : Office Supplies > Office Equipment
+gid://shopify/TaxonomyCategory/os-10-1           : Office Supplies > Office Equipment > Calculator Accessories
+gid://shopify/TaxonomyCategory/os-10-2           : Office Supplies > Office Equipment > Calculators
+gid://shopify/TaxonomyCategory/os-10-3           : Office Supplies > Office Equipment > Electronic Dictionaries & Translators
+gid://shopify/TaxonomyCategory/os-10-4           : Office Supplies > Office Equipment > Label Makers
+gid://shopify/TaxonomyCategory/os-10-5           : Office Supplies > Office Equipment > Laminators
+gid://shopify/TaxonomyCategory/os-10-6           : Office Supplies > Office Equipment > Office Shredders
+gid://shopify/TaxonomyCategory/os-10-7           : Office Supplies > Office Equipment > Postage Meters
+gid://shopify/TaxonomyCategory/os-10-8           : Office Supplies > Office Equipment > Time & Attendance Clocks
+gid://shopify/TaxonomyCategory/os-10-9           : Office Supplies > Office Equipment > Transcribers & Dictation Systems
+gid://shopify/TaxonomyCategory/os-10-10          : Office Supplies > Office Equipment > Typewriters
+gid://shopify/TaxonomyCategory/os-11             : Office Supplies > Office Instruments
+gid://shopify/TaxonomyCategory/os-11-1           : Office Supplies > Office Instruments > Call Bells
+gid://shopify/TaxonomyCategory/os-11-2           : Office Supplies > Office Instruments > Clipboards
+gid://shopify/TaxonomyCategory/os-11-3           : Office Supplies > Office Instruments > Letter Openers
+gid://shopify/TaxonomyCategory/os-11-4           : Office Supplies > Office Instruments > Magnifiers
+gid://shopify/TaxonomyCategory/os-11-5           : Office Supplies > Office Instruments > Office Stamps
+gid://shopify/TaxonomyCategory/os-11-6           : Office Supplies > Office Instruments > Pencil Sharpeners
+gid://shopify/TaxonomyCategory/os-11-7           : Office Supplies > Office Instruments > Staple Removers
+gid://shopify/TaxonomyCategory/os-11-8           : Office Supplies > Office Instruments > Staplers
+gid://shopify/TaxonomyCategory/os-11-9           : Office Supplies > Office Instruments > Tape Dispensers
+gid://shopify/TaxonomyCategory/os-11-10          : Office Supplies > Office Instruments > Writing & Drawing Instrument Accessories
+gid://shopify/TaxonomyCategory/os-11-11          : Office Supplies > Office Instruments > Writing & Drawing Instruments
+gid://shopify/TaxonomyCategory/os-12             : Office Supplies > Paper Handling
+gid://shopify/TaxonomyCategory/os-12-1           : Office Supplies > Paper Handling > Fingertip Grips
+gid://shopify/TaxonomyCategory/os-12-2           : Office Supplies > Paper Handling > Hole Punches
+gid://shopify/TaxonomyCategory/os-12-3           : Office Supplies > Paper Handling > Paper Folding Machines
+gid://shopify/TaxonomyCategory/os-12-4           : Office Supplies > Paper Handling > Paper Joggers
+gid://shopify/TaxonomyCategory/os-12-5           : Office Supplies > Paper Handling > Paperweights
+gid://shopify/TaxonomyCategory/os-12-6           : Office Supplies > Paper Handling > Pencil Boards
+gid://shopify/TaxonomyCategory/os-13             : Office Supplies > Presentation Supplies
+gid://shopify/TaxonomyCategory/os-13-1           : Office Supplies > Presentation Supplies > Chalkboards
+gid://shopify/TaxonomyCategory/os-13-2           : Office Supplies > Presentation Supplies > Display Boards
+gid://shopify/TaxonomyCategory/os-13-3           : Office Supplies > Presentation Supplies > Document Cameras
+gid://shopify/TaxonomyCategory/os-13-4           : Office Supplies > Presentation Supplies > Dry-Erase Boards
+gid://shopify/TaxonomyCategory/os-13-5           : Office Supplies > Presentation Supplies > Easel Pads
+gid://shopify/TaxonomyCategory/os-13-6           : Office Supplies > Presentation Supplies > Easels
+gid://shopify/TaxonomyCategory/os-13-7           : Office Supplies > Presentation Supplies > Laser Pointers
+gid://shopify/TaxonomyCategory/os-13-8           : Office Supplies > Presentation Supplies > Lecterns
+gid://shopify/TaxonomyCategory/os-13-9           : Office Supplies > Presentation Supplies > Transparencies
+gid://shopify/TaxonomyCategory/os-13-10          : Office Supplies > Presentation Supplies > Wireless Presenters
+gid://shopify/TaxonomyCategory/os-14             : Office Supplies > Shipping Supplies
+gid://shopify/TaxonomyCategory/os-14-1           : Office Supplies > Shipping Supplies > Moving & Shipping Boxes
+gid://shopify/TaxonomyCategory/os-14-2           : Office Supplies > Shipping Supplies > Packing Materials
+gid://shopify/TaxonomyCategory/os-14-3           : Office Supplies > Shipping Supplies > Packing Tape
+gid://shopify/TaxonomyCategory/pa                : Product Add-Ons
+gid://shopify/TaxonomyCategory/pa-1              : Product Add-Ons > Extended Warranties
+gid://shopify/TaxonomyCategory/pa-2              : Product Add-Ons > Installation Services
+gid://shopify/TaxonomyCategory/pa-3              : Product Add-Ons > Maintenance Plans
+gid://shopify/TaxonomyCategory/pa-4              : Product Add-Ons > Product Customization
+gid://shopify/TaxonomyCategory/pa-5              : Product Add-Ons > Product Upgrades
+gid://shopify/TaxonomyCategory/pa-6              : Product Add-Ons > Shipping Insurance
+gid://shopify/TaxonomyCategory/pa-7              : Product Add-Ons > Subscription Services
+gid://shopify/TaxonomyCategory/rc                : Religious & Ceremonial
+gid://shopify/TaxonomyCategory/rc-1              : Religious & Ceremonial > Memorial Ceremony Supplies
+gid://shopify/TaxonomyCategory/rc-1-1            : Religious & Ceremonial > Memorial Ceremony Supplies > Memorial Urns
+gid://shopify/TaxonomyCategory/rc-2              : Religious & Ceremonial > Religious Items
+gid://shopify/TaxonomyCategory/rc-2-1            : Religious & Ceremonial > Religious Items > Prayer Beads
+gid://shopify/TaxonomyCategory/rc-2-2            : Religious & Ceremonial > Religious Items > Prayer Cards
+gid://shopify/TaxonomyCategory/rc-2-3            : Religious & Ceremonial > Religious Items > Religious Altars
+gid://shopify/TaxonomyCategory/rc-2-4            : Religious & Ceremonial > Religious Items > Religious Veils
+gid://shopify/TaxonomyCategory/rc-2-5            : Religious & Ceremonial > Religious Items > Tarot Cards
+gid://shopify/TaxonomyCategory/rc-3              : Religious & Ceremonial > Wedding Ceremony Supplies
+gid://shopify/TaxonomyCategory/rc-3-1            : Religious & Ceremonial > Wedding Ceremony Supplies > Aisle Runners
+gid://shopify/TaxonomyCategory/rc-3-2            : Religious & Ceremonial > Wedding Ceremony Supplies > Flower Girl Baskets
+gid://shopify/TaxonomyCategory/rc-3-3            : Religious & Ceremonial > Wedding Ceremony Supplies > Ring Pillows & Holders
+gid://shopify/TaxonomyCategory/se                : Services
+gid://shopify/TaxonomyCategory/se-1              : Services > Automotive Services
+gid://shopify/TaxonomyCategory/se-1-1            : Services > Automotive Services > Automotive Electrical Services
+gid://shopify/TaxonomyCategory/se-1-3            : Services > Automotive Services > Car Repair & Maintenance
+gid://shopify/TaxonomyCategory/se-1-4            : Services > Automotive Services > Car Security & Safety
+gid://shopify/TaxonomyCategory/se-1-2            : Services > Automotive Services > Car Valeting & Detailing
+gid://shopify/TaxonomyCategory/se-1-5            : Services > Automotive Services > Tire & Wheel Services
+gid://shopify/TaxonomyCategory/se-1-6            : Services > Automotive Services > Vehicle Inspection
+gid://shopify/TaxonomyCategory/se-2              : Services > Building & Construction Services
+gid://shopify/TaxonomyCategory/se-2-1            : Services > Building & Construction Services > Commercial Construction
+gid://shopify/TaxonomyCategory/se-2-2            : Services > Building & Construction Services > Outdoor Construction
+gid://shopify/TaxonomyCategory/se-2-3            : Services > Building & Construction Services > Residential Construction & Renovation
+gid://shopify/TaxonomyCategory/se-2-4            : Services > Building & Construction Services > Specialized Construction Services
+gid://shopify/TaxonomyCategory/se-3              : Services > Business Services
+gid://shopify/TaxonomyCategory/se-3-1            : Services > Business Services > Human Resources & Payroll
+gid://shopify/TaxonomyCategory/se-3-2            : Services > Business Services > Logistics & Removals
+gid://shopify/TaxonomyCategory/se-3-3            : Services > Business Services > Office Services
+gid://shopify/TaxonomyCategory/se-3-4            : Services > Business Services > Security Services
+gid://shopify/TaxonomyCategory/se-4              : Services > Entertainment & Recreation Services
+gid://shopify/TaxonomyCategory/se-4-5            : Services > Entertainment & Recreation Services > Children Activities
+gid://shopify/TaxonomyCategory/se-4-1            : Services > Entertainment & Recreation Services > Concerts & Entertainment Events
+gid://shopify/TaxonomyCategory/se-4-3            : Services > Entertainment & Recreation Services > Event Planning
+gid://shopify/TaxonomyCategory/se-4-6            : Services > Entertainment & Recreation Services > Indoor Activities
+gid://shopify/TaxonomyCategory/se-4-7            : Services > Entertainment & Recreation Services > Outdoor Activities
+gid://shopify/TaxonomyCategory/se-4-4            : Services > Entertainment & Recreation Services > Travel & Leisure
+gid://shopify/TaxonomyCategory/se-8              : Services > Environmental Services
+gid://shopify/TaxonomyCategory/se-8-1            : Services > Environmental Services > Waste Management Services
+gid://shopify/TaxonomyCategory/se-9              : Services > Food & Beverage Services
+gid://shopify/TaxonomyCategory/se-5              : Services > Home Improvement Services
+gid://shopify/TaxonomyCategory/se-5-1            : Services > Home Improvement Services > Electrical Services
+gid://shopify/TaxonomyCategory/se-5-2            : Services > Home Improvement Services > Outdoor Services
+gid://shopify/TaxonomyCategory/se-5-3            : Services > Home Improvement Services > Plumbing
+gid://shopify/TaxonomyCategory/se-5-4            : Services > Home Improvement Services > Specialized Home Services
+gid://shopify/TaxonomyCategory/se-6              : Services > Personal Services
+gid://shopify/TaxonomyCategory/se-6-1            : Services > Personal Services > Beauty & Personal Care
+gid://shopify/TaxonomyCategory/se-6-7            : Services > Personal Services > Clothing Alterations
+gid://shopify/TaxonomyCategory/se-6-2            : Services > Personal Services > Educational Services
+gid://shopify/TaxonomyCategory/se-6-6            : Services > Personal Services > Fitness & Wellness
+gid://shopify/TaxonomyCategory/se-6-3            : Services > Personal Services > Healthcare Services
+gid://shopify/TaxonomyCategory/se-6-4            : Services > Personal Services > Lifestyle Services
+gid://shopify/TaxonomyCategory/se-7              : Services > Professional Services
+gid://shopify/TaxonomyCategory/se-7-1            : Services > Professional Services > Consulting Services
+gid://shopify/TaxonomyCategory/se-7-2            : Services > Professional Services > Finance & Insurance
+gid://shopify/TaxonomyCategory/se-7-3            : Services > Professional Services > IT & Technology
+gid://shopify/TaxonomyCategory/se-7-4            : Services > Professional Services > Legal Services
+gid://shopify/TaxonomyCategory/se-7-5            : Services > Professional Services > Marketing & Advertising
+gid://shopify/TaxonomyCategory/se-7-8            : Services > Professional Services > Property Management
+gid://shopify/TaxonomyCategory/se-7-6            : Services > Professional Services > Real Estate
+gid://shopify/TaxonomyCategory/se-7-9            : Services > Professional Services > Tax Services
+gid://shopify/TaxonomyCategory/so                : Software
+gid://shopify/TaxonomyCategory/so-4              : Software > Cloud Services
+gid://shopify/TaxonomyCategory/so-1              : Software > Computer Software
+gid://shopify/TaxonomyCategory/so-1-1            : Software > Computer Software > Antivirus & Security Software
+gid://shopify/TaxonomyCategory/so-1-15           : Software > Computer Software > Artificial Intelligence (AI) Software
+gid://shopify/TaxonomyCategory/so-1-2            : Software > Computer Software > Business & Productivity Software
+gid://shopify/TaxonomyCategory/so-1-3            : Software > Computer Software > Compilers & Programming Tools
+gid://shopify/TaxonomyCategory/so-1-4            : Software > Computer Software > Computer Utilities & Maintenance Software
+gid://shopify/TaxonomyCategory/so-1-5            : Software > Computer Software > Dictionary & Translation Software
+gid://shopify/TaxonomyCategory/so-1-6            : Software > Computer Software > Educational Software
+gid://shopify/TaxonomyCategory/so-1-7            : Software > Computer Software > Financial, Tax & Accounting Software
+gid://shopify/TaxonomyCategory/so-1-8            : Software > Computer Software > GPS Map Data & Software
+gid://shopify/TaxonomyCategory/so-1-9            : Software > Computer Software > Handheld & PDA Software
+gid://shopify/TaxonomyCategory/so-1-10           : Software > Computer Software > Multimedia & Design Software
+gid://shopify/TaxonomyCategory/so-1-11           : Software > Computer Software > Network Software
+gid://shopify/TaxonomyCategory/so-1-12           : Software > Computer Software > Office Application Software
+gid://shopify/TaxonomyCategory/so-1-13           : Software > Computer Software > Operating Systems
+gid://shopify/TaxonomyCategory/so-1-14           : Software > Computer Software > Restore Disks
+gid://shopify/TaxonomyCategory/so-2              : Software > Digital Goods & Currency
+gid://shopify/TaxonomyCategory/so-2-1            : Software > Digital Goods & Currency > Computer Icons
+gid://shopify/TaxonomyCategory/so-2-2            : Software > Digital Goods & Currency > Desktop Wallpapers
+gid://shopify/TaxonomyCategory/so-2-3            : Software > Digital Goods & Currency > Digital Artwork
+gid://shopify/TaxonomyCategory/so-2-4            : Software > Digital Goods & Currency > Document Templates
+gid://shopify/TaxonomyCategory/so-2-5            : Software > Digital Goods & Currency > Fonts
+gid://shopify/TaxonomyCategory/so-2-9            : Software > Digital Goods & Currency > Photo Editing Presets & LUTs
+gid://shopify/TaxonomyCategory/so-2-8            : Software > Digital Goods & Currency > SVG & Cut Files
+gid://shopify/TaxonomyCategory/so-2-6            : Software > Digital Goods & Currency > Stock Photographs & Video Footage
+gid://shopify/TaxonomyCategory/so-2-7            : Software > Digital Goods & Currency > Virtual Currency
+gid://shopify/TaxonomyCategory/so-3              : Software > Video Game Software
+gid://shopify/TaxonomyCategory/so-3-1            : Software > Video Game Software > Digital Video Games
+gid://shopify/TaxonomyCategory/so-3-2            : Software > Video Game Software > Physical Video Games
+gid://shopify/TaxonomyCategory/sg                : Sporting Goods
+gid://shopify/TaxonomyCategory/sg-1              : Sporting Goods > Athletics
+gid://shopify/TaxonomyCategory/sg-1-1            : Sporting Goods > Athletics > American Football
+gid://shopify/TaxonomyCategory/sg-1-28           : Sporting Goods > Athletics > Australian Rules Football
+gid://shopify/TaxonomyCategory/sg-1-2            : Sporting Goods > Athletics > Baseball & Softball
+gid://shopify/TaxonomyCategory/sg-1-3            : Sporting Goods > Athletics > Basketball
+gid://shopify/TaxonomyCategory/sg-1-32           : Sporting Goods > Athletics > Beach Tennis
+gid://shopify/TaxonomyCategory/sg-1-4            : Sporting Goods > Athletics > Boxing & Martial Arts
+gid://shopify/TaxonomyCategory/sg-1-5            : Sporting Goods > Athletics > Broomball Equipment
+gid://shopify/TaxonomyCategory/sg-1-6            : Sporting Goods > Athletics > Cheerleading
+gid://shopify/TaxonomyCategory/sg-1-7            : Sporting Goods > Athletics > Coaching & Officiating
+gid://shopify/TaxonomyCategory/sg-1-8            : Sporting Goods > Athletics > Cricket
+gid://shopify/TaxonomyCategory/sg-1-26           : Sporting Goods > Athletics > Curling
+gid://shopify/TaxonomyCategory/sg-1-9            : Sporting Goods > Athletics > Dancing
+gid://shopify/TaxonomyCategory/sg-1-10           : Sporting Goods > Athletics > Fencing
+gid://shopify/TaxonomyCategory/sg-1-11           : Sporting Goods > Athletics > Field Hockey & Lacrosse
+gid://shopify/TaxonomyCategory/sg-1-12           : Sporting Goods > Athletics > Figure Skating & Hockey
+gid://shopify/TaxonomyCategory/sg-1-27           : Sporting Goods > Athletics > Gaelic Games (GAA)
+gid://shopify/TaxonomyCategory/sg-1-13           : Sporting Goods > Athletics > General Purpose Athletic Equipment
+gid://shopify/TaxonomyCategory/sg-1-14           : Sporting Goods > Athletics > Gymnastics
+gid://shopify/TaxonomyCategory/sg-1-31           : Sporting Goods > Athletics > Netball
+gid://shopify/TaxonomyCategory/sg-1-15           : Sporting Goods > Athletics > Racquetball & Squash
+gid://shopify/TaxonomyCategory/sg-1-16           : Sporting Goods > Athletics > Rounders
+gid://shopify/TaxonomyCategory/sg-1-17           : Sporting Goods > Athletics > Rugby
+gid://shopify/TaxonomyCategory/sg-1-18           : Sporting Goods > Athletics > Soccer
+gid://shopify/TaxonomyCategory/sg-1-19           : Sporting Goods > Athletics > Team Handball
+gid://shopify/TaxonomyCategory/sg-1-20           : Sporting Goods > Athletics > Tennis
+gid://shopify/TaxonomyCategory/sg-1-21           : Sporting Goods > Athletics > Track & Field
+gid://shopify/TaxonomyCategory/sg-1-30           : Sporting Goods > Athletics > Triathlon
+gid://shopify/TaxonomyCategory/sg-1-29           : Sporting Goods > Athletics > Ultimate Frisbee
+gid://shopify/TaxonomyCategory/sg-1-22           : Sporting Goods > Athletics > Volleyball
+gid://shopify/TaxonomyCategory/sg-1-23           : Sporting Goods > Athletics > Wallyball Equipment
+gid://shopify/TaxonomyCategory/sg-1-24           : Sporting Goods > Athletics > Water Polo
+gid://shopify/TaxonomyCategory/sg-1-25           : Sporting Goods > Athletics > Wrestling
+gid://shopify/TaxonomyCategory/sg-2              : Sporting Goods > Fitness & General Exercise Equipment
+gid://shopify/TaxonomyCategory/sg-2-30           : Sporting Goods > Fitness & General Exercise Equipment > Ab Mats
+gid://shopify/TaxonomyCategory/sg-2-1            : Sporting Goods > Fitness & General Exercise Equipment > Ab Wheels & Rollers
+gid://shopify/TaxonomyCategory/sg-2-2            : Sporting Goods > Fitness & General Exercise Equipment > Aerobic Steps
+gid://shopify/TaxonomyCategory/sg-2-3            : Sporting Goods > Fitness & General Exercise Equipment > Balance Trainers
+gid://shopify/TaxonomyCategory/sg-2-28           : Sporting Goods > Fitness & General Exercise Equipment > Battle Ropes
+gid://shopify/TaxonomyCategory/sg-2-4            : Sporting Goods > Fitness & General Exercise Equipment > Cardio
+gid://shopify/TaxonomyCategory/sg-2-5            : Sporting Goods > Fitness & General Exercise Equipment > Exercise Balls
+gid://shopify/TaxonomyCategory/sg-2-6            : Sporting Goods > Fitness & General Exercise Equipment > Exercise Bands & Loops
+gid://shopify/TaxonomyCategory/sg-2-6-1          : Sporting Goods > Fitness & General Exercise Equipment > Exercise Bands & Loops > Figure Eight Resistance Bands
+gid://shopify/TaxonomyCategory/sg-2-6-4          : Sporting Goods > Fitness & General Exercise Equipment > Exercise Bands & Loops > Flat Resistance Bands
+gid://shopify/TaxonomyCategory/sg-2-6-2          : Sporting Goods > Fitness & General Exercise Equipment > Exercise Bands & Loops > Hip Circle Resistance Bands
+gid://shopify/TaxonomyCategory/sg-2-6-3          : Sporting Goods > Fitness & General Exercise Equipment > Exercise Bands & Loops > Resistance Tubes
+gid://shopify/TaxonomyCategory/sg-2-7            : Sporting Goods > Fitness & General Exercise Equipment > Exercise Benches
+gid://shopify/TaxonomyCategory/sg-2-8            : Sporting Goods > Fitness & General Exercise Equipment > Exercise Equipment Mats
+gid://shopify/TaxonomyCategory/sg-2-9            : Sporting Goods > Fitness & General Exercise Equipment > Exercise Machine & Equipment Sets
+gid://shopify/TaxonomyCategory/sg-2-10           : Sporting Goods > Fitness & General Exercise Equipment > Exercise Wedges
+gid://shopify/TaxonomyCategory/sg-2-11           : Sporting Goods > Fitness & General Exercise Equipment > Foam Roller Accessories
+gid://shopify/TaxonomyCategory/sg-2-12           : Sporting Goods > Fitness & General Exercise Equipment > Foam Rollers
+gid://shopify/TaxonomyCategory/sg-2-13           : Sporting Goods > Fitness & General Exercise Equipment > Hand Exercisers
+gid://shopify/TaxonomyCategory/sg-2-27           : Sporting Goods > Fitness & General Exercise Equipment > Ice Baths & Cold Plunge Tubs
+gid://shopify/TaxonomyCategory/sg-2-14           : Sporting Goods > Fitness & General Exercise Equipment > Inversion Tables & Systems
+gid://shopify/TaxonomyCategory/sg-2-15           : Sporting Goods > Fitness & General Exercise Equipment > Medicine Balls
+gid://shopify/TaxonomyCategory/sg-2-31           : Sporting Goods > Fitness & General Exercise Equipment > Plyometric Boxes
+gid://shopify/TaxonomyCategory/sg-2-16           : Sporting Goods > Fitness & General Exercise Equipment > Power Towers
+gid://shopify/TaxonomyCategory/sg-2-17           : Sporting Goods > Fitness & General Exercise Equipment > Push Up & Pull Up Bars
+gid://shopify/TaxonomyCategory/sg-2-18           : Sporting Goods > Fitness & General Exercise Equipment > Reaction Balls
+gid://shopify/TaxonomyCategory/sg-2-29           : Sporting Goods > Fitness & General Exercise Equipment > Shaker Bottles
+gid://shopify/TaxonomyCategory/sg-2-19           : Sporting Goods > Fitness & General Exercise Equipment > Speed & Resistance Parachutes
+gid://shopify/TaxonomyCategory/sg-2-20           : Sporting Goods > Fitness & General Exercise Equipment > Sport Safety Lights & Reflectors
+gid://shopify/TaxonomyCategory/sg-2-21           : Sporting Goods > Fitness & General Exercise Equipment > Stopwatches
+gid://shopify/TaxonomyCategory/sg-2-22           : Sporting Goods > Fitness & General Exercise Equipment > Suspension Trainers
+gid://shopify/TaxonomyCategory/sg-2-23           : Sporting Goods > Fitness & General Exercise Equipment > Vibration Exercise Machines
+gid://shopify/TaxonomyCategory/sg-2-24           : Sporting Goods > Fitness & General Exercise Equipment > Weight Lifting
+gid://shopify/TaxonomyCategory/sg-2-25           : Sporting Goods > Fitness & General Exercise Equipment > Weighted Clothing
+gid://shopify/TaxonomyCategory/sg-2-26           : Sporting Goods > Fitness & General Exercise Equipment > Yoga & Pilates
+gid://shopify/TaxonomyCategory/sg-3              : Sporting Goods > Indoor Games
+gid://shopify/TaxonomyCategory/sg-3-1            : Sporting Goods > Indoor Games > Air Hockey
+gid://shopify/TaxonomyCategory/sg-3-2            : Sporting Goods > Indoor Games > Billiards
+gid://shopify/TaxonomyCategory/sg-3-3            : Sporting Goods > Indoor Games > Bowling
+gid://shopify/TaxonomyCategory/sg-3-13           : Sporting Goods > Indoor Games > Carrom
+gid://shopify/TaxonomyCategory/sg-3-10           : Sporting Goods > Indoor Games > Crokinole
+gid://shopify/TaxonomyCategory/sg-3-4            : Sporting Goods > Indoor Games > Foosball
+gid://shopify/TaxonomyCategory/sg-3-5            : Sporting Goods > Indoor Games > Multi-Game Tables
+gid://shopify/TaxonomyCategory/sg-3-6            : Sporting Goods > Indoor Games > Ping Pong
+gid://shopify/TaxonomyCategory/sg-3-9            : Sporting Goods > Indoor Games > Ring Toss & Hook Games
+gid://shopify/TaxonomyCategory/sg-3-11           : Sporting Goods > Indoor Games > Sim Racing Equipment
+gid://shopify/TaxonomyCategory/sg-3-7            : Sporting Goods > Indoor Games > Table Shuffleboard
+gid://shopify/TaxonomyCategory/sg-3-12           : Sporting Goods > Indoor Games > Tabletop Curling
+gid://shopify/TaxonomyCategory/sg-3-8            : Sporting Goods > Indoor Games > Throwing Darts
+gid://shopify/TaxonomyCategory/sg-4              : Sporting Goods > Outdoor Recreation
+gid://shopify/TaxonomyCategory/sg-4-1            : Sporting Goods > Outdoor Recreation > Boating & Water Sports
+gid://shopify/TaxonomyCategory/sg-4-2            : Sporting Goods > Outdoor Recreation > Camping & Hiking
+gid://shopify/TaxonomyCategory/sg-4-3            : Sporting Goods > Outdoor Recreation > Climbing
+gid://shopify/TaxonomyCategory/sg-4-4            : Sporting Goods > Outdoor Recreation > Cycling
+gid://shopify/TaxonomyCategory/sg-4-5            : Sporting Goods > Outdoor Recreation > Equestrian
+gid://shopify/TaxonomyCategory/sg-4-6            : Sporting Goods > Outdoor Recreation > Fishing
+gid://shopify/TaxonomyCategory/sg-4-18           : Sporting Goods > Outdoor Recreation > Gold Prospecting & Panning Equipment
+gid://shopify/TaxonomyCategory/sg-4-7            : Sporting Goods > Outdoor Recreation > Golf
+gid://shopify/TaxonomyCategory/sg-4-8            : Sporting Goods > Outdoor Recreation > Hang Gliding & Skydiving
+gid://shopify/TaxonomyCategory/sg-4-9            : Sporting Goods > Outdoor Recreation > Hunting & Shooting
+gid://shopify/TaxonomyCategory/sg-4-10           : Sporting Goods > Outdoor Recreation > Hydration System Accessories
+gid://shopify/TaxonomyCategory/sg-4-11           : Sporting Goods > Outdoor Recreation > Hydration Systems
+gid://shopify/TaxonomyCategory/sg-4-12           : Sporting Goods > Outdoor Recreation > Inline & Roller Skating
+gid://shopify/TaxonomyCategory/sg-4-13           : Sporting Goods > Outdoor Recreation > Kite Buggying
+gid://shopify/TaxonomyCategory/sg-4-14           : Sporting Goods > Outdoor Recreation > Outdoor Games
+gid://shopify/TaxonomyCategory/sg-4-15           : Sporting Goods > Outdoor Recreation > Riding Scooters
+gid://shopify/TaxonomyCategory/sg-4-19           : Sporting Goods > Outdoor Recreation > Skateboard Wax
+gid://shopify/TaxonomyCategory/sg-4-16           : Sporting Goods > Outdoor Recreation > Skateboarding
+gid://shopify/TaxonomyCategory/sg-4-17           : Sporting Goods > Outdoor Recreation > Winter Sports & Activities
+gid://shopify/TaxonomyCategory/tg                : Toys & Games
+gid://shopify/TaxonomyCategory/tg-1              : Toys & Games > Game Timers
+gid://shopify/TaxonomyCategory/tg-2              : Toys & Games > Games
+gid://shopify/TaxonomyCategory/tg-2-1            : Toys & Games > Games > Battle Top Accessories
+gid://shopify/TaxonomyCategory/tg-2-2            : Toys & Games > Games > Battle Tops
+gid://shopify/TaxonomyCategory/tg-2-3            : Toys & Games > Games > Bingo Sets
+gid://shopify/TaxonomyCategory/tg-2-4            : Toys & Games > Games > Blackjack & Craps Sets
+gid://shopify/TaxonomyCategory/tg-2-5            : Toys & Games > Games > Board Games
+gid://shopify/TaxonomyCategory/tg-2-6            : Toys & Games > Games > Card Game Accessories
+gid://shopify/TaxonomyCategory/tg-2-7            : Toys & Games > Games > Card Games
+gid://shopify/TaxonomyCategory/tg-2-8            : Toys & Games > Games > Dexterity Games
+gid://shopify/TaxonomyCategory/tg-2-9            : Toys & Games > Games > Dice Sets & Games
+gid://shopify/TaxonomyCategory/tg-2-10           : Toys & Games > Games > Poker Chip Accessories
+gid://shopify/TaxonomyCategory/tg-2-11           : Toys & Games > Games > Poker Chips & Sets
+gid://shopify/TaxonomyCategory/tg-2-12           : Toys & Games > Games > Portable Electronic Games
+gid://shopify/TaxonomyCategory/tg-2-13           : Toys & Games > Games > Roulette Wheels & Sets
+gid://shopify/TaxonomyCategory/tg-2-14           : Toys & Games > Games > Slot Machines
+gid://shopify/TaxonomyCategory/tg-2-15           : Toys & Games > Games > Tile Games
+gid://shopify/TaxonomyCategory/tg-3              : Toys & Games > Outdoor Play Equipment
+gid://shopify/TaxonomyCategory/tg-3-1            : Toys & Games > Outdoor Play Equipment > Inflatable Bouncer Accessories
+gid://shopify/TaxonomyCategory/tg-3-2            : Toys & Games > Outdoor Play Equipment > Inflatable Bouncers
+gid://shopify/TaxonomyCategory/tg-3-3            : Toys & Games > Outdoor Play Equipment > Play Swings
+gid://shopify/TaxonomyCategory/tg-3-4            : Toys & Games > Outdoor Play Equipment > Play Tents & Tunnels
+gid://shopify/TaxonomyCategory/tg-3-5            : Toys & Games > Outdoor Play Equipment > Playhouses
+gid://shopify/TaxonomyCategory/tg-3-6            : Toys & Games > Outdoor Play Equipment > Pogo Sticks
+gid://shopify/TaxonomyCategory/tg-3-7            : Toys & Games > Outdoor Play Equipment > Sandboxes
+gid://shopify/TaxonomyCategory/tg-3-8            : Toys & Games > Outdoor Play Equipment > See Saws
+gid://shopify/TaxonomyCategory/tg-3-9            : Toys & Games > Outdoor Play Equipment > Slides
+gid://shopify/TaxonomyCategory/tg-3-10           : Toys & Games > Outdoor Play Equipment > Stilts
+gid://shopify/TaxonomyCategory/tg-3-11           : Toys & Games > Outdoor Play Equipment > Swing Set & Playset Accessories
+gid://shopify/TaxonomyCategory/tg-3-12           : Toys & Games > Outdoor Play Equipment > Swing Sets & Playsets
+gid://shopify/TaxonomyCategory/tg-3-13           : Toys & Games > Outdoor Play Equipment > Trampoline Accessories
+gid://shopify/TaxonomyCategory/tg-3-14           : Toys & Games > Outdoor Play Equipment > Trampolines
+gid://shopify/TaxonomyCategory/tg-3-15           : Toys & Games > Outdoor Play Equipment > Water Play Equipment
+gid://shopify/TaxonomyCategory/tg-4              : Toys & Games > Puzzles
+gid://shopify/TaxonomyCategory/tg-4-6            : Toys & Games > Puzzles > Jigsaw Puzzle Accessories
+gid://shopify/TaxonomyCategory/tg-4-7            : Toys & Games > Puzzles > Jigsaw Puzzles
+gid://shopify/TaxonomyCategory/tg-4-9            : Toys & Games > Puzzles > Mechanical Puzzles
+gid://shopify/TaxonomyCategory/tg-4-13           : Toys & Games > Puzzles > Puzzle Mats & Boards
+gid://shopify/TaxonomyCategory/tg-4-12           : Toys & Games > Puzzles > Wooden & Pegged Puzzles
+gid://shopify/TaxonomyCategory/tg-5              : Toys & Games > Toys
+gid://shopify/TaxonomyCategory/tg-5-1            : Toys & Games > Toys > Activity Toys
+gid://shopify/TaxonomyCategory/tg-5-2            : Toys & Games > Toys > Art & Drawing Toys
+gid://shopify/TaxonomyCategory/tg-5-3            : Toys & Games > Toys > Ball Pit Accessories
+gid://shopify/TaxonomyCategory/tg-5-4            : Toys & Games > Toys > Ball Pits
+gid://shopify/TaxonomyCategory/tg-5-5            : Toys & Games > Toys > Bath Toys
+gid://shopify/TaxonomyCategory/tg-5-6            : Toys & Games > Toys > Beach & Sand Toys
+gid://shopify/TaxonomyCategory/tg-5-7            : Toys & Games > Toys > Building Toys
+gid://shopify/TaxonomyCategory/tg-5-8            : Toys & Games > Toys > Dolls, Playsets & Toy Figures
+gid://shopify/TaxonomyCategory/tg-5-9            : Toys & Games > Toys > Educational Toys
+gid://shopify/TaxonomyCategory/tg-5-10           : Toys & Games > Toys > Executive Toys
+gid://shopify/TaxonomyCategory/tg-5-11           : Toys & Games > Toys > Flying Toy Accessories
+gid://shopify/TaxonomyCategory/tg-5-12           : Toys & Games > Toys > Flying Toys
+gid://shopify/TaxonomyCategory/tg-5-13           : Toys & Games > Toys > Musical Toys
+gid://shopify/TaxonomyCategory/tg-5-14           : Toys & Games > Toys > Play Vehicle Accessories
+gid://shopify/TaxonomyCategory/tg-5-15           : Toys & Games > Toys > Play Vehicles
+gid://shopify/TaxonomyCategory/tg-5-16           : Toys & Games > Toys > Pretend Play
+gid://shopify/TaxonomyCategory/tg-5-17           : Toys & Games > Toys > Remote Control Toy Accessories
+gid://shopify/TaxonomyCategory/tg-5-18           : Toys & Games > Toys > Remote Control Toys
+gid://shopify/TaxonomyCategory/tg-5-19           : Toys & Games > Toys > Riding Toy Accessories
+gid://shopify/TaxonomyCategory/tg-5-20           : Toys & Games > Toys > Riding Toys
+gid://shopify/TaxonomyCategory/tg-5-21           : Toys & Games > Toys > Robotic Toys
+gid://shopify/TaxonomyCategory/tg-5-29           : Toys & Games > Toys > Sensory Toys
+gid://shopify/TaxonomyCategory/tg-5-22           : Toys & Games > Toys > Sports Toy Accessories
+gid://shopify/TaxonomyCategory/tg-5-23           : Toys & Games > Toys > Sports Toys
+gid://shopify/TaxonomyCategory/tg-5-24           : Toys & Games > Toys > Toy Gift Baskets
+gid://shopify/TaxonomyCategory/tg-5-25           : Toys & Games > Toys > Toy Weapon & Gadget Accessories
+gid://shopify/TaxonomyCategory/tg-5-26           : Toys & Games > Toys > Toy Weapons & Gadgets
+gid://shopify/TaxonomyCategory/tg-5-27           : Toys & Games > Toys > Visual Toys
+gid://shopify/TaxonomyCategory/tg-5-28           : Toys & Games > Toys > Wind-Up Toys
+gid://shopify/TaxonomyCategory/na                : Uncategorized
+gid://shopify/TaxonomyCategory/vp                : Vehicles & Parts
+gid://shopify/TaxonomyCategory/vp-1              : Vehicles & Parts > Vehicle Parts & Accessories
+gid://shopify/TaxonomyCategory/vp-1-1            : Vehicles & Parts > Vehicle Parts & Accessories > Aircraft Parts & Accessories
+gid://shopify/TaxonomyCategory/vp-1-2            : Vehicles & Parts > Vehicle Parts & Accessories > Electric Vehicle (EV) Parts & Accessories
+gid://shopify/TaxonomyCategory/vp-1-3            : Vehicles & Parts > Vehicle Parts & Accessories > Motor Vehicle Electronics
+gid://shopify/TaxonomyCategory/vp-1-4            : Vehicles & Parts > Vehicle Parts & Accessories > Motor Vehicle Parts
+gid://shopify/TaxonomyCategory/vp-1-5            : Vehicles & Parts > Vehicle Parts & Accessories > Vehicle Maintenance, Care & Decor
+gid://shopify/TaxonomyCategory/vp-1-6            : Vehicles & Parts > Vehicle Parts & Accessories > Vehicle Safety & Security
+gid://shopify/TaxonomyCategory/vp-1-7            : Vehicles & Parts > Vehicle Parts & Accessories > Vehicle Storage & Cargo
+gid://shopify/TaxonomyCategory/vp-1-8            : Vehicles & Parts > Vehicle Parts & Accessories > Watercraft Parts & Accessories
+gid://shopify/TaxonomyCategory/vp-2              : Vehicles & Parts > Vehicles
+gid://shopify/TaxonomyCategory/vp-2-1            : Vehicles & Parts > Vehicles > Aircraft
+gid://shopify/TaxonomyCategory/vp-2-2            : Vehicles & Parts > Vehicles > Motor Vehicles
+gid://shopify/TaxonomyCategory/vp-2-3            : Vehicles & Parts > Vehicles > Watercraft

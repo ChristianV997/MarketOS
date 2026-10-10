@@ -1,0 +1,153 @@
+"""services.category_mapping.schemas -- dataclasses for the Shopify Product
+Taxonomy category-mapping evidence vertical.
+
+Every dataclass here represents supplemental, offline evidence for a human
+to review -- never a ranking, a supplier proof, a live validation, or a
+launch/decision authority. ``CategoryMappingEvidence.decision_authority`` is
+always ``"none"`` and ``human_review_required`` is always ``True``; nothing
+in this module selects a category on a caller's behalf.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Any, Mapping
+
+
+class CategoryTaxonomyError(ValueError):
+    """Raised for malformed, duplicate, or structurally inconsistent taxonomy
+    source records. The loader fails closed rather than silently dropping or
+    guessing at a bad row."""
+
+
+@dataclass(frozen=True)
+class TaxonomyCategory:
+    """One node of the pinned, partial Shopify Product Taxonomy snapshot."""
+
+    code: str
+    gid: str
+    name: str
+    full_path: str
+    parent_code: str | None
+    level: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "gid": self.gid,
+            "name": self.name,
+            "full_path": self.full_path,
+            "parent_code": self.parent_code,
+            "level": self.level,
+        }
+
+
+@dataclass(frozen=True)
+class CategoryMappingCandidate:
+    """One candidate taxonomy match for a caller-supplied free-text category.
+
+    ``confidence`` is a bounded, deterministic evidence score derived from
+    exact or token-overlap text matching -- not a model prediction, not a
+    ranking signal, and never itself sufficient to select a category.
+    """
+
+    code: str
+    gid: str
+    name: str
+    full_path: str
+    match_basis: str
+    confidence: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "gid": self.gid,
+            "name": self.name,
+            "full_path": self.full_path,
+            "match_basis": self.match_basis,
+            "confidence": self.confidence,
+        }
+
+
+TAXONOMY_SOURCE_PROVENANCE: Mapping[str, Any] = MappingProxyType({
+    "evidence_mode": "bundled_offline_snapshot",
+    "live_validation": False,
+    "repository_url": "https://github.com/Shopify/product-taxonomy",
+    "version_tag": "v2026-08",
+    "commit_sha": "2e9aa2e9b882383952c63d212add13eb80f46cf9",
+    "upstream_version_file": "2026-08",
+    "license": "MIT",
+    "license_evidence_url": "https://github.com/Shopify/product-taxonomy/blob/v2026-08/LICENSE",
+    "snapshot_levels_included": (1, 2, 3, 4, 5),
+    "snapshot_path": "data/shopify_product_taxonomy/categories.v2026-08.partial.txt",
+    "snapshot_sha256": "e2c0193602e5a21afadf5ffc940cec4975eeec2e698fe33d9cb1437d106dedb2",
+})
+
+# Digest of the *parsed rows* of the bundled snapshot ("code<TAB>full_path" per category, sorted by
+# code, joined by newlines). TAXONOMY_SOURCE_PROVENANCE says "bundled_offline_snapshot"; a taxonomy index
+# may carry that label only if its rows hash to this value, so a custom row set cannot be stamped as the
+# verified bundle by passing the bundle's provenance to ``parse_taxonomy_text``/``TaxonomyIndex``.
+BUNDLED_TAXONOMY_ROWS_SHA256 = "307acdb63b4b8daaa0c839a7f959aab78c75769dc3183d6044e3092aeb53085c"
+BUNDLED_EVIDENCE_MODE = "bundled_offline_snapshot"
+
+IN_MEMORY_FIXTURE_PROVENANCE: Mapping[str, Any] = MappingProxyType({
+    "evidence_mode": "in_memory_fixture",
+    "live_validation": False,
+})
+
+
+@dataclass(frozen=True)
+class CategoryMappingEvidence:
+    """Supplemental category-mapping evidence for one caller-supplied
+    free-text category string, for human review only."""
+
+    input_category: str
+    normalized_input: str
+    status: str  # "mapped" | "ambiguous" | "weak_candidate" | "unmapped"
+    candidates: tuple[CategoryMappingCandidate, ...] = ()
+    taxonomy_source: Mapping[str, Any] = field(
+        default_factory=lambda: MappingProxyType(dict(IN_MEMORY_FIXTURE_PROVENANCE))
+    )
+    human_review_required: bool = True
+    decision_authority: str = "none"
+
+    def __post_init__(self) -> None:
+        if self.human_review_required is not True:
+            raise CategoryTaxonomyError(
+                "human_review_required must be True; category mapping cannot bypass human review"
+            )
+        if self.decision_authority != "none":
+            raise CategoryTaxonomyError(
+                f"decision_authority must be 'none'; category mapping evidence possesses no decision authority (got {self.decision_authority!r})"
+            )
+        if self.status not in {"mapped", "ambiguous", "weak_candidate", "unmapped"}:
+            raise CategoryTaxonomyError(f"invalid category mapping status: {self.status!r}")
+        if self.status == "unmapped" and self.candidates:
+            raise CategoryTaxonomyError("unmapped evidence must not carry candidates")
+        if self.status == "mapped" and not self.candidates:
+            raise CategoryTaxonomyError("mapped evidence must carry at least one candidate")
+        if self.status == "mapped" and len(self.candidates) != 1:
+            raise CategoryTaxonomyError("mapped evidence must carry exactly one candidate")
+        if self.status == "mapped" and self.candidates[0].match_basis != "exact_name":
+            raise CategoryTaxonomyError("mapped evidence must rest on an exact_name match, not token overlap")
+        if self.status == "weak_candidate" and (
+            len(self.candidates) != 1 or self.candidates[0].match_basis != "token_overlap"
+        ):
+            raise CategoryTaxonomyError("weak_candidate evidence must carry exactly one token_overlap candidate")
+        if self.status == "ambiguous" and len(self.candidates) < 2:
+            raise CategoryTaxonomyError("ambiguous evidence must carry at least two candidates")
+        if not isinstance(self.candidates, tuple):
+            object.__setattr__(self, "candidates", tuple(self.candidates))
+        if not isinstance(self.taxonomy_source, MappingProxyType):
+            object.__setattr__(self, "taxonomy_source", MappingProxyType(dict(self.taxonomy_source)))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "input_category": self.input_category,
+            "normalized_input": self.normalized_input,
+            "status": self.status,
+            "candidates": [candidate.to_dict() for candidate in self.candidates],
+            "taxonomy_source": dict(self.taxonomy_source),
+            "human_review_required": self.human_review_required,
+            "decision_authority": self.decision_authority,
+        }
