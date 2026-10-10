@@ -21,6 +21,29 @@ def _opened_regular_path(fd: int) -> Path | None:
     interface return ``None`` and callers must fail closed when a root was
     requested. Windows reparse-point identity is not exercised here.
     """
+    if os.name == "nt":
+        try:
+            import ctypes
+            import msvcrt
+            from ctypes import wintypes
+
+            get_final_path = ctypes.windll.kernel32.GetFinalPathNameByHandleW
+            get_final_path.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+            get_final_path.restype = wintypes.DWORD
+            handle = wintypes.HANDLE(msvcrt.get_osfhandle(fd))
+            size = 32768
+            buffer = ctypes.create_unicode_buffer(size)
+            length = get_final_path(handle, buffer, size, 0)
+            if length == 0 or length >= size:
+                return None
+            value = buffer.value
+            if value.startswith("\\\\?\\UNC\\"):
+                value = "\\\\" + value[8:]
+            elif value.startswith("\\\\?\\"):
+                value = value[4:]
+            return Path(value)
+        except (OSError, ValueError, AttributeError, ImportError):
+            return None
     try:
         return Path(os.readlink(f"/proc/self/fd/{fd}"))
     except (OSError, ValueError, AttributeError):

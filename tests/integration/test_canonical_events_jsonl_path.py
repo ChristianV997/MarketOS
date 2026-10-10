@@ -554,10 +554,24 @@ def test_direct_loader_symlink_escape_rejected_at_opened_object(tmp_path):
     assert warnings == ["jsonl_path_outside_allowed_root"]
 
 
-def test_windows_reparse_point_identity_not_exercised_on_this_host():
-    """Document host coverage: this Linux runner validates /proc/self/fd, not NT reparse points."""
+@pytest.mark.skipif(os.name == "nt", reason="POSIX /proc/self/fd coverage is not available on Windows")
+def test_posix_opened_fd_identity_is_available_on_this_host():
+    """Document host coverage for the POSIX opened-fd identity path."""
     assert os.name == "posix"
     assert Path("/proc/self/fd").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle identity is not exercised on POSIX")
+def test_windows_opened_handle_identity_is_available(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(_valid_event_line())
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        opened = query_service._opened_regular_path(fd)
+    finally:
+        os.close(fd)
+    assert opened is not None
+    assert opened.resolve() == path.resolve()
 
 
 @pytest.mark.skipif(not Path("/proc/self/fd").exists(), reason="opened-fd path identity requires /proc/self/fd (native Linux)")
