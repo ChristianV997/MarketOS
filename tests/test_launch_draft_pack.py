@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -82,6 +81,43 @@ def test_context_is_applied_and_sanitized(reports):
 def test_missing_context_uses_conservative_defaults(pack):
     assert pack["shopify_draft_payload"]["vendor"] == "MarketOS Draft"
     assert "TBD" in pack["product_listing"]["shipping_note"]
+
+
+def _pack_with_unit_economics(synthesis, unit_economics):
+    candidate_id = synthesis["top_candidate_id"]
+    candidates = []
+    matched = False
+    for item in synthesis["candidates"]:
+        candidate = dict(item)
+        if candidate.get("candidate_id") == candidate_id:
+            candidate["unit_economics_summary"] = dict(unit_economics)
+            matched = True
+        candidates.append(candidate)
+    assert matched
+    variant_synthesis = {**synthesis, "unit_economics_summary": {}, "candidates": candidates}
+    return build_launch_draft_pack(synthesis=variant_synthesis).to_dict()
+
+
+@pytest.mark.parametrize(
+    ("unit_economics", "expected_payload_price"),
+    [({}, "TBD"), ({"target_sell_price": 0.0}, 0.0)],
+)
+def test_missing_zero_and_positive_prices_remain_distinct_in_draft_payloads(reports, unit_economics, expected_payload_price):
+    synthesis, _market, _supplier, _consumer = reports
+    pack = _pack_with_unit_economics(synthesis, unit_economics)
+
+    expected_offer_price = unit_economics.get("target_sell_price")
+    assert pack["offer_stack"]["pricing_suggestion"]["target_price"] == expected_offer_price
+    assert pack["shopify_draft_payload"]["variants"][0]["price"] == expected_payload_price
+    assert pack["medusa_draft_payload"]["variants"][0]["price"] == expected_payload_price
+    if not unit_economics:
+        missing_explicitly = _pack_with_unit_economics(synthesis, {"target_sell_price": None})
+        positive = _pack_with_unit_economics(synthesis, {"target_sell_price": 24.95})
+        assert missing_explicitly["shopify_draft_payload"]["variants"][0]["price"] == "TBD"
+        assert missing_explicitly["medusa_draft_payload"]["variants"][0]["price"] == "TBD"
+        assert positive["offer_stack"]["pricing_suggestion"]["target_price"] == 24.95
+        assert positive["shopify_draft_payload"]["variants"][0]["price"] == 24.95
+        assert positive["medusa_draft_payload"]["variants"][0]["price"] == 24.95
 
 
 def test_creative_counts_meet_pack_contract(pack):
@@ -172,3 +208,112 @@ def test_draft_pack_does_not_contain_activation_instructions(pack):
     raw = json.dumps(pack).lower()
     assert "shopify api" not in raw
     assert "launch ads" not in raw
+
+
+def test_matching_customer_language_becomes_platform_neutral_draft_copy(reports):
+    synthesis, market, supplier, consumer = reports
+    pack = build_launch_draft_pack(synthesis=synthesis, marketplace_trend=market, supplier_feasibility=supplier, consumer_attention=consumer).to_dict()
+    short = pack["product_listing"]["short_description"]
+    hero = pack["landing_page"]["sections"]["hero"]["body_copy"]
+    assert "quick portable printing" in short
+    assert "quick portable printing" in hero
+    assert "not a verified product promise" in short
+    assert "prints labels without ink" not in json.dumps(pack)
+    assert "visible print test" not in json.dumps(pack)
+    assert pack["product_listing"]["specifications"]["certifications"].startswith("TBD")
+    assert pack["launch_draft_status"] == "draft_only_pending_human_approval"
+    assert pack["approval_checklist"]["launch_authorized"] is False
+    assert pack["shopify_draft_payload"]["status"] == "draft"
+    assert pack["medusa_draft_payload"]["status"] == "draft"
+    assert pack["published"] is False
+    assert pack["ads_launched"] is False
+
+
+def test_missing_customer_evidence_does_not_invent_draft_language(reports):
+    synthesis, market, supplier, _consumer = reports
+    pack = build_launch_draft_pack(synthesis=synthesis, marketplace_trend=market, supplier_feasibility=supplier, consumer_attention=None).to_dict()
+    assert "quick portable printing" not in json.dumps(pack["product_listing"])
+    assert "customers who want" in pack["product_listing"]["short_description"]
+    assert any("Consumer attention evidence was not supplied" in note for note in pack["operator_notes"])
+    assert pack["approval_checklist"]["launch_authorized"] is False
+    assert pack["published"] is False
+
+
+def test_mismatched_evidence_is_not_copied_and_cannot_clear_draft_gates(reports):
+    synthesis, _market, _supplier, _consumer = reports
+    foreign_attention = {
+        "top_candidate_id": "other-product",
+        "candidates": [{
+            "candidate_id": "other-product",
+            "score": {
+                "landing_page_copy_hints": ["Lead with: FOREIGN_CUSTOMER_LANGUAGE"],
+                "voice_of_customer": {"desired_outcomes": ["FOREIGN_OUTCOME"], "claims": ["FOREIGN_CLAIM"], "proof_signals": ["FOREIGN_PROOF"]},
+            },
+        }],
+    }
+    foreign_supplier = {"top_candidate_id": "other-product", "candidates": [{"candidate_id": "other-product", "score": {"economics": {"target_sell_price": 1}}}]}
+    pack = build_launch_draft_pack(synthesis=synthesis, consumer_attention=foreign_attention, supplier_feasibility=foreign_supplier).to_dict()
+    raw = json.dumps(pack)
+    assert "FOREIGN_CUSTOMER_LANGUAGE" not in raw
+    assert "FOREIGN_OUTCOME" not in raw
+    assert "FOREIGN_CLAIM" not in raw
+    assert "FOREIGN_PROOF" not in raw
+    assert "other-product" not in raw
+    assert any("supplier proof is not live-observed" in item for item in pack["approval_checklist"]["blockers"])
+    assert any("does not match this draft candidate" in note for note in pack["operator_notes"])
+    assert pack["approval_checklist"]["launch_authorized"] is False
+    assert pack["published"] is False
+    assert pack["ads_launched"] is False
+    assert pack["orders_created"] is False
+    assert pack["payments_created"] is False
+    assert pack["customer_messages_sent"] is False
+    assert pack["shopify_draft_payload"]["status"] == "draft"
+    assert pack["medusa_draft_payload"]["status"] == "draft"
+
+
+def test_no_real_candidate_identity_cannot_bind_to_a_placeholder_sentinel(reports):
+    """A draft with no real candidate id (no top_candidate_id, no candidate
+    row id) must never match evidence keyed by the internal "candidate"
+    display placeholder -- that would let an unrelated report's row bind by
+    coincidence rather than by real product identity."""
+    synthesis, _market, _supplier, _consumer = reports
+    synthesis = {**synthesis, "top_candidate_id": None, "candidates": [{}]}
+    sentinel_attention = {"candidates": [{"candidate_id": "candidate", "score": {"landing_page_copy_hints": ["STOLEN CUSTOMER LANGUAGE FROM OTHER PRODUCT"]}}]}
+    pack = build_launch_draft_pack(synthesis=synthesis, consumer_attention=sentinel_attention).to_dict()
+    raw = json.dumps(pack)
+    assert "STOLEN CUSTOMER LANGUAGE FROM OTHER PRODUCT" not in raw
+    assert any("was not supplied" in note for note in pack["operator_notes"] if "Consumer attention" in note)
+    assert pack["approval_checklist"]["launch_authorized"] is False
+
+
+def test_matching_evidence_binds_regardless_of_case_or_surrounding_whitespace(reports):
+    """The synthesis/candidate id and the evidence report's own id come from
+    independent pipelines and are not guaranteed to agree on casing or
+    padding for the same real candidate -- matching must not silently drop
+    genuine evidence over that alone."""
+    synthesis, _market, _supplier, _consumer = reports
+    synthesis = {**synthesis, "top_candidate_id": " Widget-1 ", "candidates": [{"candidate_id": " Widget-1 "}]}
+    same_candidate_attention = {"candidates": [{"candidate_id": "widget-1", "score": {"landing_page_copy_hints": ["real matching language"]}}]}
+    pack = build_launch_draft_pack(synthesis=synthesis, consumer_attention=same_candidate_attention).to_dict()
+    assert "real matching language" in pack["product_listing"]["short_description"]
+    assert any("matches this draft candidate" in note for note in pack["operator_notes"] if "Consumer attention" in note)
+
+
+@pytest.mark.parametrize("malformed_id", [True, False, ["a", "b"], {"nested": "id"}])
+def test_malformed_non_string_identity_can_never_bind_an_unrelated_evidence_row(reports, malformed_id):
+    """A non-string top_candidate_id/candidate_id (bool, list, dict, ...) is
+    never a real product identifier. Coercing it with str() would still
+    produce a stable-looking key that could coincidentally collide with an
+    equally malformed candidate_id on an unrelated evidence row -- malformed
+    identity must bind nothing, exactly like the missing-identity case."""
+    synthesis, _market, _supplier, _consumer = reports
+    synthesis = {**synthesis, "top_candidate_id": malformed_id, "candidates": [{}]}
+    colliding_attention = {"candidates": [{"candidate_id": malformed_id, "score": {"landing_page_copy_hints": ["MALFORMED IDENTITY COLLISION LANGUAGE"]}}]}
+    pack = build_launch_draft_pack(synthesis=synthesis, consumer_attention=colliding_attention).to_dict()
+    raw = json.dumps(pack)
+    assert "MALFORMED IDENTITY COLLISION LANGUAGE" not in raw
+    assert any("was not supplied" in note for note in pack["operator_notes"] if "Consumer attention" in note)
+    assert pack["approval_checklist"]["launch_authorized"] is False
+    assert pack["published"] is False
+    assert pack["shopify_draft_payload"]["status"] == "draft"
+    assert pack["medusa_draft_payload"]["status"] == "draft"
