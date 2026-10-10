@@ -3,3 +3,4 @@
 # (.github/workflows/ci.yml) and local development.
 ruff==0.16.10
 pytest-cov>=7.1.0
+pytest-mergify==2026.9.24.1

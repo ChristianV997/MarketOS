@@ -1,0 +1,7 @@
+# Canonical test profile for the Python version declared in .python-version.
+# Keep runtime and development dependencies in their existing authoritative
+# manifests; this file is the single install entry point for local and CI tests.
+# setup-python cache-dependency-path must list this file and the two includes;
+# pip -r follows includes, the Actions cache hasher does not.
+-r requirements.txt
+-r requirements-dev.txt
