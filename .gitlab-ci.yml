@@ -1,0 +1,164 @@
+# MarketOS GitLab CI companion (MR evidence only).
+#
+# Purpose: add useful, secure test evidence on GitLab merge requests without
+# duplicating the full GitHub Actions workload (.github/workflows/ci.yml).
+#
+# Source authority: GitHub (ChristianV997/MarketOS) is the verified canonical
+# host. This file is prepared on GitHub and expected to land on GitLab only via
+# an authorized mirror/sync. Do not treat this companion as deployment or
+# provider-mutation authority.
+#
+# Python/dependency contract (live main, 8d70725c):
+#   - Python 3.12 (.python-version / GitHub CI)
+#   - pip install -r requirements.txt (pytest + pytest-xdist included there)
+# Unresolved parity (Codex Agent A PR #343, open): requirements-test.txt is the
+# proposed single test install entry (-r requirements.txt + requirements-dev.txt)
+# but is NOT on main yet. This companion follows live main until that merges;
+# after merge, switch install/cache keys to requirements-test.txt without
+# expanding job scope.
+#
+# Explicitly out of scope here (owned by GitHub / Codex A / Grok Bots ops):
+# Semgrep policy, pip-audit, OSS/compose validators, container smoke, advisory
+# coverage, Mergify tokens, deployment, and any secret-backed steps.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+default:
+  image: python:3.12-bookworm
+  interruptible: true
+
+variables:
+  PYTHONPATH: "$CI_PROJECT_DIR"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  # Enough history for MR changed-file diffs without a full clone.
+  GIT_DEPTH: "50"
+  # Fail closed: no provider/network mutation knobs.
+  ORCHESTRATOR_HANDLES_CYCLES: "true"
+  SLEEP_ENABLED: "0"
+  # Bound pytest console noise; JUnit carries structured evidence.
+  PYTEST_ADDOPTS: "--tb=short -q"
+
+cache:
+  key:
+    files:
+      - requirements.txt
+  paths:
+    - .cache/pip
+
+stages:
+  - test
+
+# Single blocking companion job. allow_failure stays unset (false) so failures
+# are never masked. No CI/CD secret variables are referenced.
+mr-python-companion:
+  stage: test
+  timeout: 20 minutes
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  before_script:
+    - python --version
+    - test "$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" = "3.12"
+    - python -m pip install --upgrade pip
+    - python -m pip install -r requirements.txt
+  script:
+    - mkdir -p artifacts
+    - python -m compileall -q .
+    - |
+      set -euo pipefail
+      # Resolve changed paths for this MR (source branch only; MR pipeline).
+      base="${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}"
+      if [ -z "$base" ]; then
+        base="$(git merge-base "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" HEAD || true)"
+      fi
+      if [ -n "$base" ]; then
+        git diff --name-only "$base"...HEAD > artifacts/changed-files.txt || true
+      else
+        # Fallback: empty changed set → select_tests unknown_fallback lane.
+        : > artifacts/changed-files.txt
+      fi
+      echo "Changed files ($(wc -l < artifacts/changed-files.txt)):"
+      head -n 80 artifacts/changed-files.txt
+      # Build select_tests argv from changed paths (cap to keep the job bounded).
+      args=()
+      while IFS= read -r path; do
+        [ -z "$path" ] && continue
+        args+=(--path "$path")
+        if [ "${#args[@]}" -ge 80 ]; then
+          break
+        fi
+      done < artifacts/changed-files.txt
+      python scripts/ai/select_tests.py --json "${args[@]}" > artifacts/select-tests.json
+      python - <<'PY'
+      import json
+      import pathlib
+      import re
+      import shlex
+
+      report = json.loads(pathlib.Path("artifacts/select-tests.json").read_text(encoding="utf-8"))
+      cmds = report.get("recommended_commands") or []
+      # Companion runs Python evidence only; skip npm/frontend and session helpers.
+      pytest_cmds = []
+      for cmd in cmds:
+          if not isinstance(cmd, str):
+              continue
+          if re.search(r"\bpytest\b", cmd) is None:
+              continue
+          # Strip local -q; GitLab adds JUnit + bounded opts centrally.
+          parts = [p for p in shlex.split(cmd) if p != "-q"]
+          pytest_cmds.append(shlex.join(parts))
+      if not pytest_cmds:
+          pytest_cmds = [
+              "pytest tests/contracts/test_architecture_boundaries.py",
+          ]
+      pathlib.Path("artifacts/pytest-commands.txt").write_text(
+          "\n".join(pytest_cmds) + "\n", encoding="utf-8"
+      )
+      print("Selected pytest commands:")
+      for line in pytest_cmds:
+          print(" ", line)
+      PY
+    - |
+      set -euo pipefail
+      : > artifacts/junit.xml
+      first=1
+      while IFS= read -r cmd; do
+        [ -z "$cmd" ] && continue
+        echo "+ $cmd"
+        # shellcheck disable=SC2086
+        if [ "$first" -eq 1 ]; then
+          eval "$cmd --junitxml=artifacts/junit.xml --maxfail=20"
+          first=0
+        else
+          # Append subsequent suites without wiping the first report: run into
+          # a side file then keep the primary report from the first suite.
+          # Prefer a single primary JUnit for the GitLab MR widget.
+          eval "$cmd --junitxml=artifacts/junit-extra.xml --maxfail=20"
+        fi
+      done < artifacts/pytest-commands.txt
+  after_script:
+    - |
+      # Bounded log evidence only (no secret dumps, no full pip freeze).
+      {
+        echo "CI_PIPELINE_SOURCE=${CI_PIPELINE_SOURCE:-}"
+        echo "CI_PIPELINE_ID=${CI_PIPELINE_ID:-}"
+        echo "CI_JOB_ID=${CI_JOB_ID:-}"
+        echo "CI_COMMIT_SHA=${CI_COMMIT_SHA:-}"
+        echo "CI_MERGE_REQUEST_IID=${CI_MERGE_REQUEST_IID:-}"
+        echo "python=$(python --version 2>&1)"
+        wc -l artifacts/changed-files.txt artifacts/pytest-commands.txt 2>/dev/null || true
+      } > artifacts/companion-summary.txt
+      head -c 16384 artifacts/companion-summary.txt || true
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: artifacts/junit.xml
+    paths:
+      - artifacts/junit.xml
+      - artifacts/select-tests.json
+      - artifacts/pytest-commands.txt
+      - artifacts/changed-files.txt
+      - artifacts/companion-summary.txt
+    # Keep artifact payload small; do not attach caches or venvs.
