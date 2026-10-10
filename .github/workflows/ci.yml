@@ -50,6 +50,9 @@ jobs:
     timeout-minutes: 20
     env:
       PYTHONPATH: ${{ github.workspace }}
+      # The Mergify plugin is installed by the shared test profile for
+      # reporting, but test selection must stay disabled in the blocking job.
+      MERGIFY_TEST_SELECTION_ENABLE: "false"
 
     steps:
       - uses: actions/checkout@v7
@@ -59,12 +62,17 @@ jobs:
           # Keep CI aligned with the Docker production runtime.
           python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: requirements.txt
+          # requirements-test.txt only -r-includes the authoritative
+          # manifests; setup-python does not follow -r, so hash those too.
+          cache-dependency-path: |
+            requirements-test.txt
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-test.txt
 
       - name: Compile check
         run: python -m compileall -q .
@@ -155,13 +163,14 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
           cache-dependency-path: |
+            requirements-test.txt
             requirements.txt
             requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r requirements-dev.txt
+          python -m pip install -r requirements-test.txt
 
       - name: ruff check (advisory)
         run: ruff check . || true
@@ -169,6 +178,10 @@ jobs:
       - name: pytest --cov (advisory)
         # Floor set slightly below the measured baseline (67.6% on 2026-07-29)
         # so normal variance doesn't trip it while still catching real drops.
+        env:
+          # Keep Mergify retries/quarantine out of the blocking test job.
+          MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+          MERGIFY_TEST_SELECTION_ENABLE: "false"
         run: pytest tests/ --cov=. --cov-report=term-missing --cov-fail-under=65 || true
 
   container-smoke:
