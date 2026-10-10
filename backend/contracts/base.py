@@ -1,7 +1,8 @@
 """BaseArtifact — root dataclass for all typed cross-system artifacts.
 
 Every artifact produced by MarketOS or its connected repositories carries:
-  - deterministic artifact_id (content-addressed)
+  - artifact_id: random (UUID4) when a new artifact is created, then persisted
+    and preserved; an explicitly supplied id is never replaced or recomputed
   - full lineage chain (parent_ids list)
   - workspace ownership
   - creation timestamp
@@ -37,20 +38,33 @@ class BaseArtifact:
 
     def __post_init__(self) -> None:
         if not self.artifact_id:
-            self.artifact_id = self._derive_id()
+            self.artifact_id = self._mint_id()
         if not self.replay_hash:
             self.replay_hash = self._derive_replay_hash()
 
     # ── identity ──────────────────────────────────────────────────────────────
 
-    def _derive_id(self) -> str:
-        """UUID5 from artifact_type + workspace + key content."""
-        key = f"{self.artifact_type}:{self.workspace}:{self.created_at}"
-        namespace = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
-        return str(uuid.uuid5(namespace, key))
+    def _mint_id(self) -> str:
+        """Mint the identity of a newly created artifact.
+
+        Identity semantics:
+
+        * New record (no ``artifact_id``): a random UUID4, drawn from the OS
+          entropy source, minted once here and persisted by ``to_dict``. It is
+          unique across threads, processes, restarts, PID reuse and equal
+          timestamps because it carries no process-local state.
+        * Stored record (``artifact_id`` present, including replay and
+          ``from_dict`` of a serialized artifact): the id is preserved exactly.
+          Registering the same id again replaces the earlier version.
+        * A payload with no ``artifact_id`` has no persisted identity, so it is
+          a new record and receives a fresh id each time it is built. Retrying
+          a logical operation is therefore only idempotent when the caller
+          supplies a stable ``artifact_id`` of its own.
+        """
+        return str(uuid.uuid4())
 
     def _derive_replay_hash(self) -> str:
-        """Content-addressed hash for replay deduplication."""
+        """Hash of the serialized record, including its artifact_id."""
         content = json.dumps(self.to_dict(), sort_keys=True, default=str)
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
@@ -75,7 +89,13 @@ class BaseArtifact:
         # campaign_id and outcome_recorded, not merely BaseArtifact fields.
         if is_dataclass(cls):
             valid_fields = {item.name for item in fields(cls)}
-            return cls(**{key: value for key, value in d.items() if key in valid_fields})
+            payload = {key: value for key, value in d.items() if key in valid_fields}
+            if not payload.get("artifact_id"):
+                # The replay hash includes artifact_id. If an incomplete
+                # payload has lost that identity, the constructor will mint a
+                # new one, so the retained hash no longer describes this row.
+                payload["replay_hash"] = ""
+            return cls(**payload)
         obj = cls.__new__(cls)
         obj.artifact_id    = d.get("artifact_id", "")
         obj.artifact_type  = d.get("artifact_type", "base")

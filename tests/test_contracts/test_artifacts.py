@@ -45,6 +45,19 @@ def test_base_artifact_to_dict():
     assert "parent_ids" in d
 
 
+def test_same_timestamp_base_artifacts_are_distinct_and_replay_keeps_the_id():
+    stamp = 1_700_000_000.0
+    a = BaseArtifact(artifact_type="base", workspace="prod", created_at=stamp)
+    b = BaseArtifact(artifact_type="base", workspace="prod", created_at=stamp)
+    assert a.created_at == stamp and b.created_at == stamp
+    assert a.artifact_id != b.artifact_id
+    restored = BaseArtifact.from_dict(a.to_dict())
+    assert restored.artifact_id == a.artifact_id
+    assert restored.replay_hash == a.replay_hash
+    assert restored.created_at == stamp
+
+
+
 # ── SimulationArtifact ────────────────────────────────────────────────────────
 
 def test_simulation_artifact_type():
