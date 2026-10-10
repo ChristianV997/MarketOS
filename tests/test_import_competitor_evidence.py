@@ -479,4 +479,3 @@ def test_phone_in_product_labeled_title_is_rejected_without_echo():
     assert result["status"] == "rejected"
     assert result["offer_count"] == 0
     assert result["rejections"][0]["code"] == "contact_data_rejected"
-
