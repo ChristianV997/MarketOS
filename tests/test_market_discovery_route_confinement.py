@@ -40,6 +40,15 @@ def _dataset(name: str = CANARY) -> str:
     )
 
 
+def _symlink_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege unavailable")
+        raise
+
+
 def _post(payload: dict) -> tuple[int, bytes]:
     body = json.dumps(payload).encode()
     sent: list[dict] = []
@@ -139,7 +148,7 @@ def test_outside_symlink_inside_the_project_cannot_escape(inside, tmp_path):
     outside = tmp_path / "outside_dataset.json"
     outside.write_text(_dataset(), encoding="utf-8")
     link = inside / "inside_link.json"
-    link.symlink_to(outside)
+    _symlink_or_skip(link, outside)
     status, body, rendered = _discover(str(link), str(link.relative_to(REPO)))
     assert status == 200
     assert body["status"] == "blocked"
@@ -148,7 +157,7 @@ def test_outside_symlink_inside_the_project_cannot_escape(inside, tmp_path):
 
 def test_outside_directory_symlink_component_cannot_escape(inside, tmp_path):
     (tmp_path / "data.json").write_text(_dataset(), encoding="utf-8")
-    (inside / "dir_link").symlink_to(tmp_path, target_is_directory=True)
+    _symlink_or_skip(inside / "dir_link", tmp_path, target_is_directory=True)
     status, body, rendered = _discover(str((inside / "dir_link" / "data.json").relative_to(REPO)))
     assert status == 200
     assert body["status"] == "blocked"
@@ -157,7 +166,7 @@ def test_outside_directory_symlink_component_cannot_escape(inside, tmp_path):
 
 def test_in_root_symlink_to_an_in_root_file_is_still_allowed(inside):
     link = inside / "seed_link.json"
-    link.symlink_to(REPO / SEED)
+    _symlink_or_skip(link, REPO / SEED)
     status, body, _ = _discover(str(link))
     assert status == 200
     assert body["discovery"]["category_opportunities"]
@@ -238,7 +247,12 @@ def test_final_component_swapped_to_an_outside_symlink_after_the_check_is_not_fo
     def confine_then_swap(path: str) -> str:
         absolute = real_confine(path)
         os.unlink(absolute)
-        os.symlink(outside, absolute)
+        try:
+            os.symlink(outside, absolute)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                pytest.skip("Windows symlink privilege unavailable")
+            raise
         return absolute
 
     monkeypatch.setattr(local_dataset, "_confined_dataset_path", confine_then_swap)

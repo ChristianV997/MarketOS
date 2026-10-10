@@ -12,6 +12,15 @@ CANARY = "zz-canary-local-dataset-root"
 REPO = Path(__file__).resolve().parents[1]
 
 
+def _symlink_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege unavailable")
+        raise
+
+
 def _canary_payload() -> str:
     return json.dumps({
         "dataset_id": "outside-root-dataset",
@@ -120,7 +129,7 @@ def test_symlink_inside_project_cannot_escape(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "open", tracking_open)
     with tempfile.TemporaryDirectory(dir=REPO) as inside:
         link = Path(inside) / "inside_link.json"
-        link.symlink_to(outside)
+        _symlink_or_skip(link, outside)
         with pytest.raises(ValueError, match="dataset_path_outside_project_root") as caught:
             load_local_evidence_dataset(str(link))
         assert CANARY not in str(caught.value)

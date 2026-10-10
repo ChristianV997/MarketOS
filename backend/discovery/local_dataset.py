@@ -73,8 +73,6 @@ def _read_regular_file(resolved: str) -> bytes:
     if not isinstance(resolved, str) or not resolved or "\x00" in resolved:
         raise ValueError("dataset_path_invalid")
     root_s = os.path.realpath(_project_root())
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
-    dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
 
     try:
         if os.path.commonpath([root_s, resolved]) != root_s:
@@ -94,6 +92,12 @@ def _read_regular_file(resolved: str) -> bytes:
         Path(confined).relative_to(root_s)
     except ValueError:
         raise ValueError("dataset_path_outside_project_root") from None
+
+    if os.name == "nt":
+        return _read_regular_file_windows(confined, root_s)
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
 
     try:
         root_fd = os.open(root_s, dir_flags)
@@ -117,6 +121,122 @@ def _read_regular_file(resolved: str) -> bytes:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
             raise FileNotFoundError("dataset_not_found")
         return handle.read()
+
+
+def _read_regular_file_windows(confined: str, root_s: str) -> bytes:
+    """Read one regular file through a verified Win32 handle.
+
+    Windows has no ``dir_fd``/``O_NOFOLLOW`` equivalent.  Open the path with
+    ``FILE_FLAG_OPEN_REPARSE_POINT`` so a final-component swap is inspected as
+    the reparse point itself, then bind the read to that same handle and verify
+    its final path remains under the project root.  The final-path check also
+    catches an intermediate junction/reparse-point race.
+    """
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    generic_read = 0x80000000
+    share_read = 0x00000001
+    share_write = 0x00000002
+    share_delete = 0x00000004
+    open_existing = 3
+    backup_semantics = 0x02000000
+    open_reparse_point = 0x00200000
+    invalid_handle = ctypes.c_void_p(-1).value
+    file_attribute_reparse_point = 0x00000400
+    file_attribute_directory = 0x00000010
+
+    class _ByHandleFileInformation(ctypes.Structure):
+        _fields_ = [
+            ("dwFileAttributes", wintypes.DWORD),
+            ("ftCreationTime", wintypes.FILETIME),
+            ("ftLastAccessTime", wintypes.FILETIME),
+            ("ftLastWriteTime", wintypes.FILETIME),
+            ("dwVolumeSerialNumber", wintypes.DWORD),
+            ("nFileSizeHigh", wintypes.DWORD),
+            ("nFileSizeLow", wintypes.DWORD),
+            ("nNumberOfLinks", wintypes.DWORD),
+            ("nFileIndexHigh", wintypes.DWORD),
+            ("nFileIndexLow", wintypes.DWORD),
+        ]
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.GetFileInformationByHandle.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_ByHandleFileInformation),
+    ]
+    kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+    kernel32.GetFinalPathNameByHandleW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    kernel32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel32.CreateFileW(
+        confined,
+        generic_read,
+        share_read | share_write | share_delete,
+        None,
+        open_existing,
+        backup_semantics | open_reparse_point,
+        None,
+    )
+    if handle is None or handle == invalid_handle:
+        raise FileNotFoundError("dataset_not_found")
+
+    fd = -1
+    try:
+        info = _ByHandleFileInformation()
+        if not kernel32.GetFileInformationByHandle(handle, ctypes.pointer(info)):
+            raise FileNotFoundError("dataset_not_found")
+        if info.dwFileAttributes & (file_attribute_reparse_point | file_attribute_directory):
+            raise FileNotFoundError("dataset_not_found")
+
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        handle = None
+        final_buffer = ctypes.create_unicode_buffer(32768)
+        final_length = kernel32.GetFinalPathNameByHandleW(
+            wintypes.HANDLE(msvcrt.get_osfhandle(fd)), final_buffer, len(final_buffer), 0
+        )
+        if not final_length or final_length >= len(final_buffer):
+            raise FileNotFoundError("dataset_not_found")
+        final_path = final_buffer.value
+        if final_path.startswith("\\\\?\\UNC\\"):
+            final_path = "\\\\" + final_path[8:]
+        elif final_path.startswith("\\\\?\\"):
+            final_path = final_path[4:]
+        try:
+            if os.path.commonpath([os.path.normcase(os.path.realpath(root_s)), os.path.normcase(os.path.realpath(final_path))]) != os.path.normcase(os.path.realpath(root_s)):
+                raise ValueError
+        except (OSError, ValueError):
+            raise FileNotFoundError("dataset_not_found") from None
+
+        with os.fdopen(fd, "rb") as handle_file:
+            fd = -1
+            if not stat.S_ISREG(os.fstat(handle_file.fileno()).st_mode):
+                raise FileNotFoundError("dataset_not_found")
+            return handle_file.read()
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        elif handle is not None:
+            kernel32.CloseHandle(handle)
+        raise
 
 
 def load_local_evidence_dataset(path: str) -> dict[str, Any]:
