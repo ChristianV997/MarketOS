@@ -319,6 +319,7 @@ class Offer:
                 "completeness": self.quality.completeness,
                 "observed_at": self.quality.observed_at.isoformat(),
                 "source_ref": self.quality.source_ref,
+                "retrieval_mode": self.quality.retrieval_mode,
                 "is_synthetic": self.quality.is_synthetic,
             },
             "context": self.context.to_dict(),

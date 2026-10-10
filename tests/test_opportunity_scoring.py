@@ -40,20 +40,23 @@ def _evidence(
     weight_status: str = "observed",
     variants: tuple[dict, ...] = ({"name": "Color: Black"}, {"name": "Color: Silver"}),
     variants_status: str = "observed",
+    fetch_provenance: str = "fresh_fetch",
 ) -> CJProductEvidence:
     field_status = {
-        "price": price_status, "shipping_cost": shipping_status,
+        "price": price_status, "currency": "observed", "shipping_cost": shipping_status,
+        "shipping_currency": "observed" if shipping_cost is not None else "unavailable",
         "estimated_delivery_days": delivery_status, "weight_kg": weight_status, "variants": variants_status,
     }
     return CJProductEvidence(
         source="cj_public_page", source_url="https://www.cjdropshipping.com/product/x.html", observed_at=1_700_000_000.0,
         external_product_id="cj-1", title="Portable Espresso Maker", field_status=field_status,
-        price=price, variants=variants, weight_kg=weight_kg, shipping_cost=shipping_cost,
-        estimated_delivery_days=delivery_days,
+        price=price, currency="USD", variants=variants, weight_kg=weight_kg,
+        shipping_cost=shipping_cost, shipping_currency="USD" if shipping_cost is not None else None,
+        estimated_delivery_days=delivery_days, fetch_provenance=fetch_provenance,
     )
 
 
-def _evidence_result(evidence: CJProductEvidence | None, *, unit_cost=9.5, shipping_cost=2.0) -> SupplierEvidenceResult:
+def _evidence_result(evidence: CJProductEvidence | None, *, unit_cost: float | None = 9.5, shipping_cost=2.0) -> SupplierEvidenceResult:
     ranking = ({"product_id": "cj-1", "composite_score": 0.82, "relevance": 0.9, "completeness": 0.8, "confidence": 0.7},) if evidence else ()
     return SupplierEvidenceResult(
         attempted=True, unit_cost=unit_cost, shipping_cost=shipping_cost, source_url="https://www.cjdropshipping.com/product/x.html",
@@ -99,14 +102,34 @@ class TestDimensionsWithoutEvidence:
 
 class TestDimensionsWithEvidence:
     def test_supplier_evidence_quality_observed_with_real_evidence(self):
-        evidence = _evidence()
+        evidence = _evidence(fetch_provenance="cache_hit")
         result = _evidence_result(evidence)
         score = mod.score_opportunity(_candidate(), supplier_evidence=result)
         by_name = {d.name: d for d in score.dimensions}
-        assert by_name["supplier_evidence_quality"].provenance == "observed"
+        assert by_name["supplier_evidence_quality"].provenance == "public_page"
         assert by_name["supplier_evidence_quality"].is_unknown is False
-        assert by_name["observed_supplier_cost"].provenance == "observed"
+        assert "public-page observation is not supplier-live proof" in by_name["supplier_evidence_quality"].reason
+        assert "retrieval=cache_hit" in by_name["supplier_evidence_quality"].reason
+        assert by_name["observed_supplier_cost"].provenance == "public_page"
         assert by_name["observed_supplier_cost"].raw_value == 9.5
+        assert "not supplier-live proof" in by_name["observed_supplier_cost"].reason
+
+    def test_explicit_zero_public_price_is_not_scored_as_supplier_cost(self):
+        evidence = _evidence(price=0.0, price_status="observed")
+        result = _evidence_result(evidence, unit_cost=0.0)
+        cost = {d.name: d for d in mod.score_opportunity(_candidate(), supplier_evidence=result).dimensions}["observed_supplier_cost"]
+
+        assert cost.is_unknown is True
+        assert cost.raw_value is None
+
+    def test_missing_public_page_price_stays_unavailable_in_scoring(self):
+        result = _evidence_result(_evidence(price=None, price_status="unavailable"), unit_cost=None)
+
+        score = mod.score_opportunity(_candidate(), supplier_evidence=result)
+
+        cost = {dimension.name: dimension for dimension in score.dimensions}["observed_supplier_cost"]
+        assert cost.is_unknown is True
+        assert cost.raw_value is None
 
     def test_product_simplicity_uses_observed_variant_count(self):
         evidence = _evidence(variants=({"name": "A"},))
@@ -114,7 +137,25 @@ class TestDimensionsWithEvidence:
         score = mod.score_opportunity(_candidate(), supplier_evidence=result)
         by_name = {d.name: d for d in score.dimensions}
         assert by_name["product_simplicity"].raw_value == 1.0
-        assert by_name["product_simplicity"].provenance == "observed"
+        assert by_name["product_simplicity"].provenance == "public_page"
+
+    def test_foreign_currency_cost_and_shipping_are_not_used_by_scoring(self):
+        evidence = _evidence()
+        evidence = CJProductEvidence(
+            source=evidence.source, source_url=evidence.source_url, observed_at=evidence.observed_at,
+            fetched_at=evidence.fetched_at, external_product_id=evidence.external_product_id,
+            title=evidence.title, field_status=evidence.field_status, price=evidence.price,
+            currency="EUR", shipping_cost=evidence.shipping_cost, shipping_currency="EUR",
+            estimated_delivery_days=None, variants=evidence.variants, weight_kg=evidence.weight_kg,
+            fetch_provenance=evidence.fetch_provenance,
+        )
+        result = _evidence_result(evidence, unit_cost=9.5, shipping_cost=2.0)
+        dimensions = {item.name: item for item in mod.score_opportunity(_candidate(), supplier_evidence=result).dimensions}
+
+        assert dimensions["observed_supplier_cost"].is_unknown is True
+        assert dimensions["observed_supplier_cost"].raw_value is None
+        assert dimensions["shipping_complexity"].is_unknown is True
+        assert "EUR" in dimensions["shipping_complexity"].reason
 
     def test_shipping_complexity_unavailable_when_not_observed(self):
         evidence = _evidence(shipping_status="unavailable", shipping_cost=None,
@@ -355,8 +396,15 @@ class TestOpportunityScoringEvents:
             assert event.metadata["dry_run"] is True
             assert event.metadata["advisory"] is True
             assert event.metadata["no_launch_authority"] is True
+            assert event.metadata["no_ad_authority"] is True
             assert event.metadata["no_spend_authority"] is True
             assert event.metadata["no_order_authority"] is True
+            assert event.metadata["no_payment_authority"] is True
+            assert event.metadata["no_outreach_authority"] is True
+            assert event.metadata["no_supplier_mutation_authority"] is True
+            assert event.metadata["no_inventory_mutation_authority"] is True
+            assert event.metadata["no_customer_message_authority"] is True
+            assert event.metadata["no_external_action_authority"] is True
 
     def test_events_correlate_to_run_id(self):
         assessment = mod.rank_opportunities([_candidate()], workspace_id="workspace-1", query="x", generated_at=1.0)

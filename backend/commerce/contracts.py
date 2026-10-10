@@ -18,6 +18,7 @@ def _quality_dict(quality: DataQuality) -> dict[str, Any]:
         "completeness": quality.completeness,
         "observed_at": quality.observed_at.isoformat(),
         "source_ref": quality.source_ref,
+        "retrieval_mode": quality.retrieval_mode,
         "is_synthetic": quality.is_synthetic,
         "is_live_attributed": quality.is_live_attributed,
     }
@@ -40,6 +41,7 @@ def _quality_from_dict(data: dict[str, Any] | None) -> DataQuality:
         "attribution": data.get("attribution", "unknown"),
         "completeness": data.get("completeness", "complete"),
         "source_ref": data.get("source_ref", ""),
+        "retrieval_mode": data.get("retrieval_mode", "unknown"),
     }
     if observed_at is not None:
         kwargs["observed_at"] = observed_at

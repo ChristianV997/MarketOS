@@ -9,6 +9,7 @@ import os
 import hashlib
 import asyncio
 import json
+import math
 import re
 import time
 from datetime import datetime, timezone
@@ -67,7 +68,9 @@ class Crawl4AIResearchAdapter:
         return AdapterHealth(self.name, configured=True, reachable=True, capabilities=("web_crawl", "structured_extraction", "cache"))
 
     @staticmethod
-    def _product_records_from_jsonld(html: Any, url: str) -> list[dict[str, Any]]:
+    def _product_records_from_jsonld(
+        html: Any, url: str, *, fetched_at: float | None = None, retrieval_mode: str = "unknown",
+    ) -> list[dict[str, Any]]:
         """Extract only explicit schema.org Product evidence from a page.
 
         JSON-LD is deterministic, requires no model credentials, and avoids
@@ -104,7 +107,6 @@ class Crawl4AIResearchAdapter:
             except (TypeError, ValueError):
                 continue
 
-        retrieved_at = datetime.now(timezone.utc).isoformat()
         records: list[dict[str, Any]] = []
         seen: set[tuple[str, str]] = set()
         for product in objects:
@@ -114,11 +116,19 @@ class Crawl4AIResearchAdapter:
             offers = product.get("offers")
             offer_rows = offers if isinstance(offers, list) else [offers]
             offer = next((item for item in offer_rows if isinstance(item, Mapping)), {})
-            raw_price = offer.get("price", offer.get("lowPrice", product.get("price", 0.0))) if isinstance(offer, Mapping) else product.get("price", 0.0)
+            raw_price = None
+            if isinstance(offer, Mapping):
+                raw_price = offer.get("price")
+                if raw_price is None:
+                    raw_price = offer.get("lowPrice")
+            if raw_price is None:
+                raw_price = product.get("price")
             try:
-                price = float(raw_price or 0.0)
+                price = float(raw_price) if raw_price not in (None, "") else None
+                if price is not None and not math.isfinite(price):
+                    price = None
             except (TypeError, ValueError):
-                price = 0.0
+                price = None
             product_id = str(product.get("sku") or product.get("mpn") or product.get("productID") or "").strip()
             dedupe_key = (product_id, name.casefold())
             if dedupe_key in seen:
@@ -126,17 +136,21 @@ class Crawl4AIResearchAdapter:
             seen.add(dedupe_key)
             brand = product.get("brand")
             brand_name = str(brand.get("name") or "").strip() if isinstance(brand, Mapping) else str(brand or "").strip()
+            raw_currency = (offer.get("priceCurrency") or product.get("priceCurrency")) if isinstance(offer, Mapping) else product.get("priceCurrency")
+            currency = str(raw_currency).strip().upper() if raw_currency not in (None, "") else None
             record: dict[str, Any] = {
                 "name": name,
                 "url": str(product.get("url") or url),
                 "source": "crawl4ai",
-                "selling_price": max(0.0, price),
-                "currency": str(offer.get("priceCurrency") or product.get("priceCurrency") or "USD").upper() if isinstance(offer, Mapping) else str(product.get("priceCurrency") or "USD").upper(),
+                "selling_price": price,
+                "currency": currency,
+                "shipping_currency": None,
                 "availability": str(offer.get("availability") or "") if isinstance(offer, Mapping) else "",
                 "brand": brand_name,
                 "description": str(product.get("description") or ""),
-                "retrieved_at": retrieved_at,
-                "quality": {"provenance": "live", "attribution": "attributed", "source_ref": url},
+                "fetched_at": fetched_at,
+                "retrieval_mode": retrieval_mode,
+                "quality": {"provenance": "public_page", "attribution": "attributed", "source_ref": url},
             }
             if product_id:
                 record["product_id"] = product_id
@@ -165,17 +179,29 @@ class Crawl4AIResearchAdapter:
             shipping_details = offer.get("shippingDetails") if isinstance(offer, Mapping) else None
             shipping_rate = shipping_details.get("shippingRate") if isinstance(shipping_details, Mapping) else None
             if isinstance(shipping_rate, Mapping):
-                try:
-                    record["shipping_cost"] = max(0.0, float(shipping_rate.get("value")))
-                except (TypeError, ValueError):
-                    pass
+                raw_shipping = shipping_rate.get("value")
+                if raw_shipping is not None:
+                    try:
+                        shipping_cost = float(raw_shipping)
+                    except (TypeError, ValueError):
+                        shipping_cost = math.nan
+                    if math.isfinite(shipping_cost) and shipping_cost >= 0:
+                        record["shipping_cost"] = shipping_cost
+                        raw_shipping_currency = shipping_rate.get("currency")
+                        record["shipping_currency"] = (
+                            str(raw_shipping_currency).strip().upper()
+                            if raw_shipping_currency not in (None, "") else None
+                        )
+                    else:
+                        record["shipping_cost_status"] = "malformed"
             records.append(record)
         return records
 
     @staticmethod
-    def _normalized_structured_records(structured: Any, url: str) -> list[dict[str, Any]]:
+    def _normalized_structured_records(
+        structured: Any, url: str, *, fetched_at: float | None = None, retrieval_mode: str = "unknown",
+    ) -> list[dict[str, Any]]:
         rows = structured if isinstance(structured, list) else [structured]
-        retrieved_at = datetime.now(timezone.utc).isoformat()
         normalized: list[dict[str, Any]] = []
         for row in rows:
             if not isinstance(row, Mapping):
@@ -188,8 +214,9 @@ class Crawl4AIResearchAdapter:
                 "name": name,
                 "url": row.get("url") or url,
                 "source": "crawl4ai",
-                "retrieved_at": row.get("retrieved_at") or retrieved_at,
-                "quality": {"provenance": "live", "attribution": "attributed", "source_ref": str(row.get("url") or url)},
+                "fetched_at": fetched_at,
+                "retrieval_mode": retrieval_mode,
+                "quality": {"provenance": "public_page", "attribution": "attributed", "source_ref": str(row.get("url") or url)},
             })
         return normalized
 
@@ -211,16 +238,43 @@ class Crawl4AIResearchAdapter:
             self._raw_cache.pop(oldest, None)
 
     def _records_from_raw(self, raw: Mapping[str, Any], url: str) -> list[dict[str, Any]]:
+        fetched_at = raw.get("fetched_at")
+        retrieval_mode = str(raw.get("retrieval_mode") or "unknown")
         extracted = raw.get("extracted_content")
         if extracted:
             try:
                 structured = json.loads(extracted) if isinstance(extracted, str) else extracted
             except (TypeError, ValueError):
                 structured = None
-            normalized = self._normalized_structured_records(structured, url) if structured is not None else []
+            normalized = self._normalized_structured_records(
+                structured, url, fetched_at=fetched_at, retrieval_mode=retrieval_mode,
+            ) if structured is not None else []
             if normalized:
                 return normalized
-        return self._product_records_from_jsonld(raw.get("html", ""), url)
+        return self._product_records_from_jsonld(
+            raw.get("html", ""), url, fetched_at=fetched_at, retrieval_mode=retrieval_mode,
+        )
+
+    @staticmethod
+    def _public_page_quality(record: Mapping[str, Any], source_ref: str) -> DataQuality | None:
+        retrieval_mode = str(record.get("retrieval_mode") or "unknown")
+        if retrieval_mode not in {"fresh_fetch", "cache_hit"}:
+            return None
+        raw_fetched_at = record.get("fetched_at")
+        if raw_fetched_at is None:
+            return None
+        try:
+            fetched_at = float(raw_fetched_at)
+            if not math.isfinite(fetched_at) or fetched_at < 0:
+                return None
+            observed_at = datetime.fromtimestamp(fetched_at, tz=timezone.utc)
+        except (TypeError, ValueError, OverflowError, OSError):
+            return None
+        return DataQuality(
+            provenance="public_page", attribution="attributed" if source_ref else "unknown",
+            completeness="partial", observed_at=observed_at, source_ref=source_ref,
+            retrieval_mode=retrieval_mode,
+        )
 
     async def discover(self, url: str, *, context: SidecarContext) -> list[dict[str, Any]]:
         parsed = urlparse(url)
@@ -252,6 +306,7 @@ class Crawl4AIResearchAdapter:
 
         cached_raw = self._raw_cache_get(url, dry_run=False)
         if cached_raw is not None:
+            cached_raw["retrieval_mode"] = "cache_hit" if cached_raw.get("fetched_at") is not None else "cache_hit_timestamp_unknown"
             return self._records_from_raw(cached_raw, url)
 
         channel = crawl4ai_browser_channel()
@@ -266,9 +321,12 @@ class Crawl4AIResearchAdapter:
         )
         async with AsyncWebCrawler(config=browser_config) as crawler:
             result = await crawler.arun(url=url)
+        fetched_at = time.time()
         raw = {
             "extracted_content": getattr(result, "extracted_content", None),
             "html": getattr(result, "html", "") or "",
+            "fetched_at": fetched_at,
+            "retrieval_mode": "fresh_fetch",
         }
         self._raw_cache_put(url, raw, dry_run=False)
         records = self._records_from_raw(raw, url)
@@ -307,21 +365,24 @@ class Crawl4AIResearchAdapter:
                 continue
             source_ref = str(record.get("url") or record.get("source_ref") or "")
             product_id = str(record.get("product_id") or hashlib.sha256(f"{source_ref}:{name}".encode()).hexdigest()[:24])
-            raw_quality = record.get("quality") or {}
-            quality = raw_quality if isinstance(raw_quality, DataQuality) else DataQuality(
-                provenance=str(raw_quality.get("provenance", "unknown")),
-                attribution="attributed" if source_ref else "unknown",
-                source_ref=source_ref,
-            )
+            quality = Crawl4AIResearchAdapter._public_page_quality(record, source_ref)
+            currency = str(record.get("currency") or "").strip().upper()
+            if quality is None or not currency:
+                continue
+            raw_price = record.get("selling_price", record.get("price"))
+            if raw_price is None or isinstance(raw_price, bool):
+                continue
             try:
-                price = float(record.get("selling_price", record.get("price", 0.0)) or 0.0)
+                price = float(raw_price)
             except (TypeError, ValueError):
-                price = 0.0
+                continue
+            if not math.isfinite(price) or price <= 0:
+                continue
             candidates.append(ProductCandidate(
                 product_id=product_id,
                 name=name,
-                currency=str(record.get("currency", "USD")),
-                selling_price=max(0.0, price),
+                currency=currency,
+                selling_price=price,
                 source_signal_ids=(source_ref,) if source_ref else (),
                 quality=quality,
             ))
@@ -341,16 +402,27 @@ class Crawl4AIResearchAdapter:
             if not product_id:
                 continue
             raw_cost = record.get("unit_cost", record.get("wholesale_price", record.get("supplier_price")))
+            if raw_cost is None or isinstance(raw_cost, bool):
+                continue
             try:
                 unit_cost = float(raw_cost)
             except (TypeError, ValueError):
                 continue
-            if unit_cost <= 0:
+            if not math.isfinite(unit_cost) or unit_cost <= 0:
+                continue
+            raw_shipping = record.get("shipping_cost")
+            if raw_shipping is None or isinstance(raw_shipping, bool):
                 continue
             try:
-                shipping_cost = max(0.0, float(record.get("shipping_cost", 0.0) or 0.0))
+                shipping_cost = float(raw_shipping)
             except (TypeError, ValueError):
-                shipping_cost = 0.0
+                continue
+            if not math.isfinite(shipping_cost) or shipping_cost < 0:
+                continue
+            currency = str(record.get("currency") or "").strip().upper()
+            shipping_currency = str(record.get("shipping_currency") or "").strip().upper()
+            if not currency or currency != shipping_currency:
+                continue
             try:
                 fulfillment_days = int(record["fulfillment_days"]) if record.get("fulfillment_days") is not None else None
             except (TypeError, ValueError):
@@ -360,6 +432,9 @@ class Crawl4AIResearchAdapter:
             except (TypeError, ValueError):
                 inventory_units = None
             source_ref = str(record.get("url") or record.get("source_ref") or "")
+            quality = Crawl4AIResearchAdapter._public_page_quality(record, source_ref)
+            if quality is None:
+                continue
             supplier_id = str(record.get("supplier_id") or record.get("supplier_name") or urlparse(source_ref).hostname or "crawl4ai-supplier").strip()
             offers.append(SupplierOffer(
                 supplier_id=supplier_id,
@@ -368,7 +443,7 @@ class Crawl4AIResearchAdapter:
                 shipping_cost=shipping_cost,
                 fulfillment_days=fulfillment_days,
                 inventory_units=inventory_units,
-                currency=str(record.get("currency") or "USD").upper(),
-                quality=DataQuality(provenance="live", attribution="attributed" if source_ref else "unknown", source_ref=source_ref),
+                currency=currency,
+                quality=quality,
             ))
         return offers
