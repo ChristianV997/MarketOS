@@ -12,6 +12,7 @@ from typing import Any, Mapping, Sequence
 from evaluation.companyos.approval_ledger import REQUEST_TYPES
 from evaluation.companyos.credential_registry import build_credential_registry
 from evaluation.companyos.provider_registry import build_provider_registry
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 
 REQUEST_KINDS = (
     "serp_google_organic_snapshot",
@@ -76,14 +77,22 @@ def _tuple(value: Any) -> tuple[str, ...]:
     return tuple(str(item) for item in value)
 
 
+
+
+
 def _secret_like(value: Any) -> bool:
     if isinstance(value, Mapping):
-        return any(str(key).lower().replace("-", "_") in _SECRET_KEYS | _RAW_KEYS or _secret_like(item) for key, item in value.items())
+        return any(
+            str(key).lower().replace("-", "_") in _SECRET_KEYS | _RAW_KEYS
+            or _secret_like(str(key))
+            or _secret_like(item)
+            for key, item in value.items()
+        )
     if isinstance(value, (tuple, list, set)):
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza"))
+        return "-----begin " in lowered or "bearer " in lowered or contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza"))
     return False
 
 

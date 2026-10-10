@@ -7,11 +7,12 @@ plans, normalized evidence contracts, and deterministic dry-run results.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from evaluation.companyos.approval_ledger import REQUEST_TYPES
 from evaluation.companyos.credential_registry import build_credential_registry
-from evaluation.companyos.provider_registry import build_provider_registry
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
+
 
 ADAPTER_MODES = (
     "fixture_only",
@@ -74,18 +75,22 @@ def _tuple(value: Any) -> tuple[str, ...]:
     return tuple(str(item) for item in value)
 
 
+
+
+
 def _secret_like(value: Any) -> bool:
     if isinstance(value, Mapping):
         for key, item in value.items():
-            normalized = str(key).lower().replace("-", "_")
-            if normalized in _SECRET_KEYS or normalized in _RAW_KEYS or _secret_like(item):
+            key_text = str(key)
+            normalized = key_text.lower().replace("-", "_")
+            if normalized in _SECRET_KEYS or normalized in _RAW_KEYS or _secret_like(key_text) or _secret_like(item):
                 return True
         return False
     if isinstance(value, (tuple, list, set)):
         return any(_secret_like(item) for item in value)
     if isinstance(value, str):
         lowered = value.lower()
-        return "-----begin " in lowered or "bearer " in lowered or any(marker in lowered for marker in ("sk-", "ghp_", "xoxb-", "AIza"))
+        return "-----begin " in lowered or "bearer " in lowered or contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in ("ghp_", "xoxb-", "aiza"))
     return False
 
 

@@ -12,8 +12,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from evaluation.companyos.approval_ledger import build_approval_ledger, simulate_action
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 
 SECRET_KEYS = {"password", "secret", "token", "api_key", "apikey", "private_key", "access_token", "refresh_token", "client_secret", "authorization", "cookie"}
+
 
 
 def _path(value: str | None) -> Path | None:
@@ -40,16 +42,15 @@ def _output_path(value: str) -> Path:
 def _secret_like(value: Any) -> bool:
     if isinstance(value, dict):
         for key, item in value.items():
-            normalized = str(key).lower().replace("-", "_")
-            if normalized in SECRET_KEYS:
-                return True
-            if _secret_like(item):
+            key_text = str(key)
+            normalized = key_text.lower().replace("-", "_")
+            if normalized in SECRET_KEYS or _secret_like(key_text) or _secret_like(item):
                 return True
     elif isinstance(value, list):
         return any(_secret_like(item) for item in value)
     elif isinstance(value, str):
         lowered = value.lower()
-        return any(marker in lowered for marker in ("bearer ", "-----begin ", "sk-", "ghp_"))
+        return contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in ("bearer ", "-----begin ", "ghp_"))
     return False
 
 
