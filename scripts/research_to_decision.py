@@ -10,15 +10,17 @@ import argparse
 import csv
 import errno
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import stat as stat_module
 import sys
+import unicodedata
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping, Sequence
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 # Allow direct ``python scripts/research_to_decision.py`` execution from any cwd.
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -223,23 +225,193 @@ def _reject_html(raw: str) -> None:
         raise ResearchToDecisionError("HTML or raw page content is not accepted")
 
 
+def _is_unsafe_relative_path(text: str) -> bool:
+    """True for a rooted, absolute, drive-qualified, UNC or ``..``-traversing path.
+
+    Judged under POSIX *and* Windows rules on every platform: a manifest authored
+    on one OS must be accepted or rejected identically on the other. Using the
+    host ``Path`` alone let ``..\\outside.json`` through on POSIX (where ``\\`` is an
+    ordinary character) while rejecting it on Windows.
+    """
+    if ".." in text.replace("\\", "/").split("/"):
+        return True
+    if ":" in text:
+        return True
+    for flavour in (PurePosixPath, PureWindowsPath):
+        candidate = flavour(text)
+        if candidate.is_absolute() or candidate.drive or candidate.root:
+            return True
+    return False
+
+
+_WINDOWS_RESERVED_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"COM{digit}" for digit in "123456789\u00b9\u00b2\u00b3"}
+    | {f"LPT{digit}" for digit in "123456789\u00b9\u00b2\u00b3"}
+)
+
+
+def _has_windows_unportable_component(text: str) -> bool:
+    """True when any path component names a Windows device or cannot exist as written on Windows.
+
+    Windows treats ``NUL``, ``CON``, ``COM1`` ... as devices whatever the extension (``nul.txt``) and
+    silently drops trailing dots and spaces from a component (``report.json.`` is ``report.json``, and
+    ``.. `` is ``..``). A manifest path that means one thing on POSIX and another on Windows breaks the
+    "judged identically on every host" contract, so it is refused here on every host. Ordinary names such
+    as ``contract.json`` or ``console.csv`` are unaffected: only a reserved *stem* matches.
+    """
+    for part in re.split(r"[/\\]", text):
+        if not part or part == ".":
+            continue
+        if part.endswith((" ", ".")):
+            return True
+        if part.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_RESERVED_DEVICE_NAMES:
+            return True
+    return False
+
+
+def _is_unsafe_local_file_path(text: str) -> bool:
+    """A manifest *file* path that is unsafe or non-portable (see the two checks it combines)."""
+    return _is_unsafe_relative_path(text) or _has_windows_unportable_component(text)
+
+
+def _parse_url(value: str, error: str):
+    """``urlparse`` that fails closed: a malformed (e.g. unterminated IPv6) URL raises the module error."""
+    try:
+        return urlparse(value)
+    except ValueError:
+        raise ResearchToDecisionError(error) from None
+
+
+_HOST_LABEL = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?")
+
+
+def _resolve_root(path: Path | str, label: str) -> Path:
+    """``Path.resolve()`` for an operator-supplied root that fails closed.
+
+    A symlink loop raises a bare RuntimeError (3.11/3.12) whose text echoes the path; an
+    over-long or unencodable name raises OSError/ValueError. Neither may escape as-is.
+    """
+    try:
+        str(path).encode("utf-8")
+        return Path(path).resolve()
+    except (RuntimeError, OSError, ValueError):
+        raise ResearchToDecisionError(f"{label} could not be resolved safely") from None
+
+
+def _is_well_formed_http_host(hostname: str | None) -> bool:
+    """True only for a real DNS name (IDN allowed), a dotted-quad IPv4 or a bracketed IPv6 literal.
+
+    A non-ASCII host is judged by its IDNA form, because that is the host a client connects to:
+    ``http://\uff0e\uff0e/x`` folds to ``..``, and soft-hyphen, zero-width and bidi characters are
+    dropped or refused rather than hiding in the text. Whitespace, controls, backslash, percent,
+    shell and URL punctuation, empty or hyphen-edged labels, and ambiguous numeric hosts such as
+    ``0x7f.1`` or ``999.1.1.1`` are malformed.
+    """
+    if not hostname:
+        return False
+    # Invisible and format characters (soft hyphen, zero-width, bidi) are dropped by IDNA, so two
+    # visibly different strings would name one host; refuse them instead of normalising them away.
+    if any(unicodedata.category(char) in {"Cc", "Cf", "Zs", "Zl", "Zp"} for char in hostname):
+        return False
+    if ":" in hostname:  # urlsplit strips the brackets of an IPv6 literal
+        if "%" in hostname:  # IPv6Address would accept a '%zone' scope id; it is never a reference host
+            return False
+        try:
+            ipaddress.IPv6Address(hostname)
+        except ValueError:
+            return False
+        return True
+    try:
+        ascii_host = hostname.encode("idna").decode("ascii")
+    except (UnicodeError, ValueError):
+        return False
+    labels = ascii_host[:-1].split(".") if ascii_host.endswith(".") else ascii_host.split(".")
+    if not all(_HOST_LABEL.fullmatch(label) for label in labels):
+        return False
+    last = labels[-1].lower()
+    if last.isdigit() or last.startswith("0x"):  # numeric-looking: only a strict dotted quad is a host
+        try:
+            ipaddress.IPv4Address(".".join(labels))
+        except ValueError:
+            return False
+    return True
+
+
+def _http_authority_is_safe(parsed) -> bool:
+    """Well-formed host, a valid port, no userinfo (not even an empty one) and no stray brackets."""
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if port == 0 or not parsed.netloc or "@" in parsed.netloc:
+        return False
+    if "[" in parsed.netloc and ":" not in (parsed.hostname or ""):  # only an IPv6 literal may be bracketed
+        return False
+    return _is_well_formed_http_host(parsed.hostname)
+
+
+def _url_path_has_traversal(path: str) -> bool:
+    """A ``..`` segment in a URL path, however separated, percent-encoded (even twice) or ``;``-suffixed."""
+    decoded = path
+    for _ in range(3):
+        step = unquote(decoded)
+        if step == decoded:
+            break
+        decoded = step
+    return any(segment.split(";", 1)[0].strip() == ".." for segment in re.split(r"[/\\]", decoded))
+
+
 def _reference_text(value: Any, field: str, *, required: bool = True, allow_url_query: bool = False) -> str:
+    # CR/LF are rejected on the raw value: _text() would otherwise fold them into a space and
+    # let a header-shaped tail ("x\r\nHost: evil") through as ordinary text.
+    if isinstance(value, str) and any(char in value for char in "\r\n"):
+        raise ResearchToDecisionError(f"{field} must be a safe reference")
     reference = _text(value, field, required=required)
     if not reference:
         return reference
-    parsed = urlparse(reference)
+    # Reject NUL before URL query/fragment stripping so hidden unsafe bytes
+    # cannot be silently normalized out of an operator-supplied reference.
+    if "\x00" in reference:
+        raise ResearchToDecisionError(f"{field} must be a safe reference")
+    try:
+        reference.encode("utf-8")  # a lone surrogate would otherwise escape later, when the reference is hashed
+    except UnicodeEncodeError:
+        raise ResearchToDecisionError(f"{field} must be a safe reference") from None
+    try:
+        parsed = urlparse(reference)
+        # ``port`` raises ValueError for a non-numeric or out-of-range port, and
+        # ``urlparse`` for a malformed bracketed (IPv6) host; both must fail closed
+        # as a ResearchToDecisionError, never escape as a bare ValueError.
+        if parsed.scheme in {"http", "https"}:
+            parsed.port
+    except ValueError:
+        raise ResearchToDecisionError(f"{field} must be a safe reference") from None
     if parsed.scheme in {"http", "https"}:
-        if not parsed.netloc or parsed.username or parsed.password:
+        if not _http_authority_is_safe(parsed) or parsed.username or parsed.password:
             raise ResearchToDecisionError(f"{field} must be a safe reference")
         if (parsed.query or parsed.fragment) and not allow_url_query:
             raise ResearchToDecisionError(f"{field} must not contain a query or fragment")
         if allow_url_query:
             reference = parsed._replace(query="", fragment="").geturl()
-    elif parsed.scheme:
-        if "://" in reference or parsed.scheme not in {"fixture", "file", "manual"}:
-            raise ResearchToDecisionError(f"{field} must be a safe reference")
-    path = Path(parsed.path or reference)
-    if path.is_absolute() or ".." in path.parts or any(char in reference for char in "<>\r\n\x00"):
+    elif "://" in reference or (parsed.scheme and parsed.scheme not in {"fixture", "file", "manual"}):
+        # Also covers a URL whose scheme text was damaged by whitespace folding (\"ht\ttp://x\"): it no
+        # longer parses as a scheme, but a local reference never contains "://".
+        raise ResearchToDecisionError(f"{field} must be a safe reference")
+    path_text = parsed.path or reference
+    if parsed.scheme in {"http", "https"}:
+        # A URL path is not a filesystem path: its leading "/" is the URL root, not an
+        # absolute local path (host-OS ``Path.is_absolute`` disagreed across platforms).
+        # Traversal segments are still rejected, and hostnames like '..' or '.' are rejected.
+        unsafe_path = (
+            _url_path_has_traversal(path_text)
+            or parsed.hostname in {".", ".."}
+            or ".." in parsed.netloc.replace("\\", "/").split("/")
+            or any(part in {".", ".."} for part in parsed.netloc.split(":"))
+        )
+    else:
+        unsafe_path = _is_unsafe_relative_path(path_text)
+    if unsafe_path or any(char in reference for char in "<>\r\n\x00"):
         # \x00 specifically: Path.resolve() raises an unhandled ValueError
         # ("embedded null byte") deep inside posixpath's realpath, not a
         # ResearchToDecisionError -- reproduced via
@@ -574,7 +746,7 @@ def _supplier_document_evidence_bindings(
         return {}
     if evidence_root is None:
         raise ResearchToDecisionError("supplier document evidence bindings require an evidence root")
-    root = evidence_root.resolve()
+    root = _resolve_root(evidence_root, "supplier evidence root")
     if not root.is_dir():
         raise ResearchToDecisionError("supplier evidence root does not exist or is not a directory")
     bindings: dict[tuple[str, str], dict[str, Any]] = {}
@@ -600,6 +772,11 @@ def _supplier_document_evidence_bindings(
         if key in bindings:
             raise ResearchToDecisionError(f"duplicate supplier document evidence binding for offer {offer_id}/{exact_sku}")
         relative_path = urlparse(reference).path or reference
+        # An http(s) reference is accepted by _reference_text with an absolute URL path ("/bin/x.pdf");
+        # as a local evidence path that must be rejected *before* the walk below, which would
+        # otherwise call is_symlink() on host paths outside the evidence root (an existence oracle).
+        if _is_unsafe_local_file_path(relative_path):
+            raise ResearchToDecisionError("document_evidence.reference must remain relative to the manifest")
         # Checked on the *unresolved* path, walking every component: once
         # _resolve() calls Path.resolve() it follows symlinks and returns
         # the real target, which is never itself a symlink -- so a symlink
@@ -607,7 +784,11 @@ def _supplier_document_evidence_bindings(
         walked = root
         for part in Path(relative_path).parts:
             walked = walked / part
-            if walked.is_symlink():
+            try:
+                symlink = walked.is_symlink()
+            except OSError:  # e.g. a multibyte component over 255 bytes; the platform error echoes the path
+                raise ResearchToDecisionError("document_evidence.reference could not be resolved safely") from None
+            if symlink:
                 raise ResearchToDecisionError("document_evidence.reference must not be a symlink")
         resolved = _resolve(root, relative_path, label="document_evidence.reference")
         if resolved.suffix.lower() not in SUPPORTED_EVIDENCE_DOCUMENT_EXTENSIONS:
@@ -698,13 +879,28 @@ def _resolve(base_dir: Path, value: Any, *, label: str) -> Path:
         # (nothing is ever read before this point), but an unhandled
         # exception is not this module's fail-closed contract.
         raise ResearchToDecisionError(f"{label} must not contain a NUL byte")
-    candidate = Path(raw)
-    if candidate.is_absolute() or ".." in candidate.parts:
+    try:
+        raw.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ResearchToDecisionError(f"{label} could not be resolved safely") from None
+    if _is_unsafe_local_file_path(raw):
         raise ResearchToDecisionError(f"{label} must remain relative to the manifest")
-    resolved = (base_dir / candidate).resolve()
-    if base_dir.resolve() not in resolved.parents:
+    if any(len(part.encode("utf-8")) > 255 for part in re.split(r"[/\\]", raw)):
+        raise ResearchToDecisionError(f"{label} could not be resolved safely")
+    candidate = Path(raw)
+    try:
+        resolved = (base_dir / candidate).resolve()
+        resolved_base = base_dir.resolve()
+        inside = resolved_base in resolved.parents
+        is_file = inside and resolved.is_file()
+    except (RuntimeError, OSError, ValueError):
+        # A symlink loop (RuntimeError), an over-long component (OSError, e.g. a multibyte name
+        # over 255 bytes) or a lone surrogate (UnicodeEncodeError) must fail closed with this
+        # module's error, not escape bare. Never echo the path: the platform error text does.
+        raise ResearchToDecisionError(f"{label} could not be resolved safely") from None
+    if not inside:
         raise ResearchToDecisionError(f"{label} escapes the manifest directory")
-    if not resolved.is_file():
+    if not is_file:
         raise ResearchToDecisionError(f"{label} does not exist")
     return resolved
 
@@ -874,8 +1070,14 @@ def _check_lane(records: list[Any], lane: Mapping[str, Any], *, label: str) -> l
             warnings.append(f"destination_missing:{label}")
         source_url = str(getattr(record, "source_url", "") or "")
         if source_url:
-            parsed = urlparse(source_url)
-            if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
+            parsed = _parse_url(source_url, f"unsafe source_url in {label}")
+            if (
+                any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in source_url)  # urlparse strips tab/CR/LF
+                or parsed.scheme not in {"http", "https"}
+                or not _http_authority_is_safe(parsed)
+                or parsed.query
+                or parsed.fragment
+            ):
                 raise ResearchToDecisionError(f"unsafe source_url in {label}")
     return sorted(set(warnings))
 
@@ -1180,8 +1382,11 @@ def _load_observation(path: Path, entry: Mapping[str, Any], *, lane: Mapping[str
     candidate_evidence_refs: dict[str, list[str]] = {}
     for row in rows:
         url = row.get("url") or row.get("source_url")
-        if kind == "reviewed_url" and (not isinstance(url, str) or urlparse(url).scheme not in {"http", "https"} or not urlparse(url).netloc):
-            raise ResearchToDecisionError(f"reviewed_url requires an http(s) URL: {label}")
+        if kind == "reviewed_url":
+            reviewed = _parse_url(url, f"reviewed_url requires an http(s) URL: {label}") if isinstance(url, str) else None
+            if reviewed is None or reviewed.scheme not in {"http", "https"} or not reviewed.netloc:
+                raise ResearchToDecisionError(f"reviewed_url requires an http(s) URL: {label}")
+            _reference_text(url, "reviewed_url.url", allow_url_query=True)
         reference_value = row.get("source_reference") or row.get("document_reference") or (url if kind == "reviewed_url" else row.get("source")) or entry.get("source_reference") or label
         reference_id = _evidence_reference(reference_value, f"{kind}.source_reference", allow_url_query=kind == "reviewed_url")
         method = _text(row.get("extraction_method") or entry.get("extraction_method") or ("operator_reviewed_url" if kind == "reviewed_url" else "manual_document_review"), f"{kind}.extraction_method", required=True)
@@ -1530,9 +1735,9 @@ def build_research_to_decision(
     """
     lane, metadata, captured_at = _validate_manifest(manifest)
     operator_confirmations = _operator_supplier_confirmations(operator_confirmed_supplier_documents)
-    evidence_root = Path(supplier_evidence_root).resolve() if supplier_evidence_root else None
+    evidence_root = _resolve_root(supplier_evidence_root, "supplier evidence root") if supplier_evidence_root else None
     document_evidence_bindings = _supplier_document_evidence_bindings(confirmed_supplier_document_evidence, evidence_root=evidence_root)
-    base = Path(base_dir).resolve()
+    base = _resolve_root(base_dir, "manifest base directory")
     entries_total = sum(len(manifest.get(key, []) or []) for key in ("supplier_inputs", "marketplace_inputs", "consumer_attention_inputs", "observation_inputs")) + (1 if manifest.get("public_market_seed") else 0)
     if entries_total > MAX_INPUT_FILES:
         raise ResearchToDecisionError(f"manifest exceeds {MAX_INPUT_FILES} input files")
