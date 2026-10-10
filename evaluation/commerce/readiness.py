@@ -150,6 +150,56 @@ def _next_action(*, credential: Mapping[str, Any], pack: Mapping[str, Any], supp
     return "deploy_readonly_validation_stack", "Deploy the read-only validation stack and keep all mutation phases gated behind an approval ledger.", ()
 
 
+def _merge_public_market_competition(competition: dict[str, Any], public_market: Mapping[str, Any]) -> dict[str, Any]:
+    """Fold offline/public-market benchmark offers into competition readiness.
+
+    Fixture/demo public-market context is useful bounded evidence
+    (``partially_ready``) and never upgrades to ``live_observed``. Live public
+    GETs may mark competition live-observed; they still do not authorize
+    supplier proof, spend, or launch.
+    """
+    if not public_market:
+        return competition
+    pm_offers = int(public_market.get("competitor_offers_observed", 0) or 0)
+    if pm_offers <= 0 and not public_market.get("candidates_tested"):
+        return competition
+    mode = str(public_market.get("evidence_mode", "") or "").lower()
+    eval_offers = int(competition.get("observed_offer_count", 0) or 0)
+    offers = max(eval_offers, pm_offers)
+    coverage = max(_number(competition.get("pricing_coverage")), _number(public_market.get("pricing_coverage")))
+    confidence = max(_number(competition.get("confidence")), _number(public_market.get("public_evidence_confidence")))
+    if competition.get("status") == "live_observed" or (mode == "public_live" and pm_offers > 0):
+        status = "live_observed"
+    elif offers > 0:
+        status = "partially_ready"
+    else:
+        status = str(competition.get("status") or "fixture_only")
+    median = competition.get("median_price")
+    return {
+        "status": status,
+        "observed_offer_count": offers,
+        "pricing_coverage": coverage,
+        "median_price": median,
+        "duplicate_count": int(competition.get("duplicate_count", 0) or 0),
+        "confidence": confidence,
+    }
+
+
+def _merge_public_market_opportunity(opportunity: dict[str, Any], public_market: Mapping[str, Any]) -> dict[str, Any]:
+    """Use public-market candidate coverage when evaluation opportunity is empty."""
+    if not public_market:
+        return opportunity
+    pm_candidates = int(public_market.get("candidates_tested", 0) or 0)
+    if int(opportunity.get("candidate_count", 0) or 0) > 0 or pm_candidates <= 0:
+        return opportunity
+    return {
+        "status": "partially_ready",
+        "candidate_count": pm_candidates,
+        "confidence": _number(public_market.get("public_evidence_confidence")),
+        "high_confidence_count": 0,
+    }
+
+
 def score_contributions(categories: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
     """Explain exactly how every readiness category contributes to /100."""
     weight = round(100 / len(categories), 4) if categories else 0.0
@@ -209,8 +259,10 @@ def build_phase1_readiness(
     competition_metrics = _metrics(evaluation, "competition_intelligence")
     offers = int(competition_metrics.get("observed_competitor_count", validation.get("observed_competitor_offers", 0)) or 0)
     competition = {"status": "live_observed" if offers else _status(validation.get("status"), structural=True), "observed_offer_count": offers, "pricing_coverage": _number(competition_metrics.get("pricing_coverage")), "median_price": competition_metrics.get("pricing_median"), "duplicate_count": int(competition_metrics.get("duplicate_count", 0) or 0), "confidence": _number(validation.get("competition_confidence"))}
+    competition = _merge_public_market_competition(competition, public_market)
     opportunity_metrics = _metrics(evaluation, "opportunity_scoring")
     opportunity = {"status": "partially_ready" if opportunity_metrics.get("candidate_count") else "fixture_only", "candidate_count": int(opportunity_metrics.get("candidate_count", 0) or 0), "confidence": _number((opportunity_metrics.get("confidence_distribution") or {}).get("mean")), "high_confidence_count": int(opportunity_metrics.get("high_confidence_count", 0) or 0)}
+    opportunity = _merge_public_market_opportunity(opportunity, public_market)
     research_metrics = _metrics(evaluation, "research_portfolio")
     research = {"status": "partially_ready" if research_metrics.get("candidate_count") else "fixture_only", "candidate_count": int(research_metrics.get("candidate_count", 0) or 0), "cluster_count": int(research_metrics.get("cluster_count", 0) or 0), "cluster_quality": research_metrics.get("cluster_quality")}
     overall = evaluation.get("overall", {}) if isinstance(evaluation.get("overall"), Mapping) else {}
@@ -227,6 +279,11 @@ def build_phase1_readiness(
     if credential_raw.get("status") == "credential_missing" and public_top:
         action = f"set_cj_credentials_and_validate_candidate:{public_top}"
         hint = "Configure CJ read-only credentials, then validate the highest-value public-market candidate with the credential-safe validation pack."
+    elif credential_raw.get("status") == "credential_missing" and not public_market:
+        # Offline-safe bounded competitor path before credentialed supplier proof.
+        action = "run_offline_public_market_benchmark"
+        hint = "Run the offline public-market benchmark (fixture/demo default) to populate competition coverage before configuring CJ credentials."
+        required_inputs = ()
     categories = {"supplier": supplier, "competition": competition, "opportunity": opportunity, "research": research, "commerce": commerce, "evaluation": eval_ready, "events": event_ready, "credentials": credential, "validation_pack": pack_ready, "deployment": deployment, "safety": safety}
     contributions = score_contributions(categories)
     score = round(sum(item["points"] for item in contributions.values()), 1)
@@ -237,6 +294,7 @@ def build_phase1_readiness(
     warnings = []
     if not evaluation: warnings.append("evaluation_report_not_supplied")
     if not pack: warnings.append("validation_pack_report_not_supplied")
+    if not public_market: warnings.append("public_market_benchmark_report_not_supplied")
     if not deployment["event_read_path_configured"]: warnings.append("event_read_jsonl_path_not_configured")
     overall_status = "ready" if not blockers and score >= 75 else "blocked" if credential_raw.get("status") == "credential_missing" else "partially_ready"
     artifacts = dict(source_artifacts or {})

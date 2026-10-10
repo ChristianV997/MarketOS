@@ -23,12 +23,21 @@ def test_no_artifact_is_deterministic_and_blocked_for_missing_credentials():
     first = build_phase1_readiness(environ={}).to_dict()
     assert first == build_phase1_readiness(environ={}).to_dict()
     assert first["overall_status"] == "blocked"
-    assert first["next_best_action"] == "set_cj_credentials_and_run_validation_pack"
+    # Offline public-market benchmark is preferred before credentialed supplier proof.
+    assert first["next_best_action"] == "run_offline_public_market_benchmark"
+    assert "public_market_benchmark_report_not_supplied" in first["advisory_warnings"]
     assert first["network_calls"] is False and first["mutated"] is False
     assert round(sum(item["points"] for item in first["score_contributions"].values()), 1) == first["overall_score"]
 
 
-@pytest.mark.parametrize("provider_status,expected", [("credential_missing", "set_cj_credentials_and_run_validation_pack"), ("live_flag_disabled", "enable_readonly_flag_and_run_validation_pack"), ("network_gate_required", "enable_readonly_flag_and_run_validation_pack")])
+@pytest.mark.parametrize(
+    "provider_status,expected",
+    [
+        ("credential_missing", "run_offline_public_market_benchmark"),
+        ("live_flag_disabled", "enable_readonly_flag_and_run_validation_pack"),
+        ("network_gate_required", "enable_readonly_flag_and_run_validation_pack"),
+    ],
+)
 def test_next_action_for_supplier_config_gates(provider_status, expected):
     env = {"MARKETOS_SUPPLIER_PROVIDER": "cj"}
     if provider_status != "credential_missing":
@@ -41,6 +50,48 @@ def test_next_action_for_supplier_config_gates(provider_status, expected):
 def test_competition_readiness_tracks_observed_offers(offers, expected):
     report = build_phase1_readiness(evaluation_report=_evaluation(offers=offers), environ={"CJ_EMAIL": "x", "CJ_API_KEY": "y", "MARKETOS_SUPPLIER_AUTH_READONLY": "1"}).to_dict()
     assert report["competition_readiness"]["status"] == expected
+
+
+def _public_market(*, offers: int = 3, mode: str = "fixture_demo", candidates: int = 2, top: str = "mini-thermal-printer") -> dict:
+    return {
+        "evidence_mode": mode,
+        "network_used": mode == "public_live",
+        "candidates_tested": candidates,
+        "competitor_pages_attempted": offers,
+        "competitor_offers_observed": offers,
+        "pricing_coverage": 0.5 if offers else 0.0,
+        "public_evidence_confidence": 0.55 if offers else 0.0,
+        "top_candidate_from_public_market": top if offers else None,
+        "remaining_supplier_blocker": "authenticated_supplier_evidence_not_live_observed",
+        "next_best_action": f"set_cj_credentials_and_validate_candidate:{top}" if top else "set_cj_credentials_and_run_validation_pack",
+    }
+
+
+def test_fixture_public_market_advances_competition_without_live_claim():
+    baseline = build_phase1_readiness(environ={}).to_dict()
+    report = build_phase1_readiness(public_market_benchmark_report=_public_market(), environ={}).to_dict()
+    assert report["competition_readiness"]["status"] == "partially_ready"
+    assert report["competition_readiness"]["observed_offer_count"] == 3
+    assert report["opportunity_readiness"]["status"] == "partially_ready"
+    assert report["opportunity_readiness"]["candidate_count"] == 2
+    assert report["evidence_summary"]["top_candidate_from_public_market"] == "mini-thermal-printer"
+    assert report["next_best_action"] == "set_cj_credentials_and_validate_candidate:mini-thermal-printer"
+    # Fixture/demo never clears the live-competition blocker or supplier proof gate.
+    assert "competition_evidence_not_live_observed" in report["blocking_gates"]
+    assert "authenticated_supplier_evidence_not_live_observed" in report["blocking_gates"]
+    assert report["overall_score"] > baseline["overall_score"]
+    assert report["network_calls"] is False and report["mutated"] is False
+
+
+def test_public_live_market_marks_competition_live_observed_only():
+    report = build_phase1_readiness(
+        public_market_benchmark_report=_public_market(mode="public_live"),
+        environ={"CJ_EMAIL": "x", "CJ_API_KEY": "y", "MARKETOS_SUPPLIER_AUTH_READONLY": "1"},
+    ).to_dict()
+    assert report["competition_readiness"]["status"] == "live_observed"
+    assert report["competition_readiness"]["observed_offer_count"] == 3
+    # Public GETs are not authenticated supplier proof.
+    assert report["supplier_readiness"]["status"] != "live_observed"
 
 
 def test_authenticated_supplier_evidence_is_live_observed():
