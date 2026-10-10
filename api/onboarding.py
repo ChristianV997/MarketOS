@@ -7,10 +7,23 @@ Guides new customers through:
 4. Campaign launch and monitoring
 """
 import logging
-from typing import Any, Optional
+from typing import Optional
 from pydantic import BaseModel
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
+
+from api.credentials_setup import (
+    credential_test_gate,
+    credential_write_gate,
+    provider_test_result,
+    read_bounded_json_object,
+    required_string,
+    stable_error,
+    store_credential,
+    validate_credential_input,
+    validate_service,
+)
+from backend.identity.workspaces import WorkspaceAccess
 
 _log = logging.getLogger(__name__)
 
@@ -143,12 +156,25 @@ async def set_store_info(
 
 @router.post("/step/2/verify-credential")
 async def verify_and_set_credential(
-    session_id: str = Body(...),
-    service: str = Body(...),
-    credential_key: str = Body(...),
-    credential_value: str = Body(...),
+    request: Request,
+    response: Response,
+    _write_access: WorkspaceAccess = Depends(credential_write_gate),
+    _test_access: WorkspaceAccess = Depends(credential_test_gate),
 ) -> dict:
-    """Verify and store a single credential."""
+    """Store one credential and report its service mode (verified internal operator only).
+
+    Uses the same gates, bounded body reader, and helpers as ``/api/setup``: the caller must hold both
+    the write and the test permission before the body is read, the key must be a provider credential
+    key, caller or workspace fields are rejected, and no provider is called.
+
+    Body: ``{"session_id", "service", "credential_key", "credential_value"}``, all strings.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    body = await read_bounded_json_object(request, frozenset({"session_id", "service", "credential_key", "credential_value"}))
+    session_id = required_string(body, "session_id")
+    service = required_string(body, "service")
+    credential_key = required_string(body, "credential_key")
+    credential_value = required_string(body, "credential_value")
     state = _sessions.get(session_id)
     if not state:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -156,38 +182,30 @@ async def verify_and_set_credential(
     if state.step != 2:
         raise HTTPException(status_code=400, detail="Not on step 2")
 
-    service = service.lower()
+    validate_credential_input(credential_key, credential_value)
+    service = validate_service(service)  # reject before anything is stored
     try:
-        from backend.config import set_credential
-        from api.credentials_setup import test_credentials
-
-        # Try to set the credential
-        set_credential(credential_key, credential_value)
-        _log.info("credential_set session=%s service=%s key=%s", session_id, service, credential_key)
-
-        # Test if it works
-        test_result = await test_credentials(service)
-
-        # Track status
-        if "credentials_set" not in state.__dict__:
-            state.credentials_set = {}
-        state.credentials_set[service] = test_result.get("status")
-
-        return {
-            "status": "ok",
-            "message": f"Credential verified for {service}",
-            "service": service,
-            "test_result": test_result,
-            "progress": {
-                "services_configured": len([s for s, status in state.credentials_set.items()
-                                           if status != "dry_run"]),
-                "services_total": 3,
-            },
-        }
+        store_credential(credential_key, credential_value)
     except Exception as exc:
-        _log.error("failed_to_verify_credential session=%s service=%s error=%s",
-                  session_id, service, exc)
-        raise HTTPException(status_code=400, detail=f"Failed to verify credential: {exc}")
+        _log.error("failed_to_verify_credential session=%s error=%s", session_id, type(exc).__name__)
+        raise stable_error(400, "credential_store_failed") from None
+    _log.info("credential_set session=%s service=%s", session_id, service)
+    test_result = provider_test_result(service)  # mode after the store; never calls a provider
+
+    if "credentials_set" not in state.__dict__:
+        state.credentials_set = {}
+    state.credentials_set[service] = test_result.get("status")
+
+    return {
+        "status": "ok",
+        "message": f"Credential stored for {service}",
+        "service": service,
+        "test_result": test_result,
+        "progress": {
+            "services_configured": len([s for s, status in state.credentials_set.items() if status != "dry_run"]),
+            "services_total": 3,
+        },
+    }
 
 
 @router.post("/step/{session_id}/complete")

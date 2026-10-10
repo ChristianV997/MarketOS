@@ -1,7 +1,7 @@
 # Identity / workspace / durable-state foundation
 
 Status: **implemented and unit/integration-tested on fixtures (SQLite stands in for Postgres); not deployed, not live-validated.**
-Package: `backend/identity/`. Tests: `tests/identity/`. One route family is mounted (`/api/organization/client-profile`, below); with no verifier or database configured it answers 503. No provider is configured.
+Package: `backend/identity/`. Tests: `tests/identity/`. Two route families use it: `/api/organization/client-profile` and the credential-setup writes under `/api/setup` (both below). With no verifier or database configured both answer 503. No provider is configured.
 
 ## What it provides
 
@@ -38,6 +38,17 @@ def handler(access: WorkspaceAccess = Depends(resolve_workspace_access)): ...
 * **TrustOS:** requests and responses pass `check_workspace_leakage` from `evaluation/trustos/client_workspace_isolation.py`. `export_client_evidence` is *not* used: it requires a registration in the JSON `WorkspaceRegistry` (a second catalog, see blocker 4) and a fixed field allow-list that does not describe a profile. **Known cost:** the screen is substring-based, so legitimate text containing words such as "strategy", "token", "formula" or a leading "/" in values is rejected (422 on write, 500 on read of a stored value).
 * The database role column is checked with the application's `role_grants`; `0002` is nullable so existing memberships have no role until an operator assigns one. There is still no route to assign roles or memberships.
 
+## Credential-setup API (`api/credentials_setup.py`)
+
+`POST /api/setup/credentials/set` and `POST /api/setup/test/{service}`, mounted by `backend/api.py` under `/api/setup`. The read-only `GET /api/setup/credentials/status` and `GET /api/setup/instructions[/{service}]` stay unauthenticated: they return booleans and static text only, and no value, path or exception text.
+
+* **Who:** the principal's *only* `internal` (owner) workspace membership (`require_workspace_permission(OWNER_TYPE, ...)`) whose stored role is `internal_operator`. `roles.py` adds `setup_credential:write` and `setup_credential:test`, granted to `internal_operator` only. `client_viewer`, a NULL or unknown role, a membership in a `client_service` workspace only, no membership, and several internal memberships all fail closed 403. Nothing in the body, query or other headers is read for identity, and a body naming a caller, workspace or role (`actor`, `user_id`, `role`, `workspace_id`, ...) is rejected `422 identity_field_rejected`.
+* **Order:** 401/403/503 are decided by the route dependencies before the handler reads the body, so a denied caller's body is never parsed and credential storage is never reached. The body is then read with the client-profile pattern (`application/json` only, else 415; at most 16 KiB, else 413; invalid JSON, 422). Every error body is a fixed `{code, field}` and never echoes the submitted key, value, field names, service name, exception text or a path.
+* **Writes:** only provider credential keys (`backend.config._SERVICE_CREDENTIALS`) are accepted, never `*_DRY_RUN` flags or arbitrary environment names. A value is non-empty, at most 4096 characters, and free of control characters. It is never logged or returned.
+* **Provider test:** never calls a provider helper. A service in dry-run reports `dry_run`. A service in live mode reports `blocked`, because no server-side approval seam exists yet. Any future live verification must go through the Approval Ledger (`evaluation/companyos/approval_ledger.py`) under a new, separately reviewed permission.
+* **Onboarding:** `api/onboarding.py`'s `verify-credential` route (no application mounts that router) uses the same gates and helpers. Its other write routes are *not* gated. `tests/identity/test_credentials_setup_gate.py` fails if any write operation under `/api/setup` or `/api/onboarding` that the production app publishes answers an anonymous caller with anything other than an identity denial, so mounting that router ungated is caught.
+* **Provisioning:** an internal operator is an `internal` workspace membership with role `internal_operator`, created by `add_member` (an operator/bootstrap action; there is still no route). Until a verifier and repository are wired in, these two routes answer 503 for everyone, so credentials are set locally with `backend/cli_setup.py`.
+
 ## Schema (additive, `0001_identity_workspace_foundation`)
 
 `workspace_identity`, `workspace_members`, `owner_portfolio_items`, `client_profiles`, `client_profile_entries`, plus `.down.sql` and a Postgres-only `.rls.sql` (RLS on, no policies, matching `deploy/supabase/schema.sql`).
@@ -57,5 +68,7 @@ def handler(access: WorkspaceAccess = Depends(resolve_workspace_access)): ...
 5. Membership provisioning (`create_workspace`, `add_member`) is an operator/bootstrap action with no route; there is deliberately no first-login auto-provisioning. Roles beyond the two profile roles, delete flows, role/membership management routes, webhooks and any client-facing login are out of scope.
 
 ## Rollback
+
+Credential-setup gates: revert the commit that added `setup_credential:*` to `roles.py` together with `api/credentials_setup.py`, `api/onboarding.py` and `tests/identity/test_credentials_setup_gate.py`. That restores the previous unauthenticated routes, which must not be exposed on a network-reachable deployment.
 
 Migration `0002` (member roles): run `0002_workspace_member_roles.down.sql` (drops only `workspace_members.role`; assigned roles are lost, memberships stay). It adds no table, so the RLS file needs no change. Then, to remove everything: delete the two `include_router` lines in `backend/api.py`, `api/routes/client_profile.py`, `backend/identity/`, `tests/identity/` and this file. If `0001` was applied (after `0002` down) to a database, run `0001_identity_workspace_foundation.down.sql` (drops only the five new tables; `workspaces` is untouched) after taking a backup, since their rows are lost.
