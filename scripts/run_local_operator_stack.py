@@ -169,15 +169,64 @@ def port_in_use(host: str, port: int) -> bool:
         sock.close()
 
 
+def _lingering_connections(port: int) -> bool | None:
+    """Linux only: True when /proc/net/tcp lists connection-state sockets (TIME_WAIT, FIN_WAIT...) on
+    this local port, False when it lists none, None when that cannot be read (non-Linux hosts)."""
+    try:
+        with open("/proc/net/tcp", encoding="ascii") as table:
+            rows = table.read().splitlines()[1:]
+    except (OSError, ValueError):
+        return None
+    for row in rows:
+        fields = row.split()
+        try:
+            if len(fields) > 3 and int(fields[1].rsplit(":", 1)[1], 16) == port:
+                # Connection states in TCP: TIME_WAIT (06), FIN_WAIT1 (04), FIN_WAIT2 (05),
+                # CLOSING (0B), LAST_ACK (09), CLOSE_WAIT (08).
+                # Listening (0A) and bound/closed (07) are not lingering connection states.
+                if fields[3] in {"04", "05", "06", "08", "09", "0B"}:
+                    return True
+        except (IndexError, ValueError):
+            continue
+    return False
+
+
 def port_bind_conflict(host: str, port: int) -> bool:
     """True when the local bind would fail (occupied or not yet reusable)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
+        # A just-closed POSIX listener can remain in TIME_WAIT even though a
+        # replacement server may safely bind the port. Windows does not use
+        # this probe option because SO_REUSEADDR has different, less safe
+        # sharing semantics there.
+        if os.name != "nt":
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((host, port))
     except OSError:
         return True
     finally:
         sock.close()
+    if os.name != "nt" and _bound_without_listening(host, port):
+        return True
+    return False
+
+
+def _bound_without_listening(host: str, port: int) -> bool:
+    """POSIX: True for a socket that is bound but not listening yet.
+
+    SO_REUSEADDR hides it from the probe above, and every real server sets that option, so this is
+    the state between bind() and listen() (or a descendant that never listens). A plain bind still
+    fails for it, but also for TIME_WAIT, which is reusable; only the latter shows up as a
+    connection-state socket in /proc/net/tcp. Where /proc is unavailable the reusable-address
+    result above stands.
+    """
+    plain = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        plain.bind((host, port))
+    except OSError:
+        return _lingering_connections(port) is False
+    finally:
+        plain.close()
     return False
 
 
@@ -201,10 +250,90 @@ def wait_port_free(host: str, port: int, timeout_s: float = 2.0) -> bool:
     """Wait until host:port is no longer in use."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        if not port_in_use(host, port):
+        if not port_in_use(host, port) and not port_bind_conflict(host, port):
             return True
         time.sleep(0.05)
-    return not port_in_use(host, port)
+    return not port_in_use(host, port) and not port_bind_conflict(host, port)
+
+
+def _windows_descendant_pids(root_pid: int) -> set[int]:
+    """Return descendants even when the launcher exited before cleanup."""
+    if os.name != "nt":
+        return set()
+
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessEntry32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry32W)]
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry32W)]
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+    if snapshot in (0, ctypes.c_void_p(-1).value):
+        return set()
+
+    children_by_parent: dict[int, list[int]] = {}
+    try:
+        entry = ProcessEntry32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        if not kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+            return set()
+        while True:
+            children_by_parent.setdefault(int(entry.th32ParentProcessID), []).append(int(entry.th32ProcessID))
+            if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                break
+    finally:
+        kernel32.CloseHandle(snapshot)
+
+    descendants: set[int] = set()
+    pending = [root_pid]
+    while pending:
+        parent_pid = pending.pop()
+        for child_pid in children_by_parent.get(parent_pid, []):
+            if child_pid not in descendants and child_pid != root_pid:
+                descendants.add(child_pid)
+                pending.append(child_pid)
+    return descendants
+
+
+def _windows_taskkill(pid: int) -> bool:
+    """Kill one Windows process tree, returning whether taskkill succeeded."""
+    if os.name != "nt":
+        return False
+    taskkill = shutil.which("taskkill")
+    if not taskkill:
+        return False
+    try:
+        result = subprocess.run(
+            [taskkill, "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=2.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
 
 
 def redact(text: str) -> str:
@@ -368,62 +497,44 @@ class ManagedProcess:
         if self.proc is None:
             return "not_started"
         pid = self.proc.pid
-        if self.proc.poll() is not None:
-            if os.name == "nt":
-                taskkill = shutil.which("taskkill")
-                if taskkill:
-                    try:
-                        subprocess.run(
-                            [taskkill, "/PID", str(pid), "/T", "/F"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            check=False,
-                            timeout=2.0,
-                        )
-                    except (OSError, subprocess.TimeoutExpired):
-                        pass
-            return "already_exited"
+        already_exited = self.proc.poll() is not None
+        descendants = _windows_descendant_pids(pid)
 
         if os.name == "nt":
             try:
-                self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+                if already_exited:
+                    os.kill(pid, signal.CTRL_BREAK_EVENT)
+                else:
+                    self.proc.send_signal(signal.CTRL_BREAK_EVENT)
             except (AttributeError, OSError, ValueError):
-                try:
-                    self.proc.terminate()
-                except OSError:
-                    pass
+                if not already_exited:
+                    try:
+                        self.proc.terminate()
+                    except OSError:
+                        pass
         else:
             try:
                 os.killpg(pid, signal.SIGTERM)
             except (ProcessLookupError, PermissionError, OSError):
-                try:
-                    self.proc.terminate()
-                except OSError:
-                    pass
+                if not already_exited:
+                    try:
+                        self.proc.terminate()
+                    except OSError:
+                        pass
 
         deadline = time.monotonic() + min(timeout_s, 1.0)
         while time.monotonic() < deadline and self.proc.poll() is None:
             time.sleep(0.05)
 
         if os.name == "nt":
-            taskkill = shutil.which("taskkill")
-            if taskkill:
-                try:
-                    subprocess.run(
-                        [taskkill, "/PID", str(pid), "/T", "/F"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=False,
-                        timeout=2.0,
-                    )
-                except (OSError, subprocess.TimeoutExpired):
-                    pass
+            _windows_taskkill(pid)
+            for descendant_pid in descendants:
+                _windows_taskkill(descendant_pid)
         else:
-            if self.proc.poll() is None:
-                try:
-                    os.killpg(pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError, OSError):
-                    pass
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
 
         if self.proc.poll() is None:
             try:
@@ -436,6 +547,8 @@ class ManagedProcess:
         except subprocess.TimeoutExpired:
             pass
 
+        if already_exited:
+            return "already_exited"
         return "terminated" if self.proc.poll() is not None else "cleanup_failed"
 
     def drain_log(self) -> str:
