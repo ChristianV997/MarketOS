@@ -166,3 +166,29 @@ def test_live_uploads_do_not_name_secrets_traces_or_logs():
                 assert "trace" not in path_val
                 assert ".log" not in path_val
                 assert "payload" not in path_val
+
+
+def test_blocking_pytest_retains_failure_status_and_bounded_diagnostics():
+    """The required test gate must remain blocking while publishing safe evidence."""
+    workflow = _parse_workflow(WORKFLOWS_DIR / "ci.yml")
+    test_job = workflow["jobs"]["test"]
+    assert "continue-on-error" not in test_job
+    run_step = next(step for step in test_job["steps"] if step.get("name") == "Run tests")
+    run = run_step["run"]
+    assert "pytest tests/ -v -n auto" in run
+    assert '--junitxml="$RUNNER_TEMP/marketos-pytest-junit.xml"' in run
+    assert "-o junit_logging=no" in run
+    assert "pytest_status=$?" in run
+    assert 'exit "$pytest_status"' in run
+    assert "scripts/ai/ci_failure_diagnostics.py" in run
+    assert "artifacts/pytest-diagnostics/pytest-junit.xml" in run
+    assert "artifacts/pytest-diagnostics/pytest-summary.txt" in run
+    assert "GITHUB_STEP_SUMMARY" in run
+    assert '"$RUNNER_TEMP/marketos-pytest-output.txt"' in run
+
+    upload = next(
+        step for step in test_job["steps"] if step.get("name") == "Upload required pytest diagnostics"
+    )
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == "artifacts/pytest-diagnostics"
+    assert "pytest-output" not in str(upload["with"])

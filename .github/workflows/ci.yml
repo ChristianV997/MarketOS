@@ -126,7 +126,28 @@ jobs:
         # available cores. Not forced on for local `pytest -q` runs (pytest.ini
         # is unchanged) since output-interleaving makes ad-hoc debugging
         # harder — pass -n auto yourself locally when you want the speedup.
-        run: pytest tests/ -v -n auto
+        run: |
+          mkdir -p artifacts/pytest-diagnostics
+          set +e
+          pytest tests/ -v -n auto \
+            --junitxml="$RUNNER_TEMP/marketos-pytest-junit.xml" \
+            -o junit_logging=no \
+            > "$RUNNER_TEMP/marketos-pytest-output.txt" 2>&1
+          pytest_status=$?
+          python scripts/ai/ci_failure_diagnostics.py \
+            --input "$RUNNER_TEMP/marketos-pytest-junit.xml" \
+            --junitxml artifacts/pytest-diagnostics/pytest-junit.xml \
+            --summary artifacts/pytest-diagnostics/pytest-summary.txt
+          cat artifacts/pytest-diagnostics/pytest-summary.txt >> "$GITHUB_STEP_SUMMARY"
+          exit "$pytest_status"
+
+      - name: Upload required pytest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: marketos-pytest-diagnostics
+          path: artifacts/pytest-diagnostics
+          if-no-files-found: warn
 
       - name: Enforce dry-run commerce-cycle p95 budget
         run: python scripts/benchmark_commerce_cycle.py --runs 10 --p95-limit-ms 2000
