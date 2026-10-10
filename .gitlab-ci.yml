@@ -8,18 +8,17 @@
 # an authorized mirror/sync. Do not treat this companion as deployment or
 # provider-mutation authority.
 #
-# Python/dependency contract (live main, 8d70725c):
-#   - Python 3.12 (.python-version / GitHub CI)
-#   - pip install -r requirements.txt (pytest + pytest-xdist included there)
-# Unresolved parity (Codex Agent A PR #343, open): requirements-test.txt is the
-# proposed single test install entry (-r requirements.txt + requirements-dev.txt)
-# but is NOT on main yet. This companion follows live main until that merges;
-# after merge, switch install/cache keys to requirements-test.txt without
-# expanding job scope.
+# Python/dependency contract (aligned with GitHub main / .github/workflows/ci.yml):
+#   - Python 3.12 (.python-version)
+#   - pip install -r requirements-test.txt
+#     (canonical entry from PR #419: -r requirements.txt + -r requirements-dev.txt)
+#   - pip cache key hashes requirements-test.txt plus both included manifests
+#     (pip follows -r; GitLab cache:files does not)
 #
-# Explicitly out of scope here (owned by GitHub / Codex A / Grok Bots ops):
-# Semgrep policy, pip-audit, OSS/compose validators, container smoke, advisory
-# coverage, Mergify tokens, deployment, and any secret-backed steps.
+# Role (not a GitHub full-suite equivalent):
+#   Changed-scope pytest via scripts/ai/select_tests.py + compileall + JUnit.
+#   Does NOT run pytest tests/ -v -n auto, Semgrep, pip-audit, compose validators,
+#   container smoke, advisory coverage, Mergify, deployment, or secret-backed steps.
 
 workflow:
   rules:
@@ -43,7 +42,9 @@ variables:
 cache:
   key:
     files:
+      - requirements-test.txt
       - requirements.txt
+      - requirements-dev.txt
   paths:
     - .cache/pip
 
@@ -61,7 +62,7 @@ mr-python-companion:
     - python --version
     - test "$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" = "3.12"
     - python -m pip install --upgrade pip
-    - python -m pip install -r requirements.txt
+    - python -m pip install -r requirements-test.txt
   script:
     - mkdir -p artifacts
     - python -m compileall -q .
