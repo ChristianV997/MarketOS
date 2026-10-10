@@ -1,16 +1,107 @@
 """Deterministic, read-only canonical event queries for JSONL and adapters."""
 from __future__ import annotations
 import json
+import os
+import re
+import stat
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Sequence
 from backend.contracts.events import Event
 from .query_models import CommerceRunSummary, CompetitionSummary, EventQuery, EventRecordView, EventTimeline, OpportunityRankingSummary, ResearchPortfolioSummary, ShopifyImportSummary
 
-def load_events_from_jsonl(path: str | Path) -> tuple[list[Event], list[str]]:
+_JSONL_LINE_BREAK = re.compile(r"\x0d\x0a|\x0d|\x0a")
+
+
+def _opened_regular_path(fd: int) -> Path | None:
+    """Return the path of an already-opened fd when the host exposes it.
+
+    Linux uses ``/proc/self/fd/<n>`` so confinement is judged on the opened
+    object, not a pre-open ``resolve()``/``is_file()`` race. Hosts without that
+    interface return ``None`` and callers must fail closed when a root was
+    requested. Windows reparse-point identity is not exercised here.
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+            import msvcrt
+            from ctypes import wintypes
+
+            get_final_path = ctypes.windll.kernel32.GetFinalPathNameByHandleW
+            get_final_path.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+            get_final_path.restype = wintypes.DWORD
+            handle = wintypes.HANDLE(msvcrt.get_osfhandle(fd))
+            size = 32768
+            buffer = ctypes.create_unicode_buffer(size)
+            length = get_final_path(handle, buffer, size, 0)
+            if length == 0 or length >= size:
+                return None
+            value = buffer.value
+            if value.startswith("\\\\?\\UNC\\"):
+                value = "\\\\" + value[8:]
+            elif value.startswith("\\\\?\\"):
+                value = value[4:]
+            return Path(value)
+        except (OSError, ValueError, AttributeError, ImportError):
+            return None
+    try:
+        return Path(os.readlink(f"/proc/self/fd/{fd}"))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _path_is_within_root(path: Path, root: Path) -> bool:
+    try:
+        resolved = path.resolve()
+        bound = root.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return resolved == bound or bound in resolved.parents
+
+
+def load_events_from_jsonl(
+    path: str | Path,
+    *,
+    max_bytes: int | None = None,
+    oversized_warning: str = "jsonl_file_oversized",
+    allowed_root: str | Path | None = None,
+) -> tuple[list[Event], list[str]]:
+    # A negative cap would make read() unbounded, so it must never be accepted as a bound.
+    if max_bytes is not None and (isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0):
+        raise ValueError("max_bytes must be a non-negative integer or None")
     events: list[Event] = []; warnings: list[str] = []
-    try: lines = Path(path).read_text(encoding="utf-8").splitlines()
-    except OSError: return events, ["jsonl_file_unavailable"]
+    fd: int | None = None
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            os.close(fd)
+            fd = None
+            return events, ["jsonl_file_unavailable"]
+        if allowed_root is not None:
+            opened = _opened_regular_path(fd)
+            if opened is None or not _path_is_within_root(opened, Path(allowed_root)):
+                os.close(fd)
+                fd = None
+                return events, ["jsonl_path_outside_allowed_root"]
+        with open(fd, "rb") as source:
+            fd = None
+            raw = source.read() if max_bytes is None else source.read(max_bytes)
+            if max_bytes is not None and source.read(1):
+                return events, [oversized_warning]
+        text = raw.decode("utf-8")
+    except (OSError, ValueError, OverflowError):
+        return events, ["jsonl_file_unavailable"]
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    lines = _JSONL_LINE_BREAK.split(text)
+    if lines and lines[-1] == "":
+        lines.pop()
     for index, line in enumerate(lines, 1):
         try: events.append(Event.from_dict(json.loads(line)))
         except Exception: warnings.append(f"malformed_jsonl_row:{index}")
