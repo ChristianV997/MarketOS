@@ -244,6 +244,104 @@ def test_secret_like_and_raw_payloads_are_rejected_and_not_leaked(name, needle):
         assert needle  # requested field remains a rejection trigger, not an echo requirement
 
 
+def test_hyphenated_candidate_id_is_not_a_secret_marker():
+    """`desk-clamp-lamp` contains `sk-` only as a word fragment, not a credential."""
+    payload = {
+        "top_candidate_id": "desk-clamp-lamp",
+        "candidates": [{"candidate_id": "desk-clamp-lamp", "query": "desk lamp"}],
+    }
+    reject_unsafe_input(payload, label="marketplace report")
+    report = build_commerce_operations_cycle(payload, None, None).to_dict()
+    assert report["overall_status"] == "plan_only"
+    assert report["cycle_mode"] == "dry_run"
+    assert report["live_validated"] is False
+    assert report["read_only"] is True
+    assert report["network_calls"] is False
+    assert report["mutated"] is False
+    assert report["artifacts_written"] is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "sk-proj-synthetic-secret-value",
+        "prefix sk-live-token-must-not-pass",
+        "prefix sk-live-example",
+        "Bearer synthetic-token-must-not-be-imported",
+    ],
+)
+def test_boundary_secret_markers_still_fail_closed(value: str):
+    payload = {"note": value}
+    with pytest.raises(ValueError, match="secret-like or raw payload"):
+        reject_unsafe_input(payload, label="fixture")
+    with pytest.raises(ValueError, match="secret-like or raw payload"):
+        build_commerce_operations_cycle(payload, None, None)
+
+
+# Synthetic, assembled at runtime so no credential-shaped literal sits in the diff.
+_SYNTHETIC_SK = "sk-" + "SYNTHETICEXAMPLE0000"
+_SAFE_IDENTIFIERS = [
+    "desk-clamp-lamp",
+    "risk-review-pack",
+    "task-queue-board",
+    "disk-usage-report",
+    "Standing Desk-Clamp Lamp (sku desk-001)",
+]
+
+
+@pytest.mark.parametrize("identifier", _SAFE_IDENTIFIERS)
+def test_ordinary_hyphenated_text_is_accepted_at_any_nesting(identifier: str):
+    for payload in (
+        {"top_candidate_id": identifier},
+        {"candidates": [{"candidate_id": identifier, "query": identifier}]},
+        {"outer": {"inner": [identifier, {"deep": identifier}]}},
+        [identifier],
+    ):
+        reject_unsafe_input(payload, label="fixture")
+    report = build_commerce_operations_cycle(
+        {"top_candidate_id": identifier, "candidates": [{"candidate_id": identifier, "query": "lamp"}]}, None, None
+    ).to_dict()
+    assert report["overall_status"] == "plan_only"
+    assert report["network_calls"] is False and report["mutated"] is False
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["", "(", ":", "=", "_", "-", ".", "/", " ", '"', "\n", "\t", "\u00e9", "\u200b",
+     "api%3D", "x%3a", "q%3Dkey%26v%3D", "line\\n", "tab\\t", "cr\\r"],
+    ids=repr,
+)
+def test_sk_token_after_any_separator_or_escaped_separator_fails_closed(prefix: str):
+    """A literal backslash-n or a %3D escape ends in a letter but is a separator, not part of a word."""
+    value = prefix + _SYNTHETIC_SK
+    for variant in (value, value.upper(), f'"{value}"'):
+        with pytest.raises(ValueError, match="secret-like or raw payload") as excinfo:
+            reject_unsafe_input({"note": variant}, label="fixture")
+        assert "SYNTHETIC" not in str(excinfo.value)  # the rejection never echoes the value
+    with pytest.raises(ValueError, match="secret-like or raw payload"):
+        build_commerce_operations_cycle({"candidates": [{"candidate_id": "x", "query": value}]}, None, None)
+
+
+@pytest.mark.parametrize("marker", ["ghp_SYNTHETIC0000", "xoxb-SYNTHETIC0000", "AIzaSYNTHETIC0000", "-----BEGIN PRIVATE KEY-----", "Bearer SYNTHETIC"])
+def test_non_sk_secret_markers_are_unchanged(marker: str):
+    with pytest.raises(ValueError, match="secret-like or raw payload"):
+        reject_unsafe_input({"note": f"prefix {marker}"}, label="fixture")
+
+
+def test_sk_token_is_rejected_on_the_client_safe_output_path_too():
+    with pytest.raises(ValueError, match="secret-like or raw payload"):
+        reject_unsafe_input({"summary": f"next step ({_SYNTHETIC_SK})"}, label="client-safe projection")
+
+
+def test_sk_glued_to_preceding_letters_is_a_documented_non_match():
+    """Trade-off that makes desk-/risk-/task- ids legal: a token with no separator at all is not an sk- prefix.
+
+    The other markers and the secret-key-name checks still apply; pinned so changing it is a decision.
+    """
+    reject_unsafe_input({"note": "abc" + _SYNTHETIC_SK}, label="fixture")
+    reject_unsafe_input({"note": "key1" + _SYNTHETIC_SK}, label="fixture")
+
+
 def test_live_flag_fail_closes_as_blocked():
     report = cycle(live_requested=True).to_dict()
     assert report["overall_status"] == "blocked"

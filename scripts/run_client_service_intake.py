@@ -71,6 +71,7 @@ from backend.deliverables.registry import DeliverableRegistry  # noqa: E402
 from backend.economics import CurrencyMismatchError, EconomicsError, EvidenceRef, Money  # noqa: E402
 from backend.workspaces.client_workspace import ClientWorkspace  # noqa: E402
 from backend.workspaces.registry import WorkspaceRegistry  # noqa: E402
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token  # noqa: E402
 from evaluation.companyos.service_delivery import (  # noqa: E402
     REQUIRED_CLIENT_DATA_FIELDS,
     assess_client_data_quality,
@@ -89,7 +90,8 @@ CLASSIFICATIONS = frozenset({"eligible", "data_inadequate", "blocked", "malforme
 # module-private) so this script's secret-shape guard behaves consistently
 # with the underlying authority's, without depending on its private
 # implementation detail.
-_SECRET_SHAPE_MARKERS = ("sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "-----begin", "bearer ")
+_SECRET_SHAPE_MARKERS = ("ghp_", "gho_", "ghu_", "ghs_", "ghr_", "-----begin", "bearer ")
+
 
 
 class IntakeError(ValueError):
@@ -99,11 +101,14 @@ class IntakeError(ValueError):
 def _reject_secret_shaped_recursive(value: Any, *, field_name: str) -> None:
     if isinstance(value, str):
         lowered = value.lower()
-        if any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
+        if contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in _SECRET_SHAPE_MARKERS):
             raise IntakeError(f"secret-shaped value rejected in {field_name}")
     elif isinstance(value, Mapping):
         for key, item in value.items():
-            _reject_secret_shaped_recursive(item, field_name=f"{field_name}.{key}")
+            key_text = str(key)
+            if contains_boundary_prefixed_sk_token(key_text) or any(marker in key_text.lower() for marker in _SECRET_SHAPE_MARKERS):
+                raise IntakeError(f"secret-shaped value rejected in {field_name}.[redacted-key]")
+            _reject_secret_shaped_recursive(item, field_name=f"{field_name}.{key_text}")
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
             _reject_secret_shaped_recursive(item, field_name=f"{field_name}[{index}]")
@@ -147,7 +152,8 @@ def load_data_quality_csv(path: Path) -> dict[str, dict[str, Any]]:
             if not name:
                 continue
             if name not in REQUIRED_CLIENT_DATA_FIELDS:
-                raise IntakeError(f"unknown data-quality field in CSV: {name!r}")
+                shown = "[redacted-key]" if contains_boundary_prefixed_sk_token(name) or any(m in name.lower() for m in _SECRET_SHAPE_MARKERS) else name
+                raise IntakeError(f"unknown data-quality field in CSV: {shown!r}")
             _reject_secret_shaped_recursive(row, field_name=f"data_quality_csv.{name}")
             entry: dict[str, Any] = {"available": str(row.get("available", "")).strip().lower() in {"1", "true", "yes"}}
             age = (row.get("as_of_days_ago") or "").strip()

@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, Sequence
 
 from evaluation.commerce.kernel_integration import replay_fingerprint
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 
 OFFER_IDS = (
     "diagnostic-audit",
@@ -26,10 +27,11 @@ EVIDENCE_STATES = frozenset({"available", "missing", "stale", "conflicting", "bl
 PROPOSAL_STATUSES = frozenset({"draft_ready", "needs_evidence", "blocked"})
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SECRET_MARKERS = (
-    "sk-", "ghp_", "github_pat_", "bearer ", "-----begin", "api_key", "access_token",
+    "ghp_", "github_pat_", "bearer ", "-----begin", "api_key", "access_token",
     "private_key", "password", "client_secret", "cookie=", "raw_payload", "source_code",
     "internal_prompt", "formula", ".env",
 )
+
 
 
 class SchemaValidationError(ValueError):
@@ -44,7 +46,7 @@ def _safe_text(value: Any, field_name: str, *, required: bool = True, max_length
     if any(unicodedata.category(char).startswith("C") for char in value):
         raise SchemaValidationError(f"invalid {field_name}")
     lowered = value.casefold()
-    if any(marker in lowered for marker in _SECRET_MARKERS):
+    if contains_boundary_prefixed_sk_token(value) or any(marker in lowered for marker in _SECRET_MARKERS):
         raise SchemaValidationError(f"unsafe {field_name}")
     return value.strip()
 
