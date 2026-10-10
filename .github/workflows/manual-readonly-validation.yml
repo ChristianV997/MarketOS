@@ -14,25 +14,46 @@ on:
       max_candidates:
         type: string
         default: "1"
+
 permissions:
   contents: read
+
 jobs:
   readonly-validation:
     runs-on: ubuntu-latest
-    env:
-      MARKETOS_SUPPLIER_PROVIDER: cj
-      MARKETOS_SUPPLIER_AUTH_READONLY: "1"
-      CJ_EMAIL: ${{ secrets.CJ_EMAIL }}
-      CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
-        with: {python-version: "3.12"}
+        with:
+          python-version: "3.12"
+      - name: Reject unbound dispatch inputs
+        env:
+          MAX_CANDIDATES: ${{ inputs.max_candidates }}
+          CANDIDATE_QUERY: ${{ inputs.candidate_query }}
+        run: |
+          python -c 'import os, sys
+          query = os.environ.get("CANDIDATE_QUERY", "")
+          limit = os.environ.get("MAX_CANDIDATES", "")
+          invalid = (
+              limit != "1"
+              or not query.strip()
+              or len(query) > 120
+              or query.startswith("-")
+              or any(not char.isprintable() for char in query)
+          )
+          sys.exit("invalid_dispatch_input" if invalid else 0)'
       - run: python -m pip install -r requirements.txt
       - run: python scripts/check_readonly_deployment_readiness.py --json
-      - if: ${{ inputs.run_supplier_preflight }}
+      - if: ${{ inputs.run_supplier_preflight == true }}
         run: python scripts/check_phase1_supplier_readonly_access.py --provider cj --json
-      # Network access is explicit twice: manual dispatch plus this input. The
-      # validation pack owns provider allowlists, sanitization, and bounded reads.
-      - if: ${{ inputs.run_validation_pack }}
-        run: python scripts/run_phase1_cj_readonly_validation_pack.py --provider cj --query "${{ inputs.candidate_query }}" --allow-network --markdown
+      # Manual and offline. Network, the live supplier flag, and CJ credentials
+      # stay unset. The pack remains a preflight and is not live proof.
+      - if: ${{ inputs.run_validation_pack == true }}
+        env:
+          CANDIDATE_QUERY: ${{ inputs.candidate_query }}
+        run: python scripts/run_phase1_cj_readonly_validation_pack.py --provider cj --query "$CANDIDATE_QUERY" --markdown
