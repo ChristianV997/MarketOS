@@ -24,10 +24,22 @@ def test_filters_and_windows_do_not_sort():
 
 def test_keyboard_and_detail_focus_contracts():
     table = _read("components/RankedCandidatesPanel.tsx")
+    nav = _read("lib/keyboardNav.ts")
     detail = _read("components/CandidateDetailPanel.tsx")
-    assert "ArrowDown" in table
+    assert "ArrowDown" in nav
+    assert "ArrowUp" in nav
+    assert "Home" in nav
+    assert "End" in nav
+    assert "adjacentCandidateIndex" in table
+    assert "shouldHandoffDetailFocus" in table
     assert "Home" in table
+    assert "End" in table
     assert 'id="candidate-detail-panel"' in detail
+    assert "Escape" in detail
+    assert "returnFocusToTable" in detail
+    assert 'role="grid"' in table
+    assert "aria-selected" in table
+    assert 'role="listbox"' in table
 
 
 def test_partial_and_stale_states_exist():

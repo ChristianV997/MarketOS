@@ -17,3 +17,12 @@ export function adjacentCandidateIndex(
 export function shouldHandoffDetailFocus(key: string): boolean {
   return key === "Enter" || key === " ";
 }
+
+/**
+ * The single tab stop of the grid: the selected candidate when it is rendered in the window, otherwise
+ * the first rendered candidate. A selection that is filtered out or paged away must not leave zero stops.
+ */
+export function rovingActiveId(visibleIds: readonly string[], selectedId: string | null): string | null {
+  if (selectedId !== null && visibleIds.includes(selectedId)) return selectedId;
+  return visibleIds[0] ?? null;
+}
