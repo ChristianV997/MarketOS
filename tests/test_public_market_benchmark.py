@@ -4,7 +4,13 @@ import json
 from pathlib import Path
 
 from backend.adapters.research.competition_evidence import CompetitorOffer
-from evaluation.commerce.public_market_benchmark import build_public_market_benchmark, load_public_market_seed, markdown_report
+from evaluation.commerce.public_market_benchmark import (
+    build_public_market_benchmark,
+    load_public_market_seed,
+    markdown_report,
+    synthesize_from_public_market,
+    to_marketplace_trend_report,
+)
 from scripts.run_phase1_public_market_benchmark import main
 
 
@@ -72,4 +78,48 @@ def test_cli_writes_only_when_output_is_explicit(tmp_path: Path, capsys):
     assert (output / "public_market_benchmark_report.json").is_file()
     assert (output / "benchmark_matrix_report.json").is_file()
     assert (output / "readiness_summary.json").is_file()
+    assert (output / "marketplace_trend_report.json").is_file()
+    assert (output / "opportunity_synthesis_report.json").is_file()
+    marketplace = json.loads((output / "marketplace_trend_report.json").read_text(encoding="utf-8"))
+    synthesis = json.loads((output / "opportunity_synthesis_report.json").read_text(encoding="utf-8"))
+    assert marketplace["candidate_count"] >= 1
+    assert "projected_from_public_market_benchmark" in marketplace["warnings"]
+    assert synthesis["overall_recommendation"] == "validate_supplier_first"
+    assert synthesis["source_reports"]["supplier"] == "missing"
     assert "fixture_demo" in capsys.readouterr().out
+
+
+def test_public_market_projects_into_marketplace_pillar_without_supplier_authority():
+    candidates, _ = load_public_market_seed(SEED)
+    report = build_public_market_benchmark(candidates, max_candidates=3).to_dict()
+    marketplace = to_marketplace_trend_report(report).to_dict()
+    assert marketplace["network_calls"] is False
+    assert marketplace["mutated"] is False
+    assert marketplace["candidate_count"] == 3
+    assert marketplace["top_candidate_id"]
+    assert "marketplace_evidence_is_not_supplier_proof" in marketplace["warnings"]
+    assert "projected_from_public_market_benchmark" in marketplace["warnings"]
+    leader = marketplace["candidates"][0]
+    assert leader["score"]["overall_marketplace_opportunity"] > 0
+    assert leader["score"]["recommendation"] == "validate_supplier_first"
+    assert any(item["price"] is not None for item in leader["evidence"])
+
+
+def test_synthesize_from_public_market_reuses_canonical_three_pillar_layer():
+    candidates, _ = load_public_market_seed(SEED)
+    report = build_public_market_benchmark(candidates, max_candidates=3).to_dict()
+    synthesis = synthesize_from_public_market(report).to_dict()
+    assert synthesis["overall_recommendation"] == "validate_supplier_first"
+    assert synthesis["marketplace_opportunity"] > 0
+    assert synthesis["supplier_feasibility"] == 0.0
+    assert synthesis["consumer_attention"] == 0.0
+    assert synthesis["source_reports"] == {
+        "marketplace": "supplied",
+        "supplier": "missing",
+        "consumer_attention": "missing",
+        "product_validation": "missing",
+    }
+    assert synthesis["confidence_grade"] == "D_low_confidence"
+    assumptions = synthesis["decision_thresholds"].get("assumptions") or []
+    assert "ctr_and_add_to_cart_thresholds_are_planning_assumptions" in assumptions
+    assert synthesis["decision_thresholds"].get("supplier_validation_required") is True

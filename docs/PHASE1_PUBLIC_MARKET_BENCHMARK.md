@@ -39,6 +39,15 @@ returns an explicitly labeled fixture fallback. `/operator/events` presents a
 compact public-market card with coverage, observed offers, the top candidate,
 and the remaining supplier blocker.
 
-Public competitor prices are market context, not supplier costs. Strong public
-evidence with missing supplier proof produces the deterministic next action:
-`set_cj_credentials_and_validate_candidate:<candidate_id>`.
+The offline runner also projects public offers into the canonical marketplace
+pillar (`marketplace_trend_report`) and runs Product Opportunity Synthesis with
+supplier/consumer pillars left missing. When `--output` is set it writes:
+
+- `marketplace_trend_report.json`
+- `opportunity_synthesis_report.json`
+
+Public competitor prices are market context, not supplier costs. Demand
+proxies and saturation from this projection are labeled as derived/assumed.
+Strong public evidence with missing supplier proof produces the deterministic
+next action: `set_cj_credentials_and_validate_candidate:<candidate_id>` on the
+benchmark, and typically `validate_supplier_first` from synthesis.

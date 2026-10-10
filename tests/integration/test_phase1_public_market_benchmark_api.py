@@ -9,6 +9,9 @@ def test_public_market_endpoint_returns_read_only_fixture_fallback():
     assert value["mutated"] is False
     assert value["network_used"] is False
     assert value["evidence_mode"] == "fixture_demo"
+    assert value["marketplace_trend_report"]["candidate_count"] >= 1
+    assert value["opportunity_synthesis"]["overall_recommendation"] == "validate_supplier_first"
+    assert value["opportunity_synthesis"]["source_reports"]["supplier"] == "missing"
 
 
 def test_public_market_endpoint_does_not_accept_browser_paths():

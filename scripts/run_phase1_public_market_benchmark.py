@@ -14,9 +14,20 @@ from evaluation.commerce.public_market_benchmark import (
     build_public_market_benchmark,
     load_public_market_seed,
     markdown_report,
+    synthesize_from_public_market,
+    to_marketplace_trend_report,
 )
 
 DEFAULT_SEED = ROOT / "tests" / "fixtures" / "public_market_benchmark" / "candidates.json"
+
+
+def _enrich(report: dict[str, object]) -> dict[str, object]:
+    marketplace = to_marketplace_trend_report(report).to_dict()
+    synthesis = synthesize_from_public_market(report).to_dict()
+    enriched = dict(report)
+    enriched["marketplace_trend_report"] = marketplace
+    enriched["opportunity_synthesis"] = synthesis
+    return enriched
 
 
 def _write(output: str, report: dict[str, object], rendered: str) -> None:
@@ -29,6 +40,12 @@ def _write(output: str, report: dict[str, object], rendered: str) -> None:
     (path / "public_market_benchmark_report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (path / "public_market_benchmark_report.md").write_text(rendered, encoding="utf-8")
     (path / "benchmark_matrix_report.json").write_text(json.dumps(report["benchmark_matrix"], indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (path / "marketplace_trend_report.json").write_text(
+        json.dumps(report["marketplace_trend_report"], indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    (path / "opportunity_synthesis_report.json").write_text(
+        json.dumps(report["opportunity_synthesis"], indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     readiness = {
         "public_market_benchmark_status": report["evidence_mode"],
         "candidates_tested": report["candidates_tested"],
@@ -38,6 +55,8 @@ def _write(output: str, report: dict[str, object], rendered: str) -> None:
         "top_candidate_from_public_market": report["top_candidate_from_public_market"],
         "remaining_supplier_blocker": report["remaining_supplier_blocker"],
         "next_best_action": report["next_best_action"],
+        "marketplace_top_candidate_id": (report.get("marketplace_trend_report") or {}).get("top_candidate_id"),
+        "opportunity_synthesis_recommendation": (report.get("opportunity_synthesis") or {}).get("overall_recommendation"),
     }
     (path / "readiness_summary.json").write_text(json.dumps(readiness, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -55,8 +74,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.json and args.markdown:
         parser.error("choose --json or --markdown")
     candidates, warnings = load_public_market_seed(args.candidate_seed)
-    report = build_public_market_benchmark(candidates, allow_network=args.allow_network, max_candidates=args.max_candidates, max_competitors_per_candidate=args.max_competitors_per_candidate).to_dict()
+    report = build_public_market_benchmark(
+        candidates,
+        allow_network=args.allow_network,
+        max_candidates=args.max_candidates,
+        max_competitors_per_candidate=args.max_competitors_per_candidate,
+    ).to_dict()
     report["warnings"] = sorted(set([*report["warnings"], *warnings]))
+    report = _enrich(report)
     rendered = markdown_report(report)
     if args.output:
         _write(args.output, report, rendered)

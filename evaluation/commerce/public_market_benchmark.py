@@ -15,10 +15,34 @@ from urllib.parse import urlparse
 from backend.adapters.research.competition_evidence import CompetitorOffer, fetch_competitor_offer
 from backend.contracts.adapters import SidecarContext
 from .benchmark_matrix import BenchmarkCandidate, BenchmarkMatrixReport, build_benchmark_matrix, normalize_candidate
+from .marketplace_trends import MarketplaceTrendEvidence, MarketplaceTrendReport, build_report as build_marketplace_trend_report
+from .opportunity_synthesis import ProductOpportunitySynthesisReport, build_product_opportunity_synthesis
 
 VERSION = "phase1-public-market-benchmark-v1"
 MAX_CANDIDATES = 10
 MAX_COMPETITORS_PER_CANDIDATE = 4
+
+_MARKETPLACE_ALIASES = (
+    "amazon",
+    "ebay",
+    "mercadolibre",
+    "alibaba",
+    "aliexpress",
+    "etsy",
+    "walmart",
+    "woocommerce",
+)
+_SOURCE_BY_MARKETPLACE = {
+    "amazon": "amazon_product_snapshot",
+    "ebay": "ebay_public_listing_snapshot",
+    "mercadolibre": "mercadolibre_highlights_snapshot",
+    "alibaba": "alibaba_market_trending_snapshot",
+    "aliexpress": "aliexpress_trending_snapshot",
+    "etsy": "etsy_public_listing_snapshot",
+    "walmart": "walmart_public_listing_snapshot",
+    "shopify": "shopify_storefront_snapshot",
+    "woocommerce": "woocommerce_storefront_snapshot",
+}
 
 
 def _bounded(value: Any) -> float:
@@ -215,8 +239,131 @@ def build_public_market_benchmark(
     return PublicMarketBenchmarkReport(VERSION, "public_live" if allow_network else "fixture_demo", allow_network, len(results), pages, offers, coverage, top, _bounded(sum(item.public_evidence_confidence for item in results) / max(1, len(results))), "authenticated_supplier_evidence_not_live_observed", next_action, tuple(results), matrix, tuple(warnings))
 
 
+def _infer_marketplace(domain: str) -> str:
+    text = str(domain or "").lower()
+    for name in _MARKETPLACE_ALIASES:
+        if name in text:
+            return name
+    # Generic public storefront pages map to the Shopify storefront bucket.
+    return "shopify"
+
+
+def _as_report_dict(report: Mapping[str, Any] | PublicMarketBenchmarkReport) -> dict[str, Any]:
+    if isinstance(report, PublicMarketBenchmarkReport):
+        return report.to_dict()
+    return dict(report)
+
+
+def to_marketplace_trend_report(
+    report: Mapping[str, Any] | PublicMarketBenchmarkReport,
+) -> MarketplaceTrendReport:
+    """Project public-market offers into the marketplace pillar for synthesis.
+
+    Reuses ``marketplace_trends.build_report`` scoring. Public competitor prices
+    remain market context: demand proxies and saturation are derived/assumed from
+    observed offer coverage and never authorize supplier proof, spend, or launch.
+    """
+    data = _as_report_dict(report)
+    mode = str(data.get("evidence_mode") or "fixture_demo")
+    records: list[MarketplaceTrendEvidence] = []
+    for candidate in data.get("candidate_results") or []:
+        if not isinstance(candidate, Mapping):
+            continue
+        candidate_id = str(candidate.get("candidate_id") or "").strip()
+        query = str(candidate.get("query") or candidate_id)
+        offers = [item for item in candidate.get("evidence") or [] if isinstance(item, Mapping)]
+        domains = sorted({str(item.get("source_domain") or "") for item in offers if item.get("source_domain")})
+        seller_proxy = max(1, len(domains)) if offers else None
+        for offer in offers:
+            if not (offer.get("product_title") or offer.get("price") is not None):
+                continue
+            marketplace = _infer_marketplace(str(offer.get("source_domain") or ""))
+            source_type = "fixture_demo" if mode == "fixture_demo" else _SOURCE_BY_MARKETPLACE.get(marketplace, "shopify_storefront_snapshot")
+            provenance = {
+                str(key): str(value)
+                for key, value in dict(offer.get("field_provenance") or {}).items()
+                if str(value) in {"observed", "derived", "assumed", "unavailable", "malformed", "blocked", "manual_import", "fixture"}
+            }
+            if seller_proxy is not None:
+                provenance.setdefault("seller_count", "derived")
+            provenance.setdefault("offer_count", "derived")
+            records.append(
+                MarketplaceTrendEvidence(
+                    candidate_id=candidate_id,
+                    query=query,
+                    marketplace=marketplace,
+                    source_type=source_type,
+                    source_url=_safe_url(offer.get("competitor_url")),
+                    evidence_mode="fixture" if mode == "fixture_demo" else mode,
+                    review_count=offer.get("review_count") if isinstance(offer.get("review_count"), int) else None,
+                    rating=offer.get("rating") if isinstance(offer.get("rating"), (int, float)) else None,
+                    price=offer.get("price") if isinstance(offer.get("price"), (int, float)) else None,
+                    currency=str(offer.get("currency") or "USD") or "USD",
+                    offer_count=len(offers),
+                    seller_count=seller_proxy,
+                    availability=str(offer.get("availability") or ""),
+                    shipping_signal="observed" if offer.get("shipping_cost") is not None else "",
+                    source_confidence=_bounded(offer.get("source_confidence", 0.0)),
+                    field_provenance=provenance,
+                    warnings=(
+                        "public_competitor_price_is_market_context_not_supplier_cost",
+                        "demand_proxies_assumed_from_public_offer_coverage",
+                    ),
+                    # MarketplaceTrendEvidence is offline-shaped even when the
+                    # parent public-market report used bounded public GETs.
+                    network_calls=False,
+                    mutated=False,
+                    read_only=True,
+                )
+            )
+    marketplace_report = build_marketplace_trend_report(records, evidence_mode=mode)
+    extra = [
+        "projected_from_public_market_benchmark",
+        "marketplace_pillar_from_public_offers_not_native_marketplace_import",
+        "price_cpa_ctr_budget_thresholds_remain_planning_assumptions",
+    ]
+    if mode == "fixture_demo":
+        extra.append("fixture_demo_evidence_only_not_live_proof")
+    return MarketplaceTrendReport(
+        report_version=marketplace_report.report_version,
+        evidence_mode=marketplace_report.evidence_mode,
+        candidate_count=marketplace_report.candidate_count,
+        source_count=marketplace_report.source_count,
+        marketplaces_observed=marketplace_report.marketplaces_observed,
+        best_seller_evidence_count=marketplace_report.best_seller_evidence_count,
+        top_candidate_id=marketplace_report.top_candidate_id,
+        next_best_action=marketplace_report.next_best_action,
+        candidates=marketplace_report.candidates,
+        warnings=tuple(sorted(set([*marketplace_report.warnings, *extra]))),
+        read_only=True,
+        network_calls=False,
+        mutated=False,
+    )
+
+
+def synthesize_from_public_market(
+    report: Mapping[str, Any] | PublicMarketBenchmarkReport,
+    *,
+    supplier_report: Mapping[str, Any] | None = None,
+    consumer_report: Mapping[str, Any] | None = None,
+) -> ProductOpportunitySynthesisReport:
+    """Fuse the projected marketplace pillar through Product Opportunity Synthesis.
+
+    Missing supplier/consumer pillars stay missing so the canonical synthesizer
+    can recommend ``validate_supplier_first`` without inventing supplier proof.
+    """
+    marketplace = to_marketplace_trend_report(report).to_dict()
+    return build_product_opportunity_synthesis(marketplace, supplier_report, consumer_report)
+
+
 def markdown_report(report: Mapping[str, Any]) -> str:
     lines = ["# Phase 1 Public Market Evidence Benchmark", "", f"- Mode: `{report.get('evidence_mode')}`", f"- Candidates: {report.get('candidates_tested', 0)}", f"- Competitor pages: {report.get('competitor_pages_attempted', 0)}", f"- Offers observed: {report.get('competitor_offers_observed', 0)}", f"- Pricing coverage: {float(report.get('pricing_coverage', 0)):.0%}", f"- Top candidate: `{report.get('top_candidate_from_public_market') or 'none'}`", f"- Next action: `{report.get('next_best_action')}`", "", "## Candidate results", "", "| Candidate | Offers | Pricing coverage | Confidence |", "| --- | ---: | ---: | ---: |"]
     for item in report.get("candidate_results", []): lines.append(f"| {item['candidate_id']} | {item['offers_observed']} | {float(item['pricing_coverage']):.0%} | {float(item['public_evidence_confidence']):.0%} |")
+    marketplace = report.get("marketplace_trend_report") if isinstance(report.get("marketplace_trend_report"), Mapping) else None
+    synthesis = report.get("opportunity_synthesis") if isinstance(report.get("opportunity_synthesis"), Mapping) else None
+    if marketplace:
+        lines.extend(["", "## Marketplace pillar projection", "", f"- Top marketplace candidate: `{marketplace.get('top_candidate_id') or 'none'}`", f"- Marketplaces observed: {', '.join(marketplace.get('marketplaces_observed') or []) or 'none'}", f"- Next marketplace action: `{marketplace.get('next_best_action')}`", "- Projection feeds Product Opportunity Synthesis only; it is not supplier proof."])
+    if synthesis:
+        lines.extend(["", "## Opportunity synthesis (marketplace pillar)", "", f"- Recommendation: `{synthesis.get('overall_recommendation')}`", f"- Combined opportunity: {float(synthesis.get('combined_opportunity_score', 0) or 0):.0%}", f"- Next action: `{synthesis.get('next_best_action')}`", "- CPA/CTR/budget/scale thresholds in the synthesis layer remain planning assumptions."])
     lines.extend(["", "Public-market evidence is read-only market context, not supplier proof. No provider actions were performed."])
     return "\n".join(lines) + "\n"
