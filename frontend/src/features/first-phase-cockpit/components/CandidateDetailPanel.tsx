@@ -1,4 +1,5 @@
 import type { RankedCandidateRow } from "../contracts/firstPhaseEvidencePacket";
+import { candidateElements, firstLaidOut } from "../lib/focusTarget";
 import { CommercialReviewTags, DecisionTimelinePanel, NextActionWorkflowPanel } from "./DecisionReviewPanels";
 
 export function CandidateDetailPanel({
@@ -8,6 +9,23 @@ export function CandidateDetailPanel({
   candidate: RankedCandidateRow | null;
   onClear: () => void;
 }) {
+  function returnFocusToTable(preferredCandidateId?: string) {
+    queueMicrotask(() => {
+      const table = document.getElementById("ranked-candidates-table");
+      const preferred = preferredCandidateId ? candidateElements(table, preferredCandidateId) : [];
+      const roving = Array.from(
+        table?.querySelectorAll<HTMLElement>('tr[tabindex="0"], [role="option"][tabindex="0"]') ?? [],
+      );
+      (firstLaidOut(preferred) ?? firstLaidOut(roving))?.focus();
+    });
+  }
+
+  function handleClear() {
+    const idToReturn = candidate?.candidateId;
+    onClear();
+    returnFocusToTable(idToReturn);
+  }
+
   if (!candidate) {
     return (
       <section
@@ -23,6 +41,12 @@ export function CandidateDetailPanel({
     <section
       id="candidate-detail-panel"
       tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          returnFocusToTable(candidate.candidateId);
+        }
+      }}
       className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-4 outline-none focus-visible:ring-1 focus-visible:ring-indigo-400"
       aria-label={`Candidate detail ${candidate.title}`}
     >
@@ -37,7 +61,7 @@ export function CandidateDetailPanel({
         </div>
         <button
           type="button"
-          onClick={onClear}
+          onClick={handleClear}
           className="min-h-8 rounded border border-zinc-700 px-3 py-2 text-[11px] text-zinc-300 hover:border-zinc-500 focus-visible:ring-2 focus-visible:ring-indigo-400"
         >
           Clear selection
