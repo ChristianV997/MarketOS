@@ -8,7 +8,9 @@ client data.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
+import tempfile
 import types
 from pathlib import Path
 
@@ -17,13 +19,16 @@ from backend.discovery.evidence_import import (
     EvidenceNormalizationResult,
     EvidenceSourceQuality,
 )
+from backend.discovery.evidence_normalizer import normalize_imported_evidence
 from backend.discovery.evidence_source_contract import EvidenceRecord
+from backend.discovery.import_registry import EvidenceImportRegistry
+from backend.obsidian.templates import render_evidence_import_note
 
 
 # Synthetic secret-shaped local path — never a real host path or credential.
 # Avoid TrustOS forbidden value markers (token/credential/sk-/...) in the string.
 _SYNTHETIC_SECRET_PATH = "/var/private_ops/client_alpha/import_bundle.csv"
-
+_FIXTURE_CSV = Path(__file__).resolve().parent / "fixtures" / "evidence_imports" / "google_trends_sample.csv"
 
 def _check_workspace_leakage(payload: dict):
     """Load TrustOS leakage check without requiring evaluation package side effects."""
@@ -190,3 +195,61 @@ def test_serialized_job_does_not_leak_exception_details():
     assert _SYNTHETIC_SECRET_PATH not in blob
     assert "exception" not in blob.lower()
     assert _check_workspace_leakage(payload) == ()
+
+
+def test_normalize_keeps_basename_provenance_and_omits_full_path():
+    """Local processing retains input_path; client projection keeps basename only.
+
+    CSV ingestion confines reads to project roots, so the synthetic file is
+    staged under tests/fixtures (not a host secret path).
+    """
+    fixture_root = Path(__file__).resolve().parent / "fixtures"
+    with tempfile.TemporaryDirectory(prefix="synth_private_ops_", dir=fixture_root) as tmp:
+        synthetic_dir = Path(tmp) / "client_alpha"
+        synthetic_dir.mkdir(parents=True)
+        synthetic_path = synthetic_dir / "import_bundle.csv"
+        shutil.copyfile(_FIXTURE_CSV, synthetic_path)
+
+        result = normalize_imported_evidence(
+            str(synthetic_path),
+            "google_trends_csv",
+            "google_trends",
+            workspace_id="workspace_synth",
+        )
+        assert result.import_job.status == "completed"
+        assert result.import_job.input_path == str(synthetic_path)
+        assert result.records
+        assert result.records[0].provenance.get("source_file") == "import_bundle.csv"
+
+        projected = result.to_dict()
+        assert "input_path" not in projected["import_job"]
+        blob = json.dumps(projected, sort_keys=True, default=str)
+        assert str(synthetic_path) not in blob
+        assert "import_bundle.csv" in blob
+        # Basename provenance is allowed; full filesystem path must not appear.
+        assert _check_workspace_leakage({"import_job": projected["import_job"]}) == ()
+
+
+def test_registry_and_obsidian_projections_omit_input_path():
+    job = _sample_job()
+    quality = _sample_quality()
+    with tempfile.TemporaryDirectory(prefix="marketos_registry_") as tmp:
+        registry = EvidenceImportRegistry(Path(tmp) / "imports.json")
+        registry.register_import_job(job)
+        registry.register_source_quality(quality)
+        raw = (Path(tmp) / "imports.json").read_text(encoding="utf-8")
+        assert "input_path" not in raw
+        assert _SYNTHETIC_SECRET_PATH not in raw
+
+        # Forged on-disk path must not restore into the in-memory job.
+        data = json.loads(raw)
+        data["import_jobs"][job.import_id]["input_path"] = _SYNTHETIC_SECRET_PATH
+        (Path(tmp) / "imports.json").write_text(json.dumps(data), encoding="utf-8")
+        reloaded = EvidenceImportRegistry(Path(tmp) / "imports.json")
+        assert reloaded.get_import_job(job.import_id).input_path == ""
+
+    note = render_evidence_import_note(job, quality)
+    assert "input_path" not in note
+    assert _SYNTHETIC_SECRET_PATH not in note
+    # Live object still holds the path for local processing.
+    assert job.input_path == _SYNTHETIC_SECRET_PATH
