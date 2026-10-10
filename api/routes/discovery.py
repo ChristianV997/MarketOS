@@ -76,11 +76,33 @@ def opportunity_discovery(
             detail={"code": "workspace_type_mismatch"},
         )
     from services.opportunity_discovery import OpportunityDiscoveryError, run_discovery
+    from backend.commerce.owner_opportunity_read_model import (
+        OwnerOpportunityReadModelError,
+        build_owner_opportunity_read_model,
+    )
 
     try:
-        return run_discovery(mode, payload, workspace=workspace).to_dict()
+        raw = run_discovery(mode, payload, workspace=workspace).to_dict()
     except OpportunityDiscoveryError as exc:
         return {"status": "malformed", "error": exc.code}
+    try:
+        projection = build_owner_opportunity_read_model(
+            mode,
+            payload,
+            workspace=workspace,
+        ).to_dict()
+    except OwnerOpportunityReadModelError as exc:
+        projection = {
+            "schema": "owner-opportunity-read-model-v1",
+            "status": "unavailable",
+            "error": exc.code,
+            "snapshot_resolution": {"source": "input_payload", "persisted": False, "resolver": "unavailable"},
+        }
+    # Additive only. Existing raw-run keys stay the route contract.
+    raw["owner_opportunity"] = projection
+    raw["owner_opportunity"]["authorized_workspace_id"] = workspace.workspace_id
+    raw["owner_opportunity"]["workspace_authorization"] = "verified_internal_membership"
+    return raw
 
 
 @router.post("/source-calibration")
