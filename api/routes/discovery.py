@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -54,6 +55,47 @@ def _reject_workspace_selector(request: Request, payload: Mapping[str, Any]) -> 
     query_keys = {key.strip().lower().replace("-", "_").replace(" ", "_") for key in request.query_params}
     if query_keys & _WORKSPACE_SELECTOR_KEYS or _contains_workspace_selector(payload):
         raise HTTPException(status_code=422, detail={"code": "workspace_selector_rejected"})
+
+
+# The CSV loader also allows the repository root. Caller-supplied import paths
+# stay on the import surface so a request cannot read arbitrary repo files.
+_IMPORT_SURFACE_DIRS = ("data", "datasets", "fixtures", "tests")
+
+
+def _import_surface_reason(raw: object) -> str | None:
+    """Return a stable block reason, or None when the path is an import-surface file."""
+    if not isinstance(raw, str) or not raw.strip() or "\x00" in raw:
+        return "import_path_invalid"
+    candidate = Path(raw)
+    if ".." in candidate.parts:
+        return "import_path_traversal_blocked"
+    root = Path.cwd().resolve()
+    try:
+        resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    except (OSError, ValueError):
+        return "import_path_invalid"
+    on_surface = False
+    for name in _IMPORT_SURFACE_DIRS:
+        base = (root / name).resolve()
+        try:
+            resolved.relative_to(base)
+        except ValueError:
+            continue
+        on_surface = True
+        break
+    if not on_surface:
+        return "import_path_outside_import_surface"
+    if not resolved.is_file():
+        return "import_path_unavailable"
+    return None
+
+
+def _blocked_import_paths(paths: list[object]) -> dict[str, Any] | None:
+    for raw in paths:
+        reason = _import_surface_reason(raw)
+        if reason:
+            return {"status": "blocked", "blocked_reasons": [reason]}
+    return None
 
 
 @router.post("/opportunity-discovery")
@@ -209,7 +251,11 @@ def import_refine_compare(payload: dict[str, Any] = Body(default_factory=dict)) 
     try:
         imports = payload.get("imports") or []
         if not isinstance(imports, list) or len(imports) > 10: return {"status": "blocked", "blocked_reasons": ["import_count_limit_exceeded"]}
-        paths = [str(item.get("input_path", "")) for item in imports if isinstance(item, dict)]
+        raw_paths = [item.get("input_path", "") for item in imports if isinstance(item, dict)]
+        blocked = _blocked_import_paths(raw_paths)
+        if blocked:
+            return blocked
+        paths = [str(item) for item in raw_paths]
         parsers = {str(item.get("input_path", "")): str(item.get("parser_type", "generic_market_csv")) for item in imports if isinstance(item, dict)}
         sources = {str(item.get("input_path", "")): str(item.get("source_name", parsers.get(str(item.get("input_path", "")), "generic_market_csv"))) for item in imports if isinstance(item, dict)}
         return run_import_refine_compare(str(payload.get("workspace_id", "default")), paths, parsers, sources, payload.get("baseline_discovery_id"), min(max(int(payload.get("max_categories", 10)), 0), 50), min(max(int(payload.get("max_hypotheses", 20)), 0), 100))
@@ -263,7 +309,11 @@ def import_evidence(payload: dict[str, Any] = Body(default_factory=dict)) -> dic
         parser = str(payload.get("parser_type", ""))
         if parser not in SUPPORTED_PARSERS:
             return {"status": "blocked", "blocked_reasons": ["unsupported_parser_type"]}
-        result = normalize_imported_evidence(str(payload.get("input_path", "")), parser, str(payload.get("source_name", parser)), str(payload.get("workspace_id", "default")), payload.get("provenance"), min(max(int(payload.get("max_rows", 10000)), 1), 10000))
+        raw_path = payload.get("input_path", "")
+        blocked = _blocked_import_paths([raw_path])
+        if blocked:
+            return blocked
+        result = normalize_imported_evidence(str(raw_path), parser, str(payload.get("source_name", parser)), str(payload.get("workspace_id", "default")), payload.get("provenance"), min(max(int(payload.get("max_rows", 10000)), 1), 10000))
         get_import_registry().register_import_job(result.import_job)
         get_import_registry().register_source_quality(result.source_quality)
         if result.records: get_discovery_registry().register_evidence(result.records)
@@ -278,7 +328,11 @@ def import_and_run(payload: dict[str, Any] = Body(default_factory=dict)) -> dict
         imports = payload.get("imports") or []
         if not isinstance(imports, list) or len(imports) > 10:
             return {"status": "blocked", "blocked_reasons": ["import_count_limit_exceeded"]}
-        paths = [str(item.get("input_path", "")) for item in imports if isinstance(item, dict)]
+        raw_paths = [item.get("input_path", "") for item in imports if isinstance(item, dict)]
+        blocked = _blocked_import_paths(raw_paths)
+        if blocked:
+            return blocked
+        paths = [str(item) for item in raw_paths]
         parsers = {str(item.get("input_path", "")): str(item.get("parser_type", "generic_market_csv")) for item in imports if isinstance(item, dict)}
         sources = {str(item.get("input_path", "")): str(item.get("source_name", parsers.get(str(item.get("input_path", "")), "generic_market_csv"))) for item in imports if isinstance(item, dict)}
         return run_market_discovery(workspace_id=str(payload.get("workspace_id", "default")), title=str(payload.get("title", "Imported Market Discovery")), objective=str(payload.get("objective", "Rank categories from imported evidence")), import_paths=paths, parser_type_by_path=parsers, source_name_by_path=sources, max_categories=min(max(int(payload.get("max_categories", 10)), 0), 50), max_hypotheses=min(max(int(payload.get("max_hypotheses", 20)), 0), 100), run_validation_services=bool(payload.get("run_validation_services", True)))
