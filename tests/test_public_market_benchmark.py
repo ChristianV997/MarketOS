@@ -1,10 +1,26 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
+
+import scripts.run_phase1_public_market_benchmark as cli
 from backend.adapters.research.competition_evidence import CompetitorOffer
-from evaluation.commerce.public_market_benchmark import build_public_market_benchmark, load_public_market_seed, markdown_report
+from evaluation.commerce.public_market_benchmark import (
+    _safe_domain,
+    _safe_text,
+    _safe_url,
+    build_public_market_benchmark,
+    load_public_market_seed,
+    markdown_report,
+    redact_report_urls,
+    synthesize_from_public_market,
+    to_marketplace_trend_report,
+)
 from scripts.run_phase1_public_market_benchmark import main
 
 
@@ -66,10 +82,427 @@ def test_markdown_has_no_raw_html_or_authority_claim():
     assert "<html" not in rendered.lower()
 
 
-def test_cli_writes_only_when_output_is_explicit(tmp_path: Path, capsys):
-    output = tmp_path / "report"
+@pytest.fixture
+def artifacts_root(tmp_path: Path, monkeypatch) -> Path:
+    """Stand-in artifacts/ root so every CLI write stays under tmp_path."""
+    root = (tmp_path / "artifacts").resolve()
+    root.mkdir()
+    monkeypatch.setattr(cli, "ARTIFACTS", root)
+    return root
+
+
+def test_cli_writes_only_when_output_is_explicit(artifacts_root: Path, capsys):
+    output = artifacts_root / "report"
     assert main(["--candidate-seed", str(SEED), "--output", str(output), "--json"]) == 0
     assert (output / "public_market_benchmark_report.json").is_file()
     assert (output / "benchmark_matrix_report.json").is_file()
     assert (output / "readiness_summary.json").is_file()
+    assert (output / "marketplace_trend_report.json").is_file()
+    assert (output / "opportunity_synthesis_report.json").is_file()
+    marketplace = json.loads((output / "marketplace_trend_report.json").read_text(encoding="utf-8"))
+    synthesis = json.loads((output / "opportunity_synthesis_report.json").read_text(encoding="utf-8"))
+    assert marketplace["candidate_count"] >= 1
+    assert "projected_from_public_market_benchmark" in marketplace["warnings"]
+    assert synthesis["overall_recommendation"] == "validate_supplier_first"
+    assert synthesis["source_reports"]["supplier"] == "missing"
     assert "fixture_demo" in capsys.readouterr().out
+
+
+def test_public_market_projects_into_marketplace_pillar_without_supplier_authority():
+    candidates, _ = load_public_market_seed(SEED)
+    report = build_public_market_benchmark(candidates, max_candidates=3).to_dict()
+    marketplace = to_marketplace_trend_report(report).to_dict()
+    assert marketplace["network_calls"] is False
+    assert marketplace["mutated"] is False
+    assert marketplace["candidate_count"] == 3
+    assert marketplace["top_candidate_id"]
+    assert "marketplace_evidence_is_not_supplier_proof" in marketplace["warnings"]
+    assert "projected_from_public_market_benchmark" in marketplace["warnings"]
+    leader = marketplace["candidates"][0]
+    assert leader["score"]["overall_marketplace_opportunity"] > 0
+    assert leader["score"]["recommendation"] == "validate_supplier_first"
+    assert any(item["price"] is not None for item in leader["evidence"])
+
+
+def test_synthesize_from_public_market_reuses_canonical_three_pillar_layer():
+    candidates, _ = load_public_market_seed(SEED)
+    report = build_public_market_benchmark(candidates, max_candidates=3).to_dict()
+    synthesis = synthesize_from_public_market(report).to_dict()
+    assert synthesis["overall_recommendation"] == "validate_supplier_first"
+    assert synthesis["marketplace_opportunity"] > 0
+    assert synthesis["supplier_feasibility"] == 0.0
+    assert synthesis["consumer_attention"] == 0.0
+    assert synthesis["source_reports"] == {
+        "marketplace": "supplied",
+        "supplier": "missing",
+        "consumer_attention": "missing",
+        "product_validation": "missing",
+    }
+    assert synthesis["confidence_grade"] == "D_low_confidence"
+    assumptions = synthesis["decision_thresholds"].get("assumptions") or []
+    assert "ctr_and_add_to_cart_thresholds_are_planning_assumptions" in assumptions
+    assert synthesis["decision_thresholds"].get("supplier_validation_required") is True
+
+
+# --- URL sanitization: userinfo, query and fragment never reach a report -----------------------
+
+_USER, _PASSWORD, _TOKEN, _FRAGMENT = "canaryuser", "canarysecretpw", "querycanary", "fragcanary"
+_STEM = "canary"  # shared by every synthetic canary, so truncated fragments are caught too
+_USERINFO_URL = f"https://{_USER}:{_PASSWORD}@public.example/p/widget?tok={_TOKEN}#{_FRAGMENT}"
+
+
+def _candidate(**overrides) -> dict:
+    value = {
+        "candidate_id": "safe", "title": "Safe", "query": "safe", "category": "test", "competitor_urls": [],
+        "fixture_offers": [{"competitor_url": _USERINFO_URL, "source_domain": f"{_USER}:{_PASSWORD}@public.example", "product_title": "Safe", "price": 9.0, "source_confidence": 0.9}],
+    }
+    value.update(overrides)
+    return value
+
+
+def _assert_no_canary(value: object) -> None:
+    blob = value if isinstance(value, str) else json.dumps(value, sort_keys=True, default=str)
+    assert _STEM not in blob
+
+
+def _priced_offer(url: str, *, warnings: tuple[str, ...] = ()) -> CompetitorOffer:
+    return CompetitorOffer("fixture", url, 1.0, "listing", "Observed offer", {"title": "observed", "price": "observed"}, price=42.0, confidence=0.6, warnings=warnings)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (_USERINFO_URL, "https://public.example/p/widget"),
+        (f"https://{_USER}@public.example:8443/p", "https://public.example:8443/p"),
+        (f"https://{_USER}:p@ss@public.example/p?x=1", "https://public.example/p"),
+        ("https://[::1]:8080/x?a=1", "https://[::1]:8080/x"),
+        ("ftp://public.example/p", ""),
+        ("https://", ""),
+        ("https://[unterminated/p", ""),
+        (None, ""),
+    ],
+)
+def test_safe_url_keeps_only_scheme_host_port_and_path(raw, expected):
+    assert _safe_url(raw) == expected
+
+
+def test_fixture_report_never_echoes_url_userinfo_in_any_projection():
+    report = build_public_market_benchmark([_candidate()]).to_dict()
+    marketplace = to_marketplace_trend_report(report).to_dict()
+    synthesis = synthesize_from_public_market(report).to_dict()
+    _assert_no_canary([report, marketplace, synthesis])
+    _assert_no_canary(markdown_report({**report, "marketplace_trend_report": marketplace, "opportunity_synthesis": synthesis}))
+    evidence = report["candidate_results"][0]["evidence"][0]
+    assert evidence["competitor_url"] == "https://public.example/p/widget"
+    assert evidence["source_domain"] == "public.example"
+    assert marketplace["candidates"][0]["evidence"][0]["source_url"] == "https://public.example/p/widget"
+
+
+def test_live_mode_never_hands_userinfo_urls_to_the_fetcher():
+    clean = "https://public.example/clean"
+    candidate = _candidate(fixture_offers=[], competitor_urls=[_USERINFO_URL, clean])
+    calls: list[str] = []
+    def fetch(url: str, *, context):
+        calls.append(url)
+        return _priced_offer(url)
+    report = build_public_market_benchmark([candidate], allow_network=True, fetcher=fetch).to_dict()
+    assert calls == [clean]
+    assert report["competitor_pages_attempted"] == 1
+    assert "competitor_url_with_userinfo_rejected" in report["warnings"]
+    _assert_no_canary(report)
+
+
+def test_live_mode_with_only_userinfo_urls_makes_no_fetch_and_no_claim():
+    candidate = _candidate(fixture_offers=[], competitor_urls=[_USERINFO_URL])
+    def fetch(url: str, *, context):
+        raise AssertionError("a userinfo URL reached the fetcher")
+    report = build_public_market_benchmark([candidate], allow_network=True, fetcher=fetch).to_dict()
+    assert report["competitor_pages_attempted"] == 0
+    assert report["competitor_offers_observed"] == 0
+    _assert_no_canary(report)
+
+
+@pytest.mark.parametrize("padding", [0, 120, 148, 150])
+def test_adapter_warnings_that_echo_a_url_are_sanitized_before_truncation(padding: int):
+    # The adapter reports e.g. "robots.txt disallows evidence URL: <url>"; the report must not keep the secret
+    # parts, including when the 180-character cap would otherwise cut the URL mid-credential.
+    echoed = "w" * padding + " " + _USERINFO_URL
+    candidate = _candidate(fixture_offers=[], competitor_urls=["https://public.example/a"])
+    def fetch(url: str, *, context):
+        return _priced_offer(url, warnings=(f"robots_blocked:{echoed}",))
+    report = build_public_market_benchmark([candidate], allow_network=True, fetcher=fetch).to_dict()
+    _assert_no_canary(report)
+    _assert_no_canary(markdown_report(report))
+    assert report["candidate_results"][0]["evidence"][0]["warnings"]
+
+
+def test_redact_report_urls_is_structure_preserving_and_idempotent():
+    stored = {"a": [{"competitor_url": _USERINFO_URL, "warnings": (f"see {_USERINFO_URL}.",)}], "n": 3, "t": "no url here", "flag": True}
+    once = redact_report_urls(stored)
+    _assert_no_canary(once)
+    assert once["n"] == 3 and once["t"] == "no url here" and once["flag"] is True
+    assert once["a"][0]["competitor_url"] == "https://public.example/p/widget"
+    assert redact_report_urls(once) == once
+
+
+# --- CLI: --output stays under artifacts/, --allow-network is the only path to the fetcher -----
+
+def _all_files(root: Path) -> list[Path]:
+    return sorted(path for path in root.rglob("*") if path.is_file())
+
+
+def test_cli_without_output_writes_nothing(monkeypatch, capsys):
+    def boom(*args, **kwargs):
+        raise AssertionError("the CLI wrote without --output")
+    monkeypatch.setattr(cli, "_write", boom)
+    assert main(["--candidate-seed", str(SEED), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["evidence_mode"] == "fixture_demo"
+
+
+@pytest.mark.parametrize("target", ["outside", "dotdot", "artifacts_root", "sibling_prefix", "victim_file"])
+def test_cli_rejects_output_outside_artifacts_before_any_work(tmp_path: Path, artifacts_root: Path, monkeypatch, capsys, target: str):
+    victim = tmp_path / "victim.py"
+    victim.write_text("# sentinel\n", encoding="utf-8")
+    chosen = {
+        "outside": tmp_path / "outside" / "run",
+        "dotdot": artifacts_root / ".." / "escaped",
+        "artifacts_root": artifacts_root,
+        "sibling_prefix": tmp_path / "artifacts-evil" / "run",
+        "victim_file": victim,
+    }[target]
+    def boom(*args, **kwargs):
+        raise AssertionError("work started before --output was validated")
+    monkeypatch.setattr(cli, "build_public_market_benchmark", boom)
+    before = _all_files(tmp_path)
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--candidate-seed", str(SEED), "--output", str(chosen), "--json"])
+    assert exit_info.value.code == 2
+    assert "artifacts" in capsys.readouterr().err
+    assert _all_files(tmp_path) == before
+    assert victim.read_text(encoding="utf-8") == "# sentinel\n"
+
+
+def test_cli_rejects_a_symlink_that_escapes_artifacts(tmp_path: Path, artifacts_root: Path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (artifacts_root / "link").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"NOT COVERED: symlinks unavailable on this host ({type(exc).__name__})")
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--candidate-seed", str(SEED), "--output", str(artifacts_root / "link" / "run"), "--json"])
+    assert exit_info.value.code == 2
+    assert _all_files(outside) == []
+
+
+def test_cli_accepts_a_single_json_file_under_artifacts(artifacts_root: Path, capsys):
+    target = artifacts_root / "phase1" / "latest.json"
+    assert main(["--candidate-seed", str(SEED), "--output", str(target), "--json"]) == 0
+    capsys.readouterr()
+    assert json.loads(target.read_text(encoding="utf-8"))["evidence_mode"] == "fixture_demo"
+    assert _all_files(artifacts_root) == [target]
+
+
+def _spy_on_builder(monkeypatch, fetch):
+    """Record the CLI's builder kwargs and inject a stub fetcher so no test can reach the network."""
+    seen: list[dict] = []
+    real = cli.build_public_market_benchmark
+    def spy(candidates, **kwargs):
+        seen.append(kwargs)
+        return real(candidates, fetcher=fetch, **kwargs)
+    monkeypatch.setattr(cli, "build_public_market_benchmark", spy)
+    return seen
+
+
+def test_cli_default_never_reaches_the_fetcher_and_is_not_supplier_proof(monkeypatch, capsys):
+    def fetch(url: str, *, context):
+        raise AssertionError("the default CLI path reached the fetcher")
+    seen = _spy_on_builder(monkeypatch, fetch)
+    assert main(["--candidate-seed", str(SEED), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert [item["allow_network"] for item in seen] == [False]
+    assert report["evidence_mode"] == "fixture_demo" and report["network_used"] is False
+    assert report["read_only"] is True and report["mutated"] is False and report["credentials_required"] is False
+    assert "fixture_demo_evidence_only_not_live_proof" in report["warnings"]
+    assert report["remaining_supplier_blocker"] == "authenticated_supplier_evidence_not_live_observed"
+    assert report["marketplace_trend_report"]["network_calls"] is False
+    assert report["opportunity_synthesis"]["source_reports"]["supplier"] == "missing"
+
+
+def test_cli_allow_network_is_the_only_switch_that_reaches_the_fetcher(monkeypatch, capsys):
+    calls: list[tuple[str, bool]] = []
+    def fetch(url: str, *, context):
+        calls.append((url, context.dry_run))
+        return _priced_offer(url)
+    seen = _spy_on_builder(monkeypatch, fetch)
+    assert main(["--candidate-seed", str(SEED), "--allow-network", "--max-candidates", "1", "--max-competitors-per-candidate", "1", "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert [item["allow_network"] for item in seen] == [True]
+    assert calls == [("https://example-shop.test/products/mini-printer", False)]
+    assert report["evidence_mode"] == "public_live" and report["network_used"] is True
+    # Public GETs are market context only: still no supplier proof, credential, or live-validated grade.
+    assert report["credentials_required"] is False and report["mutated"] is False
+    assert report["remaining_supplier_blocker"] == "authenticated_supplier_evidence_not_live_observed"
+    synthesis = report["opportunity_synthesis"]
+    assert synthesis["overall_recommendation"] == "validate_supplier_first"
+    assert synthesis["source_reports"]["supplier"] == "missing"
+    assert not synthesis["confidence_grade"].startswith("A_")
+
+
+# --- Residual-risk coverage: secret-shaped path/host material, truncation, and the write-time race --------
+
+_SECRET_SHAPES = {
+    "sk": "sk-" + "SYNTHETICEXAMPLE0123456789",
+    "sk_encoded": "%73k-" + "SYNTHETICEXAMPLE0123456789",
+    "ghp": "ghp_" + "SYNTHETICEXAMPLE0123456789",
+    "stripe": "sk_live_" + "SYNTHETICEXAMPLE0123456789",
+    "github_pat": "github_pat_" + "SYNTHETICEXAMPLE0123456789",
+    "slack": "xoxb-" + "123456789012-SYNTHETICEXAMPLE",
+    "aws": "AKIA" + "SYNTHETIC0123456",
+    "double_encoded": "ghp%255F" + "SYNTHETICEXAMPLE0123456789",
+    "jwt": "eyJ" + "SYNTHETICEXAMPLE0123456.payload",
+    "bearer": "Bearer%20" + "SYNTHETICEXAMPLE0123456789",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_SECRET_SHAPES))
+def test_secret_shaped_path_segments_are_replaced_and_the_rest_of_the_url_kept(shape: str):
+    shape_value = _SECRET_SHAPES[shape]
+    assert _safe_url(f"https://public.example/api/{shape_value}/widget?x=1") == "https://public.example/api/[redacted]/widget"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://sk-SYNTHETICEXAMPLE0123456.public.example/p",
+        "https://public.example:sk-SYNTHETICEXAMPLE/p",
+        "https://public.example:notaport/p",
+        "https://public.example:99999/p",
+    ],
+)
+def test_secret_shaped_or_malformed_authority_drops_the_url(url: str):
+    assert _safe_url(url) == ""
+    assert "SYNTHETIC" not in _safe_text(f"failed: {url}")
+
+
+def test_secret_shaped_domain_is_dropped_but_a_normal_hostname_is_kept():
+    assert _safe_domain("sk-SYNTHETICEXAMPLE0123456.public.example") == ""
+    assert _safe_domain("Shop.Public.Example") == "shop.public.example"
+    for host in ("keyjournal-notebooks.example", "monkeyjumpingtoys.example", "desk-organizers.example", "www.sk-ii.com"):
+        assert _safe_domain(host) == host
+        assert _safe_url(f"https://{host}/p") == f"https://{host}/p"
+
+
+def test_live_offer_source_domain_goes_through_the_same_domain_check():
+    candidate = _candidate(fixture_offers=[], competitor_urls=["https://sk-SYNTHETICEXAMPLE0123456.public.example/p"])
+    def fetch(url: str, *, context):
+        return _priced_offer(url)
+    report = build_public_market_benchmark([candidate], allow_network=True, fetcher=fetch).to_dict()
+    assert "SYNTHETIC" not in json.dumps(report, sort_keys=True)
+    assert report["candidate_results"][0]["evidence"][0]["source_domain"] == ""
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/products/desk-clamp-lamp", "/p/task-list", "/p/brisk-walk-shoes", "/dp/B0ABC12345",
+        "/p/desk_organizer_black_large", "/p/task_manager_planner", "/p/monkeyjumpingtoys-set", "/p/ghost_pepper_hot_sauce_2oz",
+        "/p/eyjafjallajokull-guide", "/p/my_sk_organizer12345", "/p/AKIAmonkey-notakey", "/p/bearer-bag-large-brown",
+    ],
+)
+def test_benign_path_slugs_are_not_redacted(path: str):
+    assert _safe_url(f"https://public.example{path}") == f"https://public.example{path}"
+
+
+def test_secret_shaped_path_never_reaches_any_report_projection():
+    shape_value = _SECRET_SHAPES["sk"]
+    candidate = _candidate(fixture_offers=[{"competitor_url": f"https://public.example/api/{shape_value}/w", "source_domain": "public.example", "product_title": "Safe", "price": 9.0, "source_confidence": 0.9}])
+    report = build_public_market_benchmark([candidate]).to_dict()
+    enriched = {**report, "marketplace_trend_report": to_marketplace_trend_report(report).to_dict(), "opportunity_synthesis": synthesize_from_public_market(report).to_dict()}
+    assert "SYNTHETIC" not in json.dumps(enriched, sort_keys=True)
+
+
+@pytest.mark.parametrize("prefix", ["", "robots_blocked:", "(", "\n", "see "])
+def test_no_partial_url_survives_truncation_at_any_offset(prefix: str):
+    # Every padding length places the 180-character cap at a different point inside the URL.
+    urls = [
+        "https://u:pw@public.example/api/" + _SECRET_SHAPES["sk"] + "/x?tok=canaryx#canaryy",
+        "HTTPS://u:pw@public.example/" + _SECRET_SHAPES["jwt"],
+        "https://public.example/x?canaryx",
+    ]
+    for padding in range(0, 200):
+        for url in urls:
+            out = _safe_text(prefix + "w" * padding + " " + url)
+            assert "SYNTH" not in out and "canary" not in out and "pw@" not in out and "tok=" not in out, (padding, url)
+
+
+def test_cli_rechecks_confinement_at_write_time_when_a_directory_is_swapped_for_a_symlink(tmp_path: Path, artifacts_root: Path, monkeypatch):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = artifacts_root / "run"
+    real = cli.build_public_market_benchmark
+    def swapping(candidates, **kwargs):
+        # Models the race: validated first, then swapped during a long (e.g. live) run.
+        report = real(candidates, **kwargs)
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"NOT COVERED: symlinks unavailable on this host ({type(exc).__name__})")
+        return report
+    monkeypatch.setattr(cli, "build_public_market_benchmark", swapping)
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--candidate-seed", str(SEED), "--output", str(link), "--json"])
+    assert exit_info.value.code == 2
+    assert _all_files(outside) == []
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="NOT COVERED: O_NOFOLLOW is unavailable on this platform")
+def test_cli_does_not_follow_a_leaf_symlink_swapped_in_after_validation(tmp_path: Path, artifacts_root: Path, monkeypatch):
+    victim = tmp_path / "victim.json"
+    victim.write_text("sentinel", encoding="utf-8")
+    target = artifacts_root / "latest.json"
+    real = cli.build_public_market_benchmark
+    def swapping(candidates, **kwargs):
+        report = real(candidates, **kwargs)
+        target.symlink_to(victim)
+        return report
+    monkeypatch.setattr(cli, "build_public_market_benchmark", swapping)
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--candidate-seed", str(SEED), "--output", str(target), "--json"])
+    assert exit_info.value.code == 2
+    assert victim.read_text(encoding="utf-8") == "sentinel"
+
+
+def test_cli_artifacts_are_deterministic_and_complete(artifacts_root: Path, capsys):
+    out = artifacts_root / "run"
+    assert main(["--candidate-seed", str(SEED), "--output", str(out), "--json"]) == 0
+    capsys.readouterr()
+    names = sorted(path.name for path in out.iterdir())
+    assert names == [
+        "benchmark_matrix_report.json", "marketplace_trend_report.json", "opportunity_synthesis_report.json",
+        "public_market_benchmark_report.json", "public_market_benchmark_report.md", "readiness_summary.json",
+    ]
+    first = {name: (out / name).read_bytes() for name in names}
+    assert main(["--candidate-seed", str(SEED), "--output", str(out), "--json"]) == 0
+    assert {name: (out / name).read_bytes() for name in names} == first
+    assert json.loads((out / "readiness_summary.json").read_text(encoding="utf-8"))["opportunity_synthesis_recommendation"] == "validate_supplier_first"
+
+
+def test_real_cli_process_rejects_an_output_outside_artifacts_without_writing(tmp_path: Path):
+    outside = tmp_path / "escaped"
+    result = subprocess.run(
+        [sys.executable, "scripts/run_phase1_public_market_benchmark.py", "--output", str(outside), "--json"],
+        cwd=ROOT, capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "--output must resolve to a path under the repository artifacts/ directory" in result.stderr
+    assert not outside.exists()
+
+
+def test_cli_surfaces_non_confinement_write_errors_instead_of_misreporting_them(artifacts_root: Path):
+    # An existing directory where a report file belongs is an ordinary I/O error, not an artifacts/ violation.
+    out = artifacts_root / "run"
+    (out / "public_market_benchmark_report.json").mkdir(parents=True)
+    with pytest.raises(OSError):  # IsADirectoryError on POSIX, PermissionError on Windows; never SystemExit
+        main(["--candidate-seed", str(SEED), "--output", str(out), "--json"])

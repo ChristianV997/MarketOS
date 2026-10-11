@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from backend.adapters.research.consumer_attention import ConsumerAttentionImportError, import_csv, import_json  # noqa: E402
-from evaluation.commerce.consumer_attention import ConsumerAttentionEvidence, build_report, collapse_duplicates  # noqa: E402
+from evaluation.commerce.consumer_attention import ConsumerAttentionEvidence, PROVENANCE, SOURCE_TYPES, build_report, collapse_duplicates  # noqa: E402
 
 DEFAULT = ROOT / "tests" / "fixtures" / "consumer_attention" / "google_trends_fixture.json"
 SOURCE_PLATFORMS = ("google_trends", "tiktok", "meta", "youtube", "reddit", "amazon", "mercadolibre", "ebay", "shopify", "minea", "dropshipio", "pipiads", "kalodata", "manual")
@@ -32,6 +32,33 @@ def markdown(report: dict) -> str:
     for item in report["candidates"]:
         score = item["score"]
         lines.append(f"| {item['candidate_id']} | {score['overall_consumer_attention']:.0%} | {score['voice_of_customer_quality']:.0%} | {score['creative_hook_diversity']:.0%} | {score['objection_density']:.0%} | `{score['recommendation']}` |")
+    source_types: set[str] = set()
+    provenance_classes: set[str] = set()
+    for item in report.get("candidates", []):
+        if not isinstance(item, dict):
+            continue
+        item_source_types = item.get("source_types", [])
+        if isinstance(item_source_types, (list, tuple, set)):
+            source_types.update(value for value in item_source_types if isinstance(value, str) and value in SOURCE_TYPES)
+        evidence_rows = item.get("evidence", [])
+        if not isinstance(evidence_rows, (list, tuple)):
+            continue
+        for evidence in evidence_rows:
+            if not isinstance(evidence, dict):
+                continue
+            field_provenance = evidence.get("field_provenance", {})
+            if isinstance(field_provenance, dict):
+                provenance_classes.update(
+                    value for value in field_provenance.values() if isinstance(value, str) and value in PROVENANCE
+                )
+    lines += [
+        "",
+        "## Evidence Provenance",
+        "",
+        f"Source types: {', '.join(sorted(source_types)) or 'unavailable'}",
+        f"Field provenance classes: {', '.join(sorted(provenance_classes)) or 'unavailable'}",
+        "Fixture/manual evidence is not live validation or action authority.",
+    ]
     lines += ["", "## Creative angles", ""]
     for item in report["candidates"][:5]:
         score = item["score"]
