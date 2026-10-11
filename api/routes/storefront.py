@@ -223,6 +223,8 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
     fires exclusively from the signed checkout.session.completed webhook
     (api/routes/webhooks.py), never from this request completing.
     """
+    from backend.commerce.brands import brand_registry
+    from backend.commerce.catalog import STATUS_LIVE, product_catalog
     from backend.commerce.checkout import create_checkout_session
 
     # Route identifiers are later reflected into the deterministic dry-run
@@ -230,9 +232,23 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
     # delimiter characters supplied through the path.
     if _STOREFRONT_ID.fullmatch(brand_id) is None or _STOREFRONT_ID.fullmatch(product_id) is None:
         return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=404)
+    brand = brand_registry.get(brand_id)
+    entry = product_catalog.get(product_id)
+    if (
+        brand is None
+        or not brand.active
+        or entry is None
+        or entry.brand_id != brand.brand_id
+        or entry.status != STATUS_LIVE
+    ):
+        return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=404)
+    # These identifiers come from the canonical registries, not directly
+    # from the request path, before they cross into the checkout adapter.
+    safe_brand_id = brand.brand_id
+    safe_product_id = entry.product_id
 
     utm = {k: v for k, v in request.query_params.items() if k.startswith("utm_")}
-    result = create_checkout_session(brand_id, product_id, qty=1, utm=utm)
+    result = create_checkout_session(safe_brand_id, safe_product_id, qty=1, utm=utm)
     if result.get("status") != "ok":
         return HTMLResponse(
             f"<h1>Checkout unavailable</h1><p>{html.escape(str(result.get('error', '')))}</p>",
@@ -240,7 +256,7 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
         )
     dry_run = bool(result.get("dry_run"))
     target = (
-        _safe_dry_run_checkout_target(result.get("url"), brand_id=brand_id, product_id=product_id)
+        _safe_dry_run_checkout_target(result.get("url"), brand_id=safe_brand_id, product_id=safe_product_id)
         if dry_run
         else _safe_live_checkout_target(result.get("session_id"))
     )
