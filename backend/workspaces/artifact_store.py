@@ -7,9 +7,10 @@ to an already registered ClientWorkspace. Path convention:
 
     state/workspaces/{workspace_id}/experiments/{experiment_id}/{filename}
 
-save_text() duplicates save_json_atomic's atomic-write *pattern* (temp file
-+ os.replace) for non-JSON payloads (markdown reports), since
-save_json_atomic is JSON-only.
+Atomic-write pattern uses unique temporary files (tempfile.mkstemp) +
+os.replace with exclusive creation (O_CREAT | O_EXCL), fsync, and automatic
+cleanup on failure. Concurrent writes to the same or distinct artifacts
+never collide or leave dangling temporary files.
 
 Path components are validated before join. A joined-path prefix check is
 not sufficient: ``..`` inside experiment_id or filename can normalize to a
@@ -22,6 +23,7 @@ import logging
 import ntpath
 import os
 import re
+import tempfile
 import unicodedata
 from typing import Any
 
@@ -30,6 +32,8 @@ from backend.workspaces.client_workspace import ClientWorkspace
 from backend.workspaces.registry import WorkspaceRegistry, get_workspace_registry
 
 _log = logging.getLogger(__name__)
+
+MAX_ARTIFACT_BYTES: int = int(os.getenv("MARKETOS_MAX_ARTIFACT_BYTES", 10 * 1024 * 1024))
 
 _SECRET_KEY_NAMES = frozenset(
     {
@@ -56,6 +60,12 @@ _SECRET_SHAPED_VALUE = re.compile(
 )
 _REDACTED = "[redacted]"
 
+_RESERVED_DEVICE_NAMES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{i}" for i in range(1, 10)}
+    | {f"lpt{i}" for i in range(1, 10)}
+)
+
 
 def _reject_unsafe_component(value: str, field: str) -> None:
     """Reject path components that can leave the caller's workspace directory."""
@@ -73,24 +83,47 @@ def _reject_unsafe_component(value: str, field: str) -> None:
     segments = normalized.split("/")
     if len(segments) != 1 or any(segment in {"", ".", ".."} for segment in segments):
         raise ValueError(f"invalid {field}")
+    stem = segments[0].split(".")[0].lower()
+    if stem in _RESERVED_DEVICE_NAMES:
+        raise ValueError(f"invalid {field}")
     if _SECRET_SHAPED_VALUE.search(value):
         raise ValueError(f"invalid {field}")
 
 
+def _strip_extended_prefix(path: str) -> str:
+    norm = os.path.normpath(path)
+    if norm.startswith(("\\\\?\\UNC\\", "\\\\?\\unc\\")):
+        return "\\\\" + norm[8:]
+    if norm.startswith("\\\\?\\"):
+        return norm[4:]
+    return norm
+
+
+def _normalize_path(path: str) -> str:
+    return os.path.normcase(_strip_extended_prefix(path))
+
+
 def _is_within(child: str, parent: str) -> bool:
-    parent_n = os.path.normpath(parent)
-    child_n = os.path.normpath(child)
+    parent_n = _normalize_path(parent)
+    child_n = _normalize_path(child)
     try:
         return os.path.commonpath([parent_n, child_n]) == parent_n
     except ValueError:
         return False
 
 
-def _resolve_within_workspaces(rel: str) -> str:
+def _resolve_within_workspaces(rel: str, workspace_id: str | None = None) -> str:
     """Resolve existing links before checking the canonical workspace jail."""
-    base = os.path.realpath(state_path("workspaces"))
-    resolved = os.path.realpath(state_path(rel))
-    if not _is_within(resolved, base) and resolved != base:
+    workspaces_base = _strip_extended_prefix(os.path.realpath(state_path("workspaces")))
+    target_base = (
+        _strip_extended_prefix(os.path.realpath(state_path(os.path.join("workspaces", workspace_id))))
+        if workspace_id
+        else workspaces_base
+    )
+    resolved = _strip_extended_prefix(os.path.realpath(state_path(rel)))
+    if not _is_within(resolved, workspaces_base) and _normalize_path(resolved) != _normalize_path(workspaces_base):
+        raise ValueError("artifact path is outside the workspace boundary")
+    if not _is_within(resolved, target_base) and _normalize_path(resolved) != _normalize_path(target_base):
         raise ValueError("artifact path is outside the workspace boundary")
     return resolved
 
@@ -115,31 +148,146 @@ def _redact_secret_shaped(data: Any) -> Any:
     return data
 
 
-def _save_json(path: str, data: Any) -> bool:
-    """Atomically persist an already-authorized JSON artifact without path logs."""
+def _atomic_write_text(
+    path: str,
+    text: str,
+    *,
+    workspace_jail: str | None = None,
+    max_bytes: int | None = None,
+) -> bool:
+    """Atomically write text to path using an exclusive temporary file + os.replace."""
+    if not isinstance(text, str):
+        return False
+    effective_max_bytes = MAX_ARTIFACT_BYTES if max_bytes is None else max_bytes
+    if len(text.encode("utf-8")) > effective_max_bytes:
+        _log.debug("artifact_store_save_oversized")
+        return False
+
+    tmp_path: str | None = None
     try:
         parent = os.path.dirname(path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        tmp = f"{path}.tmp"
-        with open(tmp, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2, default=str)
-        os.replace(tmp, path)
+            if os.path.islink(parent):
+                _log.debug("artifact_store_save_parent_symlink_rejected")
+                return False
+            if workspace_jail:
+                resolved_parent = _strip_extended_prefix(os.path.realpath(parent))
+                if not _is_within(resolved_parent, workspace_jail) and _normalize_path(resolved_parent) != _normalize_path(workspace_jail):
+                    _log.debug("artifact_store_save_parent_outside_jail")
+                    return False
+
+        if os.path.islink(path):
+            _log.debug("artifact_store_save_symlink_rejected")
+            return False
+        if os.path.isdir(path):
+            _log.debug("artifact_store_save_target_is_directory")
+            return False
+
+        fd, tmp_path = tempfile.mkstemp(
+            dir=parent or ".",
+            prefix=f".{os.path.basename(path)}.",
+            suffix=".tmp",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                try:
+                    os.fsync(handle.fileno())
+                except OSError:
+                    pass
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            raise
+
+        if os.path.islink(path):
+            _log.debug("artifact_store_save_symlink_rejected")
+            return False
+        if os.path.isdir(path):
+            _log.debug("artifact_store_save_target_is_directory")
+            return False
+
+        os.replace(tmp_path, path)
+        tmp_path = None
         return True
     except Exception:  # noqa: BLE001 — persistence is deliberately fail-soft
+        _log.debug("artifact_store_save_failed")
+        return False
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _save_json(
+    path: str,
+    data: Any,
+    workspace_jail: str | None = None,
+    max_bytes: int | None = None,
+) -> bool:
+    """Atomically persist an already-authorized JSON artifact without path logs."""
+    try:
+        serialized = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+    except Exception:  # noqa: BLE001
         _log.debug("artifact_store_save_json_failed")
         return False
+    success = _atomic_write_text(path, serialized, workspace_jail=workspace_jail, max_bytes=max_bytes)
+    if not success:
+        _log.debug("artifact_store_save_json_failed")
+    return success
 
 
-def _load_json(path: str, default: Any) -> Any:
+def _load_json(path: str, default: Any, max_bytes: int | None = None) -> Any:
     """Load an already-authorized JSON artifact without reflecting path errors."""
     if not os.path.exists(path):
         return default
+    if os.path.islink(path):
+        _log.debug("artifact_store_load_symlink_rejected")
+        return default
+    if not os.path.isfile(path):
+        _log.debug("artifact_store_load_non_regular_file")
+        return default
+    effective_max_bytes = MAX_ARTIFACT_BYTES if max_bytes is None else max_bytes
     try:
+        if os.path.getsize(path) > effective_max_bytes:
+            _log.debug("artifact_store_load_oversized")
+            return default
         with open(path, encoding="utf-8") as handle:
             return json.load(handle)
     except Exception:  # noqa: BLE001 — malformed or inaccessible artifacts are absent
         _log.debug("artifact_store_load_json_failed")
+        return default
+
+
+def _load_text(path: str, default: str = "", max_bytes: int | None = None) -> str:
+    """Load an already-authorized text artifact without reflecting path errors."""
+    if not os.path.exists(path):
+        return default
+    if os.path.islink(path):
+        _log.debug("artifact_store_load_symlink_rejected")
+        return default
+    if not os.path.isfile(path):
+        _log.debug("artifact_store_load_non_regular_file")
+        return default
+    effective_max_bytes = MAX_ARTIFACT_BYTES if max_bytes is None else max_bytes
+    try:
+        if os.path.getsize(path) > effective_max_bytes:
+            _log.debug("artifact_store_load_oversized")
+            return default
+        with open(path, encoding="utf-8") as f:
+            content = f.read(effective_max_bytes + 1)
+            if len(content.encode("utf-8")) > effective_max_bytes:
+                _log.debug("artifact_store_load_oversized")
+                return default
+            return content
+    except Exception:  # noqa: BLE001
+        _log.debug("artifact_store_load_text_failed")
         return default
 
 
@@ -164,6 +312,11 @@ class ArtifactStore:
     def workspace(self) -> ClientWorkspace:
         return self._workspace
 
+    def _workspace_jail(self) -> str:
+        return _strip_extended_prefix(
+            os.path.realpath(state_path(os.path.join("workspaces", self._workspace.workspace_id)))
+        )
+
     def _canonical_workspace(self) -> ClientWorkspace:
         registered = self._registry.get(self._workspace.workspace_id)
         if registered is None or registered.to_dict() != self._workspace.to_dict():
@@ -185,53 +338,66 @@ class ArtifactStore:
         rel = os.path.join(
             "workspaces", self._workspace.workspace_id, "experiments", experiment_id, filename,
         )
-        return _resolve_within_workspaces(rel)
+        return _resolve_within_workspaces(rel, self._workspace.workspace_id)
 
     def save(self, experiment_id: str, filename: str, data: Any) -> bool:
         self._assert_payload_workspace(data)
         return _save_json(
             self.path_for(experiment_id, filename),
             _redact_secret_shaped(data),
+            workspace_jail=self._workspace_jail(),
         )
 
     def load(self, experiment_id: str, filename: str, default: Any = None) -> Any:
-        return _load_json(self.path_for(experiment_id, filename), default)
+        path = self.path_for(experiment_id, filename)
+        data = _load_json(path, default)
+        if isinstance(data, dict):
+            for field in ("workspace_id", "workspace"):
+                claimed = data.get(field)
+                if claimed is not None and claimed != self._workspace.workspace_id:
+                    _log.debug("artifact_store_load_workspace_mismatch")
+                    return default
+        return data
 
     def save_text(self, experiment_id: str, filename: str, text: str) -> bool:
         path = self.path_for(experiment_id, filename)
-        try:
-            if _SECRET_SHAPED_VALUE.search(text):
-                text = _SECRET_SHAPED_VALUE.sub(_REDACTED, text)
-            parent = os.path.dirname(path)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-            tmp = f"{path}.tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(text)
-            os.replace(tmp, path)
-            return True
-        except Exception:  # noqa: BLE001 — best-effort persistence
+        if not isinstance(text, str):
             _log.debug("artifact_store_save_text_failed")
             return False
+        if _SECRET_SHAPED_VALUE.search(text):
+            text = _SECRET_SHAPED_VALUE.sub(_REDACTED, text)
+        workspace_jail = self._workspace_jail()
+        success = _atomic_write_text(path, text, workspace_jail=workspace_jail)
+        if not success:
+            _log.debug("artifact_store_save_text_failed")
+        return success
 
     def load_text(self, experiment_id: str, filename: str, default: str = "") -> str:
         path = self.path_for(experiment_id, filename)
-        if not os.path.exists(path):
-            return default
-        try:
-            with open(path, encoding="utf-8") as f:
-                return f.read()
-        except Exception:  # noqa: BLE001
-            _log.debug("artifact_store_load_text_failed")
-            return default
+        return _load_text(path, default)
 
     def list_experiments(self) -> list[str]:
         try:
             self._canonical_workspace()
             base = _resolve_within_workspaces(
-                os.path.join("workspaces", self._workspace.workspace_id, "experiments")
+                os.path.join("workspaces", self._workspace.workspace_id, "experiments"),
+                self._workspace.workspace_id,
             )
-            return sorted(os.listdir(base)) if os.path.isdir(base) else []
+            experiments: list[str] = []
+            if os.path.isdir(base):
+                workspace_jail = self._workspace_jail()
+                for name in os.listdir(base):
+                    if name.startswith("."):
+                        continue
+                    exp_path = os.path.join(base, name)
+                    if not os.path.isdir(exp_path):
+                        continue
+                    if os.path.islink(exp_path):
+                        resolved = _strip_extended_prefix(os.path.realpath(exp_path))
+                        if not _is_within(resolved, workspace_jail) and _normalize_path(resolved) != _normalize_path(workspace_jail):
+                            continue
+                    experiments.append(name)
+            return sorted(experiments)
         except Exception:  # noqa: BLE001 — fail-silent listing, including rejected identities
             _log.debug("artifact_store_list_experiments_failed")
             return []

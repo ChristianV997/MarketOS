@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 from pathlib import Path
@@ -265,3 +266,200 @@ def test_malformed_json_returns_default(workspaces):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not-json", encoding="utf-8")
     assert store.load("exp-1", "broken.json", default={"safe": True}) == {"safe": True}
+
+
+def test_concurrent_writes_to_distinct_files(workspaces):
+    registry, alpha, _ = workspaces
+    store = ArtifactStore(alpha, registry)
+    num_writers = 16
+
+    def write_worker(idx: int) -> bool:
+        return store.save(
+            "exp-concurrent",
+            f"result_{idx}.json",
+            {"worker_id": idx, "payload": f"data_{idx}"},
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(write_worker, range(num_writers)))
+
+    assert all(results)
+    for idx in range(num_writers):
+        loaded = store.load("exp-concurrent", f"result_{idx}.json")
+        assert loaded == {"worker_id": idx, "payload": f"data_{idx}"}
+
+    exp_dir = Path(store.path_for("exp-concurrent", "result_0.json")).parent
+    temp_files = [f for f in exp_dir.iterdir() if f.name.endswith(".tmp") or f.name.startswith(".")]
+    assert temp_files == []
+
+
+def test_concurrent_writes_to_same_file_remain_atomic_and_clean(workspaces):
+    registry, alpha, _ = workspaces
+    store = ArtifactStore(alpha, registry)
+    num_writers = 20
+
+    def write_worker(idx: int) -> bool:
+        return store.save(
+            "exp-race",
+            "result.json",
+            {"worker_id": idx, "payload": f"content_{idx}" * 50},
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(write_worker, range(num_writers)))
+
+    assert any(results)
+    final_data = store.load("exp-race", "result.json")
+    assert isinstance(final_data, dict)
+    assert "worker_id" in final_data
+    assert final_data["payload"].startswith("content_")
+
+    exp_dir = Path(store.path_for("exp-race", "result.json")).parent
+    files = sorted(f.name for f in exp_dir.iterdir())
+    assert files == ["result.json"]
+
+
+def test_concurrent_text_writes_remain_atomic_and_clean(workspaces):
+    registry, alpha, _ = workspaces
+    store = ArtifactStore(alpha, registry)
+    num_writers = 16
+
+    def write_worker(idx: int) -> bool:
+        return store.save_text(
+            "exp-text-race",
+            "report.md",
+            f"# Header {idx}\n" + f"Paragraph line {idx}\n" * 30,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(write_worker, range(num_writers)))
+
+    assert any(results)
+    final_text = store.load_text("exp-text-race", "report.md")
+    assert final_text.startswith("# Header ")
+    assert "Paragraph line " in final_text
+
+    exp_dir = Path(store.path_for("exp-text-race", "report.md")).parent
+    files = sorted(f.name for f in exp_dir.iterdir())
+    assert files == ["report.md"]
+
+
+def test_temporary_files_are_cleaned_up_on_failure(workspaces, monkeypatch):
+    registry, alpha, _ = workspaces
+    store = ArtifactStore(alpha, registry)
+
+    monkeypatch.setattr(
+        "backend.workspaces.artifact_store.os.replace",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("injected-disk-failure")),
+    )
+
+    assert store.save("exp-fail", "result.json", {"test": True}) is False
+    assert store.save_text("exp-fail", "report.md", "some text") is False
+
+    exp_dir = Path(store.path_for("exp-fail", "result.json")).parent
+    if exp_dir.exists():
+        temp_files = list(exp_dir.glob("*.tmp")) + list(exp_dir.glob(".*.tmp"))
+        assert temp_files == []
+
+
+def test_rejects_windows_reserved_device_names(workspaces):
+    registry, alpha, _ = workspaces
+    store = ArtifactStore(alpha, registry)
+    for dev in ("CON.json", "prn.md", "aux.txt", "nul.json", "COM1.json", "LPT2.md"):
+        with pytest.raises(ValueError, match="invalid filename"):
+            store.path_for("exp-1", dev)
+
+
+def test_cross_workspace_symlink_escape_is_rejected(tmp_path, workspaces):
+    registry, alpha, beta = workspaces
+    store_a = ArtifactStore(alpha, registry)
+    store_b = ArtifactStore(beta, registry)
+    assert store_b.save("exp-1", "beta_data.json", {"beta_val": 42})
+
+    artifact_dir = tmp_path / "workspaces" / alpha.workspace_id / "experiments" / "exp-1"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    target_beta_file = tmp_path / "workspaces" / beta.workspace_id / "experiments" / "exp-1" / "beta_data.json"
+
+    try:
+        os.symlink(target_beta_file, artifact_dir / "symlink_to_beta.json")
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable: {exc.winerror if isinstance(exc, OSError) else exc}")
+
+    with pytest.raises(ValueError, match="outside the workspace boundary"):
+        store_a.path_for("exp-1", "symlink_to_beta.json")
+
+
+def test_symlink_write_and_read_refused(workspaces, monkeypatch):
+    registry, alpha, _ = workspaces
+    store = ArtifactStore(alpha, registry)
+    path = store.path_for("exp-1", "link.json")
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text('{"existing": true}', encoding="utf-8")
+
+    orig_islink = os.path.islink
+    monkeypatch.setattr(
+        "backend.workspaces.artifact_store.os.path.islink",
+        lambda p: True if os.path.abspath(p) == os.path.abspath(path) else orig_islink(p),
+    )
+
+    assert store.save("exp-1", "link.json", {"new": "data"}) is False
+    assert store.save_text("exp-1", "link.json", "new text") is False
+    assert store.load("exp-1", "link.json", default={"safe": True}) == {"safe": True}
+    assert store.load_text("exp-1", "link.json", default="safe_default") == "safe_default"
+
+
+def test_mismatched_workspace_identity_on_load_returns_default(workspaces):
+    registry, alpha, beta = workspaces
+    store_a = ArtifactStore(alpha, registry)
+
+    path = Path(store_a.path_for("exp-1", "alien.json"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'{{"workspace_id": "{beta.workspace_id}", "secret": 123}}', encoding="utf-8")
+
+    assert store_a.load("exp-1", "alien.json", default={"fallback": True}) == {"fallback": True}
+
+    path.write_text(f'{{"workspace_id": "{alpha.workspace_id}", "secret": 123}}', encoding="utf-8")
+    assert store_a.load("exp-1", "alien.json") == {"workspace_id": alpha.workspace_id, "secret": 123}
+
+
+def test_oversized_artifacts_rejected_on_save_and_load(workspaces, monkeypatch):
+    registry, alpha, _ = workspaces
+    store = ArtifactStore(alpha, registry)
+
+    test_cap = 500
+    monkeypatch.setattr("backend.workspaces.artifact_store.MAX_ARTIFACT_BYTES", test_cap)
+
+    large_text = "x" * (test_cap + 10)
+    assert store.save_text("exp-1", "large.md", large_text) is False
+    assert store.save("exp-1", "large.json", {"payload": large_text}) is False
+
+    path = Path(store.path_for("exp-1", "disk_large.txt"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(large_text, encoding="utf-8")
+
+    assert store.load_text("exp-1", "disk_large.txt", default="cap_default") == "cap_default"
+    assert store.load("exp-1", "disk_large.txt", default={"default": True}) == {"default": True}
+
+
+def test_existing_directory_as_target_fails_soft(workspaces):
+    registry, alpha, _ = workspaces
+    store = ArtifactStore(alpha, registry)
+    path = Path(store.path_for("exp-1", "dir_artifact"))
+    path.mkdir(parents=True, exist_ok=True)
+
+    assert store.save("exp-1", "dir_artifact", {"test": True}) is False
+    assert store.save_text("exp-1", "dir_artifact", "test") is False
+    assert store.load("exp-1", "dir_artifact", default={"fallback": True}) == {"fallback": True}
+    assert store.load_text("exp-1", "dir_artifact", default="fallback") == "fallback"
+
+
+def test_list_experiments_ignores_hidden_and_files(workspaces):
+    registry, alpha, _ = workspaces
+    store = ArtifactStore(alpha, registry)
+    assert store.save("exp-valid", "result.json", {"ok": True})
+
+    exp_base = Path(store.path_for("exp-valid", "result.json")).parent.parent
+    (exp_base / ".hidden_exp").mkdir(exist_ok=True)
+    (exp_base / "loose_file.txt").write_text("loose", encoding="utf-8")
+
+    assert store.list_experiments() == ["exp-valid"]
