@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import Sidebar from "./Sidebar";
@@ -114,12 +114,27 @@ export default function Shell() {
 
   const toggleLabel = navigationToggleLabel(navOpen);
 
-  const closeDrawerFromSkip = () => {
+  const activateSkipToMain = (event: MouseEvent<HTMLAnchorElement>) => {
+    // Keep hash navigation for no-JS fallbacks, but move focus reliably for
+    // keyboard users (matches ClientShell). Close an open mobile drawer first
+    // so the landmark is not covered.
+    event.preventDefault();
     if (shouldCloseDrawerOnSkip(drawerMode, navOpen)) setNavOpen(false);
+    mainRef.current?.focus();
   };
 
   return (
     <div className="relative flex h-screen bg-[#0a0a0b] text-zinc-100 overflow-hidden">
+      {/* First in tab order on every viewport so the rail can be skipped. */}
+      <a
+        id={SKIP_TO_MAIN_ID}
+        href={`#${OPERATOR_MAIN_ID}`}
+        className="absolute left-3 top-2 z-[70] rounded bg-zinc-900 px-3 py-2 text-sm text-zinc-50 opacity-0 pointer-events-none focus:opacity-100 focus:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
+        onClick={activateSkipToMain}
+      >
+        Skip to main content
+      </a>
+
       <Sidebar
         drawerMode={drawerMode}
         open={!drawerMode || navOpen}
@@ -188,15 +203,6 @@ export default function Shell() {
             </span>
           </div>
         </header>
-
-        <a
-          id={SKIP_TO_MAIN_ID}
-          href={`#${OPERATOR_MAIN_ID}`}
-          className="absolute left-3 top-14 z-[60] rounded bg-zinc-900 px-3 py-2 text-sm text-zinc-50 opacity-0 pointer-events-none focus:opacity-100 focus:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
-          onClick={closeDrawerFromSkip}
-        >
-          Skip to main content
-        </a>
 
         <main
           ref={mainRef}

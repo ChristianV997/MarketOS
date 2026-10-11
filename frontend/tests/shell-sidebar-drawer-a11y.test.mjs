@@ -71,14 +71,17 @@ test("route changes close an open drawer and move focus to main", () => {
   assert.match(shellSrc, /firstRender/);
 });
 
-test("skip-to-main is first useful tab stop below the live-status header", () => {
-  const headerIdx = shellSrc.indexOf("<header");
-  const headerEnd = shellSrc.indexOf("</header>");
-  const skipIdx = shellSrc.indexOf("Skip to main content");
-  const mainIdx = shellSrc.indexOf("<main");
-  assert.ok(headerIdx > 0 && skipIdx > headerEnd && skipIdx < mainIdx);
+test("skip-to-main is the first focusable control and focuses the main landmark", () => {
+  const shellOpen = shellSrc.indexOf("return (");
+  const skipIdx = shellSrc.indexOf("Skip to main content", shellOpen);
+  const sidebarIdx = shellSrc.indexOf("<Sidebar", shellOpen);
+  const headerIdx = shellSrc.indexOf("<header", shellOpen);
+  const mainIdx = shellSrc.indexOf("<main", shellOpen);
+  assert.ok(skipIdx > 0 && sidebarIdx > skipIdx, "skip link precedes the sidebar rail in DOM order");
+  assert.ok(headerIdx > skipIdx && mainIdx > skipIdx);
   assert.match(shellSrc, /relative flex h-screen/);
-  assert.match(shellSrc, /absolute left-3 top-14/);
+  assert.match(shellSrc, /absolute left-3 top-2/);
+  assert.match(shellSrc, /z-\[70\]/);
   assert.match(shellSrc, /focus:opacity-100/);
   assert.doesNotMatch(shellSrc, /sr-only focus:not-sr-only/);
   assert.match(shellSrc, new RegExp(`id=\\{OPERATOR_MAIN_ID\\}|id="${OPERATOR_MAIN_ID}"`));
@@ -88,10 +91,20 @@ test("skip-to-main is first useful tab stop below the live-status header", () =>
   assert.equal(SIDEBAR_NAV_ID, "operator-sidebar-nav");
   assert.equal(shouldCloseDrawerOnSkip(true, true), true);
   assert.equal(shouldCloseDrawerOnSkip(true, false), false);
-  assert.match(shellSrc, /onClick=\{closeDrawerFromSkip\}/);
+  assert.match(shellSrc, /onClick=\{activateSkipToMain\}/);
   assert.match(shellSrc, /shouldCloseDrawerOnSkip/);
+  assert.match(shellSrc, /mainRef\.current\?\.focus\(\)/);
+  assert.match(shellSrc, /event\.preventDefault\(\)/);
   assert.match(shellSrc, /aria-label="Operator workspace"/);
   assert.match(shellSrc, /tabIndex=\{-1\}/);
+});
+
+test("desktop keyboard users can skip the persistent rail before any nav link", () => {
+  // Contract lock: the rail remains in the accessibility tree on md+, so the
+  // skip control must appear before <Sidebar> or Tab still walks every link.
+  const body = shellSrc.slice(shellSrc.indexOf("return ("));
+  assert.match(body, /Skip to main content[\s\S]*<Sidebar/);
+  assert.doesNotMatch(body, /<Sidebar[\s\S]*Skip to main content/);
 });
 
 test("operator nav landmark has an accessible name and visible focus rings", () => {
