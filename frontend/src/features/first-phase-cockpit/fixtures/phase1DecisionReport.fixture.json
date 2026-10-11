@@ -1,0 +1,83 @@
+{
+  "overall_status": "blocked",
+  "overall_score": 38.6,
+  "blocking_gates": [
+    "authenticated_supplier_evidence_not_live_observed",
+    "cj_credentials_missing_for_live_supplier_proof",
+    "competition_evidence_not_live_observed"
+  ],
+  "advisory_warnings": [
+    "evaluation_report_not_supplied",
+    "public_market_benchmark_report_not_supplied"
+  ],
+  "next_best_action": "run_offline_public_market_benchmark",
+  "next_best_prompt_hint": "Run the offline public-market benchmark (fixture/demo default) to populate competition coverage before configuring CJ credentials.",
+  "allowed_next_phases": ["read_only_deployment", "bounded_competitor_benchmark"],
+  "forbidden_next_phases": ["supplier_mutation", "ads_or_spend", "orders_payments_or_fulfillment"],
+  "read_only": true,
+  "mutated": false,
+  "network_calls": false,
+  "supplier_readiness": {
+    "status": "fixture_only",
+    "source": "unavailable",
+    "observed_field_count": 0,
+    "coverage": 0.0,
+    "price_observed": false,
+    "inventory_observed": false,
+    "shipping_observed": false
+  },
+  "competition_readiness": {
+    "status": "fixture_only",
+    "observed_offer_count": 0,
+    "pricing_coverage": 0.0
+  },
+  "opportunity_readiness": {
+    "status": "fixture_only",
+    "candidate_count": 0,
+    "confidence": 0.0
+  },
+  "commerce_run_readiness": {
+    "status": "fixture_only",
+    "run_quality": "unknown",
+    "overall_confidence": 0.0,
+    "evidence_completeness": 0.0,
+    "assumption_percentage": 0.8
+  },
+  "credential_readiness": {
+    "status": "blocked",
+    "provider": "cj",
+    "credentials_present": false,
+    "live_flag_enabled": false
+  },
+  "validation_pack_readiness": {
+    "status": "not_configured",
+    "report_present": false,
+    "live_probe_status": "not_run"
+  },
+  "safety_readiness": {
+    "status": "ready",
+    "read_only": true,
+    "no_mutation_authority": true
+  },
+  "evidence_summary": {
+    "live_observed_supplier_fields": 0,
+    "live_observed_competitor_offers": 0,
+    "overall_evidence_completeness": 0.0,
+    "overall_confidence": 0.0,
+    "assumption_percentage": 0.8,
+    "benchmark_matrix_status": "not_configured",
+    "public_market_benchmark_status": "not_configured",
+    "remaining_supplier_blocker": "authenticated_supplier_evidence_not_live_observed"
+  },
+  "provenance": {
+    "supplier": "authenticated_CJ_readonly_adapter_and_sanitized_reports",
+    "competition": "evaluation_framework_and_sanitized_validation_reports",
+    "safety": "static_phase1_policy"
+  },
+  "score_contributions": {
+    "supplier": { "status": "fixture_only", "weight": 9.0909, "status_value": 0.4, "points": 3.64 },
+    "competition": { "status": "fixture_only", "weight": 9.0909, "status_value": 0.4, "points": 3.64 },
+    "credentials": { "status": "blocked", "weight": 9.0909, "status_value": 0.0, "points": 0.0 },
+    "safety": { "status": "ready", "weight": 9.0909, "status_value": 1.0, "points": 9.09 }
+  }
+}
