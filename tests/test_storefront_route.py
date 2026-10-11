@@ -216,3 +216,9 @@ def test_checkout_redirect_allows_only_the_provider_contract(client, monkeypatch
         assert url not in resp.text
         assert "checkout.stripe.com" not in resp.text
         assert "evil.example" not in resp.text
+
+
+def test_checkout_rejects_unsafe_route_identifiers(client):
+    resp = client.get('/s/q"><svg/safe-item/checkout')
+    assert resp.status_code == 404
+    assert "location" not in {key.lower() for key in resp.headers}

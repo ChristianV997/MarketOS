@@ -48,6 +48,7 @@ _DROPPED_TAGS = {"script", "style", "iframe", "object", "embed", "svg", "math", 
 _STRIPE_CHECKOUT_NETLOCS = {"checkout.stripe.com", "checkout.stripe.com:443"}
 _STRIPE_CHECKOUT_PATH = re.compile(r"/c/pay/[A-Za-z0-9_-]+$")
 _STRIPE_SESSION_ID = re.compile(r"cs_[A-Za-z0-9_-]{4,200}$")
+_STOREFRONT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 
 
 def _attr(value: object) -> str:
@@ -223,6 +224,12 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
     (api/routes/webhooks.py), never from this request completing.
     """
     from backend.commerce.checkout import create_checkout_session
+
+    # Route identifiers are later reflected into the deterministic dry-run
+    # return URL.  Keep that URL construction independent of punctuation or
+    # delimiter characters supplied through the path.
+    if _STOREFRONT_ID.fullmatch(brand_id) is None or _STOREFRONT_ID.fullmatch(product_id) is None:
+        return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=404)
 
     utm = {k: v for k, v in request.query_params.items() if k.startswith("utm_")}
     result = create_checkout_session(brand_id, product_id, qty=1, utm=utm)
