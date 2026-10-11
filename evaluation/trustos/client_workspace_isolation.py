@@ -27,10 +27,53 @@ DEFAULT_ACCESS.update({"client_private_data": "workspace_only", "client_safe_sum
 INTERNAL_KEYS = {"internal_prompt", "internal_scoring_formula", "internal_heuristic", "internal_strategy_note", "internal_pricing_note", "internal_upsell_note", "internal_agent_instruction", "source_code", "cross_client_learning"}
 SECRET_KEYS = {"api_key", "private_key", "password", "raw_payload", "raw_html", "credentials", "credential", "access_token", "refresh_token", "authorization", "cookie", "cookies", "jwt", "token", "tokens", "client_secret", "webhook_secret", "raw_provider_payload", "provider_payload", "raw_provider_response", "provider_response"}
 _FORBIDDEN_KEY_MARKERS = ("prompt", "formula", "heuristic", "strategy", "pricing", "upsell", "agent_instruction", "source_code", "cross_client", "other_client", "private_tenant", "client_private_data", "provider_payload", "raw_payload", "provider_response", "raw_response", "credential", "secret", "password", "api_key", "access_token", "refresh_token", "authorization", "cookie", "token")
-_FORBIDDEN_VALUE_MARKERS = ("ghp_", "github_pat_", "-----begin", "bearer ", "cookie=", "session=", "<html", "other_client", "cross_client", "prompt", "formula", "heuristic", "strategy", "credential", "token", "cookie", "source code", "provider response", "raw payload")
+_FORBIDDEN_VALUE_MARKERS = (
+    "ghp_",
+    "github_pat_",
+    "-----begin",
+    "bearer ",
+    "cookie=",
+    "session=",
+    "<html",
+    "other_client",
+    "cross_client",
+    "prompt",
+    "formula",
+    "heuristic",
+    "strategy",
+    "credential",
+    "token",
+    "cookie",
+    "source code",
+    "provider response",
+    "raw payload",
+    "lawyer_ready_packet",
+    "accountant_ready_packet",
+    "security_reviewer_packet",
+    "professional packet",
+    "unredacted",
+    "pricing_note",
+    "upsell_note",
+    "internal_pricing",
+    "internal_upsell",
+    "internal_instruction",
+    "agent_instruction",
+    "agent instruction",
+    "internal pricing",
+    "internal upsell",
+    "internal scoring",
+    "scoring_formula",
+    "scoring formula",
+    "pricing_formula",
+    "pricing formula",
+)
 
-_SOURCE_CODE_VALUE = re.compile(r"(?im)^\s*(?:def|class|import|from)\s+\w+")
+_SOURCE_CODE_VALUE = re.compile(
+    r"(?im)^\s*(?:(?:async\s+)?def|class|import|from|(?:export\s+)?(?:async\s+)?function)\s+\w+"
+    r"|^\s*(?:export\s+)?(?:const|let|var)\s+\w+\s*=\s*(?:\([^)]*\)|[A-Za-z0-9_]+)\s*=>"
+)
 _FILESYSTEM_PATH_VALUE = re.compile(r"(?i)(?:^|[\s=(\[{,:])(?:file://|[a-z]:[\\/]|\\\\|/(?!/)|[^\\/\s]+\\[^\\/\s]+)")
+_CLIENT_IDENTITY_KEYS = frozenset({"workspace_id", "client_id", "tenant_id", "workspace", "tenant"})
 _NON_AUTHORITATIVE_CLAIM_MARKERS = ("actual", "live", "live_validated", "verified_live", "production")
 _SAFE_WORKSPACE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SAFE_PROVENANCE = re.compile(r"^[a-z][a-z0-9+.-]{1,15}://[A-Za-z0-9._/-]{1,192}$")
@@ -331,13 +374,38 @@ def _service_mappings() -> tuple[dict[str, Any], ...]:
     return tuple({"service_package": name, "default_workspace_type": workspace, "client_visible_reports": ("client_safe_status", "client_safe_blockers", "client_safe_next_actions"), "internal_only_reports": ("internal_strategy_notes", "internal_upsell_notes", "global_provider_intelligence"), "allowed_exports": ("client_safe_report", "professional_packet"), "professional_packets": ("lawyer_ready_packet", "accountant_ready_packet", "security_reviewer_packet"), "upsell_paths": ("next_approved_deliverable",), "retainer_path": name in {"Monthly TrustOps Retainer", "MarketOS Growth Retainer", "Full MarketOS Managed OS"}} for name, workspace in mapping.items())
 
 
-def check_workspace_leakage(payload: Mapping[str, Any], *, client_safe: bool = True) -> tuple[ClientWorkspaceLeakageCheck, ...]:
+def check_workspace_leakage(
+    payload: Mapping[str, Any],
+    *,
+    client_safe: bool = True,
+    current_workspace_id: str | None = None,
+    registry: WorkspaceRegistry | None = None,
+) -> tuple[ClientWorkspaceLeakageCheck, ...]:
     findings: list[ClientWorkspaceLeakageCheck] = []
+    other_workspaces: set[str] = set()
+    if registry is not None:
+        try:
+            for item in registry.list_all():
+                ws_id = getattr(item, "workspace_id", None)
+                if ws_id and ws_id != current_workspace_id:
+                    other_workspaces.add(ws_id.lower())
+        except Exception:
+            pass
+
     def walk(value: Any, path: str = "") -> None:
         if isinstance(value, Mapping):
             for key, child in value.items():
                 key_text = str(key).lower().replace("-", "_").replace(" ", "_")
                 data_class = next((item for item in DATA_CLASSES if item in key_text), None)
+
+                is_cross_client_identity = False
+                if key_text in _CLIENT_IDENTITY_KEYS:
+                    if current_workspace_id is not None:
+                        if isinstance(child, str) and child.strip().lower() != current_workspace_id.lower():
+                            is_cross_client_identity = True
+                    elif other_workspaces and isinstance(child, str) and child.strip().lower() in other_workspaces:
+                        is_cross_client_identity = True
+
                 forbidden_key = (
                     key_text in SECRET_KEYS
                     or data_class in INTERNAL_KEYS
@@ -345,18 +413,76 @@ def check_workspace_leakage(payload: Mapping[str, Any], *, client_safe: bool = T
                     or any(marker in key_text for marker in _FORBIDDEN_KEY_MARKERS)
                     or _contains_filesystem_path(str(key))
                     or contains_boundary_prefixed_sk_token(str(key))
+                    or (bool(other_workspaces) and any(other_id in key_text for other_id in other_workspaces))
+                    or is_cross_client_identity
                 )
-                safe_key = "[redacted-key]" if contains_boundary_prefixed_sk_token(str(key)) else str(key)
+                if contains_boundary_prefixed_sk_token(str(key)):
+                    safe_key = "[redacted-key]"
+                elif bool(other_workspaces) and any(other_id in key_text for other_id in other_workspaces):
+                    safe_key = "[cross-client-key]"
+                else:
+                    safe_key = str(key)
+
                 if forbidden_key:
-                    cls = data_class or "client_private_data"
-                    findings.append(ClientWorkspaceLeakageCheck(f"leak-{len(findings)+1}", cls, f"{path}.{safe_key}".strip("."), "internal content exposed to client projection", "critical" if cls in INTERNAL_KEYS or key_text in SECRET_KEYS else "high", "remove field or replace with an approved redacted summary", False, True, "hard_block"))
+                    if is_cross_client_identity or (bool(other_workspaces) and any(other_id in key_text for other_id in other_workspaces)):
+                        cls = "cross_client_learning"
+                        reason = "cross-client workspace or tenant reference detected"
+                    else:
+                        cls = data_class or "client_private_data"
+                        reason = "internal content exposed to client projection"
+                    findings.append(ClientWorkspaceLeakageCheck(
+                        f"leak-{len(findings)+1}",
+                        cls,
+                        f"{path}.{safe_key}".strip("."),
+                        reason,
+                        "critical" if cls in INTERNAL_KEYS or key_text in SECRET_KEYS or cls == "cross_client_learning" else "high",
+                        "remove field or replace with an approved redacted summary",
+                        False,
+                        True,
+                        "hard_block",
+                    ))
                 elif data_class in {"lawyer_ready_packet", "accountant_ready_packet", "security_reviewer_packet"}:
-                    findings.append(ClientWorkspaceLeakageCheck(f"review-{len(findings)+1}", data_class, f"{path}.{safe_key}".strip("."), "professional packet requires redaction review", "medium", "complete professional review before export", True, False, "requires_review"))
+                    findings.append(ClientWorkspaceLeakageCheck(
+                        f"review-{len(findings)+1}",
+                        data_class,
+                        f"{path}.{safe_key}".strip("."),
+                        "professional packet requires redaction review",
+                        "medium",
+                        "complete professional review before export",
+                        True,
+                        False,
+                        "requires_review",
+                    ))
                 walk(child, f"{path}.{safe_key}".strip("."))
         elif isinstance(value, (list, tuple)):
-            for index, child in enumerate(value): walk(child, f"{path}[{index}]")
-        elif isinstance(value, str) and (_contains_forbidden_value(value) or _contains_filesystem_path(value)):
-            findings.append(ClientWorkspaceLeakageCheck(f"leak-{len(findings)+1}", "client_private_data", path, "secret or cross-client value detected", "critical", "reject value and request a sanitized replacement", False, True, "hard_block"))
+            for index, child in enumerate(value):
+                walk(child, f"{path}[{index}]")
+        elif isinstance(value, str):
+            lowered_val = value.lower()
+            if other_workspaces and any(other_id in lowered_val for other_id in other_workspaces):
+                findings.append(ClientWorkspaceLeakageCheck(
+                    f"leak-{len(findings)+1}",
+                    "cross_client_learning",
+                    path,
+                    "cross-client workspace reference detected",
+                    "critical",
+                    "remove cross-client reference",
+                    False,
+                    True,
+                    "hard_block",
+                ))
+            elif _contains_forbidden_value(value) or _contains_filesystem_path(value):
+                findings.append(ClientWorkspaceLeakageCheck(
+                    f"leak-{len(findings)+1}",
+                    "client_private_data",
+                    path,
+                    "secret or cross-client value detected",
+                    "critical",
+                    "reject value and request a sanitized replacement",
+                    False,
+                    True,
+                    "hard_block",
+                ))
     walk(payload)
     return tuple(findings)
 
@@ -466,8 +592,28 @@ def export_client_evidence(
         claimed_workspace_id = payload.get("workspace_id")
         if claimed_workspace_id is not None and claimed_workspace_id != registered.workspace_id:
             raise ClientWorkspaceExportError("content_rejected")
-        if check_workspace_leakage(payload, client_safe=True):
+        reg = registry or get_workspace_registry()
+        if check_workspace_leakage(
+            payload,
+            client_safe=True,
+            current_workspace_id=registered.workspace_id,
+            registry=reg,
+        ):
             raise ClientWorkspaceExportError("content_rejected")
+
+        def _verify_nested_boundaries(node: Any) -> None:
+            if isinstance(node, Mapping):
+                for k, v in node.items():
+                    k_str = str(k).lower().replace("-", "_").replace(" ", "_")
+                    if k_str in _CLIENT_IDENTITY_KEYS:
+                        if not isinstance(v, str) or v.strip() != registered.workspace_id:
+                            raise ClientWorkspaceExportError("content_rejected")
+                    _verify_nested_boundaries(v)
+            elif isinstance(node, (list, tuple)):
+                for item in node:
+                    _verify_nested_boundaries(item)
+
+        _verify_nested_boundaries(payload)
         status_claim = str(payload.get("status", "")).casefold().replace("-", "_").replace(" ", "_")
         if any(marker in status_claim.split("_") for marker in _NON_AUTHORITATIVE_CLAIM_MARKERS):
             raise ClientWorkspaceExportError("content_rejected")
