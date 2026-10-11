@@ -75,7 +75,13 @@ def test_mergify_reporting_is_advisory_only_and_required_tests_remain_blocking()
     assert not any("MERGIFY_TOKEN" in env for env in required_envs)
     assert advisory_test_step["env"]["MERGIFY_TOKEN"] == "${{ secrets.MERGIFY_TOKEN }}"
     assert advisory_test_step["env"]["MERGIFY_TEST_SELECTION_ENABLE"] == "false"
-    assert test_step["run"] == "pytest tests/ -v -n auto"
+    required_run = test_step["run"]
+    assert "pytest tests/ -v -n auto" in required_run
+    assert '--junitxml="$RUNNER_TEMP/marketos-pytest-junit.xml"' in required_run
+    assert '-o junit_logging=no' in required_run
+    assert "pytest_status=$?" in required_run
+    assert "scripts/ai/ci_failure_diagnostics.py" in required_run
+    assert 'exit "$pytest_status"' in required_run
     assert test_step.get("continue-on-error") is not True
     assert required_test_job.get("continue-on-error") is not True
     assert "|| true" not in test_step["run"]
