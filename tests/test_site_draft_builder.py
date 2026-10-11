@@ -1,12 +1,35 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from evaluation.commerce.site_draft_builder import SITE_TYPES, build_site_draft_pack
+from evaluation.commerce.site_draft_builder import (
+    CLAIM_ROLES,
+    EVIDENCE_CLASSES,
+    EvidenceAttribution,
+    SITE_TYPES,
+    build_site_draft_pack,
+    markdown,
+)
 from evaluation.commerce.product_validation_report import generate as generate_validation_report, markdown as validation_markdown
 from scripts.generate_site_draft_pack import _defaults
+
+FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "site_draft_builder"
+
+
+def _load_fixture(name: str) -> dict:
+    return json.loads((FIXTURE_DIR / name).read_text(encoding="utf8"))
+
+
+def _all_attributions(pack: dict) -> list[dict]:
+    return [
+        attr
+        for page in pack.get("pages", [])
+        for section in page.get("sections", [])
+        for attr in section.get("evidence_attributions", [])
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -405,3 +428,150 @@ class TestMarketAccessContractAndSupplierReadiness:
         assert ("supplier_proof_ready" in readiness["blockers"]) is supplier_blocked
         assert pack["market_access"] == self._MARKET_ACCESS
         assert pack["approval_checklist"]["publishing_authorized"] is False
+
+
+class TestEvidenceAttributions:
+    def test_happy_path_sections_carry_structured_attributions(self, pack):
+        attrs = _all_attributions(pack)
+        assert attrs
+        assert pack["evidence_attribution_summary"]["attribution_count"] == len(attrs)
+        for attr in attrs:
+            assert set(attr) >= {"source_ref", "evidence_class", "claim_role", "note"}
+            assert attr["source_ref"]
+            assert attr["evidence_class"] in EVIDENCE_CLASSES
+            assert attr["claim_role"] in CLAIM_ROLES
+        summary = pack["evidence_attribution_summary"]
+        assert summary["supplier_live_claims"] is False
+        assert summary["fixture_or_manual_treated_as_live"] is False
+        assert summary["assumptions_remain_assumptions"] is True
+        assert "fixture" in summary["evidence_class_counts"]
+        assert pack["report_version"] == "site-draft-builder-v1.1"
+        assert pack["published"] is False
+        assert all(payload["status"] == "draft" for payload in pack["platform_payloads"].values())
+
+    def test_markdown_includes_attribution_summary(self, pack):
+        md = markdown(pack)
+        assert "## Evidence Attributions" in md
+        assert "Supplier live claims: `False`" in md
+        assert "## Sample Section Attributions" in md
+        assert "[fixture/" in md or "[assumed/" in md or "[derived/" in md
+
+    def test_evidence_attribution_dataclass_rejects_invalid_class_and_role(self):
+        with pytest.raises(ValueError, match="unsupported evidence class"):
+            EvidenceAttribution("opportunity_synthesis", "supplier_live_proof", "synthesis_context")
+        with pytest.raises(ValueError, match="unsupported claim role"):
+            EvidenceAttribution("opportunity_synthesis", "fixture", "live_fact")
+
+    def test_secret_shaped_keys_are_redacted_from_pack_output(self):
+        data = _load_fixture("adversarial_secret_shaped_sources.json")
+        pack = build_site_draft_pack(
+            launch_draft_pack=data["launch_draft_pack"],
+            opportunity_synthesis=data["opportunity_synthesis"],
+            supplier_feasibility=data["supplier_feasibility"],
+            client_context=data["client_context"],
+        ).to_dict()
+        raw = json.dumps(pack)
+        for token in (
+            "shpat_fixture_must_not_appear",
+            "cj-secret-must-not-appear",
+            "Bearer fixture-secret",
+            "should-never-leak",
+            "supplier-secret-must-not-appear",
+            "client-access-token-must-not-appear",
+        ):
+            assert token not in raw
+        redacted = pack["evidence_attribution_summary"]["secret_shaped_keys_redacted"]
+        assert redacted
+        assert any("access_token" in item.casefold() or "api_key" in item.casefold() or "secret" in item.casefold() for item in redacted)
+        assert pack["evidence_attribution_summary"]["supplier_live_claims"] is False
+
+    def test_malformed_evidence_modes_fail_closed(self):
+        data = _load_fixture("adversarial_malformed_evidence.json")
+        pack = build_site_draft_pack(
+            launch_draft_pack=data["launch_draft_pack"],
+            opportunity_synthesis=data["opportunity_synthesis"],
+            marketplace_trends=data["marketplace_trends"],
+            supplier_feasibility=data["supplier_feasibility"],
+            consumer_attention=data["consumer_attention"],
+        ).to_dict()
+        classes = {attr["evidence_class"] for attr in _all_attributions(pack)}
+        assert "malformed" in classes or "missing" in classes
+        assert "observed" not in classes
+        sources = pack["evidence_attribution_summary"]["sources"]
+        assert sources["opportunity_synthesis"]["evidence_class"] == "malformed"
+        assert sources["launch_draft_pack"]["evidence_class"] == "malformed"
+        assert sources["marketplace_trends"]["evidence_class"] == "malformed"
+        assert pack["evidence_attribution_summary"]["supplier_live_claims"] is False
+        assert pack["approval_checklist"]["publishing_authorized"] is False
+
+    def test_unsupported_live_labels_never_become_supplier_live_claims(self):
+        data = _load_fixture("adversarial_unsupported_evidence_class.json")
+        pack = build_site_draft_pack(
+            launch_draft_pack=data["launch_draft_pack"],
+            opportunity_synthesis=data["opportunity_synthesis"],
+            marketplace_trends=data["marketplace_trends"],
+            supplier_feasibility=data["supplier_feasibility"],
+        ).to_dict()
+        attrs = _all_attributions(pack)
+        assert attrs
+        assert all(attr["evidence_class"] != "observed" for attr in attrs)
+        assert "unsupported" in {attr["evidence_class"] for attr in attrs}
+        summary = pack["evidence_attribution_summary"]
+        assert summary["supplier_live_claims"] is False
+        assert summary["fixture_or_manual_treated_as_live"] is False
+        assert summary["sources"]["supplier_feasibility"]["evidence_class"] == "unsupported"
+        assert pack["evidence_mode"] == "unsupported"
+        raw = json.dumps(pack).lower()
+        assert "supplier-live proof" not in raw or "never" in raw
+
+    def test_contradictory_candidate_ids_are_labeled_and_do_not_bind_customer_language(self):
+        data = _load_fixture("adversarial_contradictory_sources.json")
+        pack = build_site_draft_pack(
+            launch_draft_pack=data["launch_draft_pack"],
+            opportunity_synthesis=data["opportunity_synthesis"],
+            consumer_attention=data["consumer_attention"],
+            supplier_feasibility=data["supplier_feasibility"],
+        ).to_dict()
+        assert pack["evidence_attribution_summary"]["contradictory_candidate_ids"] is True
+        attrs = _all_attributions(pack)
+        assert any(attr["evidence_class"] == "contradictory" for attr in attrs)
+        pages_raw = json.dumps(pack["pages"])
+        assert "beta-only customer language must not bind" not in pages_raw
+        assert "beta landing hint must not bind" not in pages_raw
+        assert pack["evidence_attribution_summary"]["supplier_live_claims"] is False
+
+    def test_stale_fixture_and_manual_supplier_never_become_live_proof(self):
+        data = _load_fixture("adversarial_stale_fixture_as_live.json")
+        pack = build_site_draft_pack(
+            launch_draft_pack=data["launch_draft_pack"],
+            opportunity_synthesis=data["opportunity_synthesis"],
+            marketplace_trends=data["marketplace_trends"],
+            supplier_feasibility=data["supplier_feasibility"],
+            consumer_attention=data["consumer_attention"],
+        ).to_dict()
+        sources = pack["evidence_attribution_summary"]["sources"]
+        assert sources["opportunity_synthesis"]["evidence_class"] == "stale"
+        assert sources["marketplace_trends"]["evidence_class"] == "stale"
+        assert sources["supplier_feasibility"]["evidence_class"] == "stale"
+        assert sources["consumer_attention"]["evidence_class"] == "manual_import"
+        # launch may say live_readonly, but site drafts must not emit observed supplier-live proof
+        assert sources["launch_draft_pack"]["evidence_class"] == "derived"
+        attrs = _all_attributions(pack)
+        supplier_attrs = [attr for attr in attrs if attr["claim_role"] == "supplier_context"]
+        assert supplier_attrs
+        assert all(attr["evidence_class"] in {"stale", "missing", "fixture", "manual_import", "derived", "unavailable"} for attr in supplier_attrs)
+        assert pack["evidence_attribution_summary"]["supplier_live_claims"] is False
+        assert pack["evidence_attribution_summary"]["fixture_or_manual_treated_as_live"] is False
+        assert "supplier_proof_ready" in pack["deployment_readiness"]["blockers"]
+        assert pack["approval_checklist"]["publishing_authorized"] is False
+
+    def test_missing_sources_surface_missing_or_assumed_classes(self, inputs):
+        launch, synthesis, *_ = inputs
+        pack = build_site_draft_pack(launch_draft_pack=launch, opportunity_synthesis=synthesis).to_dict()
+        sources = pack["evidence_attribution_summary"]["sources"]
+        assert sources["marketplace_trends"]["evidence_class"] == "missing"
+        assert sources["supplier_feasibility"]["evidence_class"] == "missing"
+        assert sources["consumer_attention"]["evidence_class"] == "missing"
+        classes = {attr["evidence_class"] for attr in _all_attributions(pack)}
+        assert "missing" in classes or "assumed" in classes
+        assert pack["evidence_attribution_summary"]["supplier_live_claims"] is False
