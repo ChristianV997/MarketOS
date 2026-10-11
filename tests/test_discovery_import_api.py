@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -14,6 +15,7 @@ app.include_router(router)
 
 FIXTURE = "tests/fixtures/evidence_imports/supplier_catalog_sample.csv"
 MARKER = "zz-surface-canary-1844"
+OPEN_MARKER = "zz-opened-canary-991"
 
 
 def _call(method: str, path: str, payload: dict | None = None) -> tuple[int, dict, str]:
@@ -101,6 +103,8 @@ def test_import_route_rejects_paths_outside_the_import_surface(tmp_path: Path):
         assert allowed["import_job"]["status"] == "completed"
         assert allowed["import_job"]["records_imported"] > 0
         assert MARKER not in allowed_text
+        assert ".opened-" not in allowed_text
+        assert "unintended_surface.csv" not in allowed_text
 
         hidden = (MARKER, inside.name, sibling.name, outside.name, str(outside), str(sibling))
         _assert_blocked(inside.name, "import_path_outside_import_surface", *hidden)
@@ -131,3 +135,61 @@ def test_import_route_rejects_paths_outside_the_import_surface(tmp_path: Path):
         link.unlink(missing_ok=True)
         sibling.unlink(missing_ok=True)
         sibling_root.rmdir()
+
+
+def test_opened_file_stays_confined_when_the_final_component_is_swapped():
+    """A resolve-only check can pass, then the loader follows a swapped symlink.
+
+    The canary lives at the repo root, which the CSV loader still allows. The
+    route must return bytes from the no-follow open, never that file.
+    """
+    root = Path.cwd().resolve()
+    canary = root / "unintended_open_surface.csv"
+    raced = root / "tests" / "fixtures" / "evidence_imports" / "race-open.csv"
+    canary.write_text(f"category,product,supplier_cost\n{OPEN_MARKER},item,1\n", encoding="utf-8")
+    raced.write_text("category,product,supplier_cost\nhome fitness,recovery accessory,1\n", encoding="utf-8")
+    stop = threading.Event()
+
+    def swap() -> None:
+        while not stop.is_set():
+            try:
+                raced.unlink()
+            except FileNotFoundError:
+                pass
+            try:
+                raced.symlink_to(canary)
+            except FileExistsError:
+                pass
+            try:
+                if raced.is_symlink():
+                    raced.unlink()
+                raced.write_text(
+                    "category,product,supplier_cost\nhome fitness,recovery accessory,1\n",
+                    encoding="utf-8",
+                )
+            except OSError:
+                continue
+
+    worker = threading.Thread(target=swap, daemon=True)
+    worker.start()
+    try:
+        for _ in range(30):
+            _status, body, text = _call(
+                "POST",
+                "/api/discovery/import-evidence",
+                {"input_path": "tests/fixtures/evidence_imports/race-open.csv", "parser_type": "supplier_catalog_csv", "source_name": "supplier"},
+            )
+            assert OPEN_MARKER not in text
+            assert canary.name not in text
+            assert str(canary) not in text
+            assert ".opened-" not in text
+            if body.get("status") == "blocked":
+                assert body["blocked_reasons"] == ["import_path_outside_import_surface"] or body["blocked_reasons"] == ["import_path_unavailable"]
+            else:
+                assert body["import_job"]["status"] == "completed"
+    finally:
+        stop.set()
+        worker.join(timeout=2)
+        if raced.is_symlink() or raced.exists():
+            raced.unlink(missing_ok=True)
+        canary.unlink(missing_ok=True)

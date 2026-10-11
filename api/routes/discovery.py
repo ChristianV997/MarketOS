@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -96,6 +98,87 @@ def _blocked_import_paths(paths: list[object]) -> dict[str, Any] | None:
         if reason:
             return {"status": "blocked", "blocked_reasons": [reason]}
     return None
+
+
+def _lexical_import_path(raw: str) -> Path:
+    root = Path.cwd().resolve()
+    candidate = Path(raw)
+    return candidate if candidate.is_absolute() else root / candidate
+
+
+def _read_opened_import(raw: str) -> bytes:
+    """Read the caller path with the dataset helper that opens O_NOFOLLOW.
+
+    ``Path.resolve`` is only the surface check. The bytes come from the helper's
+    open of this path, so a final-component symlink swap cannot be followed.
+    """
+    from backend.discovery.local_dataset import _read_regular_file
+
+    try:
+        return _read_regular_file(os.path.normpath(str(_lexical_import_path(raw))))
+    except FileNotFoundError:
+        raise ValueError("import_path_unavailable") from None
+    except ValueError:
+        raise ValueError("import_path_outside_import_surface") from None
+
+
+def _stage_opened_import(raw: str, payload: bytes) -> str:
+    """Copy bytes from the opened inode to a private regular file the CSV loader can re-read."""
+    leaf = Path(raw).name
+    if not leaf or leaf in {".", ".."} or "/" in leaf or "\\" in leaf or "\x00" in leaf:
+        raise ValueError("import_path_invalid")
+    parent = Path.cwd().resolve() / "tests" / "fixtures" / "evidence_imports"
+    directory = tempfile.mkdtemp(prefix=".opened-", dir=parent)
+    dest = Path(directory) / leaf
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(dest, flags, 0o600)
+    try:
+        os.write(descriptor, payload)
+    finally:
+        os.close(descriptor)
+    return str(dest)
+
+
+def _drop_staged(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    parent = os.path.dirname(path)
+    try:
+        os.rmdir(parent)
+    except OSError:
+        pass
+
+
+def _open_import_paths(raw_paths: list[object]) -> tuple[list[str], dict[str, Any] | None]:
+    """Return staged paths the loader will open, or a sanitized block response.
+
+    The staged file holds the bytes from ``_read_regular_file``. The caller path
+    is not passed to the loader, which would resolve and open it again.
+    """
+    staged: list[str] = []
+    try:
+        for raw in raw_paths:
+            reason = _import_surface_reason(raw)
+            if reason:
+                raise ValueError(reason)
+            if not isinstance(raw, str):
+                raise ValueError("import_path_invalid")
+            staged.append(_stage_opened_import(raw, _read_opened_import(raw)))
+    except ValueError as exc:
+        for path in staged:
+            _drop_staged(path)
+        code = str(exc)
+        if code not in {
+            "import_path_invalid",
+            "import_path_traversal_blocked",
+            "import_path_outside_import_surface",
+            "import_path_unavailable",
+        }:
+            code = "import_path_unavailable"
+        return [], {"status": "blocked", "blocked_reasons": [code]}
+    return staged, None
 
 
 @router.post("/opportunity-discovery")
@@ -251,14 +334,17 @@ def import_refine_compare(payload: dict[str, Any] = Body(default_factory=dict)) 
     try:
         imports = payload.get("imports") or []
         if not isinstance(imports, list) or len(imports) > 10: return {"status": "blocked", "blocked_reasons": ["import_count_limit_exceeded"]}
-        raw_paths = [item.get("input_path", "") for item in imports if isinstance(item, dict)]
-        blocked = _blocked_import_paths(raw_paths)
+        items = [item for item in imports if isinstance(item, dict)]
+        staged, blocked = _open_import_paths([item.get("input_path", "") for item in items])
         if blocked:
             return blocked
-        paths = [str(item) for item in raw_paths]
-        parsers = {str(item.get("input_path", "")): str(item.get("parser_type", "generic_market_csv")) for item in imports if isinstance(item, dict)}
-        sources = {str(item.get("input_path", "")): str(item.get("source_name", parsers.get(str(item.get("input_path", "")), "generic_market_csv"))) for item in imports if isinstance(item, dict)}
-        return run_import_refine_compare(str(payload.get("workspace_id", "default")), paths, parsers, sources, payload.get("baseline_discovery_id"), min(max(int(payload.get("max_categories", 10)), 0), 50), min(max(int(payload.get("max_hypotheses", 20)), 0), 100))
+        parsers = {staged[index]: str(item.get("parser_type", "generic_market_csv")) for index, item in enumerate(items)}
+        sources = {staged[index]: str(item.get("source_name", parsers[staged[index]])) for index, item in enumerate(items)}
+        try:
+            return run_import_refine_compare(str(payload.get("workspace_id", "default")), staged, parsers, sources, payload.get("baseline_discovery_id"), min(max(int(payload.get("max_categories", 10)), 0), 50), min(max(int(payload.get("max_hypotheses", 20)), 0), 100))
+        finally:
+            for path in staged:
+                _drop_staged(path)
     except Exception as exc:
         return {"status": "error", "error": "import_refine_compare_failed", "error_type": type(exc).__name__}
 
@@ -310,14 +396,17 @@ def import_evidence(payload: dict[str, Any] = Body(default_factory=dict)) -> dic
         if parser not in SUPPORTED_PARSERS:
             return {"status": "blocked", "blocked_reasons": ["unsupported_parser_type"]}
         raw_path = payload.get("input_path", "")
-        blocked = _blocked_import_paths([raw_path])
+        staged, blocked = _open_import_paths([raw_path])
         if blocked:
             return blocked
-        result = normalize_imported_evidence(str(raw_path), parser, str(payload.get("source_name", parser)), str(payload.get("workspace_id", "default")), payload.get("provenance"), min(max(int(payload.get("max_rows", 10000)), 1), 10000))
-        get_import_registry().register_import_job(result.import_job)
-        get_import_registry().register_source_quality(result.source_quality)
-        if result.records: get_discovery_registry().register_evidence(result.records)
-        return {**result.to_dict(), "obsidian": sync_evidence_import_note(result.import_job, result.source_quality, result)}
+        try:
+            result = normalize_imported_evidence(staged[0], parser, str(payload.get("source_name", parser)), str(payload.get("workspace_id", "default")), payload.get("provenance"), min(max(int(payload.get("max_rows", 10000)), 1), 10000))
+            get_import_registry().register_import_job(result.import_job)
+            get_import_registry().register_source_quality(result.source_quality)
+            if result.records: get_discovery_registry().register_evidence(result.records)
+            return {**result.to_dict(), "obsidian": sync_evidence_import_note(result.import_job, result.source_quality, result)}
+        finally:
+            _drop_staged(staged[0])
     except Exception as exc:
         return {"status": "error", "error": "evidence_import_failed", "error_type": type(exc).__name__}
 
@@ -328,14 +417,17 @@ def import_and_run(payload: dict[str, Any] = Body(default_factory=dict)) -> dict
         imports = payload.get("imports") or []
         if not isinstance(imports, list) or len(imports) > 10:
             return {"status": "blocked", "blocked_reasons": ["import_count_limit_exceeded"]}
-        raw_paths = [item.get("input_path", "") for item in imports if isinstance(item, dict)]
-        blocked = _blocked_import_paths(raw_paths)
+        items = [item for item in imports if isinstance(item, dict)]
+        staged, blocked = _open_import_paths([item.get("input_path", "") for item in items])
         if blocked:
             return blocked
-        paths = [str(item) for item in raw_paths]
-        parsers = {str(item.get("input_path", "")): str(item.get("parser_type", "generic_market_csv")) for item in imports if isinstance(item, dict)}
-        sources = {str(item.get("input_path", "")): str(item.get("source_name", parsers.get(str(item.get("input_path", "")), "generic_market_csv"))) for item in imports if isinstance(item, dict)}
-        return run_market_discovery(workspace_id=str(payload.get("workspace_id", "default")), title=str(payload.get("title", "Imported Market Discovery")), objective=str(payload.get("objective", "Rank categories from imported evidence")), import_paths=paths, parser_type_by_path=parsers, source_name_by_path=sources, max_categories=min(max(int(payload.get("max_categories", 10)), 0), 50), max_hypotheses=min(max(int(payload.get("max_hypotheses", 20)), 0), 100), run_validation_services=bool(payload.get("run_validation_services", True)))
+        parsers = {staged[index]: str(item.get("parser_type", "generic_market_csv")) for index, item in enumerate(items)}
+        sources = {staged[index]: str(item.get("source_name", parsers[staged[index]])) for index, item in enumerate(items)}
+        try:
+            return run_market_discovery(workspace_id=str(payload.get("workspace_id", "default")), title=str(payload.get("title", "Imported Market Discovery")), objective=str(payload.get("objective", "Rank categories from imported evidence")), import_paths=staged, parser_type_by_path=parsers, source_name_by_path=sources, max_categories=min(max(int(payload.get("max_categories", 10)), 0), 50), max_hypotheses=min(max(int(payload.get("max_hypotheses", 20)), 0), 100), run_validation_services=bool(payload.get("run_validation_services", True)))
+        finally:
+            for path in staged:
+                _drop_staged(path)
     except Exception as exc:
         return {"status": "error", "error": "import_and_run_failed", "error_type": type(exc).__name__}
 
