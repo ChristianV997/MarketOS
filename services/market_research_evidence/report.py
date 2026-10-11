@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
+from decimal import Decimal
 from typing import Any, Mapping
 
 from evaluation.commerce.opportunity_synthesis import build_product_opportunity_synthesis
 from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
 from services.reporting.render import json_safe, render_markdown_report
 
-from .conflict import detect_field_conflicts
+from .conflict import compare_field_observations, comparison_has_issue
 from .freshness import classify_freshness
 from .identity import build_observation_identity, build_source_identity, validate_binding
 from .schemas import (
@@ -107,6 +109,16 @@ def _provenance(pillar: str, source_family: str, source_ref: str, candidate_id: 
     )
 
 
+def _field_metadata(source: Mapping[str, Any], field_name: str, value: Any = None) -> tuple[Any, Any]:
+    """Read explicit metadata without assigning a currency or unit default."""
+    currency = source.get(f"{field_name}_currency") or source.get("currency_code") or source.get("currency")
+    unit = source.get(f"{field_name}_unit") or source.get("unit") or source.get("quantity_unit")
+    if isinstance(value, Mapping):
+        currency = currency or value.get("currency_code") or value.get("currency")
+        unit = unit or value.get("unit") or value.get("quantity_unit")
+    return currency, unit
+
+
 def _score_field_observations(pillar: str, report: Mapping[str, Any], candidate: Mapping[str, Any], *, candidate_id: str, workspace_id: str, as_of: str, missing_fields: list[str]) -> list[FieldObservation]:
     observations: list[FieldObservation] = []
     evidence_mode = str(report.get("evidence_mode") or MISSING)
@@ -120,11 +132,14 @@ def _score_field_observations(pillar: str, report: Mapping[str, Any], candidate:
         if value is None:
             missing_fields.append(f"{pillar}.{field_name}")
             value = MISSING
+        currency, unit = _field_metadata(candidate, field_name, value)
         observations.append(
             FieldObservation(
                 field=f"{pillar}.{field_name}",
                 value=value,
                 provenance=_provenance(pillar, pillar, source_ref, candidate_id, workspace_id, f"{pillar}.{field_name}", evidence_mode, observed_at, as_of),
+                currency=currency,
+                unit=unit,
             )
         )
     return observations
@@ -141,11 +156,14 @@ def _supplier_shipping_observations(report: Mapping[str, Any], candidate: Mappin
     for offer in priced:
         source_ref = str(offer.get("source_ref") or offer.get("supplier") or offer.get("source_type") or "supplier_offer")
         observed_at = _observed_at(offer) or _observed_at(candidate)
+        currency, unit = _field_metadata(offer, "shipping_cost", offer["shipping_cost"])
         observations.append(
             FieldObservation(
                 field="shipping_cost",
                 value=offer["shipping_cost"],
                 provenance=_provenance("supplier", "supplier", source_ref, candidate_id, workspace_id, "shipping_cost", evidence_mode, observed_at, as_of),
+                currency=currency,
+                unit=unit,
             )
         )
     return observations
@@ -162,10 +180,12 @@ def _public_market_observations(report: Mapping[str, Any], candidate: Mapping[st
         observed_at = _observed_at(item) or _observed_at(candidate)
         if item.get("price") is not None:
             priced_any = True
-            observations.append(FieldObservation("price", item["price"], _provenance("public_market_benchmark", "public_market_benchmark", source_ref, candidate_id, workspace_id, "price", evidence_mode, observed_at, as_of)))
+            currency, unit = _field_metadata(item, "price", item["price"])
+            observations.append(FieldObservation("price", item["price"], _provenance("public_market_benchmark", "public_market_benchmark", source_ref, candidate_id, workspace_id, "price", evidence_mode, observed_at, as_of), currency=currency, unit=unit))
         if item.get("shipping_cost") is not None:
             shipped_any = True
-            observations.append(FieldObservation("shipping_cost", item["shipping_cost"], _provenance("public_market_benchmark", "public_market_benchmark", source_ref, candidate_id, workspace_id, "shipping_cost", evidence_mode, observed_at, as_of)))
+            currency, unit = _field_metadata(item, "shipping_cost", item["shipping_cost"])
+            observations.append(FieldObservation("shipping_cost", item["shipping_cost"], _provenance("public_market_benchmark", "public_market_benchmark", source_ref, candidate_id, workspace_id, "shipping_cost", evidence_mode, observed_at, as_of), currency=currency, unit=unit))
     if not priced_any:
         missing_fields.append("public_market_benchmark.price")
     if not shipped_any:
@@ -236,7 +256,12 @@ def build_evidence_integrity_report(
         if item.provenance.freshness_status == "unknown":
             unknown_freshness_fields.append(item.field)
 
-    deterministic_conflicts = detect_field_conflicts(candidate_id, tuple(field_observations))
+    comparison_results = compare_field_observations(candidate_id, tuple(field_observations))
+    deterministic_conflicts = tuple(
+        replace(item, delta=float(item.delta) if isinstance(item.delta, Decimal) else item.delta)
+        for item in comparison_results
+        if comparison_has_issue(item)
+    )
 
     provenance_records = tuple(item.provenance for item in field_observations)
 
@@ -259,6 +284,7 @@ def build_evidence_integrity_report(
         field_observations=tuple(field_observations),
         missing_fields=tuple(dict.fromkeys(missing_fields)),
         unknown_freshness_fields=tuple(dict.fromkeys(unknown_freshness_fields)),
+        comparison_results=comparison_results,
         deterministic_conflicts=deterministic_conflicts,
         alias_collapse_notes=alias_collapse_notes,
         deterministic_conflict_detected=bool(deterministic_conflicts),
@@ -292,6 +318,7 @@ def render_evidence_integrity_markdown(result: EvidenceIntegrityResult) -> str:
         {"heading": "Candidate & Workspace Binding", "body": {"candidate_id": data["candidate_id"], "workspace_id": data["workspace_id"], "as_of": data["as_of"]}},
         {"heading": "Evidence Provenance", "body": data["provenance_records"] or ["none recorded"]},
         {"heading": "Field Observations", "body": data["field_observations"] or ["none recorded"]},
+        {"heading": "Currency & Unit Comparisons", "body": data["comparison_results"] or ["none available"]},
         {"heading": "Missing Fields (never coerced to zero)", "body": data["missing_fields"] or ["none recorded"]},
         {"heading": "Unknown-Freshness Fields", "body": data["unknown_freshness_fields"] or ["none recorded"]},
         {"heading": "Deterministic Conflicts (field-level, cross-source)", "body": data["deterministic_conflicts"] or ["none detected"]},

@@ -10,7 +10,7 @@ authority, reused as-is for its alias-collapse notes) and
 """
 from __future__ import annotations
 
-from .conflict import detect_field_conflicts
+from .conflict import COMPARISON_STATES, compare_field_observations, detect_field_conflicts
 from .freshness import classify_freshness
 from .identity import InvalidBindingError, build_observation_identity, build_source_identity, validate_binding, validate_candidate_id, validate_workspace_id
 from .report import REPORT_VERSION, TITLE, build_evidence_integrity_report, render_evidence_integrity_markdown
@@ -35,6 +35,8 @@ __all__ = [
     "build_evidence_integrity_report",
     "render_evidence_integrity_markdown",
     "detect_field_conflicts",
+    "compare_field_observations",
+    "COMPARISON_STATES",
     "classify_freshness",
     "validate_binding",
     "validate_candidate_id",
