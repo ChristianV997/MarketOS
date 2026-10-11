@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+import json
 from typing import Any
 
 from backend.organization.portfolio_report import build_portfolio_report
@@ -27,6 +27,31 @@ def _cap(value: Any, default: int, maximum: int) -> int:
         return max(0, min(int(value), maximum))
     except (TypeError, ValueError):
         return default
+
+
+_SAFE_FAILURE_TYPES = (
+    json.JSONDecodeError,
+    FileNotFoundError,
+    PermissionError,
+    IsADirectoryError,
+    NotADirectoryError,
+    UnicodeDecodeError,
+    KeyError,
+    IndexError,
+    ValueError,
+    TypeError,
+    OSError,
+    RuntimeError,
+    AssertionError,
+)
+
+
+def _safe_failure_type(exc: Exception) -> str:
+    """Return a stable, allowlisted exception category for public warnings."""
+    for failure_type in _SAFE_FAILURE_TYPES:
+        if isinstance(exc, failure_type):
+            return failure_type.__name__
+    return "Exception"
 
 
 def run_market_discovery(
@@ -79,15 +104,15 @@ def run_market_discovery(
             dataset = load_local_evidence_dataset(raw_path)
             source_name = str(dataset.get("source_name", "local_dataset"))
             if source_names and source_name not in source_names:
-                warnings.append(f"source_filtered:{source_name}")
+                warnings.append("source_filtered:source_not_selected")
                 continue
             safety = sources.validate_source_safe(source_name)
             if not safety.get("allowed"):
-                warnings.append(f"source_blocked:{source_name}")
+                warnings.append("source_blocked:source_not_allowed")
                 continue
             records.extend(parse_evidence_records(dataset))
         except Exception as exc:
-            warnings.append(f"dataset_failed:{Path(raw_path).name}:{type(exc).__name__}")
+            warnings.append(f"dataset_failed:redacted:{_safe_failure_type(exc)}")
     if not paths:
         persisted = registry.list_evidence(limit=10000)
         records = [record for record in persisted if not source_names or record.source_name in source_names]
@@ -148,5 +173,7 @@ def run_market_discovery(
             result["opportunity_pipeline"] = pipeline
             result["opportunity_snapshot_id"] = pipeline.get("snapshot_id")
         except Exception as exc:
-            result.setdefault("warnings", []).append(f"opportunity_pipeline_refresh_failed:{type(exc).__name__}")
+            result.setdefault("warnings", []).append(
+                f"opportunity_pipeline_refresh_failed:{_safe_failure_type(exc)}"
+            )
     return result
