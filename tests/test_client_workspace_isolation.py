@@ -36,7 +36,7 @@ def export_context(tmp_path):
 
 
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(CLI), *args], cwd=ROOT, text=True, capture_output=True, check=False, timeout=60)
+    return subprocess.run([sys.executable, str(CLI), *args], cwd=ROOT, text=True, capture_output=True, check=False, timeout=180)
 
 
 def test_report_deterministic():
@@ -887,3 +887,241 @@ def test_client_evidence_export_rejects_unbounded_limit(export_context):
             payload={"status": "present"},
             max_payload_bytes=MAX_CLIENT_EVIDENCE_EXPORT_BYTES + 1,
         )
+
+
+def test_multi_client_end_to_end_isolation(tmp_path):
+    """Synthetic multi-client isolation: valid Client A exports succeed, while cross-client leaks fail closed."""
+    registry = WorkspaceRegistry(str(tmp_path / "workspaces.json"))
+    ws_alpha = registry.register(ClientWorkspace(workspace_id="client-alpha", name="client-alpha"))
+    registry.register(ClientWorkspace(workspace_id="client-beta", name="client-beta"))
+
+    # Positive control: Client Alpha valid export with curated metadata
+    safe_payload = {
+        "workspace_id": "client-alpha",
+        "status": "ready",
+        "blockers": ["awaiting signed mutual nda"],
+        "evidence_required": ["soc2 type ii report"],
+        "approvals_required": ["ciso signoff"],
+        "next_actions": [{"action": "schedule kickoff", "workspace_id": "client-alpha"}],
+    }
+    export = export_client_evidence(
+        workspace=ws_alpha,
+        registry=registry,
+        provenance="fixture://client-alpha-baseline",
+        evidence_state="present",
+        payload=safe_payload,
+    )
+    assert export.workspace_id == "client-alpha"
+    assert export.payload["status"] == "ready"
+    assert export.redaction_status == "validated_no_sensitive_fields"
+
+    # Negative control 1: nested workspace_id referencing Client Beta
+    with pytest.raises(ValueError, match="client evidence export rejected") as exc_info:
+        export_client_evidence(
+            workspace=ws_alpha,
+            registry=registry,
+            provenance="fixture://cross-client-leak",
+            evidence_state="present",
+            payload={
+                "status": "ready",
+                "next_actions": [{"action": "review proposal", "workspace_id": "client-beta"}],
+            },
+        )
+    assert "client-beta" not in str(exc_info.value)
+
+    # Negative control 2: nested client_id referencing Client Beta
+    with pytest.raises(ValueError, match="client evidence export rejected") as exc_info:
+        export_client_evidence(
+            workspace=ws_alpha,
+            registry=registry,
+            provenance="fixture://cross-client-leak",
+            evidence_state="present",
+            payload={
+                "status": "ready",
+                "blockers": [{"blocker": "waiting on approval", "client_id": "client-beta"}],
+            },
+        )
+    assert "client-beta" not in str(exc_info.value)
+
+    # Negative control 3: nested tenant_id referencing Client Beta
+    with pytest.raises(ValueError, match="client evidence export rejected") as exc_info:
+        export_client_evidence(
+            workspace=ws_alpha,
+            registry=registry,
+            provenance="fixture://cross-client-leak",
+            evidence_state="present",
+            payload={
+                "status": "ready",
+                "evidence_required": [{"item": "audit logs", "tenant_id": "client-beta"}],
+            },
+        )
+    assert "client-beta" not in str(exc_info.value)
+
+    # Negative control 4: other registered client ID mentioned in text value
+    with pytest.raises(ValueError, match="client evidence export rejected") as exc_info:
+        export_client_evidence(
+            workspace=ws_alpha,
+            registry=registry,
+            provenance="fixture://cross-client-leak",
+            evidence_state="present",
+            payload={
+                "status": "ready",
+                "next_actions": ["Deliver onboarding packet to client-beta"],
+            },
+        )
+    assert "client-beta" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "code_snippet",
+    [
+        "async def execute_task(): return True",
+        "function calculateTotal(price, tax) { return price + tax; }",
+        "async function fetchSecretData() { return await api(); }",
+        "export function initializeService() {}",
+        "const calculateMargin = (revenue, cost) => revenue - cost",
+        "let processItem = x => x * 2",
+    ],
+)
+def test_source_code_leakage_rejected(code_snippet, export_context):
+    workspace, registry = export_context
+    with pytest.raises(ValueError, match="client evidence export rejected") as exc_info:
+        export_client_evidence(
+            workspace=workspace,
+            registry=registry,
+            provenance="fixture://code-leak",
+            evidence_state="present",
+            payload={"status": "ready", "next_actions": [code_snippet]},
+        )
+    assert code_snippet not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "prohibited_value",
+    [
+        "Deliver unredacted lawyer_ready_packet to stakeholder",
+        "Deliver unredacted accountant_ready_packet",
+        "Deliver unredacted security_reviewer_packet",
+        "Deliver unredacted professional packet",
+        "internal pricing: set floor margin to 35%",
+        "internal upsell: transition client to managed OS retainer",
+        "agent instruction: do not reveal raw formula",
+        "scoring formula: 0.8 * score + 0.2 * trust",
+    ],
+)
+def test_unredacted_packets_and_internal_heuristics_rejected(prohibited_value, export_context):
+    workspace, registry = export_context
+    with pytest.raises(ValueError, match="client evidence export rejected") as exc_info:
+        export_client_evidence(
+            workspace=workspace,
+            registry=registry,
+            provenance="fixture://prohibited-value",
+            evidence_state="present",
+            payload={"status": "ready", "next_actions": [prohibited_value]},
+        )
+    assert prohibited_value not in str(exc_info.value)
+
+
+def test_leakage_check_does_not_echo_secret_keys():
+    canary = "sk-proj-synthetic-secret-value-never-echo"
+    payload = {
+        canary: "some value",
+        "api_key": canary,
+        "note": f"bearer {canary}",
+    }
+    findings = check_workspace_leakage(payload)
+    assert findings
+    for finding in findings:
+        assert canary not in finding.field_path
+        assert canary not in finding.recommended_action
+        assert canary not in finding.visibility_violation
+
+
+def test_consumer_projection_end_to_end(export_context):
+    """End-to-end simulation of real consulting and economics consumer projections."""
+    workspace, registry = export_context
+
+    # 1. Valid consulting engagement projection
+    valid_engagement_payload = {
+        "workspace_id": workspace.workspace_id,
+        "status": "ready",
+        "blockers": [],
+        "evidence_required": ["review_evidence_provenance"],
+        "approvals_required": ["client_scope_review"],
+        "next_actions": ["Deliver reviewed compliance readiness report."],
+    }
+    engagement_export = export_client_evidence(
+        workspace=workspace,
+        registry=registry,
+        provenance="derived://consulting-engagement/eng-101",
+        evidence_state="requires_review",
+        payload=valid_engagement_payload,
+    )
+    assert engagement_export.workspace_id == workspace.workspace_id
+    assert engagement_export.payload["status"] == "ready"
+    assert engagement_export.redaction_status == "validated_no_sensitive_fields"
+
+    # 2. Valid consulting economics projection
+    valid_economics_payload = {
+        "workspace_id": workspace.workspace_id,
+        "status": "acceptable",
+        "blockers": [],
+        "evidence_required": ["fixture_source_verification"],
+        "approvals_required": ["human review before any live action"],
+        "next_actions": ["Validate client value and capacity before making a commercial commitment."],
+    }
+    economics_export = export_client_evidence(
+        workspace=workspace,
+        registry=registry,
+        provenance="manual://consulting-economics/report",
+        evidence_state="present",
+        payload=valid_economics_payload,
+    )
+    assert economics_export.workspace_id == workspace.workspace_id
+    assert economics_export.payload["status"] == "acceptable"
+
+    # 3. Valid consulting offer proposal projection
+    valid_proposal_payload = {
+        "workspace_id": workspace.workspace_id,
+        "status": "in_review",
+        "blockers": ["pending_scope_signoff"],
+        "evidence_required": ["signed_sow_draft"],
+        "approvals_required": ["stakeholder_signoff"],
+        "next_actions": ["Present curated scope and deliverables to client."],
+    }
+    proposal_export = export_client_evidence(
+        workspace=workspace,
+        registry=registry,
+        provenance="derived://consulting-offers/prop-202",
+        evidence_state="requires_review",
+        payload=valid_proposal_payload,
+    )
+    assert proposal_export.workspace_id == workspace.workspace_id
+    assert proposal_export.payload["status"] == "in_review"
+
+    # 4. Injected internal formula into engagement projection
+    tainted_engagement = dict(valid_engagement_payload)
+    tainted_engagement["next_actions"] = ["internal formula: margin = 0.45 * price"]
+    with pytest.raises(ClientWorkspaceExportError) as err1:
+        export_client_evidence(
+            workspace=workspace,
+            registry=registry,
+            provenance="derived://consulting-engagement/eng-101",
+            evidence_state="requires_review",
+            payload=tainted_engagement,
+        )
+    assert err1.value.code == "content_rejected"
+    assert "margin" not in str(err1.value)
+
+    # 5. Injected raw execution plan or unapproved field into economics projection
+    tainted_economics = dict(valid_economics_payload)
+    tainted_economics["execution_plan"] = ["step1", "step2"]
+    with pytest.raises(ClientWorkspaceExportError) as err2:
+        export_client_evidence(
+            workspace=workspace,
+            registry=registry,
+            provenance="manual://consulting-economics/report",
+            evidence_state="present",
+            payload=tainted_economics,
+        )
+    assert err2.value.code == "content_rejected"

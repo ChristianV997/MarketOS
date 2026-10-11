@@ -10,7 +10,12 @@ from .service import (
 )
 from .readiness import Phase1ReadinessReport, build_from_paths, build_phase1_readiness
 from .benchmark_matrix import BenchmarkMatrixReport, build_benchmark_from_paths, build_benchmark_matrix
-from .public_market_benchmark import PublicMarketBenchmarkReport, build_public_market_benchmark
+from .public_market_benchmark import (
+    PublicMarketBenchmarkReport,
+    build_public_market_benchmark,
+    synthesize_from_public_market,
+    to_marketplace_trend_report,
+)
 from .intelligence_adapter_plan import IntelligenceAdapterPlanReport, build_intelligence_adapter_plan
 from .dataforseo_adapter import DataForSEOAdapterReport, build_dataforseo_adapter_report
 
@@ -32,6 +37,8 @@ __all__ = [
     "build_benchmark_matrix",
     "PublicMarketBenchmarkReport",
     "build_public_market_benchmark",
+    "to_marketplace_trend_report",
+    "synthesize_from_public_market",
     "IntelligenceAdapterPlanReport",
     "build_intelligence_adapter_plan",
     "DataForSEOAdapterReport",

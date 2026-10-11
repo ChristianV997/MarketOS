@@ -36,6 +36,18 @@ A single end-to-end fixture runner that:
 4. Asserts review blockers surface (supplier_proof_ready, publishing_authorized=False).
 5. Prints a one-line SHA-validated manifest.
 
+## Evidence attribution (site-draft-builder-v1.1)
+- Gap closed: free-text `evidence_source_note` alone could not classify claim provenance.
+- Each `PageSectionDraft` now carries `evidence_attributions` (`source_ref`,
+  `evidence_class`, `claim_role`, `note`). Pack-level
+  `evidence_attribution_summary` aggregates classes/roles and asserts
+  `supplier_live_claims=false` / `fixture_or_manual_treated_as_live=false`.
+- Fixture, manual, missing, stale, malformed, unsupported, and contradictory
+  labels stay fail-closed; assumptions remain assumptions. Platform payloads
+  remain `status: draft`. No second scorer / economics recalculation.
+- OSS prior art (Schema.org ClaimReview, PROV-JSONLD) declined: fact-check /
+  publish markup, high dependency cost, no advantage over MarketOS-native classes.
+
 File ownership (NO overlap):
 - @marketos-code: `scripts/run_site_draft_e2e.py` (new), edits only to
   `evaluation/commerce/site_draft_builder.py` if a real seam bug surfaces.
