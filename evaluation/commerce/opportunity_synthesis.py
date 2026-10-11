@@ -9,6 +9,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
+from .consumer_attention import (
+    ConsumerAttentionEvidence,
+    FRESHNESS_STATES,
+    PLATFORMS,
+    PROVENANCE,
+    SOURCE_TYPES,
+)
 from .market_access_report import build_market_access_section
 
 RECOMMENDATIONS = frozenset(
@@ -111,6 +118,49 @@ def _mode(report: Mapping[str, Any] | None, candidate: Mapping[str, Any] | None)
     for item in _evidence(candidate, "evidence") + _evidence(candidate, "offers"):
         modes.append(str(item.get("evidence_mode", "")))
     return next((item for item in modes if item in {"live_readonly", "public_live", "authenticated_live"}), next((item for item in modes if item in {"manual_import", "fixture_demo", "fixture"}), "missing"))
+
+
+def _consumer_attention_provenance(
+    report: Mapping[str, Any] | None,
+    candidate: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    evidence = _evidence(candidate, "evidence")
+
+    def allowed_values(values: Any, allowed: frozenset[str]) -> set[str]:
+        if not isinstance(values, (list, tuple, set)):
+            return set()
+        return {value for value in values if isinstance(value, str) and value in allowed}
+
+    source_types = allowed_values((candidate or {}).get("source_types"), SOURCE_TYPES)
+    platforms = allowed_values((candidate or {}).get("platforms"), PLATFORMS)
+    for item in evidence:
+        source_type = item.get("source_type")
+        platform = item.get("platform")
+        if isinstance(source_type, str) and source_type in SOURCE_TYPES:
+            source_types.add(source_type)
+        if isinstance(platform, str) and platform in PLATFORMS:
+            platforms.add(platform)
+    if not platforms:
+        platforms.update(allowed_values((report or {}).get("platforms_observed"), PLATFORMS))
+
+    evidence_fields = set(ConsumerAttentionEvidence.__dataclass_fields__) - {"field_provenance", "warnings"}
+    field_provenance: dict[str, set[str]] = {}
+    for item in evidence:
+        provenance = item.get("field_provenance")
+        if not isinstance(provenance, Mapping):
+            continue
+        for field_name, value in provenance.items():
+            if field_name in evidence_fields and isinstance(value, str) and value in PROVENANCE:
+                field_provenance.setdefault(field_name, set()).add(value)
+
+    freshness = allowed_values((candidate or {}).get("freshness_statuses"), FRESHNESS_STATES)
+    return {
+        "source_types": sorted(source_types),
+        "platforms": sorted(platforms),
+        "evidence_count": len(evidence),
+        "field_provenance": {key: sorted(values) for key, values in sorted(field_provenance.items())},
+        "freshness_statuses": sorted(freshness),
+    }
 
 
 LIVE_EVIDENCE_MODES = frozenset({"live_readonly", "public_live", "authenticated_live"})
@@ -465,7 +515,12 @@ def _candidate(candidate_id: str, market: Mapping[str, Any] | None, supplier: Ma
     matrix = ProductOpportunityEvidenceMatrix(
         {"status": "supplied" if market else "missing", "mode": _mode(None, market), "score": m},
         {"status": "supplied" if supplier else "missing", "mode": _mode(None, supplier), "score": s},
-        {"status": "supplied" if consumer else "missing", "mode": _mode(None, consumer), "score": c},
+        {
+            "status": "supplied" if consumer else "missing",
+            "mode": _mode(None, consumer),
+            "score": c,
+            **_consumer_attention_provenance(consumer_report, consumer),
+        },
     )
     score = ProductOpportunityScore(candidate_id, m, s, c, combined, confidence, grade, recommendation, risk, {"marketplace_weight": 0.4 if use_consumer_weight else 0.55, "supplier_weight": 0.35 if use_consumer_weight else 0.45, "consumer_weight": 0.25 if use_consumer_weight else 0.0, "raw_marketplace": m, "raw_supplier": s, "raw_consumer": c})
     action = _plan(candidate_id, recommendation.code)

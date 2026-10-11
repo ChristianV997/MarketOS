@@ -1,0 +1,35 @@
+{
+  "opportunity_synthesis": {
+    "top_candidate_id": "candidate-alpha",
+    "top_candidate_title": "Candidate Alpha",
+    "evidence_mode": "fixture_demo",
+    "top_hooks": ["alpha hook must not bind as beta language"],
+    "top_pain_points": ["alpha pain"],
+    "candidates": [{"candidate_id": "candidate-alpha", "title": "Candidate Alpha"}]
+  },
+  "launch_draft_pack": {
+    "candidate_id": "candidate-beta",
+    "candidate_title": "Candidate Beta",
+    "evidence_mode": "fixture_demo",
+    "customer_language": "beta-only customer language must not bind across contradictory ids",
+    "ad_creatives": {"hooks": ["beta hook"], "angles": ["beta"]}
+  },
+  "consumer_attention": {
+    "evidence_mode": "fixture_demo",
+    "top_candidate_id": "candidate-beta",
+    "candidates": [
+      {
+        "candidate_id": "candidate-beta",
+        "score": {
+          "landing_page_copy_hints": ["beta landing hint must not bind"],
+          "voice_of_customer": {"desired_outcomes": ["beta outcome"]}
+        }
+      }
+    ]
+  },
+  "supplier_feasibility": {
+    "evidence_mode": "fixture_demo",
+    "top_candidate_id": "candidate-beta",
+    "candidates": [{"candidate_id": "candidate-beta"}]
+  }
+}
