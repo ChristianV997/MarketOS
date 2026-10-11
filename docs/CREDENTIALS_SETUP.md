@@ -92,9 +92,9 @@ All tokens should:
 
 When a customer connects their accounts, we:
 1. Request each credential (token, ID, keys) via `api/onboarding.py`'s step-2 wizard
-2. Verify with a test API call (`api/credentials_setup.py::test_credentials`) — create paused campaign / test product → verify ID format → confirm success
-3. Store credentials env-first, falling back to `~/.marketos/credentials.json` (mode 0600, plaintext — see `backend/config.py::get_credential/set_credential`; there is no separate encrypted-storage module today)
-4. Periodically test connectivity (detect expired/revoked tokens) — not yet automated; run `test_credentials` manually per service
+2. Record the service mode with `POST /api/setup/test/{service}` (`api/credentials_setup.py::test_credentials`; verified internal operator only): `dry_run` when credentials are missing or the service is forced to dry-run, `blocked` when it is live. It never calls a provider and verifies nothing, because no server-side approval policy permits live verification yet (see `docs/IDENTITY_WORKSPACE_FOUNDATION.md`; any future live check must go through the Approval Ledger)
+3. Store credentials env-first, falling back to `~/.marketos/credentials.json` (mode 0600, plaintext — see `backend/config.py::get_credential/set_credential`; there is no separate encrypted-storage module today). An environment variable of the same name overrides the file; `POST /api/setup/credentials/set` reports `overridden_by_environment` when that happens
+4. Periodically test connectivity (detect expired/revoked tokens) — not implemented; there is no live connectivity check until an approved policy exists
 5. Alert if multiple consecutive failures — not yet implemented
 
 ## Discovery/research sources (no setup needed)
