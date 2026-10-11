@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any, Mapping
 
-VERSION = "site-draft-builder-v1"
+VERSION = "site-draft-builder-v1.1"
 UNKNOWN = "TBD — confirm before publishing."
 SITE_TYPES = frozenset(
     {
@@ -26,6 +26,52 @@ SITE_TYPES = frozenset(
     }
 )
 PROVENANCE = frozenset({"observed", "derived", "assumed", "unavailable", "fixture", "manual_import"})
+# Evidence classes for section/claim attribution. Distinct from CMS PROVENANCE:
+# missing/stale/malformed/unsupported/contradictory stay fail-closed labels and
+# never upgrade fixture/manual inputs into supplier-live factual claims.
+EVIDENCE_CLASSES = frozenset(
+    {
+        "fixture",
+        "manual_import",
+        "derived",
+        "assumed",
+        "unavailable",
+        "missing",
+        "stale",
+        "malformed",
+        "unsupported",
+        "contradictory",
+        "observed",
+    }
+)
+CLAIM_ROLES = frozenset(
+    {
+        "positioning_hook",
+        "pain_point",
+        "customer_language",
+        "offer_framing",
+        "policy_placeholder",
+        "proof_placeholder",
+        "planning_assumption",
+        "supplier_context",
+        "marketplace_context",
+        "synthesis_context",
+        "client_context",
+        "launch_context",
+    }
+)
+_SECRET_KEY_MARKERS = (
+    "api_key",
+    "apikey",
+    "access_token",
+    "authorization",
+    "secret",
+    "password",
+    "private_key",
+    "client_secret",
+    "cj_api_key",
+    "shopify_access_token",
+)
 SAFE_CLAIM_WORDS = frozenset({"guaranteed", "cure", "treat", "diagnose", "prevent", "FDA", "clinically proven", "risk-free"})
 
 
@@ -304,6 +350,37 @@ class CMSBinding:
 
 
 @dataclass(frozen=True)
+class EvidenceAttribution:
+    """Traceable source reference for a draft section or claim.
+
+    evidence_class stays within EVIDENCE_CLASSES. Fixture, manual, missing, and
+    stale sources remain labeled as such; they never become supplier-live proof.
+    Assumptions use claim_role=planning_assumption or evidence_class=assumed.
+    """
+
+    source_ref: str
+    evidence_class: str
+    claim_role: str
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        if self.evidence_class not in EVIDENCE_CLASSES:
+            raise ValueError(f"unsupported evidence class: {self.evidence_class}")
+        if self.claim_role not in CLAIM_ROLES:
+            raise ValueError(f"unsupported claim role: {self.claim_role}")
+        if not _text(self.source_ref, 160):
+            raise ValueError("source_ref is required")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_ref": _text(self.source_ref, 160),
+            "evidence_class": self.evidence_class,
+            "claim_role": self.claim_role,
+            "note": _text(self.note, 240),
+        }
+
+
+@dataclass(frozen=True)
 class SectionBlockDraft:
     block_type: str
     content: Mapping[str, Any]
@@ -330,6 +407,7 @@ class PageSectionDraft:
     risk_note: str
     unknowns: tuple[str, ...]
     approval_required: bool = True
+    evidence_attributions: tuple[EvidenceAttribution, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return _safe(self)
@@ -599,6 +677,7 @@ class SiteDraftPack:
     operator_notes: tuple[str, ...]
     client_summary: str
     market_access: Mapping[str, Any] = field(default_factory=dict)
+    evidence_attribution_summary: Mapping[str, Any] = field(default_factory=dict)
     read_only: bool = True
     network_calls: bool = False
     mutated: bool = False
@@ -657,7 +736,413 @@ def _section_types(page_type: str, site_type: str) -> tuple[str, ...]:
     return ("hero", "benefits", "final_cta")
 
 
-def _section(section_type: str, title: str, hooks: list[str], pains: list[str], site_type: str, customer_language: str = "") -> PageSectionDraft:
+def _secret_shaped_key(key: Any) -> bool:
+    token = re.sub(r"[^a-z0-9]+", "_", str(key or "").strip().casefold()).strip("_")
+    if not token:
+        return False
+    return any(marker in token for marker in _SECRET_KEY_MARKERS)
+
+
+def _normalize_evidence_class(
+    raw: Any,
+    *,
+    missing: bool = False,
+    stale: bool = False,
+    malformed: bool = False,
+    contradictory: bool = False,
+    allow_observed: bool = False,
+) -> str:
+    """Map upstream evidence_mode/provenance into fail-closed evidence classes.
+
+    Fixture, manual, missing, and stale inputs never become observed/supplier-live.
+    Unsupported labels degrade to unsupported rather than being treated as proof.
+    """
+    if contradictory:
+        return "contradictory"
+    if malformed:
+        return "malformed"
+    if missing:
+        return "missing"
+    if stale:
+        return "stale"
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return "missing"
+    if not isinstance(raw, str):
+        return "malformed"
+    token = raw.strip().casefold()
+    aliases = {
+        "fixture_demo": "fixture",
+        "fixture": "fixture",
+        "manual_csv_import": "manual_import",
+        "manual_import": "manual_import",
+        "sanitized_report": "derived",
+        "derived": "derived",
+        "assumed": "assumed",
+        "planning_assumption": "assumed",
+        "unavailable": "unavailable",
+        "missing": "missing",
+        "stale": "stale",
+        "malformed": "malformed",
+        "unsupported": "unsupported",
+        "contradictory": "contradictory",
+        "blocked": "unavailable",
+        "plan_only": "assumed",
+        "observed": "observed",
+        "live_readonly": "observed",
+        "authenticated_live": "observed",
+        "supplier_live": "unsupported",
+        "supplier_live_proof": "unsupported",
+        "live_validated": "unsupported",
+        "factual": "unsupported",
+    }
+    mapped = aliases.get(token)
+    if mapped is None:
+        return "unsupported"
+    if mapped == "observed" and not allow_observed:
+        # Site drafts never treat upstream "live" modes as supplier-live proof.
+        return "derived"
+    if mapped in {"fixture", "manual_import", "missing", "stale", "malformed", "unsupported", "contradictory", "assumed", "unavailable"}:
+        return mapped
+    if mapped == "derived":
+        return "derived"
+    if mapped == "observed" and allow_observed:
+        return "observed"
+    return "unsupported"
+
+
+def _attr(source_ref: str, evidence_class: str, claim_role: str, note: str = "") -> EvidenceAttribution:
+    return EvidenceAttribution(
+        source_ref=_text(source_ref, 160) or "source.unavailable",
+        evidence_class=evidence_class if evidence_class in EVIDENCE_CLASSES else "unsupported",
+        claim_role=claim_role if claim_role in CLAIM_ROLES else "planning_assumption",
+        note=_text(note, 240),
+    )
+
+
+def _source_presence(value: Mapping[str, Any] | None) -> bool:
+    return bool(value)
+
+
+def _build_source_catalog(
+    *,
+    synthesis: Mapping[str, Any],
+    launch: Mapping[str, Any],
+    marketplace_trends: Mapping[str, Any] | None,
+    supplier_feasibility: Mapping[str, Any] | None,
+    consumer_attention: Mapping[str, Any] | None,
+    client_context: Mapping[str, Any] | None,
+    candidate_id: str,
+    source_id: str,
+    customer_language: str,
+) -> dict[str, Any]:
+    """Collect normalized per-source attribution metadata from stable main inputs."""
+    market = dict(_mapping(marketplace_trends))
+    supplier = dict(_mapping(supplier_feasibility))
+    consumer = dict(_mapping(consumer_attention))
+    client = dict(client_context or {})
+
+    synthesis_mode = synthesis.get("evidence_mode")
+    launch_mode = launch.get("evidence_mode")
+    market_mode = market.get("evidence_mode")
+    supplier_mode = supplier.get("evidence_mode")
+    consumer_mode = consumer.get("evidence_mode")
+
+    launch_id = _string_identity(launch.get("candidate_id")).strip()
+    synthesis_candidate = _string_identity(synthesis.get("top_candidate_id") or synthesis.get("candidate_id")).strip()
+    contradictory = bool(
+        launch_id
+        and synthesis_candidate
+        and launch_id.casefold() != synthesis_candidate.casefold()
+    )
+    # Declared stale markers on stable main fields (optional; ignore unknown shapes).
+    stale_flags = {
+        "opportunity_synthesis": bool(synthesis.get("stale") is True or synthesis.get("evidence_state") == "stale"),
+        "launch_draft_pack": bool(launch.get("stale") is True or launch.get("evidence_state") == "stale"),
+        "marketplace_trends": bool(market.get("stale") is True or market.get("evidence_state") == "stale"),
+        "supplier_feasibility": bool(supplier.get("stale") is True or supplier.get("evidence_state") == "stale"),
+        "consumer_attention": bool(consumer.get("stale") is True or consumer.get("evidence_state") == "stale"),
+    }
+    malformed_flags = {
+        "opportunity_synthesis": synthesis_mode is not None and not isinstance(synthesis_mode, str),
+        "launch_draft_pack": launch_mode is not None and not isinstance(launch_mode, str),
+        "marketplace_trends": market_mode is not None and not isinstance(market_mode, str),
+        "supplier_feasibility": supplier_mode is not None and not isinstance(supplier_mode, str),
+        "consumer_attention": consumer_mode is not None and not isinstance(consumer_mode, str),
+        "client_context": bool(client_context is not None and not isinstance(client_context, Mapping)),
+    }
+    # Secret-shaped keys must never appear in attribution notes or source_refs.
+    secret_hits: list[str] = []
+    for label, payload in (
+        ("opportunity_synthesis", synthesis),
+        ("launch_draft_pack", launch),
+        ("marketplace_trends", market),
+        ("supplier_feasibility", supplier),
+        ("consumer_attention", consumer),
+        ("client_context", client),
+    ):
+        for key in payload:
+            if _secret_shaped_key(key):
+                secret_hits.append(f"{label}.{key}")
+
+    def class_for(label: str, mode: Any, *, present: bool) -> str:
+        return _normalize_evidence_class(
+            mode,
+            missing=not present,
+            stale=stale_flags.get(label, False),
+            malformed=malformed_flags.get(label, False),
+            contradictory=contradictory and label in {"opportunity_synthesis", "launch_draft_pack"},
+            allow_observed=False,
+        )
+
+    catalog = {
+        "opportunity_synthesis": {
+            "present": _source_presence(synthesis),
+            "evidence_class": class_for("opportunity_synthesis", synthesis_mode, present=_source_presence(synthesis)),
+            "mode": _text(synthesis_mode, 50) if isinstance(synthesis_mode, str) else "",
+        },
+        "launch_draft_pack": {
+            "present": _source_presence(launch),
+            "evidence_class": class_for("launch_draft_pack", launch_mode, present=_source_presence(launch)),
+            "mode": _text(launch_mode, 50) if isinstance(launch_mode, str) else "",
+        },
+        "marketplace_trends": {
+            "present": _source_presence(market),
+            "evidence_class": class_for("marketplace_trends", market_mode, present=_source_presence(market)),
+            "mode": _text(market_mode, 50) if isinstance(market_mode, str) else "",
+        },
+        "supplier_feasibility": {
+            "present": _source_presence(supplier),
+            "evidence_class": class_for("supplier_feasibility", supplier_mode, present=_source_presence(supplier)),
+            "mode": _text(supplier_mode, 50) if isinstance(supplier_mode, str) else "",
+        },
+        "consumer_attention": {
+            "present": _source_presence(consumer),
+            "evidence_class": class_for("consumer_attention", consumer_mode, present=_source_presence(consumer)),
+            "mode": _text(consumer_mode, 50) if isinstance(consumer_mode, str) else "",
+        },
+        "client_context": {
+            "present": isinstance(client_context, Mapping) and bool(client),
+            "evidence_class": "manual_import"
+            if isinstance(client_context, Mapping) and client
+            else ("malformed" if malformed_flags["client_context"] else "missing"),
+            "mode": "client_supplied" if client else "",
+        },
+        "contradictory_candidate_ids": contradictory,
+        "secret_shaped_keys_redacted": tuple(secret_hits),
+        "candidate_id": _text(candidate_id, 100),
+        "source_id": _text(source_id, 100),
+        "customer_language_bound": bool(customer_language),
+    }
+    return catalog
+
+
+def _section_attributions(
+    section_type: str,
+    *,
+    catalog: Mapping[str, Any],
+    hooks: list[str],
+    pains: list[str],
+    customer_language: str,
+) -> tuple[EvidenceAttribution, ...]:
+    attrs: list[EvidenceAttribution] = []
+    synth = catalog["opportunity_synthesis"]
+    launch = catalog["launch_draft_pack"]
+    market = catalog["marketplace_trends"]
+    supplier = catalog["supplier_feasibility"]
+    consumer = catalog["consumer_attention"]
+    client = catalog["client_context"]
+
+    attrs.append(
+        _attr(
+            "opportunity_synthesis",
+            synth["evidence_class"],
+            "synthesis_context",
+            "Synthesis framing only; not a publishable fact claim."
+            if synth["present"]
+            else "Opportunity synthesis was not supplied.",
+        )
+    )
+    if launch["present"]:
+        attrs.append(
+            _attr(
+                "launch_draft_pack",
+                launch["evidence_class"],
+                "launch_context",
+                "Launch draft context only; status remains draft.",
+            )
+        )
+    if section_type == "hero":
+        if customer_language:
+            attrs.append(
+                _attr(
+                    "consumer_attention.landing_hint_or_desired_outcome",
+                    consumer["evidence_class"] if consumer["present"] else launch["evidence_class"],
+                    "customer_language",
+                    "Draft customer language only; not a result promise or live proof.",
+                )
+            )
+        elif hooks:
+            attrs.append(
+                _attr(
+                    "opportunity_synthesis.top_hooks",
+                    synth["evidence_class"],
+                    "positioning_hook",
+                    "Hook is planning copy from synthesis/launch; not verified performance.",
+                )
+            )
+        else:
+            attrs.append(
+                _attr(
+                    "site_draft_builder.assumed_hero",
+                    "assumed",
+                    "planning_assumption",
+                    "Hero copy is an assumed placeholder until evidence is supplied.",
+                )
+            )
+    elif section_type == "problem":
+        if pains:
+            attrs.append(
+                _attr(
+                    "opportunity_synthesis.top_pain_points",
+                    synth["evidence_class"],
+                    "pain_point",
+                    "Pain point is evidence-labeled draft language, not a clinical or guaranteed claim.",
+                )
+            )
+        else:
+            attrs.append(
+                _attr(
+                    "site_draft_builder.assumed_problem",
+                    "assumed",
+                    "planning_assumption",
+                    "Problem copy remains an assumption without supplied pain points.",
+                )
+            )
+    elif section_type in {"offer_section", "final_cta"}:
+        attrs.append(
+            _attr(
+                "client_context" if client["present"] else "site_draft_builder.assumed_offer",
+                client["evidence_class"] if client["present"] else "assumed",
+                "offer_framing" if client["present"] else "planning_assumption",
+                "Offer framing is a draft planning assumption; not a priced live offer.",
+            )
+        )
+    elif section_type in {"social_proof_placeholder", "comparison"}:
+        attrs.append(
+            _attr(
+                "site_draft_builder.proof_placeholder",
+                "unavailable",
+                "proof_placeholder",
+                "No testimonials, reviews, logos, or competitor claims are treated as factual proof.",
+            )
+        )
+    elif section_type in {"trust_policies", "contact"}:
+        attrs.append(
+            _attr(
+                "client_context.policies_or_contact",
+                client["evidence_class"] if client["present"] else "missing",
+                "policy_placeholder" if section_type == "trust_policies" else "client_context",
+                "Policy/contact details stay TBD until client-approved values are supplied.",
+            )
+        )
+    elif section_type in {"benefits", "solution", "how_it_works", "demo_section"}:
+        attrs.append(
+            _attr(
+                "opportunity_synthesis" if synth["present"] else "site_draft_builder.assumed_benefits",
+                synth["evidence_class"] if synth["present"] else "assumed",
+                "planning_assumption",
+                "Benefit/solution copy is planning language pending approved evidence.",
+            )
+        )
+    if market["present"] and section_type in {"hero", "comparison", "collection_grid", "product_grid"}:
+        attrs.append(
+            _attr(
+                "marketplace_trends",
+                market["evidence_class"],
+                "marketplace_context",
+                "Marketplace signals are supplemental offline evidence, not launch authorization.",
+            )
+        )
+    if section_type in {"trust_policies", "offer_section", "comparison", "hero"}:
+        attrs.append(
+            _attr(
+                "supplier_feasibility" if supplier["present"] else "supplier_feasibility.missing",
+                supplier["evidence_class"] if supplier["present"] else "missing",
+                "supplier_context",
+                "Supplier evidence remains non-authorizing context; fixture/manual/missing never become supplier-live proof.",
+            )
+        )
+    if catalog.get("contradictory_candidate_ids"):
+        attrs.append(
+            _attr(
+                "opportunity_synthesis.top_candidate_id|launch_draft_pack.candidate_id",
+                "contradictory",
+                "planning_assumption",
+                "Synthesis and launch candidate identities disagree; do not treat claims as bound evidence.",
+            )
+        )
+    # Deduplicate by (source_ref, claim_role, evidence_class) while preserving order.
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[EvidenceAttribution] = []
+    for item in attrs:
+        key = (item.source_ref, item.claim_role, item.evidence_class)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return tuple(unique)
+
+
+def _attribution_summary(catalog: Mapping[str, Any], pages: tuple[PageDraft, ...]) -> dict[str, Any]:
+    classes: dict[str, int] = {}
+    roles: dict[str, int] = {}
+    refs: list[str] = []
+    for page in pages:
+        for section in page.sections:
+            for attr in section.evidence_attributions:
+                classes[attr.evidence_class] = classes.get(attr.evidence_class, 0) + 1
+                roles[attr.claim_role] = roles.get(attr.claim_role, 0) + 1
+                refs.append(attr.source_ref)
+    non_live = sorted(
+        {
+            cls
+            for cls in classes
+            if cls in {"fixture", "manual_import", "missing", "stale", "malformed", "unsupported", "contradictory", "assumed", "unavailable", "derived"}
+        }
+    )
+    return {
+        "attribution_count": sum(classes.values()),
+        "evidence_class_counts": dict(sorted(classes.items())),
+        "claim_role_counts": dict(sorted(roles.items())),
+        "source_refs": tuple(dict.fromkeys(refs)),
+        "sources": {
+            key: {
+                "present": bool(value.get("present")),
+                "evidence_class": value.get("evidence_class"),
+                "mode": value.get("mode") or "",
+            }
+            for key, value in catalog.items()
+            if isinstance(value, Mapping) and "evidence_class" in value
+        },
+        "contradictory_candidate_ids": bool(catalog.get("contradictory_candidate_ids")),
+        "secret_shaped_keys_redacted": list(catalog.get("secret_shaped_keys_redacted") or ()),
+        "supplier_live_claims": False,
+        "fixture_or_manual_treated_as_live": False,
+        "assumptions_remain_assumptions": True,
+        "non_live_evidence_classes_present": non_live,
+        "note": "Attributions label draft claims only. Fixture, manual, missing, and stale evidence never authorize publishing or supplier-live proof.",
+    }
+
+
+def _section(
+    section_type: str,
+    title: str,
+    hooks: list[str],
+    pains: list[str],
+    site_type: str,
+    customer_language: str = "",
+    catalog: Mapping[str, Any] | None = None,
+) -> PageSectionDraft:
     headlines = {"hero": title, "problem": "The customer task is worth making clearer", "solution": "A focused path from need to next step", "benefits": "What the draft should make easy to understand", "how_it_works": "Show the workflow", "product_grid": "Explore the catalog", "collection_grid": "Browse the collection", "comparison": "Compare the important trade-offs", "social_proof_placeholder": "Approved proof goes here", "demo_section": "Let the product or service demonstrate", "offer_section": "Review the offer", "faq": "Questions customers may ask", "lead_capture": "Get the next useful detail", "final_cta": "Review the next step", "contact": "Start a conversation", "trust_policies": "Clear policies build trust"}
     evidence_source_note = "Existing evidence reports and client context only."
     if section_type == "hero":
@@ -683,11 +1168,52 @@ def _section(section_type: str, title: str, hooks: list[str], pains: list[str], 
     unknowns = ("Approved assets are missing.", "Policy and platform details remain TBD.")
     if section_type in {"social_proof_placeholder", "comparison"}:
         unknowns = (*unknowns, "No testimonials, reviews, logos, or unsupported competitor claims are supplied.")
-    return PageSectionDraft(section_type, section_type, headlines.get(section_type, section_type), body, "Review draft", (block,), "TBD — approved asset required.", evidence_source_note, "Do not publish unsupported claims or proof.", unknowns)
+    attributions = _section_attributions(
+        section_type,
+        catalog=catalog or {
+            "opportunity_synthesis": {"present": False, "evidence_class": "missing", "mode": ""},
+            "launch_draft_pack": {"present": False, "evidence_class": "missing", "mode": ""},
+            "marketplace_trends": {"present": False, "evidence_class": "missing", "mode": ""},
+            "supplier_feasibility": {"present": False, "evidence_class": "missing", "mode": ""},
+            "consumer_attention": {"present": False, "evidence_class": "missing", "mode": ""},
+            "client_context": {"present": False, "evidence_class": "missing", "mode": ""},
+            "contradictory_candidate_ids": False,
+            "secret_shaped_keys_redacted": (),
+        },
+        hooks=hooks,
+        pains=pains,
+        customer_language=customer_language,
+    )
+    return PageSectionDraft(
+        section_type,
+        section_type,
+        headlines.get(section_type, section_type),
+        body,
+        "Review draft",
+        (block,),
+        "TBD — approved asset required.",
+        evidence_source_note,
+        "Do not publish unsupported claims or proof.",
+        unknowns,
+        True,
+        attributions,
+    )
 
 
-def _page(spec: Mapping[str, Any], title: str, context: Mapping[str, Any], hooks: list[str], pains: list[str], site_type: str, customer_language: str = "") -> PageDraft:
-    sections = tuple(_section(item, title, hooks, pains, site_type, customer_language) for item in _section_types(str(spec["page_type"]), site_type))
+def _page(
+    spec: Mapping[str, Any],
+    title: str,
+    context: Mapping[str, Any],
+    hooks: list[str],
+    pains: list[str],
+    site_type: str,
+    customer_language: str = "",
+    catalog: Mapping[str, Any] | None = None,
+) -> PageDraft:
+    sections = tuple(
+        _section(item, title, hooks, pains, site_type, customer_language, catalog)
+        for item in _section_types(str(spec["page_type"]), site_type)
+    )
     return PageDraft(str(spec["page_id"]), str(spec["page_type"]), str(spec["route"]), str(spec["purpose"]), context["target_customer"], sections, _text(f"{spec['title']} | {context['brand_name']}", 70), _text(f"Draft page for {spec['purpose']}. Confirm claims, policies, and assets before publishing.", 155), _text(title, 70), tuple(dict.fromkeys([_text(title, 70), _text(context["industry"], 70), _text(context["target_customer"], 70)])), str(spec["conversion_goal"]), ("Approved hero asset", "Approved logo/brand asset", "Policy or proof asset where applicable"), ("Evidence is fixture/manual unless supplied otherwise.", "Unknowns remain visibly marked TBD."), ("Human approval required for copy, claims, assets, SEO, and publishing." ,))
 
 
@@ -747,7 +1273,15 @@ def _payloads(site_type: str, title: str, pages: tuple[PageDraft, ...], navigati
 
 
 def _readiness(context: Mapping[str, Any], launch: Mapping[str, Any] | None, pages: tuple[PageDraft, ...]) -> DeploymentReadinessChecklist:
-    supplier_ready = bool(launch and launch.get("evidence_mode") in {"live_readonly", "authenticated_live"} and "supplier proof" not in str(launch.get("approval_checklist", {}).get("blockers", [])).lower())
+    launch_mode = launch.get("evidence_mode") if launch else None
+    launch_mode_ok = isinstance(launch_mode, str) and launch_mode in {"live_readonly", "authenticated_live"}
+    approval = launch.get("approval_checklist") if launch else None
+    approval = approval if isinstance(approval, Mapping) else {}
+    supplier_ready = bool(
+        launch
+        and launch_mode_ok
+        and "supplier proof" not in str(approval.get("blockers", [])).lower()
+    )
     checks = {
         "domain_ready": {"status": "configured" if not str(context["domain_status"]).startswith("TBD") else "not_configured", "detail": context["domain_status"]},
         "hosting_selected": {"status": "not_configured", "detail": "No hosting call or selection was made."},
@@ -798,9 +1332,24 @@ def build_site_draft_pack(*, launch_draft_pack: Mapping[str, Any] | None = None,
         prohibited_claims=context["prohibited_claims"],
         consumer_attention=consumer_attention,
     )
+    source_catalog = _build_source_catalog(
+        synthesis=synthesis,
+        launch=launch,
+        marketplace_trends=marketplace_trends,
+        supplier_feasibility=supplier_feasibility,
+        consumer_attention=consumer_attention,
+        client_context=client_context,
+        candidate_id=candidate_id,
+        source_id=source_id,
+        customer_language=customer_language,
+    )
     specs = _route_specs(selected_type, title)
     route_manifest = RouteManifest(tuple(specs))
-    pages = tuple(_page(spec, title, context, hooks, pains, selected_type, customer_language) for spec in specs)
+    pages = tuple(
+        _page(spec, title, context, hooks, pains, selected_type, customer_language, source_catalog)
+        for spec in specs
+    )
+    attribution_summary = _attribution_summary(source_catalog, pages)
     primary = tuple({"label": spec["title"], "route": spec["route"]} for spec in specs[:5])
     footer = ({"label": "Privacy", "route": "/privacy"}, {"label": "Terms", "route": "/terms"}, {"label": "Contact", "route": "/contact"})
     navigation = NavigationDraft(primary, footer, ({"label": "Review draft", "route": specs[0]["route"]},))
@@ -815,23 +1364,189 @@ def build_site_draft_pack(*, launch_draft_pack: Mapping[str, Any] | None = None,
     catalog = CatalogDraft(({"title": title, "sku": UNKNOWN, "price": UNKNOWN, "status": "draft"},), ({"title": "TBD category", "status": "draft"},), ({"name": "TBD attribute", "values": []},), ("Verified product/service facts", "Approved assets", "Policies",))
     lead = LeadCaptureDraft(context["lead_capture_offer"], ({"name": "name", "required": True}, {"name": "email", "required": True}, {"name": "consent", "required": True}), "Obtain consent before follow-up or measurement.", "/thank-you")
     payloads = _payloads(selected_type, title, pages, navigation, seo, analytics)
-    strategy = {"primary_goal": context["primary_goal"], "secondary_goal": context["secondary_goal"], "tone": context["tone"], "preferred_platform": context["preferred_platform"], "preferred_stack": context["preferred_stack"], "evidence_note": "Site planning uses existing sanitized reports; it does not create new evidence."}
+    strategy = {
+        "primary_goal": context["primary_goal"],
+        "secondary_goal": context["secondary_goal"],
+        "tone": context["tone"],
+        "preferred_platform": context["preferred_platform"],
+        "preferred_stack": context["preferred_stack"],
+        "evidence_note": "Site planning uses existing sanitized reports; it does not create new evidence.",
+        "attribution_note": "Section claims carry evidence_attributions; fixture/manual/missing/stale never become supplier-live proof.",
+    }
     evidence_mode = _text(synthesis.get("evidence_mode") or launch.get("evidence_mode") or "fixture_demo", 50)
+    # Pack-level evidence_mode stays a label from upstream reports; normalize only
+    # when the raw value is unsupported so fixture_demo does not become "live".
+    if evidence_mode and _normalize_evidence_class(evidence_mode) == "unsupported":
+        evidence_mode = "unsupported"
     summary = f"{title} has a {selected_type} blueprint for {context['business_name']} based on {evidence_mode} evidence. It is implementation-ready planning material, not a published site or launch authorization."
-    notes = ("No network calls were made.", "No route, domain, hosting, analytics, or platform mutation occurred.", "Replace every TBD field and complete approval blockers before implementation.")
+    notes = (
+        "No network calls were made.",
+        "No route, domain, hosting, analytics, or platform mutation occurred.",
+        "Replace every TBD field and complete approval blockers before implementation.",
+        "Draft section claims include evidence_attributions with source_ref, evidence_class, and claim_role.",
+        "Fixture, manual, missing, and stale evidence remain non-live labels; assumptions stay assumptions.",
+    )
     # market_access is the shared compliance projection that every downstream
     # consumer compares byte-for-byte; this builder passes it through unchanged.
     # Supplier presence is not part of that contract: it lives in the deployment
     # readiness checks and approval blockers. The shallow copy keeps the caller's
     # own nested launch_draft_pack/opportunity_synthesis mapping from being shared.
     market_access = dict(launch.get("market_access") or synthesis.get("market_access") or {})
-    return SiteDraftPack(VERSION, "deterministic", candidate_id, title, context["business_type"], selected_type, evidence_mode, "launch_draft_pack" if launch else "not_supplied", "opportunity_synthesis" if synthesis else "not_supplied", strategy, route_manifest, site_map, navigation, pages, _section_library(), catalog, _cms_models(), lead, seo, analytics, conversion, payloads, readiness, approval, _risks(context, readiness), notes, summary, market_access=market_access)
+    return SiteDraftPack(
+        VERSION,
+        "deterministic",
+        candidate_id,
+        title,
+        context["business_type"],
+        selected_type,
+        evidence_mode,
+        "launch_draft_pack" if launch else "not_supplied",
+        "opportunity_synthesis" if synthesis else "not_supplied",
+        strategy,
+        route_manifest,
+        site_map,
+        navigation,
+        pages,
+        _section_library(),
+        catalog,
+        _cms_models(),
+        lead,
+        seo,
+        analytics,
+        conversion,
+        payloads,
+        readiness,
+        approval,
+        _risks(context, readiness),
+        notes,
+        summary,
+        market_access=market_access,
+        evidence_attribution_summary=attribution_summary,
+    )
 
 
 def markdown(pack: Mapping[str, Any]) -> str:
     pages = pack.get("pages", [])
-    lines = ["# Site Draft Pack", "", f"**Candidate:** {pack.get('candidate_title', UNKNOWN)}  ", f"**Site type:** `{pack.get('site_type', UNKNOWN)}`  ", f"**Evidence mode:** `{pack.get('evidence_mode', 'missing')}` — draft-only  ", f"**Status:** `{pack.get('deployment_readiness', {}).get('overall_status', 'partially_ready')}`", "", "## Site Strategy", "", str(pack.get("site_strategy", {})), "", "## Route Manifest", "", *[f"- `{item.get('route')}` — {item.get('page_type')}: {item.get('title')} → {item.get('conversion_goal')}" for item in pack.get("route_manifest", {}).get("routes", [])], "", "## Pages", "", *[f"### {page.get('title')}\n`{page.get('route')}` — {page.get('goal')}\nSections: {', '.join(section.get('section_type') for section in page.get('sections', []))}" for page in pages], "", "## CMS Content Model", "", *[f"- **{model.get('model_name')}**: {', '.join(model.get('required_fields', []))}" for model in pack.get("cms_content_model", {}).get("models", [])], "", "## SEO Plan", "", str(pack.get("seo_plan", {})), "", "## Analytics Plan", "", str(pack.get("analytics_plan", {})), "", "## Conversion Tests", "", *[f"- {test.get('test_id')}: {test.get('hypothesis')}" for test in pack.get("conversion_test_plan", {}).get("tests", [])], "", "## Deployment Blockers", "", *[f"- {item}" for item in pack.get("deployment_readiness", {}).get("blockers", [])], "", "## Approval Checklist", "", *[f"- [ ] {item}" for item in pack.get("approval_checklist", {}).get("items", [])], "", "This is a read-only blueprint. No platform, domain, hosting, analytics, advertising, checkout, order, payment, or messaging action occurred.", ""]
+    attr_summary = pack.get("evidence_attribution_summary") or {}
+    attr_lines = [
+        f"- Attribution count: `{attr_summary.get('attribution_count', 0)}`",
+        f"- Supplier live claims: `{attr_summary.get('supplier_live_claims', False)}`",
+        f"- Fixture/manual treated as live: `{attr_summary.get('fixture_or_manual_treated_as_live', False)}`",
+        f"- Assumptions remain assumptions: `{attr_summary.get('assumptions_remain_assumptions', True)}`",
+        f"- Non-live classes: `{', '.join(attr_summary.get('non_live_evidence_classes_present') or []) or 'none'}`",
+        f"- Note: {attr_summary.get('note') or 'Section claims carry source_ref / evidence_class / claim_role.'}",
+    ]
+    section_attr_lines: list[str] = []
+    for page in pages[:3]:
+        for section in (page.get("sections") or [])[:3]:
+            for item in section.get("evidence_attributions") or []:
+                section_attr_lines.append(
+                    f"- `{page.get('route')}` / `{section.get('section_type')}` ← "
+                    f"`{item.get('source_ref')}` [{item.get('evidence_class')}/{item.get('claim_role')}] "
+                    f"— {item.get('note') or ''}"
+                )
+    lines = [
+        "# Site Draft Pack",
+        "",
+        f"**Candidate:** {pack.get('candidate_title', UNKNOWN)}  ",
+        f"**Site type:** `{pack.get('site_type', UNKNOWN)}`  ",
+        f"**Evidence mode:** `{pack.get('evidence_mode', 'missing')}` — draft-only  ",
+        f"**Status:** `{pack.get('deployment_readiness', {}).get('overall_status', 'partially_ready')}`",
+        "",
+        "## Evidence Attributions",
+        "",
+        *attr_lines,
+        "",
+        "## Sample Section Attributions",
+        "",
+        *(section_attr_lines or ["- No structured attributions were emitted."]),
+        "",
+        "## Site Strategy",
+        "",
+        str(pack.get("site_strategy", {})),
+        "",
+        "## Route Manifest",
+        "",
+        *[
+            f"- `{item.get('route')}` — {item.get('page_type')}: {item.get('title')} → {item.get('conversion_goal')}"
+            for item in pack.get("route_manifest", {}).get("routes", [])
+        ],
+        "",
+        "## Pages",
+        "",
+        *[
+            f"### {page.get('title')}\n`{page.get('route')}` — {page.get('goal')}\nSections: "
+            f"{', '.join(section.get('section_type') for section in page.get('sections', []))}"
+            for page in pages
+        ],
+        "",
+        "## CMS Content Model",
+        "",
+        *[
+            f"- **{model.get('model_name')}**: {', '.join(model.get('required_fields', []))}"
+            for model in pack.get("cms_content_model", {}).get("models", [])
+        ],
+        "",
+        "## SEO Plan",
+        "",
+        str(pack.get("seo_plan", {})),
+        "",
+        "## Analytics Plan",
+        "",
+        str(pack.get("analytics_plan", {})),
+        "",
+        "## Conversion Tests",
+        "",
+        *[f"- {test.get('test_id')}: {test.get('hypothesis')}" for test in pack.get("conversion_test_plan", {}).get("tests", [])],
+        "",
+        "## Deployment Blockers",
+        "",
+        *[f"- {item}" for item in pack.get("deployment_readiness", {}).get("blockers", [])],
+        "",
+        "## Approval Checklist",
+        "",
+        *[f"- [ ] {item}" for item in pack.get("approval_checklist", {}).get("items", [])],
+        "",
+        "This is a read-only blueprint. No platform, domain, hosting, analytics, advertising, checkout, order, payment, or messaging action occurred.",
+        "",
+    ]
     return "\n".join(lines)
 
 
-__all__ = ["CMSBinding", "CMSContentModel", "CMSModelDraft", "CatalogDraft", "CarrdMicrositePayload", "CollectionPageDraft", "ConversionTestPlan", "DeploymentReadinessChecklist", "LeadCaptureDraft", "MedusaStorefrontDraftPayload", "NavigationDraft", "PageDraft", "PageSectionDraft", "PlatformMapping", "ProductPageDraft", "RouteManifest", "SectionBlockDraft", "SectionSchema", "ServicePageDraft", "SiteApprovalChecklist", "SiteDraftPack", "SiteMapDraft", "SiteRiskReview", "StaticSitePayload", "ShopifyThemeDraftPayload", "WebflowCMSDraftPayload", "WixHeadlessDraftPayload", "WooCommerceDraftPayload", "SquarespaceDraftPayload", "build_site_draft_pack", "markdown"]
+__all__ = [
+    "CLAIM_ROLES",
+    "CMSBinding",
+    "CMSContentModel",
+    "CMSModelDraft",
+    "CatalogDraft",
+    "CarrdMicrositePayload",
+    "CollectionPageDraft",
+    "ConversionTestPlan",
+    "DeploymentReadinessChecklist",
+    "EVIDENCE_CLASSES",
+    "EvidenceAttribution",
+    "LeadCaptureDraft",
+    "MedusaStorefrontDraftPayload",
+    "NavigationDraft",
+    "PROVENANCE",
+    "PageDraft",
+    "PageSectionDraft",
+    "PlatformMapping",
+    "ProductPageDraft",
+    "RouteManifest",
+    "SectionBlockDraft",
+    "SectionSchema",
+    "ServicePageDraft",
+    "SiteApprovalChecklist",
+    "SiteDraftPack",
+    "SiteMapDraft",
+    "SiteRiskReview",
+    "StaticSitePayload",
+    "ShopifyThemeDraftPayload",
+    "WebflowCMSDraftPayload",
+    "WixHeadlessDraftPayload",
+    "WooCommerceDraftPayload",
+    "SquarespaceDraftPayload",
+    "build_site_draft_pack",
+    "markdown",
+]
