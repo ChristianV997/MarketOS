@@ -162,12 +162,16 @@ def test_tailwind_v4_build_contract_uses_dedicated_postcss_plugin_and_css_import
     """Keep Tailwind v4's package, lockfile, PostCSS, and CSS entry in sync."""
     package = json.loads(FRONTEND_PACKAGE.read_text(encoding="utf-8"))
     dev_dependencies = package["devDependencies"]
-    assert dev_dependencies["tailwindcss"].startswith("^4.")
-    assert dev_dependencies["@tailwindcss/postcss"] == "^4.3.3"
+    tailwind_spec = dev_dependencies["tailwindcss"]
+    postcss_plugin_spec = dev_dependencies["@tailwindcss/postcss"]
+    assert tailwind_spec.startswith("^4.")
+    assert postcss_plugin_spec.startswith("^4.")
 
     lockfile = json.loads(FRONTEND_LOCKFILE.read_text(encoding="utf-8"))
     root_dependencies = lockfile["packages"][""]["devDependencies"]
-    assert root_dependencies["@tailwindcss/postcss"] == dev_dependencies["@tailwindcss/postcss"]
+    assert root_dependencies["tailwindcss"] == tailwind_spec
+    assert root_dependencies["@tailwindcss/postcss"] == postcss_plugin_spec
+    assert lockfile["packages"]["node_modules/tailwindcss"]["version"].startswith("4.")
     assert lockfile["packages"]["node_modules/@tailwindcss/postcss"]["version"].startswith("4.")
 
     postcss = POSTCSS_CONFIG.read_text(encoding="utf-8")
