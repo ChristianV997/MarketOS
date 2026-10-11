@@ -16,7 +16,7 @@ import logging
 import os
 import re
 from html.parser import HTMLParser
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode, urlparse, urlsplit
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -115,37 +115,42 @@ def _public_base():
     return parts
 
 
-def _safe_checkout_target(value: object, *, dry_run: bool, brand_id: str, product_id: str) -> str | None:
-    """Return a rebuilt redirect target, or None.
+def _safe_dry_run_checkout_target(value: object, *, brand_id: str, product_id: str) -> str | None:
+    """Rebuild a dry-run target from the local allowlisted origin."""
+    if not isinstance(value, str) or not value or any(ch in value for ch in "\r\n\t\\"):
+        return None
+    parts = urlsplit(value)
+    if parts.username or parts.password or parts.fragment:
+        return None
+    netloc = parts.netloc
+    if not netloc or any(ch in netloc for ch in "\\@ "):
+        return None
+    base = _public_base()
+    expected_path = f"/s/{brand_id}/{product_id}"
+    if (
+        base is None
+        or parts.scheme != base.scheme
+        or netloc.lower() != base.netloc.lower()
+        or parts.path != expected_path
+        or parts.query != "purchased=1"
+        or "//" in parts.path
+    ):
+        return None
+    return f"{base.scheme}://{base.netloc}{expected_path}?purchased=1"
 
-    Dry-run redirects are rebuilt from the local allowlisted base. Live
-    redirects are rebuilt from the provider session identifier; the provider's
-    returned URL is never used as a redirect authority.
-    """
-    if dry_run:
-        if not isinstance(value, str) or not value or any(ch in value for ch in "\r\n\t\\"):
-            return None
-        parts = urlsplit(value)
-        if parts.username or parts.password or parts.fragment:
-            return None
-        netloc = parts.netloc
-        if not netloc or any(ch in netloc for ch in "\\@ "):
-            return None
-        base = _public_base()
-        expected_path = f"/s/{brand_id}/{product_id}"
-        if (
-            base is None
-            or parts.scheme != base.scheme
-            or netloc.lower() != base.netloc.lower()
-            or parts.path != expected_path
-            or parts.query != "purchased=1"
-            or "//" in parts.path
-        ):
-            return None
-        return f"{base.scheme}://{base.netloc}{expected_path}?purchased=1"
+
+def _safe_live_checkout_target(value: object) -> str | None:
+    """Rebuild a live target from a validated provider session identifier."""
     if not isinstance(value, str) or not _STRIPE_SESSION_ID.fullmatch(value):
         return None
     return f"https://checkout.stripe.com/c/pay/{value}"
+
+
+def _safe_checkout_target(value: object, *, dry_run: bool, brand_id: str, product_id: str) -> str | None:
+    """Return a rebuilt redirect target, or None."""
+    if dry_run:
+        return _safe_dry_run_checkout_target(value, brand_id=brand_id, product_id=product_id)
+    return _safe_live_checkout_target(value)
 
 
 @router.get("/s/{brand_id}", response_class=HTMLResponse)
@@ -227,11 +232,10 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
             status_code=409,
         )
     dry_run = bool(result.get("dry_run"))
-    target = _safe_checkout_target(
-        result.get("url") if dry_run else result.get("session_id"),
-        dry_run=dry_run,
-        brand_id=brand_id,
-        product_id=product_id,
+    target = (
+        _safe_dry_run_checkout_target(result.get("url"), brand_id=brand_id, product_id=product_id)
+        if dry_run
+        else _safe_live_checkout_target(result.get("session_id"))
     )
     if target is None:
         return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
@@ -240,7 +244,7 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
     # The builder above reconstructs the target, but this second guard keeps
     # the redirect sink independent of route/provider taint and documents the
     # only two allowed URL contracts.
-    target_parts = urlsplit(target)
+    target_parts = urlparse(target)
     if dry_run:
         base = _public_base()
         safe_target = (
