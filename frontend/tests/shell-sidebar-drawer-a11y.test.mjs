@@ -94,7 +94,10 @@ test("skip-to-main is the first focusable control and focuses the main landmark"
   assert.match(shellSrc, /onClick=\{activateSkipToMain\}/);
   assert.match(shellSrc, /shouldCloseDrawerOnSkip/);
   assert.match(shellSrc, /mainRef\.current\?\.focus\(\)/);
-  assert.match(shellSrc, /event\.preventDefault\(\)/);
+  const skipHandlerStart = shellSrc.indexOf("const activateSkipToMain");
+  const skipHandlerEnd = shellSrc.indexOf("return (", skipHandlerStart);
+  assert.ok(skipHandlerStart >= 0 && skipHandlerEnd > skipHandlerStart);
+  assert.doesNotMatch(shellSrc.slice(skipHandlerStart, skipHandlerEnd), /event\.preventDefault\(\)/);
   assert.match(shellSrc, /aria-label="Operator workspace"/);
   assert.match(shellSrc, /tabIndex=\{-1\}/);
 });

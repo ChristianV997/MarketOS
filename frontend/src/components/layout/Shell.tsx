@@ -114,11 +114,10 @@ export default function Shell() {
 
   const toggleLabel = navigationToggleLabel(navOpen);
 
-  const activateSkipToMain = (event: MouseEvent<HTMLAnchorElement>) => {
+  const activateSkipToMain = () => {
     // Keep hash navigation for no-JS fallbacks, but move focus reliably for
     // keyboard users (matches ClientShell). Close an open mobile drawer first
     // so the landmark is not covered.
-    event.preventDefault();
     if (shouldCloseDrawerOnSkip(drawerMode, navOpen)) setNavOpen(false);
     mainRef.current?.focus();
   };
