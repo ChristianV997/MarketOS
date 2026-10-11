@@ -118,6 +118,22 @@ def test_repeated_runs_overwrite_rather_than_accumulate(world):
     assert len(world.calibration.runs) == 1
 
 
+def test_incomplete_workspace_window_preserves_existing_profiles(world, monkeypatch):
+    single_source_comparisons(world, 2)
+    engine.run_source_calibration(WS, as_of=AS_OF)
+    existing = [profile.to_dict() for profile in world.calibration.list_profiles(WS)]
+    assert existing
+
+    monkeypatch.setattr(engine, "COMPARISON_WINDOW", 1)
+    incomplete = engine.run_source_calibration(WS, as_of=AS_OF)
+
+    assert incomplete.status == "partial"
+    assert incomplete.profiles == []
+    assert incomplete.metadata["comparison_window_truncated"] is True
+    assert [profile.to_dict() for profile in world.calibration.list_profiles(WS)] == existing
+    assert any("existing profiles were preserved" in item for item in incomplete.recommendations)
+
+
 def test_timestamps_come_from_the_data_not_the_clock(world):
     single_source_comparisons(world, 2, created_at=T0)
     run = engine.run_source_calibration(WS)

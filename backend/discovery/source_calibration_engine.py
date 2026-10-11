@@ -206,11 +206,13 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
     profiles = build_source_calibration_profiles(signals)
     observed = [p for p in profiles if p.evidence_status == "observed"]
     scoped = bool(comparison_ids or import_ids)
+    incomplete_workspace_window = not scoped and (truncated or import_truncated)
     # With nothing in view (for example, the refinement registry was reset), the run is recorded and existing state is kept.
     nothing_in_view = not scoped and not comparisons
     status = "completed" if observed else "partial"
-    if nothing_in_view:
+    if nothing_in_view or incomplete_workspace_window:
         profiles = []
+        status = "partial"
     if observed and scoped:
         summary = "Observed profiles from this scoped run are recorded for review; they do not change import ordering."
         recommendations = [
@@ -236,6 +238,8 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
         recommendations.append(f"Only the {COMPARISON_WINDOW} most recently registered comparisons were read; older ones are not counted.")
     if import_truncated:
         recommendations.append(f"Only the {IMPORT_WINDOW} most recently registered imports were read; older ones are not counted.")
+    if incomplete_workspace_window:
+        recommendations.append("The workspace calibration window was incomplete; existing profiles were preserved and no replacement profile was made active.")
     if exclusions:
         recommendations.append("Excluded from calibration: " + ", ".join(f"{reason}={count}" for reason, count in exclusions.items()) + ".")
     run_id = stable_id("calibration_", {"workspace_id": workspace_id, "reference_time": reference, "policy": CALIBRATION_POLICY_VERSION, "signal_ids": [s.signal_id for s in signals], "comparison_ids": [c.comparison_id for c in comparisons], "requested_comparisons": sorted(comparison_ids or []), "requested_imports": sorted(import_ids or []), "as_of": as_of, "scoped": scoped})
@@ -253,7 +257,8 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
     # One write. A scoped run is recorded without touching workspace profiles; a workspace run retires profiles whose evidence has gone.
     if nothing_in_view:
         run.recommendations.append("No comparisons were in view, so the workspace profiles were kept as they were.")
-    persisted = registry.record_run(signals, [] if (scoped or nothing_in_view) else profiles, run, replace_workspace_profiles=not scoped and not nothing_in_view)
+    replace_profiles = not scoped and not nothing_in_view and not incomplete_workspace_window
+    persisted = registry.record_run(signals, profiles, run, replace_workspace_profiles=replace_profiles)
     if not persisted:
         # Nothing was saved, so nothing from this run may be reported as in use.
         run.status = "partial"
