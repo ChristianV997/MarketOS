@@ -14,6 +14,7 @@ from scripts.ai.agent_output_eval import (
 from scripts.ai.operator_task_packet import validate_packet
 
 BASE = "2965e410c9509368ef256580fbc599e6b025259b"
+HEAD = "e4aeebd22179359beaf59b2c7a29d0371e2aa836"
 MARKER = "UNIQUE_PROSE_MARKER"
 SECRET = "ghp_" + "abcdefghijklmnopqrstuvwxyz12"
 CANARY = "CANARY_TOKEN_DO_NOT_STORE"
@@ -25,15 +26,21 @@ def _handoff(
     agent: str = "Grok Chat Agent B",
     lane: str = "agent-handoff-audit",
     base: str = BASE,
+    head: str = HEAD,
+    include_base: bool = True,
+    include_head: bool = True,
     paths: str = "- scripts/ai/agent_output_eval.py\n- tests/ai/test_agent_handoff_audit.py",
     ownership: str = "No ownership conflict.",
     evidence: str = "python -m pytest -q tests/ai/test_agent_handoff_audit.py: 5 passed",
     extra: str = "",
 ) -> str:
+    base_line = f"Base SHA: {base}\n" if include_base else ""
+    head_line = f"Head SHA: {head}\n" if include_head else ""
     return (
         f"AGENT_ID: {agent}\n"
         f"LANE: {lane}\n"
-        f"Base SHA: {base}\n"
+        f"{base_line}"
+        f"{head_line}"
         "\n"
         "Changed paths:\n"
         f"{paths}\n"
@@ -57,9 +64,11 @@ def test_complete_handoff_parses_without_storing_prose():
     assert document["schema"] == HANDOFF_SCHEMA
     assert document["overall"] == "passed"
     assert document["merge_ready_claim"] is False
+    assert document["merge_authority"] is False
     assert document["agent_id"] == "Grok Chat Agent B"
     assert document["lane"] == "agent-handoff-audit"
     assert document["base_sha"] == BASE
+    assert document["head_sha"] == HEAD
     assert document["changed_paths"] == [
         "scripts/ai/agent_output_eval.py",
         "tests/ai/test_agent_handoff_audit.py",
@@ -75,6 +84,86 @@ def test_explicit_empty_inventory_is_complete():
     assert code == 0
     assert document["changed_paths"] == []
     assert _rules(document, "missing_changed_paths") == "passed"
+
+
+def test_omitted_base_sha_is_incomplete_until_a_ready_claim_fails_closed():
+    incomplete, incomplete_code = audit_handoff(_handoff(include_base=False))
+    assert incomplete_code == 2
+    assert incomplete["overall"] == "incomplete"
+    assert incomplete["base_sha"] is None
+    assert incomplete["head_sha"] == HEAD
+    assert _rules(incomplete, "missing_base_sha") == "failed"
+
+    ready = _handoff(include_base=False).replace("This is not merge-ready.", "The branch is merge-ready.")
+    failed, failed_code = audit_handoff(ready)
+    assert failed_code == 2
+    assert failed["overall"] == "failed"
+    assert failed["merge_ready_claim"] is True
+    assert failed["merge_authority"] is False
+
+
+def test_nested_heading_does_not_widen_the_changed_path_inventory():
+    text = _handoff(
+        paths=(
+            "- scripts/ai/agent_output_eval.py\n"
+            "Compare with tests/ai/test_agent_output_eval.py before editing.\n"
+            "### Notes\n"
+            "- tests/ai/test_agent_output_eval.py\n"
+        )
+    )
+    document, code = audit_handoff(text)
+    assert code == 0
+    assert document["changed_paths"] == ["scripts/ai/agent_output_eval.py"]
+
+
+def test_ambiguous_pass_claim_is_not_backed_by_a_distant_command():
+    text = _handoff(
+        evidence=(
+            "The design review passed.\n"
+            "Notes continue for another line.\n"
+            "python -m pytest -q tests/ai/test_agent_handoff_audit.py: 5 passed"
+        )
+    )
+    document, code = audit_handoff(text)
+    assert code == 2
+    assert document["overall"] == "incomplete"
+    assert _rules(document, "unproven_test_claim") == "failed"
+    assert _rules(document, "false_passed_claim") == "passed"
+
+
+def test_prefix_siblings_are_not_overlaps_and_duplicate_writers_are():
+    left = _handoff(agent="Agent A", lane="lane-a", paths="- scripts/ai/agent_output_eval.py")
+    sibling = _handoff(agent="Agent B", lane="lane-b", paths="- scripts/ai_extra/agent_output_eval.py")
+    distinct, distinct_code = audit_handoff_batch([left, sibling])
+    assert distinct_code == 0
+    assert distinct["overlaps"] == []
+
+    duplicate, duplicate_code = audit_handoff_batch([left, _handoff(agent="Agent B", lane="lane-b", paths="- scripts/ai/agent_output_eval.py")])
+    assert duplicate_code == 2
+    assert duplicate["overall"] == "failed"
+    assert duplicate["overlaps"] == [
+        {"agents": ["Agent A", "Agent B"], "paths": ["scripts/ai/agent_output_eval.py"]}
+    ]
+
+    restated, restated_code = audit_handoff_batch([left, _handoff(agent="Agent A", lane="lane-a", paths="- scripts/ai/agent_output_eval.py")])
+    assert restated_code == 0
+    assert restated["overlaps"] == []
+
+
+def test_secret_canary_in_a_path_is_omitted_not_echoed():
+    text = _handoff(agent=SECRET, paths=f"- scripts/ai/{CANARY}.py")
+    document, code = audit_handoff(text)
+    dumped = json.dumps(document)
+    assert code == 2
+    assert document["overall"] == "failed"
+    assert document["agent_id"] is None
+    assert document["changed_paths"] == []
+    assert _rules(document, "raw_secrets") == "failed"
+    assert _rules(document, "canary_content") == "failed"
+    assert _rules(document, "unsafe_changed_path") == "failed"
+    assert SECRET not in dumped
+    assert CANARY not in dumped
+    assert "ghp_" not in dumped
 
 
 def test_missing_identity_is_incomplete_not_malformed():

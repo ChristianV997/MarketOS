@@ -217,15 +217,20 @@ _HANDOFF_LABEL = re.compile(
 )
 _NONE_INVENTORY = re.compile(r"(?i)^(?:none|no files(?: changed)?|unchanged|\[\])\.?$")
 _PATH_RE = re.compile(
-    r"`([^`\n]+)`|(?<![\w./-])((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+\.(?:py|ya?ml|json|toml|md|txt|ini))"
+    r"`([^`\n]+)`|(?<![\w./-])((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+/?|[A-Za-z0-9_.-]+\.(?:py|ya?ml|json|toml|md|txt|ini))"
 )
 _AGENT_ID = re.compile(r"(?im)^[ \t>*-]*AGENT_ID:\s*(\S(?:.*\S)?)\s*$")
 _LANE = re.compile(r"(?im)^[ \t>*-]*(?:LANE_ID|LANE):\s*(\S(?:.*\S)?)\s*$")
 _BASE_SHA = re.compile(
     r"(?i)\b(?:base(?:[_\s-]*sha)?|parent(?:\s+commit)?)\b[^0-9a-f\n]{0,48}([0-9a-f]{7,40})\b"
 )
+_HEAD_SHA = re.compile(
+    r"(?i)\bhead(?:[_\s-]*sha)?\b[^0-9a-f\n]{0,48}([0-9a-f]{7,40})\b"
+)
 _MERGE_READY = re.compile(r"(?i)\b(?:merge[- ]ready|ready to merge|ready for merge)\b")
-_PASS_LINE = re.compile(r"(?i)(?<!not )(?<!n't )\b(?:\d+\s+passed|all checks passed|all tests passed|checks passed|tests? passed|passed)\b")
+_PASS_LINE = re.compile(
+    r"(?i)(?<!not )(?<!n't )\b(?:[1-9]\d*\s+passed|all checks passed|all tests passed|checks passed|tests? passed|(?<!\d )passed)\b"
+)
 _PROOF = re.compile(
     r"(?i)(\bpytest\b|\bruff\b|\bcompileall\b|git diff --check|session_finish(?:\.py)?|\btests?/[A-Za-z0-9_./-]+\.py\b)"
 )
@@ -246,6 +251,7 @@ _SINGLE_RULES = (
     "missing_agent_id",
     "missing_lane",
     "missing_base_sha",
+    "missing_head_sha",
     "missing_changed_paths",
     "unproven_test_claim",
     "false_passed_claim",
@@ -323,6 +329,16 @@ def _changed_header(line: str) -> tuple[bool, str]:
     return True, rest
 
 
+def _is_exact_inventory_line(line: str) -> bool:
+    """True when a line is only a path list, not prose that mentions a path."""
+    stripped = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", line.strip())
+    if not stripped:
+        return False
+    residual = _PATH_RE.sub(" ", stripped)
+    residual = re.sub(r"[`,;]", " ", residual)
+    return not residual.split()
+
+
 def _inventory(text: str) -> tuple[bool, list[str], bool, bool]:
     lines = text.splitlines()
     present = False
@@ -347,7 +363,8 @@ def _inventory(text: str) -> tuple[bool, list[str], bool, bool]:
             block.append(current)
             index += 1
         blob = "\n".join(block)
-        paths = _extract_paths(blob)
+        exact_lines = [line for line in block if line and _is_exact_inventory_line(line)]
+        paths = [path for line in exact_lines for path in _extract_paths(line)]
         none_bits = [bit.strip() for bit in re.split(r"[\n,]", blob) if bit.strip()]
         if any(_NONE_INVENTORY.match(bit.strip("` ")) for bit in none_bits) and not paths:
             explicit_none = True
@@ -357,7 +374,7 @@ def _inventory(text: str) -> tuple[bool, list[str], bool, bool]:
                 unsafe = True
                 continue
             try:
-                found.append(assert_safe_path(path, "changed_path"))
+                found.append(assert_safe_path(path, "changed_path").rstrip("/"))
             except TaskPacketError:
                 unsafe = True
     return present, sorted(set(found)), explicit_none, unsafe
@@ -426,8 +443,11 @@ def audit_handoff(text: str) -> tuple[dict[str, Any], int]:
     """Return sanitized completeness metadata for one prose handoff.
 
     Ordinary prose is parsed, not rejected as malformed. The source text is
-    not copied into the result. Merge-readiness claims fail closed when any
-    required evidence is missing or contradictory.
+    not copied into the result. A passed result means the handoff evidence
+    is complete. ``merge_authority`` is always false; this does not approve
+    a merge. Inventory entries are exact path lines and stop at the next
+    heading. A pass claim is backed only by a command on that line or the
+    line immediately above it.
     """
     source = text if isinstance(text, str) else ""
     findings: list[dict[str, str]] = []
@@ -441,9 +461,11 @@ def audit_handoff(text: str) -> tuple[dict[str, Any], int]:
     agent_match = _AGENT_ID.search(source)
     lane_match = _LANE.search(source)
     base_match = _BASE_SHA.search(source)
+    head_match = _HEAD_SHA.search(source)
     agent_id = _clean_text(agent_match.group(1)) if agent_match else ""
     lane = _clean_text(lane_match.group(1)) if lane_match else ""
     base_sha = base_match.group(1).lower() if base_match else ""
+    head_sha = head_match.group(1).lower() if head_match else ""
     if not agent_id or agent_id == "[redacted]":
         findings.append(_finding("missing_agent_id", "AGENT_ID is missing"))
         agent_id = ""
@@ -452,6 +474,8 @@ def audit_handoff(text: str) -> tuple[dict[str, Any], int]:
         lane = ""
     if not base_sha:
         findings.append(_finding("missing_base_sha", "base SHA is missing"))
+    if not head_sha:
+        findings.append(_finding("missing_head_sha", "head SHA is missing"))
 
     present, paths, explicit_none, unsafe = _inventory(source)
     if unsafe:
@@ -469,9 +493,11 @@ def audit_handoff(text: str) -> tuple[dict[str, Any], int]:
         "read_only": True,
         "overall": overall,
         "merge_ready_claim": merge_ready,
+        "merge_authority": False,
         "agent_id": agent_id or None,
         "lane": lane or None,
         "base_sha": base_sha or None,
+        "head_sha": head_sha or None,
         "changed_paths": paths,
         "ownership_statement": _ownership(source),
         "checks": _checks_for(findings, _SINGLE_RULES),
@@ -510,7 +536,11 @@ def audit_handoff_batch(texts: list[str]) -> tuple[dict[str, Any], int]:
                         shared.extend([left_path, right_path])
             if not shared:
                 continue
-            agents = [left.get("agent_id") or f"report-{left['index']}", right.get("agent_id") or f"report-{right['index']}"]
+            left_id = left.get("agent_id")
+            right_id = right.get("agent_id")
+            if left_id and right_id and left_id == right_id:
+                continue
+            agents = [left_id or f"report-{left['index']}", right_id or f"report-{right['index']}"]
             paths = sorted(set(shared))
             overlaps.append({"agents": agents, "paths": paths})
             findings.append(_finding("overlapping_write_scope", f"{agents[0]} overlaps {agents[1]} on {', '.join(paths[:8])}"))
