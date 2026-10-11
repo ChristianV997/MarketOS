@@ -226,12 +226,42 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
             f"<h1>Checkout unavailable</h1><p>{html.escape(str(result.get('error', '')))}</p>",
             status_code=409,
         )
+    dry_run = bool(result.get("dry_run"))
     target = _safe_checkout_target(
-        result.get("url") if bool(result.get("dry_run")) else result.get("session_id"),
-        dry_run=bool(result.get("dry_run")),
+        result.get("url") if dry_run else result.get("session_id"),
+        dry_run=dry_run,
         brand_id=brand_id,
         product_id=product_id,
     )
     if target is None:
+        return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
+
+    # Validate the final redirect immediately before handing it to Starlette.
+    # The builder above reconstructs the target, but this second guard keeps
+    # the redirect sink independent of route/provider taint and documents the
+    # only two allowed URL contracts.
+    target_parts = urlsplit(target)
+    if dry_run:
+        base = _public_base()
+        safe_target = (
+            base is not None
+            and target_parts.scheme == base.scheme
+            and target_parts.netloc.lower() == base.netloc.lower()
+            and not target_parts.username
+            and not target_parts.password
+            and not target_parts.fragment
+            and target_parts.query == "purchased=1"
+        )
+    else:
+        safe_target = (
+            target_parts.scheme == "https"
+            and target_parts.netloc == "checkout.stripe.com"
+            and not target_parts.username
+            and not target_parts.password
+            and not target_parts.query
+            and not target_parts.fragment
+            and _STRIPE_CHECKOUT_PATH.fullmatch(target_parts.path) is not None
+        )
+    if not safe_target:
         return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
     return RedirectResponse(url=target, status_code=303)
