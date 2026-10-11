@@ -294,6 +294,28 @@ def test_repository_is_read_and_never_appended():
     assert absent["attention_required"] is False
 
 
+def test_repository_identity_mismatch_is_fail_closed():
+    scenario = build_named_scenario("successful_direct_shipment")
+    adapter = FixtureFulfillmentAdapter.complete()
+    projected = run_fulfillment_risk_dry_run(scenario, adapter=adapter)
+    mismatched = replace(projected.events[0], workspace_id="other-workspace")
+    repository = _ReadOnlyRepo(InMemoryEventRepository())
+    repository.inner.append(mismatched)
+
+    document = review_scenario(scenario, reviewed_at=REVIEWED, adapter=adapter, repository=repository)
+
+    assert document["event_store"]["comparison"] == "workspace_mismatch"
+    assert document["event_store"]["identity_mismatch_count"] >= 1
+    assert document["attention_required"] is True
+    assert "event_store_workspace_mismatch" in document["attention_reasons"]
+
+
+def test_non_fixture_adapter_is_rejected_before_port_execution():
+    scenario = build_named_scenario("successful_direct_shipment")
+    with pytest.raises(ValueError, match="exact fixture fulfillment adapter"):
+        review_scenario(scenario, reviewed_at=REVIEWED, adapter=object())
+
+
 def test_partial_store_and_unreadable_store_need_review():
     scenario = build_named_scenario("shipment_delayed")
     adapter = FixtureFulfillmentAdapter.complete()

@@ -228,17 +228,29 @@ def _evidence_summary(refs: Sequence[Any], reviewed: datetime, max_age_hours: in
     return {"basis": basis, "freshness": freshness, "states": states}
 
 
-def _event_comparison(order_id: str, projected: Sequence[Event], repository: EventRepository | None) -> dict[str, Any]:
+def _event_comparison(
+    order_id: str,
+    workspace_id: str | None,
+    projected: Sequence[Event],
+    repository: EventRepository | None,
+) -> dict[str, Any]:
     if repository is None:
         return {"consulted": False, "read_count": 0, "appended": False, "comparison": "not_consulted", "stored_count": 0, "projected_count": len(projected)}
     read_count = 0
     stored_count = 0
     matched = 0
+    identity_mismatches = 0
     try:
         stream = repository.stream(aggregate_id=order_id, limit=MAX_READS)
-        for _event in stream:
+        for stored_event in stream:
             stored_count += 1
             read_count += 1
+            if (
+                not isinstance(stored_event, Event)
+                or stored_event.aggregate_id != order_id
+                or (workspace_id is not None and stored_event.workspace_id != workspace_id)
+            ):
+                identity_mismatches += 1
             if stored_count >= MAX_READS:
                 break
         seen_ids: set[str] = set()
@@ -247,12 +259,25 @@ def _event_comparison(order_id: str, projected: Sequence[Event], repository: Eve
             if event.event_id in seen_ids:
                 continue
             seen_ids.add(event.event_id)
+            if (
+                event.aggregate_id != order_id
+                or (workspace_id is not None and event.workspace_id != workspace_id)
+            ):
+                identity_mismatches += 1
+                continue
             stored = repository.get(event.event_id)
             read_count += 1
             if stored is None:
                 continue
+            if (
+                not isinstance(stored, Event)
+                or stored.aggregate_id != order_id
+                or (workspace_id is not None and stored.workspace_id != workspace_id)
+            ):
+                identity_mismatches += 1
+                continue
             matched += 1
-            if not isinstance(stored, Event) or stored.replay_hash() != event.replay_hash():
+            if stored.replay_hash() != event.replay_hash():
                 conflicts += 1
     except Exception:
         return {
@@ -263,7 +288,9 @@ def _event_comparison(order_id: str, projected: Sequence[Event], repository: Eve
             "stored_count": stored_count,
             "projected_count": len(projected),
         }
-    if conflicts:
+    if identity_mismatches:
+        comparison = "workspace_mismatch"
+    elif conflicts:
         comparison = "conflict"
     elif matched and matched < len(seen_ids):
         comparison = "partial"
@@ -278,6 +305,7 @@ def _event_comparison(order_id: str, projected: Sequence[Event], repository: Eve
         "comparison": comparison,
         "stored_count": stored_count,
         "projected_count": len(projected),
+        "identity_mismatch_count": identity_mismatches,
     }
 
 
@@ -348,7 +376,7 @@ def _decide(
     if tracking_unavailable:
         reasons.append("tracking_unavailable")
     comparison = events.get("comparison")
-    if comparison in {"conflict", "partial", "unreadable"}:
+    if comparison in {"conflict", "partial", "unreadable", "workspace_mismatch"}:
         reasons.append("event_store_" + str(comparison))
     freshness = evidence.get("freshness")
     basis = evidence.get("basis")
@@ -366,7 +394,7 @@ def _decide(
     if not transition.get("valid"):
         step = "stop_and_review_recorded_path_do_not_advance"
         attention_required = True
-    elif comparison in {"conflict", "partial", "unreadable"}:
+    elif comparison in {"conflict", "partial", "unreadable", "workspace_mismatch"}:
         step = "compare_projection_to_stored_event_without_rewrite"
         attention_required = True
     elif failed:
@@ -435,7 +463,7 @@ def review_proposed_path(
             raise ValueError("unsafe review input")
     transition = explain_state_path(state_path)
     evidence = _evidence_summary((), reviewed, DEFAULT_EVIDENCE_MAX_AGE_HOURS, evaluated=False)
-    events = _event_comparison(safe_order, (), None)
+    events = _event_comparison(safe_order, None, (), None)
     return _decide(
         reviewed_at=reviewed_at,
         order_id=safe_order,
@@ -462,6 +490,8 @@ def review_scenario(
     """Review one already-built scenario through the canonical dry-run. Never appends."""
     if not isinstance(scenario, FulfillmentRiskScenario):
         raise ValueError("invalid scenario")
+    if adapter is not None and type(adapter) is not FixtureFulfillmentAdapter:
+        raise ValueError("only the exact fixture fulfillment adapter is permitted")
     reviewed = _require_reviewed_at(reviewed_at)
     max_age = _bound_age(max_evidence_age_hours)
     report = run_fulfillment_risk_dry_run(scenario, adapter=adapter, occurred_at=occurred_at)
@@ -470,7 +500,7 @@ def review_scenario(
     tracking_unavailable = any(
         item.capability == "tracking" and item.status != "simulated" for item in report.port_observations
     )
-    events = _event_comparison(scenario.order_id, report.events, repository)
+    events = _event_comparison(scenario.order_id, scenario.workspace_id, report.events, repository)
     return _decide(
         reviewed_at=reviewed_at,
         order_id=scenario.order_id,
