@@ -11,10 +11,11 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from backend.adapters.research.competition_evidence import CompetitorOffer, fetch_competitor_offer
 from backend.contracts.adapters import SidecarContext
+from evaluation.secret_markers import contains_boundary_prefixed_sk_token
 from .benchmark_matrix import BenchmarkCandidate, BenchmarkMatrixReport, build_benchmark_matrix, normalize_candidate
 from .marketplace_trends import MarketplaceTrendEvidence, MarketplaceTrendReport, build_report as build_marketplace_trend_report
 from .opportunity_synthesis import ProductOpportunitySynthesisReport, build_product_opportunity_synthesis
@@ -56,16 +57,67 @@ def _bounded(value: Any) -> float:
 _URL_IN_TEXT = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 
 
+# Credential shapes anchored to a token boundary, so ordinary slugs and hosts ("desk_organizer_black_large",
+# "monkeyjumpingtoys", "eyjafjallajokull-guide", "my_sk_organizer12345") are not mistaken for credentials, unlike the
+# value-level readiness.TOKEN_VALUE that is applied to whole artifact strings. Prefixes are case-sensitive as issued.
+_TOKEN_SHAPE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:"
+    r"(?:sk|gh[opsu])_[A-Za-z0-9_]{12,}"  # sk_live_..., sk_test_..., ghp_...
+    r"|github_pat_[A-Za-z0-9_]{12,}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+"  # JWT header.payload
+    r"|(?i:bearer)\s+[A-Za-z0-9._-]{12,}"
+    r")"
+)
+# A hostname is public DNS data, so only an unmistakably long sk- label counts there ("www.sk-ii.com" is a brand).
+_AUTHORITY_LONG_SK = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9]{16,}")
+_MAX_DECODES = 5
+
+
+def _decoded_views(text: str) -> list[str]:
+    views = [text]
+    for _ in range(_MAX_DECODES):
+        decoded = unquote(views[-1])
+        if decoded == views[-1]:
+            break
+        views.append(decoded)
+    return views
+
+
+def _secret_shaped(text: str, *, authority: bool = False) -> bool:
+    """Credential-shaped text on the raw and (repeatedly) percent-decoded views.
+
+    Path segments also use the repository's shared ``sk-`` marker rule; an authority (host or port) only the
+    long-token form, because hostnames are public and ``sk-`` is a common brand prefix.
+    """
+    for view in _decoded_views(text):
+        if _TOKEN_SHAPE.search(view) is not None:
+            return True
+        if authority:
+            if _AUTHORITY_LONG_SK.search(view) is not None:
+                return True
+        elif contains_boundary_prefixed_sk_token(view):
+            return True
+    return False
+
+
 def _safe_url(value: Any) -> str:
-    """Keep scheme, host[:port] and path; userinfo, query and fragment may hold operator secrets."""
+    """Keep scheme, host[:port] and path; userinfo, query and fragment may hold operator secrets.
+
+    Secret-shaped path segments are replaced and a secret-shaped or malformed authority drops the URL,
+    so a token pasted into a path cannot reach a written or served report.
+    """
     try:
         parsed = urlparse(str(value or ""))
+        parsed.port  # noqa: B018 - raises ValueError for a non-numeric or out-of-range port
     except ValueError:
         return ""
     host_port = parsed.netloc.rpartition("@")[2]
-    if parsed.scheme not in {"http", "https"} or not host_port:
+    if parsed.scheme not in {"http", "https"} or not host_port or _secret_shaped(host_port, authority=True):
         return ""
-    return f"{parsed.scheme}://{host_port}{parsed.path}"
+    path = "/".join("[redacted]" if _secret_shaped(segment) else segment for segment in parsed.path.split("/"))
+    return f"{parsed.scheme}://{host_port}{path}"
 
 
 def _redact_urls(text: str) -> str:
@@ -82,9 +134,10 @@ def _safe_domain(value: Any) -> str:
     """Hostname only: userinfo, scheme, path, query and fragment never survive."""
     text = str(value or "").strip()
     try:
-        return (urlparse(text if "://" in text else f"//{text}").hostname or "").lower()
+        host = (urlparse(text if "://" in text else f"//{text}").hostname or "").lower()
     except ValueError:
         return ""
+    return "" if _secret_shaped(host, authority=True) else host
 
 
 def _has_userinfo(value: str) -> bool:
@@ -180,7 +233,7 @@ class PublicMarketBenchmarkReport:
 def evidence_from_offer(candidate_id: str, query: str, offer: CompetitorOffer, *, mode: str) -> PublicMarketEvidence:
     return PublicMarketEvidence(
         candidate_id=candidate_id, query=query, competitor_url=offer.source_url,
-        source_domain=(urlparse(offer.source_url).hostname or "").lower(), extraction_mode=mode,
+        source_domain=_safe_domain(offer.source_url), extraction_mode=mode,
         product_title=offer.title, brand=offer.brand, price=offer.price, currency=offer.currency,
         availability=offer.availability, rating=offer.rating, review_count=offer.review_count,
         shipping_cost=offer.shipping_cost, source_confidence=offer.confidence,

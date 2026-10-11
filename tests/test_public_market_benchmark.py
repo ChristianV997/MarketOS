@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,6 +11,8 @@ import pytest
 import scripts.run_phase1_public_market_benchmark as cli
 from backend.adapters.research.competition_evidence import CompetitorOffer
 from evaluation.commerce.public_market_benchmark import (
+    _safe_domain,
+    _safe_text,
     _safe_url,
     build_public_market_benchmark,
     load_public_market_seed,
@@ -342,3 +347,162 @@ def test_cli_allow_network_is_the_only_switch_that_reaches_the_fetcher(monkeypat
     assert synthesis["overall_recommendation"] == "validate_supplier_first"
     assert synthesis["source_reports"]["supplier"] == "missing"
     assert not synthesis["confidence_grade"].startswith("A_")
+
+
+# --- Residual-risk coverage: secret-shaped path/host material, truncation, and the write-time race --------
+
+_SECRET_SHAPES = {
+    "sk": "sk-" + "SYNTHETICEXAMPLE0123456789",
+    "sk_encoded": "%73k-" + "SYNTHETICEXAMPLE0123456789",
+    "ghp": "ghp_" + "SYNTHETICEXAMPLE0123456789",
+    "stripe": "sk_live_" + "SYNTHETICEXAMPLE0123456789",
+    "github_pat": "github_pat_" + "SYNTHETICEXAMPLE0123456789",
+    "slack": "xoxb-" + "123456789012-SYNTHETICEXAMPLE",
+    "aws": "AKIA" + "SYNTHETIC0123456",
+    "double_encoded": "ghp%255F" + "SYNTHETICEXAMPLE0123456789",
+    "jwt": "eyJ" + "SYNTHETICEXAMPLE0123456.payload",
+    "bearer": "Bearer%20" + "SYNTHETICEXAMPLE0123456789",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_SECRET_SHAPES))
+def test_secret_shaped_path_segments_are_replaced_and_the_rest_of_the_url_kept(shape: str):
+    shape_value = _SECRET_SHAPES[shape]
+    assert _safe_url(f"https://public.example/api/{shape_value}/widget?x=1") == "https://public.example/api/[redacted]/widget"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://sk-SYNTHETICEXAMPLE0123456.public.example/p",
+        "https://public.example:sk-SYNTHETICEXAMPLE/p",
+        "https://public.example:notaport/p",
+        "https://public.example:99999/p",
+    ],
+)
+def test_secret_shaped_or_malformed_authority_drops_the_url(url: str):
+    assert _safe_url(url) == ""
+    assert "SYNTHETIC" not in _safe_text(f"failed: {url}")
+
+
+def test_secret_shaped_domain_is_dropped_but_a_normal_hostname_is_kept():
+    assert _safe_domain("sk-SYNTHETICEXAMPLE0123456.public.example") == ""
+    assert _safe_domain("Shop.Public.Example") == "shop.public.example"
+    for host in ("keyjournal-notebooks.example", "monkeyjumpingtoys.example", "desk-organizers.example", "www.sk-ii.com"):
+        assert _safe_domain(host) == host
+        assert _safe_url(f"https://{host}/p") == f"https://{host}/p"
+
+
+def test_live_offer_source_domain_goes_through_the_same_domain_check():
+    candidate = _candidate(fixture_offers=[], competitor_urls=["https://sk-SYNTHETICEXAMPLE0123456.public.example/p"])
+    def fetch(url: str, *, context):
+        return _priced_offer(url)
+    report = build_public_market_benchmark([candidate], allow_network=True, fetcher=fetch).to_dict()
+    assert "SYNTHETIC" not in json.dumps(report, sort_keys=True)
+    assert report["candidate_results"][0]["evidence"][0]["source_domain"] == ""
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/products/desk-clamp-lamp", "/p/task-list", "/p/brisk-walk-shoes", "/dp/B0ABC12345",
+        "/p/desk_organizer_black_large", "/p/task_manager_planner", "/p/monkeyjumpingtoys-set", "/p/ghost_pepper_hot_sauce_2oz",
+        "/p/eyjafjallajokull-guide", "/p/my_sk_organizer12345", "/p/AKIAmonkey-notakey", "/p/bearer-bag-large-brown",
+    ],
+)
+def test_benign_path_slugs_are_not_redacted(path: str):
+    assert _safe_url(f"https://public.example{path}") == f"https://public.example{path}"
+
+
+def test_secret_shaped_path_never_reaches_any_report_projection():
+    shape_value = _SECRET_SHAPES["sk"]
+    candidate = _candidate(fixture_offers=[{"competitor_url": f"https://public.example/api/{shape_value}/w", "source_domain": "public.example", "product_title": "Safe", "price": 9.0, "source_confidence": 0.9}])
+    report = build_public_market_benchmark([candidate]).to_dict()
+    enriched = {**report, "marketplace_trend_report": to_marketplace_trend_report(report).to_dict(), "opportunity_synthesis": synthesize_from_public_market(report).to_dict()}
+    assert "SYNTHETIC" not in json.dumps(enriched, sort_keys=True)
+
+
+@pytest.mark.parametrize("prefix", ["", "robots_blocked:", "(", "\n", "see "])
+def test_no_partial_url_survives_truncation_at_any_offset(prefix: str):
+    # Every padding length places the 180-character cap at a different point inside the URL.
+    urls = [
+        "https://u:pw@public.example/api/" + _SECRET_SHAPES["sk"] + "/x?tok=canaryx#canaryy",
+        "HTTPS://u:pw@public.example/" + _SECRET_SHAPES["jwt"],
+        "https://public.example/x?canaryx",
+    ]
+    for padding in range(0, 200):
+        for url in urls:
+            out = _safe_text(prefix + "w" * padding + " " + url)
+            assert "SYNTH" not in out and "canary" not in out and "pw@" not in out and "tok=" not in out, (padding, url)
+
+
+def test_cli_rechecks_confinement_at_write_time_when_a_directory_is_swapped_for_a_symlink(tmp_path: Path, artifacts_root: Path, monkeypatch):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = artifacts_root / "run"
+    real = cli.build_public_market_benchmark
+    def swapping(candidates, **kwargs):
+        # Models the race: validated first, then swapped during a long (e.g. live) run.
+        report = real(candidates, **kwargs)
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"NOT COVERED: symlinks unavailable on this host ({type(exc).__name__})")
+        return report
+    monkeypatch.setattr(cli, "build_public_market_benchmark", swapping)
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--candidate-seed", str(SEED), "--output", str(link), "--json"])
+    assert exit_info.value.code == 2
+    assert _all_files(outside) == []
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="NOT COVERED: O_NOFOLLOW is unavailable on this platform")
+def test_cli_does_not_follow_a_leaf_symlink_swapped_in_after_validation(tmp_path: Path, artifacts_root: Path, monkeypatch):
+    victim = tmp_path / "victim.json"
+    victim.write_text("sentinel", encoding="utf-8")
+    target = artifacts_root / "latest.json"
+    real = cli.build_public_market_benchmark
+    def swapping(candidates, **kwargs):
+        report = real(candidates, **kwargs)
+        target.symlink_to(victim)
+        return report
+    monkeypatch.setattr(cli, "build_public_market_benchmark", swapping)
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--candidate-seed", str(SEED), "--output", str(target), "--json"])
+    assert exit_info.value.code == 2
+    assert victim.read_text(encoding="utf-8") == "sentinel"
+
+
+def test_cli_artifacts_are_deterministic_and_complete(artifacts_root: Path, capsys):
+    out = artifacts_root / "run"
+    assert main(["--candidate-seed", str(SEED), "--output", str(out), "--json"]) == 0
+    capsys.readouterr()
+    names = sorted(path.name for path in out.iterdir())
+    assert names == [
+        "benchmark_matrix_report.json", "marketplace_trend_report.json", "opportunity_synthesis_report.json",
+        "public_market_benchmark_report.json", "public_market_benchmark_report.md", "readiness_summary.json",
+    ]
+    first = {name: (out / name).read_bytes() for name in names}
+    assert main(["--candidate-seed", str(SEED), "--output", str(out), "--json"]) == 0
+    assert {name: (out / name).read_bytes() for name in names} == first
+    assert json.loads((out / "readiness_summary.json").read_text(encoding="utf-8"))["opportunity_synthesis_recommendation"] == "validate_supplier_first"
+
+
+def test_real_cli_process_rejects_an_output_outside_artifacts_without_writing(tmp_path: Path):
+    outside = tmp_path / "escaped"
+    result = subprocess.run(
+        [sys.executable, "scripts/run_phase1_public_market_benchmark.py", "--output", str(outside), "--json"],
+        cwd=ROOT, capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "--output must resolve to a path under the repository artifacts/ directory" in result.stderr
+    assert not outside.exists()
+
+
+def test_cli_surfaces_non_confinement_write_errors_instead_of_misreporting_them(artifacts_root: Path):
+    # An existing directory where a report file belongs is an ordinary I/O error, not an artifacts/ violation.
+    out = artifacts_root / "run"
+    (out / "public_market_benchmark_report.json").mkdir(parents=True)
+    with pytest.raises(OSError):  # IsADirectoryError on POSIX, PermissionError on Windows; never SystemExit
+        main(["--candidate-seed", str(SEED), "--output", str(out), "--json"])

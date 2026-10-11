@@ -169,3 +169,60 @@ def test_route_rate_limit_is_a_read_only_429_over_http(client, monkeypatch):
     response = client.get(PATH)
     assert response.status_code == 429
     assert response.json() == {"status": "rate_limited", "read_only": True, "mutated": False}
+
+
+SECRET_PATH_TOKEN = "sk-" + "SYNTHETICEXAMPLE0123456789"
+
+
+def test_route_replaces_secret_shaped_url_paths_in_stored_artifacts(client, monkeypatch, artifacts_root):
+    report = _stored_report()
+    evidence = report["candidate_results"][0]["evidence"][0]
+    evidence["competitor_url"] = f"https://public.example/api/{SECRET_PATH_TOKEN}/widget"
+    report["marketplace_trend_report"] = {"candidates": [{"evidence": [{"source_url": f"https://public.example/{SECRET_PATH_TOKEN}"}]}], "candidate_count": 1}
+    _configure(monkeypatch, artifacts_root / "secret_path.json", report)
+    response = client.get(PATH)
+    assert response.status_code == 200
+    assert "SYNTHETIC" not in response.text
+    assert response.json()["candidate_results"][0]["evidence"][0]["competitor_url"] == "https://public.example/api/[redacted]/widget"
+
+
+def test_route_keeps_benign_slugs_in_stored_artifacts(client, monkeypatch, artifacts_root):
+    report = _stored_report()
+    report["candidate_results"][0]["evidence"][0]["competitor_url"] = "https://public.example/products/desk-clamp-lamp"
+    _configure(monkeypatch, artifacts_root / "benign.json", report)
+    assert client.get(PATH).json()["candidate_results"][0]["evidence"][0]["competitor_url"] == "https://public.example/products/desk-clamp-lamp"
+
+
+def test_route_returns_an_artifact_without_candidate_results_unprojected(client, monkeypatch, artifacts_root):
+    _configure(monkeypatch, artifacts_root / "bare.json", {"evidence_mode": "fixture_demo", "warnings": ["bare_artifact_marker"]})
+    response = client.get(PATH)
+    assert response.status_code == 200
+    body = response.json()
+    assert "bare_artifact_marker" in body["warnings"]
+    assert "marketplace_trend_report" not in body and "opportunity_synthesis" not in body
+    assert body["read_only"] is True and body["mutated"] is False
+
+
+def test_route_rejects_a_symlinked_artifact_that_leaves_artifacts(client, monkeypatch, tmp_path, artifacts_root):
+    outside = tmp_path / "outside.json"
+    report = _stored_report()
+    report["warnings"] = [*report["warnings"], "outside_symlink_marker"]
+    outside.write_text(json.dumps(report), encoding="utf-8")
+    link = artifacts_root / "link.json"
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"NOT COVERED: symlinks unavailable on this host ({type(exc).__name__})")
+    monkeypatch.setenv(ENV, str(link))
+    body = client.get(PATH).json()
+    assert "outside_symlink_marker" not in body["warnings"]
+    assert "server_artifact_not_configured_using_fixture_demo" in body["warnings"]
+
+
+def test_route_enforces_the_real_rate_limit_over_http(client, monkeypatch):
+    monkeypatch.setenv("MARKETOS_EVENT_READ_RATE_LIMIT", "2")
+    reset_rate_limits_for_tests()
+    assert [client.get(PATH).status_code for _ in range(2)] == [200, 200]
+    limited = client.get(PATH)
+    assert limited.status_code == 429
+    assert limited.json() == {"status": "rate_limited", "read_only": True, "mutated": False}
