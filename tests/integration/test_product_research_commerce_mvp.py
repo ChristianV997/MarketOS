@@ -102,14 +102,17 @@ class TestResearchPortfolioOptIn:
         assert run.selected_candidate.candidate_id == other_id
 
     def test_economics_grounded_by_supplier_evidence_supplied_alongside_portfolio(self):
-        portfolio, _ = _portfolio_for_fixture()
-        evidence = SupplierEvidenceResult(attempted=True, unit_cost=9.5, shipping_cost=2.0, source_url="https://cj.example/x")
-        run = run_commerce_mvp_slice(
-            query="portable espresso maker", signal_fixture_path=FIXTURE,
-            research_portfolio=portfolio, supplier_evidence=evidence,
-        )
-        assert run.unit_economics_summary.source == "partial_observed_supplier_evidence"
-        assert run.unit_economics_summary.assumed_unit_cost == 9.5
+            portfolio, _ = _portfolio_for_fixture()
+            evidence = SupplierEvidenceResult(
+                attempted=True, unit_cost=9.5, shipping_cost=2.0, source_url="https://cj.example/x",
+                currency="USD", shipping_currency="USD", source_type="cj_dropshipping", status="observed"
+            )
+            run = run_commerce_mvp_slice(
+                query="portable espresso maker", signal_fixture_path=FIXTURE,
+                research_portfolio=portfolio, supplier_evidence=evidence,
+            )
+            assert run.unit_economics_summary.source == "partial_observed_supplier_evidence"
+            assert run.unit_economics_summary.assumed_unit_cost == 9.5
 
     def test_unmatched_top_candidate_id_falls_back_to_default_selection(self):
         portfolio, _ = _portfolio_for_fixture(force_top_id=None)
