@@ -17,7 +17,6 @@ STALE_AFTER_SECONDS = 90 * 24 * 3600
 MAX_ORDERING_EFFECT = 10.0
 WILSON_Z_95 = 1.959963984540054
 
-ELIGIBLE = ""
 EXCLUSION_AMBIGUOUS = "ambiguous_multi_source"
 EXCLUSION_UNMATCHED = "unmatched_import"
 EXCLUSION_AMBIGUOUS_IMPORT = "ambiguous_import_source"
@@ -48,8 +47,9 @@ class SourceUsefulnessSignal:
     provenance: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     metadata: dict[str, Any] = field(default_factory=dict)
-    attribution: str = "single_source"
-    exclusion_reason: str = ELIGIBLE
+    # Fail closed: a signal that does not state its attribution is not eligible, whatever its exclusion_reason says.
+    attribution: str = "unverified"
+    exclusion_reason: str = ""
 
     def __post_init__(self):
         self.weight = max(0.0, min(float(self.weight), 1.0))
@@ -58,7 +58,7 @@ class SourceUsefulnessSignal:
 
     @property
     def eligible(self) -> bool:
-        return not self.exclusion_reason
+        return self.attribution == "single_source" and not self.exclusion_reason
 
     def to_dict(self): return {key: getattr(self, key) for key in self.__dataclass_fields__}
 

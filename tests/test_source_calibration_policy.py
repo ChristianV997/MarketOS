@@ -24,6 +24,7 @@ from backend.discovery.import_registry import EvidenceImportRegistry
 from backend.discovery.refinement_registry import RefinementRegistry
 from backend.discovery.source_calibration import (
     MAX_ORDERING_EFFECT,
+    CalibrationRun,
     STALE_AFTER_SECONDS,
     SourceCalibrationProfile,
     SourceUsefulnessSignal,
@@ -272,7 +273,7 @@ def plan_for(*gaps, workspace=WS):
 
 
 def observed_profile(*, source="supplier_catalog_csv", adjustment=25.0, workspace=WS, parser="supplier_catalog_csv"):
-    return SourceCalibrationProfile("profile_" + source, workspace, source, "local_file", parser, recommended_priority_adjustment=adjustment, evidence_status="observed", comparison_count=2, eligible_signal_count=4)
+    return SourceCalibrationProfile("profile_" + source, workspace, source, "local_file", parser, recommended_priority_adjustment=adjustment, evidence_status="observed", comparison_count=2, eligible_signal_count=4, last_updated_at=T0)
 
 
 def test_an_observed_profile_moves_ordering_only_within_the_policy_bound(world):
@@ -372,9 +373,11 @@ def test_profiles_saved_before_the_policy_still_load_with_neutral_defaults():
     assert "evidence_status" in profile.to_dict()
 
 
-def test_a_signal_without_an_explicit_attribution_is_eligible_as_before():
+def test_a_signal_that_does_not_state_its_attribution_is_not_eligible():
     signal = SourceUsefulnessSignal("s", WS, "supplier", "local_file", "supplier_catalog_csv", signal_type="rank_improvement", value=2)
-    assert signal.eligible and signal.attribution == "single_source"
+    assert not signal.eligible and signal.attribution == "unverified"
+    stated = SourceUsefulnessSignal("s", WS, "supplier", "local_file", "supplier_catalog_csv", signal_type="rank_improvement", value=2, attribution="single_source")
+    assert stated.eligible
 
 
 def test_aggregation_is_exact_under_permutation_for_float_hostile_inputs():
@@ -457,7 +460,7 @@ def test_a_full_comparison_window_is_reported_as_truncated(world, monkeypatch):
     monkeypatch.setattr(world.refinement, "list_comparisons", lambda workspace_id, limit: (real(workspace_id, 500) * 250)[:engine.COMPARISON_WINDOW])
     run = engine.run_source_calibration(WS, as_of=AS_OF)
     assert run.metadata["comparison_window_truncated"] is True
-    assert any("most recent comparisons" in line for line in run.recommendations)
+    assert any("most recently registered comparisons" in line for line in run.recommendations)
 
 
 def test_a_failed_state_write_is_reported_not_claimed_as_completed(world, tmp_path):
@@ -609,3 +612,82 @@ def test_import_quality_facts_are_recorded_even_without_comparisons(world):
     facts = [s for s in run.signals if s.attribution == "import_quality"]
     assert [s.signal_type for s in facts] == ["unsupported_signal_rejection"] and not facts[0].eligible
     assert run.metadata["exclusions"]["import_quality_not_comparison"] == 1
+
+
+# --------------------------------------------------------------------------- third review findings
+
+
+def test_concurrent_runs_neither_lose_committed_runs_nor_report_false_persistence(tmp_path):
+    import sys as _sys
+    import threading as _threading
+    registry = CalibrationRegistry(tmp_path / "shared.json")
+    errors = []
+
+    def writer(worker):
+        for index in range(25):
+            run = CalibrationRun(f"calibration_{worker}_{index}", WS, "t", "o", [], [], "s", [], "partial", created_at=T0)
+            if not registry.record_run([], [], run):
+                errors.append((worker, index))
+
+    previous = _sys.getswitchinterval()
+    _sys.setswitchinterval(1e-6)  # force frequent thread switches, so an unlocked read-modify-write interleaves
+    try:
+        threads = [_threading.Thread(target=writer, args=(worker,)) for worker in range(8)]
+        for thread in threads: thread.start()
+        for thread in threads: thread.join()
+    finally:
+        _sys.setswitchinterval(previous)
+    assert errors == [] and len(registry.runs) == 200
+    assert len(CalibrationRegistry(tmp_path / "shared.json").runs) == 200
+
+
+def test_invalid_utf8_state_is_quarantined_not_raised(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_bytes(b"\xff\xfe not json")
+    registry = CalibrationRegistry(path)
+    assert registry.runs == {} and (tmp_path / "state.json.unreadable-1").exists()
+    registry.register_profile(SourceCalibrationProfile("p", WS, "supplier", "local_file", "supplier_catalog_csv"))
+    assert CalibrationRegistry(path).get_profile("supplier", workspace_id=WS) is not None
+
+
+def test_writes_resume_once_an_unreadable_state_becomes_readable(tmp_path):
+    path = tmp_path / "state.json"
+    path.mkdir()
+    registry = CalibrationRegistry(path)
+    assert registry.load_failed is True
+    path.rmdir()  # the obstruction is gone
+    registry.register_profile(SourceCalibrationProfile("p", WS, "supplier", "local_file", "supplier_catalog_csv"))
+    assert registry.last_save_ok is True and registry.load_failed is False
+    assert CalibrationRegistry(path).get_profile("supplier", workspace_id=WS) is not None
+
+
+def test_a_workspace_run_retires_the_signals_of_comparisons_that_dropped_out(world):
+    single_source_comparisons(world, 2)
+    engine.run_source_calibration(WS, as_of=AS_OF)
+    assert world.calibration.list_signals(workspace_id=WS, limit=1000)
+    world.refinement.comparisons.clear()
+    engine.run_source_calibration(WS, as_of=AS_OF)
+    assert world.calibration.list_signals(workspace_id=WS, limit=1000) == []
+
+
+def test_a_run_that_could_not_be_saved_reports_no_profiles(world, tmp_path):
+    single_source_comparisons(world, 2)
+    blocker = tmp_path / "not_a_directory"
+    blocker.write_text("x", encoding="utf-8")
+    world.calibration.path = blocker / "state.json"
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    assert run.metadata["persisted"] is False and run.profiles == []
+
+
+def test_plans_with_different_priorities_have_different_identifiers(world):
+    first = plan_for(gap("same_gap", priority=40.0)).plan_id
+    second = plan_for(gap("same_gap", priority=80.0)).plan_id
+    assert first != second
+
+
+def test_a_comparison_window_claim_says_registration_order_not_time(world, monkeypatch):
+    single_source_comparisons(world, 2)
+    real = world.refinement.list_comparisons
+    monkeypatch.setattr(world.refinement, "list_comparisons", lambda workspace_id, limit: (real(workspace_id, 500) * 250)[:engine.COMPARISON_WINDOW])
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    assert any("most recently registered" in line for line in run.recommendations)

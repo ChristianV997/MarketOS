@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 from .discovery_registry import get_discovery_registry
 from .import_registry import get_import_registry
@@ -29,6 +29,15 @@ __all__ = ["build_source_calibration_profiles", "derive_source_usefulness_signal
 COMPARISON_WINDOW = 500  # the refinement registry's maximum for one listing
 IMPORT_WINDOW = 500  # the import registry's maximum for one listing
 _DUPLICATE = object()  # a source name carried by more than one import job in the workspace
+
+
+class _Derived(NamedTuple):
+    signals: list
+    exclusions: dict
+    reference: float
+    comparisons: list
+    comparison_window_truncated: bool
+    import_window_truncated: bool
 
 
 def _attribute(names: list[str], job_for: Callable[[str], Any], selected: set[str] | None) -> list[tuple[str, Any, str]]:
@@ -77,10 +86,16 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
     # The reference time comes from the data unless the caller supplies one, so identical inputs give identical output.
     reference = float(as_of) if as_of is not None else max((x.created_at for x in comparisons), default=0.0)
     selected = set(import_ids) if import_ids else None
+    all_jobs = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, limit=IMPORT_WINDOW) if j is not None and j.workspace_id == workspace_id]
+    import_truncated = len(all_jobs) >= IMPORT_WINDOW
     job_cache: dict[str, Any] = {}
+    if not import_truncated:
+        # Every import is in view, so duplicate names are read from one pass with no per-source queries.
+        for job in sorted(all_jobs, key=lambda j: j.import_id):
+            job_cache[job.source_name] = _DUPLICATE if job.source_name in job_cache else job
 
     def job_for(source_name: str) -> Any:
-        # An exact per-source query, so a clash is found even when the workspace holds many other imports.
+        # With a full window, the exact per-source query finds a clash however many other imports exist.
         if source_name not in job_cache:
             found = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, source_name=source_name, limit=50) if j is not None and j.workspace_id == workspace_id and j.source_name == source_name]
             job_cache[source_name] = _DUPLICATE if len(found) > 1 else (found[0] if found else None)
@@ -139,8 +154,6 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
                 if change.get("current") in {"investigate", "prioritize"} and change.get("baseline") in {"reject", "hold", "investigate"}:
                     add("recommendation_upgrade", change.get("category_name", ""), 1, "Category recommendation upgraded in the current recorded discovery.")
     # Import-quality facts are recorded for every resolvable import in the workspace, but they never drive an adjustment.
-    all_jobs = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, limit=IMPORT_WINDOW) if j is not None and j.workspace_id == workspace_id]
-    import_truncated = len(all_jobs) >= IMPORT_WINDOW
     for job in sorted(all_jobs, key=lambda j: j.import_id):
         resolved = job_for(job.source_name)
         if resolved is None or resolved is _DUPLICATE or resolved.import_id != job.import_id:
@@ -161,15 +174,16 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
                 provenance={"method": "import_quality_fact", "non_causal": True, "policy_version": CALIBRATION_POLICY_VERSION},
             ))
             exclusions[EXCLUSION_IMPORT_QUALITY] += 1
-    return sorted(signals, key=signal_order_key), dict(sorted(exclusions.items())), reference, comparisons, truncated, import_truncated
+    return _Derived(sorted(signals, key=signal_order_key), dict(sorted(exclusions.items())), reference, comparisons, truncated, import_truncated)
 
 
 def derive_source_usefulness_signals(workspace_id="default", comparison_ids=None, import_ids=None, *, as_of=None):
-    return _derive(workspace_id, comparison_ids, import_ids, as_of)[0]
+    return _derive(workspace_id, comparison_ids, import_ids, as_of).signals
 
 
 def run_source_calibration(workspace_id="default", comparison_ids=None, import_ids=None, *, as_of=None):
-    signals, exclusions, reference, comparisons, truncated, import_truncated = _derive(workspace_id, comparison_ids, import_ids, as_of)
+    derived = _derive(workspace_id, comparison_ids, import_ids, as_of)
+    signals, exclusions, reference, comparisons, truncated, import_truncated = derived
     profiles = build_source_calibration_profiles(signals)
     observed = [p for p in profiles if p.evidence_status == "observed"]
     scoped = bool(comparison_ids or import_ids)
@@ -190,9 +204,9 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
     if scoped:
         recommendations.append("This run was scoped to selected comparisons or imports: it is recorded, but it did not replace the workspace profiles that drive recommendations.")
     if truncated:
-        recommendations.append(f"Only the {COMPARISON_WINDOW} most recent comparisons were read; older ones are not counted.")
+        recommendations.append(f"Only the {COMPARISON_WINDOW} most recently registered comparisons were read; older ones are not counted.")
     if import_truncated:
-        recommendations.append(f"Only the {IMPORT_WINDOW} most recent imports were read; older ones are not counted.")
+        recommendations.append(f"Only the {IMPORT_WINDOW} most recently registered imports were read; older ones are not counted.")
     if exclusions:
         recommendations.append("Excluded from calibration: " + ", ".join(f"{reason}={count}" for reason, count in exclusions.items()) + ".")
     run_id = stable_id("calibration_", {"workspace_id": workspace_id, "reference_time": reference, "policy": CALIBRATION_POLICY_VERSION, "signal_ids": [s.signal_id for s in signals], "comparison_ids": [c.comparison_id for c in comparisons], "scoped": scoped})
@@ -210,6 +224,8 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
     # One write. A scoped run is recorded without touching workspace profiles; a workspace run retires profiles whose evidence has gone.
     persisted = registry.record_run(signals, [] if scoped else profiles, run, replace_workspace_profiles=not scoped)
     if not persisted:
+        # Nothing was saved, so nothing from this run may be reported as in use.
         run.status = "partial"
+        run.profiles = []
         run.recommendations.append("The calibration state could not be written; this run cannot be retrieved later by its identifier, and workspace profiles were not changed.")
     return run

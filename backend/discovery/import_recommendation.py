@@ -127,5 +127,6 @@ def build_import_recommendation_plan(gap_analysis: EvidenceGapAnalysis, max_reco
     recommendations.sort(key=lambda item: (-item.priority_score, item.parser_type))
     recommendations = recommendations[:max(1, min(int(max_recommendations), 20))]
     # The calibration that was applied is part of the identity, so a plan rebuilt after calibration changes gets a new id.
-    plan_id = stable_id("import_plan_", [gap_analysis.workspace_id, sorted(gap.gap_id for gap in gap_analysis.gaps), max_recommendations, sorted(effects.items())])
+    # Content-derived: the gaps, the limit, the applied calibration, and the resulting priorities all define the plan.
+    plan_id = stable_id("import_plan_", [gap_analysis.workspace_id, sorted(gap.gap_id for gap in gap_analysis.gaps), max_recommendations, sorted(effects.items()), [(item.parser_type, round(item.priority_score, 6)) for item in recommendations]])
     return ImportRecommendationPlan(plan_id, gap_analysis.workspace_id, "Recommended Evidence Imports", recommendations, {"gap_count": len(gap_analysis.gaps), "parser_count": len(recommendations), "coverage_method": "gap_to_parser_mapping"}, created_at=gap_analysis.created_at, metadata={"no_live_access": True})

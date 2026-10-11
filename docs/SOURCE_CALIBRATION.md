@@ -31,13 +31,14 @@ A profile is `observed` only with at least 3 eligible signals across at least 2 
 - Import-quality facts (rejected rows, duplicate removal) are recorded for every resolvable import, even without a comparison, but are excluded from the adjustment. Evidence quality belongs to the normalizer and source-quality scorer, not to calibration.
 - A comparison counts as a single-source change only when its baseline and current discoveries together name one source. A source dropped between the two is treated as a confound.
 - Staleness is 90 days before the reference time. The reference is the newest comparison, unless an internal `as_of` is given, so a workspace whose comparisons are all old is never marked stale by its own clock.
-- Only the 500 most recent comparisons are read. The run says so when the window is full.
+- Only the 500 most recently registered comparisons are read (registration order, not timestamps). The run says so when the window is full.
 - A run scoped to `comparison_ids` or `import_ids` is recorded, but it does not replace the workspace profiles that drive recommendations.
-- A workspace run retires any profile whose evidence has dropped out, so a stale profile cannot keep reordering imports.
+- A workspace run retires any profile and any current signal whose evidence has dropped out, so neither a stale profile nor a listed signal can outlive its comparison.
 - A profile is ignored for a plan dated more than 90 days after its last eligible evidence, so an old profile cannot reorder later plans.
-- If the state file cannot be written, the run is recorded as `persisted: false` with status `partial`. The in-memory profiles are rolled back in the same step, so ordering never uses profiles that were not saved.
+- If the state file cannot be written, the run is recorded as `persisted: false` with status `partial`, and it reports no profiles. The in-memory state is rolled back in the same step, so ordering never uses profiles that were not saved.
 - Duplicate source names are checked with an exact query per source, so a clash is found however many other imports exist.
-- A recommendation plan's identifier includes the calibration that was applied, so a rebuilt plan with different ordering has a different identifier.
+- A recommendation plan's identifier includes the calibration that was applied and the resulting priorities, so a rebuilt plan with different content has a different identifier and does not replace the earlier one.
+- Registry writes are serialized within a process, so concurrent runs cannot discard each other's committed records. Separate processes sharing one state file are not coordinated; keep one writer per state file.
 
 ## Determinism
 
@@ -45,7 +46,7 @@ Signal, profile and run identifiers are derived from their content, and the run 
 
 ## Stored state
 
-Corrupt content is moved to `<name>.unreadable-<n>` before the next write, with a new number each time, so earlier copies are kept. A read error (for example, a permissions problem) is not treated as corruption: the file is left alone and writes are refused until it can be read. Records written before this policy, including those nested inside stored runs, load as `legacy_unverified` with neutral adjustments, so they cannot drive ordering until a new run replaces them.
+Corrupt content, including bytes that are not UTF-8, is moved to `<name>.unreadable-<n>` before the next write, with a new number each time, so earlier copies are kept. A read error (for example, a permissions problem) is not treated as corruption: the file is left alone and writes are refused until it can be read. Records written before this policy, including those nested inside stored runs, load as `legacy_unverified` with neutral adjustments, so they cannot drive ordering until a new run replaces them.
 
 All calibration remains local/cache-only. No network, credentials, scraping, live connector, commerce, advertising, payment, or publication path is enabled.
 
