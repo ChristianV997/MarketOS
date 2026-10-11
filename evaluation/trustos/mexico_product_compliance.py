@@ -16,15 +16,25 @@ from .control_plane import TrustControl, TrustEvidenceRequirement, _clean
 
 
 PROMOTION_COMPLIANCE_GATE_ID = "compliance"
-ACCESS_DATE = "2026-09-19"
+ACCESS_DATE = "2026-10-11"
 LEGAL_DISCLAIMER = (
     "Not legal advice. TrustOS records requirement applicability and evidence "
     "gaps only; it does not conclude that a product is lawful to import or sell."
 )
 
-EVIDENCE_CLASSES = ("official_db", "supplier_claim", "fixture", "unknown")
+# official_db may satisfy launch only when fresh and model-matched.
+# All other classes are recorded gaps — never launch-satisfying evidence.
+EVIDENCE_CLASSES = ("official_db", "supplier_claim", "fixture", "unknown", "manual", "conflicting")
 LAUNCH_SATISFYING_EVIDENCE = frozenset({"official_db"})
-NON_SATISFYING_EVIDENCE = frozenset({"supplier_claim", "fixture", "unknown", "manual"})
+NON_SATISFYING_EVIDENCE = frozenset({"supplier_claim", "fixture", "unknown", "manual", "conflicting"})
+GAP_REASON_CODES = (
+    "missing_official_evidence",
+    "non_official_evidence",
+    "stale_citation",
+    "conflicting_evidence",
+    "not_assessed_market",
+    "missing_exact_sku_model",
+)
 REQUIREMENT_STATUSES = ("needs_evidence", "not_assessed", "not_applicable", "satisfied")
 REQUIREMENT_FAMILIES = ("import_customs", "labeling_safety", "telecom_homologation", "sector_permits", "tax_invoicing")
 MARKETS = ("mexico", "united_states", "canada", "unknown")
@@ -81,7 +91,12 @@ class MexicoPolicySource:
 
 
 def mexico_policy_sources() -> tuple[MexicoPolicySource, ...]:
-    """Official citations recorded this session. Access date 2026-09-19."""
+    """Official citations recorded this session. Access date 2026-10-11.
+
+    Re-verified this session via primary pages: lmtr-index (Cámara),
+    lfpc-index (Cámara), crt (gob.mx/crt). Remaining rows keep prior
+    publication/effective facts; they are not newly certified lawful.
+    """
     accessed = ACCESS_DATE
     rows = (
         ("lmtr", "Ley en Materia de Telecomunicaciones y Radiodifusión", "Cámara de Diputados / DOF",
@@ -92,7 +107,7 @@ def mexico_policy_sources() -> tuple[MexicoPolicySource, ...]:
          "Primary publication of the LMTR decree."),
         ("lmtr-index", "LMTR índice Cámara", "Cámara de Diputados",
          "https://www.diputados.gob.mx/LeyesBiblio/ref/lmtr.htm", "2025-07-16", "2025-07-16", "official_observation",
-         "Index page for the LMTR original text."),
+         "Index page for the LMTR original text. Re-checked 2026-10-11: DOF 16-07-2025, sin reforma."),
         ("lical", "Ley de Infraestructura de la Calidad", "Cámara de Diputados / DOF",
          "https://www.diputados.gob.mx/LeyesBiblio/pdf/LICal_010720.pdf", "2020-07-01", "2020-07-01", "verified_legal_text",
          "DOF 1 Jul 2020. Abroga the Ley Federal sobre Metrología y Normalización. Art. 1: observancia general. Art. 62: Evaluación de la Conformidad demonstrates compliance with NOMs or estándares. Cámara index reports sin reforma."),
@@ -101,7 +116,7 @@ def mexico_policy_sources() -> tuple[MexicoPolicySource, ...]:
          "Texto vigente; última reforma DOF 12-12-2025; actualización de montos DOF 23-12-2025. Art. 1: observancia en toda la República; information, safety, and advertising principles. PROFECO is the enforcing procuraduría."),
         ("lfpc-index", "LFPC índice Cámara", "Cámara de Diputados",
          "https://www.diputados.gob.mx/LeyesBiblio/ref/lfpc.htm", "1992-12-24", "2025-12-12", "official_observation",
-         "Index confirming última reforma 12 Dec 2025."),
+         "Index confirming última reforma 12 Dec 2025; montos acuerdo DOF 23-12-2025. Re-checked 2026-10-11."),
         ("ladua", "Ley Aduanera", "Cámara de Diputados / DOF",
          "https://www.diputados.gob.mx/LeyesBiblio/pdf/LAdua.pdf", "1995-12-15", "2025-11-19", "verified_legal_text",
          "Última reforma DOF 19-11-2025 (vigencia 1 Jan 2026 except listed transitorios). Art. 1: regulates entry/exit of merchandise and despacho aduanero. Pedimento and legal stay of foreign goods are customs-law questions; HS/TIGIE classification is required evidence, not inferred."),
@@ -146,7 +161,7 @@ def mexico_policy_sources() -> tuple[MexicoPolicySource, ...]:
          "Official CoH search UI. This module never scrapes it. supplier_claim that a model is homologado is not an official_db row."),
         ("crt", "Comisión Reguladora de Telecomunicaciones", "CRT / gob.mx",
          "https://www.gob.mx/crt", "2025-10-16", "", "official_observation",
-         "CRT Pleno integration is described in DOF recitals around 16 Oct 2025; IFT pages are archive. Unresolved: whether CRT republished IFT 2021 homologation lineamientos unchanged. Do not hard-code Tipo A/B/C."),
+         "CRT gob.mx page re-checked 2026-10-11 (agency live). IFT pages remain archive. Unresolved: whether CRT republished IFT 2021 homologation lineamientos unchanged. Do not hard-code Tipo A/B/C."),
         ("cofepris", "Comisión Federal para la Protección contra Riesgos Sanitarios", "COFEPRIS / gob.mx",
          "https://www.gob.mx/cofepris", "", "", "official_observation",
          "Official agency page. Sanitary regulation of goods/services/health inputs. Exact SKU competence vs SADER/SENASICA for nutrients, seeds, or pet food is unresolved."),
@@ -250,6 +265,36 @@ class MexicoRequirementResult:
 
 
 @dataclass(frozen=True)
+class MexicoEvidenceGap:
+    """One open evidence gap before a human launch review.
+
+    These rows never certify legality. They only state what official evidence
+    is still missing, or why recorded evidence cannot satisfy launch.
+    """
+    requirement_id: str
+    family: str
+    evidence_class: str
+    reason_code: str
+    blocker: str
+    needed_evidence: str
+    satisfies_launch: bool = False
+
+    def __post_init__(self) -> None:
+        if self.family not in REQUIREMENT_FAMILIES:
+            raise ValueError(f"unsupported requirement family: {self.family}")
+        if self.reason_code not in GAP_REASON_CODES:
+            raise ValueError(f"unsupported gap reason: {self.reason_code}")
+        if self.satisfies_launch:
+            raise ValueError("evidence gaps must never claim launch satisfaction")
+        if self.evidence_class in LAUNCH_SATISFYING_EVIDENCE and self.reason_code == "missing_official_evidence":
+            # official_db can still form a gap when stale/mismatched; other reason codes apply.
+            pass
+
+    def to_dict(self) -> dict[str, Any]:
+        return _clean(self)
+
+
+@dataclass(frozen=True)
 class MexicoComplianceDecision:
     promotion_gate_id: str
     compliance_satisfied: bool
@@ -259,6 +304,8 @@ class MexicoComplianceDecision:
     results: tuple[MexicoRequirementResult, ...]
     blockers: tuple[str, ...]
     warnings: tuple[str, ...]
+    evidence_gaps: tuple[MexicoEvidenceGap, ...] = ()
+    launch_review_ready: bool = False
     not_legal_advice: bool = True
     live_lookup_performed: bool = False
     legal_conclusion: bool = False
@@ -272,12 +319,53 @@ class MexicoComplianceDecision:
             raise ValueError("Mexico overlay must not create a second gate")
         if self.legal_conclusion or self.tax_conclusion or self.live_lookup_performed:
             raise ValueError("Mexico overlay must remain metadata-only")
+        if self.launch_review_ready and self.evidence_gaps:
+            raise ValueError("launch_review_ready cannot be true while evidence gaps remain")
+        if self.launch_review_ready != self.compliance_satisfied:
+            raise ValueError("launch_review_ready must track promotion.compliance satisfaction")
 
     def requirement(self, requirement_id: str) -> MexicoRequirementResult:
         return next(item for item in self.results if item.requirement_id == requirement_id)
 
     def promotion_gate_satisfaction(self) -> dict[str, bool]:
         return {PROMOTION_COMPLIANCE_GATE_ID: self.compliance_satisfied}
+
+    def gaps_by_family(self) -> dict[str, tuple[MexicoEvidenceGap, ...]]:
+        grouped: dict[str, list[MexicoEvidenceGap]] = {family: [] for family in REQUIREMENT_FAMILIES}
+        for gap in self.evidence_gaps:
+            grouped[gap.family].append(gap)
+        return {family: tuple(items) for family, items in grouped.items() if items}
+
+    def launch_review_evidence_brief(self) -> str:
+        """Operator-facing explanation of what evidence is still needed.
+
+        Not legal advice. Never states that supplier/fixture/unknown/stale/
+        conflicting evidence satisfies launch.
+        """
+        if self.compliance_satisfied:
+            return (
+                "All assessed Mexico requirement families are satisfied or not_applicable "
+                "on recorded official evidence; this is not a legal/tax conclusion. "
+                "A lawyer/customs-broker/accountant human review is still required before launch. "
+                + LEGAL_DISCLAIMER
+            )
+        lines = [
+            "Mexico promotion.compliance remains blocked pending official evidence gaps "
+            f"for product_family={self.product_family!r} sku={self.sku_model_exact!r}.",
+            "Non-satisfying evidence classes (supplier_claim, fixture, unknown, manual, "
+            "conflicting) and stale citations never clear launch.",
+        ]
+        by_family = self.gaps_by_family()
+        if not by_family:
+            lines.append("No structured gaps recorded; inspect blockers=" + ", ".join(self.blockers) + ".")
+        for family, gaps in by_family.items():
+            detail = "; ".join(
+                f"{gap.requirement_id}[{gap.reason_code}/{gap.evidence_class}]: {gap.needed_evidence}"
+                for gap in gaps
+            )
+            lines.append(f"{family}: {detail}")
+        lines.append(LEGAL_DISCLAIMER)
+        return " ".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
         return _clean(self)
@@ -319,14 +407,108 @@ def _from_evidence(requirement_id: str, family: str, pack_id: str, applicable: s
         return _result(requirement_id, family, pack_id, "not_assessed", note="Mexico requirements are not assessed for this market.")
     if applicable == "not_applicable":
         return _result(requirement_id, family, pack_id, "not_applicable", note="Declared not applicable for this family/facts; not a legal pass.")
-    if evidence_class in {"supplier_claim", "fixture", "manual"}:
-        return _result(requirement_id, family, pack_id, "needs_evidence", blocker=f"{requirement_id}:non_official_evidence:{evidence_class}", note="supplier_claim/fixture/manual cannot satisfy launch compliance.")
+    if evidence_class == "conflicting":
+        return _result(
+            requirement_id, family, pack_id, "needs_evidence",
+            blocker=f"{requirement_id}:conflicting_evidence",
+            note="Conflicting evidence records cannot satisfy launch; reconcile to one official, fresh, model-matched source.",
+        )
+    if evidence_class in NON_SATISFYING_EVIDENCE - {"unknown", "conflicting"}:
+        return _result(
+            requirement_id, family, pack_id, "needs_evidence",
+            blocker=f"{requirement_id}:non_official_evidence:{evidence_class}",
+            note=f"{evidence_class} evidence cannot satisfy launch compliance; official_db evidence is required.",
+        )
     if extra_ok and _official(evidence_class, packet):
         return _result(requirement_id, family, pack_id, "satisfied", note="Official evidence present and citation is fresh. Not a legal conclusion.")
     note = missing_note or "Official, fresh, model-matched evidence is required."
     if citation_is_stale(packet.sources_accessed_at, packet.as_of, packet.citation_freshness_days) and evidence_class == "official_db":
-        return _result(requirement_id, family, pack_id, "needs_evidence", blocker=f"{requirement_id}:stale_citation", note=note)
+        return _result(requirement_id, family, pack_id, "needs_evidence", blocker=f"{requirement_id}:stale_citation", note="Stale official citations cannot satisfy launch; refresh primary-source evidence.")
+    if evidence_class == "unknown":
+        return _result(
+            requirement_id, family, pack_id, "needs_evidence",
+            blocker=f"{requirement_id}:missing_official_evidence",
+            note=note,
+        )
     return _result(requirement_id, family, pack_id, "needs_evidence", note=note)
+
+
+def _gap_reason_for(result: MexicoRequirementResult, evidence_class: str) -> str:
+    blocker = result.blocker
+    if "conflicting" in blocker or evidence_class == "conflicting":
+        return "conflicting_evidence"
+    if "stale_citation" in blocker:
+        return "stale_citation"
+    if "non_official_evidence" in blocker or evidence_class in {"supplier_claim", "fixture", "manual"}:
+        return "non_official_evidence"
+    if result.status == "not_assessed":
+        return "not_assessed_market"
+    return "missing_official_evidence"
+
+
+def _evidence_class_for_requirement(packet: MexicoProductCompliancePacket, requirement_id: str) -> str:
+    mapping = {
+        "mx_hs_classification": packet.hs_evidence_class,
+        "mx_pedimento": packet.pedimento_evidence_class,
+        "mx_immex": "unknown",
+        "mx_importer_rfc": packet.rfc_evidence_class,
+        "mx_cfdi": packet.cfdi_evidence_class,
+        "mx_iva": packet.iva_evidence_class,
+        "mx_nom_electrical_safety": packet.nom_003_evidence_class,
+        "mx_nom_labeling": packet.nom_024_evidence_class,
+        "mx_nom_electrical_installations": "unknown",
+        "mx_lfpc_profeco": packet.lfpc_labeling_evidence_class,
+        "mx_infraestructura_calidad": packet.lfpc_labeling_evidence_class,
+        "mx_telecom_homologation": packet.coh_evidence_class,
+        "mx_nom_208_radio": packet.coh_evidence_class,
+        "mx_ley_general_salud": packet.cofepris_evidence_class,
+        "mx_cofepris_sector": packet.cofepris_evidence_class,
+        "mx_semarnat_sector": packet.semarnat_evidence_class,
+    }
+    return mapping.get(requirement_id, "unknown")
+
+
+def build_mexico_evidence_gaps(
+    packet: MexicoProductCompliancePacket,
+    results: tuple[MexicoRequirementResult, ...],
+    *,
+    extra_blockers: tuple[str, ...] = (),
+) -> tuple[MexicoEvidenceGap, ...]:
+    """Project open needs_evidence rows into operator-facing evidence gaps."""
+    gaps: list[MexicoEvidenceGap] = []
+    if packet.market != "mexico":
+        gaps.append(MexicoEvidenceGap(
+            "mx_market_scope", "import_customs", "unknown", "not_assessed_market",
+            "mexico_requirements_not_assessed",
+            "Mexico requirement families are not assessed for this market; do not treat silence as clearance.",
+        ))
+        return tuple(gaps)
+    if "missing_exact_sku_model" in extra_blockers:
+        gaps.append(MexicoEvidenceGap(
+            "mx_sku_model", "telecom_homologation", "unknown", "missing_exact_sku_model",
+            "missing_exact_sku_model",
+            "Provide the exact SKU/model string before any CoH or NOM evidence can be matched.",
+        ))
+    for result in results:
+        if result.status != "needs_evidence":
+            continue
+        evidence_class = _evidence_class_for_requirement(packet, result.requirement_id)
+        # Surface cancelled/mismatched CoH as conflicting even when class was official_db.
+        if result.requirement_id in {"mx_telecom_homologation", "mx_nom_208_radio"} and (
+            "Cancelled CoH" in result.note or "does not match" in result.note or packet.coh_status == COH_CANCELLED
+        ):
+            evidence_class = "conflicting"
+        reason = _gap_reason_for(result, evidence_class)
+        needed = result.note or "Official, fresh, exact-model evidence is required before human launch review."
+        if evidence_class in NON_SATISFYING_EVIDENCE:
+            needed = (
+                f"Recorded evidence_class={evidence_class!r} does not satisfy launch. {needed}"
+            )
+        gaps.append(MexicoEvidenceGap(
+            result.requirement_id, result.family, evidence_class, reason,
+            result.blocker or f"{result.requirement_id}:{reason}", needed,
+        ))
+    return tuple(gaps)
 
 
 def _market_applicable(packet: MexicoProductCompliancePacket) -> str:
@@ -502,9 +684,12 @@ def evaluate_mexico_product_compliance(packet: MexicoProductCompliancePacket | M
         and bool(packet.sku_model_exact.strip())
         and all(item.status in {"not_applicable", "satisfied"} for item in results)
     )
+    blocker_tuple = tuple(dict.fromkeys(blockers))
+    warning_tuple = tuple(dict.fromkeys(warnings))
+    gaps = build_mexico_evidence_gaps(packet, results, extra_blockers=blocker_tuple)
     return MexicoComplianceDecision(
         PROMOTION_COMPLIANCE_GATE_ID, compliance, packet.market, packet.product_family,
-        packet.sku_model_exact, results, tuple(dict.fromkeys(blockers)), tuple(dict.fromkeys(warnings)),
+        packet.sku_model_exact, results, blocker_tuple, warning_tuple, gaps, compliance,
     )
 
 
@@ -574,8 +759,10 @@ def build_mexico_trust_controls() -> tuple[TrustControl, ...]:
 
 __all__ = [
     "PROMOTION_COMPLIANCE_GATE_ID", "ACCESS_DATE", "LEGAL_DISCLAIMER", "EVIDENCE_CLASSES",
+    "NON_SATISFYING_EVIDENCE", "GAP_REASON_CODES",
     "REQUIREMENT_STATUSES", "REQUIREMENT_FAMILIES", "MARKETS", "PRODUCT_FAMILIES",
     "MexicoPolicySource", "MexicoProductCompliancePacket", "MexicoRequirementResult",
-    "MexicoComplianceDecision", "mexico_policy_sources", "evaluate_mexico_product_compliance",
+    "MexicoEvidenceGap", "MexicoComplianceDecision", "mexico_policy_sources",
+    "evaluate_mexico_product_compliance", "build_mexico_evidence_gaps",
     "build_mexico_trust_controls", "citation_is_stale",
 ]
