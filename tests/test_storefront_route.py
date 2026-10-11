@@ -178,10 +178,10 @@ def test_brand_id_is_escaped_in_markup(client):
 def test_checkout_redirect_allows_only_the_provider_contract(client, monkeypatch):
     import backend.commerce.checkout as checkout
 
-    def _fake(url, dry_run):
+    def _fake(url, dry_run, session_id="cs_test_synthetic"):
         def _call(brand_id, product_id, qty=1, utm=None):
             assert utm == {"utm_source": "tiktok"}
-            return {"status": "ok", "session_id": "cs_test_synthetic", "url": url, "dry_run": dry_run}
+            return {"status": "ok", "session_id": session_id, "url": url, "dry_run": dry_run}
         return _call
 
     allowed = "https://checkout.stripe.com/c/pay/cs_test_synthetic"
@@ -209,7 +209,7 @@ def test_checkout_redirect_allows_only_the_provider_contract(client, monkeypatch
     )
     for url in rejected:
         dry_run = url.startswith("https://localhost:8000/")
-        monkeypatch.setattr(checkout, "create_checkout_session", _fake(url, dry_run))
+        monkeypatch.setattr(checkout, "create_checkout_session", _fake(url, dry_run, session_id="not-a-stripe-session"))
         resp = client.get("/s/beauty/jade-roller/checkout?utm_source=tiktok")
         assert resp.status_code == 409
         assert "location" not in {key.lower() for key in resp.headers}

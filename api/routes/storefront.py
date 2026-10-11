@@ -47,6 +47,7 @@ _ALLOWED_TAGS = {"p", "br", "ul", "ol", "li", "strong", "em", "b", "i"}
 _DROPPED_TAGS = {"script", "style", "iframe", "object", "embed", "svg", "math", "noscript"}
 _STRIPE_CHECKOUT_NETLOCS = {"checkout.stripe.com", "checkout.stripe.com:443"}
 _STRIPE_CHECKOUT_PATH = re.compile(r"/c/pay/[A-Za-z0-9_-]+$")
+_STRIPE_SESSION_ID = re.compile(r"cs_[A-Za-z0-9_-]{4,200}$")
 
 
 def _attr(value: object) -> str:
@@ -114,17 +115,22 @@ def _public_base():
     return parts
 
 
-def _safe_checkout_target(url: object, *, dry_run: bool, brand_id: str, product_id: str) -> str | None:
-    """Return a rebuilt redirect target, or None. Host checks are exact, not prefixes."""
-    if not isinstance(url, str) or not url or any(ch in url for ch in "\r\n\t\\"):
-        return None
-    parts = urlsplit(url)
-    if parts.username or parts.password or parts.fragment:
-        return None
-    netloc = parts.netloc
-    if not netloc or any(ch in netloc for ch in "\\@ "):
-        return None
+def _safe_checkout_target(value: object, *, dry_run: bool, brand_id: str, product_id: str) -> str | None:
+    """Return a rebuilt redirect target, or None.
+
+    Dry-run redirects are rebuilt from the local allowlisted base. Live
+    redirects are rebuilt from the provider session identifier; the provider's
+    returned URL is never used as a redirect authority.
+    """
     if dry_run:
+        if not isinstance(value, str) or not value or any(ch in value for ch in "\r\n\t\\"):
+            return None
+        parts = urlsplit(value)
+        if parts.username or parts.password or parts.fragment:
+            return None
+        netloc = parts.netloc
+        if not netloc or any(ch in netloc for ch in "\\@ "):
+            return None
         base = _public_base()
         expected_path = f"/s/{brand_id}/{product_id}"
         if (
@@ -137,11 +143,9 @@ def _safe_checkout_target(url: object, *, dry_run: bool, brand_id: str, product_
         ):
             return None
         return f"{base.scheme}://{base.netloc}{expected_path}?purchased=1"
-    if parts.scheme != "https" or netloc not in _STRIPE_CHECKOUT_NETLOCS:
+    if not isinstance(value, str) or not _STRIPE_SESSION_ID.fullmatch(value):
         return None
-    if not _STRIPE_CHECKOUT_PATH.fullmatch(parts.path) or parts.query:
-        return None
-    return f"https://checkout.stripe.com{parts.path}"
+    return f"https://checkout.stripe.com/c/pay/{value}"
 
 
 @router.get("/s/{brand_id}", response_class=HTMLResponse)
@@ -223,7 +227,7 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
             status_code=409,
         )
     target = _safe_checkout_target(
-        result.get("url"),
+        result.get("url") if bool(result.get("dry_run")) else result.get("session_id"),
         dry_run=bool(result.get("dry_run")),
         brand_id=brand_id,
         product_id=product_id,
