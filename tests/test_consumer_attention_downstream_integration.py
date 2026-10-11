@@ -16,6 +16,18 @@ from evaluation.commerce.site_draft_builder import build_site_draft_pack
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "consumer_attention" / "service_market_generic.json"
 CLI = ROOT / "scripts" / "run_consumer_attention_intelligence.py"
+MANUAL_CSV = ROOT / "tests" / "fixtures" / "consumer_attention" / "reddit_comments_manual_import.csv"
+
+
+def manual_import_cli(output_format: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(CLI), "--manual-import", str(MANUAL_CSV), "--source", "reddit", output_format],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
 
 
 def service_report() -> dict:
@@ -145,3 +157,38 @@ def test_cli_rejects_unparseable_reference_time():
     )
     assert result.returncode == 2
     assert "observed_at must be an ISO-8601 timestamp" in result.stderr
+
+
+def test_manual_csv_source_and_field_provenance_reach_opportunity_synthesis():
+    attention = json.loads(manual_import_cli("--json").stdout)
+    evidence = attention["candidates"][0]["evidence"]
+
+    assert attention["evidence_mode"] == "manual_import"
+    assert attention["candidates"][0]["source_types"] == ["reddit_comments_manual_import"]
+    assert evidence[0]["field_provenance"]["pain_point"] == "manual_import"
+    assert attention["read_only"] is True
+    assert attention["network_calls"] is False
+    assert attention["mutated"] is False
+
+    synthesis = build_product_opportunity_synthesis(None, None, attention).to_dict()
+    consumer = synthesis["candidates"][0]["evidence_matrix"]["consumer"]
+    assert consumer["mode"] == "manual_import"
+    assert consumer["source_types"] == ["reddit_comments_manual_import"]
+    assert consumer["platforms"] == ["reddit"]
+    assert consumer["evidence_count"] == 1
+    assert consumer["field_provenance"]["pain_point"] == ["manual_import"]
+    assert synthesis["supplier_feasibility"] == 0
+    assert synthesis["unit_economics_summary"] == {}
+    assert synthesis["read_only"] is True
+    assert synthesis["network_calls"] is False
+    assert synthesis["mutated"] is False
+
+
+def test_manual_cli_markdown_displays_bounded_source_and_provenance():
+    output = manual_import_cli("--markdown").stdout
+
+    assert "## Evidence Provenance" in output
+    assert "Source types: reddit_comments_manual_import" in output
+    assert "Field provenance classes: manual_import" in output
+    assert "manual_import" in output
+    assert "not ad authorization" in output
