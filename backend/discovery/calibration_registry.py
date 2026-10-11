@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 from pathlib import Path
 
 from .source_calibration import CalibrationRun, SourceCalibrationProfile, SourceUsefulnessSignal
+
+_log = logging.getLogger(__name__)
 
 
 class CalibrationRegistry:
@@ -16,11 +19,19 @@ class CalibrationRegistry:
         for signal in signals: self.signals[signal.signal_id] = signal
         self.save(); return signals
     def list_signals(self, workspace_id=None, source_name=None, parser_type=None, signal_type=None, limit=100): return list(self.signals.values())[:max(0, min(int(limit), 1000))] if not any([workspace_id, source_name, parser_type, signal_type]) else [x for x in self.signals.values() if (workspace_id is None or x.workspace_id == workspace_id) and (source_name is None or x.source_name == source_name) and (parser_type is None or x.parser_type == parser_type) and (signal_type is None or x.signal_type == signal_type)][:max(0, min(int(limit), 1000))]
-    def register_profile(self, profile): self.profiles[profile.profile_id] = profile; self.save(); return profile
+    def register_profile(self, profile):
+        key = (profile.workspace_id, profile.source_name, profile.parser_type)
+        for existing_id in [pid for pid, item in self.profiles.items() if pid != profile.profile_id and (item.workspace_id, item.source_name, item.parser_type) == key]:
+            del self.profiles[existing_id]
+        self.profiles[profile.profile_id] = profile; self.save(); return profile
     def get_profile(self, source_name, parser_type=None, workspace_id=None):
+        # Without a workspace there is no tenant to read from, so the answer is None rather than another workspace's profile.
+        if workspace_id is None: return None
         for profile in self.profiles.values():
-            if profile.source_name == source_name and (parser_type is None or profile.parser_type == parser_type) and (workspace_id is None or profile.workspace_id == workspace_id): return profile
+            if profile.source_name == source_name and (parser_type is None or profile.parser_type == parser_type) and profile.workspace_id == workspace_id: return profile
         return None
+    def profiles_for_parser(self, workspace_id, parser_type):
+        return sorted((x for x in self.profiles.values() if x.workspace_id == workspace_id and x.parser_type == parser_type), key=lambda x: (x.source_name, x.profile_id))
     def list_profiles(self, workspace_id=None, parser_type=None, limit=100): return [x for x in self.profiles.values() if (workspace_id is None or x.workspace_id == workspace_id) and (parser_type is None or x.parser_type == parser_type)][:max(0, min(int(limit), 500))]
     def register_calibration_run(self, run): self.runs[run.calibration_id] = run; self.save(); return run
     def get_calibration_run(self, calibration_id): return self.runs.get(calibration_id)
@@ -31,11 +42,13 @@ class CalibrationRegistry:
         try:
             if not self.path.exists(): return
             raw = json.loads(self.path.read_text(encoding="utf-8")); self.signals = {k: SourceUsefulnessSignal.from_dict(v) for k, v in raw.get("signals", {}).items()}; self.profiles = {k: SourceCalibrationProfile.from_dict(v) for k, v in raw.get("profiles", {}).items()}; self.runs = {k: CalibrationRun.from_dict(v) for k, v in raw.get("runs", {}).items()}
-        except Exception: self.signals, self.profiles, self.runs = {}, {}, {}
+        except Exception as exc:
+            _log.warning("calibration registry unreadable; starting empty: %s", type(exc).__name__); self.signals, self.profiles, self.runs = {}, {}, {}
     def save(self):
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True); temp = self.path.with_suffix(".tmp"); temp.write_text(json.dumps(self.to_dict(), indent=2, default=str), encoding="utf-8"); temp.replace(self.path)
-        except Exception: pass
+        except Exception as exc:
+            _log.warning("calibration registry save failed: %s", type(exc).__name__)
 
 
 _singleton = None; _lock = threading.Lock()

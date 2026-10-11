@@ -6,16 +6,20 @@ from .evidence_import import EvidenceSourceQuality
 
 
 def apply_calibration_to_source_quality(source_quality: EvidenceSourceQuality, calibration_profile) -> EvidenceSourceQuality:
-    """Return a bounded copy; calibration never changes source safety."""
+    """Return a bounded copy. Calibration can only lower confidence, and only for an observed profile.
+
+    Score, allowed and blocked signal types, freshness, and source type are never changed, so a fixture or
+    manual source cannot be upgraded to live and no source gains safety from calibration.
+    """
     import copy
     result = copy.deepcopy(source_quality)
+    if calibration_profile is None or getattr(calibration_profile, "evidence_status", "") != "observed":
+        return result
     if result.source_type == "external_live" or "source_not_allowed_in_read_only_phase" in result.blocked_signal_types:
         return result
-    adjustment = float(getattr(calibration_profile, "confidence_multiplier_adjustment", 1.0)) if calibration_profile else 1.0
-    if result.metadata.get("synthetic_or_cached_only") is True:
-        result.confidence_multiplier = min(result.confidence_multiplier * adjustment, 1.0)
-    else:
-        result.confidence_multiplier = min(result.confidence_multiplier * adjustment, 1.0)
+    factor = max(0.0, min(float(getattr(calibration_profile, "confidence_multiplier_adjustment", 1.0)), 1.0))
+    result.confidence_multiplier = result.confidence_multiplier * factor
+    result.metadata = {**result.metadata, "calibration_profile_id": getattr(calibration_profile, "profile_id", ""), "calibration_factor": factor}
     return result
 
 
