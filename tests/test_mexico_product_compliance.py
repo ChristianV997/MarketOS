@@ -325,3 +325,84 @@ def test_hydro_nutrients_without_cofepris_need_evidence():
     decision = evaluate_mexico_product_compliance(_official_base(contains_nutrients_or_seeds=True, cofepris_evidence_class="unknown"))
     assert decision.requirement("mx_cofepris_sector").status == "needs_evidence"
     assert decision.compliance_satisfied is False
+
+
+def test_manual_and_conflicting_evidence_classes_never_satisfy():
+    manual = evaluate_mexico_product_compliance(_official_base(
+        rfc_evidence_class="manual", importer_rfc="XAXX010101000",
+    ))
+    assert manual.requirement("mx_importer_rfc").status == "needs_evidence"
+    assert "non_official_evidence:manual" in manual.requirement("mx_importer_rfc").blocker
+    assert manual.compliance_satisfied is False
+    assert any(gap.evidence_class == "manual" for gap in manual.evidence_gaps)
+
+    conflicting = evaluate_mexico_product_compliance(_official_base(
+        product_family="smart_pet_wifi_2_4",
+        radio_present=True,
+        radio_bands_observed=("2.4ghz",),
+        electrical_present=True,
+        sku_model_exact="NHA-P610",
+        coh_number="IFT-COH-001",
+        coh_model="NHA-P610",
+        coh_status="active",
+        coh_evidence_class="conflicting",
+    ))
+    assert conflicting.requirement("mx_telecom_homologation").status == "needs_evidence"
+    assert "conflicting_evidence" in conflicting.requirement("mx_telecom_homologation").blocker
+    assert conflicting.compliance_satisfied is False
+    assert any(gap.reason_code == "conflicting_evidence" for gap in conflicting.evidence_gaps)
+
+
+def test_cancelled_official_coh_surfaces_conflicting_gap():
+    decision = evaluate_mexico_product_compliance(_official_base(
+        product_family="smart_pet_wifi_2_4",
+        radio_present=True,
+        radio_bands_observed=("2.4ghz",),
+        electrical_present=True,
+        sku_model_exact="NHA-P610",
+        coh_number="IFT-COH-001",
+        coh_model="NHA-P610",
+        coh_status="cancelled",
+        coh_evidence_class=OFFICIAL,
+    ))
+    telecom_gaps = [gap for gap in decision.evidence_gaps if gap.requirement_id == "mx_telecom_homologation"]
+    assert telecom_gaps
+    assert telecom_gaps[0].evidence_class == "conflicting"
+    assert telecom_gaps[0].satisfies_launch is False
+    assert decision.launch_review_ready is False
+
+
+def test_evidence_gaps_group_by_family_and_brief_is_operator_facing():
+    decision = evaluate_mexico_product_compliance(_official_base(
+        importer_rfc="",
+        rfc_evidence_class="unknown",
+        cfdi_ready=False,
+        cfdi_evidence_class="supplier_claim",
+        pedimento_ref="",
+        pedimento_evidence_class="fixture",
+    ))
+    assert decision.compliance_satisfied is False
+    assert decision.launch_review_ready is False
+    by_family = decision.gaps_by_family()
+    assert "tax_invoicing" in by_family
+    assert "import_customs" in by_family
+    brief = decision.launch_review_evidence_brief()
+    assert "promotion.compliance remains blocked" in brief
+    assert "supplier_claim" in brief
+    assert "fixture" in brief
+    assert "Not legal advice" in brief
+    assert "satisfy" in brief.lower()
+    payload = decision.to_dict()
+    assert "evidence_gaps" in payload
+    assert payload["launch_review_ready"] is False
+    assert all(gap["satisfies_launch"] is False for gap in payload["evidence_gaps"])
+
+
+def test_satisfied_packet_has_no_gaps_and_ready_flag_tracks_gate():
+    decision = evaluate_mexico_product_compliance(_official_base())
+    assert decision.evidence_gaps == ()
+    assert decision.launch_review_ready is True
+    assert decision.promotion_gate_satisfaction() == {"compliance": True}
+    brief = decision.launch_review_evidence_brief()
+    assert "human review is still required" in brief
+    assert "Not legal advice" in brief

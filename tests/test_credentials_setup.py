@@ -1,6 +1,4 @@
 """Tests for credential management and verification."""
-import json
-import os
 import tempfile
 from pathlib import Path
 
@@ -8,8 +6,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.credentials_setup import router as credentials_router
+import backend.config as backend_config
+from api.credentials_setup import credential_test_gate, credential_write_gate, router as credentials_router
 from backend.config import get_credential, set_credential, list_configured_services, is_dry_run
+from backend.identity.workspaces import WorkspaceAccess
 
 
 @pytest.fixture
@@ -18,14 +18,25 @@ def temp_config(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         config_path = Path(tmpdir) / "credentials.json"
         monkeypatch.setenv("MARKETOS_CONFIG_PATH", str(config_path))
+        # backend.config reads the env var once, at import. Without this the tests would write the
+        # real credentials file, so the module-level path is replaced for the test's duration.
+        monkeypatch.setattr(backend_config, "_CONFIG_PATH", config_path)
         yield config_path
 
 
 @pytest.fixture
 def client(temp_config):
-    """FastAPI test client with credentials router."""
+    """FastAPI test client with credentials router.
+
+    The two authorization gates are replaced by a synthetic operator so these tests exercise route
+    behavior only. Authorization itself (anonymous, invalid, spoofed, unauthorized) is covered with
+    the real gates in tests/identity/test_credentials_setup_gate.py.
+    """
     app = FastAPI()
     app.include_router(credentials_router, prefix="/api/setup")
+    synthetic = WorkspaceAccess("https://issuer.test", "synthetic-operator", "ws_synthetic", "internal", "n", "internal_operator")
+    app.dependency_overrides[credential_write_gate] = lambda: synthetic
+    app.dependency_overrides[credential_test_gate] = lambda: synthetic
     return TestClient(app)
 
 
@@ -100,11 +111,19 @@ class TestCredentialsAPI:
         """POST /credentials/set stores credential."""
         response = client.post(
             "/api/setup/credentials/set",
-            json={"key": "TEST_TOKEN", "value": "secret123"},
+            json={"key": "META_ACCESS_TOKEN", "value": "secret123"},
         )
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
-        assert get_credential("TEST_TOKEN") == "secret123"
+        assert "secret123" not in response.text
+        assert get_credential("META_ACCESS_TOKEN") == "secret123"
+
+    def test_set_credential_rejects_keys_outside_the_provider_allowlist(self, client, temp_config):
+        """Only provider credential keys are writable; mode flags and arbitrary names are not."""
+        for key in ("TEST_TOKEN", "META_DRY_RUN", "PATH"):
+            response = client.post("/api/setup/credentials/set", json={"key": key, "value": "x"})
+            assert response.status_code == 400, key
+        assert not temp_config.exists()
 
     def test_set_credential_invalid_key(self, client, temp_config):
         """Invalid key format rejected."""
