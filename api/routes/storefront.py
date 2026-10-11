@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import html
 import logging
-from urllib.parse import urlencode
+import os
+from html.parser import HTMLParser
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -40,10 +42,105 @@ _PAGE_STYLE = """
   footer{color:#9aa3ad;font-size:12px;padding:26px 20px;text-align:center}
 """
 
+_ALLOWED_TAGS = {"p", "br", "ul", "ol", "li", "strong", "em", "b", "i"}
+_DROPPED_TAGS = {"script", "style", "iframe", "object", "embed", "svg", "math", "noscript"}
+_STRIPE_CHECKOUT_NETLOCS = {"checkout.stripe.com", "checkout.stripe.com:443"}
+
+
+def _attr(value: object) -> str:
+    return html.escape(str(value), quote=True)
+
+
+class _DescriptionHTML(HTMLParser):
+    """Allow a small set of tags and no attributes. Drop script-like bodies."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in _DROPPED_TAGS:
+            self._skip += 1
+            return
+        if self._skip or tag not in _ALLOWED_TAGS:
+            return
+        self._parts.append("<br>" if tag == "br" else f"<{tag}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in _DROPPED_TAGS:
+            if self._skip:
+                self._skip -= 1
+            return
+        if self._skip or tag not in _ALLOWED_TAGS or tag == "br":
+            return
+        self._parts.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip:
+            self._parts.append(html.escape(data, quote=True))
+
+    def render(self) -> str:
+        return "".join(self._parts)
+
+
+def _safe_description(value: object) -> str:
+    text = value if isinstance(value, str) else ""
+    parser = _DescriptionHTML()
+    try:
+        parser.feed(text)
+        parser.close()
+    except Exception:
+        return html.escape(text, quote=True)
+    return parser.render()
+
 
 def _utm_query(params: dict) -> str:
-    utm = {k: v for k, v in params.items() if k.startswith("utm_")}
+    utm = {k: v for k, v in params.items() if isinstance(k, str) and k.startswith("utm_") and isinstance(v, str)}
     return urlencode(utm) if utm else ""
+
+
+def _public_base():
+    raw = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").strip()
+    parts = urlsplit(raw)
+    if parts.scheme not in {"http", "https"} or not parts.netloc or parts.username or parts.password:
+        return None
+    if any(ch in parts.netloc for ch in "\\@ \t\r\n"):
+        return None
+    return parts
+
+
+def _safe_checkout_target(url: object, *, dry_run: bool, brand_id: str, product_id: str) -> str | None:
+    """Return a rebuilt redirect target, or None. Host checks are exact, not prefixes."""
+    if not isinstance(url, str) or not url or any(ch in url for ch in "\r\n\t\\"):
+        return None
+    parts = urlsplit(url)
+    if parts.username or parts.password or parts.fragment:
+        return None
+    netloc = parts.netloc
+    if not netloc or any(ch in netloc for ch in "\\@ "):
+        return None
+    if dry_run:
+        base = _public_base()
+        expected_path = f"/s/{brand_id}/{product_id}"
+        if (
+            base is None
+            or parts.scheme != base.scheme
+            or netloc.lower() != base.netloc.lower()
+            or parts.path != expected_path
+            or parts.query != "purchased=1"
+            or "//" in parts.path
+        ):
+            return None
+        return f"{base.scheme}://{base.netloc}{expected_path}?purchased=1"
+    if parts.scheme != "https" or netloc not in _STRIPE_CHECKOUT_NETLOCS:
+        return None
+    if not parts.path.startswith("/") or parts.path.startswith("//") or "\\" in parts.path:
+        return None
+    query = f"?{parts.query}" if parts.query else ""
+    return f"https://checkout.stripe.com{parts.path}{query}"
 
 
 @router.get("/s/{brand_id}", response_class=HTMLResponse)
@@ -58,7 +155,7 @@ def brand_page(brand_id: str) -> HTMLResponse:
     entries = [e for e in product_catalog.for_brand(brand_id, status=STATUS_LIVE)
                if e.stock_ok]
     cards = "".join(
-        f'<a class="card" href="/s/{brand_id}/{e.product_id}">'
+        f'<a class="card" href="/s/{_attr(brand_id)}/{_attr(e.product_id)}">'
         f'<div class="t">{html.escape(e.title)}</div>'
         f'<div class="price">${e.retail_price:.2f}</div></a>'
         for e in entries
@@ -85,7 +182,9 @@ def product_page(brand_id: str, product_id: str, request: Request) -> HTMLRespon
 
     bullets = "".join(f"<li>{html.escape(str(b))}</li>" for b in entry.bullets)
     utm = _utm_query(dict(request.query_params))
-    checkout_href = f"/s/{brand_id}/{product_id}/checkout" + (f"?{utm}" if utm else "")
+    checkout_href = f"/s/{_attr(brand_id)}/{_attr(product_id)}/checkout"
+    if utm:
+        checkout_href = f"{checkout_href}?{html.escape(utm, quote=True)}"
 
     if entry.stock_ok:
         cta = f'<a class="buy" href="{checkout_href}">Buy now — ${entry.retail_price:.2f}</a>'
@@ -98,7 +197,7 @@ def product_page(brand_id: str, product_id: str, request: Request) -> HTMLRespon
         f"<div class='tagline'>{html.escape(brand.tagline)}</div></header>"
         f"<main><h1>{html.escape(entry.title)}</h1>"
         f"<div class='price'>${entry.retail_price:.2f}</div>"
-        f"{entry.description_html}"
+        f"{_safe_description(entry.description_html)}"
         f"<ul>{bullets}</ul>{cta}</main>"
         f"<footer>{html.escape(brand.name)} — ships direct from our fulfillment partners</footer>"
     )
@@ -119,7 +218,15 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
     result = create_checkout_session(brand_id, product_id, qty=1, utm=utm)
     if result.get("status") != "ok":
         return HTMLResponse(
-            f"<h1>Checkout unavailable</h1><p>{html.escape(result.get('error', ''))}</p>",
+            f"<h1>Checkout unavailable</h1><p>{html.escape(str(result.get('error', '')))}</p>",
             status_code=409,
         )
-    return RedirectResponse(url=result["url"], status_code=303)
+    target = _safe_checkout_target(
+        result.get("url"),
+        dry_run=bool(result.get("dry_run")),
+        brand_id=brand_id,
+        product_id=product_id,
+    )
+    if target is None:
+        return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
+    return RedirectResponse(url=target, status_code=303)
