@@ -15,7 +15,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -63,7 +63,10 @@ def fingerprint(payload: Any) -> str:
 
 
 REDACTED_LEAF = "<redacted-leaf>"
-_ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\)[^'\"\r\n<>|]*")
+_DRIVE_OR_UNC = r"""(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\)[^'\"\r\n<>|]*"""
+_POSIX_ROOTS = r"""(?<![A-Za-z0-9_:/])/(?:tmp|private|var|etc|usr|home|Users|runner|work|github|opt|root|run|proc|sys|mnt|app)[\\/][^'\"\r\n<>|]*"""
+_POSIX_EXT = r"""(?<![A-Za-z0-9_:/])/(?:[A-Za-z0-9_.-]+[\\/])+[^\\/'\"\r\n<>|]+\.(?:json|csv|md|py|txt|log|lock)"""
+_ABSOLUTE_PATH = re.compile(rf"{_DRIVE_OR_UNC}|{_POSIX_ROOTS}|{_POSIX_EXT}")
 
 
 def _is_safe_leaf(leaf: str) -> bool:
@@ -94,7 +97,13 @@ def _repo_label(path: Path) -> str:
 
 
 def scrub_text(text: str) -> str:
-    """Replace every drive-letter or UNC path in text with its safe leaf."""
+    """Replace every drive-letter, UNC, or POSIX absolute path in text with its safe leaf."""
+    root_str = str(ROOT)
+    root_posix = ROOT.as_posix()
+    if root_str in text:
+        text = text.replace(root_str, ROOT.name)
+    if root_posix in text:
+        text = text.replace(root_posix, ROOT.name)
     return _ABSOLUTE_PATH.sub(lambda match: leaf_of(match.group(0)), text)
 
 
@@ -120,7 +129,7 @@ def summary(
     body = {
         "contract_version": CONTRACT_VERSION,
         "command": command,
-        "status": status,
+        "status": scrub_text(status),
         "evidence_class": evidence_class,
         "exit_code": exit_code,
         "generated_at": _now(),
@@ -181,7 +190,7 @@ def _run_cli(script_rel: str, extra: list[str]) -> dict[str, Any]:
         "available": True,
         "exit_code": proc.returncode,
         "reason": "ok" if proc.returncode == 0 else "cli_failed",
-        "stdout": combined[-2000:] if proc.returncode == 0 else "",
+        "stdout": "completed" if proc.returncode == 0 else "",
     }
 
 
@@ -510,8 +519,20 @@ def cmd_scenario_pack(pack_dir: str, output: str | None) -> dict[str, Any]:
     )
 
 
+class _SafeArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser that never writes caller text to stderr and maps errors to stable codes."""
+
+    def error(self, message: str) -> NoReturn:
+        lowered = message.lower()
+        if "command" in lowered and ("invalid choice" in lowered or "required" in lowered or "choose from" in lowered):
+            classification = "unrecognized_command"
+        else:
+            classification = "invalid_arguments"
+        raise OperatorSafetyError(classification, exit_code=2)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = _SafeArgumentParser(description=__doc__)
     parser.add_argument("command", choices=COMMANDS)
     parser.add_argument("--source")
     parser.add_argument("--fixture")
@@ -576,7 +597,7 @@ def main(argv: list[str] | None = None) -> int:
         elif command == "scenario-pack":
             payload = cmd_scenario_pack(args.pack_dir, args.output)
         else:
-            raise OperatorSafetyError(f"unknown command: {command}")
+            raise OperatorSafetyError("unrecognized_command", exit_code=2)
         dest = require_safe_output_dir(ROOT, output) if output else None
         return emit(payload, dest)
     except OperatorSafetyError as exc:

@@ -464,3 +464,55 @@ def test_output_write_failure_emits_one_json_document(tmp_path: Path):
     assert proc.returncode == 2
     assert body["status"] == "input_unreadable_or_malformed"
     _assert_no_disclosure(proc, *_roots(tmp_path))
+
+
+def test_successful_nested_cli_output_projects_fixed_token_and_no_body_disclosure(monkeypatch):
+    def _successful_cli(*_args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args=["python"],
+            returncode=0,
+            stdout=f'{{"status": "ok", "secret_body": "{ABS_LEAK_CANARY}"}}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(workflow.subprocess, "run", _successful_cli)
+    payload = workflow.cmd_product_validation("", None)
+    rendered = json.dumps(payload)
+    assert payload["details"]["cli"]["reason"] == "ok"
+    assert payload["details"]["cli"]["stdout"] == "completed"
+    _assert_absent(rendered, ABS_LEAK_CANARY)
+
+
+def test_unrecognized_command_emits_json_without_echoing_caller_text():
+    canary = "unrecognized-cmd-probe-9988"
+    proc = _run(canary)
+    assert proc.returncode == 2
+    assert proc.stderr == ""
+    body = _payload(proc)
+    assert body["command"] == "invalid"
+    assert body["exit_code"] == 2
+    assert body["status"] == "unrecognized_command"
+    assert body["details"]["error"] == "unrecognized_command"
+    _assert_absent(proc.stdout + proc.stderr, canary)
+
+
+def test_unrecognized_arguments_emit_json_without_echoing_caller_args():
+    flag_canary = "--flag-probe-7766"
+    val_canary = "val-probe-5544"
+    proc = _run("preflight", flag_canary, val_canary)
+    assert proc.returncode == 2
+    assert proc.stderr == ""
+    body = _payload(proc)
+    assert body["command"] == "invalid"
+    assert body["exit_code"] == 2
+    assert body["status"] == "invalid_arguments"
+    assert body["details"]["error"] == "invalid_arguments"
+    _assert_absent(proc.stdout + proc.stderr, flag_canary, val_canary)
+
+
+def test_scrub_text_handles_posix_paths_and_secret_leaves():
+    posix_path = "/tmp/pytest-of-runner/pytest-0/test_output.json"
+    posix_secret = "/home/runner/work/MarketOS/sk-live1234567890abcdef.json"
+    assert workflow.scrub_text(f"path: {posix_path}") == "path: test_output.json"
+    assert workflow.scrub_text(f"secret: {posix_secret}") == f"secret: {workflow.REDACTED_LEAF}"
+    assert workflow.scrub_text("route /operator/first-phase is safe") == "route /operator/first-phase is safe"
