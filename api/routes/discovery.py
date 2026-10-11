@@ -121,10 +121,9 @@ def _validate_import_surface_path(raw: object) -> tuple[str | None, str | None]:
     except (ValueError, OSError):
         return None, "import_path_outside_import_surface"
 
-    # Check existence as regular file
-    if not os.path.isfile(real_s):
-        return None, "import_path_unavailable"
-
+    # Do not preflight the path with a second path-based existence check. The
+    # same-path check would introduce a TOCTOU window and is already covered by
+    # the no-follow, regular-file read in ``_read_regular_file``.
     return norm_s, None
 
 
