@@ -60,15 +60,15 @@ def _confined_dataset_path(path: str) -> str:
 
 
 def _read_regular_file(resolved: str) -> bytes:
-    """Open a project-root-confined path without following a final-component symlink.
+    """Read a project-root-confined file through the descriptor that was actually opened.
 
-    Path-boundary checks (``commonpath`` / ``relative_to``) dominate ``os.open`` on the
-    same absolute path at this sink — not a plain string prefix. The project-root
-    directory is held open via ``dir_fd`` while the file is opened with a root-relative
-    path derived only after that boundary check, so the open cannot leave the root.
-    ``O_NOFOLLOW`` stops a final-component swap to an outside symlink; ``O_NONBLOCK``
-    plus the regular-file check keep a FIFO or device from hanging or feeding the
-    loader. Descriptors are always closed.
+    Path-boundary checks (``commonpath`` / ``relative_to``) run first and are kept as
+    defense-in-depth. The bytes then come from an object opened under the project root
+    without following symlinks: on POSIX every component is walked from a pinned root
+    descriptor (``_read_regular_file_posix``); on Windows the handle is opened first and
+    its final path is verified under the root before any read. ``O_NONBLOCK`` plus the
+    regular-file check keep a FIFO or device from hanging or feeding the loader.
+    Descriptors are always closed.
     """
     if not isinstance(resolved, str) or not resolved or "\x00" in resolved:
         raise ValueError("dataset_path_invalid")
@@ -95,32 +95,54 @@ def _read_regular_file(resolved: str) -> bytes:
 
     if os.name == "nt":
         return _read_regular_file_windows(confined, root_s)
+    return _read_regular_file_posix(root_s, relative_path.parts)
 
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
-    dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
 
+def _read_regular_file_posix(root_s: str, relative_parts: tuple[str, ...]) -> bytes:
+    """Read one regular file by walking root-relative components from a pinned descriptor.
+
+    Every component is opened with ``dir_fd`` relative to its already-open parent, and
+    ``O_NOFOLLOW`` makes each open refuse a symlink. A symlink swapped into any
+    component after the boundary check therefore fails closed instead of redirecting
+    the read. The absolute path is never handed to ``os.open``, because POSIX ignores
+    ``dir_fd`` for absolute paths. Plain ``openat`` semantics are enough; ``openat2`` is
+    not required.
+    """
+    if os.open not in os.supports_dir_fd or not hasattr(os, "O_NOFOLLOW"):
+        # Without dir_fd and O_NOFOLLOW the walk cannot refuse symlinks, so refuse to read.
+        raise FileNotFoundError("dataset_not_found")
+    nofollow = os.O_NOFOLLOW
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow | cloexec
+    file_flags = os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0) | cloexec
     try:
-        root_fd = os.open(root_s, dir_flags)
+        descriptor = _open_relative_file(root_s, relative_parts, dir_flags, file_flags)
     except OSError:
         raise FileNotFoundError("dataset_not_found") from None
+    owned = True
     try:
-        # Dominating boundary check on the exact path expression passed to os.open.
-        if os.path.commonpath([root_s, confined]) != root_s:
-            raise ValueError("dataset_path_outside_project_root")
-        try:
-            # Open the boundary-checked absolute path while holding the project-root
-            # directory descriptor. POSIX ignores dir_fd for absolute paths; the
-            # commonpath guard on ``confined`` is the CodeQL-recognized sanitizer for
-            # this sink, and root_fd keeps the root directory pinned for the open.
-            descriptor = os.open(confined, flags, dir_fd=root_fd)
-        except OSError:
-            raise FileNotFoundError("dataset_not_found") from None
-    finally:
-        os.close(root_fd)
-    with os.fdopen(descriptor, "rb") as handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+        # A directory or FIFO fails here, before any read, with the same error as on Windows.
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise FileNotFoundError("dataset_not_found")
-        return handle.read()
+        with os.fdopen(descriptor, "rb") as handle:
+            owned = False
+            return handle.read()
+    finally:
+        if owned:
+            os.close(descriptor)
+
+
+def _open_relative_file(root_s: str, relative_parts: tuple[str, ...], dir_flags: int, file_flags: int) -> int:
+    """Open ``relative_parts`` under ``root_s`` one component at a time, never following symlinks."""
+    current = os.open(root_s, dir_flags)
+    try:
+        for name in relative_parts[:-1]:
+            child = os.open(name, dir_flags, dir_fd=current)
+            os.close(current)
+            current = child
+        return os.open(relative_parts[-1], file_flags, dir_fd=current)
+    finally:
+        os.close(current)
 
 
 def _read_regular_file_windows(confined: str, root_s: str) -> bytes:
