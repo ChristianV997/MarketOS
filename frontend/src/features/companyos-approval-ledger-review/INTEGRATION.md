@@ -1,6 +1,7 @@
 # CompanyOS Approval Ledger review (frontend slice)
 
-Status: implemented, fixture-backed, contract-adapted, focused-tested. Offline planning review only.
+Status: implemented, fixture-backed, contract-adapted, focused-tested, routed.
+Offline planning review only.
 
 ## Data source (no invented API)
 
@@ -22,6 +23,17 @@ Report contract: `ApprovalLedgerReport.to_dict()` with
 This page mirrors that offline artifact as a sanitized frontend fixture. It does
 **not** call `/api/cockpit/approvals` (execution-cockpit write/decide path).
 
+## Route
+
+Mounted under Shell in `frontend/src/main.tsx`:
+
+```text
+/operator/approval-ledger → <ApprovalLedgerReviewPage />
+```
+
+Sidebar / Shell chrome ownership is out of this lane. Direct URL navigation is
+enough for the review vertical.
+
 ## What the UI shows
 
 - Queue summary (blocked / pending / draft-or-simulated / approved records)
@@ -37,14 +49,12 @@ This page mirrors that offline artifact as a sanitized frontend fixture. It does
 Always: `execution_authorized === false`. Scorecards, drafts, simulations, and
 approved **records** never authorize spend, publish, orders, payments,
 messaging, or provider calls on this surface. No approve/deny buttons.
+`would_auto_allow_draft` is a descriptive simulation result only.
 
 ## Integration boundaries
 
 Do **not** edit in this lane:
 
-- `frontend/src/components/layout/Sidebar.tsx` / `Shell.tsx` / `ClientShell.tsx` (Agent C)
+- `frontend/src/components/layout/Sidebar.tsx` / `Shell.tsx` / `sidebarDrawer.ts`
 - Tailwind / PostCSS / `package.json` (PR #423)
 - Backend ledger, CLI, or new API routes
-
-Suggested future mount (nav owner): `/operator/approval-ledger` →
-`<ApprovalLedgerReviewPage />`.

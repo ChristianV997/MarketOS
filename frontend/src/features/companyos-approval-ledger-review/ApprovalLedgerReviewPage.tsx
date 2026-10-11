@@ -3,7 +3,8 @@ import { buildApprovalLedgerFixture } from "./fixtures/ledgerFixture.ts";
 
 /**
  * Mountable page for offline Approval Ledger review.
- * Not registered in the shared router/Sidebar by this lane (Agent C owns nav).
+ * Registered at `/operator/approval-ledger` via `frontend/src/main.tsx` under Shell.
+ * Sidebar/nav ownership stays with the shell lane; this page is review-only.
  */
 export function ApprovalLedgerReviewPage() {
   return <ApprovalLedgerReview packet={buildApprovalLedgerFixture()} />;

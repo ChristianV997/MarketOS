@@ -115,6 +115,8 @@ test("keyboard selection stays in source order and source has no mutation contro
   assert.equal(moveSelection(ids, null, "ArrowDown"), "seed-manual-import");
   assert.equal(moveSelection(ids, "seed-manual-import", "ArrowDown"), "seed-publish");
   assert.equal(moveSelection(ids, "seed-publish", "Home"), "seed-manual-import");
+  assert.equal(moveSelection(ids, "seed-manual-import", "End"), "seed-publish");
+  assert.equal(moveSelection(ids, "seed-publish", "ArrowUp"), "seed-manual-import");
 
   const component = await readFile(
     new URL("../src/features/companyos-approval-ledger-review/components/ApprovalLedgerReview.tsx", import.meta.url),
@@ -123,6 +125,11 @@ test("keyboard selection stays in source order and source has no mutation contro
   assert.doesNotMatch(component, /onClick=\{[^}]*approve|decideApproval|create_pending_approval|fetch\(|httpx|openai/i);
   assert.doesNotMatch(component, /type="password"|name="api_key"|<form/i);
   assert.match(component, /no approve, deny, publish, spend, order, payment, messaging, or provider action controls/i);
+  assert.match(component, /Evidence references/i);
+  assert.match(component, /Conditions/i);
+  assert.match(component, /Decision class/i);
+  assert.match(component, /Not live authority/i);
+  assert.match(component, /would_auto_allow_draft|humanizeToken\(item\.result\)/i);
 
   const featureRoot = await readFile(
     new URL("../src/features/companyos-approval-ledger-review/INTEGRATION.md", import.meta.url),
@@ -131,4 +138,47 @@ test("keyboard selection stays in source order and source has no mutation contro
   assert.match(featureRoot, /no mounted read-only HTTP GET/i);
   assert.match(featureRoot, /\/api\/cockpit\/approvals/);
   assert.match(featureRoot, /execution-cockpit write\/decide path/i);
+  assert.match(featureRoot, /\/operator\/approval-ledger/);
+});
+
+test("Shell router mounts /operator/approval-ledger without cockpit or mutation APIs", async () => {
+  const main = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8");
+  assert.match(
+    main,
+    /import\s+\{\s*ApprovalLedgerReviewPage\s*\}\s+from\s+["']\.\/features\/companyos-approval-ledger-review["']/,
+  );
+  assert.match(
+    main,
+    /path:\s*["']\/operator\/approval-ledger["'],\s*element:\s*<ApprovalLedgerReviewPage\s*\/>/,
+  );
+  assert.doesNotMatch(main, /\/api\/cockpit\/approvals/);
+  assert.doesNotMatch(main, /decideApproval|create_pending_approval/);
+
+  const page = await readFile(
+    new URL("../src/features/companyos-approval-ledger-review/ApprovalLedgerReviewPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /buildApprovalLedgerFixture/);
+  assert.doesNotMatch(page, /fetch\(|axios|httpx|\/api\//i);
+
+  const index = await readFile(
+    new URL("../src/features/companyos-approval-ledger-review/index.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(index, /ApprovalLedgerReviewPage/);
+});
+
+test("success view exposes evidence, conditions, and policy labels without authority", () => {
+  const packet = buildApprovalLedgerFixture();
+  const view = viewOf(packet, { selectedApprovalId: "seed-manual-import" });
+  assert.equal(view.state, "success");
+  assert.ok(view.selectedRequest);
+  assert.equal(view.selectedRequest.approval_id, "seed-manual-import");
+  assert.ok(view.selectedRequest.evidence.some((item) => item.ref_id === "ev-manual-import-1" && item.sanitized));
+  assert.ok(view.selectedRequest.conditions.some((item) => /source is public/i.test(item.description)));
+  assert.ok(view.model.policies.some((item) => item.decision_class === "blocked_in_current_mode"));
+  assert.ok(view.model.policies.some((item) => item.decision_class === "approval_possible_later"));
+  assert.equal(view.model.execution_authorized, false);
+  assert.match(view.authorityNote, /do not authorize/i);
+  assert.equal(view.model.simulations[0].result, "would_auto_allow_draft");
 });
