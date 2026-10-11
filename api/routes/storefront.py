@@ -247,25 +247,25 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
     target_parts = urlparse(target)
     if dry_run:
         base = _public_base()
-        safe_target = (
-            base is not None
-            and target_parts.scheme == base.scheme
-            and target_parts.netloc.lower() == base.netloc.lower()
-            and not target_parts.username
-            and not target_parts.password
-            and not target_parts.fragment
-            and target_parts.query == "purchased=1"
-        )
+        if (
+            base is None
+            or target_parts.scheme != base.scheme
+            or target_parts.netloc.lower() != base.netloc.lower()
+            or target_parts.username
+            or target_parts.password
+            or target_parts.fragment
+            or target_parts.query != "purchased=1"
+        ):
+            return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
     else:
-        safe_target = (
-            target_parts.scheme == "https"
-            and target_parts.netloc == "checkout.stripe.com"
-            and not target_parts.username
-            and not target_parts.password
-            and not target_parts.query
-            and not target_parts.fragment
-            and _STRIPE_CHECKOUT_PATH.fullmatch(target_parts.path) is not None
-        )
-    if not safe_target:
-        return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
+        if (
+            target_parts.scheme != "https"
+            or target_parts.netloc != "checkout.stripe.com"
+            or target_parts.username
+            or target_parts.password
+            or target_parts.query
+            or target_parts.fragment
+            or _STRIPE_CHECKOUT_PATH.fullmatch(target_parts.path) is None
+        ):
+            return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
     return RedirectResponse(url=target, status_code=303)
