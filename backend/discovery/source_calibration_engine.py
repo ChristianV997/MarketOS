@@ -67,13 +67,21 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
     discovery_registry = get_discovery_registry()
     import_registry = get_import_registry()
     refinement = get_refinement_registry()
-    truncated = False
+    exclusions: Counter[str] = Counter()
     if comparison_ids:
-        comparisons = [refinement.get_comparison(x) for x in comparison_ids]
+        comparisons = []
+        for comparison_id in dict.fromkeys(comparison_ids):  # a repeated id is one comparison, not two
+            comparison = refinement.get_comparison(comparison_id)
+            if comparison is None:
+                exclusions["comparison_not_found"] += 1
+            elif comparison.workspace_id != workspace_id:
+                exclusions["cross_workspace_comparison"] += 1
+            else:
+                comparisons.append(comparison)
+        truncated = False
     else:
         comparisons = refinement.list_comparisons(workspace_id, COMPARISON_WINDOW)
-        truncated = len(comparisons) >= COMPARISON_WINDOW
-    exclusions: Counter[str] = Counter()
+        truncated = len(comparisons) >= COMPARISON_WINDOW  # judged on what the registry returned, before any as_of filter
     selected_comparisons = []
     for comparison in comparisons:
         if comparison is None or comparison.workspace_id != workspace_id:
@@ -82,26 +90,30 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
             exclusions["after_as_of"] += 1
             continue
         selected_comparisons.append(comparison)
-    comparisons = sorted(selected_comparisons, key=lambda x: (x.created_at, x.comparison_id))
+    comparisons = sorted({c.comparison_id: c for c in selected_comparisons}.values(), key=lambda x: (x.created_at, x.comparison_id))
     # The reference time comes from the data unless the caller supplies one, so identical inputs give identical output.
     reference = float(as_of) if as_of is not None else max((x.created_at for x in comparisons), default=0.0)
     selected = set(import_ids) if import_ids else None
     def visible(job) -> bool:
         return job is not None and job.workspace_id == workspace_id and (as_of is None or float(job.created_at) <= float(as_of))
 
-    all_jobs = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, limit=IMPORT_WINDOW) if visible(j)]
-    import_truncated = len(all_jobs) >= IMPORT_WINDOW
+    raw_jobs = import_registry.list_import_jobs(workspace_id=workspace_id, limit=IMPORT_WINDOW)
+    import_truncated = len(raw_jobs) >= IMPORT_WINDOW  # judged before the as_of filter, so a full window is never read as complete
+    all_jobs = [j for j in raw_jobs if visible(j)]
     job_cache: dict[str, Any] = {}
     if not import_truncated:
-        # Every import is in view, so duplicate names are read from one pass with no per-source queries.
+        # Every import is in view, so duplicate names come from this one pass; a name not in it has no import.
         for job in sorted(all_jobs, key=lambda j: j.import_id):
             job_cache[job.source_name] = _DUPLICATE if job.source_name in job_cache else job
 
     def job_for(source_name: str) -> Any:
-        # With a full window, the exact per-source query finds a clash however many other imports exist.
         if source_name not in job_cache:
-            found = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, source_name=source_name, limit=50) if visible(j) and j.source_name == source_name]
-            job_cache[source_name] = _DUPLICATE if len(found) > 1 else (found[0] if found else None)
+            if not import_truncated:
+                job_cache[source_name] = None
+            else:
+                # With a full window, an exact per-source query finds a clash however many other imports exist.
+                found = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, source_name=source_name, limit=50) if visible(j) and j.source_name == source_name]
+                job_cache[source_name] = _DUPLICATE if len(found) > 1 else (found[0] if found else None)
         return job_cache[source_name]
 
     signals: list[SourceUsefulnessSignal] = []
@@ -179,7 +191,9 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
                 provenance={"method": "import_quality_fact", "non_causal": True, "policy_version": CALIBRATION_POLICY_VERSION},
             ))
             exclusions[EXCLUSION_IMPORT_QUALITY] += 1
-    return _Derived(sorted(signals, key=signal_order_key), dict(sorted(exclusions.items())), reference, comparisons, truncated, import_truncated)
+    unique = {}
+    for signal in signals: unique.setdefault(signal.signal_id, signal)  # equal ids are the same evidence, however many times it was listed
+    return _Derived(sorted(unique.values(), key=signal_order_key), dict(sorted(exclusions.items())), reference, comparisons, truncated, import_truncated)
 
 
 def derive_source_usefulness_signals(workspace_id="default", comparison_ids=None, import_ids=None, *, as_of=None):
@@ -192,7 +206,11 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
     profiles = build_source_calibration_profiles(signals)
     observed = [p for p in profiles if p.evidence_status == "observed"]
     scoped = bool(comparison_ids or import_ids)
+    # With nothing in view (for example, the refinement registry was reset), the run is recorded and existing state is kept.
+    nothing_in_view = not scoped and not comparisons
     status = "completed" if observed else "partial"
+    if nothing_in_view:
+        profiles = []
     if observed and scoped:
         summary = "Observed profiles from this scoped run are recorded for review; they do not change import ordering."
         recommendations = [
@@ -233,10 +251,13 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
     from .calibration_registry import get_calibration_registry
     registry = get_calibration_registry()
     # One write. A scoped run is recorded without touching workspace profiles; a workspace run retires profiles whose evidence has gone.
-    persisted = registry.record_run(signals, [] if scoped else profiles, run, replace_workspace_profiles=not scoped)
+    if nothing_in_view:
+        run.recommendations.append("No comparisons were in view, so the workspace profiles were kept as they were.")
+    persisted = registry.record_run(signals, [] if (scoped or nothing_in_view) else profiles, run, replace_workspace_profiles=not scoped and not nothing_in_view)
     if not persisted:
         # Nothing was saved, so nothing from this run may be reported as in use.
         run.status = "partial"
         run.profiles = []
-        run.recommendations.append("The calibration state could not be written; this run cannot be retrieved later by its identifier, and workspace profiles were not changed.")
+        run.summary = "The calibration state could not be written, so nothing from this run is in use."
+        run.recommendations = ["The calibration state could not be written; this run cannot be retrieved later by its identifier, and workspace profiles were not changed."]
     return run

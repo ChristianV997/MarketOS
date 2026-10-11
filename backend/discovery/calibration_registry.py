@@ -12,11 +12,15 @@ from .source_calibration import CalibrationRun, SourceCalibrationProfile, Source
 _log = logging.getLogger(__name__)
 
 
+RUN_RETENTION = 50  # stored run records are capped, so state does not grow without bound
+
+
 def _locked(method):
-    """Run a reader under the registry lock, so it never iterates while a write is changing the same dictionaries."""
+    """Run a reader under the registry lock, retrying a failed startup read first, so readers never see cleared state for good."""
     @functools.wraps(method)
     def inner(self, *args, **kwargs):
         with self._lock:
+            if self.load_failed: self.load()
             return method(self, *args, **kwargs)
     return inner
 
@@ -39,11 +43,12 @@ class CalibrationRegistry:
     def _commit(self, change):
         """Apply one change and save it. If the save fails, roll back, so an unsaved record never affects ordering."""
         with self._lock:
-            if not self._writable(): self.last_save_ok = False; return
+            if not self._writable(): self.last_save_ok = False; return False
             before = self.snapshot()
             change()
             self.save()
             if not self.last_save_ok: self.restore(before)
+            return self.last_save_ok
     def register_signals(self, signals):
         def change():
             for signal in signals: self.signals[signal.signal_id] = signal
@@ -54,26 +59,24 @@ class CalibrationRegistry:
         def change(): self.runs[run.calibration_id] = run
         self._commit(change); return run
     def record_run(self, signals, profiles, run, *, replace_workspace_profiles=False):
-        """Persist one run in a single write, under the lock. A failed write rolls back every in-memory change.
+        """Persist one run in a single write. A failed write rolls back every in-memory change.
 
         A workspace run replaces the workspace's profiles and current signals, so retired evidence cannot stay listed.
         """
-        with self._lock:
-            if not self._writable():
-                run.metadata["persisted"] = False; self.last_save_ok = False; return False
-            before = self.snapshot()
+        def change():
             if replace_workspace_profiles:
                 for pid in [pid for pid, item in self.profiles.items() if item.workspace_id == run.workspace_id]: del self.profiles[pid]
                 for sid in [sid for sid, item in self.signals.items() if item.workspace_id == run.workspace_id]: del self.signals[sid]
             for signal in signals: self.signals[signal.signal_id] = signal
             for profile in profiles: self._put_profile(profile)
             self.runs[run.calibration_id] = run
+            if len(self.runs) > RUN_RETENTION:
+                keep = sorted(self.runs.values(), key=lambda item: item.created_at)[-RUN_RETENTION:]
+                self.runs = {item.calibration_id: item for item in keep}
             run.metadata["persisted"] = True
-            self.save()
-            if not self.last_save_ok:
-                self.restore(before)
-                run.metadata["persisted"] = False
-            return self.last_save_ok
+        persisted = self._commit(change)
+        if not persisted: run.metadata["persisted"] = False
+        return persisted
     def clear_for_tests(self):
         with self._lock:
             self.signals.clear(); self.profiles.clear(); self.runs.clear(); self.save()

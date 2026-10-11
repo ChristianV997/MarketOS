@@ -13,7 +13,7 @@ import pytest
 import backend.discovery.import_recommendation as recommendation_module
 import backend.discovery.source_calibration_engine as engine
 from backend.discovery import calibration_registry as calibration_module
-from backend.discovery.calibration_registry import CalibrationRegistry
+from backend.discovery.calibration_registry import RUN_RETENTION, CalibrationRegistry
 from backend.discovery.category_discovery import CategoryDiscoveryRun
 from backend.discovery.discovery_comparison import DiscoveryComparison
 from backend.discovery.discovery_registry import DiscoveryRegistry
@@ -329,7 +329,7 @@ def test_recommendation_plan_is_identical_across_repeats(world):
 
 
 def test_calibration_lowers_confidence_but_never_raises_it_or_changes_safety():
-    base = EvidenceSourceQuality("shop", "local_file", 80.0, 0.5, allowed_signal_types=["own_store_sales_proxy"], blocked_signal_types=["profit_proxy"], freshness_label="static", metadata={"synthetic_or_cached_only": False})
+    base = EvidenceSourceQuality("shop", "local_file", 80.0, 0.5, allowed_signal_types=["own_store_sales_proxy"], blocked_signal_types=["profit_proxy"], freshness_label="static", metadata={"synthetic_or_cached_only": False, "parser_type": "supplier_catalog_csv"})
     profile = observed_profile(source="shop", adjustment=0.0)
     profile.confidence_multiplier_adjustment = 1.25
     raised = apply_calibration_to_source_quality(base, profile, as_of=T0)
@@ -542,13 +542,24 @@ def test_an_observed_profile_ages_out_when_the_plan_is_built_long_after_its_evid
 
 
 def test_a_workspace_rerun_retires_a_profile_whose_evidence_has_gone(world):
-    single_source_comparisons(world, 2)
+    single_source_comparisons(world, 2, source="supplier")
+    single_source_comparisons(world, 2, source="alpha")
     engine.run_source_calibration(WS, as_of=AS_OF)
     assert world.calibration.get_profile("supplier", workspace_id=WS).evidence_status == "observed"
-    world.refinement.comparisons.clear()
+    for index in range(2):
+        world.refinement.comparisons.pop(f"cmp_supplier_{index}")
     engine.run_source_calibration(WS, as_of=AS_OF)
     assert world.calibration.get_profile("supplier", workspace_id=WS) is None
-    assert plan_for(gap("g", priority=50.0)).recommendations[0].metadata["calibration_reason"] == "no_profile"
+    assert world.calibration.get_profile("alpha", workspace_id=WS).evidence_status == "observed"
+
+
+def test_a_rerun_with_nothing_in_view_keeps_the_workspace_state(world):
+    single_source_comparisons(world, 2)
+    engine.run_source_calibration(WS, as_of=AS_OF)
+    world.refinement.comparisons.clear()  # for example, the refinement registry was reset
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    assert world.calibration.get_profile("supplier", workspace_id=WS).evidence_status == "observed"
+    assert any("were kept" in line for line in run.recommendations)
 
 
 def test_a_failed_write_leaves_ordering_on_the_previous_profiles(world, tmp_path):
@@ -637,8 +648,8 @@ def test_concurrent_runs_neither_lose_committed_runs_nor_report_false_persistenc
         for thread in threads: thread.join()
     finally:
         _sys.setswitchinterval(previous)
-    assert errors == [] and len(registry.runs) == 200
-    assert len(CalibrationRegistry(tmp_path / "shared.json").runs) == 200
+    assert errors == [] and len(registry.runs) == RUN_RETENTION
+    assert len(CalibrationRegistry(tmp_path / "shared.json").runs) == RUN_RETENTION
 
 
 def test_invalid_utf8_state_is_quarantined_not_raised(tmp_path):
@@ -664,10 +675,11 @@ def test_writes_resume_once_an_unreadable_state_becomes_readable(tmp_path):
 def test_a_workspace_run_retires_the_signals_of_comparisons_that_dropped_out(world):
     single_source_comparisons(world, 2)
     engine.run_source_calibration(WS, as_of=AS_OF)
-    assert world.calibration.list_signals(workspace_id=WS, limit=1000)
-    world.refinement.comparisons.clear()
+    before = {s.comparison_id for s in world.calibration.list_signals(workspace_id=WS, limit=1000)}
+    assert before == {"cmp_supplier_0", "cmp_supplier_1"}
+    world.refinement.comparisons.pop("cmp_supplier_0")
     engine.run_source_calibration(WS, as_of=AS_OF)
-    assert world.calibration.list_signals(workspace_id=WS, limit=1000) == []
+    assert {s.comparison_id for s in world.calibration.list_signals(workspace_id=WS, limit=1000)} == {"cmp_supplier_1"}
 
 
 def test_a_run_that_could_not_be_saved_reports_no_profiles(world, tmp_path):
@@ -809,3 +821,81 @@ def test_readers_never_iterate_over_a_half_written_state(tmp_path):
     finally:
         _sys.setswitchinterval(previous)
     assert failures == []
+
+
+# --------------------------------------------------------------------------- fifth review findings
+
+
+def test_an_unsaved_run_does_not_describe_ordering_effects(world, tmp_path):
+    single_source_comparisons(world, 2)
+    blocker = tmp_path / "not_a_directory"
+    blocker.write_text("x", encoding="utf-8")
+    world.calibration.path = blocker / "state.json"
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    assert "nothing from this run is in use" in run.summary
+    assert not any("may reorder" in line or "positive" in line for line in run.recommendations)
+
+
+def test_repeated_comparison_ids_are_counted_once(world):
+    single_source_comparisons(world, 2)
+    once = engine.run_source_calibration(WS, comparison_ids=["cmp_supplier_0", "cmp_supplier_1"], as_of=AS_OF)
+    repeated = engine.run_source_calibration(WS, comparison_ids=["cmp_supplier_0", "cmp_supplier_0", "cmp_supplier_1"], as_of=AS_OF)
+    assert profile_for(repeated).eligible_signal_count == profile_for(once).eligible_signal_count
+    assert profile_for(repeated).recommended_priority_adjustment == profile_for(once).recommended_priority_adjustment
+
+
+def test_unknown_and_foreign_comparison_ids_are_recorded_as_exclusions(world):
+    single_source_comparisons(world, 1)
+    single_source_comparisons(world, 1, workspace=OTHER, source="other")
+    run = engine.run_source_calibration(WS, comparison_ids=["cmp_supplier_0", "typo", "cmp_other_0"], as_of=AS_OF)
+    assert run.metadata["exclusions"]["comparison_not_found"] == 1
+    assert run.metadata["exclusions"]["cross_workspace_comparison"] == 1
+
+
+def test_a_full_import_window_is_reported_even_when_as_of_filters_it(world, monkeypatch):
+    monkeypatch.setattr(engine, "IMPORT_WINDOW", 3)
+    single_source_comparisons(world, 1, parser_import=False)
+    add_import(world, "imp_a", "other_a")
+    add_import(world, "imp_b", "other_b")
+    world.imports.register_import_job(EvidenceImportJob(import_id="imp_late", workspace_id=WS, source_name="supplier", source_type="local_file", input_path="late.csv", parser_type="supplier_catalog_csv", created_at=T0 + 20 * DAY, finished_at=T0 + 20 * DAY))
+    run = engine.run_source_calibration(WS, as_of=T0 + 10 * DAY)
+    assert run.metadata["import_window_truncated"] is True
+    assert any("most recently registered imports" in line for line in run.recommendations)
+
+
+def test_readers_see_state_that_became_readable_after_a_failed_startup_read(tmp_path):
+    path = tmp_path / "state.json"
+    path.mkdir()
+    reader = CalibrationRegistry(path)
+    assert reader.load_failed is True
+    path.rmdir()
+    CalibrationRegistry(path).register_profile(observed_profile(adjustment=8.0))
+    assert reader.profiles_for_parser(WS, "supplier_catalog_csv")[0].evidence_status == "observed"
+
+
+def test_a_current_profile_applies_beside_a_stale_one_for_the_same_parser(world):
+    stale = observed_profile(source="supplier_a", adjustment=-8.0)
+    stale.last_updated_at = T0
+    current = observed_profile(source="supplier_b", adjustment=8.0)
+    current.last_updated_at = T0 + 200 * DAY
+    world.calibration.register_profile(stale)
+    world.calibration.register_profile(current)
+    plan = build_import_recommendation_plan(EvidenceGapAnalysis("a", WS, "t", "o", [gap("g", priority=50.0)], created_at=T0 + 200 * DAY))
+    assert plan.recommendations[0].metadata["calibration_reason"] == "policy_observed"
+    assert plan.recommendations[0].metadata["calibration_profile_id"] == current.profile_id
+
+
+def test_a_profile_for_another_source_cannot_lower_this_sources_confidence():
+    base = EvidenceSourceQuality("shop", "local_file", 80.0, 0.5, metadata={"parser_type": "supplier_catalog_csv"})
+    other = observed_profile(source="other_source", adjustment=0.0)
+    other.confidence_multiplier_adjustment = 0.25
+    assert apply_calibration_to_source_quality(base, other, as_of=T0).confidence_multiplier == 0.5
+
+
+def test_run_records_are_capped_and_the_newest_are_kept(tmp_path):
+    registry = CalibrationRegistry(tmp_path / "retention.json")
+    for index in range(RUN_RETENTION + 5):
+        run = CalibrationRun(f"calibration_{index:03d}", WS, "t", "o", [], [], "s", [], "partial", created_at=T0 + index)
+        assert registry.record_run([], [], run)
+    assert len(registry.runs) == RUN_RETENTION
+    assert "calibration_000" not in registry.runs and f"calibration_{RUN_RETENTION + 4:03d}" in registry.runs
