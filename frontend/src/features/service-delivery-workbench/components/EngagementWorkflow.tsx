@@ -53,8 +53,44 @@ export function EngagementWorkflow({
   engagement: ServiceEngagement;
   exportPreview: ClientSafeServiceExport | null;
 }) {
+  const cues = engagement.operator_review_cues;
   return (
     <div className="grid gap-3 lg:grid-cols-2">
+      <section
+        aria-labelledby="operator-review-cues-heading"
+        className="rounded-lg border border-amber-700/40 bg-amber-950/30 p-4 lg:col-span-2"
+      >
+        <h3 id="operator-review-cues-heading" className="text-sm font-semibold text-amber-100">
+          Operator review cues
+        </h3>
+        <p className="mt-2 text-sm text-amber-50/90" role="note">
+          {cues.review_note ||
+            "Scan cues are planning copies only. Fixture, manual, simulated, and assumption evidence is never live validation."}
+        </p>
+        <ul className="mt-3 grid gap-2 text-sm text-zinc-200 sm:grid-cols-2 lg:grid-cols-4">
+          <li>
+            Next owner: <strong className="font-medium">{cues.nba_owner}</strong>
+            {" · "}live execution never
+          </li>
+          <li>
+            Evidence: {cues.evidence_count} · strongest{" "}
+            <EvidencePill value={cues.strongest_evidence_class} />
+            {cues.evidence_not_live_validated ? " · not live validated" : " · class label only"}
+          </li>
+          <li>
+            Economics: display only · fee <EvidencePill value={cues.fee_evidence_class} />
+            {" · "}contribution <EvidencePill value={cues.contribution_evidence_class} />
+          </li>
+          <li>
+            Financial copy: {cues.financial_ready ? "ready" : "incomplete"}
+            {cues.data_inadequate ? " · data inadequate" : ""}
+          </li>
+        </ul>
+        <p className="mt-3 text-sm text-zinc-200">
+          Next human action: {cues.nba_action_short || engagement.next_best_action.action}
+        </p>
+      </section>
+
       <Panel title="Client intake" headingId="intake-heading">
         <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <div><dt className="text-[11px] uppercase text-zinc-500">Client</dt><dd>{engagement.intake.display_name}</dd></div>

@@ -157,6 +157,24 @@ export type NextBestAction = {
   rationale: string;
 };
 
+/** Additive pipeline triage cues. Descriptive only — never execution authority. */
+export type OperatorReviewCues = {
+  nba_owner: "operator" | "client" | "blocked";
+  nba_action_short: string;
+  nba_executes_live_action: false;
+  evidence_count: number;
+  strongest_evidence_class: EvidenceClass;
+  weakest_evidence_class: EvidenceClass;
+  evidence_not_live_validated: boolean;
+  fee_evidence_class: EvidenceClass;
+  contribution_evidence_class: EvidenceClass;
+  economics_display_only: true;
+  economics_frontend_calculates: false;
+  data_inadequate: boolean;
+  financial_ready: boolean;
+  review_note: string;
+};
+
 export type ServiceEngagement = {
   engagement_id: string;
   service_id: PriorityServiceId;
@@ -171,6 +189,7 @@ export type ServiceEngagement = {
   assumptions: string[];
   missing_data: string[];
   next_best_action: NextBestAction;
+  operator_review_cues: OperatorReviewCues;
   creative_assets: CreativeAssetRequest[];
   private_operator_notes: string | null;
   internal_prompt: string | null;

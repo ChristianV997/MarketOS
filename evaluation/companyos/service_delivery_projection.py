@@ -8,11 +8,11 @@ untouched by this module). It produces data in the ``service-delivery-plane-v1``
 shape that adapter already knows how to consume: an enriched
 ``ClientEngagement.to_dict()`` per engagement, with a handful of additive
 sub-objects (``evidence_set`` entries carrying an ``evidence_class``,
-``economics``, ``financial_readiness``, ``capacity``, ``next_best_action``)
-that let the existing, already-tested adapter render richer detail instead
-of falling back to its own defaults. Every key this module adds is one the
-adapter already reads and gracefully defaults when absent -- nothing here
-recalculates money, re-ranks engagements, or invents a lifecycle state.
+``economics``, ``financial_readiness``, ``capacity``, ``next_best_action``,
+and additive ``operator_review_cues``) that let the existing adapter render
+richer detail and a pipeline triage scan instead of falling back to its
+own defaults. Cue keys are derived copies only -- nothing here recalculates
+money, re-ranks engagements, or invents a lifecycle state.
 
 Canonical authorities reused, never re-derived:
 
@@ -145,6 +145,107 @@ def _intake_fields(data_quality: ClientDataQualityAssessment) -> list[dict[str, 
     return fields
 
 
+# Strongest-first ranks for operator scan cues. Never upgrades classes — used
+# only to pick a descriptive strongest/weakest label for the pipeline table.
+_EVIDENCE_STRENGTH_RANK: dict[str, int] = {
+    "live_validated": 90,
+    "observed": 80,
+    "supplier_documented": 70,
+    "derived": 60,
+    "supplier_claimed": 50,
+    "manual_import": 40,
+    "fixture": 30,
+    "simulated": 20,
+    "assumption": 10,
+    "unavailable": 0,
+}
+
+_NON_LIVE_EVIDENCE_CLASSES = frozenset(
+    {"fixture", "manual_import", "assumption", "simulated", "unavailable"}
+)
+
+
+def _build_operator_review_cues(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Derive additive, read-only triage cues for the operator pipeline scan.
+
+    Cues are descriptive copies of fields the adapter already consumes. They
+    never authorize approve/spend/publish/fulfill/message actions and never
+    upgrade evidence classes to live validation.
+    """
+    evidence_set = row.get("evidence_set") if isinstance(row.get("evidence_set"), list) else []
+    classes: list[str] = []
+    for item in evidence_set:
+        if not isinstance(item, Mapping):
+            continue
+        evidence_class = item.get("evidence_class")
+        if isinstance(evidence_class, str) and evidence_class.strip():
+            classes.append(evidence_class.strip())
+
+    if classes:
+        strongest = max(classes, key=lambda value: _EVIDENCE_STRENGTH_RANK.get(value, -1))
+        weakest = min(classes, key=lambda value: _EVIDENCE_STRENGTH_RANK.get(value, 10_000))
+    else:
+        strongest = "unavailable"
+        weakest = "unavailable"
+
+    economics = row.get("economics") if isinstance(row.get("economics"), Mapping) else {}
+    fee = economics.get("fee") if isinstance(economics.get("fee"), Mapping) else None
+    contribution = economics.get("contribution") if isinstance(economics.get("contribution"), Mapping) else None
+    fee_class = fee.get("evidence_class") if fee and isinstance(fee.get("evidence_class"), str) else "unavailable"
+    contribution_class = (
+        contribution.get("evidence_class")
+        if contribution and isinstance(contribution.get("evidence_class"), str)
+        else "unavailable"
+    )
+    display_only = True
+    if fee is not None:
+        display_only = fee.get("display_only") is not False
+    if contribution is not None:
+        display_only = display_only and contribution.get("display_only") is not False
+
+    eligibility = row.get("eligibility") if isinstance(row.get("eligibility"), Mapping) else {}
+    financial = row.get("financial_readiness") if isinstance(row.get("financial_readiness"), Mapping) else {}
+    nba = row.get("next_best_action") if isinstance(row.get("next_best_action"), Mapping) else {}
+    owner = nba.get("owner") if isinstance(nba.get("owner"), str) else "blocked"
+    if owner not in {"operator", "client", "blocked"}:
+        owner = "blocked"
+    action = nba.get("action") if isinstance(nba.get("action"), str) else "Review intake and data quality before proceeding."
+    action_short = action.strip()
+    if len(action_short) > 96:
+        action_short = action_short[:93].rstrip() + "..."
+
+    # Fixture/manual/assumption/simulated (or mixed/empty) must never read as
+    # live validation in the operator scan. Pure live_validated sets keep the
+    # class label but the review_note still denies commercial authority here.
+    not_live_evidence = (
+        not classes
+        or any(item in _NON_LIVE_EVIDENCE_CLASSES for item in classes)
+        or strongest != "live_validated"
+    )
+
+    return {
+        "nba_owner": owner,
+        "nba_action_short": action_short,
+        "nba_executes_live_action": False,
+        "evidence_count": len(classes),
+        "strongest_evidence_class": strongest if classes else "unavailable",
+        "weakest_evidence_class": weakest if classes else "unavailable",
+        "evidence_not_live_validated": not_live_evidence,
+        "fee_evidence_class": fee_class if fee is not None else "unavailable",
+        "contribution_evidence_class": contribution_class if contribution is not None else "unavailable",
+        "economics_display_only": bool(display_only),
+        "economics_frontend_calculates": False,
+        "data_inadequate": bool(eligibility.get("data_inadequate")),
+        "financial_ready": bool(financial.get("ready")) and not bool(eligibility.get("data_inadequate")),
+        "review_note": (
+            "Scan cues are planning copies only. Fixture, manual, simulated, and "
+            "assumption evidence is never live validation. Economics remain "
+            "backend display labels; this workbench does not approve, spend, "
+            "publish, fulfill, or message."
+        ),
+    }
+
+
 def _capacity_signal(economics: ServiceEconomics | None) -> dict[str, Any]:
     if economics is None or economics.capacity_utilization is None:
         return {"state": "unavailable", "message": "Capacity signal unavailable.", "concurrent_label": None}
@@ -176,7 +277,9 @@ def build_service_engagement_row(
 
     Starts from ``engagement.to_dict()`` (the existing, tested canonical
     shape) and only adds keys the frontend adapter already knows how to
-    read -- it never invents a new field the adapter does not consume.
+    read, plus additive ``operator_review_cues`` derived from those same
+    fields for pipeline triage. It never recalculates money, re-ranks
+    engagements, or invents lifecycle transitions.
     """
     row = engagement.to_dict()
     evidence_titles = evidence_titles or {}
@@ -290,6 +393,7 @@ def build_service_engagement_row(
     # omitting them is both safe and behaviorally identical on the other
     # side of this boundary.
     row["stale"] = bool(data_quality.stale_fields)
+    row["operator_review_cues"] = _build_operator_review_cues(row)
     return row
 
 
