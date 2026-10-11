@@ -277,6 +277,9 @@ test("operator review cues expose evidence economics and owner without authority
   assert.equal(cues.economics_display_only, true);
   assert.equal(cues.economics_frontend_calculates, false);
   assert.equal(cues.evidence_not_live_validated, true);
+  assert.equal(cues.fee_evidence_class, "assumption");
+  assert.equal(cues.contribution_evidence_class, "unavailable");
+  assert.equal(cues.financial_ready, false);
   assert.notEqual(cues.strongest_evidence_class, "live_validated");
 
   const forged = deriveOperatorReviewCues({

@@ -164,37 +164,12 @@ export function deriveOperatorReviewCues(input: {
   const owner = String(producer.nba_owner ?? "");
   return {
     ...derived,
+    // Producer cues may refine operator-facing copy only. Evidence, economics,
+    // readiness, and safety flags remain derived from the canonical payload.
     nba_owner: (["operator", "client", "blocked"].includes(owner)
       ? owner
       : derived.nba_owner) as OperatorReviewCues["nba_owner"],
     nba_action_short: String(producer.nba_action_short ?? derived.nba_action_short).slice(0, 120),
-    nba_executes_live_action: false,
-    evidence_count: Number.isFinite(Number(producer.evidence_count))
-      ? Math.max(0, Math.floor(Number(producer.evidence_count)))
-      : derived.evidence_count,
-    strongest_evidence_class: neverUpgradeEvidenceClass(
-      derived.strongest_evidence_class,
-      producer.strongest_evidence_class ?? derived.strongest_evidence_class,
-    ),
-    weakest_evidence_class: normalizeEvidenceClass(
-      producer.weakest_evidence_class ?? derived.weakest_evidence_class,
-    ),
-    // Never let a producer cue upgrade fixture/manual rows into live validation.
-    evidence_not_live_validated: !(
-      derived.evidence_not_live_validated === false
-      && producer.evidence_not_live_validated === false
-    ),
-    fee_evidence_class: normalizeEvidenceClass(producer.fee_evidence_class ?? derived.fee_evidence_class),
-    contribution_evidence_class: normalizeEvidenceClass(
-      producer.contribution_evidence_class ?? derived.contribution_evidence_class,
-    ),
-    economics_display_only: true,
-    economics_frontend_calculates: false,
-    data_inadequate: producer.data_inadequate === true || derived.data_inadequate,
-    financial_ready: (
-      (producer.financial_ready === true || derived.financial_ready)
-      && !(producer.data_inadequate === true || derived.data_inadequate)
-    ),
     review_note: String(producer.review_note ?? derived.review_note).slice(0, 400),
   };
 }
