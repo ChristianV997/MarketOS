@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 from pathlib import Path
 from typing import Any, Callable
 
@@ -56,6 +57,17 @@ def _number(row: dict[str, str], *names: str) -> float | None:
         return float(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _reject_non_finite_json_constant(value: str) -> None:
+    raise ValueError("non_finite_json_constant")
+
+
+def _parse_finite_json_number(value: str) -> float:
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        raise ValueError("non_finite_json_number")
+    return numeric
 
 
 def _record(row: dict[str, str], index: int, parser: str, provenance: dict[str, Any], entity_type: str, entity_name: str, signal: str, value: Any, metadata: dict[str, Any] | None = None) -> EvidenceRecord | None:
@@ -154,13 +166,29 @@ def parse_generic_market_csv(rows, provenance):
         signal = _text(r, "signal_type")
         if signal not in KNOWN_SIGNALS: return []
         raw = _text(r, "value")
+        if not raw: return []
         value: Any = raw
-        try: value = float(raw)
+        try:
+            numeric = float(raw)
         except ValueError: pass
+        else:
+            if not math.isfinite(numeric): return []
+            value = numeric
         metadata: dict[str, Any] = {}
         if _text(r, "metadata_json"):
-            try: metadata = json.loads(_text(r, "metadata_json"))
-            except json.JSONDecodeError: metadata = {"metadata_json_invalid": True}
+            try:
+                parsed_metadata = json.loads(
+                    _text(r, "metadata_json"),
+                    parse_constant=_reject_non_finite_json_constant,
+                    parse_float=_parse_finite_json_number,
+                )
+                metadata = (
+                    parsed_metadata
+                    if isinstance(parsed_metadata, dict)
+                    else {"metadata_json_invalid": True}
+                )
+            except (json.JSONDecodeError, ValueError, RecursionError):
+                metadata = {"metadata_json_invalid": True}
         return [(_text(r, "entity_type") or "category", signal, value, metadata)]
     return _parse(rows, "generic_market_csv", provenance, build)
 
