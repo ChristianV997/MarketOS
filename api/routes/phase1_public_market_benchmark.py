@@ -8,7 +8,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from backend.security.rate_limit import check_rate_limit, event_read_policy
-from evaluation.commerce.public_market_benchmark import build_public_market_benchmark, load_public_market_seed
+from evaluation.commerce.public_market_benchmark import (
+    build_public_market_benchmark,
+    load_public_market_seed,
+    redact_report_urls,
+    synthesize_from_public_market,
+    to_marketplace_trend_report,
+)
 
 router = APIRouter(prefix="/api/phase1", tags=["phase1-public-market-benchmark"])
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +30,30 @@ def _safe_path(name: str) -> Path | None:
     return path if ARTIFACTS in path.parents else None
 
 
+def _with_canonical_projection(report: dict) -> dict:
+    """Attach marketplace pillar + synthesis without mutating authority claims."""
+    if not isinstance(report.get("candidate_results"), list):
+        return {**report, "read_only": True, "mutated": False}
+    try:
+        marketplace = report.get("marketplace_trend_report")
+        if not isinstance(marketplace, dict):
+            marketplace = to_marketplace_trend_report(report).to_dict()
+        synthesis = report.get("opportunity_synthesis")
+        if not isinstance(synthesis, dict):
+            synthesis = synthesize_from_public_market(report).to_dict()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        # A malformed stored artifact must degrade to its own content, never to a 500.
+        warnings = report.get("warnings") if isinstance(report.get("warnings"), list) else []
+        return {**report, "warnings": sorted(set([*warnings, "canonical_projection_unavailable"])), "read_only": True, "mutated": False}
+    return {
+        **report,
+        "marketplace_trend_report": marketplace,
+        "opportunity_synthesis": synthesis,
+        "read_only": True,
+        "mutated": False,
+    }
+
+
 @router.get("/public-market-benchmark")
 def public_market_benchmark(request: Request = None):
     key = getattr(getattr(request, "client", None), "host", None) or "direct"
@@ -35,11 +65,13 @@ def public_market_benchmark(request: Request = None):
         from evaluation.commerce.readiness import load_sanitized_artifact
         value, warnings, _ = load_sanitized_artifact(configured)
         if value:
-            return {**value, "warnings": sorted(set([*value.get("warnings", []), *warnings])), "read_only": True, "mutated": False}
+            enriched = _with_canonical_projection(redact_report_urls(value))
+            enriched["warnings"] = sorted(set([*enriched.get("warnings", []), *warnings]))
+            return enriched
     candidates, warnings = load_public_market_seed(DEFAULT_SEED)
     report = build_public_market_benchmark(candidates, allow_network=False).to_dict()
     report["warnings"] = sorted(set([*report["warnings"], *warnings, "server_artifact_not_configured_using_fixture_demo"]))
-    return report
+    return _with_canonical_projection(report)
 
 
 __all__ = ["router"]
