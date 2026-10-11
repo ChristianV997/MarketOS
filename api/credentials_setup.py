@@ -28,6 +28,7 @@ names, service name, exception text, or a path.
 """
 import json
 import logging
+import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -206,7 +207,13 @@ async def set_credential(
     except Exception as exc:
         _log.error("failed_to_set_credential key=%s error=%s", key, type(exc).__name__)
         raise stable_error(500, "credential_store_failed") from None
-    return {"status": "ok", "message": f"Credential {key} saved successfully"}
+    if os.getenv(key):  # backend.config reads the environment first, so the saved value would not take effect
+        return {
+            "status": "ok",
+            "message": f"Credential {key} saved, but an environment variable of the same name takes precedence",
+            "overridden_by_environment": True,
+        }
+    return {"status": "ok", "message": f"Credential {key} saved successfully", "overridden_by_environment": False}
 
 
 @router.get("/credentials/status")

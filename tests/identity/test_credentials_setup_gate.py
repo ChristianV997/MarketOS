@@ -568,6 +568,17 @@ def test_a_write_that_was_not_persisted_is_a_stable_500_not_a_false_success(app,
     assert effects.calls == [("swallowed", "META_ACCESS_TOKEN")]
 
 
+def test_the_response_says_when_an_environment_variable_overrides_the_saved_value(app, effects, monkeypatch):
+    monkeypatch.delenv("META_ACCESS_TOKEN", raising=False)
+    plain = send(app, "set", headers=auth("operator"))
+    assert plain.status_code == 200 and plain.json()["overridden_by_environment"] is False
+    monkeypatch.setenv("META_ACCESS_TOKEN", "synthetic-environment-value-77c1")
+    masked = send(app, "set", headers=auth("operator"))
+    assert masked.status_code == 200 and masked.json()["overridden_by_environment"] is True
+    assert "takes precedence" in masked.json()["message"]
+    assert CANARY not in masked.text and "synthetic-environment-value-77c1" not in masked.text  # neither value is echoed
+
+
 def test_an_environment_variable_cannot_mask_a_failed_write(app, effects, monkeypatch):
     monkeypatch.setenv("META_ACCESS_TOKEN", CANARY)  # get_credential would read this and call the write a success
     monkeypatch.setattr(backend_config, "set_credential", lambda key, value: None)
