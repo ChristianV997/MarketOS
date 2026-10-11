@@ -226,7 +226,25 @@ def build_validation_sprint_plan(workspace_id="default",opportunity_ids=None,lim
     if len(evidence)>=EVIDENCE_PAGE_CAP: warnings.append("evidence_pool_may_be_truncated")
     return plan_validation_sprint(candidates,workspace_id=workspace_id,requested_ids=requested,title=title,objective=objective,limit=limit,evidence_records=evidence,learning_context=learning_context,acknowledged_learning_for=acknowledged_learning_for,budgets=budgets,portfolio=portfolio,runaway=runaway,warnings=warnings)
 
-def run_validation_sprint(workspace_id="default",opportunity_ids=None,title="Opportunity Validation Sprint",objective="Validate planning-ready opportunities with dry-run governed services",limit=10,apply_transitions=True):
+def run_validation_sprint(workspace_id="default",opportunity_ids=None,title="Opportunity Validation Sprint",objective="Validate planning-ready opportunities with dry-run governed services",limit=10,apply_transitions=True,*,authorized=False):
+    """Execute a validation sprint only after an explicit execution authorization.
+
+    The planning seam is advisory and must not accidentally become an execution
+    path merely because a caller invokes this function with its default values.
+    Unauthorized calls return a bounded non-mutating response before reading or
+    writing any execution registry.
+    """
+    if authorized is not True:
+        return {
+            "status": "blocked",
+            "sprint": None,
+            "scorecards": [],
+            "transitions": [],
+            "portfolio_report": None,
+            "obsidian": {"status": "not_run"},
+            "blocked_reasons": ["execution_not_authorized"],
+            "execution_authorized": False,
+        }
     targets=select_validation_targets(workspace_id,opportunity_ids,limit); registry=get_validation_sprint_registry(); sprint=ValidationSprint(stable_sprint_id(workspace_id,title),workspace_id,title,objective,"running",targets,metadata={"planning_only":True}); registry.register_sprint(sprint)
     if not targets:
         sprint.status="blocked"; sprint.blocked_reasons=["no_validation_targets"]; sprint.finished_at=time.time(); registry.update_sprint(sprint); return {"sprint":sprint.to_dict(),"scorecards":[],"transitions":[],"status":"blocked"}

@@ -94,6 +94,22 @@ def test_handoff_payload_binds_to_the_run_entry_point_signature_without_invoking
     assert plan.execution_handoff["authorized"] is False
 
 
+def test_execution_entry_point_fails_closed_without_authorization(monkeypatch):
+    def _forbidden(*args, **kwargs):
+        raise AssertionError("unauthorized execution attempted a side effect")
+
+    monkeypatch.setattr(runner, "select_validation_targets", _forbidden)
+    monkeypatch.setattr(runner, "get_validation_sprint_registry", _forbidden)
+    monkeypatch.setattr(runner, "run_planner_executor_reviewer", _forbidden)
+
+    result = runner.run_validation_sprint("default", opportunity_ids=[], limit=1)
+
+    assert result["status"] == "blocked"
+    assert result["execution_authorized"] is False
+    assert result["blocked_reasons"] == ["execution_not_authorized"]
+    assert result["sprint"] is None
+
+
 def test_plan_serializes_to_json_without_registry_objects(seeded_registry):
     plan = runner.build_validation_sprint_plan("default", None, 10)
     round_tripped = json.loads(json.dumps(plan.to_dict(), sort_keys=True))
