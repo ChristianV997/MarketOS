@@ -1,12 +1,13 @@
 # Canonical Paths
 
-Updated: 2026-09-18
+Updated: 2026-10-11
 
 | Concern | Inspect first |
 |---|---|
 | Financial calculations and money | `backend/economics/kernel.py` |
 | Event spine & envelope | `backend/contracts/events.py` |
 | Replay certification & identity | `backend/events/replay_certification.py` |
+| Operator identity & route authorization | `backend/identity/http.py` (`require_workspace_permission`), `docs/IDENTITY_WORKSPACE_FOUNDATION.md` |
 | Client export & isolation boundary | `evaluation/trustos/client_workspace_isolation.py` |
 | Resource execution governance | `evaluation/companyos/resource_execution_governor.py` |
 | Pre-integration policy gate & approval | `evaluation/companyos/approval_ledger.py` |
