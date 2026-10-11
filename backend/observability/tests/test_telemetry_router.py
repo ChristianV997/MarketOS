@@ -1,7 +1,6 @@
 """Tests for backend.observability.telemetry_router."""
 import math
 import uuid
-import pytest
 import logging
 
 from backend.observability.telemetry_router import TelemetryRouter, get_telemetry_router
@@ -18,7 +17,6 @@ from backend.observability.metrics import (
     sleep_cycle_duration_ms,
     sleep_compression_ratio,
     sleep_units_created,
-    cognitive_entropy,
 )
 
 

@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
-import re
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -202,13 +200,41 @@ ALLOWLISTS: dict[str, frozenset[str]] = {
     "dry_run": ALLOWED_DRY_RUN,
 }
 
-_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-_SECRET_RE = re.compile(
-    r"(?:bearer\s+)?[A-Za-z0-9_\-]{24,}|(?:sk-|ghp_|xox[baprs]-)[A-Za-z0-9_\-]+",
-    re.I,
+_SECRET_PREFIXES = (
+    "github_pat",
+    "gho_",
+    "ghp_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
+    "sk-",
+    "xoxb-",
+    "xoxa-",
+    "xoxp-",
+    "xoxr-",
+    "xoxs-",
+    "npm_",
+    "akia",
 )
-_PATH_INDICATOR = re.compile(r"[\\/]")
-_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _looks_like_email(value: str) -> bool:
+    at = value.find("@")
+    if at <= 0 or at >= len(value) - 1:
+        return False
+    dot = value.find(".", at + 1)
+    return dot > at + 1 and dot < len(value) - 1
+
+
+def _looks_like_secret(value: str) -> bool:
+    folded = value.casefold()
+    if any(prefix in folded for prefix in _SECRET_PREFIXES):
+        return True
+    if folded.startswith("bearer "):
+        token = folded[7:].strip()
+        if len(token) >= 6 and all(char.isalnum() or char in "._~+/-=" for char in token):
+            return True
+    return len(value) >= 24 and all(char.isalnum() or char in "_-" for char in value)
 
 
 def normalize_label(label_name: str, value: Any) -> str:
@@ -251,15 +277,15 @@ def normalize_label(label_name: str, value: Any) -> str:
         return "other"
 
     # Check for control characters
-    if _CONTROL_CHAR_RE.search(val_clean):
+    if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in val_clean):
         return "other"
 
     # Check for file paths / traversal
-    if _PATH_INDICATOR.search(val_clean):
+    if "/" in val_clean or "\\" in val_clean:
         return "other"
 
     # Check for PII or secrets
-    if _EMAIL_RE.search(val_clean) or _SECRET_RE.search(val_clean):
+    if _looks_like_email(val_clean) or _looks_like_secret(val_clean):
         return "other"
 
     candidate = val_clean.lower()

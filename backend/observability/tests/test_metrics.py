@@ -1,12 +1,8 @@
 """Tests for backend.observability.metrics."""
 import math
 import uuid
-import pytest
 
 from backend.observability.metrics import (
-    ALLOWED_EVENT_TYPES,
-    ALLOWED_PROVIDERS,
-    ALLOWED_STATUSES,
     _NullMetric,
     cognitive_entropy,
     episodic_count,
