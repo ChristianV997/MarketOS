@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import re
 from decimal import Decimal
 from typing import Any, Mapping
@@ -17,7 +18,7 @@ from backend.workspaces.client_workspace import ClientWorkspace
 from backend.workspaces.registry import WorkspaceRegistry
 from evaluation.commerce.kernel_integration import replay_fingerprint
 from evaluation.trustos.client_workspace_isolation import export_client_evidence
-from services.consulting_economics import build_consulting_economics_report
+from services.consulting_economics import ConsultingEconomicsInputError, build_consulting_economics_report
 from services.consulting_engagement import ConsultingEngagementRequest, build_consulting_engagement
 from services.consulting_evidence_register import (
     ConsultingEvidenceInputError,
@@ -70,28 +71,51 @@ def _catalog_package_price(offer_ids: tuple[str, ...], currency: str) -> dict[st
         amounts.append((str(offer.price_range.minimum), offer.price_range.currency))
     if not amounts:
         return None
-    minimum = min(amounts, key=lambda item: Decimal(item[0]))
+    total = sum((Decimal(amount) for amount, _ in amounts), Decimal("0"))
     return {
-        "amount": minimum[0],
-        "currency": minimum[1],
+        "amount": str(total),
+        "currency": currency,
         "source": "catalog_band",
         "provenance": "assumed",
         "evidence_state": "assumed",
     }
 
 
-def _envelopes(reports: list[Mapping[str, Any]], workspace_id: str) -> list[dict[str, Any]]:
+def _canonical_report_fingerprint(report: Any) -> str:
+    payload = report.to_dict() if hasattr(report, "to_dict") else dict(report)
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _envelopes(
+    reports: list[Mapping[str, Any]],
+    workspace_id: str,
+    report_registry: ReportRegistry,
+    expected_ids: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    if len(reports) != len(set(expected_ids)):
+        raise ConsultingEvidenceInputError("component report set mismatch")
     envelopes = []
     for report in reports:
-        if str(report.get("workspace_id", workspace_id)) != workspace_id:
+        report_id = str(report.get("report_id", ""))
+        if report_id not in expected_ids:
+            raise ConsultingEvidenceInputError("component report set mismatch")
+        canonical = report_registry.get(report_id)
+        if canonical is None or canonical.workspace_id != workspace_id:
             raise ConsultingEvidenceInputError("workspace mismatch")
-        status = str(report.get("status", "completed"))
+        if str(report.get("workspace_id", "")) != canonical.workspace_id:
+            raise ConsultingEvidenceInputError("workspace mismatch")
+        if str(report.get("fingerprint", "")) != _canonical_report_fingerprint(canonical):
+            raise ConsultingEvidenceInputError("component report fingerprint mismatch")
+        if str(report.get("service_name", "")) != canonical.service_name:
+            raise ConsultingEvidenceInputError("component report service mismatch")
+        status = str(canonical.status)
         if status not in {"completed", "partial", "unavailable", "blocked", "draft", "empty"}:
             status = "partial"
         envelopes.append(build_component_report_envelope(
-            report_id=str(report.get("report_id", "")),
-            fingerprint=str(report.get("fingerprint") or hashlib.sha256(str(report.get("report_id", "")).encode()).hexdigest()[:32]),
-            service=str(report.get("service_name") or report.get("service") or "product_research"),
+            report_id=canonical.report_id,
+            fingerprint=_canonical_report_fingerprint(canonical),
+            service=canonical.service_name,
             workspace_id=workspace_id,
             status=status,
         ))
@@ -148,7 +172,14 @@ def build_consulting_proposal_draft(
     supplied = incoming.get("component_reports")
     try:
         if isinstance(supplied, list):
-            envelopes = _envelopes(supplied, workspace.workspace_id)
+            envelopes = _envelopes(
+                supplied,
+                workspace.workspace_id,
+                report_registry,
+                linked,
+            )
+        elif supplied is not None:
+            raise ConsultingEvidenceInputError("component reports must be a list")
         else:
             envelopes = []
             for report_id in linked:
@@ -157,7 +188,7 @@ def build_consulting_proposal_draft(
                     raise ConsultingEvidenceInputError("workspace mismatch")
                 envelopes.append(build_component_report_envelope(
                     report_id=report.report_id,
-                    fingerprint=hashlib.sha256(report.report_id.encode()).hexdigest()[:32],
+                    fingerprint=_canonical_report_fingerprint(report),
                     service=report.service_name,
                     workspace_id=workspace.workspace_id,
                     status=report.status if report.status in {"completed", "partial", "unavailable", "blocked", "draft", "empty"} else "partial",
@@ -229,27 +260,36 @@ def build_consulting_proposal_draft(
             "offering_name": "Consulting draft",
             "service_model": str(economics_copy.get("service_model") or "project"),
             "currency": currency,
-            "evidence_mode": "fixture",
-            "evidence_id": "consulting-proposal-draft",
-            "source_ref": "fixture://consulting-proposal-draft/economics",
+            "evidence_mode": str(economics_copy.get("evidence_mode") or "fixture"),
+            "evidence_id": str(economics_copy.get("evidence_id") or "consulting-proposal-draft"),
+            "source_ref": str(economics_copy.get("source_ref") or "fixture://consulting-proposal-draft/economics"),
         }
-        payload.update(economics_copy)
-        payload["currency"] = currency
-        payload.pop("package_price", None)
+        reserved = {"service_id", "offering_name", "currency", "evidence_mode", "evidence_id", "source_ref", "package_price"}
+        payload.update({key: value for key, value in economics_copy.items() if key not in reserved})
         if "package_price" in economics_copy:
             payload["package_price"] = economics_copy["package_price"]
         elif band is not None:
             payload["package_price"] = band
-        report = build_consulting_economics_report(payload)
-        economics_body = {
-            "currency": report.currency,
-            "recommendation": report.recommendation,
-            "fingerprint": report.fingerprint,
-            "blockers": [_code(item, "economics_blocker") for item in report.blockers],
-        }
-        unknowns.extend(report.evidence_required)
-        if report.recommendation in {"blocked", "needs_evidence"}:
+        try:
+            report = build_consulting_economics_report(payload)
+        except ConsultingEconomicsInputError:
+            economics_body = {
+                "currency": currency,
+                "recommendation": "blocked",
+                "fingerprint": "",
+                "blockers": ["economics_input_rejected"],
+            }
             blockers.append("economics_incomplete")
+        else:
+            economics_body = {
+                "currency": report.currency,
+                "recommendation": report.recommendation,
+                "fingerprint": report.fingerprint,
+                "blockers": [_code(item, "economics_blocker") for item in report.blockers],
+            }
+            unknowns.extend(report.evidence_required)
+            if report.recommendation in {"blocked", "needs_evidence"}:
+                blockers.append("economics_incomplete")
 
     status = "blocked" if blockers else proposal.status
     if status not in {"draft_ready", "needs_evidence", "blocked"}:

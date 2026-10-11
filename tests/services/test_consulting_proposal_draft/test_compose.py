@@ -20,6 +20,8 @@ from services.consulting_proposal_draft import (
     build_consulting_proposal_draft,
     render_consulting_proposal_markdown,
 )
+from services.consulting_proposal_draft.compose import _catalog_package_price
+from services.consulting_offers import get_offer_definition
 
 WORKSPACE_ID = "fixture-consulting-client"
 FOREIGN = "workspace-other-client"
@@ -157,6 +159,42 @@ def test_foreign_workspace_evidence_is_not_exported(authorities):
     assert FOREIGN not in blob
     assert "foreign-report" not in blob
     assert "evidence_register_rejected" in draft["blockers"]
+
+
+def test_same_workspace_forged_component_report_is_rejected(authorities):
+    request = _request()
+    request["component_reports"] = [{
+        "report_id": "report_fixture_product",
+        "fingerprint": "forged-fingerprint",
+        "service_name": "product_research",
+        "workspace_id": WORKSPACE_ID,
+        "status": "completed",
+    }]
+
+    draft = _build(request, authorities)
+
+    assert "evidence_register_rejected" in draft["blockers"]
+
+
+def test_live_economics_mode_is_blocked_without_raising(authorities):
+    request = _request()
+    request["economics"]["evidence_mode"] = "live"
+
+    draft = _build(request, authorities)
+
+    assert draft["economics"]["recommendation"] == "blocked"
+    assert "economics_incomplete" in draft["blockers"]
+
+
+def test_multi_offer_catalog_price_is_aggregate(authorities):
+    del authorities
+    first = get_offer_definition("diagnostic-audit").price_range.minimum
+    second = get_offer_definition("unit-service-economics").price_range.minimum
+
+    price = _catalog_package_price(("diagnostic-audit", "unit-service-economics"), "USD")
+
+    assert price is not None
+    assert price["amount"] == str(first + second)
 
 
 def test_currency_mismatch_does_not_invent_a_kernel_result(authorities):
