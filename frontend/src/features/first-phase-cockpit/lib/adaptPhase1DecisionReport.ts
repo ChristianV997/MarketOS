@@ -90,6 +90,10 @@ function humanize(value: string | null | undefined): string {
   return String(value ?? "").replace(/_/g, " ").trim() || "unavailable";
 }
 
+function ratioPercent(value: number | null | undefined): string {
+  return `${(Number(value ?? 0) * 100).toFixed(0)}%`;
+}
+
 export function classifyEvidenceAuthority(
   status: string | null | undefined,
   categoryKey?: string,
@@ -120,11 +124,11 @@ export function isLiveSupplierProof(supplierStatus: string | null | undefined): 
 function categoryDetail(key: string, source: Phase1ReadinessSource): string {
   if (key === "supplier") {
     const s = source.supplier_readiness ?? {};
-    return `${s.observed_field_count ?? 0} fields · coverage ${Number(s.coverage ?? 0).toFixed(0)}% · source ${humanize(s.source)}`;
+    return `${s.observed_field_count ?? 0} fields · coverage ${ratioPercent(s.coverage)} · source ${humanize(s.source)}`;
   }
   if (key === "competition") {
     const c = source.competition_readiness ?? {};
-    return `${c.observed_offer_count ?? 0} offers · pricing coverage ${Number(c.pricing_coverage ?? 0).toFixed(0)}%`;
+    return `${c.observed_offer_count ?? 0} offers · pricing coverage ${ratioPercent(c.pricing_coverage)}`;
   }
   if (key === "opportunity") {
     const o = source.opportunity_readiness ?? {};

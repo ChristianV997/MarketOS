@@ -97,6 +97,19 @@ test("adaptPhase1DecisionReport does not treat competition live_observed as supp
   assert.equal(competition?.authority, "partial_or_degraded");
 });
 
+test("formats readiness coverage ratios as percentages", () => {
+  const report = adaptPhase1DecisionReport({
+    isLoading: false,
+    isError: false,
+    data: {
+      supplier_readiness: { status: "fixture_only", observed_field_count: 2, coverage: 0.2 },
+      competition_readiness: { status: "live_observed", observed_offer_count: 3, pricing_coverage: 0.5 },
+    },
+  });
+  assert.match(report.categories.find((row) => row.key === "supplier")?.detail ?? "", /coverage 20%/);
+  assert.match(report.categories.find((row) => row.key === "competition")?.detail ?? "", /pricing coverage 50%/);
+});
+
 test("adaptPhase1DecisionReport error and empty states are explicit", () => {
   const errorView = adaptPhase1DecisionReport({
     isLoading: false,
@@ -115,10 +128,12 @@ test("adaptPhase1DecisionReport error and empty states are explicit", () => {
 test("page wires Phase1DecisionReportPanel without touching shared nav or public-market API edits", async () => {
   const page = await readFile(pageUrl, "utf8");
   const panel = await readFile(panelUrl, "utf8");
+  const hook = await readFile(new URL("../src/features/first-phase-cockpit/hooks/usePhase1DecisionReport.ts", import.meta.url), "utf8");
   assert.match(page, /Phase1DecisionReportPanel/);
   assert.match(page, /usePhase1DecisionReport/);
   assert.match(page, /phase1-decision-report/);
   assert.match(panel, /GET \/api\/phase1\/readiness/);
+  assert.match(hook, /Phase 1 readiness request failed/);
   assert.match(panel, /Not live supplier proof|Live observed/);
   assert.doesNotMatch(panel, /marketplace_trend_report|opportunity_synthesis/);
   assert.doesNotMatch(page, /fetchPublicMarketBenchmark/);

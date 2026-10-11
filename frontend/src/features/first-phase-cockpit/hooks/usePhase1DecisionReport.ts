@@ -11,10 +11,13 @@ import type { Phase1DecisionReportView } from "../contracts/phase1DecisionReport
  */
 export function usePhase1DecisionReport(): Phase1DecisionReportView {
   const query = usePhase1Readiness();
+  const errorMessage = query.error instanceof Error
+    ? `Phase 1 readiness request failed: ${query.error.message}`
+    : null;
   return adaptPhase1DecisionReport({
     isLoading: query.isLoading,
     isError: Boolean(query.error),
-    errorMessage: query.error instanceof Error ? query.error.message : null,
+    errorMessage,
     data: (query.data ?? null) as Phase1ReadinessSource | null,
   });
 }
