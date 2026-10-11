@@ -193,7 +193,7 @@ def product_page(brand_id: str, product_id: str, request: Request) -> HTMLRespon
         cta = '<div class="oos">Temporarily out of stock</div>'
 
     body = (
-        f"<header><div class='brand'><a href='/s/{brand_id}' style='color:inherit;"
+        f"<header><div class='brand'><a href='/s/{_attr(brand_id)}' style='color:inherit;"
         f"text-decoration:none'>{html.escape(brand.name)}</a></div>"
         f"<div class='tagline'>{html.escape(brand.tagline)}</div></header>"
         f"<main><h1>{html.escape(entry.title)}</h1>"

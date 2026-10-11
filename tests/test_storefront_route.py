@@ -169,6 +169,11 @@ def test_brand_id_is_escaped_in_markup(client):
     assert "<svg" not in resp.text.lower()
     assert "Quoted Brand" in resp.text
 
+    product = client.get('/s/q"><svg/safe-item')
+    assert product.status_code == 200
+    assert "<svg" not in product.text.lower()
+    assert "href='/s/q&quot;&gt;&lt;svg'" in product.text
+
 
 def test_checkout_redirect_allows_only_the_provider_contract(client, monkeypatch):
     import backend.commerce.checkout as checkout
