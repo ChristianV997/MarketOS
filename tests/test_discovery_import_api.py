@@ -51,6 +51,19 @@ def _call(method: str, path: str, payload: dict | None = None) -> tuple[int, dic
     return status, json.loads(text), text
 
 
+ALL_IMPORT_ROUTES = (
+    "/api/discovery/import-evidence",
+    "/api/discovery/import-and-run",
+    "/api/discovery/import-refine-compare",
+)
+
+
+def _make_payload(route: str, path: str) -> dict:
+    if route == "/api/discovery/import-evidence":
+        return {"input_path": path, "parser_type": "supplier_catalog_csv", "source_name": "supplier"}
+    return {"imports": [{"input_path": path, "parser_type": "supplier_catalog_csv", "source_name": "supplier"}]}
+
+
 def test_import_api():
     path = str(Path(__file__).parent / "fixtures" / "evidence_imports" / "supplier_catalog_sample.csv")
     status, body, _text = _call(
@@ -69,14 +82,44 @@ def test_import_api():
     assert blocked_status == 200 and blocked["status"] == "blocked"
 
 
-def _assert_blocked(path: str, reason: str, *hidden: str, route: str = "/api/discovery/import-evidence", payload: dict | None = None) -> None:
-    status, body, text = _call("POST", route, payload or {"input_path": path, "parser_type": "supplier_catalog_csv", "source_name": "supplier"})
+def _assert_blocked(
+    path: str,
+    reason: str,
+    *hidden: str,
+    route: str = "/api/discovery/import-evidence",
+    payload: dict | None = None,
+) -> None:
+    status, body, text = _call("POST", route, payload or _make_payload(route, path))
     assert status == 200
     assert body["status"] == "blocked"
     assert body["blocked_reasons"] == [reason]
     assert "records" not in body
+    assert "Traceback" not in text
+    assert ".opened-" not in text
     for item in hidden:
         assert item not in text
+
+
+def test_all_import_routes_succeed_with_valid_fixture():
+    templates_dir = Path("data/import_templates")
+    pre_existing = set(templates_dir.iterdir()) if templates_dir.exists() else set()
+    try:
+        for route in ALL_IMPORT_ROUTES:
+            status, body, text = _call("POST", route, _make_payload(route, FIXTURE))
+            assert status == 200
+            assert body.get("status") != "blocked"
+            assert ".opened-" not in text
+            assert "Traceback" not in text
+    finally:
+        if templates_dir.exists():
+            for p in list(templates_dir.iterdir()):
+                if p not in pre_existing:
+                    p.unlink(missing_ok=True)
+            if not pre_existing:
+                try:
+                    templates_dir.rmdir()
+                except OSError:
+                    pass
 
 
 def test_import_route_rejects_paths_outside_the_import_surface(tmp_path: Path):
@@ -87,52 +130,45 @@ def test_import_route_rejects_paths_outside_the_import_surface(tmp_path: Path):
     outside = tmp_path / "outside.csv"
     row = f"category,product,supplier_cost\n{MARKER},item,1\n"
     link = root / "tests" / "fixtures" / "evidence_imports" / "outside-link.csv"
+    can_symlink = True
     try:
         inside.write_text(row, encoding="utf-8")
         sibling_root.mkdir(exist_ok=True)
         sibling.write_text(row, encoding="utf-8")
         outside.write_text(row, encoding="utf-8")
-        link.symlink_to(outside)
-
-        allowed_status, allowed, allowed_text = _call(
-            "POST",
-            "/api/discovery/import-evidence",
-            {"input_path": FIXTURE, "parser_type": "supplier_catalog_csv", "source_name": "supplier"},
-        )
-        assert allowed_status == 200
-        assert allowed["import_job"]["status"] == "completed"
-        assert allowed["import_job"]["records_imported"] > 0
-        assert MARKER not in allowed_text
-        assert ".opened-" not in allowed_text
-        assert "unintended_surface.csv" not in allowed_text
+        try:
+            link.symlink_to(outside)
+        except OSError:
+            can_symlink = False
 
         hidden = (MARKER, inside.name, sibling.name, outside.name, str(outside), str(sibling))
-        _assert_blocked(inside.name, "import_path_outside_import_surface", *hidden)
-        _assert_blocked(str(sibling), "import_path_outside_import_surface", *hidden)
-        _assert_blocked(str(outside), "import_path_outside_import_surface", *hidden)
-        _assert_blocked(
-            "tests/fixtures/../../unintended_surface.csv",
-            "import_path_traversal_blocked",
-            *hidden,
-        )
-        _assert_blocked(
-            "tests/fixtures/evidence_imports/missing-no-such.csv",
-            "import_path_unavailable",
-            "missing-no-such.csv",
-            *hidden,
-        )
-        _assert_blocked(str(link), "import_path_outside_import_surface", *hidden)
-        for route in ("/api/discovery/import-and-run", "/api/discovery/import-refine-compare"):
+
+        for route in ALL_IMPORT_ROUTES:
+            _assert_blocked(inside.name, "import_path_outside_import_surface", *hidden, route=route)
+            _assert_blocked(str(sibling), "import_path_outside_import_surface", *hidden, route=route)
+            _assert_blocked(str(outside), "import_path_outside_import_surface", *hidden, route=route)
             _assert_blocked(
-                inside.name,
-                "import_path_outside_import_surface",
+                "tests/fixtures/../../unintended_surface.csv",
+                "import_path_traversal_blocked",
                 *hidden,
                 route=route,
-                payload={"imports": [{"input_path": inside.name, "parser_type": "supplier_catalog_csv"}]},
             )
+            _assert_blocked(
+                "tests/fixtures/evidence_imports/missing-no-such.csv",
+                "import_path_unavailable",
+                "missing-no-such.csv",
+                *hidden,
+                route=route,
+            )
+            if can_symlink:
+                _assert_blocked(str(link), "import_path_outside_import_surface", *hidden, route=route)
+            _assert_blocked("", "import_path_invalid", *hidden, route=route)
+            _assert_blocked("   ", "import_path_invalid", *hidden, route=route)
+            _assert_blocked("bad\x00path.csv", "import_path_invalid", *hidden, route=route)
     finally:
         inside.unlink(missing_ok=True)
-        link.unlink(missing_ok=True)
+        if can_symlink:
+            link.unlink(missing_ok=True)
         sibling.unlink(missing_ok=True)
         sibling_root.rmdir()
 
@@ -154,11 +190,11 @@ def test_opened_file_stays_confined_when_the_final_component_is_swapped():
         while not stop.is_set():
             try:
                 raced.unlink()
-            except FileNotFoundError:
+            except OSError:
                 pass
             try:
                 raced.symlink_to(canary)
-            except FileExistsError:
+            except OSError:
                 pass
             try:
                 if raced.is_symlink():

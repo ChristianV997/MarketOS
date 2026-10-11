@@ -62,91 +62,100 @@ def _reject_workspace_selector(request: Request, payload: Mapping[str, Any]) -> 
 # The CSV loader also allows the repository root. Caller-supplied import paths
 # stay on the import surface so a request cannot read arbitrary repo files.
 _IMPORT_SURFACE_DIRS = ("data", "datasets", "fixtures", "tests")
+_STAGED_PARENT_DIR = os.path.realpath(os.path.join(os.getcwd(), "tests", "fixtures", "evidence_imports"))
 
 
-def _import_surface_reason(raw: object) -> str | None:
-    """Return a stable block reason, or None when the path is an import-surface file."""
-    if not isinstance(raw, str) or not raw.strip() or "\x00" in raw:
-        return "import_path_invalid"
-    candidate = Path(raw)
-    if ".." in candidate.parts:
-        return "import_path_traversal_blocked"
-    root = Path.cwd().resolve()
-    try:
-        resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
-    except (OSError, ValueError):
-        return "import_path_invalid"
-    on_surface = False
-    for name in _IMPORT_SURFACE_DIRS:
-        base = (root / name).resolve()
-        try:
-            resolved.relative_to(base)
-        except ValueError:
-            continue
-        on_surface = True
-        break
-    if not on_surface:
-        return "import_path_outside_import_surface"
-    if not resolved.is_file():
-        return "import_path_unavailable"
-    return None
+def _get_project_root() -> str:
+    return os.path.realpath(os.getcwd())
 
 
-def _blocked_import_paths(paths: list[object]) -> dict[str, Any] | None:
-    for raw in paths:
-        reason = _import_surface_reason(raw)
-        if reason:
-            return {"status": "blocked", "blocked_reasons": [reason]}
-    return None
+def _validate_import_surface_path(raw: object) -> tuple[str | None, str | None]:
+    """Validate that raw is a confined path within an allowed import surface directory.
 
-
-def _lexical_import_path(raw: str) -> Path:
-    root = Path.cwd().resolve()
-    candidate = Path(raw)
-    return candidate if candidate.is_absolute() else root / candidate
-
-
-def _read_opened_import(raw: str) -> bytes:
-    """Read the caller path with the dataset helper that opens O_NOFOLLOW.
-
-    ``Path.resolve`` is only the surface check. The bytes come from the helper's
-    open of this path, so a final-component symlink swap cannot be followed.
+    Returns:
+        (canonical_path, None) if valid and exists as a regular file.
+        (None, block_reason) if invalid, outside surface, traversal, or unavailable.
     """
-    from backend.discovery.local_dataset import _read_regular_file
+    if not isinstance(raw, str) or not raw.strip() or "\x00" in raw:
+        return None, "import_path_invalid"
+
+    # Reject traversal syntactically
+    candidate_parts = Path(raw).parts
+    if ".." in candidate_parts:
+        return None, "import_path_traversal_blocked"
+
+    root_s = _get_project_root()
+    candidate = Path(raw)
+    norm_s = os.path.normpath(str(candidate if candidate.is_absolute() else Path(root_s) / candidate))
+
+    # Boundary check: norm_s must be strictly within root_s
+    try:
+        if os.path.commonpath([root_s, norm_s]) != root_s:
+            return None, "import_path_outside_import_surface"
+    except (ValueError, OSError):
+        return None, "import_path_outside_import_surface"
+
+    # Match against allowed import surface directories
+    matched_surface: str | None = None
+    for name in _IMPORT_SURFACE_DIRS:
+        surface_dir = os.path.realpath(os.path.join(root_s, name))
+        try:
+            if os.path.commonpath([surface_dir, norm_s]) == surface_dir:
+                matched_surface = surface_dir
+                break
+        except (ValueError, OSError):
+            continue
+
+    if not matched_surface:
+        return None, "import_path_outside_import_surface"
+
+    # Resolve symlinks and re-verify confinement against the matched surface directory
+    try:
+        real_s = os.path.realpath(norm_s)
+    except (OSError, ValueError):
+        return None, "import_path_unavailable"
 
     try:
-        return _read_regular_file(os.path.normpath(str(_lexical_import_path(raw))))
-    except FileNotFoundError:
-        raise ValueError("import_path_unavailable") from None
-    except ValueError:
-        raise ValueError("import_path_outside_import_surface") from None
+        if os.path.commonpath([matched_surface, real_s]) != matched_surface:
+            return None, "import_path_outside_import_surface"
+    except (ValueError, OSError):
+        return None, "import_path_outside_import_surface"
+
+    # Check existence as regular file
+    if not os.path.isfile(real_s):
+        return None, "import_path_unavailable"
+
+    return norm_s, None
 
 
-def _stage_opened_import(raw: str, payload: bytes) -> str:
+def _stage_opened_import(payload: bytes) -> str:
     """Copy bytes from the opened inode to a private regular file the CSV loader can re-read."""
-    leaf = Path(raw).name
-    if not leaf or leaf in {".", ".."} or "/" in leaf or "\\" in leaf or "\x00" in leaf:
-        raise ValueError("import_path_invalid")
-    parent = Path.cwd().resolve() / "tests" / "fixtures" / "evidence_imports"
-    directory = tempfile.mkdtemp(prefix=".opened-", dir=parent)
-    dest = Path(directory) / leaf
+    parent_dir = _STAGED_PARENT_DIR
+    temp_dir = tempfile.mkdtemp(prefix=".opened-", dir=parent_dir)
+    real_temp_dir = os.path.realpath(temp_dir)
+    if os.path.commonpath([parent_dir, real_temp_dir]) != parent_dir:
+        raise ValueError("staged_dir_outside_parent")
+    dest = os.path.normpath(os.path.join(real_temp_dir, "staged_import.csv"))
+    if os.path.commonpath([real_temp_dir, dest]) != real_temp_dir:
+        raise ValueError("staged_file_outside_temp_dir")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     descriptor = os.open(dest, flags, 0o600)
     try:
         os.write(descriptor, payload)
     finally:
         os.close(descriptor)
-    return str(dest)
+    return dest
 
 
 def _drop_staged(path: str) -> None:
+    parent_dir = _STAGED_PARENT_DIR
     try:
-        os.unlink(path)
-    except OSError:
-        pass
-    parent = os.path.dirname(path)
-    try:
-        os.rmdir(parent)
+        real_path = os.path.realpath(path)
+        if os.path.commonpath([parent_dir, real_path]) == parent_dir:
+            os.unlink(real_path)
+            parent = os.path.dirname(real_path)
+            if os.path.commonpath([parent_dir, parent]) == parent_dir and parent != parent_dir:
+                os.rmdir(parent)
     except OSError:
         pass
 
@@ -158,27 +167,41 @@ def _open_import_paths(raw_paths: list[object]) -> tuple[list[str], dict[str, An
     is not passed to the loader, which would resolve and open it again.
     """
     staged: list[str] = []
-    try:
-        for raw in raw_paths:
-            reason = _import_surface_reason(raw)
-            if reason:
-                raise ValueError(reason)
-            if not isinstance(raw, str):
-                raise ValueError("import_path_invalid")
-            staged.append(_stage_opened_import(raw, _read_opened_import(raw)))
-    except ValueError as exc:
-        for path in staged:
-            _drop_staged(path)
-        code = str(exc)
-        if code not in {
-            "import_path_invalid",
-            "import_path_traversal_blocked",
-            "import_path_outside_import_surface",
-            "import_path_unavailable",
-        }:
-            code = "import_path_unavailable"
-        return [], {"status": "blocked", "blocked_reasons": [code]}
+    from backend.discovery.local_dataset import _read_regular_file
+
+    for raw in raw_paths:
+        norm_s, reason = _validate_import_surface_path(raw)
+        if reason is not None:
+            for p in staged:
+                _drop_staged(p)
+            return [], {"status": "blocked", "blocked_reasons": [reason]}
+
+        assert norm_s is not None
+        try:
+            payload = _read_regular_file(norm_s)
+        except FileNotFoundError:
+            for p in staged:
+                _drop_staged(p)
+            return [], {"status": "blocked", "blocked_reasons": ["import_path_unavailable"]}
+        except ValueError:
+            for p in staged:
+                _drop_staged(p)
+            return [], {"status": "blocked", "blocked_reasons": ["import_path_outside_import_surface"]}
+        except Exception:
+            for p in staged:
+                _drop_staged(p)
+            return [], {"status": "blocked", "blocked_reasons": ["import_path_unavailable"]}
+
+        try:
+            staged_path = _stage_opened_import(payload)
+            staged.append(staged_path)
+        except Exception:
+            for p in staged:
+                _drop_staged(p)
+            return [], {"status": "blocked", "blocked_reasons": ["import_path_unavailable"]}
+
     return staged, None
+
 
 
 @router.post("/opportunity-discovery")
