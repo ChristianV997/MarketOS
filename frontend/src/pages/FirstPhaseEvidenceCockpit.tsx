@@ -6,10 +6,12 @@ import { ControlPlanePanel } from "@/features/first-phase-cockpit/components/Con
 import { DraftPreviewPanel } from "@/features/first-phase-cockpit/components/DraftPreviewPanel";
 import { EvidencePillarsPanel } from "@/features/first-phase-cockpit/components/EvidencePillarsPanel";
 import { RankedCandidatesPanel } from "@/features/first-phase-cockpit/components/RankedCandidatesPanel";
+import { Phase1DecisionReportPanel } from "@/features/first-phase-cockpit/components/Phase1DecisionReportPanel";
 import { RunMetadataPanel } from "@/features/first-phase-cockpit/components/RunMetadataPanel";
 import { SupplierCsvPreview } from "@/components/SupplierCsvPreview";
 import type { SupplierCsvPreviewResult } from "@/lib/supplierCsvParser";
 import { useFirstPhaseEvidenceCockpit } from "@/features/first-phase-cockpit/hooks/useFirstPhaseEvidenceCockpit";
+import { usePhase1DecisionReport } from "@/features/first-phase-cockpit/hooks/usePhase1DecisionReport";
 import type { CandidateFilterState } from "@/features/first-phase-cockpit/contracts/firstPhaseEvidencePacket";
 import { filterCandidates } from "@/features/first-phase-cockpit/lib/filterCandidates";
 import { serializeClientSafeExport } from "@/features/first-phase-cockpit/lib/exportClientSafeReport";
@@ -30,6 +32,7 @@ const SAFETY_BADGES = [
 
 export default function FirstPhaseEvidenceCockpitPage() {
   const { packet, isLoading, hasErrors } = useFirstPhaseEvidenceCockpit();
+  const decisionReport = usePhase1DecisionReport();
   const [filter, setFilter] = useState<CandidateFilterState>(() =>
     initialFilter(typeof window === "undefined" ? "" : window.location.search),
   );
@@ -91,8 +94,14 @@ export default function FirstPhaseEvidenceCockpitPage() {
     <div className="mx-auto max-w-7xl space-y-5 overflow-x-hidden p-4 sm:p-6">
       {/* Launch Draft Pack / Higgsfield creative assets: deferred. No frontend display adapter until a cockpit-owned read-only contract exists on this page. */}
       <a
-        href="#ranked-candidates-table"
+        href="#phase1-decision-report"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-100"
+      >
+        Skip to Phase 1 decision report
+      </a>
+      <a
+        href="#ranked-candidates-table"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-16 focus:z-50 focus:rounded focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-100"
       >
         Skip to ranked candidates
       </a>
@@ -103,6 +112,7 @@ export default function FirstPhaseEvidenceCockpitPage() {
       <p className="mt-1 text-sm text-zinc-500">
             Decision-review surface over existing Phase 1 projections. Rankings and economics are not recalculated.
             GET /api/phase1/evidence-cockpit is not implemented; missing slots stay unavailable.
+            The decision report below uses the stable readiness contract only.
           </p>
         </div>
         <div className="flex flex-wrap gap-2" aria-label="Safety guarantees">
@@ -123,6 +133,8 @@ export default function FirstPhaseEvidenceCockpitPage() {
         unmatchedServerCount={packet.fingerprint.unmatchedServerIds.length}
         unmatchedProjectionCount={packet.fingerprint.unmatchedProjectionIds.length}
       />
+
+      <Phase1DecisionReportPanel report={decisionReport} />
 
       {isLoading && (
         <p className="text-sm text-zinc-400" role="status">
