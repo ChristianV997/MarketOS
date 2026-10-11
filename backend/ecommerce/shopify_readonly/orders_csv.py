@@ -38,6 +38,24 @@ _DATE = re.compile(
 _AMOUNT = re.compile(r"\d+(?:\.\d+)?")
 _PHONE = re.compile(r"(?:\+\d{1,3}[\s.\-]?)?(?:\(\d{3}\)[\s.\-]*\d{3}[\s.\-]?\d{4}|\d{3}[\s.\-]\d{3}[\s.\-]\d{4})")
 _STREET = re.compile(r"\d+\s+[A-Za-z0-9.'-]+\s+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|blvd|boulevard)\b", re.IGNORECASE)
+_REFUND_STATUS = {
+    "success": "successful",
+    "successful": "successful",
+    "succeeded": "successful",
+    "completed": "successful",
+    "complete": "successful",
+    "paid": "successful",
+    "refunded": "successful",
+    "pending": "pending",
+    "processing": "pending",
+    "scheduled": "pending",
+    "failed": "failed",
+    "failure": "failed",
+    "declined": "failed",
+    "cancelled": "failed",
+    "canceled": "failed",
+    "voided": "failed",
+}
 
 _MAPPED = {
     "id": "id",
@@ -68,6 +86,8 @@ _MAPPED = {
     "lineitem discount": "line_discount",
     "record type": "record_type",
     "refund id": "refund_id",
+    "transaction status": "transaction_status",
+    "refund status": "transaction_status",
 }
 _PII = {
     "email", "phone", "notes", "note attributes", "customer", "customer name",
@@ -143,6 +163,13 @@ def _amount(raw: str) -> tuple[float | None, str | None]:
     return float(value), None
 
 
+def _refund_amount(raw: str) -> tuple[float | None, str | None]:
+    value, error = _amount(raw)
+    if error is None and value is not None and value < 0:
+        return None, "malformed_amount"
+    return value, error
+
+
 def _date(raw: str) -> tuple[str | None, str | None]:
     text = " ".join(raw.strip().split())
     if text == "":
@@ -178,6 +205,17 @@ def _identity(raw: str) -> tuple[str, str | None]:
     if text == "" or len(text) > 64 or not _IDENTITY.fullmatch(text) or _has_contact(text):
         return "", "malformed_identity"
     return text, None
+
+
+def _transaction_status(raw: str) -> tuple[str, str | None]:
+    if any(ord(char) < 32 for char in raw):
+        return "unknown", "malformed_status"
+    text = " ".join(raw.strip().lower().split())
+    if text == "":
+        return "missing", None
+    if len(text) > 32 or _has_contact(text):
+        return "unknown", "malformed_status"
+    return _REFUND_STATUS.get(text, "unknown"), None
 
 
 def _stable_id(prefix: str, value: str) -> str:
@@ -234,6 +272,8 @@ def parse_shopify_orders_refunds_csv(text: str, workspace_id: str = "commerce-mv
         file_kind = "refund"
     else:
         file_kind = "order"
+    if file_kind == "order" and any(header in {"transaction status", "refund status"} for header in headers):
+        return _reject([_rejection(None, "unsupported_column", "transaction status")])
     if file_kind == "order" and "amount" in mapped_headers and "refunded amount" not in mapped_headers and "refund amount" not in mapped_headers:
         return _reject([_rejection(None, "unsupported_column", "amount")])
 
@@ -345,6 +385,7 @@ def _same(current: Any, new: Any) -> bool:
 
 def _take_order(row_number: int, cells: dict[str, str], orders: dict[str, dict[str, Any]], refunds: dict[str, dict[str, Any]], rejections: list[dict[str, Any]], conflicts: set[str]) -> None:
     values = _mapped(cells)
+    order_key_source = "id" if values.get("id") else "order_id" if values.get("order_id") else "name"
     order_id, id_error = _identity(values.get("id") or values.get("order_id") or values.get("name") or "")
     name, name_error = _identity(values.get("name") or order_id)
     if not _check(row_number, "id", id_error, rejections) or not order_id:
@@ -358,7 +399,7 @@ def _take_order(row_number: int, cells: dict[str, str], orders: dict[str, dict[s
     total, total_error = _amount(values.get("total", ""))
     tax, tax_error = _amount(values.get("tax", ""))
     discounts, discount_error = _amount(values.get("discounts", ""))
-    refunded, refund_error = _amount(values.get("refunded_amount", ""))
+    refunded, refund_error = _refund_amount(values.get("refunded_amount", ""))
     financial, financial_error = _label(values.get("financial_status", ""), 40)
     fulfillment, fulfillment_error = _label(values.get("fulfillment_status", ""), 40)
     ok = all(_check(row_number, field, error, rejections) for field, error in (
@@ -370,7 +411,7 @@ def _take_order(row_number: int, cells: dict[str, str], orders: dict[str, dict[s
     if not ok:
         conflicts.add(f"order:{order_id}")
         return
-    incoming = {"order_name": name or order_id, "created_at": created_at, "currency": currency, "subtotal": subtotal, "total": total, "tax": tax, "discounts": discounts, "financial_status": financial, "fulfillment_status": fulfillment, "cancelled_at": cancelled_at}
+    incoming = {"order_name": name or order_id, "order_key_source": order_key_source, "created_at": created_at, "currency": currency, "subtotal": subtotal, "total": total, "tax": tax, "discounts": discounts, "financial_status": financial, "fulfillment_status": fulfillment, "cancelled_at": cancelled_at}
     current = orders.get(order_id)
     if current is None:
         orders[order_id] = {**incoming, "lines": {}}
@@ -415,7 +456,14 @@ def _take_line(row_number: int, order_id: str, values: dict[str, str], lines: di
 
 def _attach_order_refund(row_number: int, order_id: str, currency: str, created_at: str | None, amount: float | None, refunds: dict[str, dict[str, Any]], rejections: list[dict[str, Any]], conflicts: set[str]) -> None:
     identity = f"order-refund:{order_id}"
-    incoming = {"order_id": order_id, "created_at": created_at, "currency": currency, "amount": amount}
+    incoming = {
+        "order_id": order_id,
+        "created_at": created_at,
+        "currency": currency,
+        "amount": amount,
+        "refund_source": "order_level",
+        "transaction_status": "not_applicable",
+    }
     current = refunds.get(identity)
     if current is None:
         refunds[identity] = incoming
@@ -432,6 +480,7 @@ def _attach_order_refund(row_number: int, order_id: str, currency: str, created_
 def _take_refund(row_number: int, cells: dict[str, str], refunds: dict[str, dict[str, Any]], rejections: list[dict[str, Any]], conflicts: set[str]) -> None:
     values = _mapped(cells)
     refund_id, refund_error = _identity(values.get("refund_id") or values.get("id") or "")
+    order_key_source = "order_id" if values.get("order_id") else "name"
     order_id, order_error = _identity(values.get("order_id") or values.get("name") or "")
     if not _check(row_number, "refund id", refund_error, rejections) or not refund_id:
         return
@@ -439,11 +488,21 @@ def _take_refund(row_number: int, cells: dict[str, str], refunds: dict[str, dict
         return
     created_at, date_error = _date(values.get("created_at", ""))
     currency, currency_error = _currency(values.get("currency", ""))
-    amount, amount_error = _amount(values.get("refunded_amount", values.get("amount", "")))
-    if not all(_check(row_number, field, error, rejections) for field, error in (("created at", date_error), ("currency", currency_error), ("amount", amount_error))):
+    amount_raw = values.get("refunded_amount", "").strip() or values.get("amount", "")
+    amount, amount_error = _refund_amount(amount_raw)
+    status, status_error = _transaction_status(values.get("transaction_status", ""))
+    if not all(_check(row_number, field, error, rejections) for field, error in (("created at", date_error), ("currency", currency_error), ("amount", amount_error), ("transaction status", status_error))):
         conflicts.add(f"refund:{refund_id}")
         return
-    incoming = {"order_id": order_id, "created_at": created_at, "currency": currency, "amount": amount}
+    incoming = {
+        "order_id": order_id,
+        "created_at": created_at,
+        "currency": currency,
+        "amount": amount,
+        "refund_source": "transaction",
+        "order_key_source": order_key_source,
+        "transaction_status": status,
+    }
     current = refunds.get(refund_id)
     if current is None:
         refunds[refund_id] = incoming
@@ -464,13 +523,28 @@ def _order_models(orders: dict[str, dict[str, Any]]) -> tuple[tuple[ShopifyOrder
             line_id = _stable_id("line", f"{order_id}:{index}:{key}")
             line_ids.append(line_id)
             line_models.append(ShopifyLineItemObservation(line_id, order_id, None, None, line["title"], line["sku"], line["quantity"], line["price"], line["discount"], "", {"read_only": True, "evidence_state": "manual_import"}))
-        order_models.append(ShopifyOrderObservation(order_id, item["order_name"], item["created_at"], item["currency"], item["subtotal"], item["total"], item["tax"], item["discounts"], item["financial_status"], item["fulfillment_status"], tuple(line_ids), None, "shopify_orders_csv", item["cancelled_at"], {"read_only": True, "evidence_state": "manual_import", "source": _SOURCE}))
+        order_models.append(ShopifyOrderObservation(order_id, item["order_name"], item["created_at"], item["currency"], item["subtotal"], item["total"], item["tax"], item["discounts"], item["financial_status"], item["fulfillment_status"], tuple(line_ids), None, "shopify_orders_csv", item["cancelled_at"], {"read_only": True, "evidence_state": "manual_import", "source": _SOURCE, "order_key_source": item["order_key_source"]}))
     return tuple(order_models), tuple(line_models)
 
 
 def _refund_models(refunds: dict[str, dict[str, Any]]) -> tuple[ShopifyRefundObservation, ...]:
     return tuple(
-        ShopifyRefundObservation(refund_id, item["order_id"], item["created_at"], item["currency"], item["amount"], {"read_only": True, "evidence_state": "manual_import", "source": _SOURCE, "no_refund_authority": True})
+        ShopifyRefundObservation(
+            refund_id,
+            item["order_id"],
+            item["created_at"],
+            item["currency"],
+            item["amount"],
+            {
+                "read_only": True,
+                "evidence_state": "manual_import",
+                "source": _SOURCE,
+                "no_refund_authority": True,
+                "refund_source": item["refund_source"],
+                "order_key_source": item.get("order_key_source", "order_id"),
+                "transaction_status": item["transaction_status"],
+            },
+        )
         for refund_id, item in sorted(refunds.items())
     )
 
