@@ -11,6 +11,7 @@ import {
   type ServiceEngagementProjection,
 } from "../contracts/serviceEngagementProjection.ts";
 import { HIGGSFIELD_DRAFT_SKILLS } from "../lib/creativeAssetContract.ts";
+import { deriveOperatorReviewCues } from "../lib/adaptServiceProjection.ts";
 
 const EVIDENCE_CYCLE: EvidenceClass[] = [
   "observed",
@@ -143,7 +144,7 @@ export function buildEngagement(options: {
   const dataInadequate = Boolean(options.dataInadequate || options.lifecycle === "data_inadequate");
   const required = requiredInputsFor(options.serviceId);
   const feeLabel = options.serviceId === "managed-acquisition-cro" ? "2500.00" : "1200.00";
-  return {
+  const engagement: ServiceEngagement = {
     engagement_id,
     service_id: options.serviceId,
     lifecycle_state: options.lifecycle,
@@ -241,6 +242,22 @@ export function buildEngagement(options: {
       executes_live_action: false,
       rationale: "Workbench actions are operator review steps only.",
     },
+    operator_review_cues: {
+      nba_owner: dataInadequate ? "client" : "operator",
+      nba_action_short: "placeholder",
+      nba_executes_live_action: false,
+      evidence_count: 0,
+      strongest_evidence_class: "unavailable",
+      weakest_evidence_class: "unavailable",
+      evidence_not_live_validated: true,
+      fee_evidence_class: "unavailable",
+      contribution_evidence_class: "unavailable",
+      economics_display_only: true,
+      economics_frontend_calculates: false,
+      data_inadequate: dataInadequate,
+      financial_ready: false,
+      review_note: "placeholder",
+    },
     creative_assets: creativeDraft(options.clientName),
     private_operator_notes: options.includeInternal ? "INTERNAL: margin heuristic 0.62, do not export." : null,
     internal_prompt: options.includeInternal ? "SYSTEM PROMPT: score clients for upsell" : null,
@@ -248,6 +265,14 @@ export function buildEngagement(options: {
     updated_at: "2026-09-18T00:00:00Z",
     stale: Boolean(options.stale),
   };
+  engagement.operator_review_cues = deriveOperatorReviewCues({
+    evidence: engagement.evidence,
+    economics: engagement.economics,
+    next_best_action: engagement.next_best_action,
+    eligibility: engagement.eligibility,
+    financial_readiness: engagement.financial_readiness,
+  });
+  return engagement;
 }
 
 const CLIENT_NAMES = [

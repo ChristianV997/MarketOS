@@ -8,6 +8,7 @@ import {
   type EvidenceClass,
   type LifecycleState,
   type PriorityServiceId,
+  type OperatorReviewCues,
   type ServiceEngagement,
   type ServiceEngagementProjection,
 } from "../contracts/serviceEngagementProjection.ts";
@@ -16,6 +17,25 @@ import { containsSecretShapedValue, EXPORT_OMIT_KEYS } from "./exportClientSafeE
 const LIFECYCLE_SET = new Set<string>(LIFECYCLE_STATES);
 const EVIDENCE_SET = new Set<string>(EVIDENCE_CLASSES);
 const SERVICE_SET = new Set<string>(PRIORITY_SERVICE_IDS);
+const NON_LIVE_EVIDENCE = new Set<EvidenceClass>([
+  "fixture",
+  "manual_import",
+  "assumption",
+  "simulated",
+  "unavailable",
+]);
+const EVIDENCE_STRENGTH: Record<EvidenceClass, number> = {
+  live_validated: 90,
+  observed: 80,
+  supplier_documented: 70,
+  derived: 60,
+  supplier_claimed: 50,
+  manual_import: 40,
+  fixture: 30,
+  simulated: 20,
+  assumption: 10,
+  unavailable: 0,
+};
 const ACCEPTED_INPUT_VERSIONS = new Set([
   SERVICE_ENGAGEMENT_PROJECTION_VERSION,
   SERVICE_DELIVERY_PLANE_REPORT_VERSION,
@@ -97,6 +117,86 @@ export function normalizeServiceId(value: unknown): PriorityServiceId | null {
     return "managed-acquisition-cro";
   }
   return null;
+}
+
+export function deriveOperatorReviewCues(input: {
+  evidence: ServiceEngagement["evidence"];
+  economics: ServiceEngagement["economics"];
+  next_best_action: ServiceEngagement["next_best_action"];
+  eligibility: ServiceEngagement["eligibility"];
+  financial_readiness: ServiceEngagement["financial_readiness"];
+  producerCues?: unknown;
+}): OperatorReviewCues {
+  const classes = input.evidence.map((item) => item.evidence_class);
+  const strongest = classes.length
+    ? classes.reduce((best, item) => (EVIDENCE_STRENGTH[item] > EVIDENCE_STRENGTH[best] ? item : best))
+    : "unavailable" as EvidenceClass;
+  const weakest = classes.length
+    ? classes.reduce((worst, item) => (EVIDENCE_STRENGTH[item] < EVIDENCE_STRENGTH[worst] ? item : worst))
+    : "unavailable" as EvidenceClass;
+  const derived: OperatorReviewCues = {
+    nba_owner: input.next_best_action.owner,
+    nba_action_short: input.next_best_action.action.length > 96
+      ? `${input.next_best_action.action.slice(0, 93).trimEnd()}...`
+      : input.next_best_action.action,
+    nba_executes_live_action: false,
+    evidence_count: classes.length,
+    strongest_evidence_class: strongest,
+    weakest_evidence_class: weakest,
+    evidence_not_live_validated: (
+      !classes.length
+      || classes.some((item) => NON_LIVE_EVIDENCE.has(item))
+      || strongest !== "live_validated"
+    ),
+    fee_evidence_class: input.economics.fee?.evidence_class ?? "unavailable",
+    contribution_evidence_class: input.economics.contribution?.evidence_class ?? "unavailable",
+    economics_display_only: true,
+    economics_frontend_calculates: false,
+    data_inadequate: input.eligibility.data_inadequate,
+    financial_ready: input.financial_readiness.ready && !input.eligibility.data_inadequate,
+    review_note:
+      "Scan cues are planning copies only. Fixture, manual, simulated, and assumption evidence is never live validation. Economics remain backend display labels; this workbench does not approve, spend, publish, fulfill, or message.",
+  };
+
+  const producer = asRecord(input.producerCues);
+  if (!producer) return derived;
+
+  const owner = String(producer.nba_owner ?? "");
+  return {
+    ...derived,
+    nba_owner: (["operator", "client", "blocked"].includes(owner)
+      ? owner
+      : derived.nba_owner) as OperatorReviewCues["nba_owner"],
+    nba_action_short: String(producer.nba_action_short ?? derived.nba_action_short).slice(0, 120),
+    nba_executes_live_action: false,
+    evidence_count: Number.isFinite(Number(producer.evidence_count))
+      ? Math.max(0, Math.floor(Number(producer.evidence_count)))
+      : derived.evidence_count,
+    strongest_evidence_class: neverUpgradeEvidenceClass(
+      derived.strongest_evidence_class,
+      producer.strongest_evidence_class ?? derived.strongest_evidence_class,
+    ),
+    weakest_evidence_class: normalizeEvidenceClass(
+      producer.weakest_evidence_class ?? derived.weakest_evidence_class,
+    ),
+    // Never let a producer cue upgrade fixture/manual rows into live validation.
+    evidence_not_live_validated: !(
+      derived.evidence_not_live_validated === false
+      && producer.evidence_not_live_validated === false
+    ),
+    fee_evidence_class: normalizeEvidenceClass(producer.fee_evidence_class ?? derived.fee_evidence_class),
+    contribution_evidence_class: normalizeEvidenceClass(
+      producer.contribution_evidence_class ?? derived.contribution_evidence_class,
+    ),
+    economics_display_only: true,
+    economics_frontend_calculates: false,
+    data_inadequate: producer.data_inadequate === true || derived.data_inadequate,
+    financial_ready: (
+      (producer.financial_ready === true || derived.financial_ready)
+      && !(producer.data_inadequate === true || derived.data_inadequate)
+    ),
+    review_note: String(producer.review_note ?? derived.review_note).slice(0, 400),
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -263,6 +363,69 @@ function adaptEngagement(raw: unknown): AdaptEngagementResult {
     ? toStringList(record.missing_data)
     : toStringList(record.missing_information);
 
+  const eligibilityPanel: ServiceEngagement["eligibility"] = {
+    eligible: Boolean(eligibility.eligible) && !dataInadequate,
+    data_inadequate: dataInadequate,
+    reasons: toStringList(eligibility.reasons).length
+      ? toStringList(eligibility.reasons)
+      : (dataInadequate ? missing : []),
+    required_from_client: Array.isArray(eligibility.required_from_client)
+      ? eligibility.required_from_client.map((item) => {
+        const row = asRecord(item) ?? {};
+        return {
+          field: String(row.field ?? "unspecified"),
+          why: String(row.why ?? "Required before analysis can proceed."),
+          how_to_provide: String(row.how_to_provide ?? "Upload a client-safe export of the source record."),
+        };
+      })
+      : missing.map((field) => ({
+        field,
+        why: "Listed as missing_information on the #261 engagement copy.",
+        how_to_provide: `Provide ${field} as a client-safe record.`,
+      })),
+  };
+  const evidence = evidenceSource.map((item, index) => {
+    const row = asRecord(item) ?? {};
+    return {
+      evidence_id: String(row.evidence_id ?? row.reference_id ?? `ev-${index}`),
+      title: String(row.title ?? row.label ?? "Evidence item"),
+      evidence_class: neverUpgradeEvidenceClass(
+        normalizeEvidenceClass(row.base_class ?? row.evidence_class ?? row.class),
+        row.evidence_class ?? row.class,
+      ),
+      summary: String(row.summary ?? row.note ?? ""),
+      collected_at: row.collected_at == null ? null : String(row.collected_at),
+    };
+  });
+  const economicsSummary: ServiceEngagement["economics"] = {
+    authority: "backend_service_economics",
+    frontend_calculates: false,
+    fee: displayMoney(economics.fee ?? record.fee),
+    contribution: displayMoney(economics.contribution ?? record.contribution),
+    contribution_unavailable_reason: (economics.contribution ?? record.contribution)
+      ? null
+      : String(economics.contribution_unavailable_reason ?? "No sanitized contribution copy was supplied."),
+    planning_assumption_note: String(
+      economics.planning_assumption_note
+      ?? "Price, CAC, ROAS, and contribution labels are planning assumptions unless marked live_validated by the backend.",
+    ),
+  };
+  const financialReadiness: ServiceEngagement["financial_readiness"] = {
+    ready: Boolean(financial.ready) && !dataInadequate,
+    missing: toStringList(financial.missing).length ? toStringList(financial.missing) : missing,
+    note: String(financial.note ?? "Financial figures are display copies only. The frontend does not calculate contribution."),
+  };
+  const nextBestAction: ServiceEngagement["next_best_action"] = {
+    action: String(nba.action ?? (dataInadequate
+      ? "Collect the missing client records listed on this engagement."
+      : "Review intake and wait for a canonical workbench projection.")),
+    owner: (["operator", "client", "blocked"].includes(String(nba.owner))
+      ? String(nba.owner)
+      : dataInadequate ? "client" : "blocked") as "operator" | "client" | "blocked",
+    executes_live_action: false,
+    rationale: String(nba.rationale ?? "This workbench is read-only and does not execute CompanyOS transitions."),
+  };
+
   return {
     ok: true,
     engagement: {
@@ -276,59 +439,11 @@ function adaptEngagement(raw: unknown): AdaptEngagementResult {
         contact_channel: String(intake.contact_channel ?? "not_collected"),
         fields: mapIntakeFields(intake, intakeData),
       },
-      eligibility: {
-        eligible: Boolean(eligibility.eligible) && !dataInadequate,
-        data_inadequate: dataInadequate,
-        reasons: toStringList(eligibility.reasons).length
-          ? toStringList(eligibility.reasons)
-          : (dataInadequate ? missing : []),
-        required_from_client: Array.isArray(eligibility.required_from_client)
-          ? eligibility.required_from_client.map((item) => {
-            const row = asRecord(item) ?? {};
-            return {
-              field: String(row.field ?? "unspecified"),
-              why: String(row.why ?? "Required before analysis can proceed."),
-              how_to_provide: String(row.how_to_provide ?? "Upload a client-safe export of the source record."),
-            };
-          })
-          : missing.map((field) => ({
-            field,
-            why: "Listed as missing_information on the #261 engagement copy.",
-            how_to_provide: `Provide ${field} as a client-safe record.`,
-          })),
-      },
-      evidence: evidenceSource.map((item, index) => {
-        const row = asRecord(item) ?? {};
-        return {
-          evidence_id: String(row.evidence_id ?? row.reference_id ?? `ev-${index}`),
-          title: String(row.title ?? row.label ?? "Evidence item"),
-          evidence_class: neverUpgradeEvidenceClass(
-            normalizeEvidenceClass(row.base_class ?? row.evidence_class ?? row.class),
-            row.evidence_class ?? row.class,
-          ),
-          summary: String(row.summary ?? row.note ?? ""),
-          collected_at: row.collected_at == null ? null : String(row.collected_at),
-        };
-      }),
-      financial_readiness: {
-        ready: Boolean(financial.ready) && !dataInadequate,
-        missing: toStringList(financial.missing).length ? toStringList(financial.missing) : missing,
-        note: String(financial.note ?? "Financial figures are display copies only. The frontend does not calculate contribution."),
-      },
+      eligibility: eligibilityPanel,
+      evidence,
+      financial_readiness: financialReadiness,
       deliverables: mapDeliverables(record, dataInadequate),
-      economics: {
-        authority: "backend_service_economics",
-        frontend_calculates: false,
-        fee: displayMoney(economics.fee ?? record.fee),
-        contribution: displayMoney(economics.contribution ?? record.contribution),
-        contribution_unavailable_reason: (economics.contribution ?? record.contribution)
-          ? null
-          : String(economics.contribution_unavailable_reason ?? "No sanitized contribution copy was supplied."),
-        planning_assumption_note: String(
-          economics.planning_assumption_note
-          ?? "Price, CAC, ROAS, and contribution labels are planning assumptions unless marked live_validated by the backend.",
-        ),
-      },
+      economics: economicsSummary,
       capacity: {
         state: (["ok", "warning", "blocked", "unavailable"].includes(String(capacity.state))
           ? String(capacity.state)
@@ -340,16 +455,15 @@ function adaptEngagement(raw: unknown): AdaptEngagementResult {
         ? toStringList(record.assumptions)
         : (record.scope ? [String(record.scope)] : []),
       missing_data: missing,
-      next_best_action: {
-        action: String(nba.action ?? (dataInadequate
-          ? "Collect the missing client records listed on this engagement."
-          : "Review intake and wait for a canonical workbench projection.")),
-        owner: (["operator", "client", "blocked"].includes(String(nba.owner))
-          ? String(nba.owner)
-          : dataInadequate ? "client" : "blocked") as "operator" | "client" | "blocked",
-        executes_live_action: false,
-        rationale: String(nba.rationale ?? "This workbench is read-only and does not execute CompanyOS transitions."),
-      },
+      next_best_action: nextBestAction,
+      operator_review_cues: deriveOperatorReviewCues({
+        evidence,
+        economics: economicsSummary,
+        next_best_action: nextBestAction,
+        eligibility: eligibilityPanel,
+        financial_readiness: financialReadiness,
+        producerCues: record.operator_review_cues,
+      }),
       creative_assets: Array.isArray(record.creative_assets)
         ? record.creative_assets.map((item) => {
           const row = asRecord(item) ?? {};

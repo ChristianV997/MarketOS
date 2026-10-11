@@ -12,6 +12,7 @@ export type WorkbenchViewModel = {
   filtered: ServiceEngagement[];
   selected: ServiceEngagement | null;
   selectedIndex: number;
+  selectionOutsideFilter: boolean;
   exportPreview: ReturnType<typeof buildClientSafeServiceExport> | null;
   liveEndpointUnavailable: boolean;
   diagnostics: string[];
@@ -31,6 +32,7 @@ export function composeWorkbenchViewModel(input: {
       filtered: [],
       selected: null,
       selectedIndex: -1,
+      selectionOutsideFilter: false,
       exportPreview: null,
       liveEndpointUnavailable: true,
       diagnostics: [],
@@ -45,6 +47,7 @@ export function composeWorkbenchViewModel(input: {
       filtered: [],
       selected: null,
       selectedIndex: -1,
+      selectionOutsideFilter: false,
       exportPreview: null,
       liveEndpointUnavailable: true,
       diagnostics: input.errorMessage ? [input.errorMessage] : [],
@@ -52,6 +55,16 @@ export function composeWorkbenchViewModel(input: {
   }
 
   const filtered = filterEngagements(input.projection.engagements, input.filters);
+  const requestedStillVisible = Boolean(
+    input.selectedId
+    && filtered.some((item) => item.engagement_id === input.selectedId),
+  );
+  const selectionOutsideFilter = Boolean(
+    input.selectedId
+    && input.projection.engagements.some((item) => item.engagement_id === input.selectedId)
+    && !requestedStillVisible
+    && filtered.length > 0,
+  );
   const selected = filtered.find((item) => item.engagement_id === input.selectedId)
     ?? filtered[0]
     ?? null;
@@ -85,17 +98,25 @@ export function composeWorkbenchViewModel(input: {
     statusMessage = "Manual-import / #261 plane copy. Not live-validated. Server order is preserved; economics are display copies only.";
   }
 
+  if (selectionOutsideFilter && selected) {
+    statusMessage = `${statusMessage} Previous selection left the filter; focusing ${selected.intake.display_name} (${selected.engagement_id}).`;
+  }
+
   return {
     surface,
     statusMessage,
     filtered,
     selected,
     selectedIndex,
+    selectionOutsideFilter,
     exportPreview: selected ? buildClientSafeServiceExport(selected) : null,
     liveEndpointUnavailable: true,
     diagnostics: [
       ...(input.errorMessage ? [input.errorMessage] : []),
       ...input.projection.diagnostics,
+      ...(selectionOutsideFilter
+        ? ["selection_outside_filter: previous engagement is hidden by the current filter"]
+        : []),
     ],
   };
 }
