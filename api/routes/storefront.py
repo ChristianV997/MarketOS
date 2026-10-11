@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import logging
 import os
+import re
 from html.parser import HTMLParser
 from urllib.parse import urlencode, urlsplit
 
@@ -45,6 +46,7 @@ _PAGE_STYLE = """
 _ALLOWED_TAGS = {"p", "br", "ul", "ol", "li", "strong", "em", "b", "i"}
 _DROPPED_TAGS = {"script", "style", "iframe", "object", "embed", "svg", "math", "noscript"}
 _STRIPE_CHECKOUT_NETLOCS = {"checkout.stripe.com", "checkout.stripe.com:443"}
+_STRIPE_CHECKOUT_PATH = re.compile(r"/c/pay/[A-Za-z0-9_-]+$")
 
 
 def _attr(value: object) -> str:
@@ -137,10 +139,9 @@ def _safe_checkout_target(url: object, *, dry_run: bool, brand_id: str, product_
         return f"{base.scheme}://{base.netloc}{expected_path}?purchased=1"
     if parts.scheme != "https" or netloc not in _STRIPE_CHECKOUT_NETLOCS:
         return None
-    if not parts.path.startswith("/") or parts.path.startswith("//") or "\\" in parts.path:
+    if not _STRIPE_CHECKOUT_PATH.fullmatch(parts.path) or parts.query:
         return None
-    query = f"?{parts.query}" if parts.query else ""
-    return f"https://checkout.stripe.com{parts.path}{query}"
+    return f"https://checkout.stripe.com{parts.path}"
 
 
 @router.get("/s/{brand_id}", response_class=HTMLResponse)

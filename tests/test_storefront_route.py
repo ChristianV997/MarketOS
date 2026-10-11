@@ -194,6 +194,8 @@ def test_checkout_redirect_allows_only_the_provider_contract(client, monkeypatch
     rejected = (
         "https://evil.example/pay",
         "https://checkout.stripe.com.evil.example/c/pay/cs_test_synthetic",
+        "https://checkout.stripe.com/c/pay/cs_test_synthetic/next",
+        "https://checkout.stripe.com/c/pay/cs_test_synthetic?next=https://evil.example",
         "https://Checkout.stripe.com/c/pay/cs_test_synthetic",
         "https://user@checkout.stripe.com/c/pay/cs_test_synthetic",
         "http://checkout.stripe.com/c/pay/cs_test_synthetic",
