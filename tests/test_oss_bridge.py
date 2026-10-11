@@ -1,9 +1,11 @@
 import asyncio
-import time
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from backend.commerce.oss_bridge import clear_oss_cache, collect_oss_inputs
 from backend.commerce.loop import run_provider_cycle
 from backend.contracts.adapters import AdapterHealth, SidecarContext
+from backend.adapters.research import crawl4ai as crawl4ai_module
 from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
 
 
@@ -43,9 +45,11 @@ def test_oss_bridge_marks_live_attributed_research_and_preserves_economics():
     assert normalized["metadata"]["currency"] == "USD"
 
 
-def test_oss_bridge_preserves_typed_crawl4ai_candidate_for_ranking():
+def test_oss_bridge_preserves_typed_crawl4ai_candidate_for_ranking(monkeypatch):
     clear_oss_cache()
-    fetched_at = time.time()
+    fetched_at = datetime(2026, 10, 10, 12, tzinfo=timezone.utc).timestamp()
+    # Keep the observation fresh relative to a frozen test clock on every run.
+    monkeypatch.setattr(crawl4ai_module, "time", SimpleNamespace(time=lambda: fetched_at))
 
     class StructuredResearch(Crawl4AIResearchAdapter):
         async def discover(self, url, *, context):
