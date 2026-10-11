@@ -201,7 +201,7 @@ def build_source_calibration_profiles(signals: list[SourceUsefulnessSignal], exi
         profiles.append(SourceCalibrationProfile(
             profile_identity(*key), key[0], key[1], source_types[0] if len(source_types) == 1 else "mixed", key[2],
             score, multiplier, adjustment, positive, negative, neutral, strengths, weaknesses, strengths, weaknesses,
-            last_updated_at=max(x.created_at for x in items),
+            last_updated_at=max((x.created_at for x in eligible), default=max(x.created_at for x in items)),
             provenance={"method": "deterministic_observed_change_aggregation", "non_causal": True, "policy_version": CALIBRATION_POLICY_VERSION, "attribution": "single_source_eligible_only", "interval": "wilson_95_over_signals", "interval_caveat": "signals from one comparison are correlated, so the interval is optimistic"},
             metadata={"signal_count": len(items), "source_type_conflict": len(source_types) > 1},
             evidence_status=status, eligible_signal_count=len(eligible), excluded_signal_count=len(items) - len(eligible),

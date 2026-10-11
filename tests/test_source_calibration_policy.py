@@ -496,7 +496,7 @@ def test_an_unreadable_registry_is_moved_aside_not_overwritten(tmp_path):
     path.write_bytes(original)
     registry = CalibrationRegistry(path)
     registry.register_profile(SourceCalibrationProfile("p", WS, "supplier", "local_file", "supplier_catalog_csv"))
-    assert (tmp_path / "state.json.unreadable").read_bytes() == original
+    assert (tmp_path / "state.json.unreadable-1").read_bytes() == original
     assert CalibrationRegistry(path).get_profile("supplier", workspace_id=WS) is not None
 
 
@@ -525,3 +525,87 @@ def test_a_source_name_in_both_baseline_and_current_is_attributed_once(world):
     single_source_comparisons(world, 2)
     signals = engine.derive_source_usefulness_signals(WS, as_of=AS_OF)
     assert {s.attribution for s in signals if s.comparison_id} == {"single_source"}
+
+
+# --------------------------------------------------------------------------- second review findings
+
+
+def test_an_observed_profile_ages_out_when_the_plan_is_built_long_after_its_evidence(world):
+    world.calibration.register_profile(observed_profile(adjustment=-8.0))
+    world.calibration.profiles[next(iter(world.calibration.profiles))].last_updated_at = T0
+    stale_plan = build_import_recommendation_plan(EvidenceGapAnalysis("a", WS, "t", "o", [gap("g", priority=50.0)], created_at=T0 + STALE_AFTER_SECONDS + DAY))
+    recommendation = stale_plan.recommendations[0]
+    assert recommendation.metadata["calibration_reason"] == "stale_profile" and recommendation.priority_score == pytest.approx(55.0)
+
+
+def test_a_workspace_rerun_retires_a_profile_whose_evidence_has_gone(world):
+    single_source_comparisons(world, 2)
+    engine.run_source_calibration(WS, as_of=AS_OF)
+    assert world.calibration.get_profile("supplier", workspace_id=WS).evidence_status == "observed"
+    world.refinement.comparisons.clear()
+    engine.run_source_calibration(WS, as_of=AS_OF)
+    assert world.calibration.get_profile("supplier", workspace_id=WS) is None
+    assert plan_for(gap("g", priority=50.0)).recommendations[0].metadata["calibration_reason"] == "no_profile"
+
+
+def test_a_failed_write_leaves_ordering_on_the_previous_profiles(world, tmp_path):
+    single_source_comparisons(world, 2)
+    engine.run_source_calibration(WS, as_of=AS_OF)
+    before = plan_for(gap("g", priority=50.0)).recommendations[0].priority_score
+    blocker = tmp_path / "not_a_directory"
+    blocker.write_text("x", encoding="utf-8")
+    world.calibration.path = blocker / "state.json"
+    world.refinement.comparisons.clear()
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    assert run.metadata["persisted"] is False and run.status == "partial"
+    assert world.calibration.get_profile("supplier", workspace_id=WS).evidence_status == "observed"
+    assert plan_for(gap("g", priority=50.0)).recommendations[0].priority_score == pytest.approx(before)
+
+
+def test_the_plan_identifier_changes_when_the_calibration_applied_changes(world):
+    gaps = [gap("g", priority=50.0)]
+    without = plan_for(*gaps).plan_id
+    assert plan_for(*gaps).plan_id == without
+    world.calibration.register_profile(observed_profile(adjustment=8.0))
+    assert plan_for(*gaps).plan_id != without
+
+
+def test_legacy_profiles_nested_inside_stored_runs_are_neutralised_too(tmp_path):
+    import json as _json
+    path = tmp_path / "legacy_run.json"
+    nested_profile = {"profile_id": "profile_n", "workspace_id": WS, "source_name": "supplier", "source_type": "local_file", "parser_type": "supplier_catalog_csv", "recommended_priority_adjustment": 12.0}
+    nested_signal = {"signal_id": "n1", "workspace_id": WS, "source_name": "supplier", "source_type": "local_file", "parser_type": "supplier_catalog_csv", "signal_type": "rank_improvement", "value": 2.0}
+    run = {"calibration_id": "calibration_old", "workspace_id": WS, "title": "t", "objective": "o", "signals": [nested_signal], "profiles": [nested_profile]}
+    path.write_text(_json.dumps({"signals": {}, "profiles": {}, "runs": {"calibration_old": run}}), encoding="utf-8")
+    registry = CalibrationRegistry(path)
+    stored = registry.runs["calibration_old"]
+    assert stored.profiles[0].evidence_status == "legacy_unverified" and stored.profiles[0].recommended_priority_adjustment == 0.0
+    assert stored.signals[0].attribution == "legacy_unverified" and not stored.signals[0].eligible
+
+
+def test_a_read_error_is_not_treated_as_corruption(tmp_path):
+    path = tmp_path / "state.json"
+    path.mkdir()  # reading a directory fails with an OSError, which is not evidence that the content is corrupt
+    registry = CalibrationRegistry(path)
+    assert registry.load_failed is True and path.is_dir()
+    registry.register_profile(SourceCalibrationProfile("p", WS, "supplier", "local_file", "supplier_catalog_csv"))
+    assert registry.last_save_ok is False and path.is_dir()
+    assert not list(tmp_path.glob("state.json.unreadable*"))
+
+
+def test_a_second_corruption_keeps_the_first_quarantined_copy(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text("{first", encoding="utf-8")
+    CalibrationRegistry(path)
+    path.write_text("{second", encoding="utf-8")
+    CalibrationRegistry(path)
+    assert (tmp_path / "state.json.unreadable-1").read_text(encoding="utf-8") == "{first"
+    assert (tmp_path / "state.json.unreadable-2").read_text(encoding="utf-8") == "{second"
+
+
+def test_import_quality_facts_are_recorded_even_without_comparisons(world):
+    add_import(world, "imp_supplier", "supplier", rejected=10, imported=2)
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    facts = [s for s in run.signals if s.attribution == "import_quality"]
+    assert [s.signal_type for s in facts] == ["unsupported_signal_rejection"] and not facts[0].eligible
+    assert run.metadata["exclusions"]["import_quality_not_comparison"] == 1

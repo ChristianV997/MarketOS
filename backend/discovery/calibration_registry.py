@@ -13,7 +13,7 @@ _log = logging.getLogger(__name__)
 
 class CalibrationRegistry:
     def __init__(self, path=None):
-        self.path = Path(path or os.getenv("MARKETOS_CALIBRATION_STATE", "state/source_calibration_registry.json")); self.signals = {}; self.profiles = {}; self.runs = {}; self._lock = threading.RLock(); self.last_save_ok = True; self.load()
+        self.path = Path(path or os.getenv("MARKETOS_CALIBRATION_STATE", "state/source_calibration_registry.json")); self.signals = {}; self.profiles = {}; self.runs = {}; self._lock = threading.RLock(); self.last_save_ok = True; self.load_failed = False; self.load()
     def register_signal(self, signal): self.signals[signal.signal_id] = signal; self.save(); return signal
     def register_signals(self, signals):
         for signal in signals: self.signals[signal.signal_id] = signal
@@ -38,24 +38,56 @@ class CalibrationRegistry:
     def list_calibration_runs(self, workspace_id=None, limit=50): return list(reversed([x for x in self.runs.values() if workspace_id is None or x.workspace_id == workspace_id]))[:max(0, min(int(limit), 500))]
     def clear_for_tests(self): self.signals.clear(); self.profiles.clear(); self.runs.clear(); self.save()
     def to_dict(self): return {"signals": {k: v.to_dict() for k, v in self.signals.items()}, "profiles": {k: v.to_dict() for k, v in self.profiles.items()}, "runs": {k: v.to_dict() for k, v in self.runs.items()}}
+    def record_run(self, signals, profiles, run, *, replace_workspace_profiles=False):
+        """Persist one run in a single write. A failed write rolls back every in-memory change, so ordering never sees unsaved profiles."""
+        before = self.snapshot()
+        for signal in signals: self.signals[signal.signal_id] = signal
+        if replace_workspace_profiles:
+            for pid in [pid for pid, item in self.profiles.items() if item.workspace_id == run.workspace_id]: del self.profiles[pid]
+        for profile in profiles:
+            key = (profile.workspace_id, profile.source_name, profile.parser_type)
+            for pid in [pid for pid, item in self.profiles.items() if pid != profile.profile_id and (item.workspace_id, item.source_name, item.parser_type) == key]: del self.profiles[pid]
+            self.profiles[profile.profile_id] = profile
+        self.runs[run.calibration_id] = run
+        run.metadata["persisted"] = True
+        self.save()
+        if not self.last_save_ok:
+            self.restore(before)
+            run.metadata["persisted"] = False
+        return self.last_save_ok
+    def snapshot(self): return {"signals": dict(self.signals), "profiles": dict(self.profiles), "runs": dict(self.runs)}
+    def restore(self, snapshot): self.signals, self.profiles, self.runs = dict(snapshot["signals"]), dict(snapshot["profiles"]), dict(snapshot["runs"])
     def load(self):
+        self.load_failed = False
         try:
             if not self.path.exists(): return
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            signals = raw.get("signals", {}); profiles = raw.get("profiles", {})
+            text = self.path.read_text(encoding="utf-8")
+        except OSError as exc:
+            # A read error is not corruption: leave the file alone and refuse to write over it.
+            self.load_failed = True; self.signals, self.profiles, self.runs = {}, {}, {}
+            _log.warning("calibration registry unreadable; writes disabled: %s", type(exc).__name__)
+            return
+        try:
+            raw = json.loads(text)
+            signals = raw.get("signals", {}); profiles = raw.get("profiles", {}); runs = raw.get("runs", {})
             # Records written before attribution and policy versioning are not verifiable, so they stay out of every adjustment.
-            for item in signals.values():
+            for item in list(signals.values()) + [x for run in runs.values() for x in run.get("signals", [])]:
                 if "attribution" not in item: item.update(attribution="legacy_unverified", exclusion_reason="legacy_unverified")
-            for item in profiles.values():
+            for item in list(profiles.values()) + [x for run in runs.values() for x in run.get("profiles", [])]:
                 if "policy_version" not in item: item.update(evidence_status="legacy_unverified", recommended_priority_adjustment=0.0, confidence_multiplier_adjustment=1.0)
-            self.signals = {k: SourceUsefulnessSignal.from_dict(v) for k, v in signals.items()}; self.profiles = {k: SourceCalibrationProfile.from_dict(v) for k, v in profiles.items()}; self.runs = {k: CalibrationRun.from_dict(v) for k, v in raw.get("runs", {}).items()}
+            self.signals = {k: SourceUsefulnessSignal.from_dict(v) for k, v in signals.items()}; self.profiles = {k: SourceCalibrationProfile.from_dict(v) for k, v in profiles.items()}; self.runs = {k: CalibrationRun.from_dict(v) for k, v in runs.items()}
         except Exception as exc:
-            # Keep the unreadable file for inspection; the next save must not silently overwrite it.
-            _log.warning("calibration registry unreadable; moved aside and starting empty: %s", type(exc).__name__)
-            try: os.replace(self.path, self.path.with_name(self.path.name + ".unreadable"))
+            # Corrupt content: keep it under a fresh quarantine name, so an earlier quarantined copy is never overwritten.
+            index = 1
+            while self.path.with_name(f"{self.path.name}.unreadable-{index}").exists(): index += 1
+            try: os.replace(self.path, self.path.with_name(f"{self.path.name}.unreadable-{index}"))
             except OSError: pass
+            _log.warning("calibration registry corrupt; moved aside and starting empty: %s", type(exc).__name__)
             self.signals, self.profiles, self.runs = {}, {}, {}
     def save(self):
+        if self.load_failed:
+            self.last_save_ok = False
+            return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True); temp = self.path.with_suffix(".tmp"); temp.write_text(json.dumps(self.to_dict(), indent=2, default=str), encoding="utf-8"); temp.replace(self.path); self.last_save_ok = True
         except Exception as exc:
