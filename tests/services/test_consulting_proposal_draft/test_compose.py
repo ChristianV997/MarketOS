@@ -20,7 +20,7 @@ from services.consulting_proposal_draft import (
     build_consulting_proposal_draft,
     render_consulting_proposal_markdown,
 )
-from services.consulting_proposal_draft.compose import _catalog_package_price
+from services.consulting_proposal_draft.compose import _canonical_report_fingerprint, _catalog_package_price
 from services.consulting_offers import get_offer_definition
 
 WORKSPACE_ID = "fixture-consulting-client"
@@ -176,6 +176,37 @@ def test_same_workspace_forged_component_report_is_rejected(authorities):
     assert "evidence_register_rejected" in draft["blockers"]
 
 
+def test_duplicate_component_report_ids_are_rejected(authorities):
+    _, report_registry, workspace, _ = authorities
+    report_registry.register(CommercialReport(
+        report_id="report_fixture_second",
+        workspace_id=workspace.workspace_id,
+        proposal_id="proposal-fixture-second",
+        experiment_id="experiment-fixture-second",
+        service_name="customer_intelligence",
+        title="Second fixture report",
+        summary="A second bounded fixture report.",
+        status="completed",
+        created_at=0.0,
+    ))
+    request = _request()
+    request["linked_component_report_ids"] = ["report_fixture_product", "report_fixture_second"]
+    canonical = report_registry.get("report_fixture_product")
+    assert canonical is not None
+    duplicate = {
+        "report_id": canonical.report_id,
+        "fingerprint": _canonical_report_fingerprint(canonical),
+        "service_name": canonical.service_name,
+        "workspace_id": workspace.workspace_id,
+        "status": canonical.status,
+    }
+    request["component_reports"] = [duplicate, dict(duplicate)]
+
+    draft = _build(request, authorities)
+
+    assert "evidence_register_rejected" in draft["blockers"]
+
+
 def test_live_economics_mode_is_blocked_without_raising(authorities):
     request = _request()
     request["economics"]["evidence_mode"] = "live"
@@ -184,6 +215,22 @@ def test_live_economics_mode_is_blocked_without_raising(authorities):
 
     assert draft["economics"]["recommendation"] == "blocked"
     assert "economics_incomplete" in draft["blockers"]
+
+
+def test_legacy_service_fee_alias_is_not_combined_with_catalog_price(authorities):
+    request = _request()
+    request["economics"]["service_fee"] = {
+        "amount": "4800",
+        "currency": "USD",
+        "source": "legacy_alias",
+        "provenance": "manual",
+        "evidence_state": "observed",
+    }
+
+    draft = _build(request, authorities)
+
+    assert draft["economics"]["fingerprint"]
+    assert "economics_input_rejected" not in draft["economics"]["blockers"]
 
 
 def test_multi_offer_catalog_price_is_aggregate(authorities):

@@ -93,13 +93,16 @@ def _envelopes(
     report_registry: ReportRegistry,
     expected_ids: tuple[str, ...],
 ) -> list[dict[str, Any]]:
-    if len(reports) != len(set(expected_ids)):
+    report_ids = [str(report.get("report_id", "")) for report in reports]
+    expected_id_set = set(expected_ids)
+    if (
+        len(reports) != len(expected_ids)
+        or len(report_ids) != len(set(report_ids))
+        or set(report_ids) != expected_id_set
+    ):
         raise ConsultingEvidenceInputError("component report set mismatch")
     envelopes = []
-    for report in reports:
-        report_id = str(report.get("report_id", ""))
-        if report_id not in expected_ids:
-            raise ConsultingEvidenceInputError("component report set mismatch")
+    for report, report_id in zip(reports, report_ids, strict=True):
         canonical = report_registry.get(report_id)
         if canonical is None or canonical.workspace_id != workspace_id:
             raise ConsultingEvidenceInputError("workspace mismatch")
@@ -264,10 +267,24 @@ def build_consulting_proposal_draft(
             "evidence_id": str(economics_copy.get("evidence_id") or "consulting-proposal-draft"),
             "source_ref": str(economics_copy.get("source_ref") or "fixture://consulting-proposal-draft/economics"),
         }
-        reserved = {"service_id", "offering_name", "currency", "evidence_mode", "evidence_id", "source_ref", "package_price"}
+        reserved = {
+            "service_id",
+            "offering_name",
+            "currency",
+            "evidence_mode",
+            "evidence_id",
+            "source_ref",
+            "package_price",
+            "service_fee",
+        }
         payload.update({key: value for key, value in economics_copy.items() if key not in reserved})
         if "package_price" in economics_copy:
             payload["package_price"] = economics_copy["package_price"]
+        elif "service_fee" in economics_copy:
+            # Keep the economics service's legacy alias when no canonical
+            # package_price was supplied. Do not also inject the catalog band:
+            # the parser intentionally rejects both names together.
+            payload["service_fee"] = economics_copy["service_fee"]
         elif band is not None:
             payload["package_price"] = band
         try:
