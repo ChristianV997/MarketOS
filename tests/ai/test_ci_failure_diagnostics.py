@@ -76,6 +76,45 @@ def test_diagnostics_redact_common_secret_and_absolute_path_shapes(tmp_path):
     assert "[redacted-path]" in output
 
 
+def test_diagnostics_redact_bearer_token_inside_assignment_metadata(tmp_path):
+    raw = tmp_path / "raw.xml"
+    junit = tmp_path / "junit.xml"
+    summary = tmp_path / "summary.txt"
+    token_tail = "ci_fixture_authorization_canary"
+    raw.write_text(
+        '<testsuite tests="1" failures="1"><testcase '
+        'classname="authorization=&quot;Bearer ' + token_tail + '&quot;" '
+        'name="test_auth"><failure /></testcase></testsuite>',
+        encoding="utf-8",
+    )
+
+    assert build_diagnostics(raw, junit, summary) == "ready"
+    output = junit.read_text(encoding="utf-8") + summary.read_text(encoding="utf-8")
+    assert token_tail not in output
+    assert "Bearer" not in output
+    assert "[redacted-secret]" in output
+
+
+def test_diagnostics_redact_relative_path_like_metadata(tmp_path):
+    raw = tmp_path / "raw.xml"
+    junit = tmp_path / "junit.xml"
+    summary = tmp_path / "summary.txt"
+    path_marker = "ci_fixture_relative_path_canary"
+    raw.write_text(
+        '<testsuite tests="1" failures="1"><testcase '
+        'classname="../../' + path_marker + '" '
+        'name="fixtures/' + path_marker + '.py"><failure /></testcase></testsuite>',
+        encoding="utf-8",
+    )
+
+    assert build_diagnostics(raw, junit, summary) == "ready"
+    output = junit.read_text(encoding="utf-8") + summary.read_text(encoding="utf-8")
+    assert path_marker not in output
+    assert "../" not in output
+    assert "fixtures/" not in output
+    assert "[redacted-path]" in output
+
+
 def test_diagnostics_reject_a_valid_non_junit_root(tmp_path):
     raw = tmp_path / "not-junit.xml"
     raw.write_text("<report><testcase name=\"fixture\" /></report>", encoding="utf-8")
@@ -133,6 +172,26 @@ def test_diagnostics_junit_projection_is_case_bounded(tmp_path):
     assert len(root.findall("testcase")) == MAX_CASES
     assert root.attrib["tests"] == str(MAX_CASES + 5)
     assert root.attrib["failures"] == str(MAX_CASES + 5)
+
+
+def test_summary_byte_cap_preserves_utf8_boundaries(tmp_path):
+    raw = tmp_path / "raw.xml"
+    cases = "".join(
+        '<testcase classname="tests.unicode" name="' + ("€" * 240) + '"><failure /></testcase>'
+        for _ in range(MAX_CASES)
+    )
+    raw.write_text(
+        f'<testsuite tests="{MAX_CASES}" failures="{MAX_CASES}">{cases}</testsuite>',
+        encoding="utf-8",
+    )
+
+    junit = tmp_path / "junit.xml"
+    summary = tmp_path / "summary.txt"
+    assert build_diagnostics(raw, junit, summary) == "ready"
+    summary_bytes = summary.read_bytes()
+    assert len(summary_bytes) <= MAX_SUMMARY_BYTES
+    assert summary_bytes.endswith(b"\n")
+    summary_bytes.decode("utf-8")
 
 
 def test_diagnostics_are_deterministic(tmp_path):

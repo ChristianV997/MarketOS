@@ -32,15 +32,22 @@ _ABSOLUTE_PATH = re.compile(
     r"(?ix)(?:\b[a-z]:[\\/][^\s\"']*|(?<!\S)\\\\[^\s\"']*|"
     r"(?<![a-z0-9_:/])/[^\s\"']*)"
 )
+_RELATIVE_PATH = re.compile(
+    r"(?ix)(?<![a-z0-9_])(?:\.\.?[\\/])+(?:[^\s\"']+)"
+    r"|(?<![a-z0-9_])(?:[a-z0-9_.-]+[\\/])+(?:[^\s\"']+)"
+)
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
 
 
 def _safe_text(value: object) -> str:
     text = _CONTROL_CHARS.sub(" ", str(value or "")).strip()
+    # Redact the complete bearer credential before generic assignments can
+    # consume only its prefix and leave the token tail behind.
+    text = _SECRET_BEARER.sub("[redacted-secret]", text)
     text = _SECRET_ASSIGNMENT.sub("[redacted-secret]", text)
     text = _SECRET_PREFIX.sub("[redacted-secret]", text)
-    text = _SECRET_BEARER.sub("[redacted-secret]", text)
     text = _ABSOLUTE_PATH.sub("[redacted-path]", text)
+    text = _RELATIVE_PATH.sub("[redacted-path]", text)
     return text[:MAX_IDENTIFIER_CHARS]
 
 
@@ -131,7 +138,10 @@ def _write_summary(path: Path, lines: Iterable[str]) -> None:
     text = "\n".join(lines).strip() + "\n"
     encoded = text.encode("utf-8")
     if len(encoded) > MAX_SUMMARY_BYTES:
-        encoded = encoded[: MAX_SUMMARY_BYTES - 1] + b"\n"
+        # Truncate at a decoded boundary so the bounded artifact remains
+        # consumable when a test identity contains multibyte Unicode.
+        encoded = encoded[: MAX_SUMMARY_BYTES - 1].decode("utf-8", "ignore").encode("utf-8")
+        encoded += b"\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(encoded)
 
