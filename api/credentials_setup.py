@@ -60,7 +60,7 @@ _IDENTITY_FIELDS = frozenset(
 
 def stable_error(status_code: int, code: str, field: str | None = None) -> HTTPException:
     """An error whose body is a fixed code and a known field name, never caller input."""
-    return HTTPException(status_code=status_code, detail={"code": code, "field": field})
+    return HTTPException(status_code=status_code, detail={"code": code, "field": field}, headers={"Cache-Control": "no-store"})
 
 
 async def read_bounded_json_object(request: Request, fields: frozenset[str]) -> dict[str, Any]:
@@ -117,15 +117,34 @@ def validate_credential_input(key: str, value: str) -> None:
     """Raise a stable 400 for a key outside the provider allowlist or a malformed value."""
     if key not in _allowed_credential_keys():
         raise stable_error(400, "unsupported_key", "key")
-    if not value or len(value) > _MAX_VALUE_LENGTH or any(ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+    if (
+        not value
+        or value != value.strip()  # a padded token is a paste error, and a blank one would flip a service out of dry-run
+        or len(value) > _MAX_VALUE_LENGTH
+        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
+    ):
         raise stable_error(400, "invalid_value", "value")
 
 
+def credential_keys_for(service: str) -> frozenset[str]:
+    """The credential keys that belong to one service (empty for an unknown service)."""
+    from backend.config import _SERVICE_CREDENTIALS
+
+    return frozenset(_SERVICE_CREDENTIALS.get(service, ()))
+
+
 def store_credential(key: str, value: str) -> None:
-    """Persist one validated credential. Callers must already have passed the authorization gate."""
-    from backend.config import set_credential
+    """Persist one validated credential and confirm the file holds it. Callers must already have passed the gate.
+
+    ``backend.config.set_credential`` logs and swallows write errors (read-only home, full disk), so a
+    normal return does not prove persistence. The file is read back, not ``get_credential``, because an
+    environment variable of the same name would mask a failed write.
+    """
+    from backend.config import _load_config, set_credential
 
     set_credential(key, value)
+    if _load_config().get(key) != value:
+        raise RuntimeError("credential_not_persisted")
     _log.info("credential_set key=%s", key)  # key name only; never the value
 
 

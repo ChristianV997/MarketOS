@@ -19,6 +19,7 @@ from api.credentials_setup import (
     read_bounded_json_object,
     required_string,
     stable_error,
+    credential_keys_for,
     store_credential,
     validate_credential_input,
     validate_service,
@@ -184,6 +185,8 @@ async def verify_and_set_credential(
 
     validate_credential_input(credential_key, credential_value)
     service = validate_service(service)  # reject before anything is stored
+    if credential_key not in credential_keys_for(service):
+        raise stable_error(400, "key_service_mismatch", "credential_key")  # a key is only reported under its own service
     try:
         store_credential(credential_key, credential_value)
     except Exception as exc:
@@ -202,7 +205,8 @@ async def verify_and_set_credential(
         "service": service,
         "test_result": test_result,
         "progress": {
-            "services_configured": len([s for s, status in state.credentials_set.items() if status != "dry_run"]),
+            # "blocked" is live mode (credentials complete) with verification disabled; dry_run and error are not configured
+            "services_configured": len([s for s, status in state.credentials_set.items() if status == "blocked"]),
             "services_total": 3,
         },
     }

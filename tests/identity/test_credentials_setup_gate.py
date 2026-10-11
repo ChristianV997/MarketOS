@@ -173,7 +173,14 @@ def storage_effects(monkeypatch, tmp_path) -> Effects:
     """Storage and mode recorders with the config path redirected; provider packages are left alone."""
     fx = Effects(tmp_path / "credentials.json")
     monkeypatch.setattr(backend_config, "_CONFIG_PATH", fx.config_path)  # even a missed mock cannot touch a real file
-    monkeypatch.setattr(backend_config, "set_credential", lambda key, value: (fx.calls.append(("storage", key)), fx.stored.append((key, value))))
+    real_save = backend_config._save_config  # writes to the redirected path, so the route's read-back can see it
+
+    def recording_set_credential(key, value):
+        fx.calls.append(("storage", key))
+        fx.stored.append((key, value))
+        real_save({key: value})
+
+    monkeypatch.setattr(backend_config, "set_credential", recording_set_credential)
     monkeypatch.setattr(backend_config, "is_dry_run", lambda service: not fx.live)
     return fx
 
@@ -525,7 +532,7 @@ def test_keys_outside_the_provider_allowlist_are_400_and_not_stored(app, effects
     assert_no_side_effects(effects)
 
 
-@pytest.mark.parametrize("value", ["", "x" * 4097, "a\nb", "a\rb", "a\x00b", "a\x7fb"])
+@pytest.mark.parametrize("value", ["", "x" * 4097, "a\nb", "a\rb", "a\x00b", "a\x7fb", " ", "  padded", "padded  "])
 def test_malformed_values_are_400_and_not_stored(app, effects, value):
     response = call(app, "POST", TARGETS["set"][1], headers=auth("operator"), json_body={"key": "META_ACCESS_TOKEN", "value": value})
     assert_stable(response, 400, "invalid_value", "value")
@@ -548,6 +555,30 @@ def test_storage_failure_is_a_stable_500_that_reflects_and_logs_nothing_sensitiv
     assert_stable(response, 500, "credential_store_failed")
     for leaked in (CANARY, SENSITIVE_PATH):
         assert leaked not in response.text and leaked not in caplog.text
+
+
+def test_a_write_that_was_not_persisted_is_a_stable_500_not_a_false_success(app, effects, monkeypatch, caplog):
+    """backend.config swallows write errors; the route must not answer 200 'saved' when the file lacks the value."""
+    monkeypatch.setattr(backend_config, "set_credential", lambda key, value: effects.calls.append(("swallowed", key)))
+    with caplog.at_level(logging.DEBUG):
+        response = send(app, "set", headers=auth("operator"))
+    assert_stable(response, 500, "credential_store_failed")
+    assert response.headers["cache-control"] == "no-store"
+    assert CANARY not in response.text and CANARY not in caplog.text and "saved successfully" not in response.text
+    assert effects.calls == [("swallowed", "META_ACCESS_TOKEN")]
+
+
+def test_an_environment_variable_cannot_mask_a_failed_write(app, effects, monkeypatch):
+    monkeypatch.setenv("META_ACCESS_TOKEN", CANARY)  # get_credential would read this and call the write a success
+    monkeypatch.setattr(backend_config, "set_credential", lambda key, value: None)
+    assert_stable(send(app, "set", headers=auth("operator")), 500, "credential_store_failed")
+
+
+@pytest.mark.parametrize("target", BODY_TARGETS)
+def test_stable_error_responses_are_not_cacheable_either(app, effects, target):
+    response = call(app, "POST", TARGETS[target][1], headers=auth("operator"), content=b"not json")
+    assert response.status_code == 422 and response.headers["cache-control"] == "no-store"
+    assert_no_side_effects(effects)
 
 
 # --------------------------------------------------------------------------- provider test route
@@ -613,6 +644,40 @@ def test_onboarding_verify_rejects_a_non_provider_key_or_unknown_service_before_
     for patch, status in (({"credential_key": "META_DRY_RUN"}, 400), ({"service": "unknown"}, 404), ({"credential_value": "a\nb"}, 400)):
         assert call(app, method, url, headers=auth("operator"), json_body={**body, **patch}).status_code == status
     assert_no_side_effects(effects)
+
+
+@pytest.mark.parametrize(
+    "service,key",
+    [("shopify", "META_ACCESS_TOKEN"), ("meta", "STRIPE_SECRET_KEY"), ("tiktok", "SHOPIFY_ACCESS_TOKEN"), ("meta", "SUPABASE_URL")],
+)
+def test_onboarding_verify_binds_the_key_to_its_own_service(app, effects, onboarding_session, service, key):
+    method, url, body = TARGETS["onboarding"]
+    response = call(app, method, url, headers=auth("operator"), json_body={**body, "service": service, "credential_key": key})
+    assert_stable(response, 400, "key_service_mismatch", "credential_key")
+    assert onboarding._sessions[onboarding_session].__dict__.get("credentials_set", {}) == {}
+    assert_no_side_effects(effects)
+
+
+@pytest.mark.parametrize(
+    "live,failing,expected_status,expected_configured",
+    [(False, False, "dry_run", 0), (True, False, "blocked", 1), (True, True, "error", 0)],
+    ids=["dry-run", "live-blocked", "status-error"],
+)
+def test_onboarding_counts_only_blocked_live_services_as_configured(app, effects, monkeypatch, live, failing, expected_status, expected_configured):
+    effects.live = live
+    if failing:
+        monkeypatch.setattr(backend_config, "is_dry_run", lambda service: (_ for _ in ()).throw(RuntimeError("unavailable")))
+    response = send(app, "onboarding", headers=auth("operator"))
+    assert response.status_code == 200
+    assert response.json()["test_result"]["status"] == expected_status
+    assert response.json()["progress"]["services_configured"] == expected_configured
+
+
+def test_onboarding_write_that_was_not_persisted_is_not_reported_as_stored(app, effects, monkeypatch):
+    monkeypatch.setattr(backend_config, "set_credential", lambda key, value: None)
+    response = send(app, "onboarding", headers=auth("operator"))
+    assert_stable(response, 400, "credential_store_failed")
+    assert "stored" not in response.text
 
 
 def test_onboarding_verify_rejects_caller_fields_and_mistyped_values_without_echo(app, effects):
