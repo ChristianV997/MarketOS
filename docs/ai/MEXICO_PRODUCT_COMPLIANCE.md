@@ -1,8 +1,9 @@
 # Mexico product-compliance policy overlay
 
-- lane: MEXICO-PRODUCT-COMPLIANCE-POLICY-V1
-- legal-source access date: 2026-09-19 (unchanged since; no cited rule has been re-verified after this date)
-- consumer-architecture last updated: 2026-09-22 (offering_kind gating and the four report consumers documented below; no new legal source consulted for this update)
+- lane: MEXICO-PRODUCT-COMPLIANCE-EVIDENCE-TO-READINESS
+- legal-source access date: 2026-10-11 (lmtr-index, lfpc-index, crt re-checked this session; other cited rows carry prior publication/effective facts and are not newly certified)
+- consumer-architecture last updated: 2026-09-22
+- evidence-gap readiness surface added: 2026-10-11
 - not legal advice
 - maps onto the canonical `promotion.compliance` gate
 - does **not** add a GATE_ID, registry, scorer, or live lookup
@@ -15,30 +16,45 @@
 | Packs | existing `privacy_legal_baseline` and `tax_accounting_readiness` |
 | Evaluator | `evaluation.trustos.mexico_product_compliance.evaluate_mexico_product_compliance` |
 | Satisfaction map | `decision.promotion_gate_satisfaction()` → `{"compliance": bool}` |
-| Fail-closed | unlisted evidence, unknown bands, missing RFC/CFDI/pedimento/HS, stale citations, cancelled/mismatched CoH |
+| Launch-review readiness | `decision.launch_review_ready` tracks the same boolean; `decision.evidence_gaps` / `launch_review_evidence_brief()` explain open gaps |
+| Fail-closed | unlisted evidence, unknown bands, missing RFC/CFDI/pedimento/HS, stale citations, cancelled/mismatched/conflicting CoH |
 | Non-Mexico | `united_states` / `canada` / `unknown` → every requirement `not_assessed`; compliance false from this overlay |
 | Non-radio hydro | IFT/NOM-208 `not_applicable`; other MX sale/import duties still apply |
 | Dual-band / 4G | do **not** guess IFT-016 / IFT-017 / IFT-011; hold `compliance` |
-| Evidence classes | `official_db` may satisfy; `supplier_claim` / `fixture` / `unknown` never satisfy launch |
+| Evidence classes | `official_db` may satisfy when fresh/model-matched; `supplier_claim` / `fixture` / `unknown` / `manual` / `conflicting` never satisfy launch |
 | Already sold in MX | warning only; never auto-clears |
-| Consumer | `evaluation.commerce.market_access_report` projects this evaluator's decision into every live recommendation surface (see "Consumer surfaces and offering_kind" below); it never recomputes law, never adds a second gate/registry, and never edits this evaluator's own files |
+| Consumer | `evaluation.commerce.market_access_report` projects this evaluator's decision into live recommendation surfaces; it never recomputes law |
 
 Statuses preserved: `needs_evidence` | `not_assessed` | `not_applicable`. `satisfied` is internal and only when official, fresh, model-matched evidence exists.
+
+## Evidence gaps before human launch review
+
+`MexicoComplianceDecision.evidence_gaps` lists each open `needs_evidence` requirement with:
+
+| Field | Meaning |
+| --- | --- |
+| `family` | One of `import_customs`, `tax_invoicing`, `labeling_safety`, `telecom_homologation`, `sector_permits` |
+| `evidence_class` | Recorded class (`unknown`, `supplier_claim`, `fixture`, `manual`, `conflicting`, or stale `official_db`) |
+| `reason_code` | `missing_official_evidence` / `non_official_evidence` / `stale_citation` / `conflicting_evidence` / `not_assessed_market` / `missing_exact_sku_model` |
+| `needed_evidence` | Operator-facing description of what official evidence is still required |
+| `satisfies_launch` | Always `false` for gap rows |
+
+`launch_review_evidence_brief()` turns those rows into a single operator-facing paragraph. It never states that supplier/fixture/unknown/manual/conflicting/stale evidence clears `promotion.compliance`. Cleared packets still remind that lawyer/customs-broker/accountant review is required (not legal advice).
+
+Cancelled or model-mismatched CoH rows that were recorded as `official_db` are projected as `conflicting` gaps so they cannot be mistaken for satisfying official evidence.
 
 ## Consumer surfaces and offering_kind (added, this document updated 2026-09-22)
 
 MarketOS recommends goods, services, and hybrids, but this evaluator only ever modeled goods (customs/telecom/NOM requirements). `evaluation.commerce.market_access_report` reads an additive `offering_kind` from the candidate dict (`"goods"` / `"service"` / `"hybrid"` / `"unknown"`, defaulting to `"goods"` so every pre-existing goods-only caller is unaffected) and gates which of this evaluator's requirements are even applicable **before** calling it — it never asks this evaluator to reason about services, and it never invents a second evaluator for them:
 
-| `offering_kind` | Customs / telecom / physical-NOM requirements (`mx_hs_classification`, `mx_pedimento`, `mx_immex`, `mx_telecom_homologation`, `mx_nom_208_radio`, `mx_nom_electrical_safety`, `mx_nom_labeling`) | Sector/consumer-labeling requirements this repo only models for goods today (`mx_lfpc_profeco`, `mx_infraestructura_calidad`, `mx_ley_general_salud`, `mx_cofepris_sector`, `mx_semarnat_sector`) | Fiscal duties (`mx_importer_rfc`, `mx_cfdi`, `mx_iva`) |
+| `offering_kind` | Customs / telecom / physical-NOM requirements | Sector/consumer-labeling requirements | Fiscal duties |
 | --- | --- | --- | --- |
-| `goods` (default) | evaluated normally by this evaluator | evaluated normally by this evaluator | evaluated normally |
-| `service` | `not_applicable` (no physical good exists to classify/label/homologate) | `not_assessed` (no service-sector evaluator exists here — never falsely cleared, never falsely blocked) | still evaluated (jurisdiction-wide sale duties, not goods-specific) |
-| `hybrid` | evaluated exactly as `goods` (nothing else to base it on) | evaluated exactly as `goods`, plus a warning that the service component is not covered | still evaluated |
-| `unknown` (declared or unrecognized) | `not_assessed` | `not_assessed` | `not_assessed` |
+| `goods` (default) | evaluated normally | evaluated normally | evaluated normally |
+| `service` | `not_applicable` | `not_assessed` | still evaluated |
+| `hybrid` | as `goods` | as `goods` + service-component warning | still evaluated |
+| `unknown` | `not_assessed` | `not_assessed` | `not_assessed` |
 
-A pure `service` offering can therefore never show `compliant` for Mexico — there is no canonical evaluator for Mexican service-sector licensing/health/environmental requirements yet, so those stay `not_assessed` rather than being silently cleared. This is a report-layer projection choice, not a change to this evaluator's own logic: `evaluate_mexico_product_compliance()` itself is never called with a "service" market or product family — it only ever sees `mexico`/`united_states`/`canada` and the existing `PRODUCT_FAMILIES` tuple, exactly as before.
-
-Consumer surfaces receiving the identical projection (proven by cross-consumer contract tests, `tests/test_market_access_cross_consumer_contract.py` and `tests/test_market_access_offering_kind_cross_consumer.py`): `evaluation.commerce.product_validation_report.ProductValidationReport`, `evaluation.commerce.opportunity_synthesis.build_product_opportunity_synthesis`, `evaluation.commerce.launch_draft_pack.build_launch_draft_pack`, `evaluation.commerce.site_draft_builder.build_site_draft_pack`.
+Consumer surfaces receiving the identical projection: `ProductValidationReport`, `build_product_opportunity_synthesis`, `build_launch_draft_pack`, `build_site_draft_pack`.
 
 ## Requirement families
 
@@ -56,24 +72,30 @@ Consumer surfaces receiving the identical projection (proven by cross-consumer c
 
 No SKU is certified by family. Exact model + official evidence is required before `compliance` can be true.
 
-## Source classifications (access 2026-09-19)
+## Source classifications (access 2026-10-11)
 
 See `mexico_policy_sources()` for URLs, issuing authority, publication/effective dates, and `verified_legal_text` vs `official_observation` vs `unresolved_interpretation`.
+
+Re-checked this session against primary pages:
+
+1. LMTR Cámara index — DOF 16-07-2025, sin reforma (`https://www.diputados.gob.mx/LeyesBiblio/ref/lmtr.htm`).
+2. LFPC Cámara index — última reforma DOF 12-12-2025; montos acuerdo DOF 23-12-2025 (`https://www.diputados.gob.mx/LeyesBiblio/ref/lfpc.htm`).
+3. CRT agency page live (`https://www.gob.mx/crt`).
 
 Unresolved for a human/lawyer/customs broker:
 
 1. Whether CRT has republished IFT 2021 homologation lineamientos unchanged.
-2. IFT-016 vigencia 3 Nov 2025 (IFT archive table) vs 7 Feb 2025 + 270 days = 4 Nov 2025.
+2. IFT-016 vigencia table date vs arithmetic 270-day calculation.
 3. Whether a given nutrient/seed/pet-food SKU is COFEPRIS vs SADER/SENASICA.
 4. Graphic Sello IFT start date.
 5. Exact derechos / fees after CRT Pleno.
 6. HS code for any real SKU.
-7. Mexican **service-sector** licensing, health, and environmental requirements have no canonical evaluator in this repository yet. A declared `service` offering reports these as `not_assessed` (never silently cleared, never blocked by goods-only physical rules) -- a human must confirm no such requirement is missing from this system's model entirely before treating any real service offering's Mexico section as complete.
-8. `hybrid` offerings only get their goods component assessed by this evaluator; the service component is flagged `not_assessed` via warning, never evaluated.
+7. Mexican **service-sector** licensing has no canonical evaluator here yet.
+8. `hybrid` offerings only get their goods component assessed by this evaluator.
 
-## Implementation note for the evaluator's owner (observed, not fixed here -- different lane)
+## OSS / prior-art adoption
 
-`evaluate_mexico_product_compliance()`'s `_from_evidence()` and the module-level `NON_SATISFYING_EVIDENCE` constant both treat `"manual"` as a non-satisfying evidence-class value, but `MexicoProductCompliancePacket.__post_init__` validates every `*_evidence_class` field against `EVIDENCE_CLASSES = ("official_db", "supplier_claim", "fixture", "unknown")`, which does not include `"manual"` -- so a caller can never actually construct a packet with `evidence_class="manual"` (it raises `ValueError` first), making that branch and `NON_SATISFYING_EVIDENCE` unreachable dead code. This is a code-quality observation confirmed by reading the evaluator directly (not by a failing test — no caller anywhere in this repository passes `"manual"` as an evidence class, so nothing currently depends on the broken path). It does not affect any status this document or the consumer projection reports today. Flagged here rather than fixed, since `evaluation/trustos/mexico_product_compliance.py` is owned by a separate lane and this document's own scope is the consumer projection, not the evaluator's internals.
+No third-party compliance library, legal database client, or scraper was added. Fit review: public CoH UIs (e.g. ehomologados) remain observation-only citations; scraping or embedding them would create live-lookup authority this overlay forbids. Reuse stays inside TrustOS `promotion.compliance` + existing legal/tax packs.
 
 ## Safety
 
