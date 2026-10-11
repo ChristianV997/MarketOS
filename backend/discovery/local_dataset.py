@@ -11,6 +11,7 @@ from typing import Any
 from .evidence_source_contract import EvidenceRecord
 
 MAX_RECORDS = 10_000
+_HAS_OPEN_DIR_FD = os.open in getattr(os, "supports_dir_fd", ())
 
 
 def _project_root() -> Path:
@@ -108,7 +109,7 @@ def _read_regular_file_posix(root_s: str, relative_parts: tuple[str, ...]) -> by
     ``dir_fd`` for absolute paths. Plain ``openat`` semantics are enough; ``openat2`` is
     not required.
     """
-    if os.open not in os.supports_dir_fd or not hasattr(os, "O_NOFOLLOW"):
+    if not _HAS_OPEN_DIR_FD or not hasattr(os, "O_NOFOLLOW"):
         # Without dir_fd and O_NOFOLLOW the walk cannot refuse symlinks, so refuse to read.
         raise FileNotFoundError("dataset_not_found")
     nofollow = os.O_NOFOLLOW
