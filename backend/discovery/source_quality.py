@@ -3,19 +3,31 @@ from __future__ import annotations
 from typing import Any
 
 from .evidence_import import EvidenceSourceQuality
+from .source_calibration import STALE_AFTER_SECONDS
 
 
-def apply_calibration_to_source_quality(source_quality: EvidenceSourceQuality, calibration_profile) -> EvidenceSourceQuality:
-    """Return a bounded copy; calibration never changes source safety."""
+def apply_calibration_to_source_quality(source_quality: EvidenceSourceQuality, calibration_profile, as_of: float | None = None) -> EvidenceSourceQuality:
+    """Return a bounded copy. Calibration can only lower confidence, and only for an observed, current profile.
+
+    The caller must give ``as_of``: without a time there is no way to judge freshness, so nothing applies.
+    Score, allowed and blocked signal types, freshness, and source type are never changed, so a fixture or
+    manual source cannot be upgraded to live and no source gains safety from calibration.
+    """
     import copy
     result = copy.deepcopy(source_quality)
+    if as_of is None or calibration_profile is None or getattr(calibration_profile, "evidence_status", "") != "observed":
+        return result
+    age = float(as_of) - float(getattr(calibration_profile, "last_updated_at", 0.0))
+    if age < 0 or age > STALE_AFTER_SECONDS:
+        return result
+    # A profile describes one source and parser; it must never lower another source's confidence.
+    if calibration_profile.source_name != source_quality.source_name or calibration_profile.parser_type != source_quality.metadata.get("parser_type"):
+        return result
     if result.source_type == "external_live" or "source_not_allowed_in_read_only_phase" in result.blocked_signal_types:
         return result
-    adjustment = float(getattr(calibration_profile, "confidence_multiplier_adjustment", 1.0)) if calibration_profile else 1.0
-    if result.metadata.get("synthetic_or_cached_only") is True:
-        result.confidence_multiplier = min(result.confidence_multiplier * adjustment, 1.0)
-    else:
-        result.confidence_multiplier = min(result.confidence_multiplier * adjustment, 1.0)
+    factor = max(0.0, min(float(getattr(calibration_profile, "confidence_multiplier_adjustment", 1.0)), 1.0))
+    result.confidence_multiplier = result.confidence_multiplier * factor
+    result.metadata = {**result.metadata, "calibration_profile_id": getattr(calibration_profile, "profile_id", ""), "calibration_factor": factor}
     return result
 
 
