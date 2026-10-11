@@ -71,16 +71,20 @@ def resolve_under_root(root: Path, value: str) -> Path:
     if ".." in Path(value).parts or ".." in value.replace("\\", "/"):
         raise OperatorSafetyError("path traversal is not allowed")
     candidate = Path(value)
-    resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    try:
+        resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    except (OSError, RuntimeError):
+        # A symlink loop raises RuntimeError on Python 3.11/3.12 and OSError elsewhere; both texts name the path.
+        raise OSError("path could not be resolved") from None
     return resolved
 
 
 def require_safe_input(root: Path, value: str, *, label: str) -> Path:
     resolved = resolve_under_root(root, value)
     if not resolved.exists():
-        raise OperatorSafetyError(f"{label} does not exist: {resolved}")
+        raise OperatorSafetyError(f"{label} does not exist")
     if resolved.suffix.lower() not in ALLOWED_INPUT_SUFFIXES:
-        raise OperatorSafetyError(f"{label} must be .json, .csv, or .md: {resolved}")
+        raise OperatorSafetyError(f"{label} must be .json, .csv, or .md")
     return resolved
 
 
@@ -100,12 +104,20 @@ def require_safe_output_dir(root: Path, value: str) -> Path:
     return resolved
 
 
+def read_input_text(path: Path, *, label: str) -> str:
+    """Read a validated input as UTF-8. An OS error keeps its type but never carries the path."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise type(exc)(f"{label} could not be read") from None
+
+
 def load_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(read_input_text(path, label="JSON input"))
     if not isinstance(payload, dict):
-        raise OperatorSafetyError(f"JSON object required: {path}")
+        raise OperatorSafetyError("JSON object required")
     if contains_secret_shaped(payload):
-        raise OperatorSafetyError(f"secret-shaped content rejected: {path}", 4)
+        raise OperatorSafetyError("secret-shaped content rejected", 4)
     return payload
 
 

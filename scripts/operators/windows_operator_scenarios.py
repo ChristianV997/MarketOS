@@ -13,6 +13,7 @@ from scripts.operators.windows_operator_safety import (
     OperatorSafetyError,
     assert_no_authority,
     contains_secret_shaped,
+    read_input_text,
 )
 
 SCENARIO_SCHEMA = "marketos-windows-operator-scenario-v1"
@@ -53,23 +54,24 @@ def _fingerprint(payload: Any) -> str:
 
 
 def load_scenario(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(read_input_text(path, label="scenario"))
     if not isinstance(payload, dict):
-        raise OperatorSafetyError(f"scenario must be an object: {path}")
+        raise OperatorSafetyError("scenario must be an object")
     if contains_secret_shaped(payload):
-        raise OperatorSafetyError(f"secret-shaped scenario rejected: {path}", 4)
+        raise OperatorSafetyError("secret-shaped scenario rejected", 4)
     assert_no_authority(payload)
     if payload.get("schema_version") != SCENARIO_SCHEMA:
-        raise OperatorSafetyError(f"unsupported scenario schema: {payload.get('schema_version')}")
+        raise OperatorSafetyError("unsupported scenario schema")
     if payload.get("evidence_class") == "actual":
         raise OperatorSafetyError("scenario must not claim actual live execution", 4)
     stages = payload.get("stages") or {}
     missing = [name for name in REQUIRED_STAGES if name not in stages]
     if missing:
-        raise OperatorSafetyError(f"scenario missing stages {missing}: {path}")
+        raise OperatorSafetyError(f"scenario missing stages {missing}")
     for name, value in stages.items():
+        # Stage names and classes come from the file body; never echo them.
         if value not in STAGE_CLASSES:
-            raise OperatorSafetyError(f"invalid stage class {name}={value}")
+            raise OperatorSafetyError("invalid stage class")
     if payload.get("network_mutation") is True:
         raise OperatorSafetyError("network_mutation must be false", 4)
     return payload
@@ -88,7 +90,7 @@ def verify_replay(payload: dict[str, Any]) -> str:
 
 def run_scenario_pack(pack_dir: Path) -> dict[str, Any]:
     if not pack_dir.is_dir():
-        raise OperatorSafetyError(f"scenario pack directory missing: {pack_dir}")
+        raise OperatorSafetyError("scenario pack directory missing")
     results = []
     for scenario_id in REQUIRED_SCENARIOS:
         path = pack_dir / f"{scenario_id}.json"
@@ -96,7 +98,7 @@ def run_scenario_pack(pack_dir: Path) -> dict[str, Any]:
             raise OperatorSafetyError(f"missing required scenario: {scenario_id}")
         payload = load_scenario(path)
         if payload.get("scenario_id") != scenario_id:
-            raise OperatorSafetyError(f"scenario_id mismatch in {path}")
+            raise OperatorSafetyError(f"scenario_id mismatch for {scenario_id}")
         fp = verify_replay(payload)
         results.append(
             {
