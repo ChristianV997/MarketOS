@@ -8,18 +8,18 @@
 # an authorized mirror/sync. Do not treat this companion as deployment or
 # provider-mutation authority.
 #
-# Python/dependency contract (live main, 8d70725c):
-#   - Python 3.12 (.python-version / GitHub CI)
-#   - pip install -r requirements.txt (pytest + pytest-xdist included there)
-# Unresolved parity (Codex Agent A PR #343, open): requirements-test.txt is the
-# proposed single test install entry (-r requirements.txt + requirements-dev.txt)
-# but is NOT on main yet. This companion follows live main until that merges;
-# after merge, switch install/cache keys to requirements-test.txt without
-# expanding job scope.
+# Python/dependency contract (aligned with GitHub main / .github/workflows/ci.yml):
+#   - Python 3.12 (.python-version)
+#   - pip install -r requirements-test.txt
+#     (canonical entry from PR #419: -r requirements.txt + -r requirements-dev.txt)
+#   - pip cache key hashes requirements-test.txt plus both included manifests
+#     (pip follows -r; GitLab cache:files does not)
 #
-# Explicitly out of scope here (owned by GitHub / Codex A / Grok Bots ops):
-# Semgrep policy, pip-audit, OSS/compose validators, container smoke, advisory
-# coverage, Mergify tokens, deployment, and any secret-backed steps.
+# Role (not a GitHub full-suite equivalent):
+#   Changed-scope pytest via scripts/ai/gitlab_companion_pytest.py (select_tests +
+#   allowlisted argv, subprocess shell=False) + compileall + JUnit.
+#   Does NOT run pytest tests/ -v -n auto, Semgrep, pip-audit, compose validators,
+#   container smoke, advisory coverage, Mergify, deployment, or secret-backed steps.
 
 workflow:
   rules:
@@ -43,7 +43,9 @@ variables:
 cache:
   key:
     files:
+      - requirements-test.txt
       - requirements.txt
+      - requirements-dev.txt
   paths:
     - .cache/pip
 
@@ -61,7 +63,7 @@ mr-python-companion:
     - python --version
     - test "$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" = "3.12"
     - python -m pip install --upgrade pip
-    - python -m pip install -r requirements.txt
+    - python -m pip install -r requirements-test.txt
   script:
     - mkdir -p artifacts
     - python -m compileall -q .
@@ -80,63 +82,8 @@ mr-python-companion:
       fi
       echo "Changed files ($(wc -l < artifacts/changed-files.txt)):"
       head -n 80 artifacts/changed-files.txt
-      # Build select_tests argv from changed paths (cap to keep the job bounded).
-      args=()
-      while IFS= read -r path; do
-        [ -z "$path" ] && continue
-        args+=(--path "$path")
-        if [ "${#args[@]}" -ge 80 ]; then
-          break
-        fi
-      done < artifacts/changed-files.txt
-      python scripts/ai/select_tests.py --json "${args[@]}" > artifacts/select-tests.json
-      python - <<'PY'
-      import json
-      import pathlib
-      import re
-      import shlex
-
-      report = json.loads(pathlib.Path("artifacts/select-tests.json").read_text(encoding="utf-8"))
-      cmds = report.get("recommended_commands") or []
-      # Companion runs Python evidence only; skip npm/frontend and session helpers.
-      pytest_cmds = []
-      for cmd in cmds:
-          if not isinstance(cmd, str):
-              continue
-          if re.search(r"\bpytest\b", cmd) is None:
-              continue
-          # Strip local -q; GitLab adds JUnit + bounded opts centrally.
-          parts = [p for p in shlex.split(cmd) if p != "-q"]
-          pytest_cmds.append(shlex.join(parts))
-      if not pytest_cmds:
-          pytest_cmds = [
-              "pytest tests/contracts/test_architecture_boundaries.py",
-          ]
-      pathlib.Path("artifacts/pytest-commands.txt").write_text(
-          "\n".join(pytest_cmds) + "\n", encoding="utf-8"
-      )
-      print("Selected pytest commands:")
-      for line in pytest_cmds:
-          print(" ", line)
-      PY
-    - |
-      set -euo pipefail
-      : > artifacts/junit.xml
-      first=1
-      while IFS= read -r cmd; do
-        [ -z "$cmd" ] && continue
-        echo "+ $cmd"
-        # shellcheck disable=SC2086
-        if [ "$first" -eq 1 ]; then
-          eval "$cmd --junitxml=artifacts/junit.xml --maxfail=20"
-          first=0
-        else
-          # Append subsequent suites without wiping the first report: run into
-          # a side file then keep the primary report from the first suite.
-          # Prefer a single primary JUnit for the GitLab MR widget.
-          eval "$cmd --junitxml=artifacts/junit-extra.xml --maxfail=20"
-        fi
-      done < artifacts/pytest-commands.txt
+    # Changed-scope pytest via validated argv (shell=False); never shell-evaluates command strings.
+    - python scripts/ai/gitlab_companion_pytest.py --changed-files artifacts/changed-files.txt --artifacts-dir artifacts --maxfail 20
   after_script:
     - |
       # Bounded log evidence only (no secret dumps, no full pip freeze).
@@ -159,6 +106,7 @@ mr-python-companion:
       - artifacts/junit.xml
       - artifacts/select-tests.json
       - artifacts/pytest-commands.txt
+      - artifacts/pytest-argvs.json
       - artifacts/changed-files.txt
       - artifacts/companion-summary.txt
     # Keep artifact payload small; do not attach caches or venvs.
