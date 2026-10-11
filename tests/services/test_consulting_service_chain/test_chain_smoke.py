@@ -28,6 +28,7 @@ from services.consulting_engagement import ConsultingEngagementRequest, build_co
 from services.consulting_evidence_register import build_component_report_envelope, build_evidence_register
 from services.consulting_offers import ConsultingOfferRequest, build_consulting_offer_proposal
 from services.consulting_portfolio import synthesize_portfolio
+from services.consulting_proposal_draft import build_consulting_proposal_draft
 
 WORKSPACE_ID = "fixture-consulting-client"
 OFFERS_FIXTURES = Path(__file__).parents[2] / "fixtures" / "consulting_offers"
@@ -309,3 +310,23 @@ def test_cross_workspace_report_is_rejected_by_the_delivery_boundary(global_repo
             metadata={},
             report_ids=["other-workspace-report"],
         )
+
+
+def test_proposal_draft_composes_the_chain_without_granting_authority(local_authorities):
+    workspace_registry, report_registry, workspace, artifact_store = local_authorities
+    offer = json.loads((OFFERS_FIXTURES / "complete_product.json").read_text(encoding="utf-8"))
+    engagement = json.loads((ENGAGEMENT_FIXTURES / "complete_product.json").read_text(encoding="utf-8"))
+    economics = json.loads((ECONOMICS_FIXTURES / "project_complete.json").read_text(encoding="utf-8"))
+    request = {**offer, "selected_deliverables": engagement["selected_deliverables"], "economics": economics}
+    draft = build_consulting_proposal_draft(
+        request,
+        workspace=workspace,
+        artifact_store=artifact_store,
+        workspace_registry=workspace_registry,
+        report_registry=report_registry,
+    )
+    assert draft["workspace_id"] == WORKSPACE_ID
+    assert draft["authority"]["human_approved"] is False
+    assert draft["authority"]["work_authorized"] is False
+    assert draft["client_export"]["workspace_id"] == WORKSPACE_ID
+    assert "some-other-workspace" not in json.dumps(draft)
