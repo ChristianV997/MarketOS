@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import re
+import sqlite3
 import sys
 import types
 import warnings
@@ -24,10 +25,20 @@ from fastapi import FastAPI
 
 import backend.config as backend_config
 from api import credentials_setup, onboarding
-from backend.identity.errors import IdentityError, StorageUnavailable
+from backend.identity.errors import IdentityError, IdentityProviderUnavailable, StorageUnavailable
 from backend.identity.http import WORKSPACE_HEADER, get_token_verifier, get_workspace_repository
-from backend.identity.principal import VerifiedPrincipal
-from backend.identity.roles import CLIENT_VIEWER, CREDENTIAL_TEST, CREDENTIAL_WRITE, INTERNAL_OPERATOR, role_grants
+from backend.identity.principal import ClerkSessionTokenVerifier, VerifiedPrincipal
+from backend.identity.roles import (
+    CLIENT_VIEWER,
+    CREDENTIAL_TEST,
+    CREDENTIAL_WRITE,
+    INTERNAL_OPERATOR,
+    PROFILE_CREATE,
+    PROFILE_READ,
+    PROFILE_UPDATE,
+    ROLE_PERMISSIONS,
+    role_grants,
+)
 
 from .conftest import ISSUER
 
@@ -726,3 +737,222 @@ def test_every_mutating_operation_the_production_app_mounts_under_setup_or_onboa
         response = call(production_app, method, concrete, json_body={"key": "META_ACCESS_TOKEN", "value": CANARY})
         assert response.status_code in {401, 503} and code(response) in IDENTITY_DENIAL_CODES, f"{method} {path} is not behind an identity gate"
     assert_no_side_effects(storage_effects)
+
+
+# --------------------------------------------------------------------------- the full request path through the production app
+#
+# Everything above mounts the routers on a throwaway app with a dictionary verifier. The tests below use the
+# real application object (its CORS and request-context middleware, every router it mounts), the canonical
+# ``ClerkSessionTokenVerifier`` claim policy, and a real ``PostgresWorkspaceRepository`` over SQLite, installed
+# through the same ``dependency_overrides`` seam deployment wiring is documented to use.
+#
+# What this is NOT: live authentication. The signature check is a fixture that verifies nothing
+# cryptographically, because the repository declares no JWT/JWKS library, issuer or key configuration. The
+# lifespan is deliberately not run: it starts background cycle threads and writes runtime state, and
+# dependency overrides do not depend on it.
+
+WIRED_NOW = 1_800_000_000.0
+WIRED_PARTY = "https://marketos.test"
+FOREIGN_ISSUER = "https://other-issuer.test"
+OWNER_FOREIGN = "ws_owner_foreign_issuer"
+
+
+def _claims(subject: str, **changes) -> dict:
+    claims = {"iss": ISSUER, "sub": subject, "exp": WIRED_NOW + 300, "azp": WIRED_PARTY, **changes}
+    return {key: value for key, value in claims.items() if value is not None}
+
+
+SIGNED_CLAIMS = {
+    **{f"tok-{name}": _claims(principal.subject) for name, principal in {
+        "operator": OPERATOR, "viewer": VIEWER, "norole": NOROLE, "clientop": CLIENT_OP,
+        "clientuser": CLIENT_USER, "multi": MULTI, "outsider": OUTSIDER,
+    }.items()},
+    "tok-foreign": _claims("user_foreign_issuer_operator"),
+    "tok-expired": _claims(OPERATOR.subject, exp=WIRED_NOW - 3600),
+    "tok-wrong-issuer": _claims(OPERATOR.subject, iss="https://evil.test"),
+    "tok-wrong-party": _claims(OPERATOR.subject, azp="https://unlisted.test"),
+    "tok-no-party": _claims(OPERATOR.subject, azp=None),
+    "tok-not-yet-valid": _claims(OPERATOR.subject, nbf=WIRED_NOW + 3600),
+    "tok-no-expiry": _claims(OPERATOR.subject, exp=None),
+}
+
+
+def fixture_signature_verifier(token: str) -> dict:
+    """FIXTURE ONLY: maps a synthetic token to claims. It verifies no signature and no key."""
+    if token == "tok-revoked":
+        raise IdentityError()  # what a real signature check signals for a rejected or revoked session
+    if token == "tok-keys-down":
+        raise IdentityProviderUnavailable()  # key material unavailable
+    try:
+        return dict(SIGNED_CLAIMS[token])
+    except KeyError:
+        raise IdentityError() from None
+
+
+@pytest.fixture
+def wired(store):
+    """The production application with fixture identity providers installed and removed afterwards.
+
+    Request this fixture before ``effects``: the application must be imported while the real provider
+    packages are importable, never while the recording fakes occupy ``sys.modules``, or the cached
+    application (and modules that bound the fakes at import time) would outlive the test.
+    """
+    fake = sys.modules.get("backend.integrations")
+    assert "backend.api" in sys.modules or fake is None or getattr(fake, "__file__", None), (
+        "import the application before the provider fakes are installed: request `wired` before `effects`"
+    )
+    from backend.api import app as production_app
+
+    store.create_workspace(OWNER_FOREIGN, "internal", "Foreign Issuer Workspace")
+    store.add_member(OWNER_FOREIGN, FOREIGN_ISSUER, "user_foreign_issuer_operator", INTERNAL_OPERATOR)  # same subject, other issuer
+    verifier = ClerkSessionTokenVerifier(
+        fixture_signature_verifier, issuer=ISSUER, authorized_parties={WIRED_PARTY}, clock=lambda: WIRED_NOW
+    )
+    saved = dict(production_app.dependency_overrides)
+    production_app.dependency_overrides[get_token_verifier] = lambda: verifier
+    production_app.dependency_overrides[get_workspace_repository] = lambda: store
+    try:
+        yield production_app
+    finally:
+        production_app.dependency_overrides.clear()
+        production_app.dependency_overrides.update(saved)
+        assert production_app.dependency_overrides == saved  # the shared application is left exactly as found
+
+
+PRODUCTION_TARGETS = ["set", "test"]  # the onboarding router is not mounted by the application
+UNVERIFIABLE = {
+    "anonymous": {},
+    "wrong-scheme": {"Authorization": "Basic abc"},
+    "unknown-token": auth("unknown"),
+    "expired": auth("expired"),
+    "wrong-issuer": auth("wrong-issuer"),
+    "unlisted-authorized-party": auth("wrong-party"),
+    "missing-authorized-party": auth("no-party"),
+    "not-yet-valid": auth("not-yet-valid"),
+    "missing-expiry": auth("no-expiry"),
+    "revoked-session": auth("revoked"),
+}
+
+
+@pytest.mark.parametrize("target", PRODUCTION_TARGETS)
+@pytest.mark.parametrize("who", list(UNVERIFIABLE))
+def test_wired_production_app_refuses_every_unverifiable_identity_with_401(wired, effects, target, who):
+    response = send(wired, target, headers=UNVERIFIABLE[who])
+    assert response.status_code == 401, response.text
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert code(response) in {"missing_credentials", "invalid_credentials", "token_expired"}
+    assert "x-request-id" in response.headers  # the application's own middleware stack handled the request
+    assert response.body_reads == 0
+    assert_no_side_effects(effects)
+
+
+@pytest.mark.parametrize("target", PRODUCTION_TARGETS)
+def test_wired_production_app_reports_unavailable_key_material_as_503_not_401(wired, effects, target):
+    response = send(wired, target, headers=auth("keys-down"))
+    assert (response.status_code, code(response)) == (503, "identity_provider_unavailable")
+    assert "www-authenticate" not in response.headers
+    assert_no_side_effects(effects)
+
+
+WIRED_UNAUTHORIZED = {
+    **UNAUTHORIZED,
+    "membership-held-under-another-issuer": auth("foreign"),
+}
+
+
+@pytest.mark.parametrize("target", PRODUCTION_TARGETS)
+@pytest.mark.parametrize("who", list(WIRED_UNAUTHORIZED))
+@pytest.mark.parametrize("spoofed", [False, True], ids=["plain", "spoofed"])
+def test_wired_production_app_denies_a_verified_but_unauthorized_identity_with_403(wired, effects, target, who, spoofed):
+    headers = {**WIRED_UNAUTHORIZED[who], **(SPOOF_HEADERS if spoofed else {})}
+    response = send(wired, target, headers=headers, spoof_body=spoofed, query=("?workspace_id=" + OWNER_OP) if spoofed else "")
+    assert response.status_code == 403, response.text
+    assert code(response) in {"workspace_not_authorized", "role_not_authorized", "no_workspace_membership", "workspace_ambiguous"}
+    assert OWNER_OP not in response.text and OWNER_FOREIGN not in response.text and CANARY not in response.text
+    assert response.body_reads == 0
+    assert_no_side_effects(effects)
+
+
+def test_wired_production_app_serves_a_verified_internal_operator_and_leaks_nothing(wired, effects, caplog):
+    with caplog.at_level(logging.DEBUG):
+        stored = send(wired, "set", headers=auth("operator"))
+        tested = send(wired, "test", headers=auth("operator"))
+    assert stored.status_code == 200 and stored.json()["status"] == "ok", stored.text
+    assert tested.status_code == 200 and tested.json()["status"] == "dry_run", tested.text
+    assert stored.headers["cache-control"] == "no-store" and tested.headers["cache-control"] == "no-store"
+    assert "x-request-id" in stored.headers
+    assert effects.stored == [("META_ACCESS_TOKEN", CANARY)]
+    assert effects.calls == [("storage", "META_ACCESS_TOKEN")]  # one write, and no provider helper
+    for leaked in (CANARY, ISSUER, OPERATOR.subject, OWNER_OP, "tok-operator", WIRED_PARTY):
+        assert leaked not in stored.text + tested.text, leaked
+        assert leaked not in caplog.text, leaked
+
+
+def test_wired_production_app_blocks_a_live_service_for_a_verified_operator(wired, effects):
+    effects.live = True
+    response = send(wired, "test", headers=auth("operator"))
+    assert response.status_code == 200 and response.json()["status"] == "blocked"
+    assert effects.calls == []  # no provider helper, even for the most privileged caller
+
+
+def test_wired_production_app_still_rejects_caller_fields_for_a_verified_operator(wired, effects):
+    response = send(wired, "set", headers=auth("operator"), spoof_body=True)
+    assert_stable(response, 422, "identity_field_rejected")
+    assert_no_side_effects(effects)
+
+
+def test_role_and_membership_changes_take_effect_on_the_next_request(wired, effects, db_path):
+    assert send(wired, "set", headers=auth("operator")).status_code == 200
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "UPDATE workspace_members SET role = ? WHERE subject = ? AND workspace_id = ?", (CLIENT_VIEWER, OPERATOR.subject, OWNER_OP)
+        )
+        connection.commit()
+        demoted = send(wired, "set", headers=auth("operator"))
+        assert (demoted.status_code, code(demoted)) == (403, "role_not_authorized")
+        connection.execute("DELETE FROM workspace_members WHERE subject = ? AND workspace_id = ?", (OPERATOR.subject, OWNER_OP))
+        connection.commit()
+        removed = send(wired, "test", headers=auth("operator"))
+        assert removed.status_code == 403 and code(removed) in {"no_workspace_membership", "workspace_not_authorized"}
+    finally:
+        connection.close()
+    assert effects.stored == [("META_ACCESS_TOKEN", CANARY)]  # only the first, authorized request wrote
+
+
+def test_wired_production_app_answers_503_when_the_workspace_store_is_down(wired, effects):
+    class Down:
+        def memberships_for(self, principal):
+            raise RuntimeError(f"driver exploded near {SENSITIVE_PATH}")
+
+    wired.dependency_overrides[get_workspace_repository] = lambda: Down()
+    for target in PRODUCTION_TARGETS:
+        response = send(wired, target, headers=auth("operator"))
+        assert (response.status_code, code(response)) == (503, "storage_unavailable")
+        assert SENSITIVE_PATH not in response.text
+    assert_no_side_effects(effects)
+
+
+def test_wired_providers_leave_read_routes_and_the_client_profile_gate_alone(wired, effects):
+    status = call(wired, "GET", "/api/setup/credentials/status")
+    assert status.status_code == 200 and set(status.json()) == {"status", "services", "services_ready", "services_total"}
+    assert call(wired, "GET", "/api/setup/instructions").json()["status"] == "ok"
+    profile = call(wired, "GET", "/api/organization/client-profile")
+    assert (profile.status_code, code(profile)) == (401, "missing_credentials")
+    assert_no_side_effects(effects)
+
+
+def test_a_cors_preflight_for_the_credential_write_reaches_no_handler(wired, effects):
+    preflight = call(
+        wired, "OPTIONS", "/api/setup/credentials/set", content_type=None,
+        headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization,content-type"},
+    )
+    assert preflight.status_code in {200, 400}
+    assert_no_side_effects(effects)
+
+
+def test_the_credential_permissions_do_not_widen_the_client_profile_roles():
+    assert ROLE_PERMISSIONS[CLIENT_VIEWER] == frozenset({PROFILE_READ})
+    assert ROLE_PERMISSIONS[INTERNAL_OPERATOR] == frozenset(
+        {PROFILE_READ, PROFILE_CREATE, PROFILE_UPDATE, CREDENTIAL_WRITE, CREDENTIAL_TEST}
+    )
