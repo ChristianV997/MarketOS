@@ -57,7 +57,7 @@ def test_dataset_failure_warning_redacts_caller_filename(filename, tmp_path, mon
         "filename_canary": "SYNTHETIC-CANARY" in rendered,
     }
 
-    assert warning == "dataset_failed:JSONDecodeError"
+    assert warning == "dataset_failed:redacted:JSONDecodeError"
     assert not any(leaks.values()), "caller-controlled dataset path leaked"
 
 
@@ -84,7 +84,7 @@ def test_dataset_failure_warning_omits_exception_message_and_preserves_safe_type
         "exception_message": marker in rendered,
     }
 
-    assert warning == "dataset_failed:ValueError"
+    assert warning == "dataset_failed:redacted:ValueError"
     assert not any(leaks.values()), "exception details leaked"
 
 
@@ -117,7 +117,7 @@ def test_dataset_failure_warning_uses_generic_suffix_for_custom_exception(
         "exception_type": "SYNTHETIC_EXCEPTION_CLASS_CANARY" in rendered,
     }
 
-    assert warning == "dataset_failed:Exception"
+    assert warning == "dataset_failed:redacted:Exception"
     assert not any(leaks.values()), "custom exception details leaked"
 
 
@@ -198,3 +198,25 @@ def test_pipeline_failure_warning_omits_exception_details(monkeypatch):
 
     assert warnings == ["opportunity_pipeline_refresh_failed:Exception"]
     assert not any(leaks.values()), "pipeline exception details leaked"
+
+
+def test_dataset_failure_warning_preserves_stable_family_and_safe_suffix(
+    tmp_path, monkeypatch
+):
+    input_path = tmp_path / "outside-root.json"
+    input_path.write_text("{", encoding="utf-8")
+
+    result = run_market_discovery(
+        dataset_paths=[str(input_path)],
+        run_validation_services=False,
+        refresh_pipeline=False,
+    )
+    rendered = json.dumps(result, sort_keys=True)
+    warning = next((item for item in result["warnings"] if item.startswith("dataset_failed:")), "")
+    leaks = {
+        "absolute_path": str(input_path) in rendered,
+        "basename": input_path.name in rendered,
+    }
+
+    assert warning == "dataset_failed:redacted:ValueError"
+    assert not any(leaks.values()), "outside-root dataset identity leaked"

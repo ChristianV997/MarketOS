@@ -112,7 +112,7 @@ def run_market_discovery(
                 continue
             records.extend(parse_evidence_records(dataset))
         except Exception as exc:
-            warnings.append(f"dataset_failed:{_safe_failure_type(exc)}")
+            warnings.append(f"dataset_failed:redacted:{_safe_failure_type(exc)}")
     if not paths:
         persisted = registry.list_evidence(limit=10000)
         records = [record for record in persisted if not source_names or record.source_name in source_names]
