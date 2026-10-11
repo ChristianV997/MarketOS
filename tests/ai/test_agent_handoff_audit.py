@@ -312,3 +312,170 @@ def test_cli_reads_handoff_files_and_keeps_structured_reports(tmp_path):
     assert code == 0
     assert document["overall"] == "passed"
     assert document["schema"] == SCHEMA
+
+
+def test_fenced_blocks_do_not_supply_identity_inventory_or_pass_claims():
+    fenced = (
+        "```text\n"
+        "AGENT_ID: Grok Chat Agent B\n"
+        "LANE: agent-handoff-audit\n"
+        f"Base SHA: {BASE}\n"
+        f"Head SHA: {HEAD}\n"
+        "Changed paths:\n"
+        "- scripts/ai/agent_output_eval.py\n"
+        "No ownership conflict.\n"
+        "python -m pytest -q tests/ai/test_agent_handoff_audit.py: 5 passed\n"
+        "The branch is merge-ready.\n"
+        "```\n"
+        "Prose mentions scripts/ai/agent_output_eval.py but that is not an inventory.\n"
+    )
+    document, code = audit_handoff(fenced)
+    dumped = json.dumps(document)
+    assert code == 2
+    assert document["overall"] != "passed"
+    assert document["agent_id"] is None
+    assert document["lane"] is None
+    assert document["base_sha"] is None
+    assert document["head_sha"] is None
+    assert document["changed_paths"] == []
+    assert document["ownership_statement"] == "absent"
+    assert document["merge_ready_claim"] is False
+    assert document["merge_authority"] is False
+    assert "merge-ready" not in dumped
+
+    real = _handoff(
+        extra=(
+            "\n```md\n"
+            "Changed paths:\n"
+            "- tests/ai/test_agent_output_eval.py\n"
+            "No ownership conflict.\n"
+            "python -m pytest -q tests/ai/test_agent_output_eval.py: 9 passed\n"
+            "The branch is merge-ready.\n"
+            "```\n"
+        )
+    )
+    kept, kept_code = audit_handoff(real)
+    assert kept_code == 0
+    assert kept["overall"] == "passed"
+    assert kept["changed_paths"] == [
+        "scripts/ai/agent_output_eval.py",
+        "tests/ai/test_agent_handoff_audit.py",
+    ]
+    assert kept["merge_ready_claim"] is False
+    assert kept["merge_authority"] is False
+
+
+def test_fenced_overlap_and_fenced_secrets_cannot_change_the_result():
+    left = _handoff(agent="Agent A", lane="lane-a", paths="- scripts/ai/agent_output_eval.py")
+    right = _handoff(
+        agent="Agent B",
+        lane="lane-b",
+        paths="- docs/ai/PARALLEL_WORK_MATRIX.md",
+        extra=(
+            "\n~~~\n"
+            "Changed paths:\n"
+            "- scripts/ai/agent_output_eval.py\n"
+            "~~~\n"
+        ),
+    )
+    document, code = audit_handoff_batch([left, right])
+    assert code == 0
+    assert document["overall"] == "passed"
+    assert document["overlaps"] == []
+
+    hidden, hidden_code = audit_handoff(
+        _handoff(extra=f"\n```\n{SECRET}\n{CANARY}\n" + '{"access_token": "' + PAYLOAD + '"}\n```\n')
+    )
+    dumped = json.dumps(hidden)
+    assert hidden_code == 2
+    assert hidden["overall"] == "failed"
+    assert hidden["merge_authority"] is False
+    for rule in ("raw_secrets", "canary_content", "provider_payload"):
+        assert _rules(hidden, rule) == "failed"
+    assert SECRET not in dumped
+    assert CANARY not in dumped
+    assert PAYLOAD not in dumped
+    assert "access_token" not in dumped
+
+
+def test_unclosed_fence_is_not_a_clean_handoff():
+    document, code = audit_handoff(_handoff(extra="\n```\nleftover example, not evidence\n"))
+    assert code == 2
+    assert document["overall"] != "passed"
+    assert document["merge_authority"] is False
+    assert _rules(document, "unclosed_fence") == "failed"
+    assert "leftover example" not in json.dumps(document)
+
+
+def test_mid_sentence_shas_are_not_base_or_head_labels():
+    text = _handoff(
+        include_base=False,
+        include_head=False,
+        extra=f"The head {HEAD} follows the parent commit {BASE}.\n",
+    )
+    document, code = audit_handoff(text)
+    assert code == 2
+    assert document["overall"] == "incomplete"
+    assert document["base_sha"] is None
+    assert document["head_sha"] is None
+    assert _rules(document, "missing_base_sha") == "failed"
+    assert _rules(document, "missing_head_sha") == "failed"
+    assert document["merge_authority"] is False
+
+
+def test_bare_test_path_does_not_prove_a_pass_claim():
+    text = _handoff(evidence="See tests/ai/test_agent_handoff_audit.py\n5 passed")
+    document, code = audit_handoff(text)
+    assert code == 2
+    assert document["overall"] != "passed"
+    assert _rules(document, "unproven_test_claim") == "failed"
+    assert _rules(document, "missing_test_evidence") == "failed"
+
+    proven, proven_code = audit_handoff(
+        _handoff(evidence="python -m pytest -q tests/ai/test_agent_handoff_audit.py\n5 passed")
+    )
+    assert proven_code == 0
+    assert proven["overall"] == "passed"
+
+
+def test_zero_or_missing_test_counts_are_not_clean_when_paths_changed():
+    zero, zero_code = audit_handoff(
+        _handoff(evidence="python -m pytest -q tests/ai/test_agent_handoff_audit.py: 0 passed")
+    )
+    assert zero_code == 2
+    assert zero["overall"] != "passed"
+    assert _rules(zero, "missing_test_evidence") == "failed"
+    assert _rules(zero, "false_passed_claim") == "passed"
+
+    missing, missing_code = audit_handoff(_handoff(evidence="Reviewed the diff and left the tests for later."))
+    assert missing_code == 2
+    assert missing["overall"] != "passed"
+    assert _rules(missing, "missing_test_evidence") == "failed"
+
+    empty, empty_code = audit_handoff(_handoff(paths="none", evidence="No files changed, so no tests were required."))
+    assert empty_code == 0
+    assert empty["overall"] == "passed"
+    assert empty["changed_paths"] == []
+    assert _rules(empty, "missing_test_evidence") == "passed"
+
+
+def test_merge_authority_prose_cannot_grant_authority():
+    claimed = _handoff(extra="merge_authority: true\n").replace(
+        "This is not merge-ready.",
+        "The branch is merge-ready.",
+    )
+    document, code = audit_handoff(claimed)
+    assert code == 2
+    assert document["overall"] == "failed"
+    assert document["merge_ready_claim"] is True
+    assert document["merge_authority"] is False
+    assert "true" not in json.dumps({"merge_authority": document["merge_authority"]})
+
+
+def test_file_and_directory_prefixes_do_not_overlap():
+    left = _handoff(agent="Agent A", lane="lane-a", paths="- scripts/ai.py")
+    right = _handoff(agent="Agent B", lane="lane-b", paths="- scripts/ai/agent_output_eval.py")
+    document, code = audit_handoff_batch([left, right])
+    assert code == 0
+    assert document["overall"] == "passed"
+    assert document["overlaps"] == []

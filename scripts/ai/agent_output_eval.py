@@ -222,17 +222,17 @@ _PATH_RE = re.compile(
 _AGENT_ID = re.compile(r"(?im)^[ \t>*-]*AGENT_ID:\s*(\S(?:.*\S)?)\s*$")
 _LANE = re.compile(r"(?im)^[ \t>*-]*(?:LANE_ID|LANE):\s*(\S(?:.*\S)?)\s*$")
 _BASE_SHA = re.compile(
-    r"(?i)\b(?:base(?:[_\s-]*sha)?|parent(?:\s+commit)?)\b[^0-9a-f\n]{0,48}([0-9a-f]{7,40})\b"
+    r"(?im)^[ \t>*-]*base(?:[_\s-]*sha)?\s*:\s*([0-9a-f]{7,40})\s*$"
 )
 _HEAD_SHA = re.compile(
-    r"(?i)\bhead(?:[_\s-]*sha)?\b[^0-9a-f\n]{0,48}([0-9a-f]{7,40})\b"
+    r"(?im)^[ \t>*-]*head(?:[_\s-]*sha)?\s*:\s*([0-9a-f]{7,40})\s*$"
 )
 _MERGE_READY = re.compile(r"(?i)\b(?:merge[- ]ready|ready to merge|ready for merge)\b")
 _PASS_LINE = re.compile(
     r"(?i)(?<!not )(?<!n't )\b(?:[1-9]\d*\s+passed|all checks passed|all tests passed|checks passed|tests? passed|(?<!\d )passed)\b"
 )
 _PROOF = re.compile(
-    r"(?i)(\bpytest\b|\bruff\b|\bcompileall\b|git diff --check|session_finish(?:\.py)?|\btests?/[A-Za-z0-9_./-]+\.py\b)"
+    r"(?i)(\bpytest\b|\bruff\b|\bcompileall\b|git diff --check|session_finish(?:\.py)?)"
 )
 _SKIP_WORD = re.compile(r"(?i)\b(?:skipped|not[_ ]run|unavailable|ci_unavailable|did not run|not executed)\b")
 _FAILED_COUNT = re.compile(r"(?i)\b[1-9]\d*\s+failed\b")
@@ -258,6 +258,8 @@ _SINGLE_RULES = (
     "unclear_skipped_check",
     "ownership_unreported",
     "unsafe_changed_path",
+    "missing_test_evidence",
+    "unclosed_fence",
     "raw_secrets",
     "canary_content",
     "provider_payload",
@@ -432,11 +434,52 @@ def _claim_findings(lines: list[str]) -> list[dict[str, str]]:
 
 
 def _overall(findings: list[dict[str, str]], *, merge_ready: bool) -> str:
-    if any(item["rule"] in _HARD_FAIL for item in findings) or (merge_ready and findings):
+    if merge_ready or any(item["rule"] in _HARD_FAIL for item in findings):
         return "failed"
     if findings:
         return "incomplete"
     return "passed"
+
+
+def _strip_fences(text: str) -> tuple[str, bool]:
+    """Drop fenced markdown so examples cannot satisfy the contract.
+
+    A fence is a line of three or more backticks or tildes. The interior is
+    discarded, and a blank line is left behind so a command cannot prove a
+    claim across the fence. An opening fence without a closer is unclosed.
+    """
+    kept: list[str] = []
+    marker: str | None = None
+    for line in text.splitlines():
+        opener = re.match(r"^[ \t]*(`{3,}|~{3,})[ \t]*([^`\n]*)$", line)
+        if marker is None:
+            if opener and not opener.group(2).strip().startswith(opener.group(1)[0]):
+                marker = opener.group(1)
+                continue
+            kept.append(line)
+            continue
+        if (
+            opener
+            and opener.group(1)[0] == marker[0]
+            and len(opener.group(1)) >= len(marker)
+            and not opener.group(2).strip()
+        ):
+            marker = None
+            kept.append("")
+            continue
+    return "\n".join(kept), marker is not None
+
+
+def _proven_pass(lines: list[str]) -> bool:
+    for index, line in enumerate(lines):
+        previous = lines[index - 1] if index else ""
+        if not _PASS_LINE.search(line):
+            continue
+        if _FAILED_COUNT.search(line) or _real_skip(line):
+            continue
+        if _PROOF.search(line) or _PROOF.search(previous):
+            return True
+    return False
 
 
 def audit_handoff(text: str) -> tuple[dict[str, Any], int]:
@@ -445,9 +488,12 @@ def audit_handoff(text: str) -> tuple[dict[str, Any], int]:
     Ordinary prose is parsed, not rejected as malformed. The source text is
     not copied into the result. A passed result means the handoff evidence
     is complete. ``merge_authority`` is always false; this does not approve
-    a merge. Inventory entries are exact path lines and stop at the next
-    heading. A pass claim is backed only by a command on that line or the
-    line immediately above it.
+    a merge, and a merge-ready claim is failed even when the other evidence
+    is complete. Fenced markdown is not evidence. Inventory entries are
+    exact path lines and stop at the next heading. A pass claim is backed
+    only by pytest, ruff, compileall, git diff --check, or session_finish
+    on that line or the line immediately above it. Changed paths need one
+    positive command-backed pass count; an explicit empty inventory does not.
     """
     source = text if isinstance(text, str) else ""
     findings: list[dict[str, str]] = []
@@ -458,10 +504,14 @@ def audit_handoff(text: str) -> tuple[dict[str, Any], int]:
     if _PROVIDER_PAYLOAD.search(source):
         findings.append(_finding("provider_payload", "provider payload redacted"))
 
-    agent_match = _AGENT_ID.search(source)
-    lane_match = _LANE.search(source)
-    base_match = _BASE_SHA.search(source)
-    head_match = _HEAD_SHA.search(source)
+    parsed, unclosed = _strip_fences(source)
+    if unclosed:
+        findings.append(_finding("unclosed_fence", "unclosed markdown fence"))
+
+    agent_match = _AGENT_ID.search(parsed)
+    lane_match = _LANE.search(parsed)
+    base_match = _BASE_SHA.search(parsed)
+    head_match = _HEAD_SHA.search(parsed)
     agent_id = _clean_text(agent_match.group(1)) if agent_match else ""
     lane = _clean_text(lane_match.group(1)) if lane_match else ""
     base_sha = base_match.group(1).lower() if base_match else ""
@@ -477,16 +527,19 @@ def audit_handoff(text: str) -> tuple[dict[str, Any], int]:
     if not head_sha:
         findings.append(_finding("missing_head_sha", "head SHA is missing"))
 
-    present, paths, explicit_none, unsafe = _inventory(source)
+    present, paths, explicit_none, unsafe = _inventory(parsed)
     if unsafe:
         findings.append(_finding("unsafe_changed_path", "unsafe changed-path entry omitted"))
     if not present or (not paths and not explicit_none):
         findings.append(_finding("missing_changed_paths", "changed-path inventory is missing"))
-    if _ownership(source) == "absent":
+    if _ownership(parsed) == "absent":
         findings.append(_finding("ownership_unreported", "ownership conflict was not reported"))
-    findings.extend(_claim_findings(source.splitlines()))
+    parsed_lines = parsed.splitlines()
+    findings.extend(_claim_findings(parsed_lines))
+    if paths and not _proven_pass(parsed_lines):
+        findings.append(_finding("missing_test_evidence", "changed paths have no command-backed passing test count"))
     findings = _dedupe(findings)
-    merge_ready = _claims_merge_ready(source)
+    merge_ready = _claims_merge_ready(parsed)
     overall = _overall(findings, merge_ready=merge_ready)
     document = {
         "schema": HANDOFF_SCHEMA,
@@ -499,7 +552,7 @@ def audit_handoff(text: str) -> tuple[dict[str, Any], int]:
         "base_sha": base_sha or None,
         "head_sha": head_sha or None,
         "changed_paths": paths,
-        "ownership_statement": _ownership(source),
+        "ownership_statement": _ownership(parsed),
         "checks": _checks_for(findings, _SINGLE_RULES),
         "findings": findings,
     }
