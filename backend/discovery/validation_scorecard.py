@@ -2,7 +2,7 @@ from __future__ import annotations
 import uuid
 from .validation_sprint import ValidationScorecard
 
-def build_validation_scorecard(opportunity, service_results, evidence_records=None, gaps=None, calibration_profiles=None):
+def build_validation_scorecard(opportunity, service_results, evidence_records=None, gaps=None, calibration_profiles=None, scorecard_id=None):
     completed=[x for x in service_results if x.status=="completed"]; failed=[x for x in service_results if x.status in {"blocked","unavailable","failed"}]; score=50+min(25,len(completed)*8)-min(20,len(failed)*5); passed=[]; checks=[]; risks=[]; missing=[]
     for result in service_results:
         risks.extend(result.risk_flags); missing.extend(result.missing_evidence); checks.extend(result.recommendations)
@@ -16,4 +16,4 @@ def build_validation_scorecard(opportunity, service_results, evidence_records=No
     elif completed and score>=75 and confidence>=.65 and "product_research_completed" in passed and not synthetic: recommendation,transition="advance_to_launch_candidate","launch_candidate"
     elif missing: recommendation,transition="request_more_evidence","evidence_requested"
     else: recommendation,transition="keep_validating","validation_ready"
-    return ValidationScorecard("scorecard_"+uuid.uuid4().hex[:16],opportunity.opportunity_id,opportunity.name,opportunity.category_name,score,confidence,recommendation,service_results,passed,checks,sorted(set(risks)),sorted(set(missing)),["Review missing evidence and rerun the sprint."],transition,{"planning_only":True})
+    return ValidationScorecard(scorecard_id or "scorecard_"+uuid.uuid4().hex[:16],opportunity.opportunity_id,opportunity.name,opportunity.category_name,score,confidence,recommendation,service_results,passed,checks,sorted(set(risks)),sorted(set(missing)),["Review missing evidence and rerun the sprint."],transition,{"planning_only":True})
