@@ -20,7 +20,8 @@ def test_scorecard_blocks_synthetic_evidence_from_advancing():
 def test_empty_validation_sprint_fails_closed():
     result=run_validation_sprint(workspace_id="empty-validation-test",limit=1)
     assert result["status"] == "blocked"
-    assert result["sprint"]["blocked_reasons"] == ["no_validation_targets"]
+    assert result["sprint"] is None
+    assert result["blocked_reasons"] == ["execution_not_authorized"]
 
 def test_sprint_serializes():
     sprint=ValidationSprint("s","w","t","o")

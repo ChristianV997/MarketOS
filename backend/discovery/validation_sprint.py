@@ -1,6 +1,6 @@
 from __future__ import annotations
 import time, uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 def _b(v, lo, hi):
@@ -43,5 +43,19 @@ class ValidationSprint:
     def from_dict(cls,d):
         d=dict(d); d["targets"]=[ValidationSprintTarget.from_dict(x) for x in d.get("targets",[])]; d["scorecards"]=[ValidationScorecard.from_dict(x) for x in d.get("scorecards",[])]; return cls(**{k:d[k] for k in cls.__dataclass_fields__ if k in d})
     def to_markdown(self): return f"# {self.title}\n\n**Status:** `{self.status}`  \n**Objective:** {self.objective}\n\n## Targets\n\n"+"\n".join(f"- **{x.name}**: {', '.join(x.service_plan)}" for x in self.targets)+"\n\n## Scorecards\n\n"+"\n".join(f"- {x.opportunity_name}: `{x.validation_score:.1f}` — `{x.recommendation}`" for x in self.scorecards)+"\n\nThis sprint is dry-run and planning-only. No live ads, orders, messages, payments, publishing, or commerce mutation are performed.\n"
+
+@dataclass
+class PlannedValidationTarget:
+    """One candidate in a plan-only sprint. `eligible=False` rows explain why they were excluded."""
+    target_id: str; opportunity_id: str; name: str; stage: str; eligible: bool; status: str
+    planned_services: list[str] = field(default_factory=list); skipped_services: dict[str, list[str]] = field(default_factory=dict)
+    reasons: list[str] = field(default_factory=list); governor: dict[str, Any] = field(default_factory=dict); learning: dict[str, Any] = field(default_factory=dict); scorecard_preview: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class ValidationSprintPlan:
+    """Deterministic, side-effect-free preflight for a validation sprint. It authorizes nothing; execution stays in run_validation_sprint."""
+    plan_id: str; workspace_id: str; title: str; objective: str; status: str; targets: list[PlannedValidationTarget] = field(default_factory=list); reasons: list[str] = field(default_factory=list)
+    governor_summary: dict[str, Any] = field(default_factory=dict); approvals_required: list[dict[str, Any]] = field(default_factory=list); next_safe_steps: list[str] = field(default_factory=list); execution_handoff: dict[str, Any] = field(default_factory=dict); safety: dict[str, Any] = field(default_factory=dict); warnings: list[str] = field(default_factory=list)
+    def to_dict(self): return asdict(self)
 
 def stable_sprint_id(workspace_id, title): return "sprint_"+uuid.uuid5(uuid.NAMESPACE_URL,f"{workspace_id}:{title}:{time.time_ns()}").hex[:16]
