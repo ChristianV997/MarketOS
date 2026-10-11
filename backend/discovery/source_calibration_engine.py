@@ -258,7 +258,8 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
     if nothing_in_view:
         run.recommendations.append("No comparisons were in view, so the workspace profiles were kept as they were.")
     replace_profiles = not scoped and not nothing_in_view and not incomplete_workspace_window
-    persisted = registry.record_run(signals, profiles, run, replace_workspace_profiles=replace_profiles)
+    persisted_profiles = [] if (scoped or nothing_in_view or incomplete_workspace_window) else profiles
+    persisted = registry.record_run(signals, persisted_profiles, run, replace_workspace_profiles=replace_profiles)
     if not persisted:
         # Nothing was saved, so nothing from this run may be reported as in use.
         run.status = "partial"
