@@ -4,7 +4,7 @@ Owns the committed `.gitlab-ci.yml` as the fixture. Enforces:
 1. MR-only workflow/job rules (`CI_PIPELINE_SOURCE == "merge_request_event"`).
 2. Canonical Python test profile install/cache (`requirements-test.txt` + includes).
 3. Blocking companion job (no allow_failure / continue-on-error / `|| true`).
-4. Changed-scope selection via `scripts/ai/select_tests.py` with architecture-boundaries fallback.
+4. Changed-scope selection via argv runner (no shell `eval`) with architecture-boundaries fallback.
 5. Bounded JUnit/artifacts; no secrets, deploy, or provider-mutation powers.
 6. Explicit non-equivalence to GitHub's required full `pytest tests/ -v -n auto` suite.
 """
@@ -22,6 +22,7 @@ REQUIREMENTS = ROOT / "requirements.txt"
 REQUIREMENTS_DEV = ROOT / "requirements-dev.txt"
 PYTHON_VERSION = ROOT / ".python-version"
 SELECT_TESTS = ROOT / "scripts" / "ai" / "select_tests.py"
+COMPANION_RUNNER = ROOT / "scripts" / "ai" / "gitlab_companion_pytest.py"
 GITHUB_CI = ROOT / ".github" / "workflows" / "ci.yml"
 
 MR_RULE = '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -122,8 +123,22 @@ def test_gitlab_companion_changed_scope_selection_and_honest_fallback():
     script = "\n".join(_job_script_blobs(job))
 
     assert SELECT_TESTS.is_file(), "select_tests helper must exist for changed-scope selection"
-    assert "scripts/ai/select_tests.py" in script
-    assert "test_architecture_boundaries" in script, (
+    assert COMPANION_RUNNER.is_file(), "dedicated companion argv runner must exist"
+    assert "scripts/ai/gitlab_companion_pytest.py" in script
+    # Reject shell-builtin eval invocation; comments may mention the word.
+    for blob in _job_script_blobs(job):
+        for line in blob.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            assert not re.search(r"(^|[;&|]\s*)eval(\s|$)", stripped), (
+                f"companion YAML must not shell-eval command strings: {stripped}"
+            )
+
+    runner_text = COMPANION_RUNNER.read_text(encoding="utf-8")
+    assert "select_tests" in runner_text
+    assert "shell=False" in runner_text
+    assert "test_architecture_boundaries" in runner_text, (
         "empty/unknown changed set must fall back to architecture-boundaries pytest"
     )
 
@@ -146,6 +161,7 @@ def test_gitlab_companion_bounds_artifacts_and_forbids_secret_deploy_powers():
     assert reports.get("junit") == "artifacts/junit.xml"
     paths = artifacts.get("paths") or []
     assert "artifacts/junit.xml" in paths
+    assert "artifacts/pytest-argvs.json" in paths
     assert "artifacts/companion-summary.txt" in paths
     assert artifacts.get("when") == "always"
     assert artifacts.get("expire_in") == "7 days"
