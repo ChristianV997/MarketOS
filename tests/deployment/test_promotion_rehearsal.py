@@ -652,11 +652,11 @@ def _with_fake_runner_present(monkeypatch: pytest.MonkeyPatch, fake_popen_factor
     make for an unrelated path (e.g. the Dockerfile check, phase1's own
     file reads), and without intercepting any other subprocess.Popen/.run
     call the same pipeline makes for something else entirely
-    (get_runtime_versions' own node/docker --version calls, and --
-    confirmed by direct reproduction -- CPython's platform.platform()
-    itself shells out on this interpreter/platform). fake_popen_factory
-    is only invoked for argv that actually names the operator-stack
-    runner script; anything else goes to the real subprocess.Popen/.run
+    (get_runtime_versions' own node/docker --version calls). Host platform
+    metadata is collected via the bounded collect_host_platform_metadata
+    helper and must not call platform.platform(). fake_popen_factory is
+    only invoked for argv that actually names the operator-stack runner
+    script; anything else goes to the real subprocess.Popen/.run
     unmodified. Also patches os.killpg/os.getpgid to no-ops on POSIX
     (there is no real process group to signal) while still recording
     what _terminate_operator_stack_process attempted, via the fake
