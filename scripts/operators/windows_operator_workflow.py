@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.operators.windows_operator_safety import (
+    SECRET_KEY_NAMES,
     OperatorSafetyError,
     assert_no_authority,
     contains_secret_shaped,
@@ -60,6 +62,52 @@ def fingerprint(payload: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+REDACTED_LEAF = "<redacted-leaf>"
+_ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\)[^'\"\r\n<>|]*")
+
+
+def _is_safe_leaf(leaf: str) -> bool:
+    """A leaf may be shown only when it is short, not secret-shaped, and has no secret key name."""
+    if not leaf or len(leaf) > 120 or leaf.endswith(":"):
+        return False
+    if contains_secret_shaped(leaf):
+        return False
+    tokens = re.findall(r"[a-z0-9]+", leaf.lower())
+    candidates = set(tokens)
+    for size in (2, 3):
+        candidates.update("_".join(tokens[i : i + size]) for i in range(len(tokens) - size + 1))
+    return not candidates & SECRET_KEY_NAMES
+
+
+def leaf_of(path: str | Path) -> str:
+    """Return only the final path component, or a stable redaction marker."""
+    parts = [part for part in re.split(r"[\\/]+", str(path).strip()) if part]
+    leaf = parts[-1] if parts else ""
+    return leaf if _is_safe_leaf(leaf) else REDACTED_LEAF
+
+
+def _repo_label(path: Path) -> str:
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return leaf_of(path)
+
+
+def scrub_text(text: str) -> str:
+    """Replace every drive-letter or UNC path in text with its safe leaf."""
+    return _ABSOLUTE_PATH.sub(lambda match: leaf_of(match.group(0)), text)
+
+
+def scrub_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: scrub_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [scrub_value(item) for item in value]
+    if isinstance(value, str):
+        return scrub_text(value)
+    return value
+
+
 def summary(
     *,
     command: str,
@@ -68,6 +116,7 @@ def summary(
     exit_code: int,
     details: dict[str, Any],
 ) -> dict[str, Any]:
+    details = scrub_value(details)
     body = {
         "contract_version": CONTRACT_VERSION,
         "command": command,
@@ -87,10 +136,11 @@ def summary(
 
 def emit(payload: dict[str, Any], output: Path | None) -> int:
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    sys.stdout.write(text)
+    # Persist before printing so a write failure yields one JSON document, not two.
     if output is not None:
         output.mkdir(parents=True, exist_ok=True)
         (output / f"{payload['command'].replace('-', '_')}_summary.json").write_text(text, encoding="utf-8")
+    sys.stdout.write(text)
     return int(payload["exit_code"])
 
 
@@ -119,18 +169,19 @@ def _run_cli(script_rel: str, extra: list[str]) -> dict[str, Any]:
             "stdout": "",
         }
     combined = (proc.stdout or "") + (proc.stderr or "")
+    # Failed nested CLIs print tracebacks and exception text; keep only successful output.
     if proc.returncode != 0 and "ModuleNotFoundError" in combined:
         return {
             "available": False,
             "exit_code": 3,
             "reason": "python_dependency_unavailable",
-            "stdout": combined[-2000:],
+            "stdout": "",
         }
     return {
         "available": True,
         "exit_code": proc.returncode,
         "reason": "ok" if proc.returncode == 0 else "cli_failed",
-        "stdout": combined[-2000:],
+        "stdout": combined[-2000:] if proc.returncode == 0 else "",
     }
 
 
@@ -153,7 +204,7 @@ def cmd_preflight() -> dict[str, Any]:
     except Exception:
         missing_eval = True
     details = {
-        "repository": str(ROOT),
+        "repository": ROOT.name,
         "platform": sys.platform,
         "tools": {name: bool(path) for name, path in tools.items()},
         "sibling_ownership": sibling_prs,
@@ -191,7 +242,12 @@ def cmd_copy_sanitized(command: str, source: str, output: str, *, expected_class
         evidence_class=expected_class,
         status="copied",
         exit_code=0,
-        details={"source": str(src), "destination": str(dest), "bytes": dest.stat().st_size, "never_actual": True},
+        details={
+            "source": leaf_of(src),
+            "destination": leaf_of(dest),
+            "bytes": dest.stat().st_size,
+            "never_actual": True,
+        },
     )
 
 
@@ -219,8 +275,8 @@ def cmd_commerce_cycle(fixture: str, output: str | None) -> dict[str, Any]:
     src = require_safe_input(ROOT, fixture, label="fixture")
     try:
         fixture_payload = json.loads(src.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise OperatorSafetyError(f"commerce fixture could not be read: {src}") from exc
+    except (OSError, json.JSONDecodeError):
+        raise OperatorSafetyError(f"commerce fixture could not be read: {leaf_of(src)}") from None
     records = fixture_payload if isinstance(fixture_payload, list) else [fixture_payload]
     query = next(
         (
@@ -239,10 +295,10 @@ def cmd_commerce_cycle(fixture: str, output: str | None) -> dict[str, Any]:
     result = _run_cli("scripts/run_commerce_mvp_slice.py", extra)
     operations = ROOT / "scripts/run_commerce_operations_cycle.py"
     details = {
-        "fixture": str(src),
+        "fixture": leaf_of(src),
         "mvp_slice": result,
         "operations_cycle": "not_run" if not operations.is_file() else "present_not_invoked_default",
-        "output": str(dest) if dest else None,
+        "output": leaf_of(dest) if dest else None,
     }
     evidence = "unavailable" if not result["available"] else "fixture"
     exit_code = 3 if not result["available"] else (0 if result["exit_code"] == 0 else 1)
@@ -268,9 +324,9 @@ def cmd_batch_manifest(manifest: str) -> dict[str, Any]:
         status="validated_local_manifest" if cycle.is_file() else "operations_cycle_cli_absent",
         exit_code=0,
         details={
-            "manifest": str(src),
+            "manifest": leaf_of(src),
             "job_count": len(jobs),
-            "operations_cycle_cli": str(cycle) if cycle.is_file() else "not_on_this_branch",
+            "operations_cycle_cli": _repo_label(cycle) if cycle.is_file() else "not_on_this_branch",
             "note": "PR #238 owns batch I/O if present; this command only validates the local manifest.",
         },
     )
@@ -282,12 +338,14 @@ def cmd_client_safe_export(source: str, output: str) -> dict[str, Any]:
     dest_root.mkdir(parents=True, exist_ok=True)
     payload = load_json_object(src)
     assert_no_authority(payload)
+    if contains_secret_shaped(src.name):
+        raise OperatorSafetyError("client_safe_export_rejected_secret_shaped_value", 4)
     export = {
         "export_version": "windows-operator-client-safe-v1",
         "read_only": True,
         "mutated": False,
         "network_calls": False,
-        "source_name": src.name,
+        "source_name": leaf_of(src),
         "evidence_class": payload.get("evidence_class", "fixture"),
         "keys": sorted(payload.keys()),
         "authorities": {key: False for key in ("launch", "ads", "orders", "payments", "messaging")},
@@ -301,7 +359,7 @@ def cmd_client_safe_export(source: str, output: str) -> dict[str, Any]:
         evidence_class="fixture",
         status="exported",
         exit_code=0,
-        details={"destination": str(dest), "source": str(src)},
+        details={"destination": leaf_of(dest), "source": leaf_of(src)},
     )
 
 
@@ -332,7 +390,7 @@ def cmd_inspect(path: str) -> dict[str, Any]:
         evidence_class=str(payload.get("evidence_class", "fixture")) if isinstance(payload, dict) else "fixture",
         status="inspected",
         exit_code=0,
-        details={"path": str(src), "keys": redacted_keys, "secret_shaped": False},
+        details={"path": leaf_of(src), "keys": redacted_keys, "secret_shaped": False},
     )
 
 
@@ -354,7 +412,7 @@ def cmd_replay(packet: str) -> dict[str, Any]:
         evidence_class="fixture",
         status="byte_identical",
         exit_code=0,
-        details={"fingerprint": first, "path": str(src)},
+        details={"fingerprint": first, "path": leaf_of(src)},
     )
 
 
@@ -399,7 +457,7 @@ def cmd_coderos() -> dict[str, Any]:
             evidence_class="unavailable",
             status="adapter_missing",
             exit_code=3,
-            details={"adapter": str(adapter)},
+            details={"adapter": _repo_label(adapter)},
         )
     try:
         from backend.adapters.coderos_readonly import CoderOSAdapterConfig, probe
@@ -415,7 +473,7 @@ def cmd_coderos() -> dict[str, Any]:
                 "mode": "plan_only",
                 "would_execute": report.planned_action.would_execute,
                 "reason": report.planned_action.reason,
-                "windows_snapshot_script": "C:\\Users\\HP\\Documents\\GitHub\\CoderOS\\scripts\\coderos_snapshot.py",
+                "windows_snapshot_script": "CoderOS/scripts/coderos_snapshot.py (external checkout; not invoked)",
                 "windows_snapshot_status": "unavailable_in_this_linux_agent",
             },
         )
@@ -522,15 +580,38 @@ def main(argv: list[str] | None = None) -> int:
         dest = require_safe_output_dir(ROOT, output) if output else None
         return emit(payload, dest)
     except OperatorSafetyError as exc:
+        message = scrub_text(str(exc))
         payload = summary(
             command="blocked" if exc.exit_code == 4 else "invalid",
             evidence_class="blocked" if exc.exit_code == 4 else "unavailable",
-            status=str(exc),
+            status=message,
             exit_code=exc.exit_code,
-            details={"error": str(exc)},
+            details={"error": message},
         )
         sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
         return exc.exit_code
+    except (OSError, ValueError) as exc:
+        # Read and decode failures (including JSONDecodeError and UnicodeDecodeError) carry
+        # paths or input bytes in their text, so only the exception class name is reported.
+        payload = summary(
+            command="invalid",
+            evidence_class="unavailable",
+            status="input_unreadable_or_malformed",
+            exit_code=2,
+            details={"error": "input_unreadable_or_malformed", "exception": type(exc).__name__},
+        )
+        sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        return 2
+    except Exception as exc:  # noqa: BLE001 - never let a traceback carry paths to stderr
+        payload = summary(
+            command="invalid",
+            evidence_class="unavailable",
+            status="internal_error_redacted",
+            exit_code=1,
+            details={"error": "internal_error_redacted", "exception": type(exc).__name__},
+        )
+        sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        return 1
 
 
 if __name__ == "__main__":
