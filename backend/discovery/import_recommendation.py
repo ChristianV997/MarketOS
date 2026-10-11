@@ -73,27 +73,37 @@ class ImportRecommendationPlan:
         return f"# {self.title}\n\n{rows}\n\n## Operator instruction\n\nExport the listed fields into the template under `data/import_templates/`, then use the local import-and-run workflow. No live provider access is required.\n"
 
 
+def _freshness(profile: Any, as_of: float) -> str:
+    """Judge a profile against the plan's own time: current, stale, or dated after the plan."""
+    age = as_of - float(profile.last_updated_at)
+    if age < 0:
+        return "profile_after_plan_time"
+    if age > STALE_AFTER_SECONDS:
+        return "stale_profile"
+    return "current"
+
+
 def _calibration_for_parser(workspace_id: str, parser: str, as_of: float) -> tuple[Any, Any, str]:
     """Return (effective_profile, reported_profile, reason) for one parser in one workspace.
 
-    Only an observed profile can move ordering. Exactly one observed profile for the parser applies; two
-    observed profiles with different source names are ambiguous and apply nothing. Profiles that are not
-    observed are reported for transparency but never change ordering, so a neutral profile cannot block one
-    that is observed.
+    Only an observed profile that is current at planning time can move ordering. Exactly one such profile
+    applies; two with different source names are ambiguous and apply nothing. Other profiles are reported for
+    transparency but never change ordering, so a neutral or stale profile cannot block a current one.
     """
     try:
         profiles = get_calibration_registry().profiles_for_parser(workspace_id, parser)
     except Exception as exc:
         _log.warning("calibration unavailable for recommendation planning: %s", type(exc).__name__)
         return None, None, "calibration_unavailable"
-    # Freshness is judged at planning time, so a profile from long ago cannot keep reordering later plans.
-    observed = [profile for profile in profiles if profile.evidence_status == "observed" and as_of - profile.last_updated_at <= STALE_AFTER_SECONDS]
-    if len({profile.source_name for profile in observed}) > 1:
+    observed = [profile for profile in profiles if profile.evidence_status == "observed"]
+    current = [profile for profile in observed if _freshness(profile, as_of) == "current"]
+    if len({profile.source_name for profile in current}) > 1:
         return None, None, "ambiguous_profile"
+    if current:
+        return current[0], current[0], "policy_observed"
     if observed:
-        return observed[0], observed[0], "policy_observed"
-    if profiles and all(profile.evidence_status == "observed" for profile in profiles):
-        return None, profiles[0] if len(profiles) == 1 else None, "stale_profile"
+        reason = _freshness(observed[0], as_of)
+        return None, observed[0] if len(observed) == 1 else None, reason
     if not profiles:
         return None, None, "no_profile"
     reported = profiles[0] if len(profiles) == 1 else None

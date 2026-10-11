@@ -86,7 +86,10 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
     # The reference time comes from the data unless the caller supplies one, so identical inputs give identical output.
     reference = float(as_of) if as_of is not None else max((x.created_at for x in comparisons), default=0.0)
     selected = set(import_ids) if import_ids else None
-    all_jobs = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, limit=IMPORT_WINDOW) if j is not None and j.workspace_id == workspace_id]
+    def visible(job) -> bool:
+        return job is not None and job.workspace_id == workspace_id and (as_of is None or float(job.created_at) <= float(as_of))
+
+    all_jobs = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, limit=IMPORT_WINDOW) if visible(j)]
     import_truncated = len(all_jobs) >= IMPORT_WINDOW
     job_cache: dict[str, Any] = {}
     if not import_truncated:
@@ -97,7 +100,7 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
     def job_for(source_name: str) -> Any:
         # With a full window, the exact per-source query finds a clash however many other imports exist.
         if source_name not in job_cache:
-            found = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, source_name=source_name, limit=50) if j is not None and j.workspace_id == workspace_id and j.source_name == source_name]
+            found = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, source_name=source_name, limit=50) if visible(j) and j.source_name == source_name]
             job_cache[source_name] = _DUPLICATE if len(found) > 1 else (found[0] if found else None)
         return job_cache[source_name]
 
@@ -132,8 +135,10 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
                 created_at=comparison.created_at, attribution=attribution, exclusion_reason=reason,
             )
 
-            def add(signal_type, entity_name, value, rationale):
-                identity = dict(base, signal_type=signal_type, entity_name=entity_name, value=value)
+            def add(signal_type, entity_name, value, rationale, ordinal=0):
+                # A position in the comparison keeps two identical entries as two signals, not one.
+                entity_name = "" if entity_name is None else str(entity_name)
+                identity = dict(base, signal_type=signal_type, entity_name=entity_name, value=value, ordinal=ordinal)
                 signals.append(SourceUsefulnessSignal(
                     stable_id("signal_", identity), signal_type=signal_type, entity_name=entity_name, value=value, rationale=[rationale],
                     provenance={"method": "comparison_source_attribution", "non_causal": True, "policy_version": CALIBRATION_POLICY_VERSION},
@@ -142,17 +147,17 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
 
             if comparison.evidence_count_change > 0:
                 add("evidence_count_increase", "", comparison.evidence_count_change, "Current discovery contains more evidence records than baseline.")
-            for movement in comparison.category_movements:
+            for position, movement in enumerate(comparison.category_movements):
                 name_ = movement.get("category_name", "")
                 if movement.get("score_change", 0) > 0:
-                    add("confidence_increase", name_, movement.get("score_change", 0), "Category score increased after the compared evidence set was included.")
+                    add("confidence_increase", name_, movement.get("score_change", 0), "Category score increased after the compared evidence set was included.", position)
                 if movement.get("rank_change", 0) > 0:
-                    add("rank_improvement", name_, movement.get("rank_change", 0), "Category rank improved in the current recorded discovery.")
+                    add("rank_improvement", name_, movement.get("rank_change", 0), "Category rank improved in the current recorded discovery.", position)
                 if movement.get("score_change", 0) < 0:
-                    add("low_confidence_noise", name_, abs(movement.get("score_change", 0)), "Category score declined in the current recorded discovery; source attribution is non-causal.")
-            for change in comparison.recommendation_changes:
+                    add("low_confidence_noise", name_, abs(movement.get("score_change", 0)), "Category score declined in the current recorded discovery; source attribution is non-causal.", position)
+            for position, change in enumerate(comparison.recommendation_changes):
                 if change.get("current") in {"investigate", "prioritize"} and change.get("baseline") in {"reject", "hold", "investigate"}:
-                    add("recommendation_upgrade", change.get("category_name", ""), 1, "Category recommendation upgraded in the current recorded discovery.")
+                    add("recommendation_upgrade", change.get("category_name", ""), 1, "Category recommendation upgraded in the current recorded discovery.", position)
     # Import-quality facts are recorded for every resolvable import in the workspace, but they never drive an adjustment.
     for job in sorted(all_jobs, key=lambda j: j.import_id):
         resolved = job_for(job.source_name)
@@ -188,7 +193,13 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
     observed = [p for p in profiles if p.evidence_status == "observed"]
     scoped = bool(comparison_ids or import_ids)
     status = "completed" if observed else "partial"
-    if observed:
+    if observed and scoped:
+        summary = "Observed profiles from this scoped run are recorded for review; they do not change import ordering."
+        recommendations = [
+            "Only a workspace-wide run updates the profiles that reorder import recommendations.",
+            "Keep source-specific limitations and provenance in every refinement cycle.",
+        ]
+    elif observed:
         summary = "Observed profiles summarize changes in persisted discovery comparisons that met the sample and attribution policy."
         recommendations = [
             f"Observed profiles may reorder import recommendations by at most {MAX_ORDERING_EFFECT:g} points; critical and high gaps keep their floor.",
@@ -209,7 +220,7 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
         recommendations.append(f"Only the {IMPORT_WINDOW} most recently registered imports were read; older ones are not counted.")
     if exclusions:
         recommendations.append("Excluded from calibration: " + ", ".join(f"{reason}={count}" for reason, count in exclusions.items()) + ".")
-    run_id = stable_id("calibration_", {"workspace_id": workspace_id, "reference_time": reference, "policy": CALIBRATION_POLICY_VERSION, "signal_ids": [s.signal_id for s in signals], "comparison_ids": [c.comparison_id for c in comparisons], "scoped": scoped})
+    run_id = stable_id("calibration_", {"workspace_id": workspace_id, "reference_time": reference, "policy": CALIBRATION_POLICY_VERSION, "signal_ids": [s.signal_id for s in signals], "comparison_ids": [c.comparison_id for c in comparisons], "requested_comparisons": sorted(comparison_ids or []), "requested_imports": sorted(import_ids or []), "as_of": as_of, "scoped": scoped})
     metadata = {
         "non_causal": True, "policy_version": CALIBRATION_POLICY_VERSION, "scope": "scoped" if scoped else "workspace",
         "signal_count": len(signals), "eligible_signal_count": sum(1 for s in signals if s.eligible), "exclusions": exclusions,

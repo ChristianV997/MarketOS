@@ -26,23 +26,23 @@ A profile is `observed` only with at least 3 eligible signals across at least 2 
 
 - Priority ordering moves by at most 10 points, and only when exactly one observed profile in the workspace serves the parser. Two observed profiles for one parser are ambiguous and have no effect. A profile that is not observed never changes ordering, and never blocks an observed one.
 - Severe evidence gaps (critical or high) keep a priority floor of 70, so a historically useful source cannot suppress a critical missing signal.
-- `apply_calibration_to_source_quality` can only lower a confidence multiplier, and it never changes score, allowed or blocked signal types, freshness, or source type. It is implemented but **not on the import path today**: record confidence is unchanged, and the bound is tested rather than live.
+- `apply_calibration_to_source_quality` can only lower a confidence multiplier, only for an observed profile that is current at the `as_of` time it is given, and it never changes score, allowed or blocked signal types, freshness, or source type. Without an `as_of`, it has no effect. It is implemented but **not on the import path today**: record confidence is unchanged, and the bound is tested rather than live.
 - Each profile reports its eligible and excluded counts, exclusion reasons, and a 95% Wilson interval for the positive share. The interval is descriptive only: it does not feed the adjustment, which is bounded by policy instead. Signals from one comparison are correlated, so the interval is optimistic.
 - Import-quality facts (rejected rows, duplicate removal) are recorded for every resolvable import, even without a comparison, but are excluded from the adjustment. Evidence quality belongs to the normalizer and source-quality scorer, not to calibration.
 - A comparison counts as a single-source change only when its baseline and current discoveries together name one source. A source dropped between the two is treated as a confound.
 - Staleness is 90 days before the reference time. The reference is the newest comparison, unless an internal `as_of` is given, so a workspace whose comparisons are all old is never marked stale by its own clock.
 - Only the 500 most recently registered comparisons are read (registration order, not timestamps). The run says so when the window is full.
-- A run scoped to `comparison_ids` or `import_ids` is recorded, but it does not replace the workspace profiles that drive recommendations.
+- A run scoped to `comparison_ids` or `import_ids` is recorded, and its summary says its profiles do not change ordering. It does not replace the workspace profiles that drive recommendations.
 - A workspace run retires any profile and any current signal whose evidence has dropped out, so neither a stale profile nor a listed signal can outlive its comparison.
-- A profile is ignored for a plan dated more than 90 days after its last eligible evidence, so an old profile cannot reorder later plans.
+- A profile is judged against the plan's own time. It is ignored when the plan is more than 90 days after its last eligible evidence, and also when its evidence is dated after the plan. The reason is recorded as `stale_profile` or `profile_after_plan_time`.
 - If the state file cannot be written, the run is recorded as `persisted: false` with status `partial`, and it reports no profiles. The in-memory state is rolled back in the same step, so ordering never uses profiles that were not saved.
 - Duplicate source names are checked with an exact query per source, so a clash is found however many other imports exist.
 - A recommendation plan's identifier includes the calibration that was applied and the resulting priorities, so a rebuilt plan with different content has a different identifier and does not replace the earlier one.
-- Registry writes are serialized within a process, so concurrent runs cannot discard each other's committed records. Separate processes sharing one state file are not coordinated; keep one writer per state file.
+- Registry reads and writes are serialized within a process, so a read never sees a write in progress, and concurrent runs cannot discard each other's committed records. Separate processes sharing one state file are not coordinated; keep one writer per state file.
 
 ## Determinism
 
-Signal, profile and run identifiers are derived from their content, and the run timestamp is the newest comparison's time, never the wall clock. The reference time can be set with an internal `as_of` argument; the API does not expose it. Identical inputs give identical output. A repeated run overwrites its records instead of accumulating them. A run over no comparisons is dated at 0 (the epoch), because there is nothing to date it by.
+Signal, profile and run identifiers are derived from their content, and the run timestamp is the newest comparison's time, never the wall clock. The reference time can be set with an internal `as_of` argument, which also bounds which imports are visible; the API does not expose it. A replay at a fixed `as_of` therefore gives the same result after later evidence arrives. Identical inputs give identical output. A repeated run overwrites its records instead of accumulating them. A run over no comparisons is dated at 0 (the epoch), because there is nothing to date it by.
 
 ## Stored state
 

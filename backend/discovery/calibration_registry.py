@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -9,6 +10,15 @@ from pathlib import Path
 from .source_calibration import CalibrationRun, SourceCalibrationProfile, SourceUsefulnessSignal
 
 _log = logging.getLogger(__name__)
+
+
+def _locked(method):
+    """Run a reader under the registry lock, so it never iterates while a write is changing the same dictionaries."""
+    @functools.wraps(method)
+    def inner(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return inner
 
 
 class CalibrationRegistry:
@@ -26,19 +36,23 @@ class CalibrationRegistry:
         if replace_key:
             for pid in [pid for pid, item in self.profiles.items() if pid != profile.profile_id and (item.workspace_id, item.source_name, item.parser_type) == key]: del self.profiles[pid]
         self.profiles[profile.profile_id] = profile
+    def _commit(self, change):
+        """Apply one change and save it. If the save fails, roll back, so an unsaved record never affects ordering."""
+        with self._lock:
+            if not self._writable(): self.last_save_ok = False; return
+            before = self.snapshot()
+            change()
+            self.save()
+            if not self.last_save_ok: self.restore(before)
     def register_signals(self, signals):
-        with self._lock:
-            if not self._writable(): self.last_save_ok = False; return signals
+        def change():
             for signal in signals: self.signals[signal.signal_id] = signal
-            self.save(); return signals
+        self._commit(change); return signals
     def register_profile(self, profile):
-        with self._lock:
-            if not self._writable(): self.last_save_ok = False; return profile
-            self._put_profile(profile); self.save(); return profile
+        self._commit(lambda: self._put_profile(profile)); return profile
     def register_calibration_run(self, run):
-        with self._lock:
-            if not self._writable(): self.last_save_ok = False; return run
-            self.runs[run.calibration_id] = run; self.save(); return run
+        def change(): self.runs[run.calibration_id] = run
+        self._commit(change); return run
     def record_run(self, signals, profiles, run, *, replace_workspace_profiles=False):
         """Persist one run in a single write, under the lock. A failed write rolls back every in-memory change.
 
@@ -106,8 +120,10 @@ class CalibrationRegistry:
 
     def register_signal(self, signal): return self.register_signals([signal])[0]
 
+    @_locked
     def list_signals(self, workspace_id=None, source_name=None, parser_type=None, signal_type=None, limit=100): return list(self.signals.values())[:max(0, min(int(limit), 1000))] if not any([workspace_id, source_name, parser_type, signal_type]) else [x for x in self.signals.values() if (workspace_id is None or x.workspace_id == workspace_id) and (source_name is None or x.source_name == source_name) and (parser_type is None or x.parser_type == parser_type) and (signal_type is None or x.signal_type == signal_type)][:max(0, min(int(limit), 1000))]
 
+    @_locked
     def get_profile(self, source_name, parser_type=None, workspace_id=None):
         # Without a workspace there is no tenant to read from, so the answer is None rather than another workspace's profile.
         if workspace_id is None: return None
@@ -115,17 +131,23 @@ class CalibrationRegistry:
             if profile.source_name == source_name and (parser_type is None or profile.parser_type == parser_type) and profile.workspace_id == workspace_id: return profile
         return None
 
+    @_locked
     def profiles_for_parser(self, workspace_id, parser_type):
         return sorted((x for x in self.profiles.values() if x.workspace_id == workspace_id and x.parser_type == parser_type), key=lambda x: (x.source_name, x.profile_id))
 
+    @_locked
     def list_profiles(self, workspace_id=None, parser_type=None, limit=100): return [x for x in self.profiles.values() if (workspace_id is None or x.workspace_id == workspace_id) and (parser_type is None or x.parser_type == parser_type)][:max(0, min(int(limit), 500))]
 
+    @_locked
     def get_calibration_run(self, calibration_id): return self.runs.get(calibration_id)
 
+    @_locked
     def list_calibration_runs(self, workspace_id=None, limit=50): return list(reversed([x for x in self.runs.values() if workspace_id is None or x.workspace_id == workspace_id]))[:max(0, min(int(limit), 500))]
 
+    @_locked
     def to_dict(self): return {"signals": {k: v.to_dict() for k, v in self.signals.items()}, "profiles": {k: v.to_dict() for k, v in self.profiles.items()}, "runs": {k: v.to_dict() for k, v in self.runs.items()}}
 
+    @_locked
     def snapshot(self): return {"signals": dict(self.signals), "profiles": dict(self.profiles), "runs": dict(self.runs)}
 
     def restore(self, snapshot): self.signals, self.profiles, self.runs = dict(snapshot["signals"]), dict(snapshot["profiles"]), dict(snapshot["runs"])

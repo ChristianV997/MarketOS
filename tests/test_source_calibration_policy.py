@@ -332,10 +332,10 @@ def test_calibration_lowers_confidence_but_never_raises_it_or_changes_safety():
     base = EvidenceSourceQuality("shop", "local_file", 80.0, 0.5, allowed_signal_types=["own_store_sales_proxy"], blocked_signal_types=["profit_proxy"], freshness_label="static", metadata={"synthetic_or_cached_only": False})
     profile = observed_profile(source="shop", adjustment=0.0)
     profile.confidence_multiplier_adjustment = 1.25
-    raised = apply_calibration_to_source_quality(base, profile)
+    raised = apply_calibration_to_source_quality(base, profile, as_of=T0)
     assert raised.confidence_multiplier == base.confidence_multiplier
     profile.confidence_multiplier_adjustment = 0.5
-    lowered = apply_calibration_to_source_quality(base, profile)
+    lowered = apply_calibration_to_source_quality(base, profile, as_of=T0)
     assert lowered.confidence_multiplier == pytest.approx(0.25) and lowered.confidence_multiplier < base.confidence_multiplier
     for untouched in ("quality_score", "allowed_signal_types", "blocked_signal_types", "freshness_label", "source_type"):
         assert getattr(lowered, untouched) == getattr(base, untouched)
@@ -345,7 +345,7 @@ def test_a_fixture_source_cannot_be_upgraded_to_live_by_calibration():
     fixture = EvidenceSourceQuality("fixture", "fixture", 15.0, 0.15, metadata={"synthetic_or_cached_only": True})
     profile = observed_profile(source="fixture", adjustment=0.0)
     profile.confidence_multiplier_adjustment = 1.25
-    adjusted = apply_calibration_to_source_quality(fixture, profile)
+    adjusted = apply_calibration_to_source_quality(fixture, profile, as_of=T0)
     assert adjusted.source_type == "fixture" and adjusted.freshness_label == "static" and adjusted.confidence_multiplier <= 0.15
 
 
@@ -354,7 +354,7 @@ def test_an_unobserved_profile_changes_nothing():
     limited = observed_profile(source="shop", adjustment=0.0)
     limited.evidence_status = "limited"
     limited.confidence_multiplier_adjustment = 0.25
-    assert apply_calibration_to_source_quality(base, limited).confidence_multiplier == 0.5
+    assert apply_calibration_to_source_quality(base, limited, as_of=T0).confidence_multiplier == 0.5
 
 
 # --------------------------------------------------------------------------- registry and compatibility
@@ -691,3 +691,121 @@ def test_a_comparison_window_claim_says_registration_order_not_time(world, monke
     monkeypatch.setattr(world.refinement, "list_comparisons", lambda workspace_id, limit: (real(workspace_id, 500) * 250)[:engine.COMPARISON_WINDOW])
     run = engine.run_source_calibration(WS, as_of=AS_OF)
     assert any("most recently registered" in line for line in run.recommendations)
+
+
+# --------------------------------------------------------------------------- fourth review findings
+
+
+def test_an_unsaved_profile_never_reorders_imports_in_this_process(world, tmp_path):
+    blocker = tmp_path / "not_a_directory"
+    blocker.write_text("x", encoding="utf-8")
+    world.calibration.path = blocker / "state.json"
+    world.calibration.register_profile(observed_profile(adjustment=8.0))
+    assert world.calibration.last_save_ok is False and world.calibration.profiles == {}
+    assert plan_for(gap("g", priority=50.0)).recommendations[0].metadata["calibration_reason"] == "no_profile"
+
+
+def test_a_profile_dated_after_the_plan_is_not_applied(world):
+    future = observed_profile(adjustment=8.0)
+    future.last_updated_at = T0 + 30 * DAY
+    world.calibration.register_profile(future)
+    plan = build_import_recommendation_plan(EvidenceGapAnalysis("a", WS, "t", "o", [gap("g", priority=50.0)], created_at=T0))
+    assert plan.recommendations[0].metadata["calibration_reason"] == "profile_after_plan_time"
+    assert plan.recommendations[0].priority_score == pytest.approx(55.0)
+
+
+def test_a_stale_observed_profile_is_reported_as_stale_not_as_ambiguous(world):
+    old = observed_profile(adjustment=8.0)
+    world.calibration.register_profile(old)
+    world.calibration.profiles[old.profile_id].last_updated_at = T0
+    neutral = SourceCalibrationProfile("profile_alt", WS, "supplier_alt", "local_file", "supplier_catalog_csv")
+    world.calibration.register_profile(neutral)
+    plan = build_import_recommendation_plan(EvidenceGapAnalysis("a", WS, "t", "o", [gap("g", priority=50.0)], created_at=T0 + STALE_AFTER_SECONDS + DAY))
+    assert plan.recommendations[0].metadata["calibration_reason"] == "stale_profile"
+
+
+def test_a_scoped_run_does_not_describe_an_ordering_effect(world):
+    single_source_comparisons(world, 2)
+    scoped = engine.run_source_calibration(WS, comparison_ids=["cmp_supplier_0", "cmp_supplier_1"], as_of=AS_OF)
+    assert any(p.evidence_status == "observed" for p in scoped.profiles)
+    assert "do not change import ordering" in scoped.summary
+    assert not any("may reorder" in line for line in scoped.recommendations)
+
+
+def test_an_explicit_as_of_replays_the_same_result_after_later_imports_arrive(world):
+    single_source_comparisons(world, 2)
+    first = engine.run_source_calibration(WS, as_of=T0 + 10 * DAY)
+    world.imports.register_import_job(EvidenceImportJob(import_id="imp_late", workspace_id=WS, source_name="supplier", source_type="local_file", input_path="late.csv", parser_type="supplier_catalog_csv", created_at=T0 + 20 * DAY, finished_at=T0 + 20 * DAY))
+    replay = engine.run_source_calibration(WS, as_of=T0 + 10 * DAY)
+    assert replay.calibration_id == first.calibration_id and replay.to_dict() == first.to_dict()
+
+
+def test_a_null_category_name_does_not_abort_the_run(world):
+    add_import(world, "imp_supplier", "supplier")
+    add_discovery(world, "base", ["supplier"]); add_discovery(world, "cur", ["supplier"])
+    add_comparison(world, "cmp", "base", "cur", movements=[{"category_name": None, "score_change": 5}, {"category_name": "named", "score_change": 3}])
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    assert {s.entity_name for s in run.signals if s.comparison_id} == {"", "named"}
+
+
+def test_duplicate_movements_are_counted_and_stored_as_separate_signals(world):
+    add_import(world, "imp_supplier", "supplier")
+    duplicate = {"category_name": "same", "score_change": 5}
+    for index in range(2):
+        add_discovery(world, f"base_{index}", ["supplier"]); add_discovery(world, f"cur_{index}", ["supplier"])
+        add_comparison(world, f"cmp_{index}", f"base_{index}", f"cur_{index}", movements=[duplicate, dict(duplicate)])
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    confidence = [s for s in run.signals if s.signal_type == "confidence_increase"]
+    assert len(confidence) == 4 and len({s.signal_id for s in confidence}) == 4
+    assert len([s for s in world.calibration.list_signals(workspace_id=WS, limit=1000) if s.signal_type == "confidence_increase"]) == 4
+
+
+def test_scoped_runs_over_different_imports_have_different_identifiers(world):
+    single_source_comparisons(world, 1)
+    first = engine.run_source_calibration(WS, comparison_ids=["cmp_supplier_0"], import_ids=["no_such_a"], as_of=AS_OF)
+    second = engine.run_source_calibration(WS, comparison_ids=["cmp_supplier_0"], import_ids=["no_such_b"], as_of=AS_OF)
+    assert first.calibration_id != second.calibration_id
+
+
+def test_source_quality_calibration_without_a_time_has_no_effect():
+    base = EvidenceSourceQuality("shop", "local_file", 80.0, 0.5)
+    profile = observed_profile(source="shop", adjustment=0.0)
+    profile.confidence_multiplier_adjustment = 0.25
+    assert apply_calibration_to_source_quality(base, profile).confidence_multiplier == 0.5
+
+
+def test_readers_never_iterate_over_a_half_written_state(tmp_path):
+    import sys as _sys
+    import threading as _threading
+    registry = CalibrationRegistry(tmp_path / "readers.json")
+    failures = []
+    stop = _threading.Event()
+
+    def writer():
+        generation = 0
+        while not stop.is_set() and generation < 80:
+            generation += 1
+            signals = [SourceUsefulnessSignal(f"g{generation}_{k}", WS, "supplier", "local_file", "supplier_catalog_csv", attribution="single_source", comparison_id=f"c{generation}_{k}", signal_type="rank_improvement", value=1) for k in range(400)]
+            run = CalibrationRun(f"calibration_{generation}", WS, "t", "o", [], [], "s", [], "partial", created_at=T0)
+            registry.record_run(signals, [observed_profile(adjustment=float(generation % 5))], run, replace_workspace_profiles=True)
+
+    def reader():
+        for _ in range(150):
+            try:
+                registry.list_signals(workspace_id=WS, limit=1000)
+                registry.profiles_for_parser(WS, "supplier_catalog_csv")
+                registry.list_calibration_runs(WS, 20)
+            except RuntimeError as exc:  # "dictionary changed size during iteration" is the failure this guards against
+                failures.append(str(exc))
+
+    previous = _sys.getswitchinterval()
+    _sys.setswitchinterval(1e-6)
+    try:
+        threads = [_threading.Thread(target=writer)] + [_threading.Thread(target=reader) for _ in range(3)]
+        for thread in threads: thread.start()
+        for thread in threads[1:]: thread.join()
+        stop.set()
+        threads[0].join()
+    finally:
+        _sys.setswitchinterval(previous)
+    assert failures == []
