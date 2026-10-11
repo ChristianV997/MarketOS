@@ -76,7 +76,7 @@ def single_source_comparisons(world, count, *, source="supplier", parser_import=
     if parser_import:
         add_import(world, f"imp_{source}", source, workspace=workspace)
     for index in range(count):
-        add_discovery(world, f"base_{source}_{index}", [], workspace=workspace, created_at=created_at)
+        add_discovery(world, f"base_{source}_{index}", [source], workspace=workspace, created_at=created_at)
         add_discovery(world, f"cur_{source}_{index}", [source], workspace=workspace, created_at=created_at)
         add_comparison(world, f"cmp_{source}_{index}", f"base_{source}_{index}", f"cur_{source}_{index}", workspace=workspace, created_at=created_at)
 
@@ -393,3 +393,135 @@ def test_aggregation_is_exact_under_permutation_for_float_hostile_inputs():
         shuffled = list(signals)
         rng.shuffle(shuffled)
         assert [p.to_dict() for p in build_source_calibration_profiles(shuffled)] == baseline
+
+
+# --------------------------------------------------------------------------- review findings
+
+
+def test_a_selection_cannot_hide_a_duplicate_source_name(world):
+    add_import(world, "imp_one", "supplier"); add_import(world, "imp_two", "supplier")
+    single_source_comparisons(world, 2, parser_import=False)
+    run = engine.run_source_calibration(WS, import_ids=["imp_one"], as_of=AS_OF)
+    assert all(s.exclusion_reason == "ambiguous_import_source" for s in run.signals if s.comparison_id)
+    assert not [p for p in run.profiles if p.evidence_status == "observed"]
+
+
+def test_a_source_dropped_between_baseline_and_current_is_ambiguous(world):
+    add_import(world, "imp_alpha", "alpha")
+    for index in range(2):
+        add_discovery(world, f"base_{index}", ["alpha", "beta"])
+        add_discovery(world, f"cur_{index}", ["alpha"])
+        add_comparison(world, f"cmp_{index}", f"base_{index}", f"cur_{index}")
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    assert all(s.exclusion_reason == "ambiguous_multi_source" for s in run.signals if s.comparison_id)
+    assert not [p for p in run.profiles if p.evidence_status == "observed"]
+
+
+def test_import_quality_facts_cannot_make_a_profile_observed(world):
+    add_import(world, "imp_supplier", "supplier", rejected=10, imported=2)
+    for index in range(2):
+        add_discovery(world, f"base_{index}", ["supplier"])
+        add_discovery(world, f"cur_{index}", ["supplier"])
+        add_comparison(world, f"cmp_{index}", f"base_{index}", f"cur_{index}", movements=[], recs=[], evidence_change=1)
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    profile = profile_for(run)
+    assert profile.eligible_signal_count == 2 and profile.evidence_status == "limited"
+    assert profile.exclusion_counts.get("import_quality_not_comparison") == 1
+    assert profile.recommended_priority_adjustment == 0.0
+
+
+def test_a_scoped_run_is_recorded_but_does_not_replace_the_workspace_profile(world):
+    single_source_comparisons(world, 2)
+    engine.run_source_calibration(WS, as_of=AS_OF)
+    workspace_profile = world.calibration.get_profile("supplier", workspace_id=WS)
+    assert workspace_profile.evidence_status == "observed"
+    scoped = engine.run_source_calibration(WS, comparison_ids=["cmp_supplier_0"], as_of=AS_OF)
+    assert scoped.metadata["scope"] == "scoped" and profile_for(scoped).evidence_status == "limited"
+    assert world.calibration.get_profile("supplier", workspace_id=WS).evidence_status == "observed"
+    assert world.calibration.get_calibration_run(scoped.calibration_id) is not None
+
+
+def test_a_comparison_after_the_reference_time_is_not_read(world):
+    single_source_comparisons(world, 2, created_at=T0)
+    add_discovery(world, "base_late", ["supplier"]); add_discovery(world, "cur_late", ["supplier"])
+    add_comparison(world, "cmp_late", "base_late", "cur_late", created_at=T0 + 5 * DAY)
+    run = engine.run_source_calibration(WS, as_of=T0 + DAY)
+    assert run.metadata["exclusions"]["after_as_of"] == 1
+    assert all(s.comparison_id != "cmp_late" for s in run.signals)
+    assert run.created_at == T0 + DAY
+
+
+def test_a_full_comparison_window_is_reported_as_truncated(world, monkeypatch):
+    single_source_comparisons(world, 2)
+    real = world.refinement.list_comparisons
+    monkeypatch.setattr(world.refinement, "list_comparisons", lambda workspace_id, limit: (real(workspace_id, 500) * 250)[:engine.COMPARISON_WINDOW])
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    assert run.metadata["comparison_window_truncated"] is True
+    assert any("most recent comparisons" in line for line in run.recommendations)
+
+
+def test_a_failed_state_write_is_reported_not_claimed_as_completed(world, tmp_path):
+    single_source_comparisons(world, 2)
+    blocker = tmp_path / "not_a_directory"
+    blocker.write_text("x", encoding="utf-8")
+    world.calibration.path = blocker / "state.json"  # the parent is a regular file, so every write fails
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    assert run.metadata["persisted"] is False and run.status == "partial"
+    assert any("could not be written" in line for line in run.recommendations)
+
+
+def test_the_persisted_flag_is_stored_with_a_successful_run(world, tmp_path):
+    single_source_comparisons(world, 2)
+    run = engine.run_source_calibration(WS, as_of=AS_OF)
+    assert run.metadata["persisted"] is True
+    reloaded = CalibrationRegistry(world.calibration.path)
+    assert reloaded.get_calibration_run(run.calibration_id).metadata["persisted"] is True
+
+
+def test_records_written_before_the_policy_load_as_unverified_and_neutral(tmp_path):
+    import json as _json
+    path = tmp_path / "legacy.json"
+    legacy_signal = {"signal_id": "old", "workspace_id": WS, "source_name": "supplier", "source_type": "local_file", "parser_type": "supplier_catalog_csv", "signal_type": "rank_improvement", "value": 3.0}
+    legacy_profile = {"profile_id": "profile_old", "workspace_id": WS, "source_name": "supplier", "source_type": "local_file", "parser_type": "supplier_catalog_csv", "recommended_priority_adjustment": 20.0, "confidence_multiplier_adjustment": 1.25}
+    path.write_text(_json.dumps({"signals": {"old": legacy_signal}, "profiles": {"profile_old": legacy_profile}, "runs": {}}), encoding="utf-8")
+    registry = CalibrationRegistry(path)
+    assert registry.signals["old"].attribution == "legacy_unverified" and not registry.signals["old"].eligible
+    loaded = registry.profiles["profile_old"]
+    assert loaded.evidence_status == "legacy_unverified" and loaded.recommended_priority_adjustment == 0.0 and loaded.confidence_multiplier_adjustment == 1.0
+
+
+def test_an_unreadable_registry_is_moved_aside_not_overwritten(tmp_path):
+    path = tmp_path / "state.json"
+    original = b"{truncated by a crash"
+    path.write_bytes(original)
+    registry = CalibrationRegistry(path)
+    registry.register_profile(SourceCalibrationProfile("p", WS, "supplier", "local_file", "supplier_catalog_csv"))
+    assert (tmp_path / "state.json.unreadable").read_bytes() == original
+    assert CalibrationRegistry(path).get_profile("supplier", workspace_id=WS) is not None
+
+
+def test_a_neutral_profile_does_not_block_an_observed_one(world):
+    world.calibration.register_profile(observed_profile(source="supplier_catalog_csv", adjustment=8.0))
+    neutral = SourceCalibrationProfile("profile_alt", WS, "supplier_alt", "local_file", "supplier_catalog_csv")
+    world.calibration.register_profile(neutral)
+    recommendation = plan_for(gap("g", priority=50.0)).recommendations[0]
+    assert recommendation.metadata["calibration_reason"] == "policy_observed"
+    assert recommendation.priority_score == pytest.approx(55.0 + 8.0)
+
+
+def test_a_calibration_failure_during_planning_is_logged(world, monkeypatch, caplog):
+    class Broken:
+        def profiles_for_parser(self, workspace_id, parser):
+            raise RuntimeError("state unreadable")
+
+    monkeypatch.setattr(recommendation_module, "get_calibration_registry", lambda: Broken())
+    with caplog.at_level("WARNING"):
+        recommendation = plan_for(gap("g", priority=50.0)).recommendations[0]
+    assert recommendation.metadata["calibration_reason"] == "calibration_unavailable"
+    assert "calibration unavailable" in caplog.text and "state unreadable" not in caplog.text
+
+
+def test_a_source_name_in_both_baseline_and_current_is_attributed_once(world):
+    single_source_comparisons(world, 2)
+    signals = engine.derive_source_usefulness_signals(WS, as_of=AS_OF)
+    assert {s.attribution for s in signals if s.comparison_id} == {"single_source"}

@@ -22,6 +22,9 @@ EXCLUSION_AMBIGUOUS = "ambiguous_multi_source"
 EXCLUSION_UNMATCHED = "unmatched_import"
 EXCLUSION_AMBIGUOUS_IMPORT = "ambiguous_import_source"
 EXCLUSION_STALE = "stale_comparison"
+# Import-quality facts describe evidence quality, which the normalizer and source-quality scorer already own.
+# They are kept and counted, but they never drive an adjustment or count toward the observation gate.
+EXCLUSION_IMPORT_QUALITY = "import_quality_not_comparison"
 
 
 @dataclass
@@ -155,9 +158,13 @@ def wilson_interval(successes: int, trials: int, z: float = WILSON_Z_95) -> tupl
     return (max(0.0, centre - half), min(1.0, centre + half))
 
 
+def stable_id(prefix: str, payload: Any) -> str:
+    """Content-derived identifier. Canonical JSON keeps it unambiguous when a value contains a separator."""
+    return prefix + uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)).hex[:16]
+
+
 def profile_identity(workspace_id: str, source_name: str, parser_type: str) -> str:
-    # JSON encoding keeps the key unambiguous when a name itself contains a separator.
-    return "profile_" + uuid.uuid5(uuid.NAMESPACE_URL, json.dumps([workspace_id, source_name, parser_type], separators=(",", ":"))).hex[:16]
+    return stable_id("profile_", [workspace_id, source_name, parser_type])
 
 
 def build_source_calibration_profiles(signals: list[SourceUsefulnessSignal], existing_profiles: list[SourceCalibrationProfile] | None = None) -> list[SourceCalibrationProfile]:

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import uuid
 from collections import Counter
 from typing import Any
 
@@ -12,6 +10,7 @@ from .source_calibration import (
     CALIBRATION_POLICY_VERSION,
     EXCLUSION_AMBIGUOUS,
     EXCLUSION_AMBIGUOUS_IMPORT,
+    EXCLUSION_IMPORT_QUALITY,
     EXCLUSION_STALE,
     EXCLUSION_UNMATCHED,
     MAX_ORDERING_EFFECT,
@@ -22,37 +21,35 @@ from .source_calibration import (
     SourceUsefulnessSignal,
     build_source_calibration_profiles,
     signal_order_key,
+    stable_id,
 )
 
 __all__ = ["build_source_calibration_profiles", "derive_source_usefulness_signals", "run_source_calibration"]
 
-
-_DUPLICATE = object()  # marks a source name that more than one import job carries
-
-
-def _signal_id(**identity: Any) -> str:
-    # Content-derived, so repeated runs over the same comparisons produce the same ids and registry writes overwrite instead of accumulating.
-    return "signal_" + uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str)).hex[:16]
+COMPARISON_WINDOW = 500  # the registry's own maximum for one listing
+_DUPLICATE = object()  # a source name carried by more than one import job in the workspace
 
 
-def _attribute(names: list[str], jobs: dict[str, Any]) -> list[tuple[str, Any, str, str]]:
-    """Return (source_name, import_job, attribution, exclusion_reason) for each source a comparison names.
+def _attribute(names: list[str], jobs: dict[str, Any], selected: set[str] | None) -> list[tuple[str, Any, str]]:
+    """Return (source_name, import_job_or_None, attribution) for each source a comparison touches.
 
-    A single named source is attributable only when exactly one import job carries it. With several named
-    sources, the comparison's change cannot be split between them, so every source is excluded.
+    A change is single-source only when the baseline and current discoveries together name exactly one source,
+    and that source has exactly one import job in the workspace that the caller selected. Otherwise the change
+    cannot be split between sources, so it is recorded as excluded.
     """
     result = []
     for name in names:
-        job = jobs.get(name)
+        raw = jobs.get(name)
+        job = None if raw is None or raw is _DUPLICATE or (selected is not None and raw.import_id not in selected) else raw
         if len(names) > 1:
             attribution = EXCLUSION_AMBIGUOUS
+        elif raw is _DUPLICATE:
+            attribution = EXCLUSION_AMBIGUOUS_IMPORT
         elif job is None:
             attribution = EXCLUSION_UNMATCHED
-        elif job is _DUPLICATE:
-            attribution = EXCLUSION_AMBIGUOUS_IMPORT
         else:
             attribution = "single_source"
-        result.append((name, job if job is not _DUPLICATE else None, attribution, "" if attribution == "single_source" else attribution))
+        result.append((name, job, attribution))
     return result
 
 
@@ -60,15 +57,30 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
     discovery_registry = get_discovery_registry()
     import_registry = get_import_registry()
     refinement = get_refinement_registry()
-    comparisons = [refinement.get_comparison(x) for x in comparison_ids] if comparison_ids else refinement.list_comparisons(workspace_id, 100)
-    comparisons = sorted((x for x in comparisons if x is not None and x.workspace_id == workspace_id), key=lambda x: (x.created_at, x.comparison_id))
-    # Reference time comes from the data unless the caller supplies one: no wall-clock input, so identical inputs give identical output.
-    reference = float(as_of) if as_of is not None else max((x.created_at for x in comparisons), default=0.0)
-    jobs = [import_registry.get_import_job(x) for x in import_ids] if import_ids else import_registry.list_import_jobs(workspace_id=workspace_id, limit=500)
-    jobs_by_source: dict[str, Any] = {}
-    for job in sorted((j for j in jobs if j is not None and j.workspace_id == workspace_id), key=lambda j: j.import_id):
-        jobs_by_source[job.source_name] = _DUPLICATE if job.source_name in jobs_by_source else job
+    truncated = False
+    if comparison_ids:
+        comparisons = [refinement.get_comparison(x) for x in comparison_ids]
+    else:
+        comparisons = refinement.list_comparisons(workspace_id, COMPARISON_WINDOW)
+        truncated = len(comparisons) >= COMPARISON_WINDOW
     exclusions: Counter[str] = Counter()
+    selected_comparisons = []
+    for comparison in comparisons:
+        if comparison is None or comparison.workspace_id != workspace_id:
+            continue
+        if as_of is not None and comparison.created_at > float(as_of):
+            exclusions["after_as_of"] += 1
+            continue
+        selected_comparisons.append(comparison)
+    comparisons = sorted(selected_comparisons, key=lambda x: (x.created_at, x.comparison_id))
+    # The reference time comes from the data unless the caller supplies one, so identical inputs give identical output.
+    reference = float(as_of) if as_of is not None else max((x.created_at for x in comparisons), default=0.0)
+    # Duplicate detection looks at every import job in the workspace, so a caller's selection cannot hide a clash.
+    all_jobs = [j for j in import_registry.list_import_jobs(workspace_id=workspace_id, limit=500) if j is not None and j.workspace_id == workspace_id]
+    jobs_by_source: dict[str, Any] = {}
+    for job in sorted(all_jobs, key=lambda j: j.import_id):
+        jobs_by_source[job.source_name] = _DUPLICATE if job.source_name in jobs_by_source else job
+    selected = set(import_ids) if import_ids else None
     considered: dict[str, Any] = {}
     signals: list[SourceUsefulnessSignal] = []
     for comparison in comparisons:
@@ -77,23 +89,21 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
         if current is None:
             exclusions["current_discovery_unavailable"] += 1
             continue
-        if getattr(current, "workspace_id", None) != workspace_id:
-            exclusions["cross_workspace_discovery"] += 1
-            continue
         if baseline is None:
             exclusions["baseline_missing"] += 1
             continue
-        if getattr(baseline, "workspace_id", None) != workspace_id:
+        if getattr(current, "workspace_id", None) != workspace_id or getattr(baseline, "workspace_id", None) != workspace_id:
             exclusions["cross_workspace_discovery"] += 1
             continue
-        names = sorted(set(current.source_names or []))
+        # Both sides count: a source present in the baseline and dropped from the current is still a confound.
+        names = sorted(set(current.source_names or []) | set(baseline.source_names or []))
         if not names:
             exclusions["source_unattributed"] += 1
             continue
         stale = (reference - comparison.created_at) > STALE_AFTER_SECONDS
-        for source_name, job, attribution, exclusion in _attribute(names, jobs_by_source):
+        for source_name, job, attribution in _attribute(names, jobs_by_source, selected):
             considered.setdefault(source_name, job)
-            reason = EXCLUSION_STALE if stale else exclusion
+            reason = EXCLUSION_STALE if stale else ("" if attribution == "single_source" else attribution)
             if reason:
                 exclusions[reason] += 1
             base = dict(
@@ -107,7 +117,7 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
             def add(signal_type, entity_name, value, rationale):
                 identity = dict(base, signal_type=signal_type, entity_name=entity_name, value=value)
                 signals.append(SourceUsefulnessSignal(
-                    _signal_id(**identity), signal_type=signal_type, entity_name=entity_name, value=value, rationale=[rationale],
+                    stable_id("signal_", identity), signal_type=signal_type, entity_name=entity_name, value=value, rationale=[rationale],
                     provenance={"method": "comparison_source_attribution", "non_causal": True, "policy_version": CALIBRATION_POLICY_VERSION},
                     **base,
                 ))
@@ -125,10 +135,10 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
             for change in comparison.recommendation_changes:
                 if change.get("current") in {"investigate", "prioritize"} and change.get("baseline") in {"reject", "hold", "investigate"}:
                     add("recommendation_upgrade", change.get("category_name", ""), 1, "Category recommendation upgraded in the current recorded discovery.")
-    # Import-quality signals describe one import job, so they are emitted once per source rather than once per comparison.
+    # Import-quality facts are emitted once per source, and recorded but excluded from the adjustment.
     for source_name in sorted(considered):
         job = considered[source_name]
-        if job is None or job is _DUPLICATE:
+        if job is None:
             continue
         quality = []
         if job.records_rejected > max(1, job.records_imported):
@@ -137,8 +147,14 @@ def _derive(workspace_id, comparison_ids, import_ids, as_of):
             quality.append(("duplicate_noise", 1, "The import reported duplicate evidence removal."))
         for signal_type, value, rationale in quality:
             identity = dict(workspace_id=workspace_id, source_name=source_name, parser_type=job.parser_type, import_id=job.import_id, signal_type=signal_type, value=value)
-            signals.append(SourceUsefulnessSignal(_signal_id(**identity), workspace_id, source_name, job.source_type, job.parser_type, related_import_id=job.import_id, signal_type=signal_type, value=value, confidence=0.8, weight=1.0, rationale=[rationale], created_at=reference, attribution="import_quality", provenance={"method": "import_quality", "non_causal": True, "policy_version": CALIBRATION_POLICY_VERSION}))
-    return sorted(signals, key=signal_order_key), dict(sorted(exclusions.items())), reference, comparisons
+            signals.append(SourceUsefulnessSignal(
+                stable_id("signal_", identity), workspace_id, source_name, job.source_type, job.parser_type, related_import_id=job.import_id,
+                signal_type=signal_type, value=value, confidence=0.8, weight=1.0, rationale=[rationale], created_at=reference,
+                attribution="import_quality", exclusion_reason=EXCLUSION_IMPORT_QUALITY,
+                provenance={"method": "import_quality_fact", "non_causal": True, "policy_version": CALIBRATION_POLICY_VERSION},
+            ))
+            exclusions[EXCLUSION_IMPORT_QUALITY] += 1
+    return sorted(signals, key=signal_order_key), dict(sorted(exclusions.items())), reference, comparisons, truncated
 
 
 def derive_source_usefulness_signals(workspace_id="default", comparison_ids=None, import_ids=None, *, as_of=None):
@@ -146,9 +162,10 @@ def derive_source_usefulness_signals(workspace_id="default", comparison_ids=None
 
 
 def run_source_calibration(workspace_id="default", comparison_ids=None, import_ids=None, *, as_of=None):
-    signals, exclusions, reference, comparisons = _derive(workspace_id, comparison_ids, import_ids, as_of)
+    signals, exclusions, reference, comparisons, truncated = _derive(workspace_id, comparison_ids, import_ids, as_of)
     profiles = build_source_calibration_profiles(signals)
     observed = [p for p in profiles if p.evidence_status == "observed"]
+    scoped = bool(comparison_ids or import_ids)
     status = "completed" if observed else "partial"
     if observed:
         summary = "Observed profiles summarize changes in persisted discovery comparisons that met the sample and attribution policy."
@@ -163,22 +180,32 @@ def run_source_calibration(workspace_id="default", comparison_ids=None, import_i
             f"Collect at least {MIN_ELIGIBLE_SIGNALS_FOR_ADJUSTMENT} eligible signals across {MIN_COMPARISONS_FOR_ADJUSTMENT} single-source comparisons per source.",
             "Run import-refine-compare after adding local evidence, with one source per discovery where possible.",
         ]
+    if scoped:
+        recommendations.append("This run was scoped to selected comparisons or imports: it is recorded, but it did not replace the workspace profiles that drive recommendations.")
+    if truncated:
+        recommendations.append(f"Only the {COMPARISON_WINDOW} most recent comparisons were read; older ones are not counted.")
     if exclusions:
         recommendations.append("Excluded from calibration: " + ", ".join(f"{reason}={count}" for reason, count in exclusions.items()) + ".")
-    identity = {"workspace_id": workspace_id, "reference_time": reference, "policy": CALIBRATION_POLICY_VERSION, "signal_ids": [s.signal_id for s in signals], "comparison_ids": [c.comparison_id for c in comparisons]}
-    run_id = "calibration_" + uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(identity, sort_keys=True, separators=(",", ":"))).hex[:16]
+    run_id = stable_id("calibration_", {"workspace_id": workspace_id, "reference_time": reference, "policy": CALIBRATION_POLICY_VERSION, "signal_ids": [s.signal_id for s in signals], "comparison_ids": [c.comparison_id for c in comparisons], "scoped": scoped})
     metadata = {
-        "non_causal": True, "policy_version": CALIBRATION_POLICY_VERSION, "signal_count": len(signals),
-        "eligible_signal_count": sum(1 for s in signals if s.eligible), "exclusions": exclusions,
-        "reference_time": reference, "ordering_effect_bound": MAX_ORDERING_EFFECT,
-        "min_eligible_signals": MIN_ELIGIBLE_SIGNALS_FOR_ADJUSTMENT, "min_comparisons": MIN_COMPARISONS_FOR_ADJUSTMENT,
-        "stale_after_seconds": STALE_AFTER_SECONDS,
+        "non_causal": True, "policy_version": CALIBRATION_POLICY_VERSION, "scope": "scoped" if scoped else "workspace",
+        "signal_count": len(signals), "eligible_signal_count": sum(1 for s in signals if s.eligible), "exclusions": exclusions,
+        "reference_time": reference, "comparison_window": COMPARISON_WINDOW, "comparison_window_truncated": truncated,
+        "ordering_effect_bound": MAX_ORDERING_EFFECT, "min_eligible_signals": MIN_ELIGIBLE_SIGNALS_FOR_ADJUSTMENT,
+        "min_comparisons": MIN_COMPARISONS_FOR_ADJUSTMENT, "stale_after_seconds": STALE_AFTER_SECONDS,
     }
     run = CalibrationRun(run_id, workspace_id, "Source Usefulness Calibration", "Estimate which local evidence sources have been useful in recorded comparisons", signals, profiles, summary, recommendations, status, created_at=reference, metadata=metadata)
     from .calibration_registry import get_calibration_registry
     registry = get_calibration_registry()
     registry.register_signals(signals)
-    for profile in profiles:
-        registry.register_profile(profile)
+    if not scoped:
+        for profile in profiles:
+            registry.register_profile(profile)
     registry.register_calibration_run(run)
+    run.metadata["persisted"] = registry.last_save_ok
+    if registry.last_save_ok:
+        registry.save()  # store the persisted flag with the run
+    if not registry.last_save_ok:
+        run.status = "partial"
+        run.recommendations.append("The calibration state could not be written; this run cannot be retrieved later by its identifier.")
     return run

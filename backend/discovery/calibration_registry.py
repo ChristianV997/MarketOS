@@ -13,7 +13,7 @@ _log = logging.getLogger(__name__)
 
 class CalibrationRegistry:
     def __init__(self, path=None):
-        self.path = Path(path or os.getenv("MARKETOS_CALIBRATION_STATE", "state/source_calibration_registry.json")); self.signals = {}; self.profiles = {}; self.runs = {}; self._lock = threading.RLock(); self.load()
+        self.path = Path(path or os.getenv("MARKETOS_CALIBRATION_STATE", "state/source_calibration_registry.json")); self.signals = {}; self.profiles = {}; self.runs = {}; self._lock = threading.RLock(); self.last_save_ok = True; self.load()
     def register_signal(self, signal): self.signals[signal.signal_id] = signal; self.save(); return signal
     def register_signals(self, signals):
         for signal in signals: self.signals[signal.signal_id] = signal
@@ -41,13 +41,25 @@ class CalibrationRegistry:
     def load(self):
         try:
             if not self.path.exists(): return
-            raw = json.loads(self.path.read_text(encoding="utf-8")); self.signals = {k: SourceUsefulnessSignal.from_dict(v) for k, v in raw.get("signals", {}).items()}; self.profiles = {k: SourceCalibrationProfile.from_dict(v) for k, v in raw.get("profiles", {}).items()}; self.runs = {k: CalibrationRun.from_dict(v) for k, v in raw.get("runs", {}).items()}
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            signals = raw.get("signals", {}); profiles = raw.get("profiles", {})
+            # Records written before attribution and policy versioning are not verifiable, so they stay out of every adjustment.
+            for item in signals.values():
+                if "attribution" not in item: item.update(attribution="legacy_unverified", exclusion_reason="legacy_unverified")
+            for item in profiles.values():
+                if "policy_version" not in item: item.update(evidence_status="legacy_unverified", recommended_priority_adjustment=0.0, confidence_multiplier_adjustment=1.0)
+            self.signals = {k: SourceUsefulnessSignal.from_dict(v) for k, v in signals.items()}; self.profiles = {k: SourceCalibrationProfile.from_dict(v) for k, v in profiles.items()}; self.runs = {k: CalibrationRun.from_dict(v) for k, v in raw.get("runs", {}).items()}
         except Exception as exc:
-            _log.warning("calibration registry unreadable; starting empty: %s", type(exc).__name__); self.signals, self.profiles, self.runs = {}, {}, {}
+            # Keep the unreadable file for inspection; the next save must not silently overwrite it.
+            _log.warning("calibration registry unreadable; moved aside and starting empty: %s", type(exc).__name__)
+            try: os.replace(self.path, self.path.with_name(self.path.name + ".unreadable"))
+            except OSError: pass
+            self.signals, self.profiles, self.runs = {}, {}, {}
     def save(self):
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True); temp = self.path.with_suffix(".tmp"); temp.write_text(json.dumps(self.to_dict(), indent=2, default=str), encoding="utf-8"); temp.replace(self.path)
+            self.path.parent.mkdir(parents=True, exist_ok=True); temp = self.path.with_suffix(".tmp"); temp.write_text(json.dumps(self.to_dict(), indent=2, default=str), encoding="utf-8"); temp.replace(self.path); self.last_save_ok = True
         except Exception as exc:
+            self.last_save_ok = False
             _log.warning("calibration registry save failed: %s", type(exc).__name__)
 
 

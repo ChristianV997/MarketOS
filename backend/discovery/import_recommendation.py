@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import logging
 import math
 import time
 import uuid
@@ -9,7 +9,9 @@ from typing import Any
 
 from .evidence_gap import EvidenceGapAnalysis
 from .calibration_registry import get_calibration_registry
-from .source_calibration import CALIBRATION_POLICY_VERSION, MAX_ORDERING_EFFECT
+from .source_calibration import CALIBRATION_POLICY_VERSION, MAX_ORDERING_EFFECT, stable_id
+
+_log = logging.getLogger(__name__)
 
 # A severe gap is never ordered below this, whatever calibration says.
 CRITICAL_PRIORITY_FLOOR = 70.0
@@ -71,22 +73,28 @@ class ImportRecommendationPlan:
         return f"# {self.title}\n\n{rows}\n\n## Operator instruction\n\nExport the listed fields into the template under `data/import_templates/`, then use the local import-and-run workflow. No live provider access is required.\n"
 
 
-def _calibration_for_parser(workspace_id: str, parser: str) -> tuple[Any, str]:
-    """The one workspace profile for this parser, or a reason it cannot be used.
+def _calibration_for_parser(workspace_id: str, parser: str) -> tuple[Any, Any, str]:
+    """Return (effective_profile, reported_profile, reason) for one parser in one workspace.
 
-    Profiles are keyed by the source name an operator chose, which is often the parser name itself, so the
-    lookup is by parser within the workspace. Two sources for one parser cannot be told apart: no adjustment.
+    Only an observed profile can move ordering. Exactly one observed profile for the parser applies; two
+    observed profiles with different source names are ambiguous and apply nothing. Profiles that are not
+    observed are reported for transparency but never change ordering, so a neutral profile cannot block one
+    that is observed.
     """
     try:
         profiles = get_calibration_registry().profiles_for_parser(workspace_id, parser)
-    except Exception:
-        return None, "calibration_unavailable"
+    except Exception as exc:
+        _log.warning("calibration unavailable for recommendation planning: %s", type(exc).__name__)
+        return None, None, "calibration_unavailable"
+    observed = [profile for profile in profiles if profile.evidence_status == "observed"]
+    if len({profile.source_name for profile in observed}) > 1:
+        return None, None, "ambiguous_profile"
+    if observed:
+        return observed[0], observed[0], "policy_observed"
     if not profiles:
-        return None, "no_profile"
-    if len({profile.source_name for profile in profiles}) > 1:
-        return None, "ambiguous_profile"
-    profile = profiles[0]
-    return profile, "policy_observed" if profile.evidence_status == "observed" else f"not_observed:{profile.evidence_status}"
+        return None, None, "no_profile"
+    reported = profiles[0] if len(profiles) == 1 else None
+    return None, reported, f"not_observed:{reported.evidence_status}" if reported else "not_observed:multiple_sources"
 
 
 def _ordering_effect(profile: Any, reason: str) -> float:
@@ -105,13 +113,13 @@ def build_import_recommendation_plan(gap_analysis: EvidenceGapAnalysis, max_reco
         required, optional = _FIELDS.get(parser, _FIELDS["generic_market_csv"])
         priority = min(100.0, math.fsum(gap.priority_score for gap in gaps) / max(1, len(gaps)) + min(25.0, len(gaps) * 5.0))
         signals = sorted({gap.missing_signal_type for gap in gaps})
-        calibration, reason = _calibration_for_parser(gap_analysis.workspace_id, parser)
+        calibration, reported, reason = _calibration_for_parser(gap_analysis.workspace_id, parser)
         adjustment = _ordering_effect(calibration, reason)
         adjusted_priority = max(0.0, min(100.0, priority + adjustment))
         if any(gap.severity in {"critical", "high"} for gap in gaps): adjusted_priority = max(adjusted_priority, CRITICAL_PRIORITY_FLOOR)
-        metadata = {"real_market_claims": False, "calibration_profile_id": getattr(calibration, "profile_id", ""), "calibration_policy_version": CALIBRATION_POLICY_VERSION, "calibration_reason": reason, "calibration_evidence_status": getattr(calibration, "evidence_status", "none"), "usefulness_score": getattr(calibration, "usefulness_score", None), "priority_adjustment": adjustment, "calibration_strengths": getattr(calibration, "strengths", []), "calibration_weaknesses": getattr(calibration, "weaknesses", [])}
+        metadata = {"real_market_claims": False, "calibration_profile_id": getattr(reported, "profile_id", ""), "calibration_policy_version": CALIBRATION_POLICY_VERSION, "calibration_reason": reason, "calibration_evidence_status": getattr(reported, "evidence_status", "none"), "usefulness_score": getattr(reported, "usefulness_score", None), "priority_adjustment": adjustment, "calibration_strengths": getattr(reported, "strengths", []), "calibration_weaknesses": getattr(reported, "weaknesses", [])}
         recommendations.append(ImportRecommendation("recommendation_" + uuid.uuid5(uuid.NAMESPACE_URL, f"{gap_analysis.workspace_id}:{parser}").hex[:16], gap_analysis.workspace_id, parser, parser.replace("_csv", ""), f"Import {parser.replace('_', ' ')} evidence", f"This local export can address: {', '.join(signals)}.", adjusted_priority, signals, required, optional, sorted({gap.gap_id for gap in gaps}), f"data/import_templates/{parser}.csv", created_at=gap_analysis.created_at, metadata=metadata))
     recommendations.sort(key=lambda item: (-item.priority_score, item.parser_type))
     recommendations = recommendations[:max(1, min(int(max_recommendations), 20))]
-    plan_identity = uuid.uuid5(uuid.NAMESPACE_URL, json.dumps([gap_analysis.workspace_id, sorted(gap.gap_id for gap in gap_analysis.gaps), max_recommendations], separators=(",", ":"))).hex[:16]
-    return ImportRecommendationPlan("import_plan_" + plan_identity, gap_analysis.workspace_id, "Recommended Evidence Imports", recommendations, {"gap_count": len(gap_analysis.gaps), "parser_count": len(recommendations), "coverage_method": "gap_to_parser_mapping"}, created_at=gap_analysis.created_at, metadata={"no_live_access": True})
+    plan_id = stable_id("import_plan_", [gap_analysis.workspace_id, sorted(gap.gap_id for gap in gap_analysis.gaps), max_recommendations])
+    return ImportRecommendationPlan(plan_id, gap_analysis.workspace_id, "Recommended Evidence Imports", recommendations, {"gap_count": len(gap_analysis.gaps), "parser_count": len(recommendations), "coverage_method": "gap_to_parser_mapping"}, created_at=gap_analysis.created_at, metadata={"no_live_access": True})
