@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 from xml.etree import ElementTree as ET
 
 from scripts.ai.ci_failure_diagnostics import (
@@ -37,6 +38,67 @@ def test_diagnostics_are_parseable_bounded_and_redacted(tmp_path):
     assert "failure_or_error_identities:" in summary_text
     assert fake_secret not in summary_text
     assert len(summary.read_bytes()) <= MAX_SUMMARY_BYTES
+
+
+def test_diagnostics_redact_common_secret_and_absolute_path_shapes(tmp_path):
+    raw = tmp_path / "raw.xml"
+    junit = tmp_path / "junit.xml"
+    summary = tmp_path / "summary.txt"
+    fake_github_token = "".join(("g", "h", "o", "_", "fixture", "_token"))
+    fake_slack_token = "".join(("x", "o", "x", "b", "-", "fixture", "-token"))
+    fake_aws_key = "".join(("A", "K", "I", "A", "1234", "5678", "90AB", "CDEF"))
+    fake_bearer = "".join(("Bear", "er", " ", "fixture_bearer_token"))
+    windows_path = r"C:\runner\_work\MarketOS\secret.py"
+    unc_path = r"\\server\share\secret.py"
+    posix_path = "/var/lib/runner/workspace/secret.py"
+    raw.write_text(
+        f'<testsuite tests="1" failures="1"><testcase '
+        f'classname="{windows_path}" name="{fake_github_token} {fake_slack_token} '
+        f'{fake_aws_key} {fake_bearer} {unc_path} {posix_path}"><failure /></testcase></testsuite>',
+        encoding="utf-8",
+    )
+
+    assert build_diagnostics(raw, junit, summary) == "ready"
+    output = junit.read_text(encoding="utf-8")
+    summary_text = summary.read_text(encoding="utf-8")
+    for value in (
+        fake_github_token,
+        fake_slack_token,
+        fake_aws_key,
+        fake_bearer,
+        windows_path,
+        unc_path,
+        posix_path,
+    ):
+        assert value not in output
+        assert value not in summary_text
+    assert "[redacted-secret]" in output
+    assert "[redacted-path]" in output
+
+
+def test_diagnostics_reject_a_valid_non_junit_root(tmp_path):
+    raw = tmp_path / "not-junit.xml"
+    raw.write_text("<report><testcase name=\"fixture\" /></report>", encoding="utf-8")
+    junit = tmp_path / "junit.xml"
+    summary = tmp_path / "summary.txt"
+
+    assert build_diagnostics(raw, junit, summary) == "malformed_junit"
+    assert "malformed_junit" in summary.read_text(encoding="utf-8")
+
+
+def test_diagnostics_enforce_byte_cap_after_input_changes(tmp_path):
+    class GrowingInput:
+        def is_file(self):
+            return True
+
+        def open(self, mode):
+            assert mode == "rb"
+            return BytesIO(b"x" * (MAX_INPUT_BYTES + 1))
+
+    junit = tmp_path / "junit.xml"
+    summary = tmp_path / "summary.txt"
+
+    assert build_diagnostics(GrowingInput(), junit, summary) == "junit_too_large"
 
 
 def test_malformed_and_oversized_junit_fail_closed_without_raw_content(tmp_path):
@@ -88,3 +150,21 @@ def test_diagnostics_are_deterministic(tmp_path):
     build_diagnostics(raw, second_junit, second_summary)
     assert first_junit.read_bytes() == second_junit.read_bytes()
     assert first_summary.read_bytes() == second_summary.read_bytes()
+
+
+def test_summary_identities_exclude_skipped_cases(tmp_path):
+    raw = tmp_path / "raw.xml"
+    raw.write_text(
+        "<testsuite tests=\"2\" failures=\"1\" skipped=\"1\">"
+        "<testcase classname=\"tests.failed\" name=\"test_failure\"><failure /></testcase>"
+        "<testcase classname=\"tests.skipped\" name=\"test_skip\"><skipped /></testcase>"
+        "</testsuite>",
+        encoding="utf-8",
+    )
+    junit = tmp_path / "junit.xml"
+    summary = tmp_path / "summary.txt"
+
+    assert build_diagnostics(raw, junit, summary) == "ready"
+    summary_text = summary.read_text(encoding="utf-8")
+    assert "tests.failed::test_failure" in summary_text
+    assert "tests.skipped::test_skip" not in summary_text

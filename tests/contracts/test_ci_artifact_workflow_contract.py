@@ -173,6 +173,9 @@ def test_blocking_pytest_retains_failure_status_and_bounded_diagnostics():
     workflow = _parse_workflow(WORKFLOWS_DIR / "ci.yml")
     test_job = workflow["jobs"]["test"]
     assert "continue-on-error" not in test_job
+    assert "secrets." not in str(test_job)
+    assert "MERGIFY_TOKEN" not in str(test_job).upper()
+    assert str(test_job.get("env", {}).get("MERGIFY_TEST_SELECTION_ENABLE")).lower() == "false"
     run_step = next(step for step in test_job["steps"] if step.get("name") == "Run tests")
     run = run_step["run"]
     assert "pytest tests/ -v -n auto" in run

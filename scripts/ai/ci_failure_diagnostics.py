@@ -24,9 +24,14 @@ _SECRET_ASSIGNMENT = re.compile(
     r"\s*[:=]\s*['\"]?[^\s,;\"'}]+"
 )
 _SECRET_PREFIX = re.compile(
-    r"(?i)(?<![a-z0-9])(?:github_pat|ghp|sk)[_-][a-z0-9_-]{6,}"
+    r"(?i)(?<![a-z0-9])(?:github_pat|gh[opusr]|sk|xox[baprs]|npm)[_-][a-z0-9_-]{6,}"
+    r"|(?<![a-z0-9])akia[0-9a-z]{16,}(?![a-z0-9])"
 )
-_ABSOLUTE_PATH = re.compile(r"(?i)(?:[a-z]:[\\/]|/(?:home|opt|tmp|workspace)/)[^\s\"']*")
+_SECRET_BEARER = re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]{6,}")
+_ABSOLUTE_PATH = re.compile(
+    r"(?ix)(?:\b[a-z]:[\\/][^\s\"']*|(?<!\S)\\\\[^\s\"']*|"
+    r"(?<![a-z0-9_:/])/[^\s\"']*)"
+)
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
 
 
@@ -34,6 +39,7 @@ def _safe_text(value: object) -> str:
     text = _CONTROL_CHARS.sub(" ", str(value or "")).strip()
     text = _SECRET_ASSIGNMENT.sub("[redacted-secret]", text)
     text = _SECRET_PREFIX.sub("[redacted-secret]", text)
+    text = _SECRET_BEARER.sub("[redacted-secret]", text)
     text = _ABSOLUTE_PATH.sub("[redacted-path]", text)
     return text[:MAX_IDENTIFIER_CHARS]
 
@@ -137,15 +143,19 @@ def build_diagnostics(input_path: Path, junit_path: Path, summary_path: Path) ->
         if not input_path.is_file():
             _write_fallback(junit_path, summary_path, "missing_junit")
             return "missing_junit"
-        if input_path.stat().st_size > MAX_INPUT_BYTES:
+        with input_path.open("rb") as handle:
+            raw = handle.read(MAX_INPUT_BYTES + 1)
+        if len(raw) > MAX_INPUT_BYTES:
             _write_fallback(junit_path, summary_path, "junit_too_large")
             return "junit_too_large"
-        raw = input_path.read_bytes()
         if b"<!DOCTYPE" in raw.upper():
             _write_fallback(junit_path, summary_path, "unsafe_xml_declaration")
             return "unsafe_xml_declaration"
         root = ET.fromstring(raw)
-    except (OSError, ET.ParseError, UnicodeError):
+        if _tag(root) not in {"testsuite", "testsuites"}:
+            _write_fallback(junit_path, summary_path, "malformed_junit")
+            return "malformed_junit"
+    except (OSError, ET.ParseError, UnicodeError, RecursionError):
         _write_fallback(junit_path, summary_path, "malformed_junit")
         return "malformed_junit"
 
@@ -181,7 +191,8 @@ def build_diagnostics(input_path: Path, junit_path: Path, summary_path: Path) ->
         )
         ET.SubElement(safe_case, status, {"type": status, "message": "redacted"})
         diagnostic_cases += 1
-        identities.append(_case_identity(case))
+        if status in {"failure", "error"}:
+            identities.append(_case_identity(case))
 
     _write_xml(junit_path, safe_root)
     lines = [
