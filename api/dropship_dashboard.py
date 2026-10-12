@@ -20,7 +20,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from fastapi import APIRouter, Query
 
@@ -32,6 +32,51 @@ router = APIRouter()
 
 # Paths to persistent state (respect MARKETOS_STATE_DIR)
 _DROPSHIP_SNAPSHOT_PATH = Path(state_path("dropship.json"))
+
+
+def _log_failure(operation: str, exc: BaseException) -> None:
+    """Log failures with exception type only — never raw messages or traces."""
+    _log.error("%s failed error_type=%s", operation, type(exc).__name__)
+
+
+def _safe_error(
+    code: str,
+    *,
+    exc: BaseException | None = None,
+    extras: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Preserve the existing ``{status:error, error:...}`` contract with stable codes.
+
+    Mirrors the discovery/governance pattern: clients receive a fixed ``error``
+    code plus optional ``error_type`` (exception class name only). Exception
+    messages, paths, and secret-shaped values never enter the payload.
+    """
+    payload: dict[str, Any] = {}
+    if extras:
+        # Copy caller extras first, then force canonical keys so extras cannot
+        # overwrite status/error/error_type with exception text or other values.
+        payload.update({key: value for key, value in dict(extras).items() if key not in {"status", "error", "error_type"}})
+    payload["status"] = "error"
+    payload["error"] = code
+    if exc is not None:
+        payload["error_type"] = type(exc).__name__
+    return payload
+
+
+def _safe_error_details(details: Any) -> list[dict[str, Any]]:
+    """Expose diagnostic metadata without messages, paths, or raw context."""
+    safe: list[dict[str, Any]] = []
+    for detail in details:
+        if not isinstance(detail, Mapping):
+            continue
+        safe.append(
+            {
+                key: detail[key]
+                for key in ("timestamp", "stage", "operation", "error_type")
+                if key in detail
+            }
+        )
+    return safe
 
 
 # ── health and status ─────────────────────────────────────────────────────────
@@ -74,8 +119,8 @@ async def get_summary() -> dict:
             snapshot = json.load(f)
         return snapshot
     except Exception as exc:
-        _log.error("Failed to load snapshot: %s", exc)
-        return {"status": "error", "error": str(exc)}
+        _log_failure("dropship_summary_load", exc)
+        return _safe_error("snapshot_load_failed", exc=exc)
 
 
 @router.get("/campaigns")
@@ -107,7 +152,7 @@ async def get_campaigns(
                         "predicted_roas": launch.get("predicted_roas"),
                     })
         except Exception as exc:
-            _log.error("Failed to load campaigns: %s", exc)
+            _log_failure("dropship_campaigns_load", exc)
 
     return {
         "count": len(campaigns),
@@ -128,12 +173,8 @@ async def get_profitability(
         from backend.metrics.profitability import calculate_profitability
         return calculate_profitability(lookback_days=lookback_days)
     except Exception as exc:
-        _log.error("Failed to calculate profitability: %s", exc)
-        return {
-            "status": "error",
-            "error": str(exc),
-            "total_profit": 0.0,
-        }
+        _log_failure("dropship_profitability", exc)
+        return _safe_error("profitability_failed", exc=exc, extras={"total_profit": 0.0})
 
 
 @router.get("/profitability/products")
@@ -155,8 +196,8 @@ async def get_profitability_by_product(
             },
         }
     except Exception as exc:
-        _log.error("Failed to get product profitability: %s", exc)
-        return {"status": "error", "error": str(exc), "products": []}
+        _log_failure("dropship_profitability_products", exc)
+        return _safe_error("profitability_products_failed", exc=exc, extras={"products": []})
 
 
 @router.get("/profitability/product/{product_name}")
@@ -172,8 +213,8 @@ async def get_product_timeline(product_name: str) -> dict:
             "timeline": timeline,
         }
     except Exception as exc:
-        _log.error("Failed to get product timeline: %s", exc)
-        return {"status": "error", "error": str(exc), "timeline": []}
+        _log_failure("dropship_product_timeline", exc)
+        return _safe_error("product_timeline_failed", exc=exc, extras={"timeline": []})
 
 
 @router.get("/forecast")
@@ -186,8 +227,8 @@ async def get_revenue_forecast(
         from backend.metrics.profitability import revenue_forecast
         return revenue_forecast(horizon_days=horizon_days)
     except Exception as exc:
-        _log.error("Failed to compute forecast: %s", exc)
-        return {"status": "error", "error": str(exc)}
+        _log_failure("dropship_forecast", exc)
+        return _safe_error("forecast_failed", exc=exc)
 
 
 # ── cost tracking ─────────────────────────────────────────────────────────────
@@ -207,12 +248,8 @@ async def get_cost_summary(
             **report,
         }
     except Exception as exc:
-        _log.error("Failed to get cost report: %s", exc)
-        return {
-            "status": "error",
-            "error": str(exc),
-            "total_spend": 0.0,
-        }
+        _log_failure("dropship_cost_summary", exc)
+        return _safe_error("cost_summary_failed", exc=exc, extras={"total_spend": 0.0})
 
 
 @router.get("/costs/timeline")
@@ -235,8 +272,8 @@ async def get_cost_timeline(
             "period_minutes": lookback_minutes,
         }
     except Exception as exc:
-        _log.error("Failed to get cost timeline: %s", exc)
-        return {"status": "error", "error": str(exc), "data": []}
+        _log_failure("dropship_cost_timeline", exc)
+        return _safe_error("cost_timeline_failed", exc=exc, extras={"data": []})
 
 
 @router.get("/costs/by-service")
@@ -255,7 +292,8 @@ async def get_costs_by_service(
             "period_minutes": lookback_minutes,
         }
     except Exception as exc:
-        return {"status": "error", "error": str(exc), "by_service": {}}
+        _log_failure("dropship_costs_by_service", exc)
+        return _safe_error("costs_by_service_failed", exc=exc, extras={"by_service": {}})
 
 
 # ── error tracking ───────────────────────────────────────────────────────────
@@ -275,12 +313,8 @@ async def get_error_summary(
             **summary,
         }
     except Exception as exc:
-        _log.error("Failed to get error summary: %s", exc)
-        return {
-            "status": "error",
-            "error": str(exc),
-            "total_errors": 0,
-        }
+        _log_failure("dropship_error_summary", exc)
+        return _safe_error("error_summary_failed", exc=exc, extras={"total_errors": 0})
 
 
 @router.get("/errors/recent")
@@ -292,14 +326,15 @@ async def get_recent_errors(
     from backend.error_telemetry import error_details
 
     try:
-        details = error_details(stage=stage, limit=limit)
+        details = _safe_error_details(error_details(stage=stage, limit=limit))
         return {
             "status": "ok",
             "count": len(details),
             "errors": details,
         }
     except Exception as exc:
-        return {"status": "error", "error": str(exc), "errors": []}
+        _log_failure("dropship_errors_recent", exc)
+        return _safe_error("errors_recent_failed", exc=exc, extras={"errors": []})
 
 
 # ── campaign metrics ─────────────────────────────────────────────────────────
@@ -312,8 +347,8 @@ async def ingest_metrics() -> dict:
         from backend.metrics.campaign_metrics import ingest_campaign_metrics
         return ingest_campaign_metrics()
     except Exception as exc:
-        _log.error("Failed to ingest metrics: %s", exc)
-        return {"status": "error", "error": str(exc)}
+        _log_failure("dropship_metrics_ingest", exc)
+        return _safe_error("metrics_ingest_failed", exc=exc)
 
 
 @router.get("/metrics/performance")
@@ -333,8 +368,8 @@ async def get_campaign_performance(
             "platform_filter": platform,
         }
     except Exception as exc:
-        _log.error("Failed to get performance: %s", exc)
-        return {"status": "error", "error": str(exc), "campaigns": []}
+        _log_failure("dropship_metrics_performance", exc)
+        return _safe_error("metrics_performance_failed", exc=exc, extras={"campaigns": []})
 
 
 @router.get("/metrics/campaign/{campaign_id}")
@@ -347,7 +382,8 @@ async def get_campaign_metrics(campaign_id: str) -> dict:
             return {"status": "not_found", "campaign_id": campaign_id}
         return {"status": "ok", **metrics}
     except Exception as exc:
-        return {"status": "error", "error": str(exc)}
+        _log_failure("dropship_campaign_metrics", exc)
+        return _safe_error("campaign_metrics_failed", exc=exc)
 
 
 # ── budget optimization ───────────────────────────────────────────────────────
@@ -363,8 +399,8 @@ async def get_scaling_decisions() -> dict:
         result["decisions"] = decisions
         return result
     except Exception as exc:
-        _log.error("Failed to compute scaling: %s", exc)
-        return {"status": "error", "error": str(exc), "decisions": []}
+        _log_failure("dropship_scaling_decisions", exc)
+        return _safe_error("scaling_decisions_failed", exc=exc, extras={"decisions": []})
 
 
 @router.get("/optimization/scaling-summary")
@@ -376,7 +412,8 @@ async def get_scaling_summary(
         from backend.optimization.budget_scaling import scaling_summary
         return scaling_summary(lookback_days=lookback_days)
     except Exception as exc:
-        return {"status": "error", "error": str(exc)}
+        _log_failure("dropship_scaling_summary", exc)
+        return _safe_error("scaling_summary_failed", exc=exc)
 
 
 # ── alerts and reporting ──────────────────────────────────────────────────────
@@ -391,8 +428,8 @@ async def get_alerts(
         from backend.monitoring.alerts import alert_summary
         return {"status": "ok", **alert_summary(lookback_hours=lookback_hours)}
     except Exception as exc:
-        _log.error("Failed to get alerts: %s", exc)
-        return {"status": "error", "error": str(exc), "alerts": []}
+        _log_failure("dropship_alerts", exc)
+        return _safe_error("alerts_failed", exc=exc, extras={"alerts": []})
 
 
 @router.post("/alerts/evaluate")
@@ -403,7 +440,8 @@ async def trigger_alert_evaluation() -> dict:
         fired = evaluate_alerts()
         return {"status": "ok", "alerts_fired": len(fired), "alerts": fired}
     except Exception as exc:
-        return {"status": "error", "error": str(exc)}
+        _log_failure("dropship_alerts_evaluate", exc)
+        return _safe_error("alerts_evaluate_failed", exc=exc)
 
 
 @router.get("/report")
@@ -418,8 +456,8 @@ async def get_report(regenerate: bool = Query(False)) -> dict:
                 return existing
         return generate_report()
     except Exception as exc:
-        _log.error("Failed to build report: %s", exc)
-        return {"status": "error", "error": str(exc)}
+        _log_failure("dropship_report", exc)
+        return _safe_error("report_failed", exc=exc)
 
 
 @router.get("/calibration")
@@ -429,7 +467,8 @@ async def get_calibration_report() -> dict:
         from backend.metrics.calibration_tuning import confidence_report
         return confidence_report()
     except Exception as exc:
-        return {"status": "error", "error": str(exc)}
+        _log_failure("dropship_calibration", exc)
+        return _safe_error("calibration_failed", exc=exc)
 
 
 @router.get("/signal-cache")
@@ -439,7 +478,8 @@ async def get_signal_cache_status() -> dict:
         from backend.discovery.signal_cache import cache_status
         return {"status": "ok", **cache_status()}
     except Exception as exc:
-        return {"status": "error", "error": str(exc)}
+        _log_failure("dropship_signal_cache", exc)
+        return _safe_error("signal_cache_failed", exc=exc)
 
 
 @router.get("/discovery/sources")
@@ -453,7 +493,8 @@ async def get_discovery_sources_status() -> dict:
         from backend.discovery.registry import discovery_registry
         return {"status": "ok", "sources": discovery_registry.status_report()}
     except Exception as exc:
-        return {"status": "error", "error": str(exc)}
+        _log_failure("dropship_discovery_sources", exc)
+        return _safe_error("discovery_sources_failed", exc=exc)
 
 
 # ── credentials and config ────────────────────────────────────────────────────
@@ -495,4 +536,4 @@ async def get_credentials_needed() -> dict:
     }
 
 
-__all__ = ["router"]
+__all__ = ["router", "_safe_error", "_log_failure"]
