@@ -105,12 +105,14 @@ export default function Shell() {
 
   // Skip-to-main / route change may close a drawer first; focus main after inert clears.
   // Escape / scrim restore the toggle instead and do not set focusMainAfterDrawerClose.
+  // pathname is a dependency so onNavigate-close-then-route still focuses main when
+  // navOpen was already false before the location update.
   useEffect(() => {
     if (!focusMainAfterDrawerClose.current) return;
     if (navOpen || mainContentIsInert(drawerMode, navOpen)) return;
     focusMainAfterDrawerClose.current = false;
     mainRef.current?.focus();
-  }, [drawerMode, navOpen]);
+  }, [drawerMode, navOpen, location.pathname]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
