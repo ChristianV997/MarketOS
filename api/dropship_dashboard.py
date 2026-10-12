@@ -63,6 +63,22 @@ def _safe_error(
     return payload
 
 
+def _safe_error_details(details: Any) -> list[dict[str, Any]]:
+    """Expose diagnostic metadata without messages, paths, or raw context."""
+    safe: list[dict[str, Any]] = []
+    for detail in details:
+        if not isinstance(detail, Mapping):
+            continue
+        safe.append(
+            {
+                key: detail[key]
+                for key in ("timestamp", "stage", "operation", "error_type")
+                if key in detail
+            }
+        )
+    return safe
+
+
 # ── health and status ─────────────────────────────────────────────────────────
 
 
@@ -310,7 +326,7 @@ async def get_recent_errors(
     from backend.error_telemetry import error_details
 
     try:
-        details = error_details(stage=stage, limit=limit)
+        details = _safe_error_details(error_details(stage=stage, limit=limit))
         return {
             "status": "ok",
             "count": len(details),

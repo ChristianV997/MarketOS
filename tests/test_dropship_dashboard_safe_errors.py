@@ -234,6 +234,40 @@ def test_log_failure_omits_exception_message(caplog):
     assert PATH_MARKER not in joined
 
 
+def test_recent_error_details_omit_raw_messages_and_context():
+    client = _client()
+    with patch(
+        "backend.error_telemetry.error_details",
+        return_value=[
+            {
+                "timestamp": 1.0,
+                "stage": "supplier",
+                "operation": "quote",
+                "error_type": "_SyntheticLeakError",
+                "error_msg": MESSAGE_MARKER,
+                "context": {"path": PATH_MARKER, "token": SECRET_MARKER},
+            }
+        ],
+    ):
+        response = client.get("/api/dropship/errors/recent")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["errors"] == [
+        {
+            "timestamp": 1.0,
+            "stage": "supplier",
+            "operation": "quote",
+            "error_type": "_SyntheticLeakError",
+        }
+    ]
+    raw = json.dumps(payload)
+    assert MESSAGE_MARKER not in raw
+    assert SECRET_MARKER not in raw
+    assert PATH_MARKER not in raw
+
+
 def test_module_has_no_str_exc_client_sinks():
     source = Path(dashboard.__file__).read_text(encoding="utf8")
     assert 'str(exc)' not in source
