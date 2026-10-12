@@ -8,6 +8,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from .csv_ingestion import PARSERS, load_csv_rows
@@ -19,6 +20,8 @@ PLACEHOLDER_CATEGORY = "PLACEHOLDER_CATEGORY"
 PLACEHOLDER_VALUE = "PLACEHOLDER_TEST_VALUE"
 # A real KNOWN_SIGNALS member, so the placeholder row is not silently dropped by the importer.
 PLACEHOLDER_SIGNAL = "trend_proxy"
+# Pass to normalize_imported_evidence so starter-kit rows stay labelled synthetic; the importer reads only this, not the manifest.
+IMPORT_PROVENANCE = MappingProxyType({"type": "synthetic_fixture", "not_real_market_data": True})
 
 
 class TemplateError(ValueError):
@@ -174,6 +177,7 @@ def _template(parser_type: str, csv_path: Path, source_name: str | None, *, reco
             "placeholder_only": True,
             "market_evidence": False,
             "manifest_file": f"{parser_type}.manifest.json",
+            "import_provenance": dict(IMPORT_PROVENANCE),
             "round_trip_records": records,
             "publish": status,
         },
