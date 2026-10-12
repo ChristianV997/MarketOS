@@ -12,7 +12,6 @@ Covers:
 from __future__ import annotations
 
 import os
-import json
 import tempfile
 
 import pytest
@@ -441,7 +440,17 @@ class TestAgentMetricsRegistry:
 @pytest.fixture(scope="module")
 def client():
     from backend.api import app
-    return TestClient(app)
+    from backend.identity.operator_gates import runtime_control_gate
+    from backend.identity.workspaces import WorkspaceAccess
+
+    # The kill-switch routes are operator-only. This module checks their behavior for an authorized caller;
+    # refusal is covered in tests/identity/test_runtime_control_gates.py.
+    operator = WorkspaceAccess("https://issuer.test", "synthetic-operator", "ws_synthetic", "internal", "synthetic", "internal_operator")
+    app.dependency_overrides[runtime_control_gate] = lambda: operator
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.pop(runtime_control_gate, None)
 
 
 class TestAgentsEndpoint:

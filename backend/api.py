@@ -29,9 +29,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import Body, FastAPI, Header
+from fastapi import Body, Depends, FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from backend.identity.operator_gates import commerce_execution_gate
+from backend.identity.workspaces import WorkspaceAccess
 from backend.security.cors import parse_allowed_origins
 from backend.security.request_context import RequestContextMiddleware
 
@@ -778,7 +780,7 @@ def evaluation_product(payload: dict[str, Any] = Body(...)):
 
 
 @app.post("/commerce/cycle")
-def commerce_cycle(payload: dict[str, Any] | None = Body(default=None)):
+def commerce_cycle(payload: dict[str, Any] | None = Body(default=None), _access: WorkspaceAccess = Depends(commerce_execution_gate)):
     """Run the complementary commerce loop from signal to feedback.
 
     Live platform execution requires an explicit JSON ``confirm_live: true``
@@ -839,7 +841,7 @@ def commerce_cycle(payload: dict[str, Any] | None = Body(default=None)):
 
 
 @app.post("/commerce/provider-cycle")
-def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None)):
+def commerce_provider_cycle(payload: dict[str, Any] | None = Body(default=None), _access: WorkspaceAccess = Depends(commerce_execution_gate)):
     """Run the canonical loop from allowlisted research URLs.
 
     This endpoint is dry-run by default and delegates all ranking, QA, launch,
@@ -939,7 +941,7 @@ def integration_webhook(source: str, payload: dict[str, Any] = Body(...), x_webh
 
 
 @app.post("/commerce/publish")
-def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
+def commerce_publish(payload: dict[str, Any] | None = Body(default=None), _access: WorkspaceAccess = Depends(commerce_execution_gate)):
     """Publish one canonical CreativeBundle through the publishing adapter."""
     try:
         data = payload or {}
@@ -961,7 +963,7 @@ def commerce_publish(payload: dict[str, Any] | None = Body(default=None)):
 
 
 @app.post("/integrations/postiz/analytics/reconcile")
-def reconcile_postiz_analytics(payload: dict[str, Any] = Body(...)):
+def reconcile_postiz_analytics(payload: dict[str, Any] = Body(...), _access: WorkspaceAccess = Depends(commerce_execution_gate)):
     """Fetch one Postiz post's analytics and store canonical feedback evidence."""
     post_id = str(payload.get("post_id") or "").strip()
     campaign_id = str(payload.get("campaign_id") or "").strip()

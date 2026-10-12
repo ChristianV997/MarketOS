@@ -1,10 +1,12 @@
 """api.routes.agents_risk — agent hierarchy performance panel + global risk engine controls."""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from agents.arbitration import arbitrate
 from backend import api as _core
+from backend.identity.operator_gates import runtime_control_gate
+from backend.identity.workspaces import WorkspaceAccess
 
 router = APIRouter()
 
@@ -58,14 +60,14 @@ def risk_engine_status():
 
 
 @router.post("/risk/killswitch/activate")
-def activate_kill_switch(reason: str = "manual"):
+def activate_kill_switch(reason: str = "manual", _access: WorkspaceAccess = Depends(runtime_control_gate)):
     """Activate the global kill-switch — halts all new spend immediately."""
     _core._global_risk_engine.activate_kill_switch(reason=reason)
     return {"kill_switch_active": True, "reason": reason}
 
 
 @router.post("/risk/killswitch/deactivate")
-def deactivate_kill_switch():
+def deactivate_kill_switch(_access: WorkspaceAccess = Depends(runtime_control_gate)):
     """Deactivate the global kill-switch — resumes normal operation."""
     _core._global_risk_engine.deactivate_kill_switch()
     return {"kill_switch_active": False}

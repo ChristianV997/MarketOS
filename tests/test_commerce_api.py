@@ -344,6 +344,13 @@ def test_api_deployment_smoke_runs_dry_commerce_cycle(monkeypatch):
     monkeypatch.setattr("backend.core.serializer.save", lambda *_args: None)
     monkeypatch.setattr(api, "_start_runtime_services", lambda: None)
     monkeypatch.setattr(api, "_stop_runtime_services", lambda: None)
+    # Commerce execution is operator-only. This test covers the dry-run contract for an authorized caller;
+    # refusal of anonymous and non-operator callers is covered in tests/identity/test_runtime_control_gates.py.
+    from backend.identity.operator_gates import commerce_execution_gate
+    from backend.identity.workspaces import WorkspaceAccess
+
+    operator = WorkspaceAccess("https://issuer.test", "synthetic-operator", "ws_synthetic", "internal", "synthetic", "internal_operator")
+    monkeypatch.setitem(api.app.dependency_overrides, commerce_execution_gate, lambda: operator)
 
     with TestClient(api.app) as client:
         health = client.get("/health")
