@@ -168,6 +168,89 @@ def test_evidence_register_gaps_block_a_ready_status(authorities):
     assert check_workspace_leakage(draft["client_export"]["payload"]) == ()
 
 
+def test_client_export_excludes_internal_canaries(authorities):
+    workspace_registry, _report_registry, _workspace, _artifact_store = authorities
+    workspace_registry.register(ClientWorkspace(
+        workspace_id=FOREIGN,
+        name="other fixture client",
+        workspace_type="client_service",
+        mode="client_service",
+        dry_run_default=True,
+    ))
+    request = _request()
+    request["scope"] = "scope-canary-violet-otter"
+    request["assumptions"] = ["assumption-canary-violet-otter"]
+    request["missing_information"] = [
+        "Returns detail canary violet otter.",
+        "zz_internal_margin_note",
+    ]
+    request["economics"] = {
+        **request["economics"],
+        "package_price": {
+            "amount": "864201",
+            "currency": "USD",
+            "source": "catalog_band",
+            "provenance": "assumed",
+            "evidence_state": "assumed",
+        },
+    }
+    snapshot = json.loads(json.dumps(request))
+    draft = _build(request, authorities)
+    assert request == snapshot
+    assert draft["scope"]["text"] == "scope-canary-violet-otter"
+    assert "assumption-canary-violet-otter" in draft["scope"]["assumptions"]
+    assert "Returns detail canary violet otter." in draft["scope"]["unknowns"]
+    assert "zz_internal_margin_note" in draft["scope"]["unknowns"]
+    assert "zz_internal_margin_note" in render_consulting_proposal_markdown(draft)
+    assert "scope-canary-violet-otter" in render_consulting_proposal_markdown(draft)
+    assert "unknowns_present" in draft["blockers"]
+    assert "missing_information:zz_internal_margin_note" not in draft["blockers"]
+    assert draft["status"] == "blocked"
+    assert draft["economics"]["fingerprint"]
+    assert draft["evidence"]["fingerprint"]
+    assert draft["engagement"]["fingerprint"]
+    assert draft["offer"]["fingerprint"]
+    assert draft["authority"] == {
+        "human_approved": False,
+        "contract": False,
+        "invoice": False,
+        "work_authorized": False,
+        "payment_authorized": False,
+        "provider_calls": False,
+    }
+    exported = json.dumps(draft["client_export"], sort_keys=True)
+    for canary in (
+        "scope-canary-violet-otter",
+        "assumption-canary-violet-otter",
+        "Returns detail canary violet otter.",
+        "zz_internal_margin_note",
+        "missing_information:zz_internal_margin_note",
+        "864201",
+        FOREIGN,
+        "Fixture product report",
+        draft["economics"]["fingerprint"],
+        draft["evidence"]["fingerprint"],
+        draft["engagement"]["fingerprint"],
+        draft["offer"]["fingerprint"],
+    ):
+        assert canary not in exported, canary
+    payload = draft["client_export"]["payload"]
+    assert payload["status"] == "blocked"
+    assert set(payload) <= {
+        "workspace_id",
+        "status",
+        "blockers",
+        "evidence_required",
+        "approvals_required",
+        "next_actions",
+    }
+    assert check_workspace_leakage(
+        payload,
+        current_workspace_id=WORKSPACE_ID,
+        registry=workspace_registry,
+    ) == ()
+
+
 def test_caller_metadata_is_not_mutated(authorities):
     request = _request()
     snapshot = json.loads(json.dumps(request))
@@ -317,3 +400,49 @@ def test_cli_prints_the_same_draft(authorities):
     assert draft["workspace_id"] == WORKSPACE_ID
     assert draft["authority"]["human_approved"] is False
     assert FOREIGN not in completed.stdout
+
+
+def test_cli_stdout_keeps_operator_draft_out_of_client_export():
+    request = _request()
+    request["scope"] = "scope-canary-violet-otter"
+    request["assumptions"] = ["assumption-canary-violet-otter"]
+    request["missing_information"] = [
+        "Returns detail canary violet otter.",
+        "zz_internal_margin_note",
+    ]
+    request["economics"] = {
+        **request["economics"],
+        "package_price": {
+            "amount": "864201",
+            "currency": "USD",
+            "source": "catalog_band",
+            "provenance": "assumed",
+            "evidence_state": "assumed",
+        },
+    }
+    completed = subprocess.run(
+        [sys.executable, "scripts/consulting_proposal_draft.py"],
+        input=json.dumps(request),
+        text=True,
+        capture_output=True,
+        cwd=Path(__file__).parents[3],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[3])},
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "scope-canary-violet-otter" in completed.stdout
+    assert "zz_internal_margin_note" in completed.stdout
+    draft = json.loads(completed.stdout)
+    exported = json.dumps(draft["client_export"], sort_keys=True)
+    for canary in (
+        "scope-canary-violet-otter",
+        "assumption-canary-violet-otter",
+        "Returns detail canary violet otter.",
+        "zz_internal_margin_note",
+        "missing_information:zz_internal_margin_note",
+        "864201",
+    ):
+        assert canary not in exported, canary
+    assert "zz_internal_margin_note" in draft["scope"]["unknowns"]
+    assert draft["authority"]["work_authorized"] is False
+    assert draft["authority"]["provider_calls"] is False
+    assert check_workspace_leakage(draft["client_export"]["payload"]) == ()

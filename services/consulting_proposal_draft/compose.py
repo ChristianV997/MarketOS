@@ -45,6 +45,15 @@ def _code(value: object, fallback: str) -> str:
     return text
 
 
+def _export_blocker(item: object) -> str:
+    # Engagement stores caller unknowns as missing_information:<text>. That
+    # prefix is not a client-safe code. The text stays on the operator draft.
+    text = str(item or "")
+    if text.startswith("missing_information:"):
+        return "unknowns_present"
+    return _code(text, "review_blocker")
+
+
 def _money_currency(value: object) -> str | None:
     if isinstance(value, Mapping) and "currency" in value:
         return str(value.get("currency", "")).upper()
@@ -248,8 +257,8 @@ def build_consulting_proposal_draft(
         "status": engagement.status,
         "fingerprint": engagement.fingerprint,
     }
-    blockers.extend(_code(item, "review_blocker") for item in proposal.blockers)
-    blockers.extend(_code(item, "review_blocker") for item in engagement.blockers)
+    blockers.extend(_export_blocker(item) for item in proposal.blockers)
+    blockers.extend(_export_blocker(item) for item in engagement.blockers)
 
     economics_input = incoming.get("economics") if isinstance(incoming.get("economics"), Mapping) else {}
     economics_copy = copy.deepcopy(dict(economics_input))
