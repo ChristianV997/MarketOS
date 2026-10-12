@@ -46,7 +46,7 @@ _PAGE_STYLE = """
 _ALLOWED_TAGS = {"p", "br", "ul", "ol", "li", "strong", "em", "b", "i"}
 _DROPPED_TAGS = {"script", "style", "iframe", "object", "embed", "svg", "math", "noscript"}
 _STRIPE_CHECKOUT_NETLOCS = {"checkout.stripe.com", "checkout.stripe.com:443"}
-_STRIPE_CHECKOUT_PATH = re.compile(r"/c/pay/[A-Za-z0-9_-]+$")
+_STRIPE_CHECKOUT_PATH = re.compile(r"/(?:c/)?pay/(?P<session_id>[A-Za-z0-9_-]+)$")
 _STRIPE_SESSION_ID = re.compile(r"cs_[A-Za-z0-9_-]{4,200}$")
 _STOREFRONT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 
@@ -140,11 +140,42 @@ def _safe_dry_run_checkout_target(value: object, *, brand_id: str, product_id: s
     return f"{base.scheme}://{base.netloc}{expected_path}?purchased=1"
 
 
-def _safe_live_checkout_target(value: object) -> str | None:
-    """Rebuild a live target from a validated provider session identifier."""
-    if not isinstance(value, str) or not _STRIPE_SESSION_ID.fullmatch(value):
+def _allowed_live_checkout_netlocs() -> set[str]:
+    """Return the explicitly configured HTTPS checkout hosts."""
+    configured = os.getenv("STRIPE_CHECKOUT_ALLOWED_HOSTS", "")
+    hosts = {host.strip().lower() for host in configured.split(",") if host.strip()}
+    return hosts or _STRIPE_CHECKOUT_NETLOCS
+
+
+def _safe_live_checkout_target(
+    value: object, session_id: object | None = None
+) -> str | None:
+    """Validate and preserve the URL returned by the trusted checkout provider."""
+    if not isinstance(value, str):
         return None
-    return f"https://checkout.stripe.com/c/pay/{value}"
+    if not value or any(ch in value for ch in "\r\n\t\\"):
+        return None
+    parts = urlsplit(value)
+    if (
+        parts.scheme != "https"
+        or not parts.netloc
+        or parts.netloc.lower() not in _allowed_live_checkout_netlocs()
+        or parts.username
+        or parts.password
+        or parts.query
+    ):
+        return None
+    match = _STRIPE_CHECKOUT_PATH.fullmatch(parts.path)
+    if match is None:
+        return None
+    path_session_id = match.group("session_id")
+    if session_id is None:
+        session_id = path_session_id
+    if not isinstance(session_id, str) or not _STRIPE_SESSION_ID.fullmatch(session_id):
+        return None
+    if path_session_id != session_id:
+        return None
+    return value
 
 
 def _safe_checkout_target(value: object, *, dry_run: bool, brand_id: str, product_id: str) -> str | None:
@@ -258,7 +289,9 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
     target = (
         _safe_dry_run_checkout_target(result.get("url"), brand_id=safe_brand_id, product_id=safe_product_id)
         if dry_run
-        else _safe_live_checkout_target(result.get("session_id"))
+        else _safe_live_checkout_target(
+            result.get("url"), result.get("session_id")
+        )
     )
     if target is None:
         return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
@@ -283,12 +316,15 @@ def start_checkout(brand_id: str, product_id: str, request: Request):
     else:
         if (
             target_parts.scheme != "https"
-            or target_parts.netloc != "checkout.stripe.com"
+            or target_parts.netloc.lower() not in _allowed_live_checkout_netlocs()
             or target_parts.username
             or target_parts.password
             or target_parts.query
-            or target_parts.fragment
-            or _STRIPE_CHECKOUT_PATH.fullmatch(target_parts.path) is None
+            or (
+                _STRIPE_CHECKOUT_PATH.fullmatch(target_parts.path) is None
+                or _STRIPE_CHECKOUT_PATH.fullmatch(target_parts.path).group("session_id")
+                != result.get("session_id")
+            )
         ):
             return HTMLResponse("<h1>Checkout unavailable</h1>", status_code=409)
     return RedirectResponse(url=target, status_code=303)

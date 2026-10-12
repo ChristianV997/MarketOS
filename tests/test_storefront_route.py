@@ -218,6 +218,30 @@ def test_checkout_redirect_allows_only_the_provider_contract(client, monkeypatch
         assert "evil.example" not in resp.text
 
 
+def test_checkout_redirect_preserves_approved_provider_url_and_fragment(
+    client, monkeypatch
+):
+    import backend.commerce.checkout as checkout
+
+    provider_url = "https://pay.example.test/c/pay/cs_test_custom#checkout"
+    monkeypatch.setenv("STRIPE_CHECKOUT_ALLOWED_HOSTS", "pay.example.test")
+    monkeypatch.setattr(
+        checkout,
+        "create_checkout_session",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "session_id": "cs_test_custom",
+            "url": provider_url,
+            "dry_run": False,
+        },
+    )
+
+    response = client.get("/s/beauty/jade-roller/checkout")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == provider_url
+
+
 def test_checkout_rejects_unsafe_route_identifiers(client):
     resp = client.get('/s/q"><svg/safe-item/checkout')
     assert resp.status_code == 404
