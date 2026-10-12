@@ -308,6 +308,10 @@ def build_consulting_proposal_draft(
             if report.recommendation in {"blocked", "needs_evidence"}:
                 blockers.append("economics_incomplete")
 
+    # Unknowns include caller gaps and evidence-register gaps. They must not
+    # leave the draft ready, and the blocker code must not echo the text.
+    if unknowns:
+        blockers.append("unknowns_present")
     status = "blocked" if blockers else proposal.status
     if status not in {"draft_ready", "needs_evidence", "blocked"}:
         status = "blocked"

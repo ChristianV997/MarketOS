@@ -130,6 +130,44 @@ def test_draft_links_scope_evidence_and_economics_without_approval(authorities):
     assert again["fingerprint"] == draft["fingerprint"]
 
 
+def test_evidence_register_gaps_block_a_ready_status(authorities):
+    workspace_registry, report_registry, workspace, _artifact_store = authorities
+    del workspace_registry
+    report_registry.register(CommercialReport(
+        report_id="report_fixture_partial",
+        workspace_id=workspace.workspace_id,
+        proposal_id="proposal-partial",
+        experiment_id="experiment-partial",
+        service_name="product_research",
+        title="Partial fixture report",
+        summary="A partial fixture report.",
+        status="partial",
+        created_at=0.0,
+    ))
+    request = _request()
+    request["missing_information"] = []
+    request["linked_component_report_ids"] = ["report_fixture_partial"]
+    snapshot = json.loads(json.dumps(request))
+    draft = _build(request, authorities)
+    assert request == snapshot
+    assert "product_research:report_partial" in draft["scope"]["unknowns"]
+    assert draft["status"] == "blocked"
+    assert "unknowns_present" in draft["blockers"]
+    assert draft["status"] != "draft_ready"
+    assert draft["authority"] == {
+        "human_approved": False,
+        "contract": False,
+        "invoice": False,
+        "work_authorized": False,
+        "payment_authorized": False,
+        "provider_calls": False,
+    }
+    exported = json.dumps(draft["client_export"], sort_keys=True)
+    assert "report_partial" not in exported
+    assert draft["client_export"]["payload"]["status"] == "blocked"
+    assert check_workspace_leakage(draft["client_export"]["payload"]) == ()
+
+
 def test_caller_metadata_is_not_mutated(authorities):
     request = _request()
     snapshot = json.loads(json.dumps(request))
