@@ -229,18 +229,23 @@ def test_symlink_inside_root_pointing_inside_is_allowed(tmp_path: Path):
 
 # ── Opened-Object & File Descriptor Validation Tests ──────────────────────────
 
-def test_is_safe_regular_file_checks(mock_dashboard_env: dict[str, Any]):
+def test_is_safe_regular_file_checks(mock_dashboard_env: dict[str, Any], tmp_path: Path):
     root = mock_dashboard_env["root"]
     db_file = mock_dashboard_env["db_path"]
 
-    # Regular file exists and is openable
-    assert _is_safe_regular_file(db_file) is True
+    # Regular file exists, is confined within root, and is openable
+    assert _is_safe_regular_file(db_file, root=root) is True
+
+    # File outside root is rejected by root boundary check
+    outside_file = tmp_path / "outside.db"
+    outside_file.touch()
+    assert _is_safe_regular_file(outside_file, root=root) is False
 
     # Directory is not a regular file
-    assert _is_safe_regular_file(mock_dashboard_env["state_dir"]) is False
+    assert _is_safe_regular_file(mock_dashboard_env["state_dir"], root=root) is False
 
     # Non-existent file returns False
-    assert _is_safe_regular_file(root / "nonexistent.db") is False
+    assert _is_safe_regular_file(root / "nonexistent.db", root=root) is False
 
 
 # ── Non-Echoing Canary Error Tests ────────────────────────────────────────────

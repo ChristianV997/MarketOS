@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import sys
 from pathlib import Path
@@ -49,8 +50,15 @@ def confine_state_path(raw_path: str | os.PathLike[str], *, root: Path | str | N
     if not path_str or "\x00" in path_str:
         raise ValueError("state_path_invalid")
 
+    # Normalize directory separators for consistent cross-platform behavior
+    normalized_str = path_str.replace("\\", "/")
+
+    # Windows drive paths (e.g. C:/...) on non-Windows hosts cannot be safely placed under root
+    if re.match(r"^[a-zA-Z]:", normalized_str) and os.name != "nt":
+        raise ValueError("state_path_outside_root")
+
     # Explicit traversal check on path components
-    p = Path(path_str)
+    p = Path(normalized_str)
     if ".." in p.parts:
         raise ValueError("state_path_traversal_blocked")
 
@@ -61,15 +69,18 @@ def confine_state_path(raw_path: str | os.PathLike[str], *, root: Path | str | N
     candidate = p if p.is_absolute() else Path(root_s) / p
 
     try:
-        resolved_s = os.path.realpath(str(candidate))
+        resolved = candidate.resolve()
+        resolved_s = os.path.realpath(str(resolved))
     except (OSError, ValueError):
         raise ValueError("state_path_invalid") from None
 
-    # Path boundary check using commonpath (immune to sibling-prefix bypasses)
+    # Path boundary checks: commonpath + is_relative_to (immune to sibling-prefix bypasses)
     try:
         if os.path.commonpath([root_s, resolved_s]) != root_s:
             raise ValueError("state_path_outside_root")
-        rel = Path(resolved_s).relative_to(root_s)
+        if not resolved.is_relative_to(root_path):
+            raise ValueError("state_path_outside_root")
+        rel = resolved.relative_to(root_path)
     except (ValueError, OSError):
         raise ValueError("state_path_outside_root") from None
 
@@ -77,17 +88,20 @@ def confine_state_path(raw_path: str | os.PathLike[str], *, root: Path | str | N
     if not rel.parts or rel == Path(".") or ".." in rel.parts:
         raise ValueError("state_path_outside_root")
 
-    return Path(resolved_s)
+    return root_path / rel
 
 
-def _is_safe_regular_file(path: Path | str) -> bool:
+def _is_safe_regular_file(path: Path | str, *, root: Path | str | None = None) -> bool:
     """Validate that the target path exists, is a regular file, and can be opened safely.
 
     Validates the opened file descriptor directly rather than only pre-open strings,
     checking stat.S_ISREG to prevent FIFOs, sockets, device nodes, or directories.
     """
     try:
-        p = Path(path)
+        root_path = _get_dashboard_root(root)
+        p = Path(path).resolve()
+        if not p.is_relative_to(root_path):
+            return False
         if not p.is_file():
             return False
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
@@ -111,7 +125,7 @@ def load_event_log(state_path: str | Path, limit: int = 500, *, root: Path | str
     except (ValueError, OSError):
         return pd.DataFrame()
 
-    if not _is_safe_regular_file(safe_path):
+    if not _is_safe_regular_file(safe_path, root=root):
         return pd.DataFrame()
 
     try:
@@ -140,7 +154,7 @@ def load_system_meta(state_path: str | Path, *, root: Path | str | None = None) 
     except (ValueError, OSError):
         return {}
 
-    if not _is_safe_regular_file(safe_path):
+    if not _is_safe_regular_file(safe_path, root=root):
         return {}
 
     try:
@@ -169,7 +183,7 @@ def load_causal_edges(state_path: str | Path, *, root: Path | str | None = None)
     except (ValueError, OSError):
         return pd.DataFrame()
 
-    if not _is_safe_regular_file(safe_path):
+    if not _is_safe_regular_file(safe_path, root=root):
         return pd.DataFrame()
 
     try:
@@ -193,7 +207,7 @@ def load_drift_report(*, root: Path | str | None = None) -> dict[str, Any]:
             candidate_path = confine_state_path(candidate, root=base_root)
         except (ValueError, OSError):
             continue
-        if _is_safe_regular_file(candidate_path):
+        if _is_safe_regular_file(candidate_path, root=base_root):
             try:
                 with open(candidate_path, encoding="utf-8") as f:
                     return json.load(f)
