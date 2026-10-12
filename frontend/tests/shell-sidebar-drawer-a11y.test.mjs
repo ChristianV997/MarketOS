@@ -10,6 +10,8 @@ import {
   SIDEBAR_NAV_ID,
   SKIP_TO_MAIN_ID,
   isDrawerMode,
+  mainContentBlocksKeyboardWhenDrawerOpen,
+  mainContentIsInert,
   navigationToggleLabel,
   shouldCloseDrawerOnKey,
   shouldCloseDrawerOnRouteChange,
@@ -59,6 +61,23 @@ test("closed mobile sidebar is inert; desktop is never inert", () => {
   assert.equal(sidebarIsInert(false, false), false);
   assert.match(sidebarSrc, /inert/);
   assert.match(sidebarSrc, /tabIndex=\{inert \? -1 : undefined\}/);
+});
+
+test("open mobile drawer inerts main content; desktop/tablet never do", () => {
+  assert.equal(mainContentIsInert(true, true), true);
+  assert.equal(mainContentIsInert(true, false), false);
+  assert.equal(mainContentIsInert(false, true), false);
+  assert.equal(mainContentIsInert(false, false), false);
+  assert.equal(mainContentBlocksKeyboardWhenDrawerOpen(true, true), true);
+  assert.equal(mainContentBlocksKeyboardWhenDrawerOpen(false, true), false);
+  assert.equal(mainContentBlocksKeyboardWhenDrawerOpen(true, false), false);
+  // Mirror the sidebar inert/hidden pattern on the main landmark only (header
+  // toggle + scrim stay available for Tab / Shift+Tab / Escape / dismiss).
+  assert.match(shellSrc, /mainContentIsInert/);
+  assert.match(shellSrc, /mainInert/);
+  assert.match(shellSrc, /aria-hidden=\{mainInert \|\| undefined\}/);
+  assert.match(shellSrc, /\{\.\.\.\(mainInert \? \{ inert: "" \} : \{\}\)\}/);
+  assert.match(shellSrc, /focusMainAfterDrawerClose/);
 });
 
 test("route changes close an open drawer and move focus to main", () => {
@@ -138,9 +157,41 @@ test("narrow overlay leaves the live-status header above the scrim", () => {
   assert.match(shellSrc, /aria-live="polite"/);
 });
 
-test("drawer does not install a focus trap", () => {
-  assert.doesNotMatch(shellSrc, /focus-trap|focusTrap|trapFocus/);
-  assert.doesNotMatch(sidebarSrc, /focus-trap|focusTrap|trapFocus/);
+test("drawer uses inert boundary instead of a focus-trap dependency", () => {
+  assert.doesNotMatch(shellSrc, /focus-trap|focusTrap|trapFocus|focus-trap-react/);
+  assert.doesNotMatch(sidebarSrc, /focus-trap|focusTrap|trapFocus|focus-trap-react/);
+  assert.match(shellSrc, /mainContentIsInert/);
+  assert.match(shellSrc, /inert: ""/);
+});
+
+test("Tab and Shift+Tab cannot reach main controls while the mobile drawer is open", () => {
+  // Contract: open drawer => main inert/aria-hidden; closed or md+ => main available.
+  assert.equal(mainContentBlocksKeyboardWhenDrawerOpen(true, true), true);
+  assert.equal(mainContentBlocksKeyboardWhenDrawerOpen(true, false), false);
+  assert.equal(mainContentBlocksKeyboardWhenDrawerOpen(false, false), false);
+  assert.equal(mainContentBlocksKeyboardWhenDrawerOpen(false, true), false);
+  // Shell wires the helper onto <main>, not the header chrome (toggle stays in tab order).
+  const mainBlock = shellSrc.slice(shellSrc.indexOf("<main"), shellSrc.indexOf("</main>") + 7);
+  assert.match(mainBlock, /mainInert/);
+  assert.match(mainBlock, /inert/);
+  assert.match(mainBlock, /aria-hidden/);
+  assert.match(shellSrc, /id=\{NAV_TOGGLE_ID\}/);
+  assert.match(shellSrc, /NAV_SCRIM_ID/);
+  // Escape + scrim still restore focus to the toggle (not stranded in main).
+  assert.match(shellSrc, /toggleRef\.current\?\.focus\(\)/);
+  assert.match(shellSrc, /Dismiss navigation/);
+  assert.match(shellSrc, /shouldCloseDrawerOnKey/);
+});
+
+test("desktop and tablet persistent rail never inerts main content", () => {
+  assert.equal(isDrawerMode(768), false);
+  assert.equal(isDrawerMode(820), false);
+  assert.equal(isDrawerMode(1280), false);
+  assert.equal(mainContentIsInert(false, true), false);
+  assert.equal(mainContentIsInert(false, false), false);
+  assert.match(shellSrc, /className="md:hidden inline-flex/);
+  assert.match(sidebarSrc, /md:static md:z-auto md:translate-x-0/);
+  assert.match(sidebarSrc, /md:static/);
 });
 
 test("reduced-motion remains global; drawer adds no uncapped animation", () => {

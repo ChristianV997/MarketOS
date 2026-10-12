@@ -31,6 +31,15 @@ export function sidebarIsInert(drawerMode: boolean, open: boolean): boolean {
   return drawerMode && !open;
 }
 
+/**
+ * When the mobile drawer is open it behaves as a modal overlay: main-page
+ * controls behind the scrim must be unavailable to keyboard and AT.
+ * Desktop/tablet persistent rail never inerts main.
+ */
+export function mainContentIsInert(drawerMode: boolean, open: boolean): boolean {
+  return drawerMode && open;
+}
+
 export function shouldCloseDrawerOnRouteChange(drawerMode: boolean, open: boolean): boolean {
   return drawerMode && open;
 }
@@ -38,4 +47,15 @@ export function shouldCloseDrawerOnRouteChange(drawerMode: boolean, open: boolea
 /** Skip-to-main must not leave a mobile drawer covering the landmark. */
 export function shouldCloseDrawerOnSkip(drawerMode: boolean, open: boolean): boolean {
   return shouldCloseDrawerOnRouteChange(drawerMode, open);
+}
+
+/**
+ * Tab / Shift+Tab contract while the mobile drawer is open:
+ * main-page controls are excluded; chrome (skip, toggle, nav, scrim) remains.
+ */
+export function mainContentBlocksKeyboardWhenDrawerOpen(
+  drawerMode: boolean,
+  open: boolean,
+): boolean {
+  return mainContentIsInert(drawerMode, open);
 }

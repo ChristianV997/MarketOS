@@ -10,6 +10,7 @@ import {
   SIDEBAR_NAV_ID,
   SKIP_TO_MAIN_ID,
   isDrawerMode,
+  mainContentIsInert,
   navigationToggleLabel,
   shouldCloseDrawerOnKey,
   shouldCloseDrawerOnSkip,
@@ -69,6 +70,8 @@ export default function Shell() {
   const toggleRef = useRef<HTMLButtonElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const firstRender = useRef(true);
+  const focusMainAfterDrawerClose = useRef(false);
+  const mainInert = mainContentIsInert(drawerMode, navOpen);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -84,15 +87,14 @@ export default function Shell() {
   }, []);
 
   useEffect(() => {
-    setNavOpen(false);
-  }, [location.pathname]);
-
-  useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;
+      setNavOpen(false);
       return;
     }
-    mainRef.current?.focus();
+    // Close any mobile drawer, then focus main once inert is cleared (below).
+    focusMainAfterDrawerClose.current = true;
+    setNavOpen(false);
   }, [location.pathname]);
 
   useEffect(() => {
@@ -100,6 +102,15 @@ export default function Shell() {
     const first = document.querySelector<HTMLElement>(`#${SIDEBAR_NAV_ID} a`);
     first?.focus();
   }, [navOpen, drawerMode]);
+
+  // Skip-to-main / route change may close a drawer first; focus main after inert clears.
+  // Escape / scrim restore the toggle instead and do not set focusMainAfterDrawerClose.
+  useEffect(() => {
+    if (!focusMainAfterDrawerClose.current) return;
+    if (navOpen || mainContentIsInert(drawerMode, navOpen)) return;
+    focusMainAfterDrawerClose.current = false;
+    mainRef.current?.focus();
+  }, [drawerMode, navOpen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -117,8 +128,12 @@ export default function Shell() {
   const activateSkipToMain = () => {
     // Keep hash navigation for no-JS fallbacks, but move focus reliably for
     // keyboard users (matches ClientShell). Close an open mobile drawer first
-    // so the landmark is not covered.
-    if (shouldCloseDrawerOnSkip(drawerMode, navOpen)) setNavOpen(false);
+    // so the landmark is not covered or inert.
+    if (shouldCloseDrawerOnSkip(drawerMode, navOpen)) {
+      focusMainAfterDrawerClose.current = true;
+      setNavOpen(false);
+      return;
+    }
     mainRef.current?.focus();
   };
 
@@ -208,6 +223,8 @@ export default function Shell() {
           id={OPERATOR_MAIN_ID}
           tabIndex={-1}
           aria-label="Operator workspace"
+          aria-hidden={mainInert || undefined}
+          {...(mainInert ? { inert: "" } : {})}
           className="min-w-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
         >
           <Outlet />
