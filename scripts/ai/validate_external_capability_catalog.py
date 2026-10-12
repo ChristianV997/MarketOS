@@ -126,8 +126,10 @@ def is_repository_source(source_url: str) -> bool:
     if parsed.username or parsed.password or "@" in parsed.netloc:
         return False
     try:
-        parsed.port
+        port = parsed.port
     except ValueError:
+        return False
+    if port is not None and (port <= 0 or port > 65535):
         return False
     raw_hostname = parsed.hostname or ""
     if raw_hostname.endswith(".."):

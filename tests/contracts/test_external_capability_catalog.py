@@ -345,6 +345,8 @@ def test_repository_host_allowlist_rejects_subdomains_and_malformed_authority():
     assert not is_repository_source("https://github.com.evil.com/example-org/repo")
     assert not is_repository_source("https://user:password@github.com/example-org/repo")
     assert not is_repository_source("https://github.com:badport/example-org/repo")
+    assert not is_repository_source("https://github.com:70000/example-org/repo")
+    assert not is_repository_source("https://github.com:0/example-org/repo")
     assert not is_repository_source("https://github.com../example-org/repo")
 
     record = get_base_valid_record()
