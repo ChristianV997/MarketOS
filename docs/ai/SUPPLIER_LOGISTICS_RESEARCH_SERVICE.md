@@ -5,6 +5,35 @@ logistics **evidence** service for consulting reports. It composes
 existing canonical authorities; it does not introduce a second supplier
 scorer or a second logistics authority.
 
+## Offline operator path
+
+The existing sanitized supplier importer can be connected to this report
+without using the existing supplier-feasibility scorer through the bounded
+operator command:
+
+```powershell
+python scripts/run_supplier_landed_cost_feasibility.py `
+  --input tests/fixtures/supplier_feasibility/cj_validation_pack_success.json `
+  --candidate-id mini-thermal-printer `
+  --target-price 50 --currency USD `
+  --generated-at 2026-10-12T00:00:00Z --format markdown
+```
+
+The command reads only a caller-selected local JSON/CSV snapshot through the
+existing sanitized importer, adapts one candidate-bound record with
+`build_offer_from_supplier_evidence`, and delegates to
+`build_supplier_logistics_report`. It emits JSON or Markdown to stdout and
+does not write artifacts. The selling price is explicitly labeled as an
+operator assumption; no FX, tax, duty, supplier reliability, purchase, or
+launch decision is inferred.
+
+The adapter preserves the source field provenance in each `FieldEvidence`
+record, keeps missing money as `None`, and retains an explicit zero as a
+`Money` value. It does not promote `observed`, fixture, or manual-import
+metadata to human-confirmed supplier proof. Warehouse, destination, MOQ,
+availability, and delivery-window values remain evidence context rather than
+an authorization signal.
+
 ## What it is
 
 Given one candidate-bound supplier/logistics offer (goods, service, or

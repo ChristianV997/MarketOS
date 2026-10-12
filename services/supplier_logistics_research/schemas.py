@@ -51,7 +51,7 @@ EVIDENCE_QUALITY = frozenset({"observed", "manual", "fixture", "stale", "missing
 
 OFFERING_KINDS = frozenset({"goods", "service", "hybrid", "unknown"})
 
-AVAILABILITY_STATUSES = frozenset({"unknown", "in_stock", "limited", "backordered", "discontinued", "preorder"})
+AVAILABILITY_STATUSES = frozenset({"unknown", "in_stock", "limited", "backordered", "out_of_stock", "discontinued", "preorder"})
 
 FULFILLMENT_MODES = frozenset({"unknown", "dropship", "wholesale_fba", "third_party_3pl", "direct_freight", "service_delivery"})
 
@@ -117,6 +117,7 @@ class FieldEvidence:
     evidence_ref: EvidenceRef | None = None
     observed_at: str = ""
     note: str = ""
+    provenance: str = ""
 
     def __post_init__(self) -> None:
         if self.quality not in EVIDENCE_QUALITY:
@@ -125,6 +126,7 @@ class FieldEvidence:
             raise EconomicsError("invalid evidence reference")
         _text(self.observed_at, "observed_at")
         _text(self.note, "note")
+        _text(self.provenance, "provenance")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +134,7 @@ class FieldEvidence:
             "evidence_ref": self.evidence_ref.to_dict() if self.evidence_ref is not None else None,
             "observed_at": self.observed_at,
             "note": self.note,
+            "provenance": self.provenance,
         }
 
 
