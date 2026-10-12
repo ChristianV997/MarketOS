@@ -390,7 +390,8 @@ def test_missing_batches_key_is_reported_without_crashing():
     del data["batches"]
     report = _check(data)
     assert report["valid"] is False
-    assert {"missing_field", "missing_agent"} & _codes(report)
+    # missing_agent is gated on a well-formed batches list, so the only finding is the missing key itself.
+    assert [(item["code"], item["location"]) for item in report["errors"]] == [("missing_field", "batches")]
 
 
 def test_wrong_types_are_rejected_without_echoing_the_value():
@@ -399,7 +400,12 @@ def test_wrong_types_are_rejected_without_echoing_the_value():
     _assignments(data)[1]["agent_id"] = 7
     _assignments(data)[2]["task_id"] = ["b1-typed"]
     report = _check(data)
-    assert {"invalid_type"} <= _codes(report)
+    typed = {item["location"] for item in report["errors"] if item["code"] == "invalid_type"}
+    assert typed == {
+        "batches[0].assignments[0].primary_paths",
+        "batches[0].assignments[1].agent_id",
+        "batches[0].assignments[2].task_id",
+    }
     assert "planning/agent-batch-sample/typed.md" not in json.dumps(report)
 
 
@@ -409,8 +415,11 @@ def test_identifiers_must_match_the_canonical_pattern(bad_id):
     _assignments(data)[0]["task_id"] = bad_id
     report = _check(data)
     assert "invalid_identifier" in _codes(report)
-    if bad_id:  # an empty string is trivially "contained" in any text, so only non-empty values are checked
-        assert bad_id not in json.dumps(report)
+    # Compare the stripped token: json.dumps escapes a trailing newline, so the raw value could never match.
+    # An empty token is trivially contained in any text, so it is skipped.
+    token = bad_id.strip()
+    if token:
+        assert token not in json.dumps(report)
 
 
 def test_empty_primary_scope_is_rejected_but_empty_fallback_is_allowed():
@@ -448,13 +457,28 @@ def test_shared_scope_report_is_bounded_and_keeps_the_full_count():
     report = _check(data)
     # 22 agents sharing one scope form C(22, 2) = 231 agent pairs, one primary_primary finding per pair.
     assert report["error_count"] == 231
+    assert report["error_counts"] == {"primary_primary_overlap": 231}
     assert report["truncated"] is True
     assert len(report["errors"]) == plan.MAX_REPORTED_ERRORS
     for item in report["errors"]:
         assert item["code"] == "primary_primary_overlap"
         assert item["overlap_count"] == 16
         assert len(item["paths"]) == plan.MAX_REPORTED_PATHS
+        assert item["paths_truncated"] is True
     assert len(json.dumps(report)) < 60_000
+
+
+def test_secret_findings_stay_listed_when_overlaps_exceed_the_cap():
+    data = _sample()
+    shared = [f"planning/agent-batch-sample/shared/p{index:02d}.md" for index in range(16)]
+    for assignment in _assignments(data):
+        assignment["primary_paths"] = list(shared)
+    _assignments(data)[0]["task_id"] = "ghp_" + "A" * 36
+    report = _check(data)
+    assert report["truncated"] is True
+    assert report["error_counts"]["sensitive_value"] == 1
+    assert report["errors"][0]["code"] == "sensitive_value"
+    assert "ghp_" not in json.dumps(report)
 
 
 def test_many_distinct_errors_are_capped_and_flagged():
@@ -494,11 +518,11 @@ def test_cli_fails_closed_before_dispatch_on_every_invalid_mutation(mutate, tmp_
     assert json.loads(capsys.readouterr().out)["valid"] is False
 
 
-def test_valid_plan_is_checked_not_executed(tmp_path, capsys):
-    # The checker reads and reports. Exit 0 is only a validation verdict; nothing is dispatched or run.
+def test_valid_plan_yields_a_verdict_and_exit_zero(tmp_path, capsys):
+    # Exit 0 is only a validation verdict. Non-dispatch is enforced by the source-scan test, not by this one.
     target = tmp_path / "candidate.json"
     target.write_text(SAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
     assert cli.main([str(target)]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["valid"] is True
-    assert report["read_only"] is True
+    assert report["errors"] == []

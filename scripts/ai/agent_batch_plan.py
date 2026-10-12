@@ -355,6 +355,7 @@ def _check_overlaps(records: list[dict[str, Any]], findings: list[dict[str, Any]
                         location,
                         agents=agents,
                         paths=sorted(bucket["paths"])[:MAX_REPORTED_PATHS],
+                        paths_truncated=len(bucket["paths"]) > MAX_REPORTED_PATHS,
                         overlap_count=bucket["count"],
                     )
                 )
@@ -411,20 +412,28 @@ def _check_dependencies(records: list[dict[str, Any]], policy: dict[str, Any], f
         findings.append(_finding("dependency_cycle", "batches", ids=cycle))
 
 
+def _error_sort_key(item: dict[str, Any]) -> tuple[int, str, str, str]:
+    # Secret-shaped findings sort first, so a flood of overlap findings cannot push them out of the capped list.
+    rank = 0 if item["code"].startswith("sensitive_") else 1
+    return (rank, item["code"], item["location"], json.dumps(item, sort_keys=True))
+
+
 def _report(
     policy_id: str | None, findings: list[dict[str, Any]], session_id: str | None, checked: int
 ) -> dict[str, Any]:
     unique = {json.dumps(item, sort_keys=True): item for item in findings}
-    ordered = sorted(
-        unique.values(), key=lambda item: (item["code"], item["location"], json.dumps(item, sort_keys=True))
-    )
-    # error_count and valid always describe the full set; only the listed errors are capped.
+    ordered = sorted(unique.values(), key=_error_sort_key)
+    counts: dict[str, int] = {}
+    for item in ordered:
+        counts[item["code"]] = counts.get(item["code"], 0) + 1
+    # error_count, error_counts and valid describe the full set; only the listed errors are capped.
     return {
         "schema": REPORT_SCHEMA,
         "policy_id": policy_id,
         "read_only": True,
         "valid": not ordered,
         "error_count": len(ordered),
+        "error_counts": dict(sorted(counts.items())),
         "truncated": len(ordered) > MAX_REPORTED_ERRORS,
         "errors": ordered[:MAX_REPORTED_ERRORS],
         "session_id": session_id,
