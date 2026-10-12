@@ -1,0 +1,184 @@
+{
+  "schema": "MarketOS.AgentBatchPlan.v1",
+  "session_id": "four-batch-sample-2026-10-11",
+  "batches": [
+    {
+      "batch": 1,
+      "assignments": [
+        {
+          "agent_id": "hermes-bots-team",
+          "task_id": "b1-hermes-bots-team",
+          "prompt_id": "prompt-b1-hermes-bots-team",
+          "primary_paths": ["planning/agent-batch-sample/hermes-bots-team/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/hermes-bots-team/fallback.md"]
+        },
+        {
+          "agent_id": "hermes-agents-a",
+          "task_id": "b1-hermes-agents-a",
+          "prompt_id": "prompt-b1-hermes-agents-a",
+          "primary_paths": ["planning/agent-batch-sample/hermes-agents-a/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/hermes-agents-a/fallback.md"]
+        },
+        {
+          "agent_id": "hermes-agents-b",
+          "task_id": "b1-hermes-agents-b",
+          "prompt_id": "prompt-b1-hermes-agents-b",
+          "primary_paths": ["planning/agent-batch-sample/hermes-agents-b/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/hermes-agents-b/fallback.md"]
+        },
+        {
+          "agent_id": "grok-bots-team",
+          "task_id": "b1-grok-bots-team",
+          "prompt_id": "prompt-b1-grok-bots-team",
+          "primary_paths": ["planning/agent-batch-sample/grok-bots-team/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/grok-bots-team/fallback.md"]
+        },
+        {
+          "agent_id": "antigravity-a",
+          "task_id": "b1-antigravity-a",
+          "prompt_id": "prompt-b1-antigravity-a",
+          "primary_paths": ["planning/agent-batch-sample/antigravity-a/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/antigravity-a/fallback.md"]
+        }
+      ]
+    },
+    {
+      "batch": 2,
+      "assignments": [
+        {
+          "agent_id": "antigravity-b",
+          "task_id": "b2-antigravity-b",
+          "prompt_id": "prompt-b2-antigravity-b",
+          "primary_paths": ["planning/agent-batch-sample/antigravity-b/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/antigravity-b/fallback.md"],
+          "depends_on": ["b1-antigravity-a"]
+        },
+        {
+          "agent_id": "antigravity-c",
+          "task_id": "b2-antigravity-c",
+          "prompt_id": "prompt-b2-antigravity-c",
+          "primary_paths": ["planning/agent-batch-sample/antigravity-c/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/antigravity-c/fallback.md"]
+        },
+        {
+          "agent_id": "antigravity-d",
+          "task_id": "b2-antigravity-d",
+          "prompt_id": "prompt-b2-antigravity-d",
+          "primary_paths": ["planning/agent-batch-sample/antigravity-d/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/antigravity-d/fallback.md"]
+        },
+        {
+          "agent_id": "cursor-a",
+          "task_id": "b2-cursor-a",
+          "prompt_id": "prompt-b2-cursor-a",
+          "primary_paths": ["planning/agent-batch-sample/cursor-a/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/cursor-a/fallback.md"],
+          "depends_on": ["b1-hermes-agents-a"]
+        },
+        {
+          "agent_id": "cursor-b",
+          "task_id": "b2-cursor-b",
+          "prompt_id": "prompt-b2-cursor-b",
+          "primary_paths": ["planning/agent-batch-sample/cursor-b/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/cursor-b/fallback.md"]
+        }
+      ]
+    },
+    {
+      "batch": 3,
+      "assignments": [
+        {
+          "agent_id": "cursor-c",
+          "task_id": "b3-cursor-c",
+          "prompt_id": "prompt-b3-cursor-c",
+          "primary_paths": ["planning/agent-batch-sample/cursor-c/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/cursor-c/fallback.md"]
+        },
+        {
+          "agent_id": "cursor-d",
+          "task_id": "b3-cursor-d",
+          "prompt_id": "prompt-b3-cursor-d",
+          "primary_paths": ["planning/agent-batch-sample/cursor-d/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/cursor-d/fallback.md"]
+        },
+        {
+          "agent_id": "claude-a",
+          "task_id": "b3-claude-a",
+          "prompt_id": "prompt-b3-claude-a",
+          "primary_paths": ["planning/agent-batch-sample/claude-a/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/claude-a/fallback.md"],
+          "depends_on": ["b2-cursor-a"]
+        },
+        {
+          "agent_id": "claude-b",
+          "task_id": "b3-claude-b",
+          "prompt_id": "prompt-b3-claude-b",
+          "primary_paths": ["planning/agent-batch-sample/claude-b/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/claude-b/fallback.md"]
+        },
+        {
+          "agent_id": "claude-c",
+          "task_id": "b3-claude-c",
+          "prompt_id": "prompt-b3-claude-c",
+          "primary_paths": ["planning/agent-batch-sample/claude-c/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/claude-c/fallback.md"]
+        },
+        {
+          "agent_id": "claude-d",
+          "task_id": "b3-claude-d",
+          "prompt_id": "prompt-b3-claude-d",
+          "primary_paths": ["planning/agent-batch-sample/claude-d/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/claude-d/fallback.md"]
+        }
+      ]
+    },
+    {
+      "batch": 4,
+      "assignments": [
+        {
+          "agent_id": "codex-a",
+          "task_id": "b4-codex-a",
+          "prompt_id": "prompt-b4-codex-a",
+          "primary_paths": ["planning/agent-batch-sample/codex-a/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/codex-a/fallback.md"],
+          "depends_on": ["b3-claude-a", "b1-hermes-bots-team"]
+        },
+        {
+          "agent_id": "codex-b",
+          "task_id": "b4-codex-b",
+          "prompt_id": "prompt-b4-codex-b",
+          "primary_paths": ["planning/agent-batch-sample/codex-b/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/codex-b/fallback.md"]
+        },
+        {
+          "agent_id": "codex-c",
+          "task_id": "b4-codex-c",
+          "prompt_id": "prompt-b4-codex-c",
+          "primary_paths": ["planning/agent-batch-sample/codex-c/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/codex-c/fallback.md"]
+        },
+        {
+          "agent_id": "codex-d",
+          "task_id": "b4-codex-d",
+          "prompt_id": "prompt-b4-codex-d",
+          "primary_paths": ["planning/agent-batch-sample/codex-d/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/codex-d/fallback.md"]
+        },
+        {
+          "agent_id": "grok-chat-a",
+          "task_id": "b4-grok-chat-a",
+          "prompt_id": "prompt-b4-grok-chat-a",
+          "primary_paths": ["planning/agent-batch-sample/grok-chat-a/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/grok-chat-a/fallback.md"]
+        },
+        {
+          "agent_id": "grok-chat-b",
+          "task_id": "b4-grok-chat-b",
+          "prompt_id": "prompt-b4-grok-chat-b",
+          "primary_paths": ["planning/agent-batch-sample/grok-chat-b/primary.md"],
+          "fallback_paths": ["planning/agent-batch-sample/grok-chat-b/fallback.md"]
+        }
+      ]
+    }
+  ]
+}
