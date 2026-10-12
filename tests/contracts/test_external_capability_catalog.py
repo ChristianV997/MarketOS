@@ -34,7 +34,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.ai.validate_external_capability_catalog import (
     check_dossier_consistency,
+    is_repository_source,
+    sanitize_url_for_error,
     validate_catalog_data,
+    validate_source_url,
 )
 
 
@@ -291,3 +294,158 @@ def test_oss_entries_have_real_shas():
 
     missing = oss_ids - found_ids
     assert not missing, f"Missing expected OSS capabilities in catalog: {missing}"
+
+
+def test_url_validation_userinfo_rejected():
+    record = get_base_valid_record()
+    record["official_source_url"] = "https://user:password@github.com/example-org/repo"
+    errors = validate_catalog_data([record])
+    assert any("userinfo_in_source_url_rejected" in e for e in errors), f"Expected userinfo rejected, got: {errors}"
+
+    record2 = get_base_valid_record()
+    record2["official_source_url"] = "https://raw.githubusercontent.com@evil.com/payload"
+    errors2 = validate_catalog_data([record2])
+    assert any("userinfo_in_source_url_rejected" in e for e in errors2), f"Expected userinfo rejected, got: {errors2}"
+
+
+def test_url_validation_lookalike_hosts_rejected():
+    # Suffix lookalike attack
+    record = get_base_valid_record()
+    record["official_source_url"] = "https://github.com.evil.com/example-org/repo"
+    errors = validate_catalog_data([record])
+    assert any("deceptive_source_host_rejected" in e for e in errors), f"Expected deceptive host error, got: {errors}"
+
+    # Prefix lookalike attack
+    record2 = get_base_valid_record()
+    record2["official_source_url"] = "https://evil-github.com/example-org/repo"
+    errors2 = validate_catalog_data([record2])
+    assert any("deceptive_source_host_rejected" in e for e in errors2), f"Expected deceptive host error, got: {errors2}"
+
+    # Raw content host lookalike
+    record3 = get_base_valid_record()
+    record3["official_source_url"] = "https://raw.githubusercontent.com.attacker.com/payload"
+    errors3 = validate_catalog_data([record3])
+    assert any("deceptive_source_host_rejected" in e for e in errors3), f"Expected deceptive host error, got: {errors3}"
+
+
+def test_url_validation_hostnames_in_path_or_query_not_repo():
+    # URL has github.com in path or query, but host is something else
+    assert not is_repository_source("https://example.com/github.com/repo")
+    assert not is_repository_source("https://example.com/search?q=github.com")
+    assert not is_repository_source("https://example.com#github.com")
+
+    # Legitimate repository hosts
+    assert is_repository_source("https://github.com/example-org/repo")
+    assert is_repository_source("https://gitlab.com/example-org/repo")
+    assert is_repository_source("https://sub.github.com/example-org/repo")
+
+
+def test_url_validation_backslash_authority_rejected():
+    record = get_base_valid_record()
+    record["official_source_url"] = "https://evil.com\\github.com/repo"
+    errors = validate_catalog_data([record])
+    assert any("backslash in authority prohibited" in e for e in errors), f"Expected backslash error, got: {errors}"
+
+
+def test_url_validation_invalid_ports_and_host_labels():
+    record = get_base_valid_record()
+    record["official_source_url"] = "https://github.com:70000/repo"
+    errors = validate_catalog_data([record])
+    assert any("invalid port number" in e for e in errors), f"Expected invalid port error, got: {errors}"
+
+    record2 = get_base_valid_record()
+    record2["official_source_url"] = "https://github.com:badport/repo"
+    errors2 = validate_catalog_data([record2])
+    assert any("invalid port number" in e for e in errors2), f"Expected invalid port error, got: {errors2}"
+
+    record3 = get_base_valid_record()
+    record3["official_source_url"] = "https://%67%69%74%68%75%62.com/repo"
+    errors3 = validate_catalog_data([record3])
+    assert any("invalid characters in hostname" in e for e in errors3), f"Expected invalid chars error, got: {errors3}"
+
+
+def test_url_validation_case_normalization():
+    record = get_base_valid_record()
+    record["official_source_url"] = "HTTPS://GITHUB.COM/EXAMPLE-ORG/VALID_CANDIDATE"
+    errors = validate_catalog_data([record])
+    assert errors == [], f"Expected case-normalized URL to pass, got: {errors}"
+
+    record2 = get_base_valid_record()
+    record2["official_source_url"] = "HTTPS://RAW.GITHUBUSERCONTENT.COM/malicious/repo/payload.py"
+    errors2 = validate_catalog_data([record2])
+    assert any("raw_payload_url_rejected" in e for e in errors2), f"Expected raw payload rejection, got: {errors2}"
+
+
+def test_url_validation_raw_content_paths_and_hosts():
+    # GitHub /raw/ path
+    record = get_base_valid_record()
+    record["official_source_url"] = "https://github.com/example-org/repo/raw/main/exploit.py"
+    errors = validate_catalog_data([record])
+    assert any("raw_payload_url_rejected" in e for e in errors), f"Expected raw path rejection, got: {errors}"
+
+    # GitLab /-/raw/ path
+    record2 = get_base_valid_record()
+    record2["official_source_url"] = "https://gitlab.com/example-org/repo/-/raw/main/exploit.py"
+    errors2 = validate_catalog_data([record2])
+    assert any("raw_payload_url_rejected" in e for e in errors2), f"Expected gitlab raw path rejection, got: {errors2}"
+
+    # Gist raw host
+    record3 = get_base_valid_record()
+    record3["official_source_url"] = "https://gist.githubusercontent.com/user/12345/raw/script.sh"
+    errors3 = validate_catalog_data([record3])
+    assert any("raw_payload_url_rejected" in e for e in errors3), f"Expected gist raw host rejection, got: {errors3}"
+
+    # raw_payload in query or path
+    record4 = get_base_valid_record()
+    record4["official_source_url"] = "https://example.com/api/v1?fetch=raw_payload"
+    errors4 = validate_catalog_data([record4])
+    assert any("raw_payload_url_rejected" in e for e in errors4), f"Expected query raw_payload rejection, got: {errors4}"
+
+
+def test_url_validation_error_sanitization_no_token_echo():
+    # Sensitive query parameters stripped from error
+    sensitive_value = "credential_marker_9876543210"
+    record = get_base_valid_record()
+    record["official_source_url"] = f"https://raw.githubusercontent.com/org/repo/file?auth_signature={sensitive_value}"
+    errors = validate_catalog_data([record])
+    assert any("raw_payload_url_rejected" in e for e in errors)
+    for err in errors:
+        assert sensitive_value not in err, f"Sensitive query parameter echoed in error: {err}"
+        assert "?auth_signature=" not in err, f"Query string echoed in error: {err}"
+
+    # sanitize_url_for_error direct unit test
+    sanitized = sanitize_url_for_error("https://usr:pass@example.com/path?sig=confidential_data#section")
+    assert "pass" not in sanitized
+    assert "confidential_data" not in sanitized
+    assert "?sig" not in sanitized
+    assert "#section" not in sanitized
+
+
+def test_url_validation_license_url_enforcement():
+    # Lookalike host in license URL
+    record = get_base_valid_record()
+    record["license_or_terms_evidence_url"] = "https://github.com.attacker.com/LICENSE"
+    errors = validate_catalog_data([record])
+    assert any("deceptive_source_host_rejected" in e for e in errors), f"Expected license deceptive host error, got: {errors}"
+
+    # None or N/A allowed
+    record2 = get_base_valid_record()
+    record2["license_or_terms_evidence_url"] = "None"
+    errors2 = validate_catalog_data([record2])
+    assert not any("unsupported_source_url_scheme" in e for e in errors2), f"Unexpected URL error on 'None', got: {errors2}"
+
+
+def test_url_validation_file_scheme_traversal_rejection():
+    cid = "test_file_traversal"
+    errors = validate_source_url(cid, "file:///safe/dir/doc.txt")
+    assert errors == [], f"Expected safe file URL to pass, got: {errors}"
+
+    errors_traversal = validate_source_url(cid, "file:///safe/dir/../../etc/passwd")
+    assert any("directory traversal in file URL prohibited" in e for e in errors_traversal), f"Expected traversal error, got: {errors_traversal}"
+
+
+def test_url_validation_unsupported_schemes_rejected():
+    cid = "test_unsupported_scheme"
+    for bad_url in ("ftp://example.com/repo", "javascript:alert(1)", "data:text/html,payload"):
+        errors = validate_source_url(cid, bad_url)
+        assert any("unsupported_source_url_scheme" in e for e in errors), f"Expected unsupported scheme for {bad_url}, got: {errors}"
