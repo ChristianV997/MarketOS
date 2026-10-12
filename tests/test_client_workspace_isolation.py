@@ -477,6 +477,88 @@ def test_leakage_check_rejects_secret_marker():
     assert checks[0].severity == "critical"
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "/etc/passwd",
+        "C:" + chr(92) + "Users" + chr(92) + "synthetic" + chr(92) + "notes.txt",
+        "file://synthetic/private/path",
+        chr(92) * 2 + "synthetic-server" + chr(92) + "share" + chr(92) + "report.txt",
+        "folder" + chr(92) + "report.txt",
+        "prefix:folder" + chr(92) + "report.txt",
+        "assets/cache" + chr(92) + "manifest.json",
+    ],
+)
+def test_filesystem_path_detector_preserves_sensitive_marker_coverage(value: str):
+    from evaluation.trustos.client_workspace_isolation import _contains_filesystem_path
+
+    assert _contains_filesystem_path(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "ordinary client-safe summary",
+        "https://example.invalid/path/to/page",
+        "version 1/2 remains ordinary prose",
+        "relative/path without a boundary remains text",
+        "safe_value=ordinary",
+    ],
+)
+def test_filesystem_path_detector_allows_benign_values(value: str):
+    from evaluation.trustos.client_workspace_isolation import _contains_filesystem_path
+
+    assert _contains_filesystem_path(value) is False
+
+
+def test_filesystem_path_check_remains_nested_and_fails_closed():
+    payload = {"summary": {"details": ["C:" + chr(92) + "Users" + chr(92) + "synthetic" + chr(92) + "private.txt"]}}
+
+    findings = check_workspace_leakage(payload)
+
+    assert len(findings) == 1
+    assert findings[0].field_path == "summary.details[0]"
+    assert findings[0].status == "hard_block"
+    assert "synthetic" not in json.dumps(findings[0].to_dict())
+
+
+def test_filesystem_path_export_rejection_keeps_fixed_error_and_redaction(export_context):
+    workspace, registry = export_context
+    payload = {"next_actions": ["assets/cache" + chr(92) + "manifest.json"]}
+
+    with pytest.raises(ClientWorkspaceExportError) as error:
+        export_client_evidence(
+            workspace=workspace,
+            registry=registry,
+            provenance="fixture://synthetic/export",
+            evidence_state="present",
+            payload=payload,
+        )
+
+    assert error.value.code == "content_rejected"
+    assert "synthetic" not in str(error.value)
+
+
+def test_repeated_near_match_path_inputs_finish_within_a_subprocess_bound():
+    code = """
+import json
+from evaluation.trustos.client_workspace_isolation import check_workspace_leakage
+sizes = (2_000, 4_000, 8_000, 16_000)
+results = [bool(check_workspace_leakage({'summary': '(!' * size})) for size in sizes]
+print(json.dumps(results))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=15,
+    )
+
+    assert json.loads(result.stdout) == [False, False, False, False]
+
+
 @pytest.mark.parametrize("candidate_id", ("desk-clamp-lamp", "desk-clamp-lamp-amazon-mirror"))
 def test_leakage_check_accepts_hyphenated_candidate_identifier(candidate_id: str):
     assert check_workspace_leakage({"top_candidate_id": candidate_id}) == ()
