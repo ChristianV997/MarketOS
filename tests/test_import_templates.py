@@ -13,6 +13,7 @@ from backend.discovery.import_templates import (
     TemplateError,
     create_import_template,
     create_templates_for_plan,
+    kit_fields,
 )
 
 
@@ -44,7 +45,7 @@ def test_field_contract_matches_the_importer_parsers():
 
 @pytest.mark.parametrize("parser", sorted(_FIELDS))
 def test_every_parser_contract_generates_header_manifest_and_placeholder_record(workdir, parser):
-    required, optional = _FIELDS[parser]
+    required, optional = kit_fields(parser)
     item = create_import_template(parser)
     header = Path(item.file_path).read_text(encoding="utf-8-sig").splitlines()[0].split(",")
     assert header == required + optional

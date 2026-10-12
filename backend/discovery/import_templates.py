@@ -22,6 +22,16 @@ PLACEHOLDER_VALUE = "PLACEHOLDER_TEST_VALUE"
 PLACEHOLDER_SIGNAL = "trend_proxy"
 # Pass to normalize_imported_evidence so starter-kit rows stay labelled synthetic; the importer reads only this, not the manifest.
 IMPORT_PROVENANCE = MappingProxyType({"type": "synthetic_fixture", "not_real_market_data": True})
+# Optional columns a kit leaves out. The shared parser takes identity from category before entity_name
+# (csv_ingestion._parse, owned by the CSV-integrity lane), so a generic kit must not offer a category column.
+_OMITTED_OPTIONAL_FIELDS = {"generic_market_csv": ("category",)}
+
+
+def kit_fields(parser_type: str) -> tuple[list[str], list[str]]:
+    """Required and optional columns a generated kit advertises: the importer contract minus omitted optional columns."""
+    required, optional = _FIELDS[parser_type]
+    omitted = _OMITTED_OPTIONAL_FIELDS.get(parser_type, ())
+    return list(required), [name for name in optional if name not in omitted]
 
 
 class TemplateError(ValueError):
@@ -70,7 +80,7 @@ def _resolve_output_dir(output_dir: str) -> Path:
 
 
 def _placeholder_row(parser_type: str) -> dict[str, str]:
-    required, optional = _FIELDS[parser_type]
+    required, optional = kit_fields(parser_type)
     row = {name: PLACEHOLDER_VALUE for name in required + optional}
     row[required[0]] = PLACEHOLDER_CATEGORY
     if "signal_type" in row:
@@ -79,7 +89,7 @@ def _placeholder_row(parser_type: str) -> dict[str, str]:
 
 
 def _csv_bytes(parser_type: str) -> bytes:
-    required, optional = _FIELDS[parser_type]
+    required, optional = kit_fields(parser_type)
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=required + optional)
     writer.writeheader()
@@ -88,7 +98,7 @@ def _csv_bytes(parser_type: str) -> bytes:
 
 
 def _manifest_bytes(parser_type: str, records: int) -> bytes:
-    required, optional = _FIELDS[parser_type]
+    required, optional = kit_fields(parser_type)
     manifest = {
         "schema": MANIFEST_SCHEMA,
         "parser_type": parser_type,
@@ -104,7 +114,7 @@ def _manifest_bytes(parser_type: str, records: int) -> bytes:
 
 def _round_trip(out_dir: Path, parser_type: str, csv_bytes: bytes) -> int:
     """Parse a staged copy with the importer's own parser and refuse any template that would not parse as advertised."""
-    required, optional = _FIELDS[parser_type]
+    required, optional = kit_fields(parser_type)
     staged = out_dir / f".{parser_type}.{uuid.uuid4().hex}.staged.csv"
     try:
         with staged.open("xb") as handle:
@@ -160,7 +170,7 @@ def _publish(target: Path, content: bytes, *, state: str, overwrite: bool) -> No
 
 
 def _template(parser_type: str, csv_path: Path, source_name: str | None, *, records: int | None, status: str) -> ImportTemplate:
-    required, optional = _FIELDS[parser_type]
+    required, optional = kit_fields(parser_type)
     return ImportTemplate(
         "template_" + uuid.uuid5(uuid.NAMESPACE_URL, str(csv_path)).hex[:16],
         parser_type,
@@ -177,6 +187,7 @@ def _template(parser_type: str, csv_path: Path, source_name: str | None, *, reco
             "placeholder_only": True,
             "market_evidence": False,
             "manifest_file": f"{parser_type}.manifest.json",
+            "omitted_optional_fields": list(_OMITTED_OPTIONAL_FIELDS.get(parser_type, ())),
             "import_provenance": dict(IMPORT_PROVENANCE),
             "round_trip_records": records,
             "publish": status,

@@ -10,7 +10,7 @@ import pytest
 
 from backend.discovery.evidence_normalizer import normalize_imported_evidence
 from backend.discovery.import_recommendation import _FIELDS
-from backend.discovery.import_templates import IMPORT_PROVENANCE, create_import_template
+from backend.discovery.import_templates import IMPORT_PROVENANCE, create_import_template, kit_fields
 
 SUPPLIER_ROW = {
     "category": "Kitchen",
@@ -130,6 +130,46 @@ def test_reordered_and_unknown_columns_import_the_same_records(workdir):
     shuffled_result = normalize_imported_evidence(shuffled, "supplier_catalog_csv", "synthetic_fixture", provenance=dict(IMPORT_PROVENANCE))
     assert _shape(shuffled_result.records) == _shape(plain_result.records)
     assert "analyst scratch" not in json.dumps([record.to_dict() for record in shuffled_result.records], default=str)
+
+
+GENERIC_KIT_COLUMNS = [name for names in kit_fields("generic_market_csv") for name in names]
+
+
+def _header(path):
+    return Path(path).read_text(encoding="utf-8-sig").splitlines()[0].split(",")
+
+
+def test_generic_kit_offers_no_category_column_so_identity_is_entity_name(workdir):
+    # The shared parser resolves identity from category before entity_name, so a kit that offers category invites an override.
+    item = create_import_template("generic_market_csv")
+    assert _header(item.file_path) == ["entity_type", "entity_name", "signal_type", "value", "weight", "confidence", "metadata_json"]
+    assert item.metadata["omitted_optional_fields"] == ["category"]
+
+
+def test_filled_generic_kit_keeps_entity_name_as_identity(workdir):
+    row = {"entity_type": "product", "entity_name": "Synthetic Widget", "signal_type": "demand_proxy", "value": "0.5", "weight": "", "confidence": "", "metadata_json": ""}
+    path = _write_csv(workdir, "generic_filled.csv", GENERIC_KIT_COLUMNS, [row])
+    result = normalize_imported_evidence(path, "generic_market_csv", "synthetic_fixture", provenance=dict(IMPORT_PROVENANCE))
+    assert result.import_job.status == "completed"
+    assert [(record.entity_type, record.entity_name, record.signal_type, record.value) for record in result.records] == [("product", "Synthetic Widget", "demand_proxy", 0.5)]
+
+
+FILLED_WITH_CATEGORY = {"entity_type": "product", "entity_name": "Synthetic Widget", "signal_type": "demand_proxy", "value": "0.5", "weight": "", "confidence": "", "metadata_json": "", "category": "Kitchen"}
+
+
+def test_generic_csv_with_a_filled_category_column_still_imports_the_row(workdir):
+    # Precondition for the identity xfail below: the row imports, so that test cannot pass or fail for an unrelated reason.
+    path = _write_csv(workdir, "generic_with_category.csv", GENERIC_KIT_COLUMNS + ["category"], [FILLED_WITH_CATEGORY])
+    result = normalize_imported_evidence(path, "generic_market_csv", "synthetic_fixture", provenance=dict(IMPORT_PROVENANCE))
+    assert result.import_job.status == "completed"
+    assert len(result.records) == 1
+
+
+@pytest.mark.xfail(strict=True, reason="csv_ingestion._parse takes identity from category before entity_name; the parser is owned by the CSV-integrity lane (#448)")
+def test_generic_csv_with_a_filled_category_column_keeps_entity_name(workdir):
+    path = _write_csv(workdir, "generic_with_category.csv", GENERIC_KIT_COLUMNS + ["category"], [FILLED_WITH_CATEGORY])
+    result = normalize_imported_evidence(path, "generic_market_csv", "synthetic_fixture", provenance=dict(IMPORT_PROVENANCE))
+    assert [record.entity_name for record in result.records] == ["Synthetic Widget"]
 
 
 def test_filled_google_trends_row_keeps_its_value(workdir):
