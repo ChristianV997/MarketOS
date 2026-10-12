@@ -53,8 +53,42 @@ const tagsOf = (html, name, filter = () => true) => all(html, new RegExp(`<${nam
 // HTML attribute names are case-insensitive; React serializes some in camelCase (autoComplete, inputMode).
 const attr = (tag, name) => new RegExp(`\\s${name}="([^"]*)"`, "i").exec(tag)?.[1] ?? null;
 const has = (tag, name) => new RegExp(`\\s${name}(=""|=|\\s|/?>)`, "i").test(tag);
-const text = (html) =>
-  html.replace(/<[^>]+>/g, " ").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ");
+// Decode each HTML entity once. A second pass would treat the ampersand
+// produced by amp as the start of another entity and misread safe text as a tag.
+const text = (html) => {
+  const stripped = html.replace(/<[^>]+>/g, " ");
+  let out = "";
+  let i = 0;
+  while (i < stripped.length) {
+    const rest = stripped.slice(i);
+    if (rest.startsWith("&amp;")) { out += "&"; i += 5; continue; }
+    if (rest.startsWith("&lt;")) { out += "<"; i += 4; continue; }
+    if (rest.startsWith("&gt;")) { out += ">"; i += 4; continue; }
+    if (rest.startsWith("&quot;")) { out += "\""; i += 6; continue; }
+    if (rest.startsWith("&#x27;")) { out += "'"; i += 6; continue; }
+    if (rest.startsWith("&#39;")) { out += "'"; i += 5; continue; }
+    out += stripped[i];
+    i += 1;
+  }
+  return out.replace(/\s+/g, " ");
+};
+const escapedText = (value) => {
+  let out = "";
+  for (const ch of value) {
+    if (ch === "&") out += "&amp;";
+    else if (ch === "<") out += "&lt;";
+    else if (ch === ">") out += "&gt;";
+    else if (ch === "\"") out += "&quot;";
+    else if (ch === "'") out += "&#x27;";
+    else out += ch;
+  }
+  return out;
+};
+const assertSerializedAsText = (html, value) => {
+  const open = value.indexOf("<");
+  if (open >= 0) assert.equal(html.includes(value.slice(open)), false, "entered markup must not be serialized as a tag");
+  assert.equal(html.includes(escapedText(value)), true, "the field must be serialized as text, not markup");
+};
 const ids = (html) => all(html, /\sid="([^"]+)"/g).map((m) => /id="([^"]+)"/.exec(m)[1]);
 
 // ------------------------------------------------------------ first render (demo)
@@ -333,7 +367,7 @@ test("review with missing information lists each item with a link and keeps Conf
   assert.match(text(html), /Missing or invalid information \(4\)/);
   assert.match(html, /data-missing-info="4"/);
   for (const message of ["Choose the business type that fits best.", "Add at least one entry for segments.", "Add at least one target market.", "Add at least one product or service."]) {
-    assert.match(text(html), new RegExp(message.replace(/[.]/g, "\\.")));
+    assert.ok(text(html).includes(message), message);
   }
   assert.match(html, /href="#cp-businessType"/);
   const section = tagsOf(html, "section", (t) => attr(t, "id") === "cp-error-summary")[0];
@@ -638,6 +672,45 @@ test("a failed save's visible duplicate is hidden from assistive technology; the
   assert.match(html, /data-save-error="conflict"[^>]*aria-hidden="true"/);
   const state = wizardReducer(initialWizardState({ draft: productDraft(), step: "review" }), { type: "saveFailed", code: "conflict" });
   assert.match(state.announcement, /changed elsewhere.*Your entries are still here/);
+});
+
+test("markup-like profile fields stay text in the control and the review", () => {
+  const company = "Acme <b>bold</b> & \"Q\" O'Hara";
+  const amp = "&";
+  const entity = `Literal ${amp}lt;safe${amp}gt;`;
+  const slash = String.raw`C:\\demo\\notes`;
+  const draft = productDraft({
+    companyName: company,
+    categories: [entity],
+    offerings: [offering({ name: slash, availability: "in_stock", quantity: "5" })],
+  });
+  const review = asStep("review", draft);
+  const companyStep = asStep("company", draft);
+  const audience = asStep("audience", draft);
+  const offerings = asStep("offerings", draft);
+  const companyInput = tagsOf(companyStep, "input", (t) => attr(t, "name") === "companyName")[0];
+  const nameInput = tagsOf(offerings, "input", (t) => attr(t, "name") === "offerings.0.name")[0];
+  assertSerializedAsText(review, company);
+  assertSerializedAsText(companyStep, company);
+  assertSerializedAsText(audience, entity);
+  assertSerializedAsText(offerings, slash);
+  assert.equal(attr(companyInput, "value"), escapedText(company));
+  assert.equal(attr(nameInput, "value"), escapedText(slash));
+  assert.equal(review.includes("<b>"), false);
+  assert.equal(review.includes("<script"), false);
+  assert.equal(companyStep.includes("<b>"), false);
+  assert.equal(audience.includes("<safe>"), false);
+  assert.equal(text(review).includes(company), true);
+  assert.equal(review.includes(`${amp}amp;lt;safe${amp}amp;gt;`), true);
+  assert.equal(text(review).includes("<safe>"), false, "a literal entity must not become a tag");
+  assert.equal(text(review).includes(entity), true);
+  assert.equal(text(audience).includes(entity), true);
+  assert.equal(review.includes(slash), true);
+  assert.equal(text(review).includes(slash), true);
+  assert.equal(text(asStep("review", productDraft())).includes("Example Demo Co"), true);
+  const visible = text(asStep("review", { ...EMPTY_DRAFT, companyName: "Example Demo Co" }));
+  const exact = "Choose the business type that fits best.";
+  assert.equal(visible.includes(exact), true);
 });
 
 test("accessibility details: focusable page heading, 3:1 control borders, required radios, no notes overflowing the gutter", async () => {
