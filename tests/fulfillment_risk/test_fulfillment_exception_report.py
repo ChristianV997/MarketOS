@@ -239,6 +239,63 @@ def test_tracking_gap_and_missing_route_are_blockers_not_actions():
     assert missing["attention_required"] is True
 
 
+def _all_observed_scenario(captured_at: str, valid_until: str = ""):
+    base = build_named_scenario("successful_direct_shipment")
+    observed = EvidenceRef(
+        "observed-fresh",
+        source_type="manual",
+        extraction_method="manual",
+        evidence_state="observed",
+        captured_at=captured_at,
+        valid_until=valid_until,
+        origin="CN",
+        destination="MX",
+    )
+    shipping = replace(base.assumptions.supplier_shipping, evidence_state="observed", evidence_ref=observed)
+    return replace(
+        base,
+        scenario_id="observed-on-simulated-run",
+        order_id="order-observed-simulated",
+        evidence_state="observed",
+        evidence_refs=(observed,),
+        lane=replace(base.lane, evidence_refs=(observed,)),
+        price=replace(base.price, evidence_state="observed", evidence_ref=observed),
+        product_cost=replace(base.product_cost, evidence_state="observed", evidence_ref=observed),
+        assumptions=replace(base.assumptions, evidence_refs=(observed,), supplier_shipping=shipping),
+        responsibilities=replace(base.responsibilities, evidence_state="observed", evidence_refs=(observed,)),
+    )
+
+
+def test_observed_refs_do_not_clear_a_simulated_lifecycle():
+    scenario = _all_observed_scenario("2026-03-31T12:00:00+00:00")
+    document = review_scenario(scenario, reviewed_at=REVIEWED, adapter=FixtureFulfillmentAdapter.complete())
+    _assert_no_action(document)
+    assert document["lifecycle_status"] == "simulated"
+    assert document["evidence"]["basis"] == "observed"
+    assert document["evidence"]["freshness"] == "fresh"
+    assert "fixture" not in document["evidence"]["states"]
+    assert document["attention_required"] is True
+    assert document["next_safe_review_step"] == "treat_as_fixture_not_observed"
+    assert document["next_safe_review_step"] != "no_human_exception_review_required"
+    assert "999" not in json.dumps(document)
+
+
+def test_naive_evidence_timestamps_are_not_labeled_fresh():
+    captured = _all_observed_scenario("2026-03-31T12:00:00")
+    captured_doc = review_scenario(captured, reviewed_at=REVIEWED, adapter=FixtureFulfillmentAdapter.complete())
+    _assert_no_action(captured_doc)
+    assert captured_doc["evidence"]["freshness"] == "freshness_unknown"
+    assert captured_doc["evidence"]["freshness"] != "fresh"
+    assert captured_doc["attention_required"] is True
+    assert captured_doc["next_safe_review_step"] == "collect_sanitized_evidence_before_any_decision"
+
+    expiry = _all_observed_scenario("2026-03-31T12:00:00+00:00", valid_until="2026-05-01T00:00:00")
+    expiry_doc = review_scenario(expiry, reviewed_at=REVIEWED, adapter=FixtureFulfillmentAdapter.complete())
+    assert expiry_doc["evidence"]["freshness"] == "freshness_unknown"
+    assert expiry_doc["attention_required"] is True
+    assert expiry_doc["financial_fact"] is False
+
+
 def test_stale_observed_evidence_is_not_a_fresh_financial_fact():
     base = build_named_scenario("successful_direct_shipment")
     stale = EvidenceRef(

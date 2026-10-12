@@ -100,7 +100,7 @@ def _optional_instant(value: str) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        return None
     return parsed.astimezone(timezone.utc)
 
 
@@ -416,6 +416,10 @@ def _decide(
         step = "treat_as_fixture_not_observed"
         attention_required = False
     elif basis in {"simulated", "mixed"}:
+        step = "treat_as_fixture_not_observed"
+        attention_required = True
+    elif lifecycle_status == "simulated":
+        notes.append("lifecycle_run_simulated")
         step = "treat_as_fixture_not_observed"
         attention_required = True
     else:
