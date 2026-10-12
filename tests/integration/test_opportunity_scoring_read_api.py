@@ -36,11 +36,11 @@ def test_opportunity_scoring_route_respects_rate_limit(monkeypatch):
     from backend.security.rate_limit import RateLimitResult
 
     monkeypatch.setattr(
-        canonical_events, "check_rate_limit",
+        "api.routes.event_access.check_rate_limit",
         lambda policy, key: RateLimitResult(allowed=False, policy="event_read", limit=1, remaining=0, retry_after_seconds=5),
     )
     with pytest.raises(HTTPException) as refused:
-        canonical_events._admit_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.22")))
+        canonical_events.admit_event_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.22")))
     assert refused.value.status_code == 429
 
 
@@ -61,11 +61,11 @@ def test_opportunity_rankings_route_respects_rate_limit(monkeypatch):
     from backend.security.rate_limit import RateLimitResult
 
     monkeypatch.setattr(
-        canonical_events, "check_rate_limit",
+        "api.routes.event_access.check_rate_limit",
         lambda policy, key: RateLimitResult(allowed=False, policy="event_read", limit=1, remaining=0, retry_after_seconds=5),
     )
     with pytest.raises(HTTPException) as refused:
-        canonical_events._admit_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.22")))
+        canonical_events.admit_event_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.22")))
     assert refused.value.status_code == 429
 
 

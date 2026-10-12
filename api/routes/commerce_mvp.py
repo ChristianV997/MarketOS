@@ -5,15 +5,19 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from api.routes.event_access import event_write_gate
 from backend.ecommerce.shopify_readonly.events import shopify_batch_events
 from backend.ecommerce.shopify_readonly.importer import import_shopify_readonly
 from backend.events.adapters.supabase_staging import build_supabase_staging_repository, explain_supabase_staging_readiness
 from backend.events.repository import JsonlEventRepository
 from backend.events.supabase_event_validation import validate_events_for_supabase
+from backend.identity.errors import WorkspaceAccessDenied
+from backend.identity.http import http_exception
+from backend.identity.workspaces import WorkspaceAccess
 from backend.mvp_commerce.public_run import run_commerce_mvp_from_public_rss
 from backend.security.rate_limit import check_rate_limit, public_run_policy
 
@@ -73,8 +77,15 @@ def _server_jsonl_path() -> Path | None:
 
 
 @router.post("/public-run")
-def public_run(request: PublicCommerceRunRequest, http_request: Request = None) -> dict:
-    """Run one bounded public RSS query after explicit server/operator gates."""
+def public_run(request: PublicCommerceRunRequest, http_request: Request = None, access: WorkspaceAccess = Depends(event_write_gate)) -> dict:
+    """Run one bounded public RSS query after explicit server/operator gates.
+
+    Operator-only: the verified principal's sole internal workspace is the only workspace the run may write to.
+    A body ``workspace_id`` that names another workspace is refused before any network or write.
+    """
+    if "workspace_id" in request.model_fields_set and request.workspace_id != access.workspace_id:
+        raise http_exception(WorkspaceAccessDenied())
+    request = request.model_copy(update={"workspace_id": access.workspace_id})
     if os.getenv("MARKETOS_PUBLIC_COMMERCE_RUNS", "0") != "1":
         return _blocked("MARKETOS_PUBLIC_COMMERCE_RUNS=1 is required on the server", request=request)
     if not request.allow_public_network:

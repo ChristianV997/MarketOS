@@ -11,25 +11,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from backend.events.query_models import EventQuery
 from backend.events.query_service import WorkspaceScopeError, bind_query_to_workspace, event_query_report, load_events_from_jsonl
 from backend.events.supabase_query_service import explain_supabase_readiness, query_supabase_canonical_events
+from api.routes.event_access import admit_event_read, event_read_gate
 from backend.identity.errors import WorkspaceAccessDenied
-from backend.identity.http import http_exception, require_workspace_permission
-from backend.identity.repository import OWNER_TYPE
-from backend.identity.roles import CANONICAL_EVENT_READ
+from backend.identity.http import http_exception
 from backend.identity.workspaces import WorkspaceAccess
-from backend.security.rate_limit import check_rate_limit, event_read_policy
 from backend.adapters.research.cj_readonly_api import explain_cj_read_only_readiness
 
-def _admit_read(request: Request) -> None:
-    """Throttle before identity: anonymous and denied requests count, so token checks are never free."""
-    key = getattr(getattr(request, "client", None), "host", None) or "direct"
-    decision = check_rate_limit(event_read_policy(), key)
-    if not decision.allowed:
-        raise HTTPException(429, detail={"status": "rate_limited", "retry_after_seconds": decision.retry_after_seconds, "read_only": True, "mutated": False}, headers={"Retry-After": str(decision.retry_after_seconds)})
-
-
-# Operator-only and workspace-bound. Unconfigured identity fails closed with 503 before any read.
-event_read_gate = require_workspace_permission(OWNER_TYPE, CANONICAL_EVENT_READ)
-router = APIRouter(prefix="/api/events", tags=["canonical-events"], dependencies=[Depends(_admit_read), Depends(event_read_gate)])
+# Operator-only and workspace-bound (see api/routes/event_access.py). Throttled before identity.
+router = APIRouter(prefix="/api/events", tags=["canonical-events"], dependencies=[Depends(admit_event_read), Depends(event_read_gate)])
 ROOT = Path(__file__).resolve().parents[2]; ARTIFACTS = (ROOT / "artifacts").resolve()
 # Operator JSONL bound: aligned with the workbench artifact window (1 MiB).
 MAX_JSONL_BYTES = 1_048_576
