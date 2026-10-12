@@ -241,3 +241,26 @@ def test_oversized_configured_file_is_refused_before_it_is_parsed(monkeypatch, j
     assert response.status_code == 200
     assert response.json()["status"] == "blocked"
     assert loads == []
+
+
+def test_a_configured_directory_is_refused_so_no_sibling_artifact_is_read(monkeypatch, artifacts, loads):
+    directory = artifacts / "bundle"
+    directory.mkdir()
+    (directory / "events.jsonl").write_text(
+        json.dumps(_event("evt_bound_1", BOUND, 1.0).to_dict()) + "\n", encoding="utf-8"
+    )
+    (directory / "validation_report.json").write_text(
+        json.dumps(
+            {"workspace_id": OTHER, "commerce_mvp_run": {"workspace_id": OTHER, "run_id": "run_foreign_synthetic"}}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MARKETOS_EVENT_READ_JSONL_PATH", str(directory))
+
+    response = TestClient(_app()).get("/api/evaluations", headers=OPERATOR)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "blocked"
+    assert loads == []
+    assert OTHER not in response.text
+    assert "run_foreign_synthetic" not in response.text

@@ -4,13 +4,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Request
 
-from backend.security.rate_limit import check_rate_limit, event_read_policy
+from api.routes.event_access import admit_event_read, event_read_gate
 from evaluation.commerce.readiness import build_from_paths
 
-router = APIRouter(prefix="/api/phase1", tags=["phase1-readiness"])
+# Derived from evaluation output: operator-only and throttled before identity (see api/routes/event_access.py).
+router = APIRouter(prefix="/api/phase1", tags=["phase1-readiness"], dependencies=[Depends(admit_event_read), Depends(event_read_gate)])
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS = (ROOT / "artifacts").resolve()
 
@@ -25,13 +25,9 @@ def _safe_artifact_path(name: str) -> str | None:
 
 @router.get("/readiness")
 def readiness(request: Request = None):
-    key = getattr(getattr(request, "client", None), "host", None) or "direct"
-    decision = check_rate_limit(event_read_policy(), key)
-    if not decision.allowed:
-        return JSONResponse({"status": "rate_limited", "retry_after_seconds": decision.retry_after_seconds, "read_only": True, "mutated": False}, status_code=429, headers={"Retry-After": str(decision.retry_after_seconds)})
     # Artifact locations are operator-configured server-side. Browser callers
     # cannot choose a path and no report is generated as a side effect.
-    return build_from_paths(
+    report = build_from_paths(
         validation_artifact=_safe_artifact_path("MARKETOS_PHASE1_VALIDATION_ARTIFACT"),
         evaluation_report=_safe_artifact_path("MARKETOS_PHASE1_EVALUATION_REPORT"),
         comparison_report=_safe_artifact_path("MARKETOS_PHASE1_COMPARISON_REPORT"),
@@ -39,6 +35,9 @@ def readiness(request: Request = None):
         benchmark_report=_safe_artifact_path("MARKETOS_PHASE1_BENCHMARK_REPORT"),
         public_market_benchmark_report=_safe_artifact_path("MARKETOS_PHASE1_PUBLIC_MARKET_BENCHMARK_REPORT"),
     ).to_dict()
+    # Absolute server paths stay on the server: the response names each artifact, not where it lives.
+    report["source_artifacts"] = {name: Path(value).name for name, value in report.get("source_artifacts", {}).items()}
+    return report
 
 
 __all__ = ["router"]

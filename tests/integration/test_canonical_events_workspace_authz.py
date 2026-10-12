@@ -399,3 +399,18 @@ def test_every_read_view_queries_only_the_bound_workspace(monkeypatch, path):
 
     assert response.status_code == 200
     assert [query.workspace_id for query in queries] == [BOUND_WS]
+
+
+@pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer tok-viewer"}])
+def test_denied_callers_never_reach_the_supabase_source(monkeypatch, jsonl, headers):
+    reached = []
+    monkeypatch.setattr(
+        canonical_events,
+        "query_supabase_canonical_events",
+        lambda query: reached.append(query) or {"timeline": {"events": []}},
+    )
+
+    response = TestClient(_app()).get("/api/events", params={"source": "supabase_staging"}, headers=headers)
+
+    assert response.status_code in {401, 403}
+    assert reached == []

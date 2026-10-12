@@ -2,7 +2,9 @@
 
 MarketOS can run one operator-controlled Commerce MVP packet from the public
 Google News RSS search feed. This is the first Phase 1 network behavior because
-it is a bounded, no-auth, GET-only observation path. It does not prove demand,
+it is a bounded, GET-only observation path that makes outbound requests. The
+server route that triggers it is operator-only (see below); the outbound fetch
+is the only network effect and does not require a caller credential. It does not prove demand,
 sales, profitability, ROAS, supplier viability, conversion, or launch
 readiness.
 

@@ -44,8 +44,12 @@ Every `/api/events` route is operator-only and workspace-bound through
 `canonical_event:read` (shared dependencies in `api/routes/event_access.py`).
 The other routes that read or write canonical event data use the same gate:
 `/api/evaluations*` (bound workspace only), `POST /api/commerce-mvp/public-run`
-(`canonical_event:write`, bound workspace only) and `/api/orchestration/workflows*`
-(operator-only; the workflow log is not workspace-bound). Identity comes only from the verified bearer token and
+(`canonical_event:write`, bound workspace only), `/api/workflows*` (the workflow
+registry, bound workspace only; a foreign workflow answers as missing), the
+phase1 readers `/api/phase1/readiness`, `/api/phase1/benchmark-matrix` and
+`/api/phase1/public-market-benchmark` (operator-only; artifact locations are
+reduced to names), and `/orchestration/workflows*` (operator-only; the workflow
+log is not workspace-bound). Identity comes only from the verified bearer token and
 the principal's stored membership; the query, headers and body cannot grant
 access.
 
@@ -68,7 +72,7 @@ access.
   payload or secret.
 
 The readiness routes on these surfaces were open before this change and are now
-operator-only. `/api/orchestration/health` carries no event data and stays open.
+operator-only. `/orchestration/health` carries no event data and stays open.
 
 Not yet wired: the workflow log is operator-wide rather than bound to a workspace,
 because its records carry a workspace only by convention. Binding it is the

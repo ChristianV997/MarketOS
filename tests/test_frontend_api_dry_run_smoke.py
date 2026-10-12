@@ -147,7 +147,7 @@ def test_ready_endpoint_distinguishes_runtime_initialization(smoke_client):
 
 
 def test_phase1_readiness_is_read_only(smoke_client):
-    response = smoke_client.get("/api/phase1/readiness")
+    response = smoke_client.get("/api/phase1/readiness", headers=SMOKE_OPERATOR_HEADERS)
     assert response.status_code == 200
     payload = response.json()
     assert payload["read_only"] is True

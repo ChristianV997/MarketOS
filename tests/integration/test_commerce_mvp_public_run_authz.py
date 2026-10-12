@@ -210,3 +210,37 @@ def test_denied_runs_are_throttled_before_identity(runs, monkeypatch):
     assert throttled.headers.get("retry-after")
     assert verified == ["tok-viewer", "tok-viewer"]
     assert runs == []
+
+
+def test_explicit_default_workspace_is_refused_for_an_operator_bound_elsewhere(runs):
+    """Legacy callers that spell out the default workspace are refused once the operator is bound to another one."""
+    response = TestClient(_app()).post(
+        "/api/commerce-mvp/public-run",
+        json={**BODY, "workspace_id": "commerce-mvp-public"},
+        headers=OPERATOR,
+    )
+
+    assert response.status_code == 403
+    assert runs == []
+
+
+def test_supabase_staging_write_carries_only_the_bound_workspace(runs, monkeypatch):
+    written: list = []
+
+    class RecordingRepository:
+        def append_many(self, events):
+            written.extend(events)
+
+    monkeypatch.setattr(commerce_mvp, "explain_supabase_staging_readiness", lambda: {"configured": True})
+    monkeypatch.setattr(commerce_mvp, "build_supabase_staging_repository", lambda: RecordingRepository())
+    monkeypatch.setattr(commerce_mvp, "validate_events_for_supabase", lambda events: {"valid": True})
+
+    response = TestClient(_app()).post(
+        "/api/commerce-mvp/public-run",
+        json={**BODY, "event_target": "supabase_staging"},
+        headers=OPERATOR,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["write_targets"] == ["supabase_staging"]
+    assert written and {event.workspace_id for event in written} == {BOUND}

@@ -34,9 +34,12 @@ def _bound_input(loaded: EvaluationInput, access: WorkspaceAccess) -> Evaluation
     return replace(loaded, events=events, artifact={})
 
 
-def _oversized(path: Path | None) -> bool:
-    """A configured file beyond the shared read bound is refused before it is parsed, as the canonical routes do."""
-    return path is not None and path.is_file() and path.stat().st_size > MAX_EVENT_JSONL_BYTES
+def _refused(path: Path | None) -> bool:
+    """A directory is never read as an event source (it would bring a sibling validation artifact), and a file beyond
+    the shared read bound is refused before it is parsed, as the canonical routes do."""
+    if path is None or not path.exists():
+        return False
+    return path.is_dir() or path.stat().st_size > MAX_EVENT_JSONL_BYTES
 
 
 def _unconfigured(message: str) -> dict:
@@ -51,8 +54,8 @@ def evaluation(access: WorkspaceAccess = Depends(event_read_gate)):
     path = _safe_configured_path("MARKETOS_EVENT_READ_JSONL_PATH")
     if path is None:
         return _unconfigured("MARKETOS_EVENT_READ_JSONL_PATH must point beneath artifacts/")
-    if _oversized(path):
-        return _unconfigured("MARKETOS_EVENT_READ_JSONL_PATH exceeds the bounded evaluation read size")
+    if _refused(path):
+        return _unconfigured("MARKETOS_EVENT_READ_JSONL_PATH must name a file within the bounded evaluation read size")
     report = evaluate_input(_bound_input(load_evaluation_input(path, source="jsonl"), access))
     return report.to_dict()
 
@@ -63,8 +66,8 @@ def evaluation_compare(access: WorkspaceAccess = Depends(event_read_gate)):
     current_path = _safe_configured_path("MARKETOS_EVALUATION_CURRENT_JSONL_PATH")
     if baseline_path is None or current_path is None:
         return _unconfigured("configured baseline and current evaluation JSONL paths are required beneath artifacts/")
-    if _oversized(baseline_path) or _oversized(current_path):
-        return _unconfigured("configured evaluation JSONL paths exceed the bounded evaluation read size")
+    if _refused(baseline_path) or _refused(current_path):
+        return _unconfigured("configured evaluation JSONL paths must name files within the bounded evaluation read size")
     baseline = evaluate_input(_bound_input(load_evaluation_input(baseline_path, source="jsonl"), access))
     current = evaluate_input(_bound_input(load_evaluation_input(current_path, source="jsonl"), access))
     comparison = compare_evaluations(baseline, current)
