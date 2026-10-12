@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import hashlib
 import asyncio
+import html as html_lib
 import json
 import math
 import time
@@ -50,18 +51,27 @@ def crawl4ai_browser_channel() -> str | None:
     return value or None
 
 
+MAX_HTML_INPUT_CHARS: int = 2_000_000
+MAX_EXTRACTED_SCRIPTS: int = 100
+MAX_SINGLE_SCRIPT_CHARS: int = 500_000
+
+
 class _JSONLDExtractor(HTMLParser):
     """Linear-time streaming HTML parser for application/ld+json script extraction.
 
     Replaces polynomial-backtracking regular expressions (CWE-1333 / CodeQL alert #932)
     with a streaming, non-backtracking HTMLParser from the Python standard library.
+    Enforces bounded resource consumption on script counts and content lengths.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_scripts: int = MAX_EXTRACTED_SCRIPTS, max_script_len: int = MAX_SINGLE_SCRIPT_CHARS) -> None:
         super().__init__(convert_charrefs=False)
         self.scripts: list[str] = []
         self._in_script = False
         self._current_chunks: list[str] = []
+        self._current_len = 0
+        self._max_scripts = max_scripts
+        self._max_script_len = max_script_len
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag.lower() == "script":
@@ -75,32 +85,47 @@ class _JSONLDExtractor(HTMLParser):
             if is_jsonld:
                 self._in_script = True
                 self._current_chunks = []
+                self._current_len = 0
             elif self._in_script:
                 self._in_script = False
                 self._current_chunks = []
+                self._current_len = 0
 
     def handle_endtag(self, tag: str) -> None:
         if tag.lower() == "script" and self._in_script:
             self._in_script = False
-            self.scripts.append("".join(self._current_chunks))
+            content = "".join(self._current_chunks)
+            if content.strip() and len(self.scripts) < self._max_scripts:
+                self.scripts.append(content)
             self._current_chunks = []
+            self._current_len = 0
+
 
     def handle_data(self, data: str) -> None:
         if self._in_script:
-            self._current_chunks.append(data)
+            remaining = self._max_script_len - self._current_len
+            if remaining > 0:
+                chunk = data[:remaining]
+                self._current_chunks.append(chunk)
+                self._current_len += len(chunk)
 
 
-def _extract_jsonld_scripts(html: str) -> list[str]:
-    """Safely extract application/ld+json script contents from HTML in linear time."""
+def _extract_jsonld_scripts(html: str, *, max_html_chars: int = MAX_HTML_INPUT_CHARS) -> list[str]:
+    """Safely extract application/ld+json script contents from HTML in linear time.
+
+    Binds maximum input length and extracted scripts to prevent resource exhaustion.
+    """
     if not isinstance(html, str) or not html:
         return []
+    bounded_html = html[:max_html_chars]
     parser = _JSONLDExtractor()
     try:
-        parser.feed(html)
+        parser.feed(bounded_html)
         parser.close()
     except Exception:  # noqa: BLE001 — fail-soft on malformed HTML input
         return []
     return parser.scripts
+
 
 
 class Crawl4AIResearchAdapter:
@@ -152,8 +177,12 @@ class Crawl4AIResearchAdapter:
 
         for script in scripts:
             raw = script.strip()
+            if raw.startswith("\ufeff"):
+                raw = raw[1:].strip()
             if raw.startswith("/*<![CDATA[*/") and raw.endswith("/*]]>*/"):
                 raw = raw[13:-7].strip()
+            elif raw.startswith("//<![CDATA[") and raw.endswith("//]]>"):
+                raw = raw[11:-5].strip()
             elif raw.startswith("<![CDATA[") and raw.endswith("]]>"):
                 raw = raw[9:-3].strip()
             elif raw.startswith("<!--") and raw.endswith("-->"):
@@ -161,7 +190,13 @@ class Crawl4AIResearchAdapter:
             try:
                 visit(json.loads(raw))
             except (TypeError, ValueError):
-                continue
+                try:
+                    unescaped = html_lib.unescape(raw)
+                    if unescaped != raw:
+                        visit(json.loads(unescaped))
+                except (TypeError, ValueError):
+                    continue
+
 
         records: list[dict[str, Any]] = []
         seen: set[tuple[str, str]] = set()

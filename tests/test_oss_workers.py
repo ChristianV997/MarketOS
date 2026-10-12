@@ -324,3 +324,102 @@ def test_crawl4ai_jsonld_extraction_deduplicates_by_product_id_and_name():
     records = Crawl4AIResearchAdapter._product_records_from_jsonld(html, "https://supplier.example/dedupe")
     assert len(records) == 1
     assert records[0]["selling_price"] == 10.00
+
+
+def test_crawl4ai_jsonld_extraction_empty_and_whitespace_input():
+    """Verify empty, whitespace, and non-string inputs fail gracefully returning empty list."""
+    for empty_val in ("", "   \n\t  ", None, 12345, [], {}):
+        records = Crawl4AIResearchAdapter._product_records_from_jsonld(empty_val, "https://supplier.example/empty")
+        assert records == []
+
+
+def test_crawl4ai_jsonld_extraction_escaped_html_entities_and_bom():
+    """Verify HTML entities and byte-order-marks in JSON-LD are handled cleanly."""
+    # 1. HTML-escaped JSON (common in legacy CMS and CMS templates)
+    escaped_html = """
+    <script type="application/ld+json">
+    {&quot;@context&quot;: &quot;https://schema.org&quot;, &quot;@type&quot;: &quot;Product&quot;, &quot;name&quot;: &quot;Escaped &amp; Sanitized Mug&quot;, &quot;sku&quot;: &quot;esc-1&quot;, &quot;offers&quot;: {&quot;price&quot;: &quot;18.50&quot;}}
+    </script>
+    """
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(escaped_html, "https://supplier.example/escaped")
+    assert len(records) == 1
+    assert records[0]["name"] == "Escaped & Sanitized Mug"
+    assert records[0]["selling_price"] == 18.50
+
+    # 2. Leading BOM and JavaScript-commented CDATA wrapper
+    bom_cdata_html = """
+    <script type="application/ld+json">
+    \ufeff//<![CDATA[
+    {"@context": "https://schema.org", "@type": "Product", "name": "BOM CDATA Mug", "sku": "bom-1", "offers": {"price": "22.00"}}
+    //]]>
+    </script>
+    """
+    records_bom = Crawl4AIResearchAdapter._product_records_from_jsonld(bom_cdata_html, "https://supplier.example/bom")
+    assert len(records_bom) == 1
+    assert records_bom[0]["name"] == "BOM CDATA Mug"
+    assert records_bom[0]["selling_price"] == 22.00
+
+
+def test_crawl4ai_jsonld_extraction_unrelated_scripts_and_styles_not_misclassified():
+    """Confirm unrelated script, style, comment, and arbitrary HTML are not misclassified as JSON-LD."""
+    unrelated_html = """
+    <html>
+      <head>
+        <style>
+          .product { content: 'application/ld+json'; }
+        </style>
+        <script type="text/javascript">
+          var schema = {"@type": "Product", "name": "JS Object Not JSONLD", "offers": {"price": "99.99"}};
+        </script>
+        <script>
+          // Untyped script tag defaults to JavaScript
+          var untyped = {"@type": "Product", "name": "Untyped Script Product"};
+        </script>
+        <!--
+        <script type="application/ld+json">
+          {"@type": "Product", "name": "Commented Out Product", "offers": {"price": "1.00"}}
+        </script>
+        -->
+        <template>
+          <div data-type="application/ld+json">Template content</div>
+        </template>
+      </head>
+      <body>
+        <p>Mention of &lt;script type="application/ld+json"&gt; in plain text body</p>
+        <script type="application/ld+json">
+          {"@type": "Product", "name": "Legitimate Product", "offers": {"price": "14.99"}}
+        </script>
+      </body>
+    </html>
+    """
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(unrelated_html, "https://supplier.example/unrelated")
+    assert len(records) == 1
+    assert records[0]["name"] == "Legitimate Product"
+    assert records[0]["selling_price"] == 14.99
+
+
+def test_crawl4ai_jsonld_extraction_bounded_large_input_and_script_limits():
+    """Verify bounded resource consumption on massive inputs and script element counts."""
+    # 1. Very large HTML document (> 2.5MB) is bounded and processes without error or hang
+    large_prefix = "<p>" + ("padding content " * 200_000) + "</p>"  # ~3.2MB
+    large_html = (
+        '<script type="application/ld+json">'
+        + '{"@type": "Product", "name": "Early Product", "offers": {"price": "10.00"}}'
+        + '</script>'
+        + large_prefix
+    )
+    t0 = time.perf_counter()
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(large_html, "https://supplier.example/large")
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 1.0
+    assert len(records) == 1
+    assert records[0]["name"] == "Early Product"
+
+
+    # 2. Excessive count of JSON-LD scripts is bounded to MAX_EXTRACTED_SCRIPTS (100)
+    many_scripts_html = "".join(
+        f'<script type="application/ld+json">{{"@type": "Product", "name": "Product {i}", "sku": "p-{i}", "offers": {{"price": "10.00"}}}}</script>'
+        for i in range(150)
+    )
+    records_many = Crawl4AIResearchAdapter._product_records_from_jsonld(many_scripts_html, "https://supplier.example/many")
+    assert len(records_many) == 100
