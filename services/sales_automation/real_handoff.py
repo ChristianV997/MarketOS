@@ -79,7 +79,7 @@ def attempt_real_conversation_handoff(
             operations[name] = {"status": "completed", "result": result}
             return result
         except Exception as exc:  # noqa: BLE001 - external sidecar boundary
-            operations[name] = {"status": "failed", "error": str(exc)}
+            operations[name] = {"status": "failed", "error": "provider_call_failed"}
             return None
 
     contact = attempt(
