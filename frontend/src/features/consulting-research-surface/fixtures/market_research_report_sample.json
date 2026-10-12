@@ -1,0 +1,364 @@
+{
+  "assumptions": [],
+  "blockers": [
+    "consumer_attention_missing",
+    "evidence_missing"
+  ],
+  "candidate_id": "cand-1",
+  "candidate_title": "portable blender",
+  "client_safe_export_status": "ready_for_trustos_review",
+  "client_safe_projection": {
+    "blockers": [
+      "consumer_attention_missing",
+      "evidence_missing"
+    ],
+    "candidate_id": "cand-1",
+    "conflict_findings": [],
+    "evidence_class": "sanitized_report",
+    "external_actions_authorized": false,
+    "freshness": [
+      {
+        "field": "marketplace.overall_marketplace_opportunity",
+        "observed_at": "2026-08-01",
+        "pillar": "marketplace",
+        "source_ref": "portable blender",
+        "status": "supplied"
+      },
+      {
+        "field": "marketplace.saturation_score",
+        "observed_at": "2026-08-01",
+        "pillar": "marketplace",
+        "source_ref": "portable blender",
+        "status": "supplied"
+      },
+      {
+        "field": "shipping_cost",
+        "observed_at": "missing",
+        "pillar": "supplier",
+        "source_ref": "supplier-a",
+        "status": "missing"
+      },
+      {
+        "field": "supplier.overall_supplier_feasibility",
+        "observed_at": "missing",
+        "pillar": "supplier",
+        "source_ref": "portable blender",
+        "status": "missing"
+      }
+    ],
+    "geography": "MX",
+    "language": "es",
+    "live_proof": false,
+    "missing_data": [
+      "consumer_attention.overall_consumer_attention",
+      "public_market_benchmark.price",
+      "public_market_benchmark.shipping_cost",
+      "consumer_attention.report",
+      "public_market_benchmark.report",
+      "product_validation.report"
+    ],
+    "next_research_actions": [
+      "consumer_attention",
+      "obtain_evidence:consumer_attention.overall_consumer_attention",
+      "obtain_evidence:consumer_attention.report",
+      "obtain_evidence:product_validation.report",
+      "obtain_evidence:public_market_benchmark.price",
+      "obtain_evidence:public_market_benchmark.report",
+      "obtain_evidence:public_market_benchmark.shipping_cost",
+      "public_market_benchmark"
+    ],
+    "offering_kind": "goods",
+    "workspace_id": "workspace-operator-1"
+  },
+  "competitor_and_substitute_evidence": {
+    "marketplaces_observed": [
+      "ebay"
+    ],
+    "overall_marketplace_opportunity": 0.7,
+    "saturation_score": 0.4,
+    "status": "supplied",
+    "warning": "marketplace_trends_are_demand_and_competition_evidence_only_not_launch_authorization"
+  },
+  "confidence_grade": "C_fixture_or_partial",
+  "conflict_findings": [],
+  "delivery_and_logistics_feasibility": {
+    "moq": "missing",
+    "shipping_cost": 4.5,
+    "shipping_speed_score": "missing",
+    "status": "supplied"
+  },
+  "demand_and_customer_evidence": {
+    "status": "consumer_attention_not_supplied"
+  },
+  "disclaimer": "This report is offline validation guidance composed from the evidence supplied. It is not legal, tax, customs, supplier, or launch authorization, and it never certifies a product or service as compliant, validated, or ready to launch.",
+  "dry_run": true,
+  "evidence_class": "sanitized_report",
+  "evidence_integrity_fingerprint": "e08249be325cd1dc125fe19cfe251c52224cc63db9f081cd06642ba6fb3f907f",
+  "evidence_matrix": [
+    {
+      "evidence_mode": "sanitized_report",
+      "notes": [],
+      "observed_at": "2026-08-01",
+      "pillar": "marketplace",
+      "status": "supplied"
+    },
+    {
+      "evidence_mode": "sanitized_report",
+      "notes": [],
+      "observed_at": null,
+      "pillar": "supplier",
+      "status": "supplied"
+    },
+    {
+      "evidence_mode": null,
+      "notes": [
+        "consumer_attention_not_supplied"
+      ],
+      "observed_at": null,
+      "pillar": "consumer_attention",
+      "status": "missing"
+    },
+    {
+      "evidence_mode": null,
+      "notes": [
+        "public_market_benchmark_not_supplied"
+      ],
+      "observed_at": null,
+      "pillar": "public_market_benchmark",
+      "status": "missing"
+    },
+    {
+      "evidence_mode": null,
+      "notes": [
+        "product_validation_not_supplied"
+      ],
+      "observed_at": null,
+      "pillar": "product_validation",
+      "status": "missing"
+    }
+  ],
+  "executive_summary": {
+    "combined_opportunity_score": 0.655,
+    "confidence_grade": "C_fixture_or_partial",
+    "headline": "portable blender is the leading candidate at 66% combined opportunity. Recommendation: expand_consumer_research. This is validation guidance, not a profit guarantee or launch authorization.",
+    "operator_summary": "Next action: expand_consumer_research. Confidence: C_fixture_or_partial. Risks: consumer_attention_missing.",
+    "overall_recommendation": "expand_consumer_research"
+  },
+  "fingerprint": "5b8b4c6e340dc05bf0f5cb23ab671be47d7ddb3d25a9e237f9eb228e65aca480",
+  "follow_up_modules": [
+    "consumer_attention",
+    "public_market_benchmark"
+  ],
+  "freshness": [
+    {
+      "field": "marketplace.overall_marketplace_opportunity",
+      "observed_at": "2026-08-01",
+      "pillar": "marketplace",
+      "source_ref": "portable blender",
+      "status": "supplied"
+    },
+    {
+      "field": "marketplace.saturation_score",
+      "observed_at": "2026-08-01",
+      "pillar": "marketplace",
+      "source_ref": "portable blender",
+      "status": "supplied"
+    },
+    {
+      "field": "shipping_cost",
+      "observed_at": "missing",
+      "pillar": "supplier",
+      "source_ref": "supplier-a",
+      "status": "missing"
+    },
+    {
+      "field": "supplier.overall_supplier_feasibility",
+      "observed_at": "missing",
+      "pillar": "supplier",
+      "source_ref": "portable blender",
+      "status": "missing"
+    }
+  ],
+  "generated_at": "offline-deterministic",
+  "geography": "MX",
+  "language": "es",
+  "limitations": [
+    "offline_composition_only_no_live_provider_calls_performed_by_this_service",
+    "attention_is_not_supplier_proof",
+    "trends_are_not_launch_authorization",
+    "a_supplier_claim_is_not_validation",
+    "fixture_or_manual_evidence_is_not_live_proof"
+  ],
+  "marketplace_and_public_signals": {
+    "status": "public_market_benchmark_not_supplied"
+  },
+  "missing_data": [
+    "consumer_attention.overall_consumer_attention",
+    "public_market_benchmark.price",
+    "public_market_benchmark.shipping_cost",
+    "consumer_attention.report",
+    "public_market_benchmark.report",
+    "product_validation.report"
+  ],
+  "mutated": false,
+  "network_calls": false,
+  "next_action": "expand_consumer_research",
+  "next_research_actions": [
+    "consumer_attention",
+    "obtain_evidence:consumer_attention.overall_consumer_attention",
+    "obtain_evidence:consumer_attention.report",
+    "obtain_evidence:product_validation.report",
+    "obtain_evidence:public_market_benchmark.price",
+    "obtain_evidence:public_market_benchmark.report",
+    "obtain_evidence:public_market_benchmark.shipping_cost",
+    "public_market_benchmark"
+  ],
+  "observation_source_identity": [
+    {
+      "observation": {
+        "candidate_id": "cand-1",
+        "field": "marketplace.overall_marketplace_opportunity",
+        "fingerprint": "4204fe8a5e5b7b07a4df4649e9d27a337c344dd2c90e40a62d0c9a88f88a698c",
+        "workspace_id": "workspace-operator-1"
+      },
+      "source": {
+        "fingerprint": "af4ccda3d8129640533dd6b1cd6875e712239b752f8877e078f587463a9cad0e",
+        "source_family": "marketplace",
+        "source_ref": "portable blender"
+      }
+    },
+    {
+      "observation": {
+        "candidate_id": "cand-1",
+        "field": "marketplace.saturation_score",
+        "fingerprint": "e7c646d3be48c1ad2da4ef497bee05764da0bd338a713883b37f351a092d7b00",
+        "workspace_id": "workspace-operator-1"
+      },
+      "source": {
+        "fingerprint": "af4ccda3d8129640533dd6b1cd6875e712239b752f8877e078f587463a9cad0e",
+        "source_family": "marketplace",
+        "source_ref": "portable blender"
+      }
+    }
+  ],
+  "observed_facts": [
+    "ebay"
+  ],
+  "offering_kind": "goods",
+  "offering_kind_recognized": true,
+  "pricing_and_willingness_to_pay": {
+    "note": "derived from the existing opportunity-synthesis authority's own price-band logic; not a willingness-to-pay study",
+    "recommended_price_band": {
+      "currency": "USD",
+      "max": null,
+      "min": null,
+      "status": "unavailable"
+    },
+    "status": "unavailable"
+  },
+  "read_only": true,
+  "report_version": "market-research-service-v1",
+  "risks": [
+    "consumer_attention_missing"
+  ],
+  "source_conflicts": [],
+  "source_provenance": [
+    {
+      "capture_method": "offline_report",
+      "evidence_mode": "sanitized_report",
+      "freshness_status": "supplied",
+      "observation": {
+        "candidate_id": "cand-1",
+        "field": "marketplace.overall_marketplace_opportunity",
+        "fingerprint": "4204fe8a5e5b7b07a4df4649e9d27a337c344dd2c90e40a62d0c9a88f88a698c",
+        "workspace_id": "workspace-operator-1"
+      },
+      "observed_at": "2026-08-01",
+      "pillar": "marketplace",
+      "source": {
+        "fingerprint": "af4ccda3d8129640533dd6b1cd6875e712239b752f8877e078f587463a9cad0e",
+        "source_family": "marketplace",
+        "source_ref": "portable blender"
+      }
+    },
+    {
+      "capture_method": "offline_report",
+      "evidence_mode": "sanitized_report",
+      "freshness_status": "supplied",
+      "observation": {
+        "candidate_id": "cand-1",
+        "field": "marketplace.saturation_score",
+        "fingerprint": "e7c646d3be48c1ad2da4ef497bee05764da0bd338a713883b37f351a092d7b00",
+        "workspace_id": "workspace-operator-1"
+      },
+      "observed_at": "2026-08-01",
+      "pillar": "marketplace",
+      "source": {
+        "fingerprint": "af4ccda3d8129640533dd6b1cd6875e712239b752f8877e078f587463a9cad0e",
+        "source_family": "marketplace",
+        "source_ref": "portable blender"
+      }
+    }
+  ],
+  "source_reports": {
+    "consumer_attention": "missing",
+    "marketplace": "supplied",
+    "product_validation": "missing",
+    "public_market_benchmark": "missing",
+    "supplier": "supplied"
+  },
+  "status": "ready_for_client_service",
+  "supplier_feasibility": {
+    "economics": {
+      "shipping_cost": 4.5
+    },
+    "overall_supplier_feasibility": 0.6,
+    "recommendation": null,
+    "risk_flags": [],
+    "status": "supplied",
+    "warning": "a_supplier_claim_is_not_validation_until_observed_or_verified"
+  },
+  "validation_plan": [
+    {
+      "owner": "operator",
+      "task": "Collect sanitized search, review, comment, and creative imports.",
+      "window": "1-2"
+    },
+    {
+      "owner": "operator",
+      "task": "Cluster pain points, objections, and desired outcomes.",
+      "window": "3-4"
+    },
+    {
+      "owner": "operator",
+      "task": "Draft three hook and UGC hypotheses for review.",
+      "window": "5-6"
+    },
+    {
+      "owner": "operator",
+      "task": "Compare creative angles against competitor evidence.",
+      "window": "7-8"
+    },
+    {
+      "owner": "operator",
+      "task": "Define a no-spend creative test design.",
+      "window": "9-10"
+    },
+    {
+      "owner": "operator",
+      "task": "Review attention confidence and saturation risk.",
+      "window": "11-12"
+    },
+    {
+      "owner": "operator",
+      "task": "Kill weak angles or retain the strongest hypothesis.",
+      "window": "13"
+    },
+    {
+      "owner": "operator",
+      "task": "Update the client report and supplier gate.",
+      "window": "14"
+    }
+  ],
+  "workspace_id": "workspace-operator-1"
+}
