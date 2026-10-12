@@ -4,6 +4,7 @@
 - legal-source access date: 2026-10-11 (lmtr-index, lfpc-index, crt re-checked this session; other cited rows carry prior publication/effective facts and are not newly certified)
 - consumer-architecture last updated: 2026-09-22
 - evidence-gap readiness surface added: 2026-10-11
+- market-access operator action wired to evidence brief: 2026-10-12
 - not legal advice
 - maps onto the canonical `promotion.compliance` gate
 - does **not** add a GATE_ID, registry, scorer, or live lookup
@@ -42,6 +43,18 @@ Statuses preserved: `needs_evidence` | `not_assessed` | `not_applicable`. `satis
 `launch_review_evidence_brief()` turns those rows into a single operator-facing paragraph. It never states that supplier/fixture/unknown/manual/conflicting/stale evidence clears `promotion.compliance`. Cleared packets still remind that lawyer/customs-broker/accountant review is required (not legal advice).
 
 Cancelled or model-mismatched CoH rows that were recorded as `official_db` are projected as `conflicting` gaps so they cannot be mistaken for satisfying official evidence.
+
+### Operator distinction on market-access surfaces
+
+`evaluation.commerce.market_access_report` sets each Mexico jurisdiction's `next_human_action` to that same brief. Operators should read it as:
+
+| Signal | Meaning |
+| --- | --- |
+| `promotion_gate.satisfied: false` + brief listing gaps | Official evidence is still missing or non-satisfying; do not treat as launch approval |
+| `promotion_gate.satisfied: true` + brief human-review reminder | Recorded official evidence cleared the **metadata** `promotion.compliance` gate only; lawyer/customs-broker/accountant review is still required |
+| US/CA `not_assessed` next action | Those markets are outside this evaluator; absence of a Mexico brief is not approval |
+
+A missing or generic action string must never be interpreted as clearance. The consumer still never recomputes law and never creates a second compliance scorer.
 
 ## Consumer surfaces and offering_kind (added, this document updated 2026-09-22)
 
