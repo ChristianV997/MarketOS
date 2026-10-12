@@ -1,0 +1,233 @@
+{
+  "schema": "MarketOS.ProductOpportunityResearchEval.v1",
+  "description": "Synthetic, fixture-only packet for the existing Product Opportunity Synthesis. Expectations are safety policy written before any run; they are not canonical thresholds. Fixture success is not live validation, and nothing here authorizes spend, publishing, orders, payments, or provider calls.",
+  "scenarios": [
+    {
+      "id": "B00_canonical_trio_baseline",
+      "category": "baseline",
+      "marketplace": "tests/fixtures/opportunity_synthesis/marketplace_trend_report.json",
+      "supplier": "tests/fixtures/opportunity_synthesis/supplier_feasibility_report.json",
+      "consumer": "tests/fixtures/opportunity_synthesis/consumer_attention_report.json",
+      "expectations": {
+        "expected_coverage": 3,
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 0, "price_conflicts": 0, "incomplete_items": 0, "pillar_warnings": 0}
+      }
+    },
+    {
+      "id": "S01_strong_three_pillar_fixture",
+      "category": "strong_evidence",
+      "description": "Strong, consistent evidence across all three pillars. Advancing is permitted only as a launch draft for human review, with the fixture-only assumption preserved and no authorization.",
+      "marketplace": {"report_version": "marketplace-trends-v1", "evidence_mode": "fixture_demo", "candidate_count": 1, "marketplaces_observed": ["amazon"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "price": 29.99, "currency": "USD", "source_confidence": 0.78, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.8, "saturation_score": 0.22, "price_confidence": 0.78, "recommendation": "expand_competitor_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "supplier": {"report_version": "supplier-feasibility-v1", "evidence_mode": "fixture_demo", "suppliers_observed": ["cj"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "offers": [{"supplier": "cj", "unit_cost": 8.5, "shipping_cost": 3.25, "estimated_landed_cost": 11.75, "delivery_max_days": 12, "currency": "USD", "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_supplier_feasibility": 0.8, "supplier_cost_confidence": 0.7, "margin_feasibility_proxy": 0.7, "recommendation": "advance_to_launch_draft", "risk_flags": [], "economics": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75, "gross_margin_percent": 0.56, "profit_per_order_before_ad_spend": 11.25, "break_even_cpa": 11.25, "break_even_roas": 2.67, "assumptions": []}}}], "read_only": true, "network_calls": false, "mutated": false},
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": ["tiktok"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "platforms": ["tiktok"], "freshness_statuses": ["fresh"], "evidence": [{"platform": "tiktok", "hook": "Print anywhere in seconds", "evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.76, "source_diversity": 0.75, "objection_density": 0.1, "attention_saturation_risk": 0.2, "recommended_ad_angles": ["demo"], "creative_hooks": [{"hook": "Print anywhere in seconds"}], "voice_of_customer": {"pain_points": ["printing from a phone is inconvenient"], "desired_outcomes": ["quick labels"], "objections": []}, "recommendation": "generate_creative_tests"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 3,
+        "reported_coverage_matches_effective": true,
+        "expected_recommendation": "advance_to_launch_draft",
+        "max_grade": "C_fixture_or_partial",
+        "assumptions_must_include": ["supplier_readonly_proof_missing"],
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 0, "price_conflicts": 0, "incomplete_items": 0, "pillar_warnings": 0}
+      }
+    },
+    {
+      "id": "S02_marketplace_listing_no_supplier",
+      "category": "missing_pillar",
+      "description": "A marketplace listing exists, but no supplier evidence was supplied.",
+      "marketplace": {"report_version": "marketplace-trends-v1", "evidence_mode": "fixture_demo", "candidate_count": 1, "marketplaces_observed": ["amazon"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "price": 29.99, "currency": "USD", "source_confidence": 0.78, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.8, "saturation_score": 0.22, "price_confidence": 0.78, "recommendation": "expand_competitor_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "supplier": null,
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": ["tiktok"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "platforms": ["tiktok"], "freshness_statuses": ["fresh"], "evidence": [{"platform": "tiktok", "hook": "Print anywhere in seconds", "evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.76, "source_diversity": 0.75, "objection_density": 0.1, "attention_saturation_risk": 0.2, "recommended_ad_angles": ["demo"], "creative_hooks": [{"hook": "Print anywhere in seconds"}], "voice_of_customer": {"pain_points": ["printing from a phone is inconvenient"], "desired_outcomes": ["quick labels"], "objections": []}, "recommendation": "generate_creative_tests"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 2,
+        "reported_coverage_matches_effective": true,
+        "must_not_advance": true,
+        "max_grade": "C_fixture_or_partial",
+        "required_blockers": ["supplier_proof_missing"],
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 0, "price_conflicts": 0, "incomplete_items": 0, "pillar_warnings": 0}
+      }
+    },
+    {
+      "id": "S03_attention_without_demand_proof",
+      "category": "demand_gap",
+      "description": "Attention and supplier evidence exist, but there is no marketplace demand or purchase proof.",
+      "marketplace": null,
+      "supplier": {"report_version": "supplier-feasibility-v1", "evidence_mode": "fixture_demo", "suppliers_observed": ["cj"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "offers": [{"supplier": "cj", "unit_cost": 8.5, "shipping_cost": 3.25, "estimated_landed_cost": 11.75, "delivery_max_days": 12, "currency": "USD", "evidence_mode": "fixture"}], "score": {"overall_supplier_feasibility": 0.8, "supplier_cost_confidence": 0.7, "margin_feasibility_proxy": 0.7, "recommendation": "advance_to_launch_draft", "risk_flags": [], "economics": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75, "gross_margin_percent": 0.56, "profit_per_order_before_ad_spend": 11.25, "break_even_cpa": 11.25, "break_even_roas": 2.67, "assumptions": []}}}], "read_only": true, "network_calls": false, "mutated": false},
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": ["tiktok"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "platforms": ["tiktok"], "freshness_statuses": ["fresh"], "evidence": [{"platform": "tiktok", "hook": "Print anywhere in seconds", "evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.76, "source_diversity": 0.75, "objection_density": 0.1, "attention_saturation_risk": 0.2, "recommended_ad_angles": ["demo"], "creative_hooks": [{"hook": "Print anywhere in seconds"}], "voice_of_customer": {"pain_points": ["printing from a phone is inconvenient"], "desired_outcomes": ["quick labels"], "objections": []}, "recommendation": "generate_creative_tests"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 2,
+        "reported_coverage_matches_effective": true,
+        "must_not_advance": true,
+        "max_grade": "C_fixture_or_partial",
+        "required_blockers": ["marketplace_evidence_missing"],
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 0, "price_conflicts": 0, "incomplete_items": 0, "pillar_warnings": 0}
+      }
+    },
+    {
+      "id": "S04_cross_currency_join",
+      "category": "currency",
+      "description": "Marketplace prices are in USD while the supplier offer is in EUR, and the supplier economics are joined to them without any currency reconciliation.",
+      "marketplace": {"report_version": "marketplace-trends-v1", "evidence_mode": "fixture_demo", "candidate_count": 1, "marketplaces_observed": ["amazon"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "price": 29.99, "currency": "USD", "source_confidence": 0.78, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.8, "saturation_score": 0.22, "price_confidence": 0.78, "recommendation": "expand_competitor_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "supplier": {"report_version": "supplier-feasibility-v1", "evidence_mode": "fixture_demo", "suppliers_observed": ["cj"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "offers": [{"supplier": "cj", "unit_cost": 8.5, "shipping_cost": 3.25, "estimated_landed_cost": 11.75, "delivery_max_days": 12, "currency": "EUR", "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_supplier_feasibility": 0.8, "supplier_cost_confidence": 0.7, "margin_feasibility_proxy": 0.7, "recommendation": "advance_to_launch_draft", "risk_flags": [], "economics": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75, "gross_margin_percent": 0.56, "profit_per_order_before_ad_spend": 11.25, "break_even_cpa": 11.25, "break_even_roas": 2.67, "assumptions": []}}}], "read_only": true, "network_calls": false, "mutated": false},
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": ["tiktok"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "platforms": ["tiktok"], "freshness_statuses": ["fresh"], "evidence": [{"platform": "tiktok", "hook": "Print anywhere in seconds", "evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.76, "source_diversity": 0.75, "objection_density": 0.1, "attention_saturation_risk": 0.2, "recommended_ad_angles": ["demo"], "creative_hooks": [{"hook": "Print anywhere in seconds"}], "voice_of_customer": {"pain_points": ["printing from a phone is inconvenient"], "desired_outcomes": ["quick labels"], "objections": []}, "recommendation": "generate_creative_tests"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 3,
+        "reported_coverage_matches_effective": true,
+        "must_not_advance": true,
+        "max_grade": "C_fixture_or_partial",
+        "expected_metrics": {"currency_unreconciled": 1, "identity_conflicts": 0, "price_conflicts": 0, "incomplete_items": 0, "pillar_warnings": 0}
+      }
+    },
+    {
+      "id": "S05_stale_consumer_attention",
+      "category": "freshness",
+      "description": "Strong marketplace and supplier evidence, but the attention observations are stale.",
+      "marketplace": {"report_version": "marketplace-trends-v1", "evidence_mode": "fixture_demo", "candidate_count": 1, "marketplaces_observed": ["amazon"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "price": 29.99, "currency": "USD", "source_confidence": 0.78, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.8, "saturation_score": 0.22, "price_confidence": 0.78, "recommendation": "expand_competitor_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "supplier": {"report_version": "supplier-feasibility-v1", "evidence_mode": "fixture_demo", "suppliers_observed": ["cj"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "offers": [{"supplier": "cj", "unit_cost": 8.5, "shipping_cost": 3.25, "estimated_landed_cost": 11.75, "delivery_max_days": 12, "currency": "USD", "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_supplier_feasibility": 0.8, "supplier_cost_confidence": 0.7, "margin_feasibility_proxy": 0.7, "recommendation": "advance_to_launch_draft", "risk_flags": [], "economics": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75, "gross_margin_percent": 0.56, "profit_per_order_before_ad_spend": 11.25, "break_even_cpa": 11.25, "break_even_roas": 2.67, "assumptions": []}}}], "read_only": true, "network_calls": false, "mutated": false},
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": ["tiktok"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "platforms": ["tiktok"], "freshness_statuses": ["stale"], "evidence": [{"platform": "tiktok", "hook": "Print anywhere in seconds", "evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.76, "source_diversity": 0.75, "objection_density": 0.1, "attention_saturation_risk": 0.2, "recommended_ad_angles": ["demo"], "creative_hooks": [{"hook": "Print anywhere in seconds"}], "voice_of_customer": {"pain_points": ["printing from a phone is inconvenient"], "desired_outcomes": ["quick labels"], "objections": []}, "recommendation": "generate_creative_tests"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 3,
+        "reported_coverage_matches_effective": true,
+        "must_not_advance": true,
+        "max_grade": "C_fixture_or_partial",
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 0, "price_conflicts": 0, "incomplete_items": 0, "pillar_warnings": 0}
+      }
+    },
+    {
+      "id": "S06_conflicting_price_sources",
+      "category": "conflict",
+      "description": "The supplier target sell price (49.99) lies outside the observed marketplace price band (29.99) for the same candidate.",
+      "marketplace": {"report_version": "marketplace-trends-v1", "evidence_mode": "fixture_demo", "candidate_count": 1, "marketplaces_observed": ["amazon"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "price": 29.99, "currency": "USD", "source_confidence": 0.78, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.8, "saturation_score": 0.22, "price_confidence": 0.78, "recommendation": "expand_competitor_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "supplier": {"report_version": "supplier-feasibility-v1", "evidence_mode": "fixture_demo", "suppliers_observed": ["cj"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "offers": [{"supplier": "cj", "unit_cost": 8.5, "shipping_cost": 3.25, "estimated_landed_cost": 11.75, "delivery_max_days": 12, "currency": "USD", "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_supplier_feasibility": 0.8, "supplier_cost_confidence": 0.7, "margin_feasibility_proxy": 0.7, "recommendation": "advance_to_launch_draft", "risk_flags": [], "economics": {"target_sell_price": 49.99, "estimated_landed_cost": 11.75, "gross_margin_percent": 0.765, "profit_per_order_before_ad_spend": 38.24, "break_even_cpa": 38.24, "break_even_roas": 4.19, "assumptions": []}}}], "read_only": true, "network_calls": false, "mutated": false},
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": ["tiktok"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "platforms": ["tiktok"], "freshness_statuses": ["fresh"], "evidence": [{"platform": "tiktok", "hook": "Print anywhere in seconds", "evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.76, "source_diversity": 0.75, "objection_density": 0.1, "attention_saturation_risk": 0.2, "recommended_ad_angles": ["demo"], "creative_hooks": [{"hook": "Print anywhere in seconds"}], "voice_of_customer": {"pain_points": ["printing from a phone is inconvenient"], "desired_outcomes": ["quick labels"], "objections": []}, "recommendation": "generate_creative_tests"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 3,
+        "reported_coverage_matches_effective": true,
+        "must_not_advance": true,
+        "max_grade": "C_fixture_or_partial",
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 0, "price_conflicts": 1, "incomplete_items": 0, "pillar_warnings": 0}
+      }
+    },
+    {
+      "id": "S07_incomplete_observations",
+      "category": "incomplete",
+      "description": "Each pillar is missing one required observation: the marketplace price, the supplier delivery window, and the consumer platform. Scores remain high.",
+      "marketplace": {"report_version": "marketplace-trends-v1", "evidence_mode": "fixture_demo", "candidate_count": 1, "marketplaces_observed": ["amazon"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "currency": "USD", "source_confidence": 0.78, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.8, "saturation_score": 0.22, "price_confidence": 0.78, "recommendation": "expand_competitor_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "supplier": {"report_version": "supplier-feasibility-v1", "evidence_mode": "fixture_demo", "suppliers_observed": ["cj"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "offers": [{"supplier": "cj", "unit_cost": 8.5, "shipping_cost": 3.25, "estimated_landed_cost": 11.75, "currency": "USD", "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_supplier_feasibility": 0.8, "supplier_cost_confidence": 0.7, "margin_feasibility_proxy": 0.7, "recommendation": "advance_to_launch_draft", "risk_flags": [], "economics": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75, "gross_margin_percent": 0.56, "profit_per_order_before_ad_spend": 11.25, "break_even_cpa": 11.25, "break_even_roas": 2.67, "assumptions": []}}}], "read_only": true, "network_calls": false, "mutated": false},
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": ["tiktok"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "freshness_statuses": ["fresh"], "evidence": [{"hook": "Print anywhere in seconds", "evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.76, "source_diversity": 0.75, "objection_density": 0.1, "attention_saturation_risk": 0.2, "recommended_ad_angles": ["demo"], "creative_hooks": [{"hook": "Print anywhere in seconds"}], "voice_of_customer": {"pain_points": ["printing from a phone is inconvenient"], "desired_outcomes": ["quick labels"], "objections": []}, "recommendation": "generate_creative_tests"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 3,
+        "reported_coverage_matches_effective": true,
+        "must_not_advance": true,
+        "max_grade": "C_fixture_or_partial",
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 0, "price_conflicts": 0, "incomplete_items": 3, "pillar_warnings": 0}
+      }
+    },
+    {
+      "id": "S08_unavailable_consumer_source",
+      "category": "unavailable",
+      "description": "The consumer provider was unavailable. The pillar is present with no evidence items and every freshness status is unavailable.",
+      "marketplace": {"report_version": "marketplace-trends-v1", "evidence_mode": "fixture_demo", "candidate_count": 1, "marketplaces_observed": ["amazon"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "price": 29.99, "currency": "USD", "source_confidence": 0.78, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.8, "saturation_score": 0.22, "price_confidence": 0.78, "recommendation": "expand_competitor_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "supplier": {"report_version": "supplier-feasibility-v1", "evidence_mode": "fixture_demo", "suppliers_observed": ["cj"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "offers": [{"supplier": "cj", "unit_cost": 8.5, "shipping_cost": 3.25, "estimated_landed_cost": 11.75, "delivery_max_days": 12, "currency": "USD", "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_supplier_feasibility": 0.8, "supplier_cost_confidence": 0.7, "margin_feasibility_proxy": 0.7, "recommendation": "advance_to_launch_draft", "risk_flags": [], "economics": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75, "gross_margin_percent": 0.56, "profit_per_order_before_ad_spend": 11.25, "break_even_cpa": 11.25, "break_even_roas": 2.67, "assumptions": []}}}], "read_only": true, "network_calls": false, "mutated": false},
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": [], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "platforms": [], "freshness_statuses": ["unavailable"], "evidence": [], "score": {"overall_consumer_attention": 0.0, "source_diversity": 0.0, "objection_density": 0.0, "attention_saturation_risk": 0.0, "recommended_ad_angles": [], "creative_hooks": [], "voice_of_customer": {"pain_points": [], "desired_outcomes": [], "objections": []}, "recommendation": "expand_consumer_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 3,
+        "reported_coverage_matches_effective": true,
+        "must_not_advance": true,
+        "max_grade": "C_fixture_or_partial",
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 0, "price_conflicts": 0, "incomplete_items": 0, "pillar_warnings": 0}
+      }
+    },
+    {
+      "id": "S09_identity_variant_mismatch",
+      "category": "identity",
+      "description": "The same candidate_id is used for a 58mm paper-roll supplier variant and for a generic printer marketplace listing. The pillars are joined on candidate_id alone.",
+      "marketplace": {"report_version": "marketplace-trends-v1", "evidence_mode": "fixture_demo", "candidate_count": 1, "marketplaces_observed": ["amazon"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "price": 29.99, "currency": "USD", "source_confidence": 0.78, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.8, "saturation_score": 0.22, "price_confidence": 0.78, "recommendation": "expand_competitor_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "supplier": {"report_version": "supplier-feasibility-v1", "evidence_mode": "fixture_demo", "suppliers_observed": ["cj"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer 58mm paper roll", "offers": [{"supplier": "cj", "unit_cost": 8.5, "shipping_cost": 3.25, "estimated_landed_cost": 11.75, "delivery_max_days": 12, "currency": "USD", "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_supplier_feasibility": 0.8, "supplier_cost_confidence": 0.7, "margin_feasibility_proxy": 0.7, "recommendation": "advance_to_launch_draft", "risk_flags": [], "economics": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75, "gross_margin_percent": 0.56, "profit_per_order_before_ad_spend": 11.25, "break_even_cpa": 11.25, "break_even_roas": 2.67, "assumptions": []}}}], "read_only": true, "network_calls": false, "mutated": false},
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": ["tiktok"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "platforms": ["tiktok"], "freshness_statuses": ["fresh"], "evidence": [{"platform": "tiktok", "hook": "Print anywhere in seconds", "evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.76, "source_diversity": 0.75, "objection_density": 0.1, "attention_saturation_risk": 0.2, "recommended_ad_angles": ["demo"], "creative_hooks": [{"hook": "Print anywhere in seconds"}], "voice_of_customer": {"pain_points": ["printing from a phone is inconvenient"], "desired_outcomes": ["quick labels"], "objections": []}, "recommendation": "generate_creative_tests"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 3,
+        "reported_coverage_matches_effective": true,
+        "must_not_advance": true,
+        "max_grade": "C_fixture_or_partial",
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 1, "price_conflicts": 0, "incomplete_items": 0, "pillar_warnings": 0}
+      }
+    },
+    {
+      "id": "S10_partial_provider_failure",
+      "category": "partial_failure",
+      "description": "The alibaba provider failed and recorded a warning on the supplier report. The cj observation is retained, and the failure should remain visible.",
+      "marketplace": {"report_version": "marketplace-trends-v1", "evidence_mode": "fixture_demo", "candidate_count": 1, "marketplaces_observed": ["amazon"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "price": 29.99, "currency": "USD", "source_confidence": 0.78, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.8, "saturation_score": 0.22, "price_confidence": 0.78, "recommendation": "expand_competitor_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "supplier": {"report_version": "supplier-feasibility-v1", "evidence_mode": "fixture_demo", "suppliers_observed": ["cj", "alibaba"], "top_candidate_id": "candidate-a", "warnings": ["provider_failed:alibaba"], "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "offers": [{"supplier": "cj", "unit_cost": 8.5, "shipping_cost": 3.25, "estimated_landed_cost": 11.75, "delivery_max_days": 12, "currency": "USD", "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_supplier_feasibility": 0.8, "supplier_cost_confidence": 0.7, "margin_feasibility_proxy": 0.7, "recommendation": "advance_to_launch_draft", "risk_flags": [], "economics": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75, "gross_margin_percent": 0.56, "profit_per_order_before_ad_spend": 11.25, "break_even_cpa": 11.25, "break_even_roas": 2.67, "assumptions": []}}}], "read_only": true, "network_calls": false, "mutated": false},
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": ["tiktok"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "platforms": ["tiktok"], "freshness_statuses": ["fresh"], "evidence": [{"platform": "tiktok", "hook": "Print anywhere in seconds", "evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.76, "source_diversity": 0.75, "objection_density": 0.1, "attention_saturation_risk": 0.2, "recommended_ad_angles": ["demo"], "creative_hooks": [{"hook": "Print anywhere in seconds"}], "voice_of_customer": {"pain_points": ["printing from a phone is inconvenient"], "desired_outcomes": ["quick labels"], "objections": []}, "recommendation": "generate_creative_tests"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 3,
+        "retained_candidates": ["candidate-a"],
+        "max_grade": "C_fixture_or_partial",
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 0, "price_conflicts": 0, "incomplete_items": 0, "pillar_warnings": 1}
+      }
+    },
+    {
+      "id": "S11_correlated_alias_positive_control",
+      "category": "positive_control",
+      "description": "Two marketplace candidates share a query and source family but report conflicting scores. The synthesis is expected to keep one and record the conflict, which this control confirms.",
+      "marketplace": {"report_version": "marketplace-trends-v1", "evidence_mode": "fixture_demo", "candidate_count": 2, "marketplaces_observed": ["amazon"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "price": 29.99, "currency": "USD", "source_confidence": 0.78, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.8, "demand_proxy_score": 0.8, "saturation_score": 0.22, "price_confidence": 0.78, "recommendation": "expand_competitor_research"}}, {"candidate_id": "candidate-a-alias", "query": "mini thermal printer", "evidence": [{"marketplace": "amazon", "price": 29.99, "currency": "USD", "source_confidence": 0.5, "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_marketplace_opportunity": 0.5, "demand_proxy_score": 0.5, "saturation_score": 0.4, "price_confidence": 0.5, "recommendation": "expand_competitor_research"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "supplier": {"report_version": "supplier-feasibility-v1", "evidence_mode": "fixture_demo", "suppliers_observed": ["cj"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "offers": [{"supplier": "cj", "unit_cost": 8.5, "shipping_cost": 3.25, "estimated_landed_cost": 11.75, "delivery_max_days": 12, "currency": "USD", "evidence_mode": "fixture", "source_family": "amazon_bestsellers"}], "score": {"overall_supplier_feasibility": 0.8, "supplier_cost_confidence": 0.7, "margin_feasibility_proxy": 0.7, "recommendation": "advance_to_launch_draft", "risk_flags": [], "economics": {"target_sell_price": 29.99, "estimated_landed_cost": 11.75, "gross_margin_percent": 0.56, "profit_per_order_before_ad_spend": 11.25, "break_even_cpa": 11.25, "break_even_roas": 2.67, "assumptions": []}}}], "read_only": true, "network_calls": false, "mutated": false},
+      "consumer": {"report_version": "consumer-attention-v1", "evidence_mode": "fixture_demo", "platforms_observed": ["tiktok"], "top_candidate_id": "candidate-a", "candidates": [{"candidate_id": "candidate-a", "query": "mini thermal printer", "platforms": ["tiktok"], "freshness_statuses": ["fresh"], "evidence": [{"platform": "tiktok", "hook": "Print anywhere in seconds", "evidence_mode": "fixture"}], "score": {"overall_consumer_attention": 0.76, "source_diversity": 0.75, "objection_density": 0.1, "attention_saturation_risk": 0.2, "recommended_ad_angles": ["demo"], "creative_hooks": [{"hook": "Print anywhere in seconds"}], "voice_of_customer": {"pain_points": ["printing from a phone is inconvenient"], "desired_outcomes": ["quick labels"], "objections": []}, "recommendation": "generate_creative_tests"}}], "read_only": true, "network_calls": false, "mutated": false},
+      "expectations": {
+        "expected_coverage": 3,
+        "min_alias_notes": 1,
+        "max_grade": "C_fixture_or_partial",
+        "expected_metrics": {"currency_unreconciled": 0, "identity_conflicts": 0, "price_conflicts": 0, "incomplete_items": 0, "pillar_warnings": 0}
+      }
+    }
+  ],
+  "known_gaps": [
+    {
+      "id": "GAP-CURRENCY-UNRECONCILED",
+      "scenario": "S04_cross_currency_join",
+      "checks": ["currency_flagged", "must_not_advance"],
+      "reason": "Marketplace evidence is USD and supplier offers are EUR, but synthesis never reads per-item currency. The price band is labelled USD unconditionally (opportunity_synthesis.py:562), and the margin gate (line 438) runs on supplier economics with no currency check. Observed: advance_to_launch_draft with no currency caution."
+    },
+    {
+      "id": "GAP-STALE-ATTENTION-UNGATED",
+      "scenario": "S05_stale_consumer_attention",
+      "checks": ["freshness_flagged", "must_not_advance"],
+      "reason": "freshness_statuses is read only for the evidence matrix (opportunity_synthesis.py:156 and 162). Neither _recommendation (lines 432-457) nor _grade (lines 169-201) reads it. Observed: advance_to_launch_draft on a stale attention pillar."
+    },
+    {
+      "id": "GAP-UNAVAILABLE-CONSUMER-UNFLAGGED",
+      "scenario": "S08_unavailable_consumer_source",
+      "checks": ["freshness_flagged"],
+      "reason": "A consumer candidate whose only freshness status is unavailable produces no caution. _risks (lines 221-243) checks only whether a pillar is absent. Observed: no freshness caution."
+    },
+    {
+      "id": "GAP-UNAVAILABLE-COUNTED-AS-SUPPLIED",
+      "scenario": "S08_unavailable_consumer_source",
+      "checks": ["reported_coverage_matches_effective"],
+      "reason": "source_reports marks a pillar as supplied whenever a report object is present (opportunity_synthesis.py:555), even when it holds no evidence items. Observed: 3 pillars reported as supplied, 2 effective."
+    },
+    {
+      "id": "GAP-PRICE-CONFLICT-UNFLAGGED",
+      "scenario": "S06_conflicting_price_sources",
+      "checks": ["price_flagged", "must_not_advance"],
+      "reason": "The supplier target sell price (49.99) lies outside the marketplace observed band (29.99). _price_band (lines 204-213) and _thresholds (lines 460-480) read each side independently and never compare them. Observed: advance_to_launch_draft."
+    },
+    {
+      "id": "GAP-INCOMPLETE-EVIDENCE-PROCEEDS",
+      "scenario": "S07_incomplete_observations",
+      "checks": ["incomplete_flagged", "must_not_advance"],
+      "reason": "The marketplace item lacks a price, the supplier offer lacks a delivery window, and the consumer item lacks a platform. No caution is emitted, and the scores still clear the advance gate (lines 453-454). Observed: advance_to_launch_draft."
+    },
+    {
+      "id": "GAP-IDENTITY-JOIN-UNFLAGGED",
+      "scenario": "S09_identity_variant_mismatch",
+      "checks": ["identity_flagged", "must_not_advance"],
+      "reason": "Pillars are joined on candidate_id alone (opportunity_synthesis.py:548). Query text is never compared, so a 58mm paper-roll supplier was joined to a generic printer listing. Observed: advance_to_launch_draft with no identity caution."
+    },
+    {
+      "id": "GAP-PILLAR-WARNINGS-DROPPED",
+      "scenario": "S10_partial_provider_failure",
+      "checks": ["pillar_warnings_surfaced"],
+      "reason": "No pillar warnings are read. The only mention of warnings is an exclusion at line 146. A provider failure recorded as provider_failed:alibaba never reaches the synthesis output."
+    }
+  ]
+}
