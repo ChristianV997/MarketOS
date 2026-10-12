@@ -1,0 +1,63 @@
+{
+  "schema": "MarketOS.AgentBatchPolicy.v1",
+  "policy_id": "four-batch-roster-v1",
+  "require_earlier_batch_dependencies": true,
+  "forbidden_segments": [
+    ".git",
+    "artifacts",
+    "credentials",
+    "node_modules",
+    "secrets"
+  ],
+  "forbidden_segment_prefixes": [
+    ".env"
+  ],
+  "batches": [
+    {
+      "batch": 1,
+      "size": 5,
+      "agents": [
+        "hermes-bots-team",
+        "hermes-agents-a",
+        "hermes-agents-b",
+        "grok-bots-team",
+        "antigravity-a"
+      ]
+    },
+    {
+      "batch": 2,
+      "size": 5,
+      "agents": [
+        "antigravity-b",
+        "antigravity-c",
+        "antigravity-d",
+        "cursor-a",
+        "cursor-b"
+      ]
+    },
+    {
+      "batch": 3,
+      "size": 6,
+      "agents": [
+        "cursor-c",
+        "cursor-d",
+        "claude-a",
+        "claude-b",
+        "claude-c",
+        "claude-d"
+      ]
+    },
+    {
+      "batch": 4,
+      "size": 6,
+      "agents": [
+        "codex-a",
+        "codex-b",
+        "codex-c",
+        "codex-d",
+        "grok-chat-a",
+        "grok-chat-b"
+      ]
+    }
+  ]
+}
