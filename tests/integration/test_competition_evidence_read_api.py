@@ -2,6 +2,11 @@
 /api/events/competition-summaries — thin filter + decoded summary views,
 following the same pattern as the supplier-evidence/opportunity-scoring
 read routes."""
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+
 from api.routes import canonical_events
 from backend.identity.roles import INTERNAL_OPERATOR
 from backend.identity.workspaces import WorkspaceAccess
@@ -34,8 +39,9 @@ def test_competition_evidence_route_respects_rate_limit(monkeypatch):
         canonical_events, "check_rate_limit",
         lambda policy, key: RateLimitResult(allowed=False, policy="event_read", limit=1, remaining=0, retry_after_seconds=5),
     )
-    response = canonical_events.competition_evidence(limit=100, offset=0, request=None, access=OPERATOR_ACCESS)
-    assert response.status_code == 429
+    with pytest.raises(HTTPException) as refused:
+        canonical_events._admit_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.22")))
+    assert refused.value.status_code == 429
 
 
 def test_router_exposes_competition_evidence_get_route():
@@ -58,8 +64,9 @@ def test_competition_summaries_route_respects_rate_limit(monkeypatch):
         canonical_events, "check_rate_limit",
         lambda policy, key: RateLimitResult(allowed=False, policy="event_read", limit=1, remaining=0, retry_after_seconds=5),
     )
-    response = canonical_events.competition_summaries(limit=100, offset=0, request=None, access=OPERATOR_ACCESS)
-    assert response.status_code == 429
+    with pytest.raises(HTTPException) as refused:
+        canonical_events._admit_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.22")))
+    assert refused.value.status_code == 429
 
 
 def test_router_exposes_competition_summaries_get_route():

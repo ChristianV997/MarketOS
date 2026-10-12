@@ -54,8 +54,16 @@ access.
 - The workspace is that membership's workspace. A `workspace_id` query value
   may repeat it; any other value, including an empty one, is 403. Headers
   such as `X-MarketOS-Workspace` do not select a workspace.
-- Denied requests never load the JSONL file or call Supabase. Error bodies are
-  a fixed `{"detail": {"code": ...}}` with no path, payload or secret.
+- Denied requests never load the JSONL file or call Supabase. Denials (401,
+  403, 503) carry only a fixed `{"detail": {"code": ...}}`.
+- Every route is throttled before identity, so anonymous and denied requests
+  count toward `MARKETOS_EVENT_READ_RATE_LIMIT`. A throttled request answers
+  429 with `Retry-After` and `{"detail": {"status": "rate_limited", ...}}`.
+- Validation errors (422) echo the caller's own input, as FastAPI does.
+  Configuration errors keep their short messages. None includes a path,
+  payload or secret.
+
+`/api/events/readiness` was open before this change and is now operator-only.
 
 Status: implemented and integration-tested with synthetic principals in
 `tests/integration/test_canonical_events_workspace_authz.py`. Not

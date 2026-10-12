@@ -8,7 +8,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
 from backend.events.query_models import EventQuery
 from backend.events.query_service import WorkspaceScopeError, bind_query_to_workspace, event_query_report, load_events_from_jsonl
 from backend.events.supabase_query_service import explain_supabase_readiness, query_supabase_canonical_events
@@ -20,9 +19,17 @@ from backend.identity.workspaces import WorkspaceAccess
 from backend.security.rate_limit import check_rate_limit, event_read_policy
 from backend.adapters.research.cj_readonly_api import explain_cj_read_only_readiness
 
+def _admit_read(request: Request) -> None:
+    """Throttle before identity: anonymous and denied requests count, so token checks are never free."""
+    key = getattr(getattr(request, "client", None), "host", None) or "direct"
+    decision = check_rate_limit(event_read_policy(), key)
+    if not decision.allowed:
+        raise HTTPException(429, detail={"status": "rate_limited", "retry_after_seconds": decision.retry_after_seconds, "read_only": True, "mutated": False}, headers={"Retry-After": str(decision.retry_after_seconds)})
+
+
 # Operator-only and workspace-bound. Unconfigured identity fails closed with 503 before any read.
 event_read_gate = require_workspace_permission(OWNER_TYPE, CANONICAL_EVENT_READ)
-router = APIRouter(prefix="/api/events", tags=["canonical-events"], dependencies=[Depends(event_read_gate)])
+router = APIRouter(prefix="/api/events", tags=["canonical-events"], dependencies=[Depends(_admit_read), Depends(event_read_gate)])
 ROOT = Path(__file__).resolve().parents[2]; ARTIFACTS = (ROOT / "artifacts").resolve()
 # Operator JSONL bound: aligned with the workbench artifact window (1 MiB).
 MAX_JSONL_BYTES = 1_048_576
@@ -73,32 +80,17 @@ def _report(source: str, query: EventQuery) -> dict:
     raise HTTPException(400, "source must be jsonl or supabase_staging")
 
 
-def _read_limit_response(request: Request | None) -> JSONResponse | None:
-    key = getattr(getattr(request, "client", None), "host", None) or "direct"
-    decision = check_rate_limit(event_read_policy(), key)
-    if decision.allowed:
-        return None
-    return JSONResponse(
-        {"status": "rate_limited", "retry_after_seconds": decision.retry_after_seconds, "read_only": True, "mutated": False},
-        status_code=429,
-        headers={"Retry-After": str(decision.retry_after_seconds)},
-    )
-
 @router.get("")
 def events(workspace_id: str | None = None, event_type: str | None = None, aggregate_type: str | None = None, aggregate_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None, access: WorkspaceAccess = Depends(event_read_gate)):
-    if limited := _read_limit_response(request): return limited
     return _report(source, _query(workspace_id, event_type, aggregate_type, aggregate_id, limit, offset, access))
 @router.get("/timeline")
 def timeline(workspace_id: str | None = None, event_type: str | None = None, aggregate_type: str | None = None, aggregate_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None, access: WorkspaceAccess = Depends(event_read_gate)):
-    if limited := _read_limit_response(request): return limited
     return _report(source, _query(workspace_id, event_type, aggregate_type, aggregate_id, limit, offset, access))["timeline"]
 @router.get("/commerce-runs")
 def commerce_runs(workspace_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None, access: WorkspaceAccess = Depends(event_read_gate)):
-    if limited := _read_limit_response(request): return limited
     return {"runs": _report(source, _query(workspace_id, None, None, None, limit, offset, access))["commerce_runs"], "read_only": True}
 @router.get("/shopify-imports")
 def shopify_imports(workspace_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None, access: WorkspaceAccess = Depends(event_read_gate)):
-    if limited := _read_limit_response(request): return limited
     return {"imports": _report(source, _query(workspace_id, None, None, None, limit, offset, access))["shopify_imports"], "read_only": True}
 @router.get("/supplier-evidence")
 def supplier_evidence(workspace_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None, access: WorkspaceAccess = Depends(event_read_gate)):
@@ -107,7 +99,6 @@ def supplier_evidence(workspace_id: str | None = None, limit: int = Query(100, g
     first. A thin filter over the existing timeline (same events the
     generic /api/events?event_type=... already exposes) — no second query
     engine."""
-    if limited := _read_limit_response(request): return limited
     events = _report(source, _query(workspace_id, None, None, None, limit, offset, access))["timeline"]["events"]
     supplier_event_types = {"supplier_evidence_requested", "supplier_product_observed", "supplier_evidence_degraded", "commerce_economics_enriched"}
     return {"events": [event for event in events if event.get("event_type") in supplier_event_types], "read_only": True}
@@ -119,7 +110,6 @@ def opportunity_rankings(workspace_id: str | None = None, limit: int = Query(100
     reads to see why a candidate ranked where it did. Same
     query_service.py::build_*_summaries pattern as /commerce-runs and
     /shopify-imports; not a second query engine."""
-    if limited := _read_limit_response(request): return limited
     return {"rankings": _report(source, _query(workspace_id, None, None, None, limit, offset, access))["opportunity_rankings"], "read_only": True}
 @router.get("/opportunity-scoring")
 def opportunity_scoring(workspace_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None, access: WorkspaceAccess = Depends(event_read_gate)):
@@ -127,7 +117,6 @@ def opportunity_scoring(workspace_id: str | None = None, limit: int = Query(100,
     scored/ranked/completed, newest first. A thin filter over the existing
     timeline (same pattern as /api/events/supplier-evidence) — no second
     query engine."""
-    if limited := _read_limit_response(request): return limited
     events = _report(source, _query(workspace_id, None, None, None, limit, offset, access))["timeline"]["events"]
     scoring_event_types = {"opportunity_scoring_started", "candidate_scored", "opportunity_ranked", "opportunity_scoring_completed"}
     return {"events": [event for event in events if event.get("event_type") in scoring_event_types], "read_only": True}
@@ -137,7 +126,6 @@ def competition_evidence(workspace_id: str | None = None, limit: int = Query(100
     summary/pricing/completed, newest first. A thin filter over the
     existing timeline (same pattern as /api/events/supplier-evidence and
     /api/events/opportunity-scoring) — no second query engine."""
-    if limited := _read_limit_response(request): return limited
     events = _report(source, _query(workspace_id, None, None, None, limit, offset, access))["timeline"]["events"]
     competition_event_types = {"competition_observed", "competition_summary_created", "market_pricing_computed", "market_intelligence_completed"}
     return {"events": [event for event in events if event.get("event_type") in competition_event_types], "read_only": True}
@@ -149,7 +137,6 @@ def competition_summaries(workspace_id: str | None = None, limit: int = Query(10
     looks the way it does. Same query_service.py::build_*_summaries
     pattern as /commerce-runs and /opportunity-rankings; not a second query
     engine."""
-    if limited := _read_limit_response(request): return limited
     return {"summaries": _report(source, _query(workspace_id, None, None, None, limit, offset, access))["competition_summaries"], "read_only": True}
 @router.get("/research-portfolio")
 def research_portfolio(workspace_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None, access: WorkspaceAccess = Depends(event_read_gate)):
@@ -159,7 +146,6 @@ def research_portfolio(workspace_id: str | None = None, limit: int = Query(100, 
     a research portfolio was built. Same query_service.py::build_*_summaries
     pattern as /opportunity-rankings and /competition-summaries; not a
     second query engine."""
-    if limited := _read_limit_response(request): return limited
     return {"portfolios": _report(source, _query(workspace_id, None, None, None, limit, offset, access))["research_portfolios"], "read_only": True}
 @router.get("/product-research")
 def product_research(workspace_id: str | None = None, limit: int = Query(100, ge=0, le=500), offset: int = Query(0, ge=0), source: str = "jsonl", request: Request = None, access: WorkspaceAccess = Depends(event_read_gate)):
@@ -168,7 +154,6 @@ def product_research(workspace_id: str | None = None, limit: int = Query(100, ge
     filter over the existing timeline (same pattern as
     /api/events/opportunity-scoring and /api/events/competition-evidence)
     — no second query engine."""
-    if limited := _read_limit_response(request): return limited
     events = _report(source, _query(workspace_id, None, None, None, limit, offset, access))["timeline"]["events"]
     research_event_types = {"candidate_discovered", "candidate_clustered", "research_portfolio_updated", "ranking_changed", "research_completed"}
     return {"events": [event for event in events if event.get("event_type") in research_event_types], "read_only": True}

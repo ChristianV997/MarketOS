@@ -25,14 +25,20 @@ def test_supplier_evidence_route_filters_to_supplier_event_types(monkeypatch):
 
 
 def test_supplier_evidence_route_respects_rate_limit(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+
     from backend.security.rate_limit import RateLimitResult
 
     monkeypatch.setattr(
         canonical_events, "check_rate_limit",
         lambda policy, key: RateLimitResult(allowed=False, policy="event_read", limit=1, remaining=0, retry_after_seconds=5),
     )
-    response = canonical_events.supplier_evidence(limit=100, offset=0, request=None, access=OPERATOR_ACCESS)
-    assert response.status_code == 429
+    with pytest.raises(HTTPException) as refused:
+        canonical_events._admit_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.21")))
+    assert refused.value.status_code == 429
 
 
 def test_router_exposes_supplier_evidence_get_route():

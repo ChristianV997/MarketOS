@@ -1,5 +1,10 @@
 """Tests for the GET /api/events/opportunity-scoring read view — a thin
 event_type filter over the existing timeline, no second query engine."""
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+
 from api.routes import canonical_events
 from backend.identity.roles import INTERNAL_OPERATOR
 from backend.identity.workspaces import WorkspaceAccess
@@ -34,8 +39,9 @@ def test_opportunity_scoring_route_respects_rate_limit(monkeypatch):
         canonical_events, "check_rate_limit",
         lambda policy, key: RateLimitResult(allowed=False, policy="event_read", limit=1, remaining=0, retry_after_seconds=5),
     )
-    response = canonical_events.opportunity_scoring(limit=100, offset=0, request=None, access=OPERATOR_ACCESS)
-    assert response.status_code == 429
+    with pytest.raises(HTTPException) as refused:
+        canonical_events._admit_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.22")))
+    assert refused.value.status_code == 429
 
 
 def test_router_exposes_opportunity_scoring_get_route():
@@ -58,8 +64,9 @@ def test_opportunity_rankings_route_respects_rate_limit(monkeypatch):
         canonical_events, "check_rate_limit",
         lambda policy, key: RateLimitResult(allowed=False, policy="event_read", limit=1, remaining=0, retry_after_seconds=5),
     )
-    response = canonical_events.opportunity_rankings(limit=100, offset=0, request=None, access=OPERATOR_ACCESS)
-    assert response.status_code == 429
+    with pytest.raises(HTTPException) as refused:
+        canonical_events._admit_read(SimpleNamespace(client=SimpleNamespace(host="198.51.100.22")))
+    assert refused.value.status_code == 429
 
 
 def test_router_exposes_opportunity_rankings_get_route():

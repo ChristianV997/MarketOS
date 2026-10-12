@@ -182,6 +182,33 @@ def test_unconfigured_identity_provider_fails_closed(jsonl, loads, path):
     assert loads == []
 
 
+def test_requests_are_throttled_before_any_token_is_verified(jsonl, loads, monkeypatch):
+    monkeypatch.setenv("MARKETOS_EVENT_READ_RATE_LIMIT", "2")
+    reset_rate_limits_for_tests()
+    verified: list[str] = []
+
+    class CountingVerifier(FakeVerifier):
+        def verify(self, token: str) -> VerifiedPrincipal:
+            verified.append(token)
+            return super().verify(token)
+
+    app = _app(identity=False)
+    app.dependency_overrides[get_token_verifier] = lambda: CountingVerifier()
+    app.dependency_overrides[get_workspace_repository] = lambda: FakeRepo()
+    client = TestClient(app)
+    viewer = {"Authorization": "Bearer tok-viewer"}
+
+    statuses = [client.get("/api/events", headers=viewer).status_code for _ in range(2)]
+    throttled = client.get("/api/events", headers=viewer)
+
+    assert statuses == [403, 403]
+    assert throttled.status_code == 429
+    assert throttled.headers.get("retry-after")
+    assert set(throttled.json()) == {"detail"}
+    assert verified == ["tok-viewer", "tok-viewer"]
+    assert loads == []
+
+
 def test_verifier_failure_is_a_plain_401_that_echoes_nothing(jsonl, loads):
     response = TestClient(_app()).get("/api/events", headers={"Authorization": "Bearer tok-explodes"})
 
