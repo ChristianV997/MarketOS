@@ -64,8 +64,13 @@ a new score.
 | `pillar_warnings` | `warnings` strings on pillar reports and candidates, and whether each reaches the synthesis output |
 
 "Caution" means a string the synthesis emits in risk lists, blockers, threshold
-assumptions, or alias notes. The `band` dictionary is excluded, because its
-`currency` key is a label, not a caution.
+assumptions, or alias notes. A caution counts only when it equals one of a fixed
+set of exact codes for its category; matching is never by substring. The
+`band` dictionary is excluded, because its `currency` key is a label, not a
+caution. The synthesis emits no currency, identity, freshness, or price codes
+today, so those checks are known gaps. The economics-missing codes count as
+incomplete-evidence cautions only when a supplier pillar is present, because
+the synthesis emits them whenever the supplier is absent.
 
 ## Expectations
 
@@ -79,7 +84,7 @@ are safety policy written before the run. They are not canonical thresholds.
 - `*_flagged`: when the harness measures a currency, identity, freshness, price, or incomplete-evidence problem, the output must carry a caution for it.
 - `pillar_warnings_surfaced`: input warnings must appear in the output.
 - `retained_candidates`, `min_alias_notes`, `expected_coverage`: structural checks.
-- `non_authorization`: always checked. Outputs must be read-only, network-free, and non-mutating, and the next action must be a non-executing code.
+- `non_authorization`: always checked. Outputs must be read-only, network-free, and non-mutating, and the next action must be a non-executing code. The `read_only`, `network_calls`, and `mutated` values are constants the synthesis reports about itself, so they are weak evidence on their own. The real mutation guard is an input snapshot, taken before measurement and compared again after the synthesis runs. A test forces a mutating synthesis and expects the run to fail.
 
 A check that passes, or does not apply, is not reported as a gap. A failing
 check is reported as a known gap only when the packet names that exact scenario
@@ -113,6 +118,15 @@ Final, with 12 scenarios:
 | Pillar warnings: input / surfaced | 1 / 0 |
 | False-ready scenarios (must not advance, but advanced) | S04, S05, S06, S07, S09 |
 | False-confidence scenarios (grade above ceiling) | none |
+
+An independent read-only review of the first commit returned request-changes.
+Its findings were checked against the code and corrected before the final run:
+the mutation guard compared the synthesis input against a copy it never touched;
+caution matching was by substring and could be satisfied by unrelated codes; an
+unknown `--scenario` id ran zero scenarios and exited 0; unknown expectation keys
+and gap check names were not rejected; and a source with partly unavailable
+observations was classed as fresh. The corrected run produces the same numbers
+as before, and 30 tests cover the corrections.
 
 The sequence was: the baseline run; then the new scenarios with empty known
 gaps, which produced 13 unexpected failures; then the known gaps, each recorded

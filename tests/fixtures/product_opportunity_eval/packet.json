@@ -197,7 +197,7 @@
       "id": "GAP-UNAVAILABLE-CONSUMER-UNFLAGGED",
       "scenario": "S08_unavailable_consumer_source",
       "checks": ["freshness_flagged"],
-      "reason": "A consumer candidate whose only freshness status is unavailable produces no caution. _risks (lines 221-243) checks only whether a pillar is absent. Observed: no freshness caution."
+      "reason": "A consumer candidate whose only freshness status is unavailable produces no caution. _risks (lines 221-243) reads saturation, objection density and risk flags, but no freshness field. Observed: no freshness caution."
     },
     {
       "id": "GAP-UNAVAILABLE-COUNTED-AS-SUPPLIED",

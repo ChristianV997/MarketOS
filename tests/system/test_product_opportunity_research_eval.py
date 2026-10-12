@@ -58,8 +58,14 @@ def test_packet_is_fixture_only_and_secret_free():
             for item in value:
                 collect(item)
 
-    collect(_packet()["scenarios"])
-    assert modes and modes <= {"fixture", "fixture_demo", "manual_import"}, modes
+    packet = _packet()
+    collect(packet["scenarios"])
+    # The baseline scenario references repository fixtures by path, so their modes are checked too.
+    for scenario in packet["scenarios"]:
+        for pillar in harness.PILLARS:
+            if isinstance(scenario.get(pillar), str):
+                collect(json.loads((ROOT / scenario[pillar]).read_text(encoding="utf-8")))
+    assert modes and modes <= {"fixture", "fixture_demo"}, modes
 
 
 def test_known_gaps_are_exactly_the_observed_failures_and_none_is_unexpected():
@@ -126,7 +132,7 @@ def test_assumption_text_is_not_a_missing_evidence_caution():
     # Regression for a vacuous pass: "supplier_readonly_proof_missing" is an ordinary fixture-mode
     # assumption and must not satisfy an incomplete-evidence caution.
     assert harness._flagged(["supplier_readonly_proof_missing"], "incomplete") is False
-    assert harness._flagged(["target_sell_price_missing"], "incomplete") is True
+    assert harness._flagged(["target_sell_price_missing"], "incomplete", supplier_present=True) is True
 
 
 def test_resolve_report_accepts_only_repository_fixture_json():
@@ -165,3 +171,55 @@ def test_cli_writes_a_file_only_when_output_is_given(tmp_path, capsys):
 def test_harness_source_has_no_network_process_or_credential_access(banned):
     source = Path(harness.__file__).read_text(encoding="utf-8")
     assert banned not in source
+
+
+def test_mutating_synthesis_is_detected_not_masked(monkeypatch):
+    real = harness.build_product_opportunity_synthesis
+
+    def mutating(marketplace, supplier, consumer):
+        marketplace["candidates"][0]["candidate_id"] = "mutated-by-synthesis"
+        return real(marketplace, supplier, consumer)
+
+    monkeypatch.setattr(harness, "build_product_opportunity_synthesis", mutating)
+    with pytest.raises(RuntimeError, match="synthesis mutated"):
+        harness.evaluate_packet(harness.load_packet(), only={"B00_canonical_trio_baseline"})
+
+
+def test_unknown_scenario_id_is_rejected():
+    with pytest.raises(ValueError, match="unknown scenario ids"):
+        harness.evaluate_packet(harness.load_packet(), only={"no_such_scenario"})
+
+
+def test_unknown_expectation_key_and_gap_check_are_rejected(tmp_path):
+    packet = _packet()
+    packet["scenarios"][0]["expectations"]["must_not_advnace"] = True
+    path = tmp_path / "typo.json"
+    path.write_text(json.dumps(packet), encoding="utf-8")
+    with pytest.raises(ValueError, match="unknown expectation keys"):
+        harness.load_packet(path)
+    packet = _packet()
+    packet["known_gaps"].append({"id": "GAP-X", "scenario": packet["scenarios"][0]["id"], "checks": ["not_a_check"], "reason": "x"})
+    path.write_text(json.dumps(packet), encoding="utf-8")
+    with pytest.raises(ValueError, match="unknown checks"):
+        harness.load_packet(path)
+
+
+def test_caution_matching_uses_exact_codes_only():
+    assert harness._flagged(["correlated alias 'a' of 'b' shares query"], "identity") is False
+    assert harness._flagged(["currency_missing"], "currency") is False
+    assert harness._flagged(["currency_mismatch"], "currency") is True
+    assert harness._flagged(["supplier_readonly_proof_missing"], "incomplete") is False
+    assert harness._flagged(["target_sell_price_missing"], "incomplete", supplier_present=False) is False
+    assert harness._flagged(["target_sell_price_missing"], "incomplete", supplier_present=True) is True
+    assert harness._flagged(["consumer_evidence_stale"], "freshness") is True
+    assert harness._flagged(["stale_cache"], "freshness") is False
+
+
+def test_partially_unavailable_source_is_not_fresh():
+    assert harness._freshness_class(["fresh", "unavailable"]) == "unavailable"
+    assert harness._freshness_class(["fresh", "stale"]) == "stale"
+
+
+def test_pillar_warning_surfacing_is_exact_not_substring():
+    assert harness._surfaced("marketplace:provider_failed:amazon", ["provider_failed:amazon_extra"]) is False
+    assert harness._surfaced("marketplace:provider_failed:amazon", ["provider_failed:amazon"]) is True

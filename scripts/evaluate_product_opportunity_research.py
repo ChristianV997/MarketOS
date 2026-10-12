@@ -50,17 +50,52 @@ NON_EXECUTING_ACTIONS = frozenset({
     "operator_review_evidence_matrix",
     DRAFT_ACTION,
 })
-# Caution vocabulary is searched only in risk lists, blockers, threshold assumptions and alias
-# notes. The band dictionary is excluded, because its "currency" key is not a caution.
-CAUTION_TOKENS = {
-    "currency": ("currency_unreconciled", "currency_mismatch", "currency_assumed", "currency_missing"),
-    "identity": ("identity_conflict", "variant_mismatch", "query_mismatch", "correlated alias"),
-    "freshness": ("stale", "future_dated", "freshness", "unavailable"),
-    "price": ("price_band_conflict", "target_outside_band", "price_conflict"),
-    # "_missing" alone matches "supplier_readonly_proof_missing", which every fixture-mode candidate carries,
-    # so only field-level missing cautions the synthesis actually emits are searched.
-    "incomplete": ("incomplete_evidence", "target_sell_price_missing", "estimated_landed_cost_missing", "evidence_field_missing"),
+# A caution counts only when it is one of these exact codes. The synthesis emits none of the
+# currency, identity, freshness, or price codes today, so those checks are known gaps. Matching is
+# by equality, never substring: an unrelated code cannot satisfy a category by accident.
+CAUTION_CODES = {
+    "currency": frozenset({"currency_unreconciled", "currency_mismatch"}),
+    "identity": frozenset({"identity_conflict", "variant_mismatch", "query_mismatch"}),
+    "freshness": frozenset({"consumer_evidence_stale", "consumer_evidence_future_dated", "consumer_evidence_unavailable"}),
+    "price": frozenset({"price_band_conflict", "target_outside_band"}),
+    "incomplete": frozenset({"incomplete_evidence", "evidence_field_missing"}),
 }
+# The synthesis emits these when a supplier pillar is absent, which is a different condition from an
+# incomplete item. They count as incomplete-evidence cautions only when a supplier pillar is present.
+ECONOMICS_MISSING_CODES = frozenset({"target_sell_price_missing", "estimated_landed_cost_missing"})
+EXPECTATION_KEYS = frozenset({
+    "expected_coverage",
+    "reported_coverage_matches_effective",
+    "expected_recommendation",
+    "must_not_advance",
+    "max_grade",
+    "required_blockers",
+    "assumptions_must_include",
+    "min_alias_notes",
+    "retained_candidates",
+    "expected_metrics",
+})
+METRIC_KEYS = frozenset({"currency_unreconciled", "identity_conflicts", "price_conflicts", "incomplete_items", "pillar_warnings"})
+KNOWN_CHECKS = frozenset({
+    "harness_metrics_match",
+    "expected_coverage",
+    "reported_coverage_matches_effective",
+    "expected_recommendation",
+    "must_not_advance",
+    "advance_must_be_draft_only",
+    "max_grade",
+    "required_blockers",
+    "assumptions_must_include",
+    "min_alias_notes",
+    "retained_candidates",
+    "non_authorization",
+    "currency_flagged",
+    "identity_flagged",
+    "freshness_flagged",
+    "price_flagged",
+    "incomplete_flagged",
+    "pillar_warnings_surfaced",
+})
 
 
 def load_packet(path: Path = PACKET_PATH) -> dict[str, Any]:
@@ -73,6 +108,26 @@ def load_packet(path: Path = PACKET_PATH) -> dict[str, Any]:
     ids = [str(item.get("id", "")) for item in scenarios if isinstance(item, dict)]
     if len(ids) != len(scenarios) or not all(ids) or len(set(ids)) != len(ids):
         raise ValueError("scenario ids must be present and unique")
+    for scenario in scenarios:
+        expectations = scenario.get("expectations", {})
+        unknown = sorted(set(expectations) - EXPECTATION_KEYS)
+        if unknown:
+            raise ValueError(f"unknown expectation keys in {scenario['id']}: {unknown}")
+        metrics = expectations.get("expected_metrics", {})
+        unknown_metrics = sorted(set(metrics) - METRIC_KEYS)
+        if unknown_metrics:
+            raise ValueError(f"unknown expected_metrics keys in {scenario['id']}: {unknown_metrics}")
+    gap_ids = [gap.get("id") for gap in data.get("known_gaps", [])]
+    if len(gap_ids) != len(set(gap_ids)) or not all(gap_ids):
+        raise ValueError("known gap ids must be present and unique")
+    for gap in data.get("known_gaps", []):
+        if gap.get("scenario") not in ids:
+            raise ValueError(f"known gap {gap.get('id')} names an unknown scenario")
+        checks = gap.get("checks")
+        if not isinstance(checks, list) or not checks or not set(checks) <= KNOWN_CHECKS:
+            raise ValueError(f"known gap {gap.get('id')} names unknown checks")
+        if not str(gap.get("reason", "")).strip():
+            raise ValueError(f"known gap {gap.get('id')} needs a reason")
     return data
 
 
@@ -123,7 +178,8 @@ def _freshness_class(statuses: list[str]) -> str:
         return "stale"
     if "future_dated" in statuses:
         return "future_dated"
-    if all(item == "unavailable" for item in statuses):
+    # Conservative: any unavailable observation means the source is not fully fresh.
+    if "unavailable" in statuses:
         return "unavailable"
     return "fresh"
 
@@ -185,6 +241,7 @@ def measure(reports: dict[str, dict[str, Any] | None]) -> dict[str, Any]:
 
     return {
         "pillars_supplied": pillars_supplied,
+        "supplier_present": bool(maps["supplier"]),
         "effective_pillars": effective_pillars,
         "completeness": round(required_present / required_total, 4) if required_total else None,
         "incomplete_items": incomplete_items,
@@ -208,8 +265,15 @@ def _caution_strings(result: dict[str, Any]) -> list[str]:
     return [str(item) for item in strings]
 
 
-def _flagged(strings: list[str], category: str) -> bool:
-    return any(token in item for item in strings for token in CAUTION_TOKENS[category])
+def _flagged(strings: list[str], category: str, supplier_present: bool = False) -> bool:
+    codes = CAUTION_CODES[category]
+    if category == "incomplete" and supplier_present:
+        codes = codes | ECONOMICS_MISSING_CODES
+    return any(item in codes for item in strings)
+
+
+def _surfaced(warning: str, strings: list[str]) -> bool:
+    return warning.split(":", 1)[1] in strings
 
 
 def outcome(result: dict[str, Any]) -> dict[str, Any]:
@@ -287,11 +351,12 @@ def run_checks(expect: dict[str, Any], metrics: dict[str, Any], out: dict[str, A
     }
     for category, count in observed_counts.items():
         if count:
-            checks.append(_check(f"{category}_flagged", _flagged(strings, category), f"{category} observations={count}"))
+            flagged = _flagged(strings, category, supplier_present=metrics["supplier_present"])
+            checks.append(_check(f"{category}_flagged", flagged, f"{category} observations={count}"))
         else:
             checks.append(_check(f"{category}_flagged", None, "not_applicable"))
     if metrics["pillar_warnings"]:
-        missing = [item for item in metrics["pillar_warnings"] if item.split(":", 1)[1] not in " ".join(strings)]
+        missing = [item for item in metrics["pillar_warnings"] if not _surfaced(item, strings)]
         checks.append(_check("pillar_warnings_surfaced", not missing, f"unsurfaced={missing}" if missing else "surfaced"))
     else:
         checks.append(_check("pillar_warnings_surfaced", None, "not_applicable"))
@@ -311,6 +376,11 @@ def _gap_index(packet: dict[str, Any]) -> dict[tuple[str, str], str]:
 
 def evaluate_packet(packet: dict[str, Any], *, only: set[str] | None = None) -> dict[str, Any]:
     gaps = _gap_index(packet)
+    all_ids = {scenario["id"] for scenario in packet["scenarios"]}
+    if only:
+        unknown = sorted(only - all_ids)
+        if unknown:
+            raise ValueError(f"unknown scenario ids: {unknown}")
     scenarios: list[dict[str, Any]] = []
     unexpected: list[str] = []
     tallies = {"total": 0, "pass": 0, "known_gap": 0, "unexpected_fail": 0, "not_applicable": 0}
@@ -324,16 +394,20 @@ def evaluate_packet(packet: dict[str, Any], *, only: set[str] | None = None) -> 
         if only and scenario["id"] not in only:
             continue
         inputs = {pillar: _resolve_report(scenario.get(pillar)) for pillar in PILLARS}
-        before = copy.deepcopy(inputs)
+        snapshot = copy.deepcopy(inputs)
         metrics = measure(inputs)
-        result = build_product_opportunity_synthesis(copy.deepcopy(inputs["marketplace"]), copy.deepcopy(inputs["supplier"]), copy.deepcopy(inputs["consumer"])).to_dict()
-        if inputs != before:
+        if inputs != snapshot:
+            raise RuntimeError(f"measure mutated inputs for {scenario['id']}")
+        # The synthesis receives the same objects the snapshot was taken from, so a mutating
+        # synthesis is detected here rather than masked by copies.
+        result = build_product_opportunity_synthesis(inputs["marketplace"], inputs["supplier"], inputs["consumer"]).to_dict()
+        if inputs != snapshot:
             raise RuntimeError(f"synthesis mutated inputs for {scenario['id']}")
         out = outcome(result)
         expect = scenario.get("expectations", {})
         checks = run_checks(expect, metrics, out, result)
         strings = _caution_strings(result)
-        surfaced = [item for item in metrics["pillar_warnings"] if item.split(":", 1)[1] in " ".join(strings)]
+        surfaced = [item for item in metrics["pillar_warnings"] if _surfaced(item, strings)]
         scenario_checks = []
         for check in checks:
             entry = {"name": check["name"], "detail": check["detail"]}
