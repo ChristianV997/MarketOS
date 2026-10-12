@@ -9,10 +9,14 @@ import {
   requestIds,
 } from "../src/features/companyos-approval-ledger-review/lib/composeApprovalLedgerView.ts";
 import { buildApprovalLedgerFixture } from "../src/features/companyos-approval-ledger-review/fixtures/ledgerFixture.ts";
+import {
+  MAX_APPROVAL_LEDGER_REPORT_BYTES,
+  validateAndParseApprovalLedgerJson,
+} from "../src/features/companyos-approval-ledger-review/lib/loadLocalApprovalLedgerReport.ts";
 import { safeDisplayText } from "../src/features/companyos-approval-ledger-review/lib/safeText.ts";
 
-function viewOf(packet, extra = {}) {
-  const adapted = adaptApprovalLedger(packet);
+function viewOf(packet, extra = {}, adaptOptions = {}) {
+  const adapted = adaptApprovalLedger(packet, adaptOptions);
   return composeApprovalLedgerView({
     loading: false,
     errorMessage: null,
@@ -30,6 +34,7 @@ test("fixture report adapts to success with blocked vs draft distinctions", () =
   assert.equal(adapted.model.report_version, "companyos-approval-ledger-v1");
   assert.equal(adapted.model.execution_authorized, false);
   assert.equal(adapted.model.offline_planning_only, true);
+  assert.equal(adapted.model.availability, "fixture");
   assert.equal(adapted.model.safety_summary.read_only, true);
   assert.equal(adapted.model.safety_summary.external_action_performed, false);
   assert.equal(adapted.model.safety_summary.live_capabilities_enabled, false);
@@ -47,6 +52,16 @@ test("fixture report adapts to success with blocked vs draft distinctions", () =
   assert.ok(view.model.policies.some((item) => !item.blocked_in_current_mode));
   assert.equal(view.model.simulations[0].result, "would_auto_allow_draft");
   assert.equal(view.model.simulations[0].can_be_approved_now === true || view.model.simulations[0].can_be_approved_now === false, true);
+});
+
+test("local import source marks availability and forces execution_authorized false", () => {
+  const packet = buildApprovalLedgerFixture();
+  packet.execution_authorized = true;
+  const adapted = adaptApprovalLedger(packet, { source: "local_file" });
+  assert.equal(adapted.rejected, false);
+  assert.equal(adapted.model.availability, "local_import");
+  assert.equal(adapted.model.execution_authorized, false);
+  assert.match(adapted.model.limitations[0], /browser memory only/i);
 });
 
 test("loading empty and error states stay honest", () => {
@@ -103,6 +118,57 @@ test("secret-shaped and unsafe safety summaries are rejected", () => {
   assert.equal(adaptApprovalLedger(liveClaim).reason, "unsafe_safety_summary");
 });
 
+test("local JSON loader validates size shape and version without echoing contents", () => {
+  const good = buildApprovalLedgerFixture();
+  const text = JSON.stringify(good);
+  const ok = validateAndParseApprovalLedgerJson(text, { fileName: "approval_ledger_report.json" });
+  assert.equal(ok.ok, true);
+  if (ok.ok) {
+    assert.equal(ok.packet.report_version, "companyos-approval-ledger-v1");
+    assert.equal(ok.fileName, "approval_ledger_report.json");
+  }
+
+  const notJson = validateAndParseApprovalLedgerJson("{not-json sk-live-SHOULD-NOT-ECHO", {
+    fileName: "bad.json",
+  });
+  assert.equal(notJson.ok, false);
+  if (!notJson.ok) {
+    assert.equal(notJson.code, "not_json");
+    assert.doesNotMatch(notJson.message, /sk-live|SHOULD-NOT-ECHO|\{not-json/i);
+  }
+
+  const wrongVersion = validateAndParseApprovalLedgerJson(
+    JSON.stringify({ report_version: "other-v0", requests: [] }),
+    { fileName: "wrong.json" },
+  );
+  assert.equal(wrongVersion.ok, false);
+  if (!wrongVersion.ok) {
+    assert.equal(wrongVersion.code, "unsupported_version");
+    assert.doesNotMatch(wrongVersion.message, /other-v0/);
+  }
+
+  const oversized = validateAndParseApprovalLedgerJson("{}", {
+    byteLength: MAX_APPROVAL_LEDGER_REPORT_BYTES + 1,
+    fileName: "big.json",
+  });
+  assert.equal(oversized.ok, false);
+  if (!oversized.ok) {
+    assert.equal(oversized.code, "too_large");
+  }
+
+  const empty = validateAndParseApprovalLedgerJson("   ", { fileName: "empty.json" });
+  assert.equal(empty.ok, false);
+  if (!empty.ok) {
+    assert.equal(empty.code, "empty_file");
+  }
+
+  const arrayRoot = validateAndParseApprovalLedgerJson("[]", { fileName: "arr.json" });
+  assert.equal(arrayRoot.ok, false);
+  if (!arrayRoot.ok) {
+    assert.equal(arrayRoot.code, "not_object");
+  }
+});
+
 test("safe display strips angle brackets and control characters", () => {
   assert.equal(safeDisplayText("<script>alert(1)</script>"), "scriptalert(1)/script");
   assert.equal(safeDisplayText("ok\u0000title"), "oktitle");
@@ -139,6 +205,8 @@ test("keyboard selection stays in source order and source has no mutation contro
   assert.match(featureRoot, /\/api\/cockpit\/approvals/);
   assert.match(featureRoot, /execution-cockpit write\/decide path/i);
   assert.match(featureRoot, /\/operator\/approval-ledger/);
+  assert.match(featureRoot, /in memory only/i);
+  assert.match(featureRoot, /local JSON report/i);
 });
 
 test("Shell router mounts /operator/approval-ledger without cockpit or mutation APIs", async () => {
@@ -159,13 +227,27 @@ test("Shell router mounts /operator/approval-ledger without cockpit or mutation 
     "utf8",
   );
   assert.match(page, /buildApprovalLedgerFixture/);
+  assert.match(page, /readLocalApprovalLedgerFile/);
+  assert.match(page, /type="file"/);
+  assert.match(page, /Use demo fixture/);
+  assert.match(page, /adaptApprovalLedger/);
   assert.doesNotMatch(page, /fetch\(|axios|httpx|\/api\//i);
+  assert.doesNotMatch(page, /localStorage|indexedDB|sessionStorage/i);
+  assert.doesNotMatch(page, /denyApproval|decideApproval|create_pending_approval/i);
+
+  const loader = await readFile(
+    new URL("../src/features/companyos-approval-ledger-review/lib/loadLocalApprovalLedgerReport.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(loader, /MAX_APPROVAL_LEDGER_REPORT_BYTES/);
+  assert.doesNotMatch(loader, /fetch\(|XMLHttpRequest|localStorage/i);
 
   const index = await readFile(
     new URL("../src/features/companyos-approval-ledger-review/index.ts", import.meta.url),
     "utf8",
   );
   assert.match(index, /ApprovalLedgerReviewPage/);
+  assert.match(index, /readLocalApprovalLedgerFile/);
 });
 
 test("success view exposes evidence, conditions, and policy labels without authority", () => {
@@ -181,4 +263,20 @@ test("success view exposes evidence, conditions, and policy labels without autho
   assert.equal(view.model.execution_authorized, false);
   assert.match(view.authorityNote, /do not authorize/i);
   assert.equal(view.model.simulations[0].result, "would_auto_allow_draft");
+});
+
+test("accepted local JSON still fails closed through adapter for secrets", () => {
+  const packet = buildApprovalLedgerFixture();
+  packet.requests[0].request_title = "leak sk-live-abcdefghijklmnopqrstuv";
+  const text = JSON.stringify(packet);
+  const loaded = validateAndParseApprovalLedgerJson(text, { fileName: "leaky.json" });
+  // Version/shape pass; secret rejection is the adapter's job (fail closed, no echo).
+  assert.equal(loaded.ok, true);
+  if (loaded.ok) {
+    const adapted = adaptApprovalLedger(loaded.packet, { source: "local_file" });
+    assert.equal(adapted.rejected, true);
+    assert.equal(adapted.reason, "prohibited_field");
+    assert.equal(adapted.model.execution_authorized, false);
+    assert.doesNotMatch(adapted.model.safety_summary.summary, /sk-live/);
+  }
 });
