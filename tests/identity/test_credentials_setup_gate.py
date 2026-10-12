@@ -32,6 +32,7 @@ from backend.identity.roles import (
     CLIENT_VIEWER,
     CREDENTIAL_TEST,
     CREDENTIAL_WRITE,
+    EVENT_STREAM_READ,
     INTERNAL_OPERATOR,
     PROFILE_CREATE,
     PROFILE_READ,
@@ -1030,5 +1031,6 @@ def test_a_cors_preflight_for_the_credential_write_reaches_no_handler(wired, eff
 def test_the_credential_permissions_do_not_widen_the_client_profile_roles():
     assert ROLE_PERMISSIONS[CLIENT_VIEWER] == frozenset({PROFILE_READ})
     assert ROLE_PERMISSIONS[INTERNAL_OPERATOR] == frozenset(
-        {PROFILE_READ, PROFILE_CREATE, PROFILE_UPDATE, CREDENTIAL_WRITE, CREDENTIAL_TEST}
+        {PROFILE_READ, PROFILE_CREATE, PROFILE_UPDATE, CREDENTIAL_WRITE, CREDENTIAL_TEST, EVENT_STREAM_READ}
     )
+    assert not role_grants(CLIENT_VIEWER, EVENT_STREAM_READ)
