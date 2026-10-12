@@ -60,8 +60,8 @@ access.
   such as `X-MarketOS-Workspace` do not select a workspace.
 - Denied requests never load the JSONL file or call Supabase. Denials (401,
   403, 503) carry only a fixed `{"detail": {"code": ...}}`.
-- Every route is throttled before identity, so anonymous and denied requests
-  count toward `MARKETOS_EVENT_READ_RATE_LIMIT`. A throttled request answers
+- Every route on these surfaces is throttled before identity, so anonymous and
+  denied requests count toward `MARKETOS_EVENT_READ_RATE_LIMIT`. A throttled request answers
   429 with `Retry-After` and `{"detail": {"status": "rate_limited", ...}}`.
 - Validation errors (422) echo the caller's own input, as FastAPI does.
   Configuration errors keep their short messages. None includes a path,

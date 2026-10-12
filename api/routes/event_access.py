@@ -14,6 +14,9 @@ from backend.identity.repository import OWNER_TYPE
 from backend.identity.roles import CANONICAL_EVENT_READ, CANONICAL_EVENT_WRITE
 from backend.security.rate_limit import check_rate_limit, event_read_policy
 
+# Operator JSONL bound: aligned with the workbench artifact window (1 MiB). Every event-file reader uses it.
+MAX_EVENT_JSONL_BYTES = 1_048_576
+
 event_read_gate = require_workspace_permission(OWNER_TYPE, CANONICAL_EVENT_READ)
 event_write_gate = require_workspace_permission(OWNER_TYPE, CANONICAL_EVENT_WRITE)
 
@@ -35,4 +38,4 @@ def admit_event_read(request: Request) -> None:
         )
 
 
-__all__ = ["admit_event_read", "event_read_gate", "event_write_gate"]
+__all__ = ["MAX_EVENT_JSONL_BYTES", "admit_event_read", "event_read_gate", "event_write_gate"]

@@ -231,3 +231,13 @@ def test_evaluation_reads_never_write(jsonl, artifacts):
         client.get(path)
 
     assert snapshot() == before
+
+
+def test_oversized_configured_file_is_refused_before_it_is_parsed(monkeypatch, jsonl, loads):
+    monkeypatch.setattr(commerce_evaluations, "MAX_EVENT_JSONL_BYTES", 10)
+
+    response = TestClient(_app()).get("/api/evaluations", headers=OPERATOR)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "blocked"
+    assert loads == []

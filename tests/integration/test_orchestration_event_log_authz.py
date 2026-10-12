@@ -15,6 +15,7 @@ from backend.identity.http import get_token_verifier, get_workspace_repository
 from backend.identity.principal import VerifiedPrincipal
 from backend.identity.roles import CLIENT_VIEWER, INTERNAL_OPERATOR
 from backend.identity.workspaces import WorkspaceAccess
+from backend.security.rate_limit import reset_rate_limits_for_tests
 
 ISSUER = "https://clerk.test"
 BOUND = "ws_flow_bound_synthetic"
@@ -56,6 +57,14 @@ def _app(*, identity: bool = True) -> FastAPI:
         app.dependency_overrides[get_token_verifier] = lambda: FakeVerifier()
         app.dependency_overrides[get_workspace_repository] = lambda: FakeRepo()
     return app
+
+
+@pytest.fixture(autouse=True)
+def _isolated_rate_limits(monkeypatch):
+    monkeypatch.setenv("MARKETOS_EVENT_READ_RATE_LIMIT", "100000")
+    reset_rate_limits_for_tests()
+    yield
+    reset_rate_limits_for_tests()
 
 
 @pytest.fixture
@@ -123,4 +132,28 @@ def test_rate_mesh_health_stays_open_and_reads_no_event_log(store):
     response = TestClient(_app()).get("/orchestration/health")
 
     assert response.status_code == 200
+    assert store == []
+
+
+def test_denied_log_reads_are_throttled_before_identity(store, monkeypatch):
+    monkeypatch.setenv("MARKETOS_EVENT_READ_RATE_LIMIT", "2")
+    reset_rate_limits_for_tests()
+    verified: list[str] = []
+
+    class CountingVerifier(FakeVerifier):
+        def verify(self, token: str) -> VerifiedPrincipal:
+            verified.append(token)
+            return super().verify(token)
+
+    app = _app(identity=False)
+    app.dependency_overrides[get_token_verifier] = lambda: CountingVerifier()
+    app.dependency_overrides[get_workspace_repository] = lambda: FakeRepo()
+    client = TestClient(app)
+
+    statuses = [client.get("/orchestration/workflows", headers=VIEWER).status_code for _ in range(2)]
+    throttled = client.get("/orchestration/workflows", headers=VIEWER)
+
+    assert statuses == [403, 403]
+    assert throttled.status_code == 429
+    assert verified == ["tok-viewer", "tok-viewer"]
     assert store == []

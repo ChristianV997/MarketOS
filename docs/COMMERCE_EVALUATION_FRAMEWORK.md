@@ -143,7 +143,8 @@ GET /api/evaluations/compare
 
 Every evaluation route requires a verified operator principal and evaluates only the
 events of that principal's bound workspace; see
-[Canonical Event Read Views](CANONICAL_EVENT_READ_VIEWS.md#access-contract).
+[Canonical Event Read Views](CANONICAL_EVENT_READ_VIEWS.md#access-contract). A configured
+event file larger than the shared 1 MiB read bound is refused as blocked, before it is parsed.
 
 The comparison view additionally requires server-configured baseline and
 current paths beneath `artifacts/`. There are no POST, PUT, PATCH, or DELETE

@@ -362,3 +362,40 @@ def test_event_read_is_operator_only_by_role_map():
     assert role_grants(INTERNAL_OPERATOR, CANONICAL_EVENT_READ)
     assert not role_grants(CLIENT_VIEWER, CANONICAL_EVENT_READ)
     assert CANONICAL_EVENT_READ not in ROLE_PERMISSIONS[CLIENT_VIEWER]
+
+
+THIN_FILTER_PATHS = [
+    "/api/events/timeline",
+    "/api/events/commerce-runs",
+    "/api/events/shopify-imports",
+    "/api/events/supplier-evidence",
+    "/api/events/opportunity-rankings",
+    "/api/events/opportunity-scoring",
+    "/api/events/competition-evidence",
+    "/api/events/competition-summaries",
+    "/api/events/research-portfolio",
+    "/api/events/product-research",
+]
+
+
+@pytest.mark.parametrize("path", THIN_FILTER_PATHS)
+def test_every_read_view_queries_only_the_bound_workspace(monkeypatch, path):
+    queries = []
+
+    def fake_report(source, query):
+        queries.append(query)
+        return {
+            "timeline": {"events": []},
+            "commerce_runs": [],
+            "shopify_imports": [],
+            "opportunity_rankings": [],
+            "competition_summaries": [],
+            "research_portfolios": [],
+        }
+
+    monkeypatch.setattr(canonical_events, "_report", fake_report)
+
+    response = TestClient(_app()).get(path, headers=OPERATOR_TOKEN)
+
+    assert response.status_code == 200
+    assert [query.workspace_id for query in queries] == [BOUND_WS]

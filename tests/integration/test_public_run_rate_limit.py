@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from api.routes import commerce_mvp
 from backend.identity.roles import INTERNAL_OPERATOR
 from backend.identity.workspaces import WorkspaceAccess
+from backend.security.rate_limit import reset_rate_limits_for_tests
 
 OPERATOR_ACCESS = WorkspaceAccess("https://clerk.test", "user_operator", "commerce-mvp-public", "internal", "synthetic", INTERNAL_OPERATOR)
 
@@ -10,7 +11,6 @@ OPERATOR_ACCESS = WorkspaceAccess("https://clerk.test", "user_operator", "commer
 def _public_run(request, **kwargs):
     """The gate result is passed in because these tests call the handler directly."""
     return commerce_mvp.public_run(request, access=OPERATOR_ACCESS, **kwargs)
-from backend.security.rate_limit import reset_rate_limits_for_tests
 
 
 def test_public_run_returns_structured_429(monkeypatch):

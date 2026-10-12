@@ -21,6 +21,7 @@ from backend.identity.http import get_token_verifier, get_workspace_repository
 from backend.identity.principal import VerifiedPrincipal
 from backend.identity.roles import CLIENT_VIEWER, INTERNAL_OPERATOR
 from backend.identity.workspaces import WorkspaceAccess
+from backend.security.rate_limit import reset_rate_limits_for_tests
 
 ISSUER = "https://clerk.test"
 BOUND = "ws_run_bound_synthetic"
@@ -58,6 +59,15 @@ def _app(*, identity: bool = True) -> FastAPI:
         app.dependency_overrides[get_token_verifier] = lambda: FakeVerifier()
         app.dependency_overrides[get_workspace_repository] = lambda: FakeRepo()
     return app
+
+
+@pytest.fixture(autouse=True)
+def _isolated_rate_limits(monkeypatch):
+    monkeypatch.setenv("MARKETOS_EVENT_READ_RATE_LIMIT", "100000")
+    monkeypatch.setenv("MARKETOS_PUBLIC_RUN_RATE_LIMIT", "100000")
+    reset_rate_limits_for_tests()
+    yield
+    reset_rate_limits_for_tests()
 
 
 @pytest.fixture
@@ -175,3 +185,28 @@ def test_request_model_is_not_mutated_by_the_binding(runs):
 
     assert model.workspace_id == "commerce-mvp-public"
     assert "workspace_id" not in model.model_fields_set
+
+
+def test_denied_runs_are_throttled_before_identity(runs, monkeypatch):
+    monkeypatch.setenv("MARKETOS_EVENT_READ_RATE_LIMIT", "2")
+    reset_rate_limits_for_tests()
+    verified: list[str] = []
+
+    class CountingVerifier(FakeVerifier):
+        def verify(self, token: str) -> VerifiedPrincipal:
+            verified.append(token)
+            return super().verify(token)
+
+    app = _app(identity=False)
+    app.dependency_overrides[get_token_verifier] = lambda: CountingVerifier()
+    app.dependency_overrides[get_workspace_repository] = lambda: FakeRepo()
+    client = TestClient(app)
+
+    statuses = [client.post("/api/commerce-mvp/public-run", json=BODY, headers=VIEWER).status_code for _ in range(2)]
+    throttled = client.post("/api/commerce-mvp/public-run", json=BODY, headers=VIEWER)
+
+    assert statuses == [403, 403]
+    assert throttled.status_code == 429
+    assert throttled.headers.get("retry-after")
+    assert verified == ["tok-viewer", "tok-viewer"]
+    assert runs == []

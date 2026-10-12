@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from backend.events.query_models import EventQuery
 from backend.events.query_service import WorkspaceScopeError, bind_query_to_workspace, event_query_report, load_events_from_jsonl
 from backend.events.supabase_query_service import explain_supabase_readiness, query_supabase_canonical_events
-from api.routes.event_access import admit_event_read, event_read_gate
+from api.routes.event_access import MAX_EVENT_JSONL_BYTES, admit_event_read, event_read_gate
 from backend.identity.errors import WorkspaceAccessDenied
 from backend.identity.http import http_exception
 from backend.identity.workspaces import WorkspaceAccess
@@ -20,8 +20,7 @@ from backend.adapters.research.cj_readonly_api import explain_cj_read_only_readi
 # Operator-only and workspace-bound (see api/routes/event_access.py). Throttled before identity.
 router = APIRouter(prefix="/api/events", tags=["canonical-events"], dependencies=[Depends(admit_event_read), Depends(event_read_gate)])
 ROOT = Path(__file__).resolve().parents[2]; ARTIFACTS = (ROOT / "artifacts").resolve()
-# Operator JSONL bound: aligned with the workbench artifact window (1 MiB).
-MAX_JSONL_BYTES = 1_048_576
+MAX_JSONL_BYTES = MAX_EVENT_JSONL_BYTES
 
 def _query(workspace_id: str | None, event_type: str | None, aggregate_type: str | None, aggregate_id: str | None, limit: int, offset: int, access: WorkspaceAccess) -> EventQuery:
     query = EventQuery(workspace_id, event_type, aggregate_type, aggregate_id, None, None, limit, offset)

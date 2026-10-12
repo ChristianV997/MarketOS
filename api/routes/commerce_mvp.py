@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from api.routes.event_access import event_write_gate
+from api.routes.event_access import admit_event_read, event_write_gate
 from backend.ecommerce.shopify_readonly.events import shopify_batch_events
 from backend.ecommerce.shopify_readonly.importer import import_shopify_readonly
 from backend.events.adapters.supabase_staging import build_supabase_staging_repository, explain_supabase_staging_readiness
@@ -76,7 +76,7 @@ def _server_jsonl_path() -> Path | None:
     return path if ARTIFACTS in path.parents else None
 
 
-@router.post("/public-run")
+@router.post("/public-run", dependencies=[Depends(admit_event_read)])
 def public_run(request: PublicCommerceRunRequest, http_request: Request = None, access: WorkspaceAccess = Depends(event_write_gate)) -> dict:
     """Run one bounded public RSS query after explicit server/operator gates.
 
