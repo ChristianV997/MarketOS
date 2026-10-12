@@ -82,7 +82,11 @@ export function ApprovalLedgerReviewPage() {
   const reviewError = mode === "invalid" ? errorMessage : null;
 
   return (
-    <div className="min-w-0 space-y-4" data-testid="companyos-approval-ledger-page">
+    <div
+      className="min-w-0 space-y-4"
+      data-testid="companyos-approval-ledger-page"
+      aria-busy={loading || undefined}
+    >
       <section
         aria-labelledby="approval-ledger-local-source-heading"
         className="space-y-3 border-b border-zinc-800 p-3 sm:p-4 text-zinc-100"

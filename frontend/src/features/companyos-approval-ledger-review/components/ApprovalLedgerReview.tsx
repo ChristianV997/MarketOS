@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { adaptApprovalLedger } from "../lib/adaptApprovalLedger.ts";
 import { composeApprovalLedgerView, moveSelection, requestIds } from "../lib/composeApprovalLedgerView.ts";
 import { humanizeToken, safeDisplayText } from "../lib/safeText.ts";
@@ -33,6 +33,10 @@ export function ApprovalLedgerReview({
     [adaptSource, packet],
   );
   const [selected, setSelected] = useState<string | null>(null);
+  // Drop prior selection when the operator swaps demo ↔ local report (or loads another file).
+  useEffect(() => {
+    setSelected(null);
+  }, [adaptSource, packet]);
   const view = useMemo(() => composeApprovalLedgerView({
     loading,
     errorMessage,

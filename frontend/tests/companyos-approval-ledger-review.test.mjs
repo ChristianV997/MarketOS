@@ -280,3 +280,37 @@ test("accepted local JSON still fails closed through adapter for secrets", () =>
     assert.doesNotMatch(adapted.model.safety_summary.summary, /sk-live/);
   }
 });
+
+test("source swap clears selection identity so prior request ids cannot stick", async () => {
+  const component = await readFile(
+    new URL("../src/features/companyos-approval-ledger-review/components/ApprovalLedgerReview.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(component, /setSelected\(null\)/);
+  assert.match(component, /adaptSource,\s*packet/);
+
+  const page = await readFile(
+    new URL("../src/features/companyos-approval-ledger-review/ApprovalLedgerReviewPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /aria-busy=\{loading/);
+});
+
+test("simulation flags never flip execution_authorized", () => {
+  const packet = buildApprovalLedgerFixture();
+  packet.simulations = [
+    {
+      ...packet.simulations[0],
+      can_be_approved_now: true,
+      result: "would_auto_allow_draft",
+    },
+  ];
+  packet.execution_authorized = true;
+  const adapted = adaptApprovalLedger(packet, { source: "local_file" });
+  assert.equal(adapted.rejected, false);
+  assert.equal(adapted.model.execution_authorized, false);
+  assert.equal(adapted.model.simulations[0].can_be_approved_now, true);
+  const view = viewOf(packet, {}, { source: "local_file" });
+  assert.equal(view.model.execution_authorized, false);
+  assert.match(view.authorityNote, /do not authorize/i);
+});
