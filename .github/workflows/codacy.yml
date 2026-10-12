@@ -53,6 +53,12 @@ jobs:
           # Force 0 exit code to allow SARIF file generation
           # This will handover control about PR rejection to the GitHub side
           max-allowed-issues: 2147483647
+          # Bound analyzer execution and fail closed when any configured tool
+          # cannot produce a complete result. This prevents an opaque six-hour
+          # runner cancellation from being mistaken for a usable scan.
+          parallel: 2
+          tool-timeout: 15minutes
+          fail-if-incomplete: true
 
       # Upload the SARIF file generated in the previous step
       - name: Upload SARIF results file
