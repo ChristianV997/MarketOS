@@ -416,6 +416,7 @@ class ProductOpportunitySynthesisReport:
     mutated: bool = False
     alias_notes: tuple[str, ...] = ()
     market_access: Mapping[str, Any] = field(default_factory=dict)
+    consumer_attention_insights: Mapping[str, Any] = field(default_factory=lambda: {"status": "not_supplied"})
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -531,6 +532,18 @@ def _candidate(candidate_id: str, market: Mapping[str, Any] | None, supplier: Ma
     return result, action
 
 
+def _insight_attachment(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Attach insight evidence without rescoring or granting authority."""
+    if not value:
+        return {"status": "not_supplied"}
+    payload = dict(value)
+    payload["status"] = "supplied"
+    authority = dict(payload.get("authority") or {})
+    authority.update({"purchase_intent": False, "supplier_proof": False, "launch_authorization": False, "opportunity_rescore": False})
+    payload["authority"] = authority
+    return payload
+
+
 def build_product_opportunity_synthesis(
     marketplace_report: Mapping[str, Any] | None,
     supplier_report: Mapping[str, Any] | None,
@@ -539,6 +552,7 @@ def build_product_opportunity_synthesis(
     product_validation_report: Mapping[str, Any] | None = None,
     client_context: Mapping[str, Any] | None = None,
     market_access_evidence: Mapping[str, Any] | None = None,
+    consumer_insights: Mapping[str, Any] | None = None,
 ) -> ProductOpportunitySynthesisReport:
     (market, market_alias_notes), (supplier, supplier_alias_notes), (consumer, consumer_alias_notes) = _candidate_map(marketplace_report), _candidate_map(supplier_report), _candidate_map(consumer_report)
     alias_notes = tuple(market_alias_notes + supplier_alias_notes + consumer_alias_notes)
@@ -555,12 +569,16 @@ def build_product_opportunity_synthesis(
     source_reports = {"marketplace": "supplied" if marketplace_report else "missing", "supplier": "supplied" if supplier_report else "missing", "consumer_attention": "supplied" if consumer_report else "missing", "product_validation": "supplied" if product_validation_report else "missing"}
     report_modes = [str(report.get("evidence_mode", "")) for report in (marketplace_report, supplier_report, consumer_report) if report]
     mode = "fixture_demo" if "fixture_demo" in report_modes else "manual_import" if "manual_import" in report_modes else "sanitized_report"
+    insights = _insight_attachment(consumer_insights)
+    insight_questions = [item.get("statement") for item in insights.get("product_questions") or [] if isinstance(item, Mapping) and item.get("statement")]
     if top:
         rec = top.score.recommendation
         client = f"{top.title} is the leading candidate at {top.score.combined_opportunity_score:.0%} combined opportunity. Recommendation: {rec.code}. This is validation guidance, not a profit guarantee or launch authorization."
         operator = f"Next action: {rec.next_action}. Confidence: {top.score.confidence_grade}. Risks: {', '.join(top.score.risk_profile.blockers) or 'none recorded'}."
+        if insight_questions:
+            operator = f"{operator} Attention questions: {len(insight_questions)} evidence-backed question(s); not a rescore."
         band = {"min": top.decision_thresholds.recommended_price_band_min, "max": top.decision_thresholds.recommended_price_band_max, "currency": "USD", "status": "observed_or_derived" if top.decision_thresholds.recommended_price_band_min is not None else "unavailable"}
-        return ProductOpportunitySynthesisReport("product-opportunity-synthesis-v1", "deterministic", mode, len(candidates), top.candidate_id, top.title, rec.code, top.score.combined_opportunity_score, top.score.marketplace_opportunity, top.score.supplier_feasibility, top.score.consumer_attention, top.unit_economics_summary, top.score.evidence_confidence, top.score.confidence_grade, top.score.risk_profile.to_dict(), top.decision_thresholds.to_dict(), {"kill_if_cpa_above": top.decision_thresholds.kill_if_cpa_above, "scale_if_cpa_below": top.decision_thresholds.scale_if_cpa_below, "kill_if_ctr_below": top.decision_thresholds.kill_if_ctr_below, "kill_if_add_to_cart_below": top.decision_thresholds.kill_if_add_to_cart_below, "scale_if_margin_above": top.decision_thresholds.scale_if_margin_above}, band, top.decision_thresholds.break_even_cpa, top.decision_thresholds.break_even_roas, top.top_hooks, top.top_pain_points, top.top_objections, top.top_ad_angles, top.top_supplier_risks, top.top_marketplace_risks, top.top_consumer_risks, rec.next_action, plan.days, client, operator, tuple(candidates), source_reports, alias_notes=alias_notes, market_access=top.market_access)
+        return ProductOpportunitySynthesisReport("product-opportunity-synthesis-v1", "deterministic", mode, len(candidates), top.candidate_id, top.title, rec.code, top.score.combined_opportunity_score, top.score.marketplace_opportunity, top.score.supplier_feasibility, top.score.consumer_attention, top.unit_economics_summary, top.score.evidence_confidence, top.score.confidence_grade, top.score.risk_profile.to_dict(), top.decision_thresholds.to_dict(), {"kill_if_cpa_above": top.decision_thresholds.kill_if_cpa_above, "scale_if_cpa_below": top.decision_thresholds.scale_if_cpa_below, "kill_if_ctr_below": top.decision_thresholds.kill_if_ctr_below, "kill_if_add_to_cart_below": top.decision_thresholds.kill_if_add_to_cart_below, "scale_if_margin_above": top.decision_thresholds.scale_if_margin_above}, band, top.decision_thresholds.break_even_cpa, top.decision_thresholds.break_even_roas, top.top_hooks, top.top_pain_points, top.top_objections, top.top_ad_angles, top.top_supplier_risks, top.top_marketplace_risks, top.top_consumer_risks, rec.next_action, plan.days, client, operator, tuple(candidates), source_reports, alias_notes=alias_notes, market_access=top.market_access, consumer_attention_insights=insights)
     return ProductOpportunitySynthesisReport(
         report_version="product-opportunity-synthesis-v1",
         generated_at="deterministic",
@@ -597,6 +615,7 @@ def build_product_opportunity_synthesis(
         source_reports=source_reports,
         alias_notes=alias_notes,
         market_access=build_market_access_section({"id": ""}),
+        consumer_attention_insights=insights,
     )
 
 
