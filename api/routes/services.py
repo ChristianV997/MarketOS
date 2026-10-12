@@ -10,10 +10,16 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from services.reporting import json_safe
 
 router = APIRouter(prefix="/api/services")
+
+
+def _service_failure_response() -> JSONResponse:
+    """Return a stable server-error contract without reflecting exception data."""
+    return JSONResponse(status_code=500, content={"error": "service_unavailable"})
 
 
 def _resolve_workspace(name: str | None):
@@ -34,15 +40,15 @@ def _resolve_workspace(name: str | None):
 def product_audit(product: str, category: str = "general", price: float | None = None, workspace: str | None = None):
     """Product & category opportunity audit. Never raises — the underlying
     service function is itself never-raise; any unexpected failure here
-    surfaces as a structured error dict, not a 500 with a stack trace."""
+    surfaces as a stable 500 response without exception details."""
     from services.product_research.audit import run_product_audit
     try:
         result, envelope = run_product_audit(
             product, category=category, retail_price=price, workspace=_resolve_workspace(workspace),
         )
         return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
+    except Exception:  # noqa: BLE001
+        return _service_failure_response()
 
 
 @router.post("/ecommerce-operator")
@@ -63,8 +69,9 @@ def ecommerce_operator(
     """Launch readiness + ledger-derived contribution profit + kill/scale
     decision for one product, delegating to the same functions
     marketos.cli's `services ecommerce-operator` subcommand calls — one
-    code path, not two. Never raises for the same reason as the routes
-    above: this only produces a decision/readiness verdict (see
+    code path, not two. Unexpected failures use the same stable error
+    response as the routes above: this only produces a decision/readiness
+    verdict (see
     docs/LIVE_MODE_SAFETY.md) and doesn't execute anything live itself."""
     from services.ecommerce_operator.experiment import create_commerce_experiment
     from services.ecommerce_operator.launch_guard import evaluate_launch_readiness
@@ -92,8 +99,8 @@ def ecommerce_operator(
             "decision": decision.to_dict(),
             "experiment_id": envelope.experiment_id,
         })
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
+    except Exception:  # noqa: BLE001
+        return _service_failure_response()
 
 
 @router.post("/unit-economics")
@@ -101,8 +108,7 @@ def unit_economics(
     product: str, cost: float, price: float, shipping: float = 0.0,
     category: str = "general", geo: str | None = None, workspace: str | None = None,
 ):
-    """Unit economics diagnostic. Never raises for the same reason as
-    product_audit above."""
+    """Unit economics diagnostic with a stable unexpected-failure response."""
     from services.unit_economics.analyzer import run_unit_economics
     try:
         result, envelope = run_unit_economics(
@@ -110,8 +116,8 @@ def unit_economics(
             category=category, geo=geo, workspace=_resolve_workspace(workspace),
         )
         return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
+    except Exception:  # noqa: BLE001
+        return _service_failure_response()
 
 
 @router.post("/creative-growth")
@@ -124,8 +130,8 @@ def creative_growth(product: str, category: str = "general", workspace: str | No
             product, category=category, workspace=_resolve_workspace(workspace),
         )
         return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
+    except Exception:  # noqa: BLE001
+        return _service_failure_response()
 
 
 @router.post("/customer-intelligence")
@@ -142,8 +148,8 @@ def customer_intelligence(
             category=category, workspace=_resolve_workspace(workspace),
         )
         return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
+    except Exception:  # noqa: BLE001
+        return _service_failure_response()
 
 
 @router.post("/digital-product")
@@ -163,8 +169,8 @@ def digital_product(
             workspace=_resolve_workspace(workspace),
         )
         return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
+    except Exception:  # noqa: BLE001
+        return _service_failure_response()
 
 
 @router.post("/sales-automation")
@@ -189,8 +195,8 @@ def sales_automation(
             "real_handoff": envelope.outputs.get("real_handoff"),
             "commercial_status": envelope.outputs.get("commercial_status"),
         })
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
+    except Exception:  # noqa: BLE001
+        return _service_failure_response()
 
 
 @router.post("/profit-stack-advisor")
@@ -221,5 +227,5 @@ def profit_stack_advisor(
             supplier_cost=supplier_cost, retail_price=retail_price, workspace=_resolve_workspace(workspace),
         )
         return json_safe({"result": result.to_dict(), "experiment_id": envelope.experiment_id})
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
+    except Exception:  # noqa: BLE001
+        return _service_failure_response()
