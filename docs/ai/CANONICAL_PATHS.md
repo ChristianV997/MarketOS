@@ -8,6 +8,7 @@ Updated: 2026-10-11
 | Event spine & envelope | `backend/contracts/events.py` |
 | Replay certification & identity | `backend/events/replay_certification.py` |
 | Operator identity & route authorization | `backend/identity/http.py` (`require_workspace_permission`), `docs/IDENTITY_WORKSPACE_FOUNDATION.md` |
+| Live `/ws` event stream gate | `api/ws.py` (`event_stream`, operator permission `event_stream:read`) |
 | Client export & isolation boundary | `evaluation/trustos/client_workspace_isolation.py` |
 | Resource execution governance | `evaluation/companyos/resource_execution_governor.py` |
 | Pre-integration policy gate & approval | `evaluation/companyos/approval_ledger.py` |

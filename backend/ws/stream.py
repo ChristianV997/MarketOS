@@ -35,12 +35,16 @@ class WebSocketStream:
         self._idle_sleep_s = idle_sleep_s
         self._replay_n = replay_n
 
-    async def handle(self, ws: Any) -> None:
-        """Accept a WebSocket connection and stream events until disconnect."""
+    async def handle(self, ws: Any, *, subprotocol: str | None = None) -> None:
+        """Accept a WebSocket connection and stream events until disconnect.
+
+        Accepts unconditionally. The caller (``api.ws.event_stream``) must verify
+        the connection's identity before calling this.
+        """
         from backend.pubsub.broker import broker
 
         try:
-            await ws.accept()
+            await ws.accept(subprotocol=subprotocol)
         except Exception:
             return
 

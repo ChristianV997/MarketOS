@@ -17,10 +17,13 @@ PROFILE_CREATE = "client_profile:create"
 PROFILE_UPDATE = "client_profile:update"
 CREDENTIAL_WRITE = "setup_credential:write"
 CREDENTIAL_TEST = "setup_credential:test"
+EVENT_STREAM_READ = "event_stream:read"
 
 ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
     CLIENT_VIEWER: frozenset({PROFILE_READ}),
-    INTERNAL_OPERATOR: frozenset({PROFILE_READ, PROFILE_CREATE, PROFILE_UPDATE, CREDENTIAL_WRITE, CREDENTIAL_TEST}),
+    INTERNAL_OPERATOR: frozenset(
+        {PROFILE_READ, PROFILE_CREATE, PROFILE_UPDATE, CREDENTIAL_WRITE, CREDENTIAL_TEST, EVENT_STREAM_READ}
+    ),
 }
 
 
