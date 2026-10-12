@@ -10,9 +10,9 @@ import hashlib
 import asyncio
 import json
 import math
-import re
 import time
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from typing import Any, Mapping
 from urllib.parse import urlparse
 from urllib import robotparser
@@ -50,6 +50,59 @@ def crawl4ai_browser_channel() -> str | None:
     return value or None
 
 
+class _JSONLDExtractor(HTMLParser):
+    """Linear-time streaming HTML parser for application/ld+json script extraction.
+
+    Replaces polynomial-backtracking regular expressions (CWE-1333 / CodeQL alert #932)
+    with a streaming, non-backtracking HTMLParser from the Python standard library.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.scripts: list[str] = []
+        self._in_script = False
+        self._current_chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() == "script":
+            is_jsonld = False
+            for name, val in attrs:
+                if name.lower() == "type" and val:
+                    mime = val.split(";")[0].strip().lower()
+                    if mime == "application/ld+json":
+                        is_jsonld = True
+                        break
+            if is_jsonld:
+                self._in_script = True
+                self._current_chunks = []
+            elif self._in_script:
+                self._in_script = False
+                self._current_chunks = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "script" and self._in_script:
+            self._in_script = False
+            self.scripts.append("".join(self._current_chunks))
+            self._current_chunks = []
+
+    def handle_data(self, data: str) -> None:
+        if self._in_script:
+            self._current_chunks.append(data)
+
+
+def _extract_jsonld_scripts(html: str) -> list[str]:
+    """Safely extract application/ld+json script contents from HTML in linear time."""
+    if not isinstance(html, str) or not html:
+        return []
+    parser = _JSONLDExtractor()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:  # noqa: BLE001 — fail-soft on malformed HTML input
+        return []
+    return parser.scripts
+
+
 class Crawl4AIResearchAdapter:
     name = "crawl4ai"
 
@@ -79,11 +132,7 @@ class Crawl4AIResearchAdapter:
         """
         if not isinstance(html, str) or not html:
             return []
-        scripts = re.findall(
-            r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
-            html,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
+        scripts = _extract_jsonld_scripts(html)
         objects: list[Mapping[str, Any]] = []
 
         def visit(value: Any) -> None:
@@ -102,8 +151,15 @@ class Crawl4AIResearchAdapter:
                     visit(item)
 
         for script in scripts:
+            raw = script.strip()
+            if raw.startswith("/*<![CDATA[*/") and raw.endswith("/*]]>*/"):
+                raw = raw[13:-7].strip()
+            elif raw.startswith("<![CDATA[") and raw.endswith("]]>"):
+                raw = raw[9:-3].strip()
+            elif raw.startswith("<!--") and raw.endswith("-->"):
+                raw = raw[4:-3].strip()
             try:
-                visit(json.loads(script.strip()))
+                visit(json.loads(raw))
             except (TypeError, ValueError):
                 continue
 

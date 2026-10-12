@@ -1,3 +1,4 @@
+import time
 import pytest
 
 from backend.adapters.research.crawl4ai import Crawl4AIResearchAdapter
@@ -209,3 +210,117 @@ def test_crawl4ai_supplier_offers_require_an_explicit_cost_not_selling_price():
     assert offers[0].supplier_id == "supplier.example"
     assert offers[0].quality.provenance == "public_page"
     assert offers[0].quality.observed_at.timestamp() == 1_700_000_000.0
+
+
+def test_crawl4ai_jsonld_extraction_adversarial_redos_witness_is_bounded():
+    """Verify CodeQL alert #932 witness runs in bounded linear time without ReDoS."""
+    adversarial_html = (
+        '<script=type="application/ld+json">'
+        + '<script=type="application/ld+json">a' * 2500
+        + '<script type="application/ld+json">'
+        + '{"@context": "https://schema.org", "@type": "Product", "name": "Resilient Mug", "sku": "res-1", "offers": {"price": "12.50"}}'
+        + '</script>'
+    )
+    t0 = time.perf_counter()
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(adversarial_html, "https://supplier.example/resilient")
+    elapsed = time.perf_counter() - t0
+
+    assert elapsed < 1.0, f"Extraction took too long ({elapsed:.3f}s), possible polynomial backtracking"
+    assert len(records) == 1
+    assert records[0]["name"] == "Resilient Mug"
+    assert records[0]["selling_price"] == 12.50
+
+
+def test_crawl4ai_jsonld_extraction_adversarial_unclosed_and_nested_scripts():
+    """Verify parser handles unclosed script tags and malformed HTML gracefully."""
+    # 1. Unclosed script tag running to EOF completes safely without crashing or hanging
+    unclosed_eof_html = (
+        '<script type="application/ld+json">' * 1000
+        + '{"incomplete": "no closing tag"}'
+    )
+    t0 = time.perf_counter()
+    records_unclosed = Crawl4AIResearchAdapter._product_records_from_jsonld(unclosed_eof_html, "https://supplier.example/unclosed")
+    elapsed_unclosed = time.perf_counter() - t0
+    assert elapsed_unclosed < 1.0
+    assert records_unclosed == []
+
+    # 2. Malformed script block followed by valid Product JSON-LD extracts the valid record
+    malformed_and_valid_html = (
+        '<script type="application/ld+json">{"broken": json without closing brace</script>'
+        + '<script type="application/ld+json"></script>' * 500
+        + '<script type="application/ld+json">{"@type": "Product", "name": "Valid Mug", "offers": {"price": "9.99"}}</script>'
+    )
+    t1 = time.perf_counter()
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(malformed_and_valid_html, "https://supplier.example/valid")
+    elapsed = time.perf_counter() - t1
+    assert elapsed < 1.0
+    assert len(records) == 1
+    assert records[0]["name"] == "Valid Mug"
+    assert records[0]["selling_price"] == 9.99
+
+
+def test_crawl4ai_jsonld_extraction_supports_cdata_and_comment_wrappers():
+    """Verify JSON-LD scripts wrapped in CDATA or HTML comments are extracted cleanly."""
+    cdata_html = """
+    <script type="application/ld+json">
+    /*<![CDATA[*/
+    {"@context": "https://schema.org", "@type": "Product", "name": "CDATA Product", "sku": "cd-1", "offers": {"price": "25.00"}}
+    /*]]>*/
+    </script>
+    <script type="application/ld+json">
+    <!--
+    {"@context": "https://schema.org", "@type": "Product", "name": "Comment Product", "sku": "cm-1", "offers": {"price": "30.00"}}
+    -->
+    </script>
+    """
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(cdata_html, "https://supplier.example/wrappers")
+    assert len(records) == 2
+    names = {r["name"] for r in records}
+    assert names == {"CDATA Product", "Comment Product"}
+
+
+def test_crawl4ai_jsonld_extraction_supports_varied_attribute_formats_and_graph():
+    """Verify JSON-LD extraction handles case variations, MIME params, and @graph hierarchies."""
+    complex_html = """
+    <script TYPE="APPLICATION/LD+JSON; CHARSET=UTF-8" id="schema-graph">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {"@type": "Organization", "name": "Supplier Inc"},
+        {"@type": "Product", "name": "Graph Product 1", "sku": "gp-1", "offers": {"price": "10.00", "priceCurrency": "EUR"}},
+        {"@type": ["Product", "SomeOtherType"], "name": "Graph Product 2", "sku": "gp-2", "offers": {"price": "20.00"}}
+      ]
+    }
+    </script>
+    <script type='application/ld+json' async>
+    {"@type": "Product", "name": "Single Quote Product", "sku": "sq-1", "offers": {"price": "5.00"}}
+    </script>
+    <script type="application/ld+json">
+    {malformed json}
+    </script>
+    """
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(complex_html, "https://supplier.example/complex")
+    assert len(records) == 3
+    sku_to_record = {r["product_id"]: r for r in records}
+    assert "gp-1" in sku_to_record
+    assert sku_to_record["gp-1"]["selling_price"] == 10.00
+    assert sku_to_record["gp-1"]["currency"] == "EUR"
+    assert "gp-2" in sku_to_record
+    assert sku_to_record["gp-2"]["selling_price"] == 20.00
+    assert "sq-1" in sku_to_record
+    assert sku_to_record["sq-1"]["selling_price"] == 5.00
+
+
+def test_crawl4ai_jsonld_extraction_deduplicates_by_product_id_and_name():
+    """Verify duplicate products within the same page are deduplicated deterministically."""
+    html = """
+    <script type="application/ld+json">
+    {"@type": "Product", "name": "Travel Mug", "sku": "mug-1", "offers": {"price": "10.00"}}
+    </script>
+    <script type="application/ld+json">
+    {"@type": "Product", "name": "travel mug", "sku": "mug-1", "offers": {"price": "12.00"}}
+    </script>
+    """
+    records = Crawl4AIResearchAdapter._product_records_from_jsonld(html, "https://supplier.example/dedupe")
+    assert len(records) == 1
+    assert records[0]["selling_price"] == 10.00
