@@ -100,7 +100,7 @@ BUYER_MODIFIERS: dict[str, dict[str, dict[str, tuple[str, ...]]]] = {
             "consumer_attention": ("vale la pena",),
         },
         "business": {
-            "marketplace": ("paquete mayoreo",),
+            "marketplace": ("compra comercial",),
             "supplier": ("proveedor B2B", "mayoreo comercial"),
             "consumer_attention": ("uso oficina",),
         },

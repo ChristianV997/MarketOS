@@ -72,7 +72,6 @@ class ResearchQueryPlan:
     live_validated: bool = False
     launch_authorized: bool = False
     authority: str = "query_planning_only"
-    fingerprint_seed: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -69,6 +69,9 @@ def test_spanish_mexico_consumer_plan_uses_bounded_local_terms():
         q for q in plan.queries if q.source_family == "marketplace" and not q.is_original
     ]
     assert marketplace
+    marketplace_text = " ".join(q.query_text.lower() for q in marketplace)
+    assert "mayoreo" not in marketplace_text
+    assert "proveedor" not in marketplace_text
     assert all(q.is_evidence is False for q in plan.queries)
 
 
@@ -76,12 +79,14 @@ def test_preserves_original_query_and_flags_ambiguous_brief():
     plan = build_research_query_plan(
         _brief(product_query="it", category="", region="MX", language="es")
     )
-    assert plan.ok is False or "ambiguous_brief" in plan.flags
+    assert plan.ok is False
     assert "ambiguous_brief" in plan.flags
     originals = [q for q in plan.queries if q.is_original]
     assert originals
     assert all(q.query_text == "it" for q in originals)
     assert plan.brief.product_query == "it"
+    assert all(q.is_original for q in plan.queries)
+    assert len(plan.queries) == len(SOURCE_FAMILIES)
 
 
 def test_unsupported_language_does_not_invent_translations():

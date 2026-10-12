@@ -163,6 +163,11 @@ def build_research_query_plan(
             ),
         )
 
+        # Ambiguous briefs keep originals only so expansions do not invent focus.
+        if "ambiguous_brief" in flags:
+            planned.extend(family_bucket)
+            continue
+
         if language_supported and localized_query and localized_query.casefold() != product_query.casefold():
             _append_unique(
                 family_bucket,
