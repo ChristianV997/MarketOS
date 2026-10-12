@@ -28,9 +28,11 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -187,8 +189,141 @@ def get_repository_identity(root_path: Path | None = None) -> dict[str, Any]:
     }
 
 
-def get_runtime_versions() -> dict[str, Any]:
-    """Capture sanitized runtime versions without calling live networks."""
+# Host metadata probe budget. CPython's platform.platform() → uname() →
+# processor path can invoke Windows WMI and hang indefinitely; keep this
+# rehearsal off that API and bound any injectable collector.
+HOST_METADATA_TIMEOUT_S = 2.0
+HOST_METADATA_STATUSES = frozenset({"collected", "timed_out", "unavailable"})
+
+
+def _collect_host_platform_fields() -> dict[str, str]:
+    """Collect host fields without platform.platform()/uname()/processor().
+
+    Those helpers unpack processor metadata. On Windows that resolution can
+    call into WMI (or wmic) and stall the whole promotion rehearsal. Use
+    os.uname() on POSIX and sys.getwindowsversion() plus process-architecture
+    environment variables on Windows instead.
+    """
+    if hasattr(os, "uname"):
+        u = os.uname()
+        system = str(u.sysname or "")
+        release = str(u.release or "")
+        machine = str(u.machine or "")
+    elif sys.platform == "win32":
+        system = "Windows"
+        try:
+            winver = sys.getwindowsversion()
+            release = f"{winver.major}.{winver.minor}.{winver.build}"
+        except Exception:
+            release = ""
+        machine = str(
+            os.environ.get("PROCESSOR_ARCHITECTURE")
+            or os.environ.get("PROCESSOR_ARCHITEW6432")
+            or ""
+        )
+    else:
+        system = str(sys.platform or "")
+        release = ""
+        machine = ""
+
+    platform_label = "-".join(part for part in (system, release, machine) if part)
+    return {
+        "system": system,
+        "release": release,
+        "machine": machine,
+        "platform": platform_label,
+    }
+
+
+def collect_host_platform_metadata(
+    *,
+    timeout_s: float = HOST_METADATA_TIMEOUT_S,
+    collector: Callable[[], Mapping[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Bound host platform metadata collection for promotion rehearsal.
+
+    Status contract (never ``passed`` — metadata is informational evidence):
+    - ``collected``: usable fields gathered within ``timeout_s``
+    - ``timed_out``: collector exceeded the budget (daemon thread abandoned)
+    - ``unavailable``: collector raised or returned empty/unusable fields
+    """
+    empty = {
+        "status": "unavailable",
+        "platform": None,
+        "system": None,
+        "release": None,
+        "machine": None,
+        "detail": "host_metadata_empty",
+    }
+    if timeout_s <= 0:
+        return {**empty, "detail": "host_metadata_timeout_invalid"}
+
+    collect = collector or _collect_host_platform_fields
+    box: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            box["value"] = dict(collect())
+        except Exception as exc:  # boundary must not raise into rehearsal
+            box["error"] = exc
+
+    worker = threading.Thread(
+        target=_run,
+        name="promotion-host-metadata",
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=timeout_s)
+    if worker.is_alive():
+        return {
+            "status": "timed_out",
+            "platform": None,
+            "system": None,
+            "release": None,
+            "machine": None,
+            "detail": f"host_metadata_probe_exceeded_{timeout_s:g}s",
+        }
+    if "error" in box:
+        return {
+            "status": "unavailable",
+            "platform": None,
+            "system": None,
+            "release": None,
+            "machine": None,
+            "detail": "host_metadata_probe_failed",
+        }
+
+    value = box.get("value") or {}
+    system = str(value.get("system") or "")
+    release = str(value.get("release") or "")
+    machine = str(value.get("machine") or "")
+    platform_label = str(value.get("platform") or "")
+    if not platform_label and not system:
+        return empty
+    if not platform_label:
+        platform_label = "-".join(part for part in (system, release, machine) if part)
+    return {
+        "status": "collected",
+        "platform": platform_label,
+        "system": system or None,
+        "release": release or None,
+        "machine": machine or None,
+        "detail": None,
+    }
+
+
+def get_runtime_versions(
+    *,
+    host_metadata_timeout_s: float = HOST_METADATA_TIMEOUT_S,
+    host_metadata_collector: Callable[[], Mapping[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Capture sanitized runtime versions without calling live networks.
+
+    Host platform metadata uses ``collect_host_platform_metadata`` (bounded;
+    never ``platform.platform()`` / WMI processor probes). ``platform`` is the
+    collected label or ``None`` when metadata is timed out / unavailable —
+    never a fabricated ready signal.
+    """
     node_ver = "unavailable"
     docker_ver = "unavailable"
 
@@ -208,9 +343,14 @@ def get_runtime_versions() -> dict[str, Any]:
         except Exception:
             pass
 
+    host_metadata = collect_host_platform_metadata(
+        timeout_s=host_metadata_timeout_s,
+        collector=host_metadata_collector,
+    )
     return {
         "python": platform.python_version(),
-        "platform": platform.platform(),
+        "platform": host_metadata.get("platform"),
+        "host_metadata": host_metadata,
         "node": node_ver,
         "docker": docker_ver,
     }
