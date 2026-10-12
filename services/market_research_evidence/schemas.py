@@ -9,10 +9,25 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
+
+from backend.economics.kernel import Money
 
 MISSING = "missing"
 UNKNOWN = "unknown"
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Money):
+        return value.to_dict()
+    if isinstance(value, dict):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_value(item) for item in value]
+    return value
 
 FRESHNESS_STATUSES = ("supplied", "stale", "future", "unknown", "missing")
 DEFAULT_FRESHNESS_DAYS = 180
@@ -84,31 +99,46 @@ class FieldObservation:
     field: str
     value: Any
     provenance: EvidenceProvenance
+    currency: str | None = None
+    unit: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"field": self.field, "value": self.value, "provenance": self.provenance.to_dict()}
+        return {
+            "field": self.field,
+            "value": _json_value(self.value),
+            "currency": self.currency,
+            "unit": self.unit,
+            "provenance": self.provenance.to_dict(),
+        }
 
 
 @dataclass(frozen=True)
 class ConflictFinding:
-    """A deterministic, field-level disagreement between two or more
-    independently sourced observations of the same candidate/field —
-    computed directly from the supplied numeric values, not inferred
-    from `opportunity_synthesis`'s alias-collapse notes."""
+    """A deterministic field-level comparison or unresolved disagreement.
+
+    ``status`` makes non-comparable evidence explicit; a null ``delta`` is
+    intentional for currency, unit, freshness, or evidence failures.
+    """
 
     candidate_id: str
     field: str
     observations: tuple[dict[str, Any], ...]
-    delta: float
+    delta: Any
     note: str
+    status: str = "conflict"
+    currency: str | None = None
+    unit: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "candidate_id": self.candidate_id,
             "field": self.field,
             "observations": list(self.observations),
-            "delta": self.delta,
+            "delta": str(self.delta) if hasattr(self.delta, "as_tuple") else self.delta,
             "note": self.note,
+            "status": self.status,
+            "currency": self.currency,
+            "unit": self.unit,
         }
 
 
@@ -150,6 +180,7 @@ class EvidenceIntegrityResult:
     negative_controls: NegativeControls
     limitations: tuple[str, ...]
     fingerprint: str
+    comparison_results: tuple[ConflictFinding, ...] = ()
     dry_run: bool = True
     read_only: bool = True
     network_calls: bool = False
@@ -173,6 +204,7 @@ class EvidenceIntegrityResult:
             "field_observations": [item.to_dict() for item in self.field_observations],
             "missing_fields": list(self.missing_fields),
             "unknown_freshness_fields": list(self.unknown_freshness_fields),
+            "comparison_results": [item.to_dict() for item in self.comparison_results],
             "deterministic_conflicts": [item.to_dict() for item in self.deterministic_conflicts],
             "alias_collapse_notes": list(self.alias_collapse_notes),
             "deterministic_conflict_detected": self.deterministic_conflict_detected,
