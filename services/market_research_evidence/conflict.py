@@ -319,13 +319,19 @@ def compare_field_observations(
             continue
 
         amounts = [value.amount for _, value in parsed]
-        delta = max(amounts) - min(amounts)
         currency = next(iter(currencies))
         unit = next(iter(units))
+        # Span every accepted observation (max − min). Do not reduce to the
+        # first two sorted sources — with three-plus values that under-reports
+        # disagreement. Money construction still validates the extremes.
+        low = min(amounts)
+        high = max(amounts)
         if _is_money_field(field):
-            left = Money(amounts[0], currency, source="comparison", provenance="comparison", evidence_state="observed")
-            right = Money(amounts[1], currency, source="comparison", provenance="comparison", evidence_state="observed")
+            left = Money(low, currency, source="comparison", provenance="comparison", evidence_state="observed")
+            right = Money(high, currency, source="comparison", provenance="comparison", evidence_state="observed")
             delta = abs((left - right).amount)
+        else:
+            delta = high - low
         status = "comparable" if delta <= decimal_tolerance else "conflict"
         results.append(
             _finding(

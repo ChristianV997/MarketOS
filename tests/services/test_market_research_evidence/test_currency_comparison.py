@@ -69,6 +69,18 @@ def test_same_currency_difference_is_an_explicit_conflict():
     assert result.delta == Decimal("2")
 
 
+def test_three_source_span_uses_max_minus_min_not_first_two_sorted():
+    """Regression: Money delta must span every accepted observation."""
+    result = _status(
+        _observation("15", "supplier-m"),
+        _observation("10", "supplier-a"),
+        _observation("20", "supplier-z"),
+    )
+
+    assert result.status == "conflict"
+    assert result.delta == Decimal("10")
+
+
 def test_cross_currency_values_are_not_compared_or_silently_converted():
     result = _status(
         _observation("10", "supplier-a", currency="USD"),
