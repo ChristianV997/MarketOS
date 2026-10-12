@@ -158,14 +158,18 @@ def _requirement_projection(result: MexicoRequirementResult, packet: MexicoProdu
 
 
 def _next_human_action(jurisdiction: str, decision: MexicoComplianceDecision | None) -> str:
+    """Operator next step for this jurisdiction section.
+
+    Non-Mexico sections have no decision: they stay ``not_assessed`` and never
+    imply launch approval. When a Mexico decision exists, reuse the canonical
+    ``launch_review_evidence_brief()`` so market-access surfaces name the same
+    evidence still needed (or the same human-review reminder when official
+    evidence already satisfies ``promotion.compliance``). This projection does
+    not clear the gate and is not legal advice.
+    """
     if decision is None:
         return f"{JURISDICTION_CODES.get(jurisdiction, jurisdiction)} is not assessed by this system; no action recorded here."
-    if decision.compliance_satisfied:
-        return "All assessed requirements show satisfied or not-applicable evidence; a lawyer/customs-broker/accountant review is still recommended before launch (not legal advice)."
-    blockers = decision.blockers
-    if blockers:
-        return "Resolve before this jurisdiction can clear: " + "; ".join(blockers) + "."
-    return "Provide official, fresh, exact-model evidence for the requirements marked needs_evidence."
+    return decision.launch_review_evidence_brief()
 
 
 def _jurisdiction_section(jurisdiction: str, evidence: Mapping[str, Any] | None) -> dict[str, Any]:

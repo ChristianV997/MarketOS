@@ -256,3 +256,51 @@ def test_invalid_evidence_fails_closed_instead_of_crashing():
     mx = next(j for j in section["jurisdictions"] if j["jurisdiction"] == "mexico")
     assert mx["assessment_state"] == "needs_evidence"
     assert mx["assessment_state"] != "compliant"
+
+
+def test_official_evidence_next_action_uses_brief_without_granting_launch_authority():
+    """Compliant Mexico evidence still asks for human review; the brief is not launch approval."""
+    section = build_market_access_section(_WIFI_PET, {"mexico": _COMPLETE_MX_EVIDENCE})
+    mx = next(j for j in section["jurisdictions"] if j["jurisdiction"] == "mexico")
+    assert mx["promotion_gate"] == {"gate_id": "compliance", "satisfied": True}
+    action = mx["next_human_action"]
+    assert "human review is still required" in action
+    assert "Not legal advice" in action
+    assert "launch approval" not in action.lower()
+
+
+def test_non_mexico_next_action_stays_not_assessed_without_mexico_brief():
+    section = build_market_access_section(_WIFI_PET, {"mexico": _COMPLETE_MX_EVIDENCE})
+    for jurisdiction in section["jurisdictions"]:
+        if jurisdiction["jurisdiction"] == "mexico":
+            continue
+        assert jurisdiction["assessment_state"] == "not_assessed"
+        assert jurisdiction["promotion_gate"]["satisfied"] is False
+        assert "not assessed by this system" in jurisdiction["next_human_action"]
+        assert "promotion.compliance remains blocked" not in jurisdiction["next_human_action"]
+
+
+def test_evidence_class_gaps_surface_specific_needed_evidence_in_next_action():
+    """Unresolved / non-official / stale / conflicting / manual gaps must name needed evidence
+    through the canonical brief, without clearing promotion.compliance."""
+    cases = (
+        ("unknown", {"hs_classification": "", "hs_evidence_class": "unknown"}, "unknown", "missing_official_evidence"),
+        ("supplier_claim", {"cfdi_ready": False, "cfdi_evidence_class": "supplier_claim"}, "supplier_claim", "non_official_evidence"),
+        ("fixture", {"pedimento_ref": "", "pedimento_evidence_class": "fixture"}, "fixture", "non_official_evidence"),
+        ("manual", {"importer_rfc": "XAXX010101000", "rfc_evidence_class": "manual"}, "manual", "non_official_evidence"),
+        ("conflicting", {"coh_evidence_class": "conflicting"}, "conflicting", "conflicting_evidence"),
+        ("stale", {"sources_accessed_at": "2020-01-01"}, "official_db", "stale_citation"),
+    )
+    for label, overrides, expected_class, expected_reason in cases:
+        evidence = dict(_COMPLETE_MX_EVIDENCE)
+        evidence.update(overrides)
+        section = build_market_access_section(_WIFI_PET, {"mexico": evidence})
+        mx = next(j for j in section["jurisdictions"] if j["jurisdiction"] == "mexico")
+        action = mx["next_human_action"]
+        assert mx["assessment_state"] == "needs_evidence", label
+        assert mx["promotion_gate"] == {"gate_id": "compliance", "satisfied": False}, label
+        assert "promotion.compliance remains blocked" in action, label
+        assert expected_class in action, label
+        assert expected_reason in action, label
+        assert "needed" in action.lower() or "official" in action.lower(), label
+        assert "Not legal advice" in action, label
