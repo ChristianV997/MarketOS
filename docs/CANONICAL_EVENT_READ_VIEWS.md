@@ -37,12 +37,44 @@ GET-only routes are mounted at `/api/events`, `/api/events/timeline`,
 `/api/events/commerce-runs`, `/api/events/shopify-imports`, and
 `/api/events/readiness`. They contain no POST/PUT/PATCH/DELETE endpoint.
 
+### Access contract
+
+Every route is operator-only and workspace-bound through
+`backend.identity.http.require_workspace_permission` with
+`canonical_event:read`. Identity comes only from the verified bearer token and
+the principal's stored membership; the query, headers and body cannot grant
+access.
+
+- A missing or invalid bearer token is 401. No token verifier or workspace
+  repository is wired into this repository, so every route answers 503
+  `identity_provider_unavailable` until deployment wiring supplies them.
+- The principal's sole `internal` membership must carry `internal_operator`.
+  No membership, several memberships, or any other role (including
+  `client_viewer`) is 403 `workspace_not_authorized` or its specific code.
+- The workspace is that membership's workspace. A `workspace_id` query value
+  may repeat it; any other value, including an empty one, is 403. Headers
+  such as `X-MarketOS-Workspace` do not select a workspace.
+- Denied requests never load the JSONL file or call Supabase. Error bodies are
+  a fixed `{"detail": {"code": ...}}` with no path, payload or secret.
+
+Status: implemented and integration-tested with synthetic principals in
+`tests/integration/test_canonical_events_workspace_authz.py`. Not
+live-validated. The frontend viewer (`frontend/src/lib/canonicalEventsApi.ts`)
+sends no bearer token, so it cannot read these routes until identity wiring
+lands.
+
 ## Safety and privacy
 
 The views preserve canonical replay hashes and authority flags while exposing
 payload/metadata summaries only. Shopify events were redacted before writing
 and no raw Shopify PII is returned by these views. The service never creates,
 updates, publishes, launches, spends, sends, fulfills, or pays.
+
+The routes are read-only and operator-only, and a denied request reads nothing.
+
+Rollback: revert the commit that adds this contract. That restores the
+previous open reads, which must not be exposed on a network-reachable
+deployment.
 
 ## Deployment next step
 

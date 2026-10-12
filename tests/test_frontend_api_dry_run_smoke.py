@@ -78,6 +78,32 @@ def _assert_no_secret(payload) -> None:
     assert "authorization" not in lowered or "[redacted]" in lowered
 
 
+SMOKE_OPERATOR_HEADERS = {"Authorization": "Bearer smoke-operator"}
+
+
+def _operator_identity_overrides() -> dict:
+    """Synthetic verified operator whose sole internal membership is an operator role."""
+    from backend.identity.errors import IdentityError
+    from backend.identity.http import get_token_verifier, get_workspace_repository
+    from backend.identity.principal import VerifiedPrincipal
+    from backend.identity.roles import INTERNAL_OPERATOR
+    from backend.identity.workspaces import WorkspaceAccess
+
+    issuer, subject = "https://clerk.test", "user_smoke_operator"
+
+    class Verifier:
+        def verify(self, token):
+            if token != "smoke-operator":
+                raise IdentityError()
+            return VerifiedPrincipal(issuer, subject)
+
+    class Repository:
+        def memberships_for(self, principal):
+            return [WorkspaceAccess(issuer, subject, "ws_smoke_internal", "internal", "smoke", INTERNAL_OPERATOR)]
+
+    return {get_token_verifier: Verifier, get_workspace_repository: Repository}
+
+
 @pytest.fixture
 def smoke_client(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", FAKE_SECRET)
@@ -87,6 +113,9 @@ def smoke_client(monkeypatch):
     monkeypatch.delenv("MARKETOS_PUBLIC_COMMERCE_RUNS", raising=False)
     monkeypatch.delenv("MEDUSA_REQUIRED_FOR_READY", raising=False)
     api = _install_inert_runtime(monkeypatch)
+    # backend.api.app is process-wide: monkeypatch restores these overrides after the test.
+    for dependency, provider in _operator_identity_overrides().items():
+        monkeypatch.setitem(api.app.dependency_overrides, dependency, provider)
     from fastapi.testclient import TestClient
 
     with TestClient(api.app) as client:
@@ -128,7 +157,7 @@ def test_phase1_readiness_is_read_only(smoke_client):
 
 
 def test_canonical_events_readiness_is_read_only(smoke_client):
-    response = smoke_client.get("/api/events/readiness")
+    response = smoke_client.get("/api/events/readiness", headers=SMOKE_OPERATOR_HEADERS)
     assert response.status_code == 200
     payload = response.json()
     assert payload["read_only"] is True
@@ -136,8 +165,14 @@ def test_canonical_events_readiness_is_read_only(smoke_client):
     _assert_no_secret(payload)
 
 
-def test_canonical_events_timeline_read_is_safe_without_credentials(smoke_client):
+def test_canonical_events_refuse_anonymous_reads(smoke_client):
     response = smoke_client.get("/api/events/timeline", params={"limit": 5})
+    assert response.status_code == 401
+    assert response.json() == {"detail": {"code": "missing_credentials"}}
+
+
+def test_canonical_events_timeline_read_is_safe_for_an_operator(smoke_client):
+    response = smoke_client.get("/api/events/timeline", params={"limit": 5}, headers=SMOKE_OPERATOR_HEADERS)
     assert response.status_code == 200
     payload = response.json()
     assert "events" in payload
@@ -146,13 +181,13 @@ def test_canonical_events_timeline_read_is_safe_without_credentials(smoke_client
 
 
 def test_malformed_event_source_is_rejected(smoke_client):
-    response = smoke_client.get("/api/events", params={"source": "live_shopify"})
+    response = smoke_client.get("/api/events", params={"source": "live_shopify"}, headers=SMOKE_OPERATOR_HEADERS)
     assert response.status_code == 400
     _assert_no_secret(response.text)
 
 
 def test_malformed_query_types_are_rejected_with_safe_errors(smoke_client):
-    response = smoke_client.get("/api/events", params={"limit": "not-a-number"})
+    response = smoke_client.get("/api/events", params={"limit": "not-a-number"}, headers=SMOKE_OPERATOR_HEADERS)
     assert response.status_code == 422
     _assert_no_secret(response.json())
 

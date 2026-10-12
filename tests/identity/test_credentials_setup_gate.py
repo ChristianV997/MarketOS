@@ -29,6 +29,7 @@ from backend.identity.errors import IdentityError, IdentityProviderUnavailable, 
 from backend.identity.http import WORKSPACE_HEADER, get_token_verifier, get_workspace_repository
 from backend.identity.principal import ClerkSessionTokenVerifier, VerifiedPrincipal
 from backend.identity.roles import (
+    CANONICAL_EVENT_READ,
     CLIENT_VIEWER,
     CREDENTIAL_TEST,
     CREDENTIAL_WRITE,
@@ -1030,5 +1031,5 @@ def test_a_cors_preflight_for_the_credential_write_reaches_no_handler(wired, eff
 def test_the_credential_permissions_do_not_widen_the_client_profile_roles():
     assert ROLE_PERMISSIONS[CLIENT_VIEWER] == frozenset({PROFILE_READ})
     assert ROLE_PERMISSIONS[INTERNAL_OPERATOR] == frozenset(
-        {PROFILE_READ, PROFILE_CREATE, PROFILE_UPDATE, CREDENTIAL_WRITE, CREDENTIAL_TEST}
+        {PROFILE_READ, PROFILE_CREATE, PROFILE_UPDATE, CREDENTIAL_WRITE, CREDENTIAL_TEST, CANONICAL_EVENT_READ}
     )
