@@ -10,6 +10,7 @@ Enforces:
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import yaml
 
@@ -17,6 +18,10 @@ ROOT = Path(__file__).resolve().parents[2]
 NODE_WORKFLOW = ROOT / ".github" / "workflows" / "node.js.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 FRONTEND_DIR = ROOT / "frontend"
+FRONTEND_PACKAGE = FRONTEND_DIR / "package.json"
+FRONTEND_LOCKFILE = FRONTEND_DIR / "package-lock.json"
+POSTCSS_CONFIG = FRONTEND_DIR / "postcss.config.js"
+TAILWIND_ENTRY = FRONTEND_DIR / "src" / "index.css"
 
 
 def _load_node_workflow() -> dict:
@@ -151,3 +156,29 @@ def test_node_ci_workflow_permissions_contract():
             f"Permission scope '{scope}' has unexpected access level '{access}'; "
             "all granted permissions must be strictly 'read'"
         )
+
+
+def test_tailwind_v4_build_contract_uses_dedicated_postcss_plugin_and_css_import():
+    """Keep Tailwind v4's package, lockfile, PostCSS, and CSS entry in sync."""
+    package = json.loads(FRONTEND_PACKAGE.read_text(encoding="utf-8"))
+    dev_dependencies = package["devDependencies"]
+    tailwind_spec = dev_dependencies["tailwindcss"]
+    postcss_plugin_spec = dev_dependencies["@tailwindcss/postcss"]
+    assert tailwind_spec.startswith("^4.")
+    assert postcss_plugin_spec.startswith("^4.")
+
+    lockfile = json.loads(FRONTEND_LOCKFILE.read_text(encoding="utf-8"))
+    root_dependencies = lockfile["packages"][""]["devDependencies"]
+    assert root_dependencies["tailwindcss"] == tailwind_spec
+    assert root_dependencies["@tailwindcss/postcss"] == postcss_plugin_spec
+    assert lockfile["packages"]["node_modules/tailwindcss"]["version"].startswith("4.")
+    assert lockfile["packages"]["node_modules/@tailwindcss/postcss"]["version"].startswith("4.")
+
+    postcss = POSTCSS_CONFIG.read_text(encoding="utf-8")
+    assert '"@tailwindcss/postcss"' in postcss
+    assert "tailwindcss: {}" not in postcss
+
+    css = TAILWIND_ENTRY.read_text(encoding="utf-8")
+    assert '@import "tailwindcss";' in css
+    assert '@config "../tailwind.config.js";' in css
+    assert "@tailwind " not in css

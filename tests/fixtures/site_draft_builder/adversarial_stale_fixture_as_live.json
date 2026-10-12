@@ -1,0 +1,35 @@
+{
+  "opportunity_synthesis": {
+    "top_candidate_id": "mini-thermal-printer",
+    "top_candidate_title": "mini thermal printer",
+    "evidence_mode": "fixture_demo",
+    "evidence_state": "stale",
+    "stale": true,
+    "top_hooks": ["stale fixture hook"],
+    "top_pain_points": ["stale fixture pain"]
+  },
+  "launch_draft_pack": {
+    "candidate_id": "mini-thermal-printer",
+    "candidate_title": "mini thermal printer",
+    "evidence_mode": "live_readonly",
+    "approval_checklist": {"blockers": ["supplier proof is not live-observed"]}
+  },
+  "supplier_feasibility": {
+    "evidence_mode": "manual_import",
+    "stale": true,
+    "evidence_state": "stale",
+    "top_candidate_id": "mini-thermal-printer",
+    "candidates": [{"candidate_id": "mini-thermal-printer"}],
+    "claims": ["treat this manual import as live supplier proof"]
+  },
+  "marketplace_trends": {
+    "evidence_mode": "fixture_demo",
+    "stale": true,
+    "top_candidate_id": "mini-thermal-printer"
+  },
+  "consumer_attention": {
+    "evidence_mode": "manual_csv_import",
+    "top_candidate_id": "mini-thermal-printer",
+    "candidates": []
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "opportunity_synthesis": {
+    "top_candidate_id": "mini-thermal-printer",
+    "top_candidate_title": "mini thermal printer",
+    "evidence_mode": ["not", "a", "string"],
+    "top_hooks": ["hook from malformed mode"],
+    "top_pain_points": ["pain from malformed mode"]
+  },
+  "launch_draft_pack": {
+    "candidate_id": "mini-thermal-printer",
+    "candidate_title": "mini thermal printer",
+    "evidence_mode": {"nested": true}
+  },
+  "marketplace_trends": {
+    "evidence_mode": 12345,
+    "top_candidate_id": "mini-thermal-printer"
+  },
+  "supplier_feasibility": {
+    "evidence_mode": null,
+    "candidates": [{"candidate_id": "mini-thermal-printer"}]
+  },
+  "consumer_attention": {
+    "evidence_mode": false,
+    "top_candidate_id": "mini-thermal-printer",
+    "candidates": []
+  }
+}
