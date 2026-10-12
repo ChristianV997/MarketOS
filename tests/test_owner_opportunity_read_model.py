@@ -44,6 +44,61 @@ def test_full_fixture_preserves_identity_evidence_and_canonical_ranking() -> Non
     }
 
 
+def test_evidence_coverage_preserves_pillar_modes_and_one_research_step() -> None:
+    report = build_owner_opportunity_read_model("evaluate", product_payload()).to_dict()
+
+    assert report["next_research_step"] == report["opportunities"][0]["next_research_step"]
+    assert report["next_research_pillar"] is None
+    coverage = report["evidence_coverage"]
+    assert set(coverage) == {"marketplace", "supplier", "consumer_attention"}
+    assert coverage["marketplace"] == {
+        "status": "supplied",
+        "evidence_mode": "fixture_demo",
+        "evidence_classes": ["fixture"],
+        "freshness_statuses": ["current"],
+        "missing": False,
+        "stale": False,
+        "conflicting": False,
+        "fixture_only": True,
+        "manual_imported": False,
+        "evidence_count": 1,
+    }
+    assert coverage["supplier"]["evidence_mode"] == "manual_import"
+    assert coverage["supplier"]["manual_imported"] is True
+    assert coverage["supplier"]["fixture_only"] is False
+    assert coverage["consumer_attention"]["fixture_only"] is True
+
+
+def test_evidence_coverage_marks_missing_stale_and_conflicting_pillars() -> None:
+    payload = product_payload()
+    payload["candidates"][0]["reports"].pop("consumer")
+    payload["candidates"][0]["evidence"][0]["freshness"] = "stale"
+    payload["candidates"][0]["evidence"][0]["conflicting"] = True
+
+    report = build_owner_opportunity_read_model("evaluate", payload).to_dict()
+    coverage = report["opportunities"][0]["evidence_coverage"]
+
+    assert coverage["consumer_attention"]["missing"] is True
+    assert coverage["consumer_attention"]["status"] == "missing"
+    assert coverage["marketplace"]["stale"] is True
+    assert coverage["marketplace"]["conflicting"] is True
+    assert report["next_research_pillar"] == "consumer_attention"
+
+
+def test_report_without_matching_candidate_is_not_coverage_for_that_pillar() -> None:
+    payload = product_payload()
+    payload["candidates"][0]["reports"]["consumer"]["candidates"][0]["candidate_id"] = (
+        "other-candidate"
+    )
+
+    report = build_owner_opportunity_read_model("evaluate", payload).to_dict()
+    coverage = report["opportunities"][0]["evidence_coverage"]["consumer_attention"]
+
+    assert coverage["status"] == "missing"
+    assert coverage["missing"] is True
+    assert coverage["evidence_mode"] == "missing"
+
+
 def test_partial_and_missing_evidence_remain_visible() -> None:
     payload = product_payload()
     payload["candidates"][0]["reports"].pop("consumer")
