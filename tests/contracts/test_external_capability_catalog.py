@@ -337,7 +337,24 @@ def test_url_validation_hostnames_in_path_or_query_not_repo():
     # Legitimate repository hosts
     assert is_repository_source("https://github.com/example-org/repo")
     assert is_repository_source("https://gitlab.com/example-org/repo")
-    assert is_repository_source("https://sub.github.com/example-org/repo")
+    assert is_repository_source("https://github.com./example-org/repo")
+
+
+def test_repository_host_allowlist_rejects_subdomains_and_malformed_authority():
+    assert not is_repository_source("https://sub.github.com/example-org/repo")
+    assert not is_repository_source("https://github.com.evil.com/example-org/repo")
+    assert not is_repository_source("https://user:password@github.com/example-org/repo")
+    assert not is_repository_source("https://github.com:badport/example-org/repo")
+    assert not is_repository_source("https://github.com../example-org/repo")
+
+    record = get_base_valid_record()
+    record["official_source_url"] = "https://sub.github.com/example-org/repo"
+    errors = validate_catalog_data([record])
+    assert any("deceptive_source_host_rejected" in e for e in errors), errors
+
+    record["official_source_url"] = "https://github.com../example-org/repo"
+    errors = validate_catalog_data([record])
+    assert any("multiple trailing hostname dots prohibited" in e for e in errors), errors
 
 
 def test_url_validation_backslash_authority_rejected():

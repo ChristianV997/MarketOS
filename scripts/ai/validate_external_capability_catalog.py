@@ -109,10 +109,11 @@ def sanitize_url_for_error(url: str) -> str:
 
 
 def is_repository_source(source_url: str) -> bool:
-    """True if source_url is an official repository host (github.com or gitlab.com).
+    """True if source_url uses an exact official repository host.
 
     Uses parsed hostname validation instead of substring checks to prevent lookalike
-    host or path/query bypasses (CodeQL CWE-20 remediation).
+    host or path/query bypasses (CodeQL CWE-20 remediation). A single trailing DNS
+    root dot is normalized, but subdomains and malformed authorities are not trusted.
     """
     if not source_url or not isinstance(source_url, str):
         return False
@@ -122,10 +123,21 @@ def is_repository_source(source_url: str) -> bool:
         return False
     if parsed.scheme.lower() not in ("http", "https"):
         return False
-    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.username or parsed.password or "@" in parsed.netloc:
+        return False
+    try:
+        parsed.port
+    except ValueError:
+        return False
+    raw_hostname = parsed.hostname or ""
+    if raw_hostname.endswith(".."):
+        return False
+    hostname = raw_hostname.lower()
+    if hostname.endswith("."):
+        hostname = hostname[:-1]
     if not hostname:
         return False
-    return any(hostname == rh or hostname.endswith(f".{rh}") for rh in REPOSITORY_HOSTS)
+    return hostname in REPOSITORY_HOSTS
 
 
 def validate_source_url(cid: str, source_url: str) -> List[str]:
@@ -214,7 +226,13 @@ def validate_source_url(cid: str, source_url: str) -> List[str]:
         errors.append(f"malformed_source_url in {cid}: invalid characters in hostname")
         return errors
 
-    hostname = raw_host.lower().rstrip(".")
+    if raw_host.endswith(".."):
+        errors.append(f"malformed_source_url in {cid}: multiple trailing hostname dots prohibited")
+        return errors
+
+    hostname = raw_host.lower()
+    if hostname.endswith("."):
+        hostname = hostname[:-1]
     if hostname in (".", "..") or not hostname:
         errors.append(f"malformed_source_url in {cid}: invalid hostname")
         return errors
@@ -243,7 +261,7 @@ def validate_source_url(cid: str, source_url: str) -> List[str]:
     # Deceptive lookalike host check
     for target in ("raw.githubusercontent.com", "github.com", "gitlab.com"):
         if target in hostname:
-            if not (hostname == target or hostname.endswith(f".{target}")):
+            if hostname != target:
                 errors.append(f"deceptive_source_host_rejected in {cid}: lookalike host '{hostname}' prohibited")
                 return errors
 
